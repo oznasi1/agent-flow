@@ -89,10 +89,16 @@ loaded. Open the **Flow Deck** icon in the activity bar and complete the first-r
 | `flowdeck.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
 | `flowdeck.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
 
-Plus `flowdeck.workspaceMode`, `flowdeck.openIn`, `flowdeck.taskMode`,
-`flowdeck.promptModes`, `flowdeck.explorePrompt`, `flowdeck.worktree`, and
-`flowdeck.worktreeRoot` — see the Settings UI. Jira credentials are stored in VS Code
-**SecretStorage**, never in settings.
+Plus `flowdeck.workspaceMode`, `flowdeck.taskMode`, `flowdeck.promptModes`,
+`flowdeck.explorePrompt`, `flowdeck.worktree`, and `flowdeck.worktreeRoot` — see the
+Settings UI. Jira credentials are stored in VS Code **SecretStorage**, never in settings.
+
+`flowdeck.openIn` controls where a task you take gets opened: `ask` (ask each time),
+`new-window`, `this-window` (reuse the current window), or `pick-existing` — pick an
+existing `.code-workspace` file and have the task's repos merged into it. That merge is
+non-destructive: Flow Deck only appends the repos the task needs (preserving the
+workspace file's existing folders, settings, and formatting) and opens it as a
+multi-root workspace; it never overwrites or removes what was already there.
 
 ## Status
 

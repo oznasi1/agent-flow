@@ -91,6 +91,11 @@ describe("getConfig — normalization", () => {
     setConfig({ provenanceLabel: "automated" });
     expect(getConfig().provenanceLabel).toBe("automated");
   });
+
+  it("passes through openIn: pick-existing", () => {
+    setConfig({ openIn: "pick-existing" });
+    expect(getConfig().openIn).toBe("pick-existing");
+  });
 });
 
 describe("getConfig — promptModes validation", () => {

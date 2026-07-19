@@ -176,12 +176,14 @@
           "enum": [
             "ask",
             "new-window",
-            "this-window"
+            "this-window",
+            "pick-existing"
           ],
           "enumDescriptions": [
             "Ask each time you take a task",
             "Always open a task in a new window",
-            "Always open a task in the current window (replaces what's here)"
+            "Always open a task in the current window (replaces what's here)",
+            "Always pick an existing .code-workspace to open the task into"
           ],
           "default": "ask",
           "description": "Where to open a task you take: a new window, or reuse the current one."

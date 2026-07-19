@@ -36,7 +36,7 @@ export interface FlowDeckConfig {
   defaultFilter: string;
   seedAgent: boolean;
   workspaceMode: "auto" | "multiroot" | "per-window" | "ask";
-  openIn: "ask" | "new-window" | "this-window";
+  openIn: "ask" | "new-window" | "this-window" | "pick-existing";
   taskMode: string; // "ask", or a PromptMode id
   promptModes: PromptMode[];
   explorePrompt: string;
