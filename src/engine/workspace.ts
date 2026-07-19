@@ -76,7 +76,9 @@ export function listWorkspaceFiles(dir: string): WorkspaceListItem[] {
     let mtimeMs = 0;
     let folders = 0;
     try {
-      mtimeMs = fs.statSync(file).mtimeMs;
+      const st = fs.statSync(file);
+      if (!st.isFile()) continue;
+      mtimeMs = st.mtimeMs;
     } catch {
       /* keep 0 */
     }
@@ -282,7 +284,15 @@ export function mergeReposIntoWorkspace(
   const doc = jsoncParse(text, errors, { allowTrailingComma: true }) as
     | { folders?: { path?: string }[] }
     | undefined;
-  if (errors.length || !doc || typeof doc !== "object") return { added: [], ok: false };
+  if (
+    errors.length ||
+    !doc ||
+    typeof doc !== "object" ||
+    Array.isArray(doc) ||
+    (doc.folders !== undefined && !Array.isArray(doc.folders))
+  ) {
+    return { added: [], ok: false };
+  }
 
   const wsDir = path.dirname(file);
   const present = new Set(
@@ -296,16 +306,20 @@ export function mergeReposIntoWorkspace(
 
   const startIdx = Array.isArray(doc.folders) ? doc.folders.length : 0;
   let updated = text;
-  missing.forEach((r, i) => {
-    const edits = modify(
-      updated,
-      ["folders", startIdx + i],
-      { name: r.name, path: r.path },
-      { isArrayInsertion: true, formattingOptions: { insertSpaces: true, tabSize: 2 } },
-    );
-    updated = applyEdits(updated, edits);
-  });
-  fs.writeFileSync(file, updated);
+  try {
+    missing.forEach((r, i) => {
+      const edits = modify(
+        updated,
+        ["folders", startIdx + i],
+        { name: r.name, path: r.path },
+        { isArrayInsertion: true, formattingOptions: { insertSpaces: true, tabSize: 2 } },
+      );
+      updated = applyEdits(updated, edits);
+    });
+    fs.writeFileSync(file, updated);
+  } catch {
+    return { added: [], ok: false };
+  }
   return { added: missing.map((r) => r.name), ok: true };
 }
 

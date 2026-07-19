@@ -415,6 +415,27 @@ describe("mergeReposIntoWorkspace", () => {
     const res = mergeReposIntoWorkspace("/ws/missing.code-workspace", repos);
     expect(res).toEqual({ added: [], ok: false });
   });
+
+  it("degrades gracefully when the workspace root is a JSON array (valid JSON, wrong shape)", () => {
+    readFileSync.mockReturnValue("[]");
+    const res = mergeReposIntoWorkspace("/ws/array.code-workspace", repos);
+    expect(res).toEqual({ added: [], ok: false });
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("degrades gracefully when folders is a string (valid JSON, wrong shape)", () => {
+    readFileSync.mockReturnValue('{ "folders": "nope" }');
+    const res = mergeReposIntoWorkspace("/ws/bad-folders-string.code-workspace", repos);
+    expect(res).toEqual({ added: [], ok: false });
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("degrades gracefully when folders is an object (valid JSON, wrong shape)", () => {
+    readFileSync.mockReturnValue('{ "folders": {} }');
+    const res = mergeReposIntoWorkspace("/ws/bad-folders-object.code-workspace", repos);
+    expect(res).toEqual({ added: [], ok: false });
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
 });
 
 describe("openWorkspace — existing workspace", () => {
@@ -485,5 +506,11 @@ describe("listWorkspaceFiles", () => {
     statSync.mockReturnValue({ isFile: () => true, mtimeMs: 1 } as unknown as fs.Stats);
     readFileSync.mockReturnValue("{ not json");
     expect(listWorkspaceFiles("/ws")[0].folders).toBe(0);
+  });
+
+  it("excludes a directory entry named like a workspace file", () => {
+    readdirSync.mockReturnValue(["dir.code-workspace"] as never);
+    statSync.mockReturnValue({ isFile: () => false, mtimeMs: 5 } as unknown as fs.Stats);
+    expect(listWorkspaceFiles("/ws")).toEqual([]);
   });
 });
