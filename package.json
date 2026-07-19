@@ -1,9 +1,10 @@
 {
-  "name": "agent-flow",
-  "displayName": "Agent Flow",
+  "name": "oznasi1-agent-flow",
+  "displayName": "Agent Flow Deck",
   "description": "Grab a Jira task and spin up its workspace — a task pool in your sidebar that opens the right repos and pre-seeds a Claude Code agent.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "Oznasi1",
+  "icon": "media/icon.png",
   "license": "MIT",
   "author": "Oz Nasi (At-Bay)",
   "repository": {
