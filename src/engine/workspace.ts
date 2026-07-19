@@ -369,6 +369,28 @@ export async function maybeSeedAgent(context: vscode.ExtensionContext, log: (m: 
   }
 }
 
+/** Watch the plan dir so an ALREADY-OPEN window seeds itself when a matching task
+ * is taken (activation-time seeding only covers windows that (re)open). Debounced;
+ * dispose() closes the watcher. The per-window `seeded:` guard prevents re-seeding. */
+export function watchPlansAndSeed(
+  context: vscode.ExtensionContext,
+  log: (m: string) => void,
+): vscode.Disposable {
+  fs.mkdirSync(PLAN_DIR, { recursive: true });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const watcher = fs.watch(PLAN_DIR, () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => void maybeSeedAgent(context, log), 300);
+  });
+  log(`watching plan dir ${PLAN_DIR} for live seeding`);
+  return {
+    dispose: () => {
+      if (timer) clearTimeout(timer);
+      watcher.close();
+    },
+  };
+}
+
 /** Open the Claude Code panel with the prompt pre-filled. Polls for the verified
  * command (handles the activation race), then the URI handler, then clipboard. */
 async function seedClaudeCode(prompt: string, key: string, log: (m: string) => void): Promise<void> {

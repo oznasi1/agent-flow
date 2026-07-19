@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openWorkspace, maybeSeedAgent, listWorkspaceFiles, mergeReposIntoWorkspace, type OpenRequest } from "../../../src/engine/workspace";
+import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, type OpenRequest } from "../../../src/engine/workspace";
 import { commands, env, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -17,6 +17,7 @@ const mkdirSync = vi.mocked(fs.mkdirSync);
 const readdirSync = vi.mocked(fs.readdirSync);
 const rmSync = vi.mocked(fs.rmSync);
 const realpathSync = vi.mocked(fs.realpathSync);
+const watch = vi.mocked(fs.watch);
 const exec = vi.mocked(childProcess.exec);
 const execSync = vi.mocked(childProcess.execSync);
 
@@ -313,6 +314,55 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("watchPlansAndSeed", () => {
+  it("debounces plan-dir changes and re-runs seeding, and disposes cleanly", () => {
+    vi.useFakeTimers();
+    const close = vi.fn();
+    let fire: (() => void) | undefined;
+    watch.mockImplementation(((_dir: string, cb: () => void) => {
+      fire = cb;
+      return { close } as unknown as fs.FSWatcher;
+    }) as never);
+    // Resolve a single-workspace identity so maybeSeedAgent proceeds far enough to
+    // read the plan dir; readdirSync (no plan files, per the default mock) is the
+    // observable signal for "ran once" that lets this test prove the debounce.
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+
+    const disp = watchPlansAndSeed(fakeContext().context, () => {});
+    expect(fs.mkdirSync).toHaveBeenCalled(); // ensured PLAN_DIR exists
+
+    fire!();
+    fire!(); // two rapid changes
+    expect(readdirSync).not.toHaveBeenCalled(); // still debounced — timer hasn't fired yet
+    vi.advanceTimersByTime(300);
+    expect(readdirSync).toHaveBeenCalledTimes(1); // maybeSeedAgent read the plan dir once (debounced)
+
+    disp.dispose();
+    expect(close).toHaveBeenCalled(); // closes the real fs.watch, which stops further callbacks
+
+    vi.useRealTimers();
+  });
+
+  it("clears a pending debounce timer on dispose so it never fires", () => {
+    vi.useFakeTimers();
+    const close = vi.fn();
+    let fire: (() => void) | undefined;
+    watch.mockImplementation(((_dir: string, cb: () => void) => {
+      fire = cb;
+      return { close } as unknown as fs.FSWatcher;
+    }) as never);
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+
+    const disp = watchPlansAndSeed(fakeContext().context, () => {});
+    fire!(); // schedules a debounced maybeSeedAgent call
+    disp.dispose(); // must clear that pending timer before it fires
+    vi.advanceTimersByTime(300);
+    expect(readdirSync).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
   });
 });
 

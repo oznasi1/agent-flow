@@ -14,14 +14,17 @@ vi.mock("../../src/jira/auth", () => ({ ApiTokenAuth: vi.fn(() => authStub) }));
 vi.mock("../../src/tasksView", () => ({
   TasksViewProvider: Object.assign(vi.fn(() => providerStub), { viewType: "flowdeck.tasks" }),
 }));
-vi.mock("../../src/engine/workspace", () => ({ maybeSeedAgent: vi.fn(async () => undefined) }));
+vi.mock("../../src/engine/workspace", () => ({
+  maybeSeedAgent: vi.fn(async () => undefined),
+  watchPlansAndSeed: vi.fn(() => ({ dispose: vi.fn() })),
+}));
 vi.mock("../../src/setup", () => ({
   maybeRunSetup: vi.fn(async () => undefined),
   runSetup: vi.fn(async () => true),
 }));
 
 import { activate } from "../../src/extension";
-import { maybeSeedAgent } from "../../src/engine/workspace";
+import { maybeSeedAgent, watchPlansAndSeed } from "../../src/engine/workspace";
 import { maybeRunSetup, runSetup } from "../../src/setup";
 
 const cmd = (id: string) =>
@@ -50,6 +53,8 @@ describe("activate", () => {
       ]),
     );
     expect(maybeSeedAgent).toHaveBeenCalledWith(context, expect.any(Function));
+    expect(watchPlansAndSeed).toHaveBeenCalledTimes(1);
+    expect(watchPlansAndSeed).toHaveBeenCalledWith(context, expect.any(Function));
     expect(context.subscriptions.length).toBeGreaterThan(0);
   });
 

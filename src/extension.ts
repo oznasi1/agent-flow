@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { ApiTokenAuth } from "./jira/auth";
 import { TasksViewProvider } from "./tasksView";
 import { DeckPanel } from "./deckView";
-import { maybeSeedAgent } from "./engine/workspace";
+import { maybeSeedAgent, watchPlansAndSeed } from "./engine/workspace";
 import { getConfig } from "./config";
 import { maybeRunSetup, runSetup } from "./setup";
 
@@ -53,8 +53,10 @@ export function activate(context: vscode.ExtensionContext): void {
   // First-run: offer guided setup if the extension has never been configured.
   void maybeRunSetup(context, auth, log, () => provider.refresh());
 
-  // If this window was opened by a recent "take", pre-seed its Claude Code agent.
+  // If this window was opened by a recent "take", pre-seed its Claude Code agent…
   void maybeSeedAgent(context, log);
+  // …and keep watching so an already-open window seeds when a task is taken later.
+  context.subscriptions.push(watchPlansAndSeed(context, log));
 }
 
 export function deactivate(): void {
