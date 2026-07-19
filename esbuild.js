@@ -20,6 +20,12 @@ const extensionConfig = {
   format: "cjs",
   external: ["vscode"], // provided by the VS Code runtime
   target: "node18",
+  // Prefer each dependency's ESM entry (`module`) over its CommonJS/UMD `main`.
+  // jsonc-parser's UMD main calls `require("./impl/format")` through a factory
+  // parameter that esbuild can't follow, leaving an unbundled require that crashes
+  // activation at runtime ("Cannot find module './impl/format'") since node_modules
+  // isn't shipped. The ESM build uses static imports esbuild bundles correctly.
+  mainFields: ["module", "main"],
 };
 
 const webviewConfig = {
