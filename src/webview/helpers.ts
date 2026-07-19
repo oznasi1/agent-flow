@@ -21,6 +21,25 @@ export function moveKey(list: JiraTask[], fromKey: string, toKey: string, pos: "
   return next;
 }
 
+/** Distinct statuses present in a task list, ordered by workflow category
+ *  (To Do → In Progress → Done) then alphabetically. Statuses are project-specific,
+ *  so the set is derived from the loaded pool rather than hardcoded. Pure. */
+export function deriveStatuses(tasks: JiraTask[]): { name: string; category: string }[] {
+  const seen = new Map<string, string>(); // status name → category (first occurrence wins)
+  for (const t of tasks) {
+    if (t.status && !seen.has(t.status)) seen.set(t.status, t.statusCategory || "new");
+  }
+  const rank = (c: string) => (c === "new" ? 0 : c === "done" ? 2 : 1);
+  return [...seen.entries()]
+    .map(([name, category]) => ({ name, category }))
+    .sort((a, b) => rank(a.category) - rank(b.category) || a.name.localeCompare(b.name));
+}
+
+/** Does a task pass the status filter? An empty selection means "all". Pure. */
+export function matchesStatus(task: JiraTask, selected: ReadonlySet<string>): boolean {
+  return selected.size === 0 || selected.has(task.status);
+}
+
 /** Map a Jira priority name to its card CSS class. Pure. */
 export function prioClass(p: string): string {
   const s = (p || "").toLowerCase();

@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { fmtEst, moveKey, prioClass } from "./helpers";
+import { deriveStatuses, fmtEst, matchesStatus, moveKey, prioClass } from "./helpers";
 import { Filter, JiraTask, OutboundMessage, Size } from "../types";
 
 let toastSeq = 0;
@@ -76,6 +76,8 @@ export function App(): JSX.Element {
   const [me, setMe] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<Filter>("mysprint");
   const [size, setSize] = React.useState<Size>("any");
+  // Client-side status lens: the set of selected statuses (empty = show all).
+  const [statuses, setStatuses] = React.useState<Set<string>>(new Set());
   const [repoQuery, setRepoQuery] = React.useState("");
   const [tasks, setTasks] = React.useState<JiraTask[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -139,6 +141,14 @@ export function App(): JSX.Element {
           setFilter(m.filter);
           setTasks(m.tasks);
           setExpanded(new Set());
+          // Drop status selections that no longer exist in the fresh pool — otherwise
+          // a selected status with no chip would silently hide everything.
+          setStatuses((prev) => {
+            if (prev.size === 0) return prev;
+            const present = new Set(m.tasks.map((t) => t.status));
+            const kept = [...prev].filter((s) => present.has(s));
+            return kept.length === prev.size ? prev : new Set(kept);
+          });
           break;
         case "detail":
           setDetails((prev) => ({
@@ -211,13 +221,25 @@ export function App(): JSX.Element {
   const setSelected = (key: string, selected: string[]) =>
     setDetails((prev) => ({ ...prev, [key]: { ...prev[key], selected } }));
 
-  // Narrow the current pool to tasks touching a repo (matches the inferred service chips).
+  // Status lens chips, derived from the loaded pool (adapts to the project's workflow).
+  const availableStatuses = React.useMemo(() => deriveStatuses(tasks), [tasks]);
+  const toggleStatus = (name: string) =>
+    setStatuses((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
+  // Narrow the current pool to tasks touching a repo (matches the inferred service chips)
+  // and, if a status lens is active, to the selected statuses.
   const q = repoQuery.trim().toLowerCase();
-  const visibleTasks = q
-    ? tasks.filter((t) => (t.services ?? []).some((s) => s.toLowerCase().includes(q)))
-    : tasks;
+  const visibleTasks = tasks.filter(
+    (t) =>
+      (!q || (t.services ?? []).some((s) => s.toLowerCase().includes(q))) && matchesStatus(t, statuses),
+  );
   // Reorder only makes sense on the full My-sprint list, not a filtered subset.
-  const canReorder = filter === "mysprint" && !q;
+  const canReorder = filter === "mysprint" && !q && statuses.size === 0;
 
   // Toasts float over every state (gate or list), so keep them out of the branch bodies.
   const toastStack = <ToastStack toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />;
@@ -296,6 +318,28 @@ export function App(): JSX.Element {
         ))}
       </div>
 
+      {availableStatuses.length > 0 && (
+        <div className="statuses">
+          <span className="statuses-label">Status</span>
+          <button
+            className={`status-chip${statuses.size === 0 ? " active" : ""}`}
+            title="Any status"
+            onClick={() => setStatuses(new Set())}
+          >
+            All
+          </button>
+          {availableStatuses.map((s) => (
+            <button
+              key={s.name}
+              className={`status-chip${statuses.has(s.name) ? " active" : ""}`}
+              onClick={() => toggleStatus(s.name)}
+            >
+              {s.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="repo-filter">
         <SearchIcon />
         <input
@@ -319,7 +363,13 @@ export function App(): JSX.Element {
 
       {loading && <div className="loading">Loading…</div>}
       {!loading && authed !== null && visibleTasks.length === 0 && (
-        <div className="empty">{q ? `No tasks touch “${repoQuery.trim()}”.` : "No tasks in this view."}</div>
+        <div className="empty">
+          {q
+            ? `No tasks touch “${repoQuery.trim()}”.`
+            : statuses.size > 0
+              ? "No tasks match the selected status."
+              : "No tasks in this view."}
+        </div>
       )}
 
       <div

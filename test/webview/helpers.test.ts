@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fmtEst, moveKey, prioClass } from "../../src/webview/helpers";
+import { deriveStatuses, fmtEst, matchesStatus, moveKey, prioClass } from "../../src/webview/helpers";
 import { mkTask } from "../_helpers/factories";
 
 const tasks = (...keys: string[]) => keys.map((k) => mkTask({ key: k }));
@@ -38,6 +38,51 @@ describe("prioClass", () => {
   it("maps anything else (incl. empty) to p-low", () => {
     expect(prioClass("Low")).toBe("p-low");
     expect(prioClass("")).toBe("p-low");
+  });
+});
+
+describe("deriveStatuses", () => {
+  const s = (name: string, category: string) => mkTask({ status: name, statusCategory: category });
+
+  it("returns the distinct statuses present in the pool", () => {
+    const got = deriveStatuses([s("To Do", "new"), s("To Do", "new"), s("In Progress", "indeterminate")]);
+    expect(got.map((x) => x.name)).toEqual(["To Do", "In Progress"]);
+  });
+
+  it("orders by workflow category (new → indeterminate → done) then alphabetically", () => {
+    const got = deriveStatuses([
+      s("In Review", "indeterminate"),
+      s("Done", "done"),
+      s("To Do", "new"),
+      s("Blocked", "indeterminate"),
+    ]);
+    expect(got.map((x) => x.name)).toEqual(["To Do", "Blocked", "In Review", "Done"]);
+  });
+
+  it("skips tasks with no status", () => {
+    expect(deriveStatuses([mkTask({ status: "" }), s("To Do", "new")]).map((x) => x.name)).toEqual(["To Do"]);
+  });
+
+  it("carries each status's category through", () => {
+    expect(deriveStatuses([s("In Progress", "indeterminate")])).toEqual([
+      { name: "In Progress", category: "indeterminate" },
+    ]);
+  });
+});
+
+describe("matchesStatus", () => {
+  const t = mkTask({ status: "In Progress" });
+
+  it("passes everything when nothing is selected", () => {
+    expect(matchesStatus(t, new Set())).toBe(true);
+  });
+
+  it("passes a task whose status is selected", () => {
+    expect(matchesStatus(t, new Set(["To Do", "In Progress"]))).toBe(true);
+  });
+
+  it("rejects a task whose status is not selected", () => {
+    expect(matchesStatus(t, new Set(["To Do"]))).toBe(false);
   });
 });
 

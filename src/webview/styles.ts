@@ -38,6 +38,15 @@ export const CSS = `
   .size-chip.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
     border-color: var(--vscode-button-background); }
 
+  .statuses { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin: 0 0 10px 2px; }
+  .statuses-label { font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--vscode-descriptionForeground); margin-right: 2px; }
+  .status-chip { font-size: 10px; padding: 2px 9px; border-radius: 20px; cursor: pointer;
+    border: 1px solid var(--vscode-panel-border); background: transparent; color: var(--vscode-foreground); }
+  .status-chip:hover { background: var(--vscode-toolbar-hoverBackground); }
+  .status-chip.active { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+    border-color: var(--vscode-button-background); }
+
   .est { font-size: 10px; color: var(--vscode-descriptionForeground); white-space: nowrap;
     font-variant-numeric: tabular-nums; }
 

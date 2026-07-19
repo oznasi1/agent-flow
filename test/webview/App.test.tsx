@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as React from "react";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
@@ -95,6 +95,73 @@ describe("filter + size lenses", () => {
   });
 });
 
+describe("status filter lens", () => {
+  const twoStatuses = () =>
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "ASM-1", summary: "todo one", status: "To Do", statusCategory: "new" }),
+        mkTask({ key: "ASM-2", summary: "wip one", status: "In Progress", statusCategory: "indeterminate" }),
+      ],
+    });
+  // The filter chips live in the .statuses row — scope queries there so they don't
+  // collide with the same-labelled status button on each card.
+  const chip = (name: string) =>
+    within(document.querySelector(".statuses") as HTMLElement).getByRole("button", { name });
+
+  it("shows a chip per distinct status and narrows the pool by the selected ones", () => {
+    render(<App />);
+    authed();
+    twoStatuses();
+    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+
+    fireEvent.click(chip("In Progress"));
+    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+  });
+
+  it("is multi-select: adding a second status widens the view", () => {
+    render(<App />);
+    authed();
+    twoStatuses();
+    fireEvent.click(chip("In Progress"));
+    fireEvent.click(chip("To Do"));
+    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+  });
+
+  it("All clears the selection", () => {
+    render(<App />);
+    authed();
+    twoStatuses();
+    fireEvent.click(chip("In Progress"));
+    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    fireEvent.click(chip("All"));
+    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+  });
+
+  it("shows no status row when the pool has no statuses", () => {
+    render(<App />);
+    authed();
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", status: "" })] });
+    expect(document.querySelector(".statuses")).toBeNull();
+  });
+
+  it("prunes a selected status that is absent after a refetch (no invisible filter)", () => {
+    render(<App />);
+    authed();
+    twoStatuses();
+    fireEvent.click(chip("In Progress")); // filter down to ASM-2
+    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    // New pool has no "In Progress" — the stale selection must be dropped, not hide everything.
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-3", summary: "todo two", status: "To Do", statusCategory: "new" })] });
+    expect(screen.getByText("ASM-3")).toBeInTheDocument();
+  });
+});
+
 describe("My-sprint reorder bar", () => {
   it("shows Reset order only in the My-sprint lens and wires it", () => {
     render(<App />);
@@ -121,7 +188,8 @@ describe("optimistic list updates", () => {
     authed();
     host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", status: "To Do" })] });
     host({ type: "statusChanged", key: "ASM-1", status: "In Progress", category: "indeterminate", removed: false });
-    expect(screen.getByText(/In Progress/)).toBeInTheDocument();
+    // Target the card's status button (a status-filter chip now shares the "In Progress" label).
+    expect(screen.getByTitle("Change status")).toHaveTextContent("In Progress");
   });
 
   it("reflects a moved-to-sprint assignee update", () => {
@@ -184,7 +252,8 @@ describe("task card actions", () => {
 
   it("opens the status menu", () => {
     withTask(mkTask({ key: "ASM-1", status: "To Do", statusCategory: "new" }));
-    fireEvent.click(screen.getByRole("button", { name: /To Do/ }));
+    // getByTitle targets the card's status button, not the same-labelled filter chip.
+    fireEvent.click(screen.getByTitle("Change status"));
     expect(sent).toHaveBeenCalledWith({ type: "changeStatus", key: "ASM-1" });
   });
 
