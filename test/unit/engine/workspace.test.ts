@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openWorkspace, maybeSeedAgent, listWorkspaceFiles, type OpenRequest } from "../../../src/engine/workspace";
+import { openWorkspace, maybeSeedAgent, listWorkspaceFiles, mergeReposIntoWorkspace, type OpenRequest } from "../../../src/engine/workspace";
 import { commands, env, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -313,6 +313,57 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("mergeReposIntoWorkspace", () => {
+  const repos = mkRepos(["account-service", "centaur"]); // paths: /repos/account-service, /repos/centaur
+
+  it("appends only missing repos and preserves comments + settings", () => {
+    readFileSync.mockReturnValue(
+      '{\n  // my workspace\n  "folders": [{ "name": "centaur", "path": "/repos/centaur" }],\n  "settings": { "editor.tabSize": 2 }\n}\n',
+    );
+    let written = "";
+    writeFileSync.mockImplementation((_p, data) => { written = String(data); });
+
+    const res = mergeReposIntoWorkspace("/ws/ASM-1.code-workspace", repos);
+
+    expect(res).toEqual({ added: ["account-service"], ok: true });
+    expect(written).toContain("// my workspace");            // comment preserved
+    expect(written).toContain('"editor.tabSize": 2');        // settings preserved
+    expect(written).toContain('"path": "/repos/account-service"'); // repo added
+    // centaur present exactly once (not duplicated)
+    expect(written.match(/\/repos\/centaur/g)?.length).toBe(1);
+  });
+
+  it("is idempotent — no write when all repos already present", () => {
+    readFileSync.mockReturnValue(
+      '{ "folders": [{ "path": "/repos/account-service" }, { "path": "/repos/centaur" }] }',
+    );
+    const res = mergeReposIntoWorkspace("/ws/ASM-1.code-workspace", repos);
+    expect(res).toEqual({ added: [], ok: true });
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("resolves relative existing-folder paths against the workspace dir", () => {
+    // workspace lives in /repos, folder path "centaur" → /repos/centaur (already present)
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "centaur" }] }');
+    writeFileSync.mockImplementation(() => {});
+    const res = mergeReposIntoWorkspace("/repos/team.code-workspace", repos);
+    expect(res.added).toEqual(["account-service"]); // centaur matched via relative resolution
+  });
+
+  it("does NOT write on unparseable input (ok:false)", () => {
+    readFileSync.mockReturnValue("{ this is : not json");
+    const res = mergeReposIntoWorkspace("/ws/bad.code-workspace", repos);
+    expect(res).toEqual({ added: [], ok: false });
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("does NOT write when the file can't be read (ok:false)", () => {
+    readFileSync.mockImplementation(() => { throw new Error("ENOENT"); });
+    const res = mergeReposIntoWorkspace("/ws/missing.code-workspace", repos);
+    expect(res).toEqual({ added: [], ok: false });
   });
 });
 

@@ -250,6 +250,50 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   return { mode, workspaceFile, briefs, opened };
 }
 
+/** Additively merge `repos` into an existing `.code-workspace` file, preserving
+ * comments/formatting/settings via jsonc-parser. Returns ok:false WITHOUT writing
+ * if the file can't be read or safely parsed (caller opens it as-is + warns). */
+export function mergeReposIntoWorkspace(
+  file: string,
+  repos: ServiceRef[],
+): { added: string[]; ok: boolean } {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return { added: [], ok: false };
+  }
+  const errors: ParseError[] = [];
+  const doc = jsoncParse(text, errors, { allowTrailingComma: true }) as
+    | { folders?: { path?: string }[] }
+    | undefined;
+  if (errors.length || !doc || typeof doc !== "object") return { added: [], ok: false };
+
+  const wsDir = path.dirname(file);
+  const present = new Set(
+    (Array.isArray(doc.folders) ? doc.folders : [])
+      .map((f) => f?.path)
+      .filter((p): p is string => typeof p === "string")
+      .map((p) => canon(path.resolve(wsDir, p))),
+  );
+  const missing = repos.filter((r) => !present.has(canon(r.path)));
+  if (!missing.length) return { added: [], ok: true };
+
+  const startIdx = Array.isArray(doc.folders) ? doc.folders.length : 0;
+  let updated = text;
+  missing.forEach((r, i) => {
+    const edits = modify(
+      updated,
+      ["folders", startIdx + i],
+      { name: r.name, path: r.path },
+      { isArrayInsertion: true, formattingOptions: { insertSpaces: true, tabSize: 2 } },
+    );
+    updated = applyEdits(updated, edits);
+  });
+  fs.writeFileSync(file, updated);
+  return { added: missing.map((r) => r.name), ok: true };
+}
+
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Resolve symlinks so the plan matchPath (written pre-open) and the window's
