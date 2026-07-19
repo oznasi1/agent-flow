@@ -35,6 +35,7 @@ export interface OpenRequest {
   workspaceDir: string;
   seedAgent: boolean;
   openIn?: "new" | "current"; // "current" reuses the running window; default "new"
+  existingWorkspaceFile?: string; // when set: open the task into this .code-workspace
 }
 
 export interface OpenResult {
@@ -42,6 +43,8 @@ export interface OpenResult {
   workspaceFile?: string;
   briefs: { repo: string; path: string; gitExcluded: boolean; files: number }[];
   opened: string[];
+  mergedRepos?: string[]; // repos appended to an existing workspace
+  mergeFailed?: boolean;  // existing workspace could not be parsed; opened as-is
 }
 
 interface PlanFile {
@@ -194,8 +197,20 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
 
   // 2 — build the workspace target + the seed matches
   let workspaceFile: string | undefined;
+  let mergedRepos: string[] | undefined;
+  let mergeFailed: boolean | undefined;
   const matches: PlanFile["matches"] = [];
-  if (mode === "multiroot") {
+  const effMode: WorkspaceMode = req.existingWorkspaceFile ? "multiroot" : mode;
+  if (req.existingWorkspaceFile) {
+    const merge = mergeReposIntoWorkspace(req.existingWorkspaceFile, services);
+    mergedRepos = merge.added;
+    mergeFailed = merge.ok ? undefined : true;
+    workspaceFile = req.existingWorkspaceFile;
+    const mentions = services.flatMap((s) =>
+      (filesByRepo.get(s.name) ?? []).map((f) => mention("multiroot", s.name, f)),
+    );
+    matches.push({ matchPath: workspaceFile, prompt: agentPrompt(ticket, mentions, promptTemplate) });
+  } else if (mode === "multiroot") {
     fs.mkdirSync(workspaceDir, { recursive: true });
     workspaceFile = path.join(workspaceDir, `${ticket.key}.code-workspace`);
     fs.writeFileSync(
@@ -221,7 +236,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     summary: ticket.summary,
     url: ticket.url,
     createdAt: Date.now(),
-    mode,
+    mode: effMode,
     workspaceFile,
     repos: services.map((s) => ({
       name: s.name,
@@ -239,7 +254,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
 
   // 4 — open (new window, or reuse the current one)
   const opened: string[] = [];
-  if (mode === "multiroot") {
+  if (effMode === "multiroot") {
     if (await openInEditor(workspaceFile!, newWindow)) opened.push(workspaceFile!);
   } else {
     for (const s of services) {
@@ -247,7 +262,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     }
   }
 
-  return { mode, workspaceFile, briefs, opened };
+  return { mode: effMode, workspaceFile, briefs, opened, mergedRepos, mergeFailed };
 }
 
 /** Additively merge `repos` into an existing `.code-workspace` file, preserving

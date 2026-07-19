@@ -367,6 +367,45 @@ describe("mergeReposIntoWorkspace", () => {
   });
 });
 
+describe("openWorkspace — existing workspace", () => {
+  it("merges repos into the picked file and does not generate a new one", async () => {
+    // Picked workspace already contains centaur; account-service is missing.
+    readFileSync.mockImplementation((p) =>
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+    );
+
+    const result = await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/team.code-workspace" }));
+
+    expect(result.mode).toBe("multiroot");
+    expect(result.workspaceFile).toBe("/ws/team.code-workspace");
+    expect(result.mergedRepos).toEqual(["account-service"]);
+    expect(result.mergeFailed).toBeUndefined();
+    // No generated <KEY>.code-workspace was written.
+    expect(writeArg((p) => p.endsWith("ASM-1.code-workspace"))).toBeUndefined();
+    // It opened the picked file.
+    expect(result.opened).toContain("/ws/team.code-workspace");
+  });
+
+  it("reports mergeFailed when the picked file is unparseable and still opens it", async () => {
+    readFileSync.mockImplementation((p) =>
+      String(p).endsWith(".code-workspace") ? "{ broken" : "",
+    );
+    const result = await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/bad.code-workspace" }));
+    expect(result.mergeFailed).toBe(true);
+    expect(result.opened).toContain("/ws/bad.code-workspace");
+  });
+
+  it("seeds a plan whose matchPath is the picked workspace", async () => {
+    readFileSync.mockImplementation((p) =>
+      String(p).endsWith(".code-workspace") ? '{ "folders": [] }' : "",
+    );
+    await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/team.code-workspace" }));
+    const planCall = writeArg((p) => p.includes("/.flowdeck/plans/"));
+    expect(planCall).toBeDefined();
+    expect(String(planCall![1])).toContain('"matchPath": "/ws/team.code-workspace"');
+  });
+});
+
 describe("listWorkspaceFiles", () => {
   it("lists only .code-workspace files, newest first, with folder counts", () => {
     readdirSync.mockReturnValue(["b.code-workspace", "notes.txt", "a.code-workspace"] as never);
