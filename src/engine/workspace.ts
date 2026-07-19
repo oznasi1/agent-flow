@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { exec } from "child_process";
+import { parse as jsoncParse, modify, applyEdits, type ParseError } from "jsonc-parser";
 import { Run, ServiceRef, WorkspaceMode } from "../types";
 import { extractFileHints, resolveFilesInRepo, mention } from "./files";
 import { renderPrompt } from "./prompt";
@@ -48,6 +49,43 @@ interface PlanFile {
   createdAt: number;
   seedAgent: boolean;
   matches: { matchPath: string; prompt: string }[];
+}
+
+export interface WorkspaceListItem {
+  file: string;
+  folders: number;
+  mtimeMs: number;
+}
+
+/** List `*.code-workspace` files under `dir`, newest first. Best-effort: an
+ * unreadable dir yields []; an unparseable file yields a 0 folder count. */
+export function listWorkspaceFiles(dir: string): WorkspaceListItem[] {
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const items: WorkspaceListItem[] = [];
+  for (const n of names) {
+    if (!n.endsWith(".code-workspace")) continue;
+    const file = path.join(dir, n);
+    let mtimeMs = 0;
+    let folders = 0;
+    try {
+      mtimeMs = fs.statSync(file).mtimeMs;
+    } catch {
+      /* keep 0 */
+    }
+    try {
+      const doc = jsoncParse(fs.readFileSync(file, "utf8")) as { folders?: unknown[] } | undefined;
+      folders = Array.isArray(doc?.folders) ? doc!.folders.length : 0;
+    } catch {
+      /* keep 0 */
+    }
+    items.push({ file, folders, mtimeMs });
+  }
+  return items.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
 // ── Brief + prompt ────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openWorkspace, maybeSeedAgent, type OpenRequest } from "../../../src/engine/workspace";
+import { openWorkspace, maybeSeedAgent, listWorkspaceFiles, type OpenRequest } from "../../../src/engine/workspace";
 import { commands, env, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -313,5 +313,37 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("listWorkspaceFiles", () => {
+  it("lists only .code-workspace files, newest first, with folder counts", () => {
+    readdirSync.mockReturnValue(["b.code-workspace", "notes.txt", "a.code-workspace"] as never);
+    statSync.mockImplementation((p) =>
+      ({ isFile: () => true, mtimeMs: String(p).endsWith("a.code-workspace") ? 200 : 100 }) as unknown as fs.Stats,
+    );
+    readFileSync.mockImplementation((p) =>
+      String(p).endsWith("a.code-workspace")
+        ? '{ "folders": [{ "path": "x" }] }'
+        : '{ /* c */ "folders": [{ "path": "y" }, { "path": "z" }] }',
+    );
+
+    const items = listWorkspaceFiles("/ws");
+
+    expect(items.map((i) => i.file.split("/").pop())).toEqual(["a.code-workspace", "b.code-workspace"]);
+    expect(items[0].folders).toBe(1);
+    expect(items[1].folders).toBe(2);
+  });
+
+  it("returns [] when the directory can't be read", () => {
+    readdirSync.mockImplementation(() => { throw new Error("ENOENT"); });
+    expect(listWorkspaceFiles("/nope")).toEqual([]);
+  });
+
+  it("tolerates an unparseable workspace file (folders = 0)", () => {
+    readdirSync.mockReturnValue(["broken.code-workspace"] as never);
+    statSync.mockReturnValue({ isFile: () => true, mtimeMs: 1 } as unknown as fs.Stats);
+    readFileSync.mockReturnValue("{ not json");
+    expect(listWorkspaceFiles("/ws")[0].folders).toBe(0);
   });
 });
