@@ -69,7 +69,7 @@ describe("buildRunStatus", () => {
   let run: Run;
 
   beforeAll(() => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), "flowdeck-status-"));
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-status-"));
     repoPath = path.join(root, "repo");
     fs.mkdirSync(repoPath, { recursive: true });
     const g = (...a: string[]) => execFileSync("git", ["-C", repoPath, ...a], { stdio: ["ignore", "pipe", "ignore"] });

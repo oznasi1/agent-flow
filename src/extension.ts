@@ -8,32 +8,32 @@ import { maybeRunSetup, runSetup } from "./setup";
 
 export function activate(context: vscode.ExtensionContext): void {
   const auth = new ApiTokenAuth(context.secrets);
-  const output = vscode.window.createOutputChannel("Flow Deck");
+  const output = vscode.window.createOutputChannel("Agent Flow");
   const log = (m: string) => output.appendLine(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
   const provider = new TasksViewProvider(context, auth, log);
-  log("Flow Deck activated");
+  log("Agent Flow activated");
 
   context.subscriptions.push(
     output,
     vscode.window.registerWebviewViewProvider(TasksViewProvider.viewType, provider),
 
-    vscode.commands.registerCommand("flowdeck.refresh", () => provider.refresh()),
+    vscode.commands.registerCommand("agentFlow.refresh", () => provider.refresh()),
 
-    vscode.commands.registerCommand("flowdeck.signIn", async () => {
+    vscode.commands.registerCommand("agentFlow.signIn", async () => {
       const ok = await auth.signIn();
       if (ok) {
-        vscode.window.showInformationMessage("Flow Deck: signed in to Jira.");
+        vscode.window.showInformationMessage("Agent Flow: signed in to Jira.");
         await provider.refresh();
       }
       return ok;
     }),
 
-    vscode.commands.registerCommand("flowdeck.signOut", async () => {
+    vscode.commands.registerCommand("agentFlow.signOut", async () => {
       await auth.signOut();
-      vscode.window.showInformationMessage("Flow Deck: signed out of Jira.");
+      vscode.window.showInformationMessage("Agent Flow: signed out of Jira.");
     }),
 
-    vscode.commands.registerCommand("flowdeck.takeTask", async () => {
+    vscode.commands.registerCommand("agentFlow.takeTask", async () => {
       const exampleKey = `${getConfig().project || "ABC"}-1234`;
       const key = await vscode.window.showInputBox({
         title: "Take a Jira task",
@@ -43,9 +43,9 @@ export function activate(context: vscode.ExtensionContext): void {
       if (key) await provider.takeTask(key.trim().toUpperCase());
     }),
 
-    vscode.commands.registerCommand("flowdeck.openDeck", () => DeckPanel.show(context, auth, log)),
+    vscode.commands.registerCommand("agentFlow.openDeck", () => DeckPanel.show(context, auth, log)),
 
-    vscode.commands.registerCommand("flowdeck.setup", () =>
+    vscode.commands.registerCommand("agentFlow.setup", () =>
       runSetup(context, auth, log, () => provider.refresh()),
     ),
   );

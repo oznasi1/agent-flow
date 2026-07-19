@@ -35,7 +35,7 @@ survives reloads. It is a purely local ordering: nothing is written back to Jira
 
 ### 1. Persistence (host) — `src/tasksView.ts`
 
-- Memento key `flowdeck.sprintOrder` → `string[]` of issue keys in the user's
+- Memento key `agentFlow.sprintOrder` → `string[]` of issue keys in the user's
   order, stored in `context.workspaceState`.
 - On a **reorder** message: recompute the saved order and persist silently (the
   webview already updated optimistically, so no echo is posted back).

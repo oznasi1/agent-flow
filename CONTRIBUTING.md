@@ -1,13 +1,13 @@
-# Contributing to Flow Deck
+# Contributing to Agent Flow
 
-Thanks for your interest in improving Flow Deck! This is a VS Code / Cursor extension written
+Thanks for your interest in improving Agent Flow! This is a VS Code / Cursor extension written
 in TypeScript, with React webviews bundled by esbuild and tested with Vitest.
 
 ## Getting started
 
 ```bash
-git clone https://github.com/oznasi1/flowdeck.git
-cd flowdeck
+git clone https://github.com/oznasi1/agent-flow.git
+cd agent-flow
 npm install
 ```
 
@@ -25,14 +25,14 @@ npm install
 
 ## Running the extension
 
-Press **F5** in VS Code (the "Run Flow Deck" launch config) to open an Extension Development
-Host with a `build` pre-launch task. Open the **Flow Deck** icon in the activity bar and
+Press **F5** in VS Code (the "Run Agent Flow" launch config) to open an Extension Development
+Host with a `build` pre-launch task. Open the **Agent Flow** icon in the activity bar and
 complete the first-run setup wizard.
 
 ## Conventions
 
 - **No hardcoded organization values.** Anything organization-specific (Jira site, project
-  key, repo layout, blocklist, provenance label) belongs in a `flowdeck.*` setting and is
+  key, repo layout, blocklist, provenance label) belongs in a `agentFlow.*` setting and is
   read through `getConfig()` in `src/config.ts` — never inlined. New behavior that varies per
   user should follow the same pattern and be collected in the first-run wizard (`src/setup.ts`)
   where appropriate.

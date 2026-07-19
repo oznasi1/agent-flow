@@ -13,7 +13,7 @@ import { InboundMessage, OutboundMessage, Run, RunStatus } from "./types";
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
 
-/** The Deck: a full-window board of every task launched via Flow Deck, opened as a
+/** The Deck: a full-window board of every task launched via Agent Flow, opened as a
  * singleton editor-area panel. Reuses the Jira client, runs store, and status engine. */
 export class DeckPanel {
   private static current: DeckPanel | undefined;
@@ -29,8 +29,8 @@ export class DeckPanel {
       return;
     }
     const panel = vscode.window.createWebviewPanel(
-      "flowdeck.deck",
-      "Flow Deck — In-flight",
+      "agentFlow.deck",
+      "Agent Flow — In-flight",
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] },
     );

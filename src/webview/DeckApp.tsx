@@ -136,7 +136,7 @@ export function DeckApp(): JSX.Element {
       {runs.length === 0 ? (
         <div className="empty">
           <div className="big">No tasks in flight</div>
-          <div>Take a task from the Flow Deck Tasks pool and it shows up here.</div>
+          <div>Take a task from the Agent Flow Tasks pool and it shows up here.</div>
         </div>
       ) : (
         <div className="board">

@@ -3,8 +3,8 @@ import { ApiTokenAuth } from "../../../src/jira/auth";
 import { window } from "../../_mocks/vscode";
 import { fakeSecrets } from "../../_helpers/factories";
 
-const EMAIL_KEY = "flowdeck.jira.email";
-const TOKEN_KEY = "flowdeck.jira.token";
+const EMAIL_KEY = "agentFlow.jira.email";
+const TOKEN_KEY = "agentFlow.jira.token";
 
 // ApiTokenAuth takes a vscode.SecretStorage; our in-memory fake is structurally
 // compatible, so cast at the constructor boundary.

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { getConfig, FlowDeckConfig } from "./config";
+import { getConfig, AgentFlowConfig } from "./config";
 import { JiraAuth } from "./jira/auth";
 import { JiraClient, JiraAuthError } from "./jira/client";
 import { discoverRepos } from "./engine/repos";
@@ -9,14 +9,14 @@ import { createWorktrees } from "./engine/worktree";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, WorkspaceMode } from "./types";
 
-const SPRINT_ORDER_KEY = "flowdeck.sprintOrder";
+const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 
 /** Where to open a taken task — a new window, the current one, or merged into an
  * existing .code-workspace file. */
 type OpenTarget = { kind: "new" } | { kind: "current" } | { kind: "existing"; file: string };
 
 export class TasksViewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = "flowdeck.tasks";
+  public static readonly viewType = "agentFlow.tasks";
   private view?: vscode.WebviewView;
   private lastFilter: Filter = "unassigned";
 
@@ -75,7 +75,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "signIn": {
-          await vscode.commands.executeCommand("flowdeck.signIn");
+          await vscode.commands.executeCommand("agentFlow.signIn");
           break;
         }
         case "openExternal": {
@@ -244,7 +244,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const cfg = getConfig();
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
     if (repos.length === 0) {
-      this.toast("error", `No repos found under ${cfg.reposRoot}. Check flowdeck.reposRoot.`);
+      this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
       return;
     }
 
@@ -299,7 +299,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** One repo → its own window; multiple → per the workspaceMode setting (asking if configured). */
   private async chooseWorkspaceMode(
     count: number,
-    setting: FlowDeckConfig["workspaceMode"],
+    setting: AgentFlowConfig["workspaceMode"],
     label: string,
   ): Promise<WorkspaceMode | undefined> {
     if (count === 1 || setting === "per-window") return "per-window";
@@ -326,7 +326,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   public async takeTask(key: string, preselected?: string[]): Promise<void> {
     const cfg = getConfig();
     if (!(await this.auth.isAuthenticated())) {
-      const ok = await vscode.commands.executeCommand<boolean>("flowdeck.signIn");
+      const ok = await vscode.commands.executeCommand<boolean>("agentFlow.signIn");
       if (!ok) return;
     }
 
@@ -337,7 +337,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
     if (repos.length === 0) {
-      this.toast("error", `No repos found under ${cfg.reposRoot}. Check flowdeck.reposRoot.`);
+      this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
       return;
     }
     let services: ServiceRef[];
@@ -469,7 +469,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Where to open a taken task — new window, this window, or an existing workspace. */
-  private async chooseOpenTarget(cfg: FlowDeckConfig): Promise<OpenTarget | undefined> {
+  private async chooseOpenTarget(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
     if (cfg.openIn === "new-window") return { kind: "new" };
     if (cfg.openIn === "this-window") return { kind: "current" };
     if (cfg.openIn === "pick-existing") return this.pickExistingWorkspace(cfg);
@@ -491,7 +491,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Pick a `.code-workspace` from `cfg.workspaceDir` (or Browse… for one elsewhere). */
-  private async pickExistingWorkspace(cfg: FlowDeckConfig): Promise<OpenTarget | undefined> {
+  private async pickExistingWorkspace(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
     const BROWSE = "__browse__";
     const files = listWorkspaceFiles(cfg.workspaceDir);
     const items = [

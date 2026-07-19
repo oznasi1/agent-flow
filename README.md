@@ -1,4 +1,4 @@
-# Flow Deck
+# Agent Flow
 
 A VS Code / Cursor extension: a **task pool in your sidebar** that turns "what should I
 work on?" into a workspace with an agent already primed.
@@ -13,7 +13,7 @@ orchestrate, not ready to set up.
   and a size lens (S/M/L by original estimate).
 - **Jira fetch** over the REST API. Reads are the default; the only writes are optional
   status changes from a card — which also stamp a provenance label (default `claude-code`,
-  configurable via `flowdeck.provenanceLabel`, toggle with `flowdeck.stampLabelOnWrite`).
+  configurable via `agentFlow.provenanceLabel`, toggle with `agentFlow.stampLabelOnWrite`).
 - **Service inference** — reads the ticket's components/labels/text and matches your
   local repo checkouts (backend *and* frontend).
 - **Open + seed** — writes `.pick-task/TASK.md` into each repo (git-excluded), generates a
@@ -47,19 +47,19 @@ with no changes to the client or UI.
 ## Requirements
 
 - **VS Code** (or Cursor) `^1.90.0`.
-- The **Claude Code** extension (`anthropic.claude-code`) installed — Flow Deck seeds its
+- The **Claude Code** extension (`anthropic.claude-code`) installed — Agent Flow seeds its
   agent panel. Without it, the seeded task brief is still written and used as a fallback.
 - An **Atlassian API token** for your Jira Cloud account
   ([create one](https://id.atlassian.com/manage-profile/security/api-tokens)).
 
 ## First-time setup
 
-Flow Deck ships with **no organization-specific defaults** — the first time it activates it
+Agent Flow ships with **no organization-specific defaults** — the first time it activates it
 offers a short guided setup that collects your Jira site, project key, and repos directory,
 then signs you in. Everything is stored in your VS Code **user settings** (credentials go to
 encrypted **SecretStorage**, never to `settings.json`).
 
-You can re-run it anytime with the **"Flow Deck: Run Setup…"** command, or configure the
+You can re-run it anytime with the **"Agent Flow: Run Setup…"** command, or configure the
 settings below by hand.
 
 ## Develop / run
@@ -71,32 +71,32 @@ npm test             # vitest
 npm run typecheck    # tsc --noEmit
 ```
 
-Press **F5** (Run Flow Deck) to launch an Extension Development Host with the extension
-loaded. Open the **Flow Deck** icon in the activity bar and complete the first-run setup.
+Press **F5** (Run Agent Flow) to launch an Extension Development Host with the extension
+loaded. Open the **Agent Flow** icon in the activity bar and complete the first-run setup.
 
 ## Settings
 
 | Setting | Default | Notes |
 |---------|---------|-------|
-| `flowdeck.jira.baseUrl` | `""` | Your Jira Cloud site, e.g. `https://your-org.atlassian.net`. |
-| `flowdeck.jira.project` | `""` | Jira project key, e.g. `ABC`. |
-| `flowdeck.reposRoot` | `~/projects` | Where your repo checkouts live. |
-| `flowdeck.workspaceDir` | `~/projects` | Where generated `.code-workspace` files go. |
-| `flowdeck.repoBlocklist` | `[]` | Directory names under `reposRoot` to exclude from discovery. |
-| `flowdeck.githubOrg` | `""` | Reserved (clone support not yet implemented). |
-| `flowdeck.provenanceLabel` | `claude-code` | Label stamped on Jira writes when enabled. |
-| `flowdeck.stampLabelOnWrite` | `true` | Whether to stamp the provenance label. |
-| `flowdeck.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
-| `flowdeck.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
+| `agentFlow.jira.baseUrl` | `""` | Your Jira Cloud site, e.g. `https://your-org.atlassian.net`. |
+| `agentFlow.jira.project` | `""` | Jira project key, e.g. `ABC`. |
+| `agentFlow.reposRoot` | `~/projects` | Where your repo checkouts live. |
+| `agentFlow.workspaceDir` | `~/projects` | Where generated `.code-workspace` files go. |
+| `agentFlow.repoBlocklist` | `[]` | Directory names under `reposRoot` to exclude from discovery. |
+| `agentFlow.githubOrg` | `""` | Reserved (clone support not yet implemented). |
+| `agentFlow.provenanceLabel` | `claude-code` | Label stamped on Jira writes when enabled. |
+| `agentFlow.stampLabelOnWrite` | `true` | Whether to stamp the provenance label. |
+| `agentFlow.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
+| `agentFlow.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
 
-Plus `flowdeck.workspaceMode`, `flowdeck.taskMode`, `flowdeck.promptModes`,
-`flowdeck.explorePrompt`, `flowdeck.worktree`, and `flowdeck.worktreeRoot` — see the
+Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
+`agentFlow.explorePrompt`, `agentFlow.worktree`, and `agentFlow.worktreeRoot` — see the
 Settings UI. Jira credentials are stored in VS Code **SecretStorage**, never in settings.
 
-`flowdeck.openIn` controls where a task you take gets opened: `ask` (ask each time),
+`agentFlow.openIn` controls where a task you take gets opened: `ask` (ask each time),
 `new-window`, `this-window` (reuse the current window), or `pick-existing` — pick an
 existing `.code-workspace` file and have the task's repos merged into it. That merge is
-non-destructive: Flow Deck only appends the repos the task needs (preserving the
+non-destructive: Agent Flow only appends the repos the task needs (preserving the
 workspace file's existing folders, settings, and formatting) and opens it as a
 multi-root workspace; it never overwrites or removes what was already there.
 

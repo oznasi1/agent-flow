@@ -10,7 +10,7 @@ describe("gitState", () => {
   const g = (...a: string[]) => execFileSync("git", ["-C", repo, ...a], { stdio: ["ignore", "pipe", "ignore"] });
 
   beforeAll(() => {
-    repo = fs.mkdtempSync(path.join(os.tmpdir(), "flowdeck-git-"));
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-git-"));
     g("init", "-q");
     g("config", "user.email", "t@t.dev");
     g("config", "user.name", "T");

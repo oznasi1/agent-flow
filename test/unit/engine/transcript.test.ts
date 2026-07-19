@@ -6,7 +6,7 @@ import { encodeProjectDir, deriveActivity, readAgentActivity, TranscriptLine } f
 
 describe("encodeProjectDir", () => {
   it("replaces slashes with dashes", () => {
-    expect(encodeProjectDir("/Users/dev/projects/flowdeck")).toBe("-Users-dev-projects-flowdeck");
+    expect(encodeProjectDir("/Users/dev/projects/agent-flow")).toBe("-Users-dev-projects-agent-flow");
   });
 
   it("replaces dots too (worktree paths)", () => {
@@ -72,7 +72,7 @@ describe("readAgentActivity", () => {
   };
 
   beforeAll(() => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), "flowdeck-tx-"));
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-tx-"));
     encDir = path.join(root, encodeProjectDir(cwdA));
     fs.mkdirSync(encDir, { recursive: true });
     writeJsonl("older.jsonl",

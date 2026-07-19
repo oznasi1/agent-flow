@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Let the user drag task cards to reorder them on the **My sprint** tab of the Flow Deck sidebar, remembering the order per-workspace with no Jira writes.
+**Goal:** Let the user drag task cards to reorder them on the **My sprint** tab of the Agent Flow sidebar, remembering the order per-workspace with no Jira writes.
 
 **Architecture:** A small pure module (`src/engine/order.ts`) computes ordering; the host (`src/tasksView.ts`) persists the order in `context.workspaceState` and applies it when fetching the My-sprint list; the React webview (`src/webview/App.tsx`) provides handle-gated native HTML5 drag-and-drop and reports the new order to the host.
 
@@ -14,7 +14,7 @@
 - No Jira writes for reorder — no Agile rank API, no `claude-code` label stamped.
 - Drag-and-drop is enabled **only** when `filter === "mysprint"`; all other tabs keep the default `priority DESC, updated DESC` order untouched.
 - Unranked/new tickets sort to the **bottom** in server order.
-- Persistence store is the host `context.workspaceState` Memento under key `flowdeck.sprintOrder` (per-workspace).
+- Persistence store is the host `context.workspaceState` Memento under key `agentFlow.sprintOrder` (per-workspace).
 - Styling uses `var(--vscode-*)` theme variables to match the editor theme (existing convention in `src/webview/styles.ts`).
 - All pure logic lives in `src/engine/order.ts` and is unit-tested via the existing `test/engine_check.ts` harness.
 
@@ -222,7 +222,7 @@ import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 Directly below the imports (before `export class TasksViewProvider`), add:
 
 ```ts
-const SPRINT_ORDER_KEY = "flowdeck.sprintOrder";
+const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 ```
 
 - [ ] **Step 4: Add Memento accessor methods**
@@ -599,7 +599,7 @@ Expected: esbuild completes with no errors; `dist/webview.js` rebuilt.
 
 - [ ] **Step 11: Manual end-to-end verification**
 
-Launch the extension (VS Code "Run Extension" / F5, or install the built `.vsix`), open the Flow Deck sidebar, sign in, and go to the **My sprint** tab. Confirm each:
+Launch the extension (VS Code "Run Extension" / F5, or install the built `.vsix`), open the Agent Flow sidebar, sign in, and go to the **My sprint** tab. Confirm each:
 
 1. A grip (⠿) shows on the left of each card **only** on My sprint (switch to another tab → no grip, no reset bar).
 2. Drag a card by the grip to a new position → a blue insertion line appears at the drop slot; on release the order updates.

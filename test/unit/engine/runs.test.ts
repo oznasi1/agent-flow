@@ -18,7 +18,7 @@ const mkRun = (key: string, createdAt: number): Run => ({
 describe("runs store", () => {
   let dir: string;
   beforeEach(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), "flowdeck-runs-"));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-runs-"));
   });
   afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
 

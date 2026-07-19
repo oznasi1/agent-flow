@@ -1,6 +1,6 @@
 {
-  "name": "flowdeck",
-  "displayName": "Flow Deck",
+  "name": "agent-flow",
+  "displayName": "Agent Flow",
   "description": "Grab a Jira task and spin up its workspace — a task pool in your sidebar that opens the right repos and pre-seeds a Claude Code agent.",
   "version": "0.1.0",
   "publisher": "Oznasi1",
@@ -8,11 +8,11 @@
   "author": "Oz Nasi (At-Bay)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/oznasi1/flowdeck.git"
+    "url": "https://github.com/oznasi1/agent-flow.git"
   },
-  "homepage": "https://github.com/oznasi1/flowdeck#readme",
+  "homepage": "https://github.com/oznasi1/agent-flow#readme",
   "bugs": {
-    "url": "https://github.com/oznasi1/flowdeck/issues"
+    "url": "https://github.com/oznasi1/agent-flow/issues"
   },
   "keywords": [
     "jira",
@@ -37,16 +37,16 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "flowdeck",
-          "title": "Flow Deck",
-          "icon": "media/flowdeck.svg"
+          "id": "agentFlow",
+          "title": "Agent Flow",
+          "icon": "media/agent-flow.svg"
         }
       ]
     },
     "views": {
-      "flowdeck": [
+      "agentFlow": [
         {
-          "id": "flowdeck.tasks",
+          "id": "agentFlow.tasks",
           "name": "Tasks",
           "type": "webview"
         }
@@ -54,75 +54,75 @@
     },
     "commands": [
       {
-        "command": "flowdeck.refresh",
-        "title": "Flow Deck: Refresh Tasks",
+        "command": "agentFlow.refresh",
+        "title": "Agent Flow: Refresh Tasks",
         "icon": "$(refresh)"
       },
       {
-        "command": "flowdeck.setup",
-        "title": "Flow Deck: Run Setup…"
+        "command": "agentFlow.setup",
+        "title": "Agent Flow: Run Setup…"
       },
       {
-        "command": "flowdeck.signIn",
-        "title": "Flow Deck: Sign in to Jira"
+        "command": "agentFlow.signIn",
+        "title": "Agent Flow: Sign in to Jira"
       },
       {
-        "command": "flowdeck.signOut",
-        "title": "Flow Deck: Sign out of Jira"
+        "command": "agentFlow.signOut",
+        "title": "Agent Flow: Sign out of Jira"
       },
       {
-        "command": "flowdeck.takeTask",
-        "title": "Flow Deck: Take Task…"
+        "command": "agentFlow.takeTask",
+        "title": "Agent Flow: Take Task…"
       },
       {
-        "command": "flowdeck.openDeck",
-        "title": "Flow Deck: Open the Deck (in-flight)",
+        "command": "agentFlow.openDeck",
+        "title": "Agent Flow: Open the Deck (in-flight)",
         "icon": "$(dashboard)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "flowdeck.openDeck",
-          "when": "view == flowdeck.tasks",
+          "command": "agentFlow.openDeck",
+          "when": "view == agentFlow.tasks",
           "group": "navigation@1"
         },
         {
-          "command": "flowdeck.refresh",
-          "when": "view == flowdeck.tasks",
+          "command": "agentFlow.refresh",
+          "when": "view == agentFlow.tasks",
           "group": "navigation@2"
         }
       ]
     },
     "configuration": {
-      "title": "Flow Deck",
+      "title": "Agent Flow",
       "properties": {
-        "flowdeck.jira.baseUrl": {
+        "agentFlow.jira.baseUrl": {
           "type": "string",
           "default": "",
           "description": "Base URL of your Atlassian Jira Cloud site (e.g. https://your-org.atlassian.net). Set during first-run setup."
         },
-        "flowdeck.jira.project": {
+        "agentFlow.jira.project": {
           "type": "string",
           "default": "",
           "description": "Jira project key to pull tasks from (e.g. ABC). Set during first-run setup."
         },
-        "flowdeck.reposRoot": {
+        "agentFlow.reposRoot": {
           "type": "string",
           "default": "~/projects",
           "description": "Directory where your service repo checkouts live."
         },
-        "flowdeck.workspaceDir": {
+        "agentFlow.workspaceDir": {
           "type": "string",
           "default": "~/projects",
           "description": "Where generated .code-workspace files are written."
         },
-        "flowdeck.githubOrg": {
+        "agentFlow.githubOrg": {
           "type": "string",
           "default": "",
           "description": "GitHub org used to clone repos that aren't checked out yet (reserved — not yet used)."
         },
-        "flowdeck.repoBlocklist": {
+        "agentFlow.repoBlocklist": {
           "type": "array",
           "items": {
             "type": "string"
@@ -130,7 +130,7 @@
           "default": [],
           "description": "Directory names under reposRoot to exclude from task-target discovery (infra, tooling, generated repos). Hidden dirs are always skipped."
         },
-        "flowdeck.defaultFilter": {
+        "agentFlow.defaultFilter": {
           "type": "string",
           "enum": [
             "unassigned",
@@ -147,14 +147,14 @@
             "Tasks not in the active sprint"
           ],
           "default": "mysprint",
-          "description": "Default task filter lens shown when Flow Deck opens."
+          "description": "Default task filter lens shown when Agent Flow opens."
         },
-        "flowdeck.seedAgent": {
+        "agentFlow.seedAgent": {
           "type": "boolean",
           "default": true,
           "description": "After opening a workspace, pre-fill the Claude Code panel with the task plan (you press Enter to start)."
         },
-        "flowdeck.workspaceMode": {
+        "agentFlow.workspaceMode": {
           "type": "string",
           "enum": [
             "auto",
@@ -171,7 +171,7 @@
           "default": "auto",
           "description": "How to open the repos a task touches."
         },
-        "flowdeck.openIn": {
+        "agentFlow.openIn": {
           "type": "string",
           "enum": [
             "ask",
@@ -188,12 +188,12 @@
           "default": "ask",
           "description": "Where to open a task you take: a new window, or reuse the current one."
         },
-        "flowdeck.taskMode": {
+        "agentFlow.taskMode": {
           "type": "string",
           "default": "ask",
-          "markdownDescription": "Which prompt mode to seed when taking a task: `ask` to choose each time, or the `id` of one of `#flowdeck.promptModes#`."
+          "markdownDescription": "Which prompt mode to seed when taking a task: `ask` to choose each time, or the `id` of one of `#agentFlow.promptModes#`."
         },
-        "flowdeck.promptModes": {
+        "agentFlow.promptModes": {
           "type": "array",
           "markdownDescription": "Prompt modes offered when taking a task. Each has an `id`, `label`, and `prompt` template. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`. Add your own (e.g. a `debug` mode).",
           "items": {
@@ -231,13 +231,13 @@
             }
           ]
         },
-        "flowdeck.explorePrompt": {
+        "agentFlow.explorePrompt": {
           "type": "string",
           "editPresentation": "multilineText",
           "markdownDescription": "Prompt seeded when you start an **Explore** session (no ticket). Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
           "default": "Exploration session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me understand how this works: map the relevant code paths, explain the flow, and flag anything surprising or worth a follow-up ticket. Don't change code unless I ask.{files}"
         },
-        "flowdeck.worktree": {
+        "agentFlow.worktree": {
           "type": "string",
           "enum": [
             "ask",
@@ -252,20 +252,20 @@
           "default": "ask",
           "description": "Whether to isolate the task in a git worktree."
         },
-        "flowdeck.worktreeRoot": {
+        "agentFlow.worktreeRoot": {
           "type": "string",
           "default": "~/projects/.worktrees",
           "description": "Where per-task git worktrees are created (one subdir per ticket, per repo)."
         },
-        "flowdeck.stampLabelOnWrite": {
+        "agentFlow.stampLabelOnWrite": {
           "type": "boolean",
           "default": true,
-          "description": "Add the provenance label (see flowdeck.provenanceLabel) whenever this extension updates a Jira item (e.g. a status change), to mark automated changes."
+          "description": "Add the provenance label (see agentFlow.provenanceLabel) whenever this extension updates a Jira item (e.g. a status change), to mark automated changes."
         },
-        "flowdeck.provenanceLabel": {
+        "agentFlow.provenanceLabel": {
           "type": "string",
           "default": "claude-code",
-          "description": "Label stamped on Jira items this extension updates when flowdeck.stampLabelOnWrite is enabled."
+          "description": "Label stamped on Jira items this extension updates when agentFlow.stampLabelOnWrite is enabled."
         }
       }
     }

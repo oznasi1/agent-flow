@@ -26,7 +26,7 @@ export const DEFAULT_EXPLORE_PROMPT =
   "Help me understand how this works: map the relevant code paths, explain the flow, and flag anything surprising " +
   "or worth a follow-up ticket. Don't change code unless I ask.{files}";
 
-export interface FlowDeckConfig {
+export interface AgentFlowConfig {
   baseUrl: string;
   project: string;
   reposRoot: string;
@@ -53,8 +53,8 @@ export function expandHome(p: string): string {
   return p;
 }
 
-export function getConfig(): FlowDeckConfig {
-  const c = vscode.workspace.getConfiguration("flowdeck");
+export function getConfig(): AgentFlowConfig {
+  const c = vscode.workspace.getConfiguration("agentFlow");
   return {
     baseUrl: (c.get<string>("jira.baseUrl") || "").replace(/\/+$/, ""),
     project: c.get<string>("jira.project") || "",
@@ -67,15 +67,15 @@ export function getConfig(): FlowDeckConfig {
     })(),
     defaultFilter: c.get<string>("defaultFilter") || "mysprint",
     seedAgent: c.get<boolean>("seedAgent") ?? true,
-    workspaceMode: (c.get<FlowDeckConfig["workspaceMode"]>("workspaceMode")) || "auto",
-    openIn: (c.get<FlowDeckConfig["openIn"]>("openIn")) || "ask",
+    workspaceMode: (c.get<AgentFlowConfig["workspaceMode"]>("workspaceMode")) || "auto",
+    openIn: (c.get<AgentFlowConfig["openIn"]>("openIn")) || "ask",
     taskMode: c.get<string>("taskMode") || "ask",
     promptModes: (() => {
       const m = c.get<PromptMode[]>("promptModes");
       return Array.isArray(m) && m.length ? m.filter((x) => x && x.id && x.label && x.prompt) : DEFAULT_PROMPT_MODES;
     })(),
     explorePrompt: c.get<string>("explorePrompt") || DEFAULT_EXPLORE_PROMPT,
-    worktree: (c.get<FlowDeckConfig["worktree"]>("worktree")) || "ask",
+    worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
     worktreeRoot: expandHome(c.get<string>("worktreeRoot") || "~/projects/.worktrees"),
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,
     provenanceLabel: c.get<string>("provenanceLabel") || "claude-code",

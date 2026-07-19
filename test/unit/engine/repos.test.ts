@@ -12,7 +12,7 @@ function mkdir(...parts: string[]) {
 }
 
 beforeEach(() => {
-  root = fs.mkdtempSync(path.join(os.tmpdir(), "flowdeck-repos-"));
+  root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-repos-"));
 });
 
 afterEach(() => {

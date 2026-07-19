@@ -75,7 +75,7 @@ describe("openWorkspace — multiroot", () => {
     expect(String(brief![1])).toContain("ASM-1");
 
     // a plan file is written for the seed handshake, carrying the rendered prompt
-    const planWrite = writeArg((p) => p.includes(".flowdeck") && p.includes("plans") && p.endsWith(".json"));
+    const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
     expect(planWrite).toBeTruthy();
     const plan = JSON.parse(String(planWrite![1]));
     expect(plan.seedAgent).toBe(true);
@@ -95,12 +95,12 @@ describe("openWorkspace — multiroot", () => {
 
   it("does not write a plan file when seedAgent is off", async () => {
     await openWorkspace(baseReq({ seedAgent: false }));
-    expect(writeArg((p) => p.includes(".flowdeck") && p.includes("plans") && p.endsWith(".json"))).toBeUndefined();
+    expect(writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"))).toBeUndefined();
   });
 
   it("always writes a durable run record for the Deck (even with seedAgent off)", async () => {
     await openWorkspace(baseReq({ seedAgent: false }));
-    const runWrite = writeArg((p) => p.includes(".flowdeck") && p.includes("runs") && p.endsWith(".json"));
+    const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
     expect(runWrite).toBeTruthy();
     const run = JSON.parse(String(runWrite![1]));
     expect(run.key).toBe("ASM-1");
@@ -114,7 +114,7 @@ describe("openWorkspace — per-window", () => {
     const result = await openWorkspace(baseReq({ mode: "per-window" }));
     expect(result.workspaceFile).toBeUndefined();
     expect(result.opened).toEqual(["/repos/account-service", "/repos/centaur"]);
-    const planWrite = writeArg((p) => p.includes(".flowdeck") && p.includes("plans") && p.endsWith(".json"));
+    const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
     const plan = JSON.parse(String(planWrite![1]));
     expect(plan.matches.map((m: { matchPath: string }) => m.matchPath)).toEqual([
       "/repos/account-service",
@@ -176,7 +176,7 @@ describe("openWorkspace — relevant files", () => {
       }),
     );
     expect(result.briefs[0].files).toBe(1);
-    const planWrite = writeArg((p) => p.includes(".flowdeck") && p.includes("plans") && p.endsWith(".json"));
+    const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
     const plan = JSON.parse(String(planWrite![1]));
     expect(plan.matches[0].prompt).toContain("Relevant files:");
     expect(plan.matches[0].prompt).toContain("export.py");
@@ -471,7 +471,7 @@ describe("openWorkspace — existing workspace", () => {
       String(p).endsWith(".code-workspace") ? '{ "folders": [] }' : "",
     );
     await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/team.code-workspace" }));
-    const planCall = writeArg((p) => p.includes("/.flowdeck/plans/"));
+    const planCall = writeArg((p) => p.includes("/.agentflow/plans/"));
     expect(planCall).toBeDefined();
     expect(String(planCall![1])).toContain('"matchPath": "/ws/team.code-workspace"');
   });

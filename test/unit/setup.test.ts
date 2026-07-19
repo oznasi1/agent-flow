@@ -12,9 +12,9 @@ function inputs(...vals: (string | undefined)[]): void {
   for (const v of vals) m.mockResolvedValueOnce(v);
 }
 
-/** Read a flowdeck setting back out of the mock config store. */
+/** Read an agentFlow setting back out of the mock config store. */
 function readCfg(key: string): unknown {
-  return vscode.workspace.getConfiguration("flowdeck").get(key);
+  return vscode.workspace.getConfiguration("agentFlow").get(key);
 }
 
 type Validator = (v: string) => string | undefined;

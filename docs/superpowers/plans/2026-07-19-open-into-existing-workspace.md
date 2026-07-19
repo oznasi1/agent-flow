@@ -22,8 +22,8 @@
 
 ## File Structure
 
-- `package.json` — add `jsonc-parser` dependency; extend the `flowdeck.openIn` enum.
-- `src/config.ts` — widen `FlowDeckConfig["openIn"]` with `"pick-existing"`.
+- `package.json` — add `jsonc-parser` dependency; extend the `agentFlow.openIn` enum.
+- `src/config.ts` — widen `AgentFlowConfig["openIn"]` with `"pick-existing"`.
 - `src/engine/workspace.ts` — add `listWorkspaceFiles`, `mergeReposIntoWorkspace`, `watchPlansAndSeed`; extend `OpenRequest`/`OpenResult`; add the `existingWorkspaceFile` branch to `openWorkspace`.
 - `src/extension.ts` — register the plan-dir watcher.
 - `src/tasksView.ts` — add the third open target + `pickExistingWorkspace`; thread `existingWorkspaceFile` into `openWorkspace`; toast merge outcome.
@@ -348,7 +348,7 @@ describe("openWorkspace — existing workspace", () => {
       String(p).endsWith(".code-workspace") ? '{ "folders": [] }' : "",
     );
     await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/team.code-workspace" }));
-    const planCall = writeArg((p) => p.includes("/.flowdeck/plans/"));
+    const planCall = writeArg((p) => p.includes("/.agentflow/plans/"));
     expect(planCall).toBeDefined();
     expect(String(planCall![1])).toContain('"matchPath": "/ws/team.code-workspace"');
   });
@@ -588,13 +588,13 @@ git commit -m "feat: watch plan dir so already-open windows seed live"
 ## Task 5: Config — `pick-existing` open mode
 
 **Files:**
-- Modify: `src/config.ts` (`FlowDeckConfig["openIn"]` union)
-- Modify: `package.json` (`flowdeck.openIn` enum + enumDescriptions)
+- Modify: `src/config.ts` (`AgentFlowConfig["openIn"]` union)
+- Modify: `package.json` (`agentFlow.openIn` enum + enumDescriptions)
 - Modify: `README.md` (settings note)
 - Test: `test/unit/config.test.ts`
 
 **Interfaces:**
-- Produces: `FlowDeckConfig["openIn"]` is `"ask" | "new-window" | "this-window" | "pick-existing"`.
+- Produces: `AgentFlowConfig["openIn"]` is `"ask" | "new-window" | "this-window" | "pick-existing"`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -602,7 +602,7 @@ Add to `test/unit/config.test.ts` (follow its existing `setConfig`/`getConfig` p
 
 ```ts
 it("passes through openIn: pick-existing", () => {
-  setConfig({ "flowdeck.openIn": "pick-existing" });
+  setConfig({ "agentFlow.openIn": "pick-existing" });
   expect(getConfig().openIn).toBe("pick-existing");
 });
 ```
@@ -628,7 +628,7 @@ to:
 
 - [ ] **Step 4: Update the package.json schema**
 
-In `package.json`, find `flowdeck.openIn` and change its `enum` + `enumDescriptions` to include the new value:
+In `package.json`, find `agentFlow.openIn` and change its `enum` + `enumDescriptions` to include the new value:
 
 ```json
 "enum": ["ask", "new-window", "this-window", "pick-existing"],
@@ -642,7 +642,7 @@ In `package.json`, find `flowdeck.openIn` and change its `enum` + `enumDescripti
 
 - [ ] **Step 5: Update the README**
 
-In `README.md`, in the paragraph after the settings table that lists `flowdeck.openIn` values, add `pick-existing` and mention the "Existing workspace" flow (repos are merged into the picked workspace non-destructively).
+In `README.md`, in the paragraph after the settings table that lists `agentFlow.openIn` values, add `pick-existing` and mention the "Existing workspace" flow (repos are merged into the picked workspace non-destructively).
 
 - [ ] **Step 6: Run the config test + typecheck**
 
@@ -769,7 +769,7 @@ Replace `chooseOpenTarget` with:
 
 ```ts
   /** Where to open a taken task — new window, this window, or an existing workspace. */
-  private async chooseOpenTarget(cfg: FlowDeckConfig): Promise<OpenTarget | undefined> {
+  private async chooseOpenTarget(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
     if (cfg.openIn === "new-window") return { kind: "new" };
     if (cfg.openIn === "this-window") return { kind: "current" };
     if (cfg.openIn === "pick-existing") return this.pickExistingWorkspace(cfg);
@@ -787,7 +787,7 @@ Replace `chooseOpenTarget` with:
   }
 
   /** Pick a .code-workspace from workspaceDir (or Browse… for one elsewhere). */
-  private async pickExistingWorkspace(cfg: FlowDeckConfig): Promise<OpenTarget | undefined> {
+  private async pickExistingWorkspace(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
     const BROWSE = "__browse__";
     const files = listWorkspaceFiles(cfg.workspaceDir);
     const items = [
@@ -938,7 +938,7 @@ git commit -m "chore: verify open-into-existing-workspace end to end"
 - Add missing repos non-destructively (jsonc-parser, comments/settings preserved, idempotent, safety valve) — Task 2.
 - Multiroot semantics + plan matchPath on the picked file + Run record — Task 3.
 - Plan-dir watcher for already-open windows, single-seed guard, disposed on deactivate — Task 4.
-- `flowdeck.openIn: pick-existing` sticky default + schema + README — Task 5.
+- `agentFlow.openIn: pick-existing` sticky default + schema + README — Task 5.
 - `OpenTarget` union, `chooseOpenTarget`, merge-outcome toast — Task 6.
 - Tests + coverage + build + manual smoke — throughout + Task 7.
 

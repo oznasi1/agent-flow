@@ -184,7 +184,7 @@ export function App(): JSX.Element {
   if (authed === false) {
     return (
       <div className="gate">
-        <div>Connect Flow Deck to your Jira to see your task pool.</div>
+        <div>Connect Agent Flow to your Jira to see your task pool.</div>
         <button className="btn" onClick={() => send({ type: "signIn" })}>Sign in to Jira</button>
       </div>
     );

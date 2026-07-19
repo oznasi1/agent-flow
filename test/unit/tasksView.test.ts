@@ -149,17 +149,17 @@ describe("fetch", () => {
       { key: "B", summary: "", labels: [], components: [] },
       { key: "C", summary: "", labels: [], components: [] },
     ]);
-    const { send, posted, workspaceState } = setup({ workspaceState: { "flowdeck.sprintOrder": ["B", "A"] } });
+    const { send, posted, workspaceState } = setup({ workspaceState: { "agentFlow.sprintOrder": ["B", "A"] } });
     await send({ type: "fetch", filter: "mysprint", size: "any" });
     // pruneOrder(["B","A"], present) keeps ["B","A"]; persisted back
-    expect(workspaceState.update).toHaveBeenCalledWith("flowdeck.sprintOrder", ["B", "A"]);
+    expect(workspaceState.update).toHaveBeenCalledWith("agentFlow.sprintOrder", ["B", "A"]);
     const tasksMsg = posted().find((m) => m.type === "tasks") as { tasks: { key: string }[] };
     expect(tasksMsg.tasks.map((t) => t.key)).toEqual(["B", "A", "C"]);
   });
 
   it("sorts but does not prune under a size lens", async () => {
     clientStub.fetchTasks.mockResolvedValue([{ key: "A", summary: "", labels: [], components: [] }]);
-    const { send, workspaceState } = setup({ workspaceState: { "flowdeck.sprintOrder": ["A"] } });
+    const { send, workspaceState } = setup({ workspaceState: { "agentFlow.sprintOrder": ["A"] } });
     await send({ type: "fetch", filter: "mysprint", size: "s" });
     expect(workspaceState.update).not.toHaveBeenCalled();
   });
@@ -177,15 +177,15 @@ describe("reorder", () => {
     const { send, workspaceState } = setup();
     await send({ type: "fetch", filter: "mysprint", size: "any" }); // lastFilter = mysprint
     await send({ type: "reorder", order: ["C", "A", "B"] });
-    expect(workspaceState.update).toHaveBeenLastCalledWith("flowdeck.sprintOrder", ["C", "A", "B"]);
+    expect(workspaceState.update).toHaveBeenLastCalledWith("agentFlow.sprintOrder", ["C", "A", "B"]);
   });
 });
 
 describe("resetOrder", () => {
   it("clears the saved order and refetches My sprint", async () => {
-    const { send, workspaceState } = setup({ workspaceState: { "flowdeck.sprintOrder": ["A", "B"] } });
+    const { send, workspaceState } = setup({ workspaceState: { "agentFlow.sprintOrder": ["A", "B"] } });
     await send({ type: "resetOrder", size: "any" });
-    expect(workspaceState.update).toHaveBeenCalledWith("flowdeck.sprintOrder", []);
+    expect(workspaceState.update).toHaveBeenCalledWith("agentFlow.sprintOrder", []);
     expect(clientStub.fetchTasks).toHaveBeenCalledWith("mysprint", "any");
   });
 });
@@ -295,7 +295,7 @@ describe("passthrough messages", () => {
   it("routes signIn to the command", async () => {
     const { send } = setup();
     await send({ type: "signIn" });
-    expect(commands.executeCommand).toHaveBeenCalledWith("flowdeck.signIn");
+    expect(commands.executeCommand).toHaveBeenCalledWith("agentFlow.signIn");
   });
 });
 

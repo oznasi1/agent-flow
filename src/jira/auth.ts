@@ -13,8 +13,8 @@ export interface JiraAuth {
   signOut(): Promise<void>;
 }
 
-const EMAIL_KEY = "flowdeck.jira.email";
-const TOKEN_KEY = "flowdeck.jira.token";
+const EMAIL_KEY = "agentFlow.jira.email";
+const TOKEN_KEY = "agentFlow.jira.token";
 
 /**
  * API-token auth for Atlassian Cloud (Basic auth: base64(email:apiToken)).

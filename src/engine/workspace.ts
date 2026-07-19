@@ -12,7 +12,7 @@ import { gitState } from "./git";
 
 const BRIEF_DIR = ".pick-task";
 const BRIEF_FILE = "TASK.md";
-const PLAN_DIR = path.join(os.homedir(), ".flowdeck", "plans");
+const PLAN_DIR = path.join(os.homedir(), ".agentflow", "plans");
 const PLAN_TTL_MS = 15 * 60 * 1000; // seed handshake valid for 15 min
 
 // The Claude Code extension command that opens the panel with a pre-filled prompt.
@@ -110,7 +110,7 @@ function briefMarkdown(
 
 ${jiraLine}- **Repos in scope:** ${names}
 - **This repo:** \`${thisRepo}\`
-- _Seeded by Flow Deck at ${stamp}. This file is git-excluded — delete it any time._
+- _Seeded by Agent Flow at ${stamp}. This file is git-excluded — delete it any time._
 
 ---
 
@@ -439,7 +439,7 @@ async function seedClaudeCode(prompt: string, key: string, log: (m: string) => v
   // 3 — clipboard fallback
   await vscode.env.clipboard.writeText(prompt);
   vscode.window.showInformationMessage(
-    `Flow Deck: opened workspace for ${key}. Claude Code prompt copied — paste it into the panel to start.`,
+    `Agent Flow: opened workspace for ${key}. Claude Code prompt copied — paste it into the panel to start.`,
   );
   log(`seed ${key}: fell back to clipboard`);
 }

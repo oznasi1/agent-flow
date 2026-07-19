@@ -7,7 +7,7 @@
 
 When taking a task, the user can currently open it in a **new window** or the
 **current window**. This adds a third target: **pick an existing
-`.code-workspace`**. Flow Deck writes the task briefs into the inferred repos as
+`.code-workspace`**. Agent Flow writes the task briefs into the inferred repos as
 it does today, **adds any of those repos that are missing** to the picked
 workspace (non-destructively), opens it, and seeds the Claude Code agent — even
 when that workspace is **already open** in a live window.
@@ -16,9 +16,9 @@ when that workspace is **already open** in a live window.
 
 | Question | Decision |
 |----------|----------|
-| What does "existing workspace" list? | Existing `*.code-workspace` files under `flowdeck.workspaceDir`, newest first, plus a **Browse…** escape hatch (native dialog) for one that lives elsewhere. Not live OS windows, not a "recents" list. |
+| What does "existing workspace" list? | Existing `*.code-workspace` files under `agentFlow.workspaceDir`, newest first, plus a **Browse…** escape hatch (native dialog) for one that lives elsewhere. Not live OS windows, not a "recents" list. |
 | Inferred repos not in the picked workspace? | **Add the missing ones** as folders, non-destructively (preserve comments, ordering, `settings`). Only degrade to "open as-is" if the file can't be parsed safely. |
-| Seed a workspace that is already open? | **Yes.** Add a watcher on the plan dir so any already-open Flow Deck window seeds itself as soon as a matching task is taken — no reload required. |
+| Seed a workspace that is already open? | **Yes.** Add a watcher on the plan dir so any already-open Agent Flow window seeds itself as soon as a matching task is taken — no reload required. |
 | Workspace model for this path? | Always **multi-root** (a `.code-workspace` is inherently multi-root); the per-window question is skipped. |
 
 ## Approach rationale
@@ -44,7 +44,7 @@ Extends [`chooseOpenTarget()`](../../../src/tasksView.ts) with a third item,
 **`$(folder-library) Existing workspace…`**. Selecting it:
 
 1. Shows a second quick-pick listing every `*.code-workspace` file under
-   `flowdeck.workspaceDir`, sorted by mtime (newest first), each labelled with its
+   `agentFlow.workspaceDir`, sorted by mtime (newest first), each labelled with its
    filename and folder count, plus **`$(folder-opened) Browse…`** (native open
    dialog filtered to `.code-workspace`). Cancelling either pick aborts the take.
 2. Writes briefs into the inferred repos (unchanged from today).
@@ -74,9 +74,9 @@ New pure helper `mergeReposIntoWorkspace(file, repos)`:
 ## Live seeding: plan-dir watcher
 
 - In [`activate()`](../../../src/extension.ts), after the initial
-  `maybeSeedAgent`, `fs.watch(PLAN_DIR)` (`~/.flowdeck/plans`, created if absent).
+  `maybeSeedAgent`, `fs.watch(PLAN_DIR)` (`~/.agentflow/plans`, created if absent).
 - On change, debounced ~300 ms, call `maybeSeedAgent(context, log)` again.
-- Every open Flow Deck window runs this; only the window whose identity matches
+- Every open Agent Flow window runs this; only the window whose identity matches
   the new plan seeds. The existing `seeded:<key>:<identity>` `globalState` guard
   prevents double-seeding.
 - Registered as a disposable; closed in `deactivate()`.
@@ -84,7 +84,7 @@ New pure helper `mergeReposIntoWorkspace(file, repos)`:
 
 ## Surfaces (config, types, functions)
 
-- **`flowdeck.openIn`** enum gains `"pick-existing"` (with an `enumDescription`) so
+- **`agentFlow.openIn`** enum gains `"pick-existing"` (with an `enumDescription`) so
   it can be a sticky default that jumps straight to the workspace list.
 - **`chooseOpenTarget`** returns a union:
   `{ kind: "new" } | { kind: "current" } | { kind: "existing"; file: string }`.

@@ -45,7 +45,7 @@ describe("DeckPanel", () => {
   it("creates a panel and wires its html on show", () => {
     show();
     expect(window.createWebviewPanel).toHaveBeenCalledTimes(1);
-    expect(window.createWebviewPanel).toHaveBeenCalledWith("flowdeck.deck", expect.any(String), ViewColumn.Active, expect.any(Object));
+    expect(window.createWebviewPanel).toHaveBeenCalledWith("agentFlow.deck", expect.any(String), ViewColumn.Active, expect.any(Object));
     expect(lastPanel().webview.html).toContain("<div id=\"root\">");
   });
 

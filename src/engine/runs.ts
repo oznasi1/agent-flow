@@ -4,9 +4,9 @@ import * as os from "os";
 import { Run } from "../types";
 
 // The Deck's durable source of truth: one file per launched task (no TTL — unlike
-// the transient ~/.flowdeck/plans handshake that the agent-seed consumes).
+// the transient ~/.agentflow/plans handshake that the agent-seed consumes).
 export function defaultRunsDir(): string {
-  return path.join(os.homedir(), ".flowdeck", "runs");
+  return path.join(os.homedir(), ".agentflow", "runs");
 }
 
 function fileFor(dir: string, key: string): string {

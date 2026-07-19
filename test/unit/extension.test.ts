@@ -12,7 +12,7 @@ const providerStub = { refresh: vi.fn(async () => undefined), takeTask: vi.fn(as
 
 vi.mock("../../src/jira/auth", () => ({ ApiTokenAuth: vi.fn(() => authStub) }));
 vi.mock("../../src/tasksView", () => ({
-  TasksViewProvider: Object.assign(vi.fn(() => providerStub), { viewType: "flowdeck.tasks" }),
+  TasksViewProvider: Object.assign(vi.fn(() => providerStub), { viewType: "agentFlow.tasks" }),
 }));
 vi.mock("../../src/engine/workspace", () => ({
   maybeSeedAgent: vi.fn(async () => undefined),
@@ -41,15 +41,15 @@ describe("activate", () => {
     const { context } = fakeContext();
     activate(context);
 
-    expect(window.registerWebviewViewProvider).toHaveBeenCalledWith("flowdeck.tasks", providerStub);
+    expect(window.registerWebviewViewProvider).toHaveBeenCalledWith("agentFlow.tasks", providerStub);
     const ids = vi.mocked(commands.registerCommand).mock.calls.map((c) => c[0]);
     expect(ids).toEqual(
       expect.arrayContaining([
-        "flowdeck.refresh",
-        "flowdeck.signIn",
-        "flowdeck.signOut",
-        "flowdeck.takeTask",
-        "flowdeck.setup",
+        "agentFlow.refresh",
+        "agentFlow.signIn",
+        "agentFlow.signOut",
+        "agentFlow.takeTask",
+        "agentFlow.setup",
       ]),
     );
     expect(maybeSeedAgent).toHaveBeenCalledWith(context, expect.any(Function));
@@ -67,21 +67,21 @@ describe("activate", () => {
   it("setup command runs the setup wizard", async () => {
     const { context } = fakeContext();
     activate(context);
-    await cmd("flowdeck.setup")!();
+    await cmd("agentFlow.setup")!();
     expect(runSetup).toHaveBeenCalledWith(context, expect.anything(), expect.any(Function), expect.any(Function));
   });
 
   it("refresh command triggers a provider refresh", async () => {
     const { context } = fakeContext();
     activate(context);
-    await cmd("flowdeck.refresh")!();
+    await cmd("agentFlow.refresh")!();
     expect(providerStub.refresh).toHaveBeenCalled();
   });
 
   it("signIn command refreshes and notifies on success", async () => {
     const { context } = fakeContext();
     activate(context);
-    const ok = await cmd("flowdeck.signIn")!();
+    const ok = await cmd("agentFlow.signIn")!();
     expect(ok).toBe(true);
     expect(authStub.signIn).toHaveBeenCalled();
     expect(window.showInformationMessage).toHaveBeenCalled();
@@ -92,7 +92,7 @@ describe("activate", () => {
     authStub.signIn.mockResolvedValue(false);
     const { context } = fakeContext();
     activate(context);
-    const ok = await cmd("flowdeck.signIn")!();
+    const ok = await cmd("agentFlow.signIn")!();
     expect(ok).toBe(false);
     expect(providerStub.refresh).not.toHaveBeenCalled();
     expect(window.showInformationMessage).not.toHaveBeenCalled();
@@ -101,7 +101,7 @@ describe("activate", () => {
   it("signOut command signs out and notifies", async () => {
     const { context } = fakeContext();
     activate(context);
-    await cmd("flowdeck.signOut")!();
+    await cmd("agentFlow.signOut")!();
     expect(authStub.signOut).toHaveBeenCalled();
     expect(window.showInformationMessage).toHaveBeenCalled();
   });
@@ -110,7 +110,7 @@ describe("activate", () => {
     vi.mocked(window.showInputBox).mockResolvedValue("  asm-1 ");
     const { context } = fakeContext();
     activate(context);
-    await cmd("flowdeck.takeTask")!();
+    await cmd("agentFlow.takeTask")!();
     expect(providerStub.takeTask).toHaveBeenCalledWith("ASM-1");
   });
 
@@ -118,7 +118,7 @@ describe("activate", () => {
     vi.mocked(window.showInputBox).mockResolvedValue(undefined);
     const { context } = fakeContext();
     activate(context);
-    await cmd("flowdeck.takeTask")!();
+    await cmd("agentFlow.takeTask")!();
     expect(providerStub.takeTask).not.toHaveBeenCalled();
   });
 });

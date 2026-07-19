@@ -44,7 +44,7 @@ export type AgentState = "working" | "needs-you" | "idle" | "unknown";
 /** The board column a run lands in. */
 export type DeckColumn = "working" | "needs" | "review" | "done";
 
-/** A durable record of a task launched via Flow Deck — the Deck's source of truth.
+/** A durable record of a task launched via Agent Flow — the Deck's source of truth.
  * Written at take-time; enriched with live status on the fly. */
 export interface Run {
   key: string;
