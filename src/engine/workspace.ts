@@ -390,12 +390,21 @@ export function watchPlansAndSeed(
   context: vscode.ExtensionContext,
   log: (m: string) => void,
 ): vscode.Disposable {
-  fs.mkdirSync(PLAN_DIR, { recursive: true });
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const watcher = fs.watch(PLAN_DIR, () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => void maybeSeedAgent(context, log), 300);
-  });
+  let watcher: fs.FSWatcher;
+  try {
+    fs.mkdirSync(PLAN_DIR, { recursive: true });
+    watcher = fs.watch(PLAN_DIR, () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void maybeSeedAgent(context, log), 300);
+    });
+  } catch (e) {
+    // Live seeding is a convenience; a filesystem/permission problem (e.g. ~/.agentflow
+    // not writable, an OS watch limit) must not break activation — this runs synchronously
+    // from activate(). Degrade to no live watching instead of throwing.
+    log(`live seeding disabled — couldn't watch ${PLAN_DIR}: ${e instanceof Error ? e.message : String(e)}`);
+    return { dispose: () => { if (timer) clearTimeout(timer); } };
+  }
   log(`watching plan dir ${PLAN_DIR} for live seeding`);
   return {
     dispose: () => {

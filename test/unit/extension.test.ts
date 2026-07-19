@@ -58,6 +58,19 @@ describe("activate", () => {
     expect(context.subscriptions.length).toBeGreaterThan(0);
   });
 
+  it("survives a live-seeding failure — activate does not throw and commands stay registered", () => {
+    // watchPlansAndSeed touches the filesystem (mkdir/watch under ~/.agentflow). A throw
+    // there must NOT bubble out of activate(), or VS Code disposes every command + the
+    // view provider → "command 'agentFlow.setup' not found" and a dead panel.
+    vi.mocked(watchPlansAndSeed).mockImplementationOnce(() => {
+      throw new Error("EACCES: cannot watch ~/.agentflow/plans");
+    });
+    const { context } = fakeContext();
+    expect(() => activate(context)).not.toThrow();
+    const ids = vi.mocked(commands.registerCommand).mock.calls.map((c) => c[0]);
+    expect(ids).toEqual(expect.arrayContaining(["agentFlow.setup", "agentFlow.refresh"]));
+  });
+
   it("offers first-run setup on activation", () => {
     const { context } = fakeContext();
     activate(context);

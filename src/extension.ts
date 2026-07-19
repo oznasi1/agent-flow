@@ -50,13 +50,20 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
-  // First-run: offer guided setup if the extension has never been configured.
-  void maybeRunSetup(context, auth, log, () => provider.refresh());
-
-  // If this window was opened by a recent "take", pre-seed its Claude Code agent…
-  void maybeSeedAgent(context, log);
-  // …and keep watching so an already-open window seeds when a task is taken later.
-  context.subscriptions.push(watchPlansAndSeed(context, log));
+  // Best-effort niceties, all of them optional. A failure here must NEVER propagate out
+  // of activate() — an uncaught throw makes VS Code dispose every registration above
+  // (commands + the view provider), which surfaces as "command not found" and a dead
+  // Tasks panel. Guard them so the extension always comes up.
+  try {
+    // First-run: offer guided setup if the extension has never been configured.
+    void maybeRunSetup(context, auth, log, () => provider.refresh());
+    // If this window was opened by a recent "take", pre-seed its Claude Code agent…
+    void maybeSeedAgent(context, log);
+    // …and keep watching so an already-open window seeds when a task is taken later.
+    context.subscriptions.push(watchPlansAndSeed(context, log));
+  } catch (e) {
+    log(`activation: optional step failed (extension still active): ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 export function deactivate(): void {
