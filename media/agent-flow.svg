@@ -1,6 +1,1 @@
-<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <rect x="3" y="4" width="18" height="4" rx="1" stroke="currentColor" stroke-width="1.6"/>
-  <rect x="3" y="11" width="11" height="4" rx="1" stroke="currentColor" stroke-width="1.6"/>
-  <rect x="3" y="18" width="14" height="3" rx="1" stroke="currentColor" stroke-width="1.6"/>
-  <circle cx="19" cy="13" r="2.5" stroke="currentColor" stroke-width="1.6"/>
-</svg>
+<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><circle cx="12.00" cy="4.30" r="1.75"/><circle cx="17.44" cy="6.56" r="1.75"/><circle cx="19.70" cy="12.00" r="1.75"/><circle cx="17.44" cy="17.44" r="1.75"/><circle cx="12.00" cy="19.70" r="1.75"/><circle cx="6.56" cy="17.44" r="1.75"/><circle cx="4.30" cy="12.00" r="1.75"/><circle cx="6.56" cy="6.56" r="1.75"/><circle cx="14.95" cy="4.89" r="1.05"/><circle cx="19.11" cy="9.05" r="1.05"/><circle cx="19.11" cy="14.95" r="1.05"/><circle cx="14.95" cy="19.11" r="1.05"/><circle cx="9.05" cy="19.11" r="1.05"/><circle cx="4.89" cy="14.95" r="1.05"/><circle cx="4.89" cy="9.05" r="1.05"/><circle cx="9.05" cy="4.89" r="1.05"/></svg>
