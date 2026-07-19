@@ -74,6 +74,7 @@ export const window = {
   registerWebviewViewProvider: vi.fn((_id: string, _provider: unknown) => ({ dispose: vi.fn() })),
   createWebviewPanel: vi.fn((_id: string, _title: string, _col: unknown, _opts?: unknown) => makeWebviewPanel()),
   showTextDocument: vi.fn(async (_doc: unknown, _opts?: unknown): Promise<any> => undefined),
+  showOpenDialog: vi.fn(async (_opts?: unknown): Promise<any[] | undefined> => undefined),
 };
 
 export const ViewColumn = { Active: -1, Beside: -2, One: 1 } as const;
@@ -123,6 +124,7 @@ export function resetVscodeMocks(): void {
   window.registerWebviewViewProvider.mockReset().mockImplementation(() => ({ dispose: vi.fn() }));
   window.createWebviewPanel.mockReset().mockImplementation(() => makeWebviewPanel());
   window.showTextDocument.mockReset().mockResolvedValue(undefined);
+  window.showOpenDialog.mockReset().mockResolvedValue(undefined);
 
   commands.executeCommand.mockReset().mockResolvedValue(undefined);
   commands.getCommands.mockReset().mockResolvedValue([]);

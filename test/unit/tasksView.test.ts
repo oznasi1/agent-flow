@@ -5,7 +5,7 @@ import { fakeAuth, fakeContext, mkRepos } from "../_helpers/factories";
 // ── sibling modules the controller depends on ──────────────────────────────
 vi.mock("../../src/config", () => ({ getConfig: vi.fn() }));
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn() }));
-vi.mock("../../src/engine/workspace", () => ({ openWorkspace: vi.fn() }));
+vi.mock("../../src/engine/workspace", () => ({ openWorkspace: vi.fn(), listWorkspaceFiles: vi.fn(() => []) }));
 vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn((s: unknown) => s) }));
 vi.mock("../../src/jira/client", () => {
   class JiraAuthError extends Error {}
@@ -14,7 +14,7 @@ vi.mock("../../src/jira/client", () => {
 
 import { getConfig } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
-import { openWorkspace } from "../../src/engine/workspace";
+import { openWorkspace, listWorkspaceFiles } from "../../src/engine/workspace";
 import { createWorktrees } from "../../src/engine/worktree";
 import { JiraClient, JiraAuthError } from "../../src/jira/client";
 import { TasksViewProvider } from "../../src/tasksView";
@@ -406,5 +406,149 @@ describe("takeTask", () => {
     await provider.takeTask("ASM-1", ["account-service", "centaur"]);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
     expect(toast.message).toContain(".code-workspace");
+  });
+
+  describe("existing workspace open target", () => {
+    it("picks 'New window' from the 3-way picker without touching the workspace picker", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce({ val: "new" } as never);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", ["account-service"]);
+
+      expect(listWorkspaceFiles).not.toHaveBeenCalled();
+      expect(openWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({ openIn: "new", existingWorkspaceFile: undefined }),
+      );
+    });
+
+    it("aborts the take when the 3-way open-target picker is cancelled", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", ["account-service"]);
+
+      expect(openWorkspace).not.toHaveBeenCalled();
+    });
+
+    it("opens into a picked existing workspace", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+      vi.mocked(listWorkspaceFiles).mockReturnValue([
+        { file: "/ws/team.code-workspace", folders: 2, mtimeMs: 1 },
+      ]);
+      // 1st quick-pick → the 3-way open-target picker, choosing "Existing workspace…".
+      // 2nd quick-pick → the workspace-file picker, choosing the listed workspace.
+      vi.mocked(window.showQuickPick)
+        .mockResolvedValueOnce({ val: "existing" } as never)
+        .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", ["account-service"]);
+
+      expect(listWorkspaceFiles).toHaveBeenCalledWith("/ws");
+      expect(openWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          existingWorkspaceFile: "/ws/team.code-workspace",
+          mode: "multiroot",
+          openIn: "new",
+        }),
+      );
+    });
+
+    it("falls back to Browse… when chosen, using showOpenDialog", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "pick-existing" }); // skips the 3-way pick
+      vi.mocked(listWorkspaceFiles).mockReturnValue([]);
+      // Only one quick-pick fires: the workspace-file picker (Browse… item).
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "__browse__" } as never);
+      vi.mocked(window.showOpenDialog).mockResolvedValueOnce([
+        { fsPath: "/elsewhere/x.code-workspace" },
+      ] as never);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", ["account-service"]);
+
+      expect(openWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({ existingWorkspaceFile: "/elsewhere/x.code-workspace" }),
+      );
+    });
+
+    it("aborts the take when the workspace picker is cancelled", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "pick-existing" });
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", ["account-service"]);
+
+      expect(openWorkspace).not.toHaveBeenCalled();
+    });
+
+    it("aborts the take when Browse… is chosen but the file dialog is cancelled", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "pick-existing" });
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "__browse__" } as never);
+      vi.mocked(window.showOpenDialog).mockResolvedValueOnce(undefined);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", ["account-service"]);
+
+      expect(openWorkspace).not.toHaveBeenCalled();
+    });
+
+    it("reuses the current window when the target is 'current' even for an existing workspace", async () => {
+      // "current" only reachable via the 3-way pick (openIn config has no "current+existing" combo);
+      // this covers the openIn:"current" vs "new" branch in isolation from the existing-workspace flag.
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", ["account-service"]);
+
+      expect(openWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({ openIn: "current", existingWorkspaceFile: undefined }),
+      );
+    });
+
+    it("toasts an info message (not success) when the merge into the existing workspace fails to parse", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "pick-existing" });
+      vi.mocked(listWorkspaceFiles).mockReturnValue([
+        { file: "/ws/team.code-workspace", folders: 2, mtimeMs: 1 },
+      ]);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+      vi.mocked(openWorkspace).mockResolvedValue({
+        mode: "multiroot",
+        workspaceFile: "/ws/team.code-workspace",
+        briefs: [],
+        opened: ["/ws/team.code-workspace"],
+        mergeFailed: true,
+      });
+
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1", ["account-service"]);
+
+      const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
+      expect(toast.level).toBe("info");
+      expect(toast.message).toMatch(/couldn't be parsed/i);
+    });
+
+    it("names the merged repos in the success toast when the merge succeeds", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "pick-existing" });
+      vi.mocked(listWorkspaceFiles).mockReturnValue([
+        { file: "/ws/team.code-workspace", folders: 2, mtimeMs: 1 },
+      ]);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+      vi.mocked(openWorkspace).mockResolvedValue({
+        mode: "multiroot",
+        workspaceFile: "/ws/team.code-workspace",
+        briefs: [],
+        opened: ["/ws/team.code-workspace"],
+        mergedRepos: ["account-service"],
+      });
+
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1", ["account-service"]);
+
+      const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
+      expect(toast.level).toBe("success");
+      expect(toast.message).toContain("Added account-service");
+    });
   });
 });

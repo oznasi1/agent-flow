@@ -4,12 +4,16 @@ import { JiraAuth } from "./jira/auth";
 import { JiraClient, JiraAuthError } from "./jira/client";
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
-import { openWorkspace } from "./engine/workspace";
+import { openWorkspace, listWorkspaceFiles } from "./engine/workspace";
 import { createWorktrees } from "./engine/worktree";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, WorkspaceMode } from "./types";
 
 const SPRINT_ORDER_KEY = "flowdeck.sprintOrder";
+
+/** Where to open a taken task — a new window, the current one, or merged into an
+ * existing .code-workspace file. */
+type OpenTarget = { kind: "new" } | { kind: "current" } | { kind: "existing"; file: string };
 
 export class TasksViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "flowdeck.tasks";
@@ -407,14 +411,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       services = createWorktrees(services, detail.key, detail.summary, cfg.worktreeRoot, this.log);
     }
 
-    // Where should it open — a new window, or reuse the current one?
-    const openIn = await this.chooseOpenTarget(cfg);
-    if (!openIn) return;
+    // Where should it open — a new window, the current one, or an existing workspace?
+    const target = await this.chooseOpenTarget(cfg);
+    if (!target) return;
 
     // Workspace model. In the current window everything shares one window, so the
-    // multiroot/per-window question only applies when opening a new window.
+    // multiroot/per-window question only applies when opening a new window. Merging
+    // into an existing workspace is always multiroot (it IS a multi-root file).
     let mode: WorkspaceMode;
-    if (openIn === "current") {
+    if (target.kind === "existing") {
+      mode = "multiroot";
+    } else if (target.kind === "current") {
       mode = services.length === 1 ? "per-window" : "multiroot";
     } else if (services.length === 1 || cfg.workspaceMode === "per-window") {
       mode = "per-window";
@@ -442,28 +449,75 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       promptTemplate: promptMode.prompt,
       workspaceDir: cfg.workspaceDir,
       seedAgent: cfg.seedAgent,
-      openIn,
+      openIn: target.kind === "current" ? "current" : "new",
+      existingWorkspaceFile: target.kind === "existing" ? target.file : undefined,
     });
 
     const where = result.workspaceFile
       ? `workspace ${result.workspaceFile.split("/").pop()}`
       : `${result.opened.length} window(s)`;
     const seeded = cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : "";
-    this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${seeded}`);
+    if (result.mergeFailed) {
+      this.toast(
+        "info",
+        `Opened ${where} for ${key}, but its folders couldn't be parsed — repos weren't added. Brief seeded in each repo.${seeded}`,
+      );
+    } else {
+      const added = result.mergedRepos?.length ? ` Added ${result.mergedRepos.join(", ")}.` : "";
+      this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${seeded}`);
+    }
   }
 
-  /** Where to open a taken task — reuse the current window or spawn a new one. */
-  private async chooseOpenTarget(cfg: FlowDeckConfig): Promise<"new" | "current" | undefined> {
-    if (cfg.openIn === "new-window") return "new";
-    if (cfg.openIn === "this-window") return "current";
+  /** Where to open a taken task — new window, this window, or an existing workspace. */
+  private async chooseOpenTarget(cfg: FlowDeckConfig): Promise<OpenTarget | undefined> {
+    if (cfg.openIn === "new-window") return { kind: "new" };
+    if (cfg.openIn === "this-window") return { kind: "current" };
+    if (cfg.openIn === "pick-existing") return this.pickExistingWorkspace(cfg);
     const p = await vscode.window.showQuickPick(
       [
         { label: "$(empty-window) New window", detail: "Open the task in a separate window", val: "new" as const },
         { label: "$(window) This window", detail: "Open it in the current window (replaces what's here)", val: "current" as const },
+        {
+          label: "$(folder-library) Existing workspace…",
+          detail: "Open the task into a .code-workspace you already have",
+          val: "existing" as const,
+        },
       ],
-      { title: "Open the task where?", placeHolder: "New window, or reuse this one", ignoreFocusOut: true },
+      { title: "Open the task where?", placeHolder: "New window, this window, or an existing workspace", ignoreFocusOut: true },
     );
-    return p?.val;
+    if (!p) return undefined;
+    if (p.val === "existing") return this.pickExistingWorkspace(cfg);
+    return { kind: p.val };
+  }
+
+  /** Pick a `.code-workspace` from `cfg.workspaceDir` (or Browse… for one elsewhere). */
+  private async pickExistingWorkspace(cfg: FlowDeckConfig): Promise<OpenTarget | undefined> {
+    const BROWSE = "__browse__";
+    const files = listWorkspaceFiles(cfg.workspaceDir);
+    const items = [
+      ...files.map((f) => ({
+        label: `$(file-code) ${f.file.split("/").pop()}`,
+        detail: `${f.folders} folder${f.folders === 1 ? "" : "s"}`,
+        file: f.file,
+      })),
+      { label: "$(folder-opened) Browse…", detail: "Pick a .code-workspace from anywhere", file: BROWSE },
+    ];
+    const picked = await vscode.window.showQuickPick(items, {
+      title: "Open into which workspace?",
+      placeHolder: files.length ? "Pick a workspace, or Browse…" : "No workspaces found — Browse…",
+      ignoreFocusOut: true,
+    });
+    if (!picked) return undefined;
+    if (picked.file !== BROWSE) return { kind: "existing", file: picked.file };
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: false,
+      filters: { "VS Code Workspace": ["code-workspace"] },
+      title: "Pick a .code-workspace",
+    });
+    if (!uris || !uris.length) return undefined;
+    return { kind: "existing", file: uris[0].fsPath };
   }
 
   private buildBrief(detail: { key: string; summary: string; descriptionText: string }): string {
