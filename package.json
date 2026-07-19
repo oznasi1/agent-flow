@@ -3,7 +3,7 @@
   "displayName": "Flow Deck",
   "description": "Grab a Jira task and spin up its workspace — a task pool in your sidebar that opens the right repos and pre-seeds a Claude Code agent.",
   "version": "0.1.0",
-  "publisher": "oznasi",
+  "publisher": "Oznasi1",
   "license": "MIT",
   "author": "Oz Nasi (At-Bay)",
   "repository": {
@@ -134,12 +134,20 @@
           "type": "string",
           "enum": [
             "unassigned",
+            "mysprint",
             "mine",
             "sprint",
             "backlog"
           ],
-          "default": "unassigned",
-          "description": "Default task filter lens."
+          "enumDescriptions": [
+            "Unassigned tasks in the active sprint",
+            "Your tasks in the active sprint",
+            "All tasks assigned to you",
+            "All tasks in the active sprint",
+            "Tasks not in the active sprint"
+          ],
+          "default": "mysprint",
+          "description": "Default task filter lens shown when Flow Deck opens."
         },
         "flowdeck.seedAgent": {
           "type": "boolean",

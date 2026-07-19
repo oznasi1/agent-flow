@@ -86,7 +86,7 @@ loaded. Open the **Flow Deck** icon in the activity bar and complete the first-r
 | `flowdeck.githubOrg` | `""` | Reserved (clone support not yet implemented). |
 | `flowdeck.provenanceLabel` | `claude-code` | Label stamped on Jira writes when enabled. |
 | `flowdeck.stampLabelOnWrite` | `true` | Whether to stamp the provenance label. |
-| `flowdeck.defaultFilter` | `unassigned` | Default task filter lens. |
+| `flowdeck.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
 | `flowdeck.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
 
 Plus `flowdeck.workspaceMode`, `flowdeck.openIn`, `flowdeck.taskMode`,

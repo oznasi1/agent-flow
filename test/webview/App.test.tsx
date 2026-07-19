@@ -60,7 +60,7 @@ describe("filter + size lenses", () => {
     render(<App />);
     authed();
     fireEvent.click(screen.getByRole("button", { name: "S" }));
-    expect(sent).toHaveBeenCalledWith({ type: "fetch", filter: "unassigned", size: "s" });
+    expect(sent).toHaveBeenCalledWith({ type: "fetch", filter: "mysprint", size: "s" });
   });
 });
 
@@ -68,6 +68,7 @@ describe("My-sprint reorder bar", () => {
   it("shows Reset order only in the My-sprint lens and wires it", () => {
     render(<App />);
     authed();
+    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "A" })] });
     expect(screen.queryByText("Reset order")).not.toBeInTheDocument();
     host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "A" })] });
     fireEvent.click(screen.getByText("Reset order"));

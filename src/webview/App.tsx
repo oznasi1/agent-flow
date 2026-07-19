@@ -72,7 +72,7 @@ export function App(): JSX.Element {
   const [authed, setAuthed] = React.useState<boolean | null>(null);
   const [project, setProject] = React.useState("");
   const [me, setMe] = React.useState<string | null>(null);
-  const [filter, setFilter] = React.useState<Filter>("unassigned");
+  const [filter, setFilter] = React.useState<Filter>("mysprint");
   const [size, setSize] = React.useState<Size>("any");
   const [repoQuery, setRepoQuery] = React.useState("");
   const [tasks, setTasks] = React.useState<JiraTask[]>([]);

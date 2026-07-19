@@ -55,7 +55,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
   public async refresh(): Promise<void> {
     const cfg = getConfig();
-    await this.onMessage({ type: "fetch", filter: (cfg.defaultFilter as Filter) || "unassigned", size: "any" });
+    await this.onMessage({ type: "fetch", filter: (cfg.defaultFilter as Filter) || "mysprint", size: "any" });
   }
 
   private async onMessage(m: InboundMessage): Promise<void> {
@@ -67,7 +67,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           const authed = await this.auth.isAuthenticated();
           const me = authed ? await this.client().currentUserName() : null;
           this.post({ type: "state", authed, project: cfg.project, me });
-          if (authed) await this.onMessage({ type: "fetch", filter: (cfg.defaultFilter as Filter) || "unassigned", size: "any" });
+          if (authed) await this.onMessage({ type: "fetch", filter: (cfg.defaultFilter as Filter) || "mysprint", size: "any" });
           break;
         }
         case "signIn": {

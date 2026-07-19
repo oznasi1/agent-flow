@@ -36,7 +36,7 @@ describe("getConfig — defaults", () => {
       workspaceDir: expandHome("~/projects"),
       githubOrg: "",
       repoBlocklist: [],
-      defaultFilter: "unassigned",
+      defaultFilter: "mysprint",
       seedAgent: true,
       workspaceMode: "auto",
       taskMode: "ask",

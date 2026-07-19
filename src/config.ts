@@ -65,7 +65,7 @@ export function getConfig(): FlowDeckConfig {
       const b = c.get<string[]>("repoBlocklist");
       return Array.isArray(b) ? b.filter((x) => typeof x === "string" && x.length) : [];
     })(),
-    defaultFilter: c.get<string>("defaultFilter") || "unassigned",
+    defaultFilter: c.get<string>("defaultFilter") || "mysprint",
     seedAgent: c.get<boolean>("seedAgent") ?? true,
     workspaceMode: (c.get<FlowDeckConfig["workspaceMode"]>("workspaceMode")) || "auto",
     openIn: (c.get<FlowDeckConfig["openIn"]>("openIn")) || "ask",
