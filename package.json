@@ -1,0 +1,293 @@
+{
+  "name": "flowdeck",
+  "displayName": "Flow Deck",
+  "description": "Grab a Jira task and spin up its workspace — a task pool in your sidebar that opens the right repos and pre-seeds a Claude Code agent.",
+  "version": "0.1.0",
+  "publisher": "oznasi",
+  "license": "MIT",
+  "author": "Oz Nasi (At-Bay)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oznasi1/flowdeck.git"
+  },
+  "homepage": "https://github.com/oznasi1/flowdeck#readme",
+  "bugs": {
+    "url": "https://github.com/oznasi1/flowdeck/issues"
+  },
+  "keywords": [
+    "jira",
+    "claude-code",
+    "agent",
+    "worktree",
+    "workspace",
+    "sprint"
+  ],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other",
+    "SCM Providers"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "flowdeck",
+          "title": "Flow Deck",
+          "icon": "media/flowdeck.svg"
+        }
+      ]
+    },
+    "views": {
+      "flowdeck": [
+        {
+          "id": "flowdeck.tasks",
+          "name": "Tasks",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "flowdeck.refresh",
+        "title": "Flow Deck: Refresh Tasks",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "flowdeck.setup",
+        "title": "Flow Deck: Run Setup…"
+      },
+      {
+        "command": "flowdeck.signIn",
+        "title": "Flow Deck: Sign in to Jira"
+      },
+      {
+        "command": "flowdeck.signOut",
+        "title": "Flow Deck: Sign out of Jira"
+      },
+      {
+        "command": "flowdeck.takeTask",
+        "title": "Flow Deck: Take Task…"
+      },
+      {
+        "command": "flowdeck.openDeck",
+        "title": "Flow Deck: Open the Deck (in-flight)",
+        "icon": "$(dashboard)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "flowdeck.openDeck",
+          "when": "view == flowdeck.tasks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "flowdeck.refresh",
+          "when": "view == flowdeck.tasks",
+          "group": "navigation@2"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Flow Deck",
+      "properties": {
+        "flowdeck.jira.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Base URL of your Atlassian Jira Cloud site (e.g. https://your-org.atlassian.net). Set during first-run setup."
+        },
+        "flowdeck.jira.project": {
+          "type": "string",
+          "default": "",
+          "description": "Jira project key to pull tasks from (e.g. ABC). Set during first-run setup."
+        },
+        "flowdeck.reposRoot": {
+          "type": "string",
+          "default": "~/projects",
+          "description": "Directory where your service repo checkouts live."
+        },
+        "flowdeck.workspaceDir": {
+          "type": "string",
+          "default": "~/projects",
+          "description": "Where generated .code-workspace files are written."
+        },
+        "flowdeck.githubOrg": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub org used to clone repos that aren't checked out yet (reserved — not yet used)."
+        },
+        "flowdeck.repoBlocklist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Directory names under reposRoot to exclude from task-target discovery (infra, tooling, generated repos). Hidden dirs are always skipped."
+        },
+        "flowdeck.defaultFilter": {
+          "type": "string",
+          "enum": [
+            "unassigned",
+            "mine",
+            "sprint",
+            "backlog"
+          ],
+          "default": "unassigned",
+          "description": "Default task filter lens."
+        },
+        "flowdeck.seedAgent": {
+          "type": "boolean",
+          "default": true,
+          "description": "After opening a workspace, pre-fill the Claude Code panel with the task plan (you press Enter to start)."
+        },
+        "flowdeck.workspaceMode": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "multiroot",
+            "per-window",
+            "ask"
+          ],
+          "enumDescriptions": [
+            "1 repo → open that repo; multiple → one multi-root workspace",
+            "Always one multi-root workspace",
+            "Always one window per repo",
+            "Ask each time (when more than one repo)"
+          ],
+          "default": "auto",
+          "description": "How to open the repos a task touches."
+        },
+        "flowdeck.openIn": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "new-window",
+            "this-window"
+          ],
+          "enumDescriptions": [
+            "Ask each time you take a task",
+            "Always open a task in a new window",
+            "Always open a task in the current window (replaces what's here)"
+          ],
+          "default": "ask",
+          "description": "Where to open a task you take: a new window, or reuse the current one."
+        },
+        "flowdeck.taskMode": {
+          "type": "string",
+          "default": "ask",
+          "markdownDescription": "Which prompt mode to seed when taking a task: `ask` to choose each time, or the `id` of one of `#flowdeck.promptModes#`."
+        },
+        "flowdeck.promptModes": {
+          "type": "array",
+          "markdownDescription": "Prompt modes offered when taking a task. Each has an `id`, `label`, and `prompt` template. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`. Add your own (e.g. a `debug` mode).",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label",
+              "prompt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable id (used by taskMode)."
+              },
+              "label": {
+                "type": "string",
+                "description": "Shown in the picker."
+              },
+              "prompt": {
+                "type": "string",
+                "description": "Template with {key} {summary} {url} {brief} {files}."
+              }
+            }
+          },
+          "default": [
+            {
+              "id": "plan",
+              "label": "Plan first",
+              "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. Propose a step-by-step PLAN for this task and wait for my approval — do not edit any code yet. Ticket: {url}{files}"
+            },
+            {
+              "id": "implementation",
+              "label": "Implementation",
+              "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. Begin implementing. Confirm your approach with me only if something is ambiguous. Ticket: {url}{files}"
+            }
+          ]
+        },
+        "flowdeck.explorePrompt": {
+          "type": "string",
+          "editPresentation": "multilineText",
+          "markdownDescription": "Prompt seeded when you start an **Explore** session (no ticket). Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
+          "default": "Exploration session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me understand how this works: map the relevant code paths, explain the flow, and flag anything surprising or worth a follow-up ticket. Don't change code unless I ask.{files}"
+        },
+        "flowdeck.worktree": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "always",
+            "never"
+          ],
+          "enumDescriptions": [
+            "Ask each time",
+            "Always create a per-task git worktree/branch",
+            "Always work in the repo directly"
+          ],
+          "default": "ask",
+          "description": "Whether to isolate the task in a git worktree."
+        },
+        "flowdeck.worktreeRoot": {
+          "type": "string",
+          "default": "~/projects/.worktrees",
+          "description": "Where per-task git worktrees are created (one subdir per ticket, per repo)."
+        },
+        "flowdeck.stampLabelOnWrite": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add the provenance label (see flowdeck.provenanceLabel) whenever this extension updates a Jira item (e.g. a status change), to mark automated changes."
+        },
+        "flowdeck.provenanceLabel": {
+          "type": "string",
+          "default": "claude-code",
+          "description": "Label stamped on Jira items this extension updates when flowdeck.stampLabelOnWrite is enabled."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "preview": "node scripts/build-preview.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:cov": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "vscode:prepublish": "npm run build -- --production",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/vscode": "^1.90.0",
+    "@vitest/coverage-v8": "^2.1.9",
+    "esbuild": "^0.20.0",
+    "jsdom": "^24.1.3",
+    "typescript": "^5.4.0",
+    "vitest": "^2.1.9"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}

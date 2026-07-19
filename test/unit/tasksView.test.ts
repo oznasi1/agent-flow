@@ -1,0 +1,410 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { commands, env, window } from "../_mocks/vscode";
+import { fakeAuth, fakeContext, mkRepos } from "../_helpers/factories";
+
+// ── sibling modules the controller depends on ──────────────────────────────
+vi.mock("../../src/config", () => ({ getConfig: vi.fn() }));
+vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn() }));
+vi.mock("../../src/engine/workspace", () => ({ openWorkspace: vi.fn() }));
+vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn((s: unknown) => s) }));
+vi.mock("../../src/jira/client", () => {
+  class JiraAuthError extends Error {}
+  return { JiraAuthError, JiraClient: vi.fn() };
+});
+
+import { getConfig } from "../../src/config";
+import { discoverRepos } from "../../src/engine/repos";
+import { openWorkspace } from "../../src/engine/workspace";
+import { createWorktrees } from "../../src/engine/worktree";
+import { JiraClient, JiraAuthError } from "../../src/jira/client";
+import { TasksViewProvider } from "../../src/tasksView";
+import type { InboundMessage, OutboundMessage } from "../../src/types";
+
+const CFG = {
+  baseUrl: "https://jira",
+  project: "ASM",
+  reposRoot: "/repos",
+  workspaceDir: "/ws",
+  githubOrg: "org",
+  repoBlocklist: [] as string[],
+  defaultFilter: "unassigned",
+  seedAgent: true,
+  workspaceMode: "auto" as const,
+  openIn: "new-window" as const,
+  taskMode: "plan",
+  promptModes: [{ id: "plan", label: "Plan", prompt: "P {key}" }],
+  explorePrompt: "Explore {summary}{files}",
+  worktree: "never" as const,
+  worktreeRoot: "/wt",
+  stampLabelOnWrite: true,
+  provenanceLabel: "claude-code",
+};
+
+let clientStub: Record<string, ReturnType<typeof vi.fn>>;
+
+function makeClient() {
+  return {
+    currentUserName: vi.fn(async () => "Jane"),
+    getMyself: vi.fn(async () => ({ accountId: "a1", displayName: "Jane" })),
+    fetchTasks: vi.fn(async () => []),
+    getDetail: vi.fn(async () => ({
+      key: "ASM-1",
+      summary: "Do the thing",
+      descriptionText: "desc",
+      labels: [],
+      components: [],
+      url: "https://jira/browse/ASM-1",
+    })),
+    getTransitions: vi.fn(async () => [] as unknown[]),
+    transition: vi.fn(async () => undefined),
+    addLabel: vi.fn(async () => undefined),
+    getActiveSprintId: vi.fn(async () => 42),
+    addIssueToSprint: vi.fn(async () => undefined),
+    assignIssue: vi.fn(async () => undefined),
+  };
+}
+
+beforeEach(() => {
+  clientStub = makeClient();
+  vi.mocked(getConfig).mockReturnValue({ ...CFG });
+  vi.mocked(discoverRepos).mockReturnValue(mkRepos(["account-service", "centaur"]));
+  vi.mocked(JiraClient).mockImplementation(() => clientStub as unknown as JiraClient);
+  vi.mocked(openWorkspace).mockResolvedValue({
+    mode: "per-window",
+    workspaceFile: undefined,
+    briefs: [],
+    opened: ["/repos/account-service"],
+  });
+});
+
+/** Instantiate the provider and capture its webview message handler + post spy. */
+function setup(opts: { authed?: boolean; workspaceState?: Record<string, unknown> } = {}) {
+  const { context, workspaceState, globalState } = fakeContext({ workspaceState: opts.workspaceState });
+  const auth = fakeAuth({ authed: opts.authed ?? true });
+  const provider = new TasksViewProvider(context, auth);
+  const post = vi.fn();
+  let handler: (m: InboundMessage) => Promise<void> = async () => {};
+  const view = {
+    webview: {
+      options: {},
+      html: "",
+      asWebviewUri: (u: unknown) => u,
+      cspSource: "vscode-resource:",
+      postMessage: post,
+      onDidReceiveMessage: (cb: (m: InboundMessage) => Promise<void>) => {
+        handler = cb;
+        return { dispose() {} };
+      },
+    },
+  };
+  provider.resolveWebviewView(view as never);
+  const send = (m: InboundMessage) => handler(m);
+  const posted = () => post.mock.calls.map((c) => c[0] as OutboundMessage);
+  return { provider, post, send, posted, auth, workspaceState, globalState };
+}
+
+describe("ready", () => {
+  it("reports authed state with the current user and auto-fetches", async () => {
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual({ type: "state", authed: true, project: "ASM", me: "Jane" });
+    expect(clientStub.fetchTasks).toHaveBeenCalled();
+  });
+
+  it("reports unauthed state and does not fetch", async () => {
+    const { send, posted } = setup({ authed: false });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual({ type: "state", authed: false, project: "ASM", me: null });
+    expect(clientStub.fetchTasks).not.toHaveBeenCalled();
+  });
+});
+
+describe("fetch", () => {
+  it("does not fetch when unauthenticated", async () => {
+    const { send, posted } = setup({ authed: false });
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    expect(clientStub.fetchTasks).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual({ type: "state", authed: false, project: "ASM", me: null });
+  });
+
+  it("toggles loading and posts tasks with a services guess", async () => {
+    clientStub.fetchTasks.mockResolvedValue([
+      { key: "ASM-1", summary: "s", labels: [], components: [] },
+    ]);
+    const { send, posted } = setup();
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    expect(clientStub.fetchTasks).toHaveBeenCalledWith("mine", "any");
+    const tasksMsg = posted().find((m) => m.type === "tasks");
+    expect(tasksMsg).toBeTruthy();
+    expect((tasksMsg as { tasks: { services?: string[] }[] }).tasks[0].services).toBeDefined();
+    expect(posted().filter((m) => m.type === "loading")).toEqual([
+      { type: "loading", loading: true },
+      { type: "loading", loading: false },
+    ]);
+  });
+
+  it("prunes then sorts by saved order in the full My-sprint view", async () => {
+    clientStub.fetchTasks.mockResolvedValue([
+      { key: "A", summary: "", labels: [], components: [] },
+      { key: "B", summary: "", labels: [], components: [] },
+      { key: "C", summary: "", labels: [], components: [] },
+    ]);
+    const { send, posted, workspaceState } = setup({ workspaceState: { "flowdeck.sprintOrder": ["B", "A"] } });
+    await send({ type: "fetch", filter: "mysprint", size: "any" });
+    // pruneOrder(["B","A"], present) keeps ["B","A"]; persisted back
+    expect(workspaceState.update).toHaveBeenCalledWith("flowdeck.sprintOrder", ["B", "A"]);
+    const tasksMsg = posted().find((m) => m.type === "tasks") as { tasks: { key: string }[] };
+    expect(tasksMsg.tasks.map((t) => t.key)).toEqual(["B", "A", "C"]);
+  });
+
+  it("sorts but does not prune under a size lens", async () => {
+    clientStub.fetchTasks.mockResolvedValue([{ key: "A", summary: "", labels: [], components: [] }]);
+    const { send, workspaceState } = setup({ workspaceState: { "flowdeck.sprintOrder": ["A"] } });
+    await send({ type: "fetch", filter: "mysprint", size: "s" });
+    expect(workspaceState.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("reorder", () => {
+  it("is ignored outside the My-sprint lens", async () => {
+    const { send, workspaceState } = setup();
+    await send({ type: "fetch", filter: "unassigned", size: "any" }); // lastFilter = unassigned
+    await send({ type: "reorder", order: ["C", "A", "B"] });
+    expect(workspaceState.update).not.toHaveBeenCalled();
+  });
+
+  it("persists the applied order within the My-sprint lens", async () => {
+    const { send, workspaceState } = setup();
+    await send({ type: "fetch", filter: "mysprint", size: "any" }); // lastFilter = mysprint
+    await send({ type: "reorder", order: ["C", "A", "B"] });
+    expect(workspaceState.update).toHaveBeenLastCalledWith("flowdeck.sprintOrder", ["C", "A", "B"]);
+  });
+});
+
+describe("resetOrder", () => {
+  it("clears the saved order and refetches My sprint", async () => {
+    const { send, workspaceState } = setup({ workspaceState: { "flowdeck.sprintOrder": ["A", "B"] } });
+    await send({ type: "resetOrder", size: "any" });
+    expect(workspaceState.update).toHaveBeenCalledWith("flowdeck.sprintOrder", []);
+    expect(clientStub.fetchTasks).toHaveBeenCalledWith("mysprint", "any");
+  });
+});
+
+describe("changeStatus", () => {
+  it("shows an info toast when there are no transitions", async () => {
+    clientStub.getTransitions.mockResolvedValue([]);
+    const { provider, posted } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "info" }));
+    expect(clientStub.transition).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the pick is cancelled", async () => {
+    clientStub.getTransitions.mockResolvedValue([
+      { id: "31", name: "Start", toName: "In Progress", toCategory: "indeterminate" },
+    ]);
+    vi.mocked(window.showQuickPick).mockResolvedValue(undefined);
+    const { provider } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.transition).not.toHaveBeenCalled();
+  });
+
+  it("transitions, stamps the claude-code label, and reports removal for a done status", async () => {
+    clientStub.getTransitions.mockResolvedValue([
+      { id: "41", name: "Resolve", toName: "Done", toCategory: "done" },
+    ]);
+    vi.mocked(window.showQuickPick).mockResolvedValue({
+      t: { id: "41", name: "Resolve", toName: "Done", toCategory: "done" },
+    } as never);
+    const { provider, posted } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "41");
+    expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
+    expect(posted()).toContainEqual({
+      type: "statusChanged",
+      key: "ASM-1",
+      status: "Done",
+      category: "done",
+      removed: true,
+    });
+  });
+
+  it("does not stamp the label when disabled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, stampLabelOnWrite: false });
+    clientStub.getTransitions.mockResolvedValue([
+      { id: "31", name: "Start", toName: "In Progress", toCategory: "indeterminate" },
+    ]);
+    vi.mocked(window.showQuickPick).mockResolvedValue({
+      t: { id: "31", name: "Start", toName: "In Progress", toCategory: "indeterminate" },
+    } as never);
+    const { provider } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.addLabel).not.toHaveBeenCalled();
+  });
+
+  it("still succeeds when the label stamp fails", async () => {
+    clientStub.getTransitions.mockResolvedValue([
+      { id: "31", name: "Start", toName: "In Progress", toCategory: "indeterminate" },
+    ]);
+    clientStub.addLabel.mockRejectedValue(new Error("label denied"));
+    vi.mocked(window.showQuickPick).mockResolvedValue({
+      t: { id: "31", name: "Start", toName: "In Progress", toCategory: "indeterminate" },
+    } as never);
+    const { provider, posted } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "statusChanged", key: "ASM-1" }));
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success" }));
+  });
+});
+
+describe("addToMySprint", () => {
+  it("errors when the account cannot be resolved", async () => {
+    clientStub.getMyself.mockResolvedValue(null);
+    const { provider, posted } = setup();
+    await provider.addToMySprint("ASM-1");
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+    expect(clientStub.addIssueToSprint).not.toHaveBeenCalled();
+  });
+
+  it("errors when there is no active sprint", async () => {
+    clientStub.getActiveSprintId.mockResolvedValue(null);
+    const { provider, posted } = setup();
+    await provider.addToMySprint("ASM-1");
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+    expect(clientStub.addIssueToSprint).not.toHaveBeenCalled();
+  });
+
+  it("adds to sprint, assigns, stamps the label, and reports removal from unassigned", async () => {
+    const { provider, posted, send } = setup();
+    await send({ type: "fetch", filter: "unassigned", size: "any" }); // lastFilter = unassigned
+    await provider.addToMySprint("ASM-1");
+    expect(clientStub.addIssueToSprint).toHaveBeenCalledWith(42, "ASM-1");
+    expect(clientStub.assignIssue).toHaveBeenCalledWith("ASM-1", "a1");
+    expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
+    expect(posted()).toContainEqual({ type: "movedToSprint", key: "ASM-1", assignee: "Jane", removed: true });
+  });
+});
+
+describe("passthrough messages", () => {
+  it("opens external links via vscode.env", async () => {
+    const { send } = setup();
+    await send({ type: "openExternal", url: "https://example.test" });
+    expect(env.openExternal).toHaveBeenCalled();
+  });
+
+  it("routes signIn to the command", async () => {
+    const { send } = setup();
+    await send({ type: "signIn" });
+    expect(commands.executeCommand).toHaveBeenCalledWith("flowdeck.signIn");
+  });
+});
+
+describe("error handling", () => {
+  it("re-gates on a JiraAuthError and surfaces an error toast", async () => {
+    clientStub.fetchTasks.mockRejectedValue(new JiraAuthError("expired"));
+    const { send, posted } = setup();
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    expect(posted()).toContainEqual({ type: "state", authed: false, project: "ASM", me: null });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+    expect(posted()).toContainEqual({ type: "loading", loading: false });
+  });
+});
+
+describe("takeTask", () => {
+  it("opens the workspace for a preselected repo and toasts success", async () => {
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ticket: expect.objectContaining({ key: "ASM-1" }),
+        promptTemplate: "P {key}",
+        services: [expect.objectContaining({ name: "account-service" })],
+      }),
+    );
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success" }));
+  });
+
+  it("errors when no repos are checked out", async () => {
+    vi.mocked(discoverRepos).mockReturnValue([]);
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+  });
+
+  it("aborts when sign-in is declined", async () => {
+    vi.mocked(commands.executeCommand).mockResolvedValue(false);
+    const { provider } = setup({ authed: false });
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("confirms repos via QuickPick when none are preselected", async () => {
+    const repos = mkRepos(["account-service", "centaur"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1");
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ services: [repos[0]] }));
+  });
+
+  it("aborts when the repo QuickPick is cancelled", async () => {
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1");
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("prompts for a mode when taskMode is 'ask'", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: CFG.promptModes[0] } as never);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ promptTemplate: "P {key}" }));
+  });
+
+  it("aborts when the mode prompt is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("creates worktrees when worktree=always", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "always" });
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(createWorktrees).toHaveBeenCalled();
+  });
+
+  it("creates worktrees when the worktree prompt is accepted", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(createWorktrees).toHaveBeenCalled();
+  });
+
+  it("asks how to open multiple repos when workspaceMode is 'ask'", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, workspaceMode: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: "multiroot" } as never);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service", "centaur"]);
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "multiroot" }));
+  });
+
+  it("reports the generated workspace file in the success toast", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, workspaceMode: "multiroot" });
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "multiroot",
+      workspaceFile: "/ws/ASM-1.code-workspace",
+      briefs: [],
+      opened: ["/ws/ASM-1.code-workspace"],
+    });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", ["account-service", "centaur"]);
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).toContain(".code-workspace");
+  });
+});
