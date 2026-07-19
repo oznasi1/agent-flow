@@ -70,6 +70,8 @@ const CompassIcon = () => (
 
 export function App(): JSX.Element {
   const [authed, setAuthed] = React.useState<boolean | null>(null);
+  const [configured, setConfigured] = React.useState(true); // assume yes until told otherwise (no setup-flash)
+  const [error, setError] = React.useState<{ message: string; canRetry: boolean } | null>(null);
   const [project, setProject] = React.useState("");
   const [me, setMe] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<Filter>("mysprint");
@@ -98,16 +100,42 @@ export function App(): JSX.Element {
     endDrag();
   };
 
+  // Watchdog: if the host never answers our `ready` (extension failed to activate,
+  // a handler threw before replying), don't sit on a blank/"connecting" panel forever
+  // — surface it so the user knows something is wrong and can retry.
+  const gotState = React.useRef(false);
+  const watchdog = React.useRef<number | null>(null);
+  const armWatchdog = React.useCallback(() => {
+    if (watchdog.current != null) window.clearTimeout(watchdog.current);
+    gotState.current = false;
+    watchdog.current = window.setTimeout(() => {
+      if (!gotState.current) {
+        setError({
+          message: "Agent Flow isn't responding. Open the “Agent Flow” output channel for details, or reload the window.",
+          canRetry: true,
+        });
+      }
+    }, 18000); // longer than the host's 15s request timeout, so a real error wins first
+  }, []);
+
   React.useEffect(() => {
     const handler = (ev: MessageEvent<OutboundMessage>) => {
       const m = ev.data;
+      gotState.current = true; // any message means the host is alive — stand down the watchdog
       switch (m.type) {
         case "state":
+          setError(null);
           setAuthed(m.authed);
+          setConfigured(m.configured);
           setProject(m.project);
           setMe(m.me);
           break;
+        case "error":
+          setLoading(false);
+          setError({ message: m.message, canRetry: m.canRetry });
+          break;
         case "tasks":
+          setError(null);
           setFilter(m.filter);
           setTasks(m.tasks);
           setExpanded(new Set());
@@ -145,8 +173,18 @@ export function App(): JSX.Element {
     };
     window.addEventListener("message", handler);
     send({ type: "ready" });
-    return () => window.removeEventListener("message", handler);
-  }, []);
+    armWatchdog();
+    return () => {
+      window.removeEventListener("message", handler);
+      if (watchdog.current != null) window.clearTimeout(watchdog.current);
+    };
+  }, [armWatchdog]);
+
+  const retry = () => {
+    setError(null);
+    armWatchdog();
+    send({ type: "retry" });
+  };
 
   const refetch = (f: Filter, s: Size) => {
     setFilter(f);
@@ -181,12 +219,44 @@ export function App(): JSX.Element {
   // Reorder only makes sense on the full My-sprint list, not a filtered subset.
   const canReorder = filter === "mysprint" && !q;
 
+  // Toasts float over every state (gate or list), so keep them out of the branch bodies.
+  const toastStack = <ToastStack toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />;
+  const gate = (content: JSX.Element): JSX.Element => (
+    <>{content}{toastStack}</>
+  );
+
+  // Persistent, actionable failure — shown instead of a vanishing toast.
+  if (error) {
+    return gate(
+      <div className="gate">
+        <div className="gate-error">⚠ {error.message}</div>
+        {error.canRetry && <button className="btn" onClick={retry}>Retry</button>}
+      </div>,
+    );
+  }
+
+  // Handshake in flight (or the host never replied — the watchdog turns this into an
+  // error above). Never a blank panel.
+  if (authed === null) {
+    return gate(<div className="gate"><div>Connecting to Jira…</div></div>);
+  }
+
+  // Never set up: no Jira site URL / project key yet.
+  if (!configured) {
+    return gate(
+      <div className="gate">
+        <div>Agent Flow isn't connected to Jira yet — add your site URL and project to get started.</div>
+        <button className="btn" onClick={() => send({ type: "runSetup" })}>Run setup</button>
+      </div>,
+    );
+  }
+
   if (authed === false) {
-    return (
+    return gate(
       <div className="gate">
         <div>Connect Agent Flow to your Jira to see your task pool.</div>
         <button className="btn" onClick={() => send({ type: "signIn" })}>Sign in to Jira</button>
-      </div>
+      </div>,
     );
   }
 
@@ -285,7 +355,7 @@ export function App(): JSX.Element {
         ))}
       </div>
 
-      <ToastStack toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />
+      {toastStack}
     </div>
   );
 }

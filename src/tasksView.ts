@@ -58,8 +58,37 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   public async refresh(): Promise<void> {
+    await this.postInitialState();
+  }
+
+  /** Establish (and broadcast) the panel's state, then load tasks. Posts `state`
+   * up-front — before any network round-trip — so the webview always has something
+   * to render (setup CTA / sign-in gate / task list) instead of a blank panel while
+   * a request is in flight. The display name is fetched alongside the task list, so
+   * a slow or unreachable `/myself` never delays (or blocks) the UI. */
+  private async postInitialState(): Promise<void> {
     const cfg = getConfig();
-    await this.onMessage({ type: "fetch", filter: (cfg.defaultFilter as Filter) || "mysprint", size: "any" });
+    const configured = !!cfg.baseUrl && !!cfg.project;
+    let authed = false;
+    try {
+      authed = await this.auth.isAuthenticated();
+    } catch {
+      authed = false;
+    }
+    this.post({ type: "state", authed, configured, project: cfg.project, me: null });
+    if (!configured || !authed) return;
+
+    await Promise.all([
+      this.client()
+        .currentUserName()
+        .then((me) => {
+          if (me) this.post({ type: "state", authed: true, configured, project: cfg.project, me });
+        })
+        .catch(() => {
+          /* display name is best-effort — the task list is the real payload */
+        }),
+      this.onMessage({ type: "fetch", filter: (cfg.defaultFilter as Filter) || "mysprint", size: "any" }),
+    ]);
   }
 
   private async onMessage(m: InboundMessage): Promise<void> {
@@ -67,15 +96,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.log(`webview → host: ${m.type}`);
     try {
       switch (m.type) {
-        case "ready": {
-          const authed = await this.auth.isAuthenticated();
-          const me = authed ? await this.client().currentUserName() : null;
-          this.post({ type: "state", authed, project: cfg.project, me });
-          if (authed) await this.onMessage({ type: "fetch", filter: (cfg.defaultFilter as Filter) || "mysprint", size: "any" });
+        case "ready":
+        case "retry": {
+          await this.postInitialState();
           break;
         }
         case "signIn": {
           await vscode.commands.executeCommand("agentFlow.signIn");
+          break;
+        }
+        case "runSetup": {
+          await vscode.commands.executeCommand("agentFlow.setup");
           break;
         }
         case "openExternal": {
@@ -84,7 +115,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
         case "fetch": {
           if (!(await this.auth.isAuthenticated())) {
-            this.post({ type: "state", authed: false, project: cfg.project, me: null });
+            this.post({ type: "state", authed: false, configured: !!cfg.baseUrl && !!cfg.project, project: cfg.project, me: null });
             return;
           }
           this.post({ type: "loading", loading: true });
@@ -155,7 +186,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: "loading", loading: false });
       const msg = e instanceof Error ? e.message : String(e);
       if (e instanceof JiraAuthError) {
-        this.post({ type: "state", authed: false, project: cfg.project, me: null });
+        // Auth failures re-gate to the sign-in screen, which is itself the indication.
+        this.post({ type: "state", authed: false, configured: !!cfg.baseUrl && !!cfg.project, project: cfg.project, me: null });
+      } else {
+        // Everything else (unreachable site, timeout, Jira 5xx, bad project key) gets a
+        // persistent banner in the panel — a toast alone vanishes before it's read.
+        this.post({ type: "error", message: msg, canRetry: true });
       }
       this.toast("error", msg);
     }
@@ -167,7 +203,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.log(`changeStatus ${key}: start`);
     if (!(await this.auth.isAuthenticated())) {
       this.log(`changeStatus ${key}: not authenticated`);
-      this.post({ type: "state", authed: false, project: cfg.project, me: null });
+      this.post({ type: "state", authed: false, configured: !!cfg.baseUrl && !!cfg.project, project: cfg.project, me: null });
       return;
     }
     const client = this.client();
@@ -208,7 +244,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const cfg = getConfig();
     this.log(`addToMySprint ${key}: start`);
     if (!(await this.auth.isAuthenticated())) {
-      this.post({ type: "state", authed: false, project: cfg.project, me: null });
+      this.post({ type: "state", authed: false, configured: !!cfg.baseUrl && !!cfg.project, project: cfg.project, me: null });
       return;
     }
     const client = this.client();

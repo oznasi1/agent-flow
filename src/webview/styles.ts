@@ -184,6 +184,7 @@ export const CSS = `
     background: var(--vscode-button-background); color: var(--vscode-button-foreground);
     cursor: pointer; font-size: 12px; }
   .gate .btn:hover { background: var(--vscode-button-hoverBackground); }
+  .gate .gate-error { color: var(--vscode-errorForeground); line-height: 1.5; }
   .loading { color: var(--vscode-descriptionForeground); font-size: 12px; padding: 12px 4px; }
 
   /* Toasts — success / error / info, bottom of the panel */

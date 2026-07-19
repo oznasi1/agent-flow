@@ -97,6 +97,8 @@ export type InboundMessage =
   | { type: "explore" }
   | { type: "openExternal"; url: string }
   | { type: "signIn" }
+  | { type: "runSetup" }
+  | { type: "retry" }
   | { type: "reorder"; order: string[] }
   | { type: "resetOrder"; size: Size }
   // The Deck (separate webview panel)
@@ -107,12 +109,17 @@ export type InboundMessage =
 
 // Messages: host → webview
 export type OutboundMessage =
-  | { type: "state"; authed: boolean; project: string; me: string | null }
+  // `configured` is false until the Jira site URL + project key are set (first-run
+  // setup). The webview uses it to show a "run setup" call-to-action rather than a
+  // blank/loading panel.
+  | { type: "state"; authed: boolean; configured: boolean; project: string; me: string | null }
   | { type: "tasks"; filter: Filter; tasks: JiraTask[] }
   | { type: "detail"; key: string; descriptionText: string; inferred: string[]; repos: string[] }
   | { type: "statusChanged"; key: string; status: string; category: string; removed: boolean }
   | { type: "movedToSprint"; key: string; assignee: string; removed: boolean }
   | { type: "toast"; level: "success" | "error" | "info"; message: string }
+  // A persistent, actionable failure banner (unlike a toast, it stays until resolved).
+  | { type: "error"; message: string; canRetry: boolean }
   | { type: "loading"; loading: boolean }
   // The Deck
   | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean }

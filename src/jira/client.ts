@@ -4,6 +4,11 @@ import { Filter, JiraTask, Size } from "../types";
 
 export class JiraAuthError extends Error {}
 
+/** How long a single Jira request may run before we give up. Without this a wrong
+ * base URL or an unreachable site (VPN off, DNS, firewall) hangs `fetch` forever,
+ * which would leave the panel stuck on "loading" with no indication of why. */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 // The Sprint field is a custom (greenhopper) field; its id is stable per Jira site.
 let cachedSprintFieldId: string | null | undefined;
 
@@ -31,15 +36,34 @@ export class JiraClient {
   private async request(pathname: string, init?: RequestInit): Promise<any> {
     const header = await this.auth.getAuthHeader();
     if (!header) throw new JiraAuthError("Not signed in to Jira.");
-    const res = await fetch(`${this.baseUrl}${pathname}`, {
-      ...init,
-      headers: {
-        Authorization: header,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        ...(init?.headers || {}),
-      },
-    });
+    if (!this.baseUrl) {
+      throw new Error("No Jira site URL configured. Run “Agent Flow: Run Setup…”.");
+    }
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), REQUEST_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`${this.baseUrl}${pathname}`, {
+        ...init,
+        signal: ctl.signal,
+        headers: {
+          Authorization: header,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          ...(init?.headers || {}),
+        },
+      });
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") {
+        throw new Error(
+          `Jira didn't respond within ${REQUEST_TIMEOUT_MS / 1000}s (${this.baseUrl}). ` +
+            "Check agentFlow.jira.baseUrl and your network/VPN.",
+        );
+      }
+      throw new Error(`Couldn't reach Jira at ${this.baseUrl}: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      clearTimeout(timer);
+    }
     if (res.status === 401 || res.status === 403) {
       throw new JiraAuthError(`Jira auth failed (${res.status}). Sign in again.`);
     }

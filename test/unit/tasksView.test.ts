@@ -107,15 +107,46 @@ describe("ready", () => {
   it("reports authed state with the current user and auto-fetches", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", authed: true, project: "ASM", me: "Jane" });
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane" });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
 
   it("reports unauthed state and does not fetch", async () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", authed: false, project: "ASM", me: null });
+    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
+  });
+
+  it("reports not-configured (and does not fetch) when the site URL / project are unset", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, baseUrl: "", project: "" });
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: false, project: "", me: null });
+    expect(clientStub.fetchTasks).not.toHaveBeenCalled();
+  });
+
+  it("posts state up-front and still loads tasks when the display-name lookup fails", async () => {
+    clientStub.currentUserName.mockRejectedValue(new Error("myself 500"));
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    // A state is posted before (and regardless of) the /myself round-trip…
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: null });
+    // …and the task list — the real payload — still loads.
+    expect(clientStub.fetchTasks).toHaveBeenCalled();
+  });
+
+  it("re-establishes state and fetches on retry", async () => {
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "retry" });
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane" });
+    expect(clientStub.fetchTasks).toHaveBeenCalled();
+  });
+
+  it("routes runSetup to the setup command", async () => {
+    const { send } = setup();
+    await send({ type: "runSetup" });
+    expect(commands.executeCommand).toHaveBeenCalledWith("agentFlow.setup");
   });
 });
 
@@ -124,7 +155,7 @@ describe("fetch", () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "fetch", filter: "mine", size: "any" });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
-    expect(posted()).toContainEqual({ type: "state", authed: false, project: "ASM", me: null });
+    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null });
   });
 
   it("toggles loading and posts tasks with a services guess", async () => {
@@ -304,8 +335,20 @@ describe("error handling", () => {
     clientStub.fetchTasks.mockRejectedValue(new JiraAuthError("expired"));
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mine", size: "any" });
-    expect(posted()).toContainEqual({ type: "state", authed: false, project: "ASM", me: null });
+    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+    expect(posted()).toContainEqual({ type: "loading", loading: false });
+    // Auth errors re-gate (no persistent error banner — the sign-in screen is the cue).
+    expect(posted().some((m) => m.type === "error")).toBe(false);
+  });
+
+  it("posts a persistent, retryable error banner on a non-auth failure", async () => {
+    clientStub.fetchTasks.mockRejectedValue(new Error("Jira didn't respond within 15s"));
+    const { send, posted } = setup();
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    expect(posted()).toContainEqual(
+      expect.objectContaining({ type: "error", canRetry: true, message: expect.stringContaining("15s") }),
+    );
     expect(posted()).toContainEqual({ type: "loading", loading: false });
   });
 });

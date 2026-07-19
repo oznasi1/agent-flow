@@ -19,7 +19,7 @@ function host(msg: OutboundMessage) {
   });
 }
 
-const authed = () => host({ type: "state", authed: true, project: "ASM", me: "Jane" });
+const authed = () => host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane" });
 
 beforeEach(() => sent.mockClear());
 
@@ -31,7 +31,7 @@ describe("mount + auth gate", () => {
 
   it("shows the sign-in gate and wires the button when unauthenticated", () => {
     render(<App />);
-    host({ type: "state", authed: false, project: "", me: null });
+    host({ type: "state", authed: false, configured: true, project: "", me: null });
     const button = screen.getByRole("button", { name: /Sign in to Jira/i });
     fireEvent.click(button);
     expect(sent).toHaveBeenCalledWith({ type: "signIn" });
@@ -45,6 +45,37 @@ describe("mount + auth gate", () => {
     expect(screen.getByText("Jane")).toBeInTheDocument();
     expect(screen.getByText("ASM-1")).toBeInTheDocument();
     expect(screen.getByText("Fix the bug")).toBeInTheDocument();
+  });
+});
+
+describe("problem indication", () => {
+  it("shows a Connecting… indicator before any state arrives (never blank)", () => {
+    render(<App />);
+    expect(screen.getByText(/Connecting to Jira/i)).toBeInTheDocument();
+  });
+
+  it("shows a Run setup call-to-action when not configured", () => {
+    render(<App />);
+    host({ type: "state", authed: false, configured: false, project: "", me: null });
+    expect(screen.queryByText(/Sign in to Jira/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Run setup/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "runSetup" });
+  });
+
+  it("shows a persistent error banner and retries on click", () => {
+    render(<App />);
+    host({ type: "error", message: "Jira didn't respond within 15s", canRetry: true });
+    expect(screen.getByText(/didn't respond within 15s/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Retry/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "retry" });
+  });
+
+  it("clears the error once fresh state arrives", () => {
+    render(<App />);
+    host({ type: "error", message: "boom", canRetry: true });
+    expect(screen.getByText(/boom/)).toBeInTheDocument();
+    host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane" });
+    expect(screen.queryByText(/boom/)).not.toBeInTheDocument();
   });
 });
 
