@@ -664,3 +664,44 @@ describe("live-window open targets", () => {
     expect(readLiveWindows).not.toHaveBeenCalled();
   });
 });
+
+describe("explore — open target", () => {
+  const runExplore = async () => {
+    const provider = setup().provider;
+    await (provider as unknown as { explore: () => Promise<void> }).explore();
+  };
+
+  it("routes Explore through the open-target picker and into an existing workspace", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    // topic input → repo multi-pick → open-target pick (existing workspace) → ws pick
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retries");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce([{ repo: mkRepos(["account-service"])[0] }] as never) // repos
+      .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)        // open where
+      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);         // which workspace
+    vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 }]);
+
+    await runExplore();
+
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ existingWorkspaceFile: "/ws/team.code-workspace", mode: "multiroot", openIn: "new" }),
+    );
+  });
+
+  it("opens an Explore session into a live folder window", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(readLiveWindows).mockReturnValue([
+      { pid: 1, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 9 },
+    ]);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("poke around");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce([{ repo: mkRepos(["centaur"])[0] }] as never)
+      .mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/centaur" } } as never);
+
+    await runExplore();
+
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ existingFolder: "/repos/centaur", mode: "per-window", openIn: "new" }),
+    );
+  });
+});

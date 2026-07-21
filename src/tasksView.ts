@@ -314,8 +314,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (!picks || picks.length === 0) return;
     const services = picks.map((p) => p.repo);
 
-    const mode = await this.chooseWorkspaceMode(services.length, cfg.workspaceMode, "Explore");
-    if (!mode) return;
+    const target = await this.chooseOpenTarget(cfg);
+    if (!target) return;
+    const args = await this.targetToOpenArgs(target, services.length, "Explore", cfg);
+    if (!args) return;
 
     const slug = topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "explore";
     const planMd = `## Exploration: ${topic}\n\n_No Jira ticket yet — a knowledge/exploration session. If it turns into work, open a ticket afterwards._`;
@@ -324,10 +326,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       planMd,
       descriptionText: "",
       services,
-      mode,
+      mode: args.mode,
       promptTemplate: cfg.explorePrompt,
       workspaceDir: cfg.workspaceDir,
       seedAgent: cfg.seedAgent,
+      openIn: args.openIn,
+      existingWorkspaceFile: args.existingWorkspaceFile,
+      existingFolder: args.existingFolder,
     });
 
     const where = result.workspaceFile
