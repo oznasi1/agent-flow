@@ -842,6 +842,13 @@ describe("reviewPr", () => {
     expect(promptOf()).not.toContain(PR_REVIEW_AUTOFIX_CLAUSE);
   });
 
+  it("appends the auto-fix clause at the end when the prompt has no {files}", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, prReviewPrompt: "Review PR for {key}" });
+    const { provider } = setup();
+    await provider.reviewPr("ASM-1", ["account-service"]);
+    expect(promptOf()).toBe(`Review PR for {key} ${PR_REVIEW_AUTOFIX_CLAUSE}`);
+  });
+
   it("errors when no repos are checked out", async () => {
     vi.mocked(discoverRepos).mockReturnValue([]);
     const { provider, posted } = setup();

@@ -66,10 +66,10 @@ const EXPLORE_ACTION_DEFS: { id: string; label: string; settingKey: string; defa
  * readiness. Placeholders: {key} {summary} {url} {brief} {files}. The auto-fix
  * sentence (below) is appended just before {files} when agentFlow.prReviewAutoFix is on. */
 export const DEFAULT_PR_REVIEW_PROMPT =
-  'Jira {key}: "{summary}". This task has an open GitHub PR — all our PRs carry the Jira key in their title and branch. ' +
+  'Jira {key} ({url}): "{summary}". This task has an open GitHub PR — all our PRs carry the Jira key in their title and branch. ' +
   "Using `gh` (or the GitHub tools available to you): find the PR for {key}, run `gh pr checkout` to bring its branch " +
   "into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested " +
-  "changes, CI status, merge conflicts, and approval state. Summarize what you find. Ticket: {url}{files}";
+  "changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}";
 
 /** Appended to the PR-review prompt (just before {files}) when prReviewAutoFix is on. */
 export const PR_REVIEW_AUTOFIX_CLAUSE =

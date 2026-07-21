@@ -114,8 +114,10 @@ Slack-DM sentence in the Explore-actions design.
 
 ## Testing
 
-- `config.test.ts`: the three settings resolve with correct defaults; non-boolean
-  `prReviewAutoFix` ignored (defaults true); custom `prReviewStatus` honored.
+- `config.test.ts`: the three settings resolve with correct defaults; explicit
+  `prReviewAutoFix: false` honored (unset defaults to `true`, via `?? true` —
+  matching the codebase's other boolean settings); custom `prReviewStatus` honored;
+  empty `prReviewStatus` falls back to the default.
 - `tasksView.test.ts`: `reviewPr` forces `createWorktrees` even when
   `cfg.worktree === "never"`; seeds the PR-review template (not a prompt mode);
   auto-fix clause present iff `prReviewAutoFix`; cancelling the open-target picker

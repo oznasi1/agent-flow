@@ -4,7 +4,7 @@ import { JiraAuth } from "./jira/auth";
 import { JiraClient, JiraAuthError, JiraDetail } from "./jira/client";
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
-import { injectSlackDm } from "./engine/prompt";
+import { injectSlackDm, insertBeforeFiles } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles } from "./engine/workspace";
 import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
 import { createWorktrees } from "./engine/worktree";
@@ -565,14 +565,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Assemble the PR-review prompt: the configured base, with the auto-fix clause
-   * inserted just before the trailing {files} block when prReviewAutoFix is on. */
+   * inserted just before the trailing {files} block when prReviewAutoFix is on.
+   * Reuses insertBeforeFiles — the same technique as the Explore Slack-DM sentence. */
   private prReviewTemplate(cfg: AgentFlowConfig): string {
-    const base = cfg.prReviewPrompt;
-    if (!cfg.prReviewAutoFix) return base;
-    const clause = PR_REVIEW_AUTOFIX_CLAUSE;
-    return base.includes("{files}")
-      ? base.replace("{files}", ` ${clause}{files}`)
-      : `${base} ${clause}`;
+    return cfg.prReviewAutoFix
+      ? insertBeforeFiles(cfg.prReviewPrompt, " " + PR_REVIEW_AUTOFIX_CLAUSE)
+      : cfg.prReviewPrompt;
   }
 
   /** Where to open a taken task — new window, this window, a saved workspace, or a

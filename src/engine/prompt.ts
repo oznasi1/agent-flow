@@ -17,17 +17,21 @@ export function renderPrompt(template: string, vars: PromptVars, mentions: strin
     .replace(/\{files\}/g, files);
 }
 
+/** Insert `sentence` just before the first {files} placeholder so the relevant-files
+ * block stays at the very end; append it when the template has no {files}. `sentence`
+ * is inserted verbatim (caller includes any leading space) — slice-based, so `$`
+ * patterns in it are never interpreted the way String.replace would. */
+export function insertBeforeFiles(template: string, sentence: string): string {
+  const i = template.indexOf("{files}");
+  return i === -1 ? template + sentence : template.slice(0, i) + sentence + template.slice(i);
+}
+
 /** Sentence appended to a seeded Explore prompt when the action's Slack-DM toggle
  * is on. The agent performs the DM via its own Slack connector. */
 export const SLACK_DM_SENTENCE =
   "When you're done, send me a direct message on Slack summarizing the session (and link any Jira ticket you opened).";
 
-/** Append the Slack-DM instruction to a prompt template. Placed just before the
- * first {files} placeholder so the relevant-files block stays at the very end;
- * appended to the end when the template has no {files}. A no-op when disabled. */
+/** Append the Slack-DM instruction to a prompt template (before {files}). No-op when disabled. */
 export function injectSlackDm(template: string, enabled: boolean): string {
-  if (!enabled) return template;
-  const sentence = " " + SLACK_DM_SENTENCE;
-  const i = template.indexOf("{files}");
-  return i === -1 ? template + sentence : template.slice(0, i) + sentence + template.slice(i);
+  return enabled ? insertBeforeFiles(template, " " + SLACK_DM_SENTENCE) : template;
 }

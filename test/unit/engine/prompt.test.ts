@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderPrompt, injectSlackDm, SLACK_DM_SENTENCE, type PromptVars } from "../../../src/engine/prompt";
+import { renderPrompt, injectSlackDm, insertBeforeFiles, SLACK_DM_SENTENCE, type PromptVars } from "../../../src/engine/prompt";
 
 const V: PromptVars = {
   key: "ASM-5412",
@@ -41,6 +41,24 @@ describe("renderPrompt", () => {
 
   it("returns a template with no placeholders verbatim", () => {
     expect(renderPrompt("just start", V, ["@a"])).toBe("just start");
+  });
+});
+
+describe("insertBeforeFiles", () => {
+  it("inserts the sentence just before a trailing {files}", () => {
+    expect(insertBeforeFiles("do it{files}", " NOW")).toBe("do it NOW{files}");
+  });
+
+  it("appends the sentence when there is no {files} placeholder", () => {
+    expect(insertBeforeFiles("do it", " NOW")).toBe("do it NOW");
+  });
+
+  it("inserts before the first {files} only", () => {
+    expect(insertBeforeFiles("a{files}b{files}", " NOW")).toBe("a NOW{files}b{files}");
+  });
+
+  it("does not interpret $ patterns in the inserted sentence", () => {
+    expect(insertBeforeFiles("x{files}", " $& $1 done")).toBe("x $& $1 done{files}");
   });
 });
 
