@@ -2,7 +2,7 @@
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
   "description": "Grab a Jira task and spin up its workspace — a task pool in your sidebar that opens the right repos and pre-seeds a Claude Code agent.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",
   "license": "MIT",
@@ -241,7 +241,13 @@
         },
         "agentFlow.exploreMode": {
           "type": "string",
-          "enum": ["ask", "jiraTicket", "knowledge", "debug", "general"],
+          "enum": [
+            "ask",
+            "jiraTicket",
+            "knowledge",
+            "debug",
+            "general"
+          ],
           "enumDescriptions": [
             "Choose an action each time you click Explore",
             "Open a Jira ticket — explore, then create a ticket capturing the findings",
@@ -280,13 +286,32 @@
           "type": "object",
           "markdownDescription": "Per-action: when checked, the seeded prompt asks the agent to send you a Slack DM summarizing the session when it ends. Off by default. (The agent does this via its own Slack connector.)",
           "properties": {
-            "jiraTicket": { "type": "boolean", "description": "Open a Jira ticket" },
-            "knowledge": { "type": "boolean", "description": "Enhance knowledge / flow" },
-            "debug": { "type": "boolean", "description": "Debug" },
-            "general": { "type": "boolean", "description": "General" }
+            "jiraTicket": {
+              "type": "boolean",
+              "description": "Open a Jira ticket"
+            },
+            "knowledge": {
+              "type": "boolean",
+              "description": "Enhance knowledge / flow"
+            },
+            "debug": {
+              "type": "boolean",
+              "description": "Debug"
+            },
+            "general": {
+              "type": "boolean",
+              "description": "General"
+            }
           },
-          "additionalProperties": { "type": "boolean" },
-          "default": { "jiraTicket": false, "knowledge": false, "debug": false, "general": false }
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "default": {
+            "jiraTicket": false,
+            "knowledge": false,
+            "debug": false,
+            "general": false
+          }
         },
         "agentFlow.prReviewStatus": {
           "type": "string",
