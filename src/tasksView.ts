@@ -1,9 +1,10 @@
 import * as vscode from "vscode";
-import { getConfig, AgentFlowConfig } from "./config";
+import { getConfig, AgentFlowConfig, ExploreAction } from "./config";
 import { JiraAuth } from "./jira/auth";
 import { JiraClient, JiraAuthError } from "./jira/client";
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
+import { injectSlackDm } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles } from "./engine/workspace";
 import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
 import { createWorktrees } from "./engine/worktree";
@@ -279,6 +280,19 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.toast("success", `${key} → your sprint`);
   }
 
+  /** Pick which Explore action to run. Uses cfg.exploreMode directly when it names a
+   * known action; otherwise ("ask" or an unknown id) shows a QuickPick. Returns
+   * undefined when the user cancels the picker. */
+  private async chooseExploreAction(cfg: AgentFlowConfig): Promise<ExploreAction | undefined> {
+    const configured = cfg.exploreActions.find((a) => a.id === cfg.exploreMode);
+    if (configured) return configured;
+    const pick = await vscode.window.showQuickPick(
+      cfg.exploreActions.map((a) => ({ label: a.label, action: a })),
+      { title: "Explore — what kind of session?", placeHolder: "Pick an action", ignoreFocusOut: true },
+    );
+    return pick?.action;
+  }
+
   /** Explore flow: pick repos freely (no ticket), open a workspace, and seed a Claude Code
    * agent for investigation/knowledge — a Jira ticket can come out of it later. */
   public async explore(): Promise<void> {
@@ -288,6 +302,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
       return;
     }
+
+    const action = await this.chooseExploreAction(cfg);
+    if (!action) return; // picker cancelled
 
     const raw = await vscode.window.showInputBox({
       title: "Explore — what do you want to dig into?",
@@ -327,7 +344,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       descriptionText: "",
       services,
       mode: args.mode,
-      promptTemplate: cfg.explorePrompt,
+      promptTemplate: injectSlackDm(action.prompt, action.slackDm),
       workspaceDir: cfg.workspaceDir,
       seedAgent: cfg.seedAgent,
       openIn: args.openIn,

@@ -26,6 +26,41 @@ export const DEFAULT_EXPLORE_PROMPT =
   "Help me understand how this works: map the relevant code paths, explain the flow, and flag anything surprising " +
   "or worth a follow-up ticket. Don't change code unless I ask.{files}";
 
+/** Seed for the "Open a Jira ticket" action — explore, then create a ticket. */
+export const DEFAULT_EXPLORE_JIRA_TICKET_PROMPT =
+  'Exploration session. Focus: "{summary}". A brief listing the repos in scope is at {brief}. ' +
+  "Dig into this, then draft and create a Jira ticket that captures what you found — a clear problem " +
+  "statement, the affected code paths, and a proposed approach. Add the `claude-code` label to the ticket, " +
+  "and share the ticket key and URL.{files}";
+
+/** Seed for the "Debug" action — reproduce, root-cause, propose a fix. */
+export const DEFAULT_EXPLORE_DEBUG_PROMPT =
+  'Debugging session — no Jira ticket yet. Focus: "{summary}". A brief listing the repos in scope is at {brief}. ' +
+  "Reproduce the problem, trace it to a root cause, and explain what's going wrong with evidence from the code. " +
+  "Propose a fix, but don't change code unless I ask.{files}";
+
+/** Seed for the "General" action — open-ended working session. */
+export const DEFAULT_EXPLORE_GENERAL_PROMPT =
+  'Working session. Focus: "{summary}". A brief listing the repos in scope is at {brief}. ' +
+  "Help me make progress on this — ask what I need if it's unclear before diving in. " +
+  "Don't change code unless I ask.{files}";
+
+/** One Explore action as seen by the flow: id + picker label + resolved prompt + Slack toggle. */
+export interface ExploreAction {
+  id: string;
+  label: string;
+  prompt: string;
+  slackDm: boolean;
+}
+
+/** Fixed built-in actions. `settingKey` is the multiline string setting holding the prompt. */
+const EXPLORE_ACTION_DEFS: { id: string; label: string; settingKey: string; defaultPrompt: string }[] = [
+  { id: "jiraTicket", label: "Open a Jira ticket", settingKey: "explorePrompts.jiraTicket", defaultPrompt: DEFAULT_EXPLORE_JIRA_TICKET_PROMPT },
+  { id: "knowledge", label: "Enhance knowledge / flow", settingKey: "explorePrompts.knowledge", defaultPrompt: DEFAULT_EXPLORE_PROMPT },
+  { id: "debug", label: "Debug", settingKey: "explorePrompts.debug", defaultPrompt: DEFAULT_EXPLORE_DEBUG_PROMPT },
+  { id: "general", label: "General", settingKey: "explorePrompts.general", defaultPrompt: DEFAULT_EXPLORE_GENERAL_PROMPT },
+];
+
 export interface AgentFlowConfig {
   baseUrl: string;
   project: string;
@@ -39,7 +74,8 @@ export interface AgentFlowConfig {
   openIn: "ask" | "new-window" | "this-window" | "pick-existing";
   taskMode: string; // "ask", or a PromptMode id
   promptModes: PromptMode[];
-  explorePrompt: string;
+  exploreMode: string; // "ask", or an ExploreAction id
+  exploreActions: ExploreAction[];
   worktree: "ask" | "always" | "never";
   trackOpenWindows: boolean;
   stampLabelOnWrite: boolean;
@@ -53,8 +89,33 @@ export function expandHome(p: string): string {
   return p;
 }
 
+/** The user-set value of a setting (folder > workspace > global), or undefined if
+ * only the schema default applies. Used to detect an explicit legacy value for migration. */
+function explicitConfigValue<T>(c: vscode.WorkspaceConfiguration, key: string): T | undefined {
+  const i = c.inspect<T>(key);
+  return (i?.workspaceFolderValue ?? i?.workspaceValue ?? i?.globalValue) as T | undefined;
+}
+
 export function getConfig(): AgentFlowConfig {
   const c = vscode.workspace.getConfiguration("agentFlow");
+  const slackRaw = c.get<Record<string, unknown>>("exploreSlackDm") ?? {};
+  const resolvePrompt = (def: { id: string; settingKey: string; defaultPrompt: string }): string => {
+    if (def.id === "knowledge") {
+      // Migrate a customized legacy explorePrompt into the knowledge action.
+      return (
+        explicitConfigValue<string>(c, def.settingKey) ??
+        explicitConfigValue<string>(c, "explorePrompt") ??
+        def.defaultPrompt
+      );
+    }
+    return c.get<string>(def.settingKey) || def.defaultPrompt;
+  };
+  const exploreActions: ExploreAction[] = EXPLORE_ACTION_DEFS.map((def) => ({
+    id: def.id,
+    label: def.label,
+    prompt: resolvePrompt(def),
+    slackDm: slackRaw[def.id] === true,
+  }));
   return {
     baseUrl: (c.get<string>("jira.baseUrl") || "").replace(/\/+$/, ""),
     project: c.get<string>("jira.project") || "",
@@ -74,7 +135,8 @@ export function getConfig(): AgentFlowConfig {
       const m = c.get<PromptMode[]>("promptModes");
       return Array.isArray(m) && m.length ? m.filter((x) => x && x.id && x.label && x.prompt) : DEFAULT_PROMPT_MODES;
     })(),
-    explorePrompt: c.get<string>("explorePrompt") || DEFAULT_EXPLORE_PROMPT,
+    exploreMode: c.get<string>("exploreMode") || "ask",
+    exploreActions,
     worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
     trackOpenWindows: c.get<boolean>("trackOpenWindows") ?? true,
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,

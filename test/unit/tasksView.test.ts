@@ -25,6 +25,7 @@ import { readLiveWindows, windowIdentity } from "../../src/engine/presence";
 import { JiraClient, JiraAuthError } from "../../src/jira/client";
 import { TasksViewProvider } from "../../src/tasksView";
 import type { InboundMessage, OutboundMessage } from "../../src/types";
+import { SLACK_DM_SENTENCE } from "../../src/engine/prompt";
 
 const CFG = {
   baseUrl: "https://jira",
@@ -39,7 +40,13 @@ const CFG = {
   openIn: "new-window" as const,
   taskMode: "plan",
   promptModes: [{ id: "plan", label: "Plan", prompt: "P {key}" }],
-  explorePrompt: "Explore {summary}{files}",
+  exploreMode: "ask",
+  exploreActions: [
+    { id: "jiraTicket", label: "Open a Jira ticket", prompt: "JT {summary}{files}", slackDm: false },
+    { id: "knowledge", label: "Enhance knowledge / flow", prompt: "Explore {summary}{files}", slackDm: false },
+    { id: "debug", label: "Debug", prompt: "DBG {summary}{files}", slackDm: false },
+    { id: "general", label: "General", prompt: "GEN {summary}{files}", slackDm: false },
+  ],
   worktree: "never" as const,
   trackOpenWindows: true,
   stampLabelOnWrite: true,
@@ -321,6 +328,75 @@ describe("addToMySprint", () => {
     expect(clientStub.assignIssue).toHaveBeenCalledWith("ASM-1", "a1");
     expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
     expect(posted()).toContainEqual({ type: "movedToSprint", key: "ASM-1", assignee: "Jane", removed: true });
+  });
+});
+
+describe("explore", () => {
+  it("prompts for an action when exploreMode is 'ask' and seeds the chosen action's prompt", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "ask" });
+    const repos = mkRepos(["account-service", "centaur"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry logic");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ action: CFG.exploreActions[2] } as never) // action picker → Debug
+      .mockResolvedValueOnce([{ repo: repos[0] }, { repo: repos[1] }] as never); // repo picker
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ promptTemplate: "DBG {summary}{files}" }),
+    );
+  });
+
+  it("uses the configured action directly and skips the action picker", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "jiraTicket" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // only the repo picker
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ promptTemplate: "JT {summary}{files}" }),
+    );
+  });
+
+  it("falls back to the action picker when the configured exploreMode id is unknown", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "bogus" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ action: CFG.exploreActions[3] } as never) // picker → General
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ promptTemplate: "GEN {summary}{files}" }),
+    );
+  });
+
+  it("aborts before opening a workspace when the action picker is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel action pick
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(window.showInputBox).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("appends the Slack-DM sentence before {files} when the action's slackDm is on", async () => {
+    const actions = CFG.exploreActions.map((a) => (a.id === "jiraTicket" ? { ...a, slackDm: true } : a));
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "jiraTicket", exploreActions: actions });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ promptTemplate: `JT {summary} ${SLACK_DM_SENTENCE}{files}` }),
+    );
   });
 });
 
@@ -674,7 +750,9 @@ describe("explore — open target", () => {
   };
 
   it("routes Explore through the open-target picker and into an existing workspace", async () => {
-    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    // exploreMode set to a real action id so chooseExploreAction returns without a pick,
+    // keeping this test focused on the open-target step.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
     // topic input → repo multi-pick → open-target pick (existing workspace) → ws pick
     vi.mocked(window.showInputBox).mockResolvedValueOnce("retries");
     vi.mocked(window.showQuickPick)
@@ -691,7 +769,7 @@ describe("explore — open target", () => {
   });
 
   it("opens an Explore session into a live folder window", async () => {
-    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
     vi.mocked(readLiveWindows).mockReturnValue([
       { pid: 1, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 9 },
     ]);

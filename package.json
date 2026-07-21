@@ -235,8 +235,58 @@
         "agentFlow.explorePrompt": {
           "type": "string",
           "editPresentation": "multilineText",
+          "markdownDeprecationMessage": "Deprecated — use the per-action prompts under `agentFlow.explorePrompts`. If you customized this, its value is migrated into the **Enhance knowledge / flow** action automatically.",
           "markdownDescription": "Prompt seeded when you start an **Explore** session (no ticket). Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
           "default": "Exploration session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me understand how this works: map the relevant code paths, explain the flow, and flag anything surprising or worth a follow-up ticket. Don't change code unless I ask.{files}"
+        },
+        "agentFlow.exploreMode": {
+          "type": "string",
+          "enum": ["ask", "jiraTicket", "knowledge", "debug", "general"],
+          "enumDescriptions": [
+            "Choose an action each time you click Explore",
+            "Open a Jira ticket — explore, then create a ticket capturing the findings",
+            "Enhance knowledge / flow — map the code paths and explain how it works",
+            "Debug — reproduce and root-cause a problem",
+            "General — open-ended working session"
+          ],
+          "default": "ask",
+          "markdownDescription": "Which Explore action to start. `ask` shows a picker each time; otherwise that action's prompt is seeded directly. Prompts are editable under `agentFlow.explorePrompts`."
+        },
+        "agentFlow.explorePrompts.jiraTicket": {
+          "type": "string",
+          "editPresentation": "multilineText",
+          "markdownDescription": "Prompt seeded for the **Open a Jira ticket** Explore action. Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
+          "default": "Exploration session. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Dig into this, then draft and create a Jira ticket that captures what you found — a clear problem statement, the affected code paths, and a proposed approach. Add the `claude-code` label to the ticket, and share the ticket key and URL.{files}"
+        },
+        "agentFlow.explorePrompts.knowledge": {
+          "type": "string",
+          "editPresentation": "multilineText",
+          "markdownDescription": "Prompt seeded for the **Enhance knowledge / flow** Explore action. Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
+          "default": "Exploration session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me understand how this works: map the relevant code paths, explain the flow, and flag anything surprising or worth a follow-up ticket. Don't change code unless I ask.{files}"
+        },
+        "agentFlow.explorePrompts.debug": {
+          "type": "string",
+          "editPresentation": "multilineText",
+          "markdownDescription": "Prompt seeded for the **Debug** Explore action. Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
+          "default": "Debugging session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Reproduce the problem, trace it to a root cause, and explain what's going wrong with evidence from the code. Propose a fix, but don't change code unless I ask.{files}"
+        },
+        "agentFlow.explorePrompts.general": {
+          "type": "string",
+          "editPresentation": "multilineText",
+          "markdownDescription": "Prompt seeded for the **General** Explore action. Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
+          "default": "Working session. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me make progress on this — ask what I need if it's unclear before diving in. Don't change code unless I ask.{files}"
+        },
+        "agentFlow.exploreSlackDm": {
+          "type": "object",
+          "markdownDescription": "Per-action: when checked, the seeded prompt asks the agent to send you a Slack DM summarizing the session when it ends. Off by default. (The agent does this via its own Slack connector.)",
+          "properties": {
+            "jiraTicket": { "type": "boolean", "description": "Open a Jira ticket" },
+            "knowledge": { "type": "boolean", "description": "Enhance knowledge / flow" },
+            "debug": { "type": "boolean", "description": "Debug" },
+            "general": { "type": "boolean", "description": "General" }
+          },
+          "additionalProperties": { "type": "boolean" },
+          "default": { "jiraTicket": false, "knowledge": false, "debug": false, "general": false }
         },
         "agentFlow.worktree": {
           "type": "string",
