@@ -74,7 +74,6 @@ export interface AgentFlowConfig {
   openIn: "ask" | "new-window" | "this-window" | "pick-existing";
   taskMode: string; // "ask", or a PromptMode id
   promptModes: PromptMode[];
-  explorePrompt: string;
   exploreMode: string; // "ask", or an ExploreAction id
   exploreActions: ExploreAction[];
   worktree: "ask" | "always" | "never";
@@ -135,7 +134,6 @@ export function getConfig(): AgentFlowConfig {
       const m = c.get<PromptMode[]>("promptModes");
       return Array.isArray(m) && m.length ? m.filter((x) => x && x.id && x.label && x.prompt) : DEFAULT_PROMPT_MODES;
     })(),
-    explorePrompt: c.get<string>("explorePrompt") || DEFAULT_EXPLORE_PROMPT,
     exploreMode: c.get<string>("exploreMode") || "ask",
     exploreActions,
     worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
