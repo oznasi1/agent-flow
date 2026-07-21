@@ -477,6 +477,33 @@ describe("openWorkspace — existing workspace", () => {
   });
 });
 
+describe("openWorkspace — existing folder window", () => {
+  it("focuses the folder, seeds a matching plan, and reports repos not added as roots", async () => {
+    // Two services; the open folder window is /repos/account-service.
+    const result = await openWorkspace(
+      baseReq({ existingFolder: "/repos/account-service" }),
+    );
+
+    expect(result.mode).toBe("per-window");
+    expect(result.workspaceFile).toBeUndefined();
+    expect(result.opened).toEqual(["/repos/account-service"]);
+    // account-service IS the open folder; centaur can't be added as a root.
+    expect(result.unaddedRepos).toEqual(["centaur"]);
+
+    const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
+    const plan = JSON.parse(String(planWrite![1]));
+    expect(plan.matches).toHaveLength(1);
+    expect(plan.matches[0].matchPath).toBe("/repos/account-service");
+  });
+
+  it("writes a brief into the target folder when it is not one of the repos", async () => {
+    await openWorkspace(baseReq({ services: mkRepos(["solo"]), existingFolder: "/other/open-window" }));
+    const brief = writeArg((p) => p === "/other/open-window/.pick-task/TASK.md");
+    expect(brief).toBeTruthy();
+    expect(String(brief![1])).toContain("ASM-1");
+  });
+});
+
 describe("listWorkspaceFiles", () => {
   it("lists only .code-workspace files, newest first, with folder counts", () => {
     readdirSync.mockReturnValue(["b.code-workspace", "notes.txt", "a.code-workspace"] as never);

@@ -10,6 +10,7 @@ import { renderPrompt } from "./prompt";
 import { writeRun, defaultRunsDir } from "./runs";
 import { gitState } from "./git";
 import { ensureGitExcluded } from "./gitExclude";
+import { windowIdentity } from "./presence";
 
 const BRIEF_DIR = ".pick-task";
 const BRIEF_FILE = "TASK.md";
@@ -37,6 +38,7 @@ export interface OpenRequest {
   seedAgent: boolean;
   openIn?: "new" | "current"; // "current" reuses the running window; default "new"
   existingWorkspaceFile?: string; // when set: open the task into this .code-workspace
+  existingFolder?: string; // when set: focus this already-open folder window + seed it
 }
 
 export interface OpenResult {
@@ -46,6 +48,7 @@ export interface OpenResult {
   opened: string[];
   mergedRepos?: string[]; // repos appended to an existing workspace
   mergeFailed?: boolean;  // existing workspace could not be parsed; opened as-is
+  unaddedRepos?: string[]; // repos that couldn't be added as roots to a folder window
 }
 
 interface PlanFile {
@@ -174,8 +177,9 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   let workspaceFile: string | undefined;
   let mergedRepos: string[] | undefined;
   let mergeFailed: boolean | undefined;
+  let unaddedRepos: string[] | undefined;
   const matches: PlanFile["matches"] = [];
-  const effMode: WorkspaceMode = req.existingWorkspaceFile ? "multiroot" : mode;
+  const effMode: WorkspaceMode = req.existingWorkspaceFile ? "multiroot" : req.existingFolder ? "per-window" : mode;
   if (req.existingWorkspaceFile) {
     const merge = mergeReposIntoWorkspace(req.existingWorkspaceFile, services);
     mergedRepos = merge.added;
@@ -185,6 +189,20 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
       (filesByRepo.get(s.name) ?? []).map((f) => mention("multiroot", s.name, f)),
     );
     matches.push({ matchPath: workspaceFile, prompt: agentPrompt(ticket, mentions, promptTemplate) });
+  } else if (req.existingFolder) {
+    const folder = req.existingFolder;
+    // Focus an already-open folder window and seed there. VS Code offers no way to
+    // inject roots into a folder window remotely, so its folder set is unchanged;
+    // ensure a brief exists IN that folder so the seeded relative {brief} resolves.
+    if (!services.some((s) => canon(s.path) === canon(folder))) {
+      const dir = path.join(folder, BRIEF_DIR);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, BRIEF_FILE), briefMarkdown(ticket, planMd, services, path.basename(folder), []));
+      ensureGitExcluded(folder, `${BRIEF_DIR}/`);
+    }
+    unaddedRepos = services.filter((s) => canon(s.path) !== canon(folder)).map((s) => s.name);
+    const mentions = services.flatMap((s) => (filesByRepo.get(s.name) ?? []).map((f) => mention("per-window", s.name, f)));
+    matches.push({ matchPath: folder, prompt: agentPrompt(ticket, mentions, promptTemplate) });
   } else if (mode === "multiroot") {
     fs.mkdirSync(workspaceDir, { recursive: true });
     workspaceFile = path.join(workspaceDir, `${ticket.key}.code-workspace`);
@@ -231,13 +249,15 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   const opened: string[] = [];
   if (effMode === "multiroot") {
     if (await openInEditor(workspaceFile!, newWindow)) opened.push(workspaceFile!);
+  } else if (req.existingFolder) {
+    if (await openInEditor(req.existingFolder, newWindow)) opened.push(req.existingFolder);
   } else {
     for (const s of services) {
       if (await openInEditor(s.path, newWindow)) opened.push(s.path);
     }
   }
 
-  return { mode: effMode, workspaceFile, briefs, opened, mergedRepos, mergeFailed };
+  return { mode: effMode, workspaceFile, briefs, opened, mergedRepos, mergeFailed, unaddedRepos };
 }
 
 /** Additively merge `repos` into an existing `.code-workspace` file, preserving
@@ -310,12 +330,7 @@ function canon(p: string): string {
 
 // ── Public: seed-on-activation (runs in every window our extension activates in) ─
 export async function maybeSeedAgent(context: vscode.ExtensionContext, log: (m: string) => void): Promise<void> {
-  let identity: string | undefined;
-  if (vscode.workspace.workspaceFile && vscode.workspace.workspaceFile.scheme === "file") {
-    identity = canon(vscode.workspace.workspaceFile.fsPath);
-  } else if (vscode.workspace.workspaceFolders?.length === 1) {
-    identity = canon(vscode.workspace.workspaceFolders[0].uri.fsPath);
-  }
+  const identity = windowIdentity()?.identity;
   log(`activation: window identity = ${identity ?? "(no single workspace)"}`);
   if (!identity) return;
 
