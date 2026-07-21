@@ -77,10 +77,6 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-  // Best-effort: drop this window's presence record so it stops being offered.
-  try {
-    removePresence(defaultWindowsDir(), process.pid);
-  } catch {
-    /* best-effort */
-  }
+  // Best-effort: drop this window's presence record (removePresence never throws).
+  removePresence(defaultWindowsDir(), process.pid);
 }

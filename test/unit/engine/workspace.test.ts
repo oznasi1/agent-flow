@@ -494,6 +494,12 @@ describe("openWorkspace — existing folder window", () => {
     const plan = JSON.parse(String(planWrite![1]));
     expect(plan.matches).toHaveLength(1);
     expect(plan.matches[0].matchPath).toBe("/repos/account-service");
+
+    // The per-repo brief loop already writes account-service's TASK.md; the existingFolder
+    // guard must not write a second one into the same folder.
+    expect(
+      writeFileSync.mock.calls.filter((c) => String(c[0]) === "/repos/account-service/.pick-task/TASK.md"),
+    ).toHaveLength(1);
   });
 
   it("writes a brief into the target folder when it is not one of the repos", async () => {

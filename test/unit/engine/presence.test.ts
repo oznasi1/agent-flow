@@ -124,11 +124,36 @@ describe("readLiveWindows", () => {
   });
 
   it("prunes a record with a non-positive or non-numeric pid", () => {
-    vi.spyOn(process, "kill").mockReturnValue(true as never);
-    readdirSync.mockReturnValue(["bad-pid.json"] as never);
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true as never);
+    readdirSync.mockReturnValue(["zero-pid.json"] as never);
     readFileSync.mockReturnValue(JSON.stringify(rec({ pid: 0, identity: "/repos/a" })));
     expect(readLiveWindows("/win")).toEqual([]);
-    expect(rmSync).toHaveBeenCalledWith("/win/bad-pid.json", { force: true });
+    expect(rmSync).toHaveBeenCalledWith("/win/zero-pid.json", { force: true });
+    // The guard rejects these BEFORE any pidAlive/process.kill check.
+    expect(killSpy).not.toHaveBeenCalled();
+    killSpy.mockRestore();
+  });
+
+  it("prunes a record with a negative pid", () => {
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true as never);
+    readdirSync.mockReturnValue(["negative-pid.json"] as never);
+    readFileSync.mockReturnValue(JSON.stringify(rec({ pid: -1, identity: "/repos/a" })));
+    expect(readLiveWindows("/win")).toEqual([]);
+    expect(rmSync).toHaveBeenCalledWith("/win/negative-pid.json", { force: true });
+    expect(killSpy).not.toHaveBeenCalled();
+    killSpy.mockRestore();
+  });
+
+  it("prunes a record with a non-numeric pid", () => {
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true as never);
+    readdirSync.mockReturnValue(["nonnumeric-pid.json"] as never);
+    readFileSync.mockReturnValue(
+      JSON.stringify(rec({ pid: "x" as unknown as number, identity: "/repos/a" })),
+    );
+    expect(readLiveWindows("/win")).toEqual([]);
+    expect(rmSync).toHaveBeenCalledWith("/win/nonnumeric-pid.json", { force: true });
+    expect(killSpy).not.toHaveBeenCalled();
+    killSpy.mockRestore();
   });
 
   it("never throws when pruning a dead-pid file fails", () => {

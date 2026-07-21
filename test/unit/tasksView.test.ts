@@ -81,6 +81,8 @@ beforeEach(() => {
     briefs: [],
     opened: ["/repos/account-service"],
   });
+  vi.mocked(readLiveWindows).mockReturnValue([]);
+  vi.mocked(windowIdentity).mockReturnValue(undefined);
 });
 
 /** Instantiate the provider and capture its webview message handler + post spy. */

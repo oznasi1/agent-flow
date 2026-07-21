@@ -504,8 +504,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (cfg.openIn === "this-window") return { kind: "current" };
     if (cfg.openIn === "pick-existing") return this.pickExistingWorkspace(cfg);
 
-    type Pick = OpenTarget | { kind: "existing-pick" };
-    const base: { label: string; detail: string; target: Pick }[] = [
+    type PickTarget = OpenTarget | { kind: "existing-pick" };
+    const base: { label: string; detail: string; target: PickTarget }[] = [
       { label: "$(empty-window) New window", detail: "Open the task in a separate window", target: { kind: "new" } },
       { label: "$(window) This window", detail: "Open it in the current window (replaces what's here)", target: { kind: "current" } },
       { label: "$(folder-library) Existing workspace…", detail: "Open the task into a .code-workspace you already have", target: { kind: "existing-pick" } },
