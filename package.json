@@ -256,7 +256,7 @@
           "type": "string",
           "editPresentation": "multilineText",
           "markdownDescription": "Prompt seeded for the **Open a Jira ticket** Explore action. Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
-          "default": "Exploration session. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Dig into this, then draft and create a Jira ticket that captures what you found — a clear problem statement, the affected code paths, and a proposed approach. Add the `claude-code` label to the ticket, and share the ticket key and URL when you're done.{files}"
+          "default": "Exploration session. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Dig into this, then draft and create a Jira ticket that captures what you found — a clear problem statement, the affected code paths, and a proposed approach. Add the `claude-code` label to the ticket, and share the ticket key and URL.{files}"
         },
         "agentFlow.explorePrompts.knowledge": {
           "type": "string",

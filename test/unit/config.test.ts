@@ -11,6 +11,7 @@ import {
   DEFAULT_EXPLORE_GENERAL_PROMPT,
 } from "../../src/config";
 import { setConfig } from "../_mocks/vscode";
+import pkg from "../../package.json";
 
 describe("expandHome", () => {
   it("expands a bare ~ to the home directory", () => {
@@ -168,5 +169,20 @@ describe("getConfig — explore actions", () => {
   it("prefers an explicit explorePrompts.knowledge over the legacy explorePrompt", () => {
     setConfig({ explorePrompt: "legacy {files}", "explorePrompts.knowledge": "new {files}" });
     expect(getConfig().exploreActions.find((x) => x.id === "knowledge")?.prompt).toBe("new {files}");
+  });
+});
+
+describe("package.json ⇄ config constants", () => {
+  const props = (pkg.contributes.configuration.properties as Record<string, { default?: unknown }>);
+
+  it("keeps each explore prompt schema default byte-identical to its config constant", () => {
+    expect(props["agentFlow.explorePrompts.jiraTicket"].default).toBe(DEFAULT_EXPLORE_JIRA_TICKET_PROMPT);
+    expect(props["agentFlow.explorePrompts.knowledge"].default).toBe(DEFAULT_EXPLORE_PROMPT);
+    expect(props["agentFlow.explorePrompts.debug"].default).toBe(DEFAULT_EXPLORE_DEBUG_PROMPT);
+    expect(props["agentFlow.explorePrompts.general"].default).toBe(DEFAULT_EXPLORE_GENERAL_PROMPT);
+  });
+
+  it("keeps the deprecated explorePrompt default equal to the knowledge default (migration target)", () => {
+    expect(props["agentFlow.explorePrompt"].default).toBe(DEFAULT_EXPLORE_PROMPT);
   });
 });

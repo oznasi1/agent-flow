@@ -28,7 +28,6 @@ export const SLACK_DM_SENTENCE =
 export function injectSlackDm(template: string, enabled: boolean): string {
   if (!enabled) return template;
   const sentence = " " + SLACK_DM_SENTENCE;
-  return template.includes("{files}")
-    ? template.replace("{files}", sentence + "{files}")
-    : template + sentence;
+  const i = template.indexOf("{files}");
+  return i === -1 ? template + sentence : template.slice(0, i) + sentence + template.slice(i);
 }

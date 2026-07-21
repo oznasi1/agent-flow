@@ -31,7 +31,7 @@ export const DEFAULT_EXPLORE_JIRA_TICKET_PROMPT =
   'Exploration session. Focus: "{summary}". A brief listing the repos in scope is at {brief}. ' +
   "Dig into this, then draft and create a Jira ticket that captures what you found — a clear problem " +
   "statement, the affected code paths, and a proposed approach. Add the `claude-code` label to the ticket, " +
-  "and share the ticket key and URL when you're done.{files}";
+  "and share the ticket key and URL.{files}";
 
 /** Seed for the "Debug" action — reproduce, root-cause, propose a fix. */
 export const DEFAULT_EXPLORE_DEBUG_PROMPT =
@@ -113,7 +113,7 @@ export function getConfig(): AgentFlowConfig {
     id: def.id,
     label: def.label,
     prompt: resolvePrompt(def),
-    slackDm: (slackRaw as Record<string, unknown>)[def.id] === true,
+    slackDm: slackRaw[def.id] === true,
   }));
   return {
     baseUrl: (c.get<string>("jira.baseUrl") || "").replace(/\/+$/, ""),
