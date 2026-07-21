@@ -76,6 +76,16 @@ function pidAlive(pid: number): boolean {
   }
 }
 
+/** Best-effort unlink — pruning is a housekeeping side effect of reading, so a
+ * failure here (e.g. EACCES/EBUSY) must never fail the read itself. */
+function prune(file: string): void {
+  try {
+    fs.rmSync(file, { force: true });
+  } catch {
+    /* best-effort */
+  }
+}
+
 /** Read all presence records, pruning any whose process is dead and any that fail
  * to parse. Deduped by identity, newest first. */
 export function readLiveWindows(dir: string): PresenceRecord[] {
@@ -85,8 +95,7 @@ export function readLiveWindows(dir: string): PresenceRecord[] {
   } catch {
     return [];
   }
-  const seen = new Set<string>();
-  const out: PresenceRecord[] = [];
+  const valid: PresenceRecord[] = [];
   for (const n of names) {
     if (!n.endsWith(".json")) continue;
     const file = path.join(dir, n);
@@ -94,16 +103,22 @@ export function readLiveWindows(dir: string): PresenceRecord[] {
     try {
       rec = JSON.parse(fs.readFileSync(file, "utf8")) as PresenceRecord;
     } catch {
-      fs.rmSync(file, { force: true });
+      prune(file);
       continue;
     }
-    if (typeof rec.pid !== "number" || !rec.identity || !pidAlive(rec.pid)) {
-      fs.rmSync(file, { force: true });
+    if (typeof rec.pid !== "number" || rec.pid <= 0 || !rec.identity || !pidAlive(rec.pid)) {
+      prune(file);
       continue;
     }
+    valid.push(rec);
+  }
+  valid.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  const seen = new Set<string>();
+  const out: PresenceRecord[] = [];
+  for (const rec of valid) {
     if (seen.has(rec.identity)) continue;
     seen.add(rec.identity);
     out.push(rec);
   }
-  return out.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  return out;
 }
