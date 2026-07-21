@@ -1,7 +1,15 @@
 import { describe, it, expect } from "vitest";
 import * as os from "os";
 import * as path from "path";
-import { expandHome, getConfig, DEFAULT_PROMPT_MODES } from "../../src/config";
+import {
+  expandHome,
+  getConfig,
+  DEFAULT_PROMPT_MODES,
+  DEFAULT_EXPLORE_PROMPT,
+  DEFAULT_EXPLORE_JIRA_TICKET_PROMPT,
+  DEFAULT_EXPLORE_DEBUG_PROMPT,
+  DEFAULT_EXPLORE_GENERAL_PROMPT,
+} from "../../src/config";
 import { setConfig } from "../_mocks/vscode";
 
 describe("expandHome", () => {
@@ -122,5 +130,43 @@ describe("getConfig — promptModes validation", () => {
   it("falls back to defaults for a non-array value", () => {
     setConfig({ promptModes: "nonsense" });
     expect(getConfig().promptModes).toEqual(DEFAULT_PROMPT_MODES);
+  });
+});
+
+describe("getConfig — explore actions", () => {
+  it("defaults to four actions with built-in labels and default prompts, all Slack-off", () => {
+    expect(getConfig().exploreActions).toEqual([
+      { id: "jiraTicket", label: "Open a Jira ticket", prompt: DEFAULT_EXPLORE_JIRA_TICKET_PROMPT, slackDm: false },
+      { id: "knowledge", label: "Enhance knowledge / flow", prompt: DEFAULT_EXPLORE_PROMPT, slackDm: false },
+      { id: "debug", label: "Debug", prompt: DEFAULT_EXPLORE_DEBUG_PROMPT, slackDm: false },
+      { id: "general", label: "General", prompt: DEFAULT_EXPLORE_GENERAL_PROMPT, slackDm: false },
+    ]);
+  });
+
+  it("defaults exploreMode to 'ask' and honors a configured value", () => {
+    expect(getConfig().exploreMode).toBe("ask");
+    setConfig({ exploreMode: "debug" });
+    expect(getConfig().exploreMode).toBe("debug");
+  });
+
+  it("uses a per-action prompt override from settings", () => {
+    setConfig({ "explorePrompts.debug": "repro {summary}{files}" });
+    expect(getConfig().exploreActions.find((x) => x.id === "debug")?.prompt).toBe("repro {summary}{files}");
+  });
+
+  it("flips slackDm per action id and ignores non-boolean values", () => {
+    setConfig({ exploreSlackDm: { jiraTicket: true, knowledge: "yes", debug: 1 } });
+    const byId = Object.fromEntries(getConfig().exploreActions.map((x) => [x.id, x.slackDm]));
+    expect(byId).toEqual({ jiraTicket: true, knowledge: false, debug: false, general: false });
+  });
+
+  it("migrates a customized legacy explorePrompt into the knowledge action", () => {
+    setConfig({ explorePrompt: "legacy explore {summary}{files}" });
+    expect(getConfig().exploreActions.find((x) => x.id === "knowledge")?.prompt).toBe("legacy explore {summary}{files}");
+  });
+
+  it("prefers an explicit explorePrompts.knowledge over the legacy explorePrompt", () => {
+    setConfig({ explorePrompt: "legacy {files}", "explorePrompts.knowledge": "new {files}" });
+    expect(getConfig().exploreActions.find((x) => x.id === "knowledge")?.prompt).toBe("new {files}");
   });
 });

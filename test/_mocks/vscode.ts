@@ -21,6 +21,9 @@ function makeConfig() {
     update: vi.fn(async (key: string, value: unknown, _target?: unknown): Promise<void> => {
       configStore[key] = value;
     }),
+    inspect: vi.fn((key: string) =>
+      key in configStore ? { key, globalValue: configStore[key] } : { key },
+    ),
   };
 }
 

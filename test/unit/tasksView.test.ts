@@ -34,6 +34,13 @@ const CFG = {
   taskMode: "plan",
   promptModes: [{ id: "plan", label: "Plan", prompt: "P {key}" }],
   explorePrompt: "Explore {summary}{files}",
+  exploreMode: "ask",
+  exploreActions: [
+    { id: "jiraTicket", label: "Open a Jira ticket", prompt: "JT {summary}{files}", slackDm: false },
+    { id: "knowledge", label: "Enhance knowledge / flow", prompt: "Explore {summary}{files}", slackDm: false },
+    { id: "debug", label: "Debug", prompt: "DBG {summary}{files}", slackDm: false },
+    { id: "general", label: "General", prompt: "GEN {summary}{files}", slackDm: false },
+  ],
   worktree: "never" as const,
   stampLabelOnWrite: true,
   provenanceLabel: "claude-code",
