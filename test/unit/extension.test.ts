@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { commands, window } from "../_mocks/vscode";
+import { commands, window, setConfig } from "../_mocks/vscode";
 import { fakeContext } from "../_helpers/factories";
 
 const authStub = {
@@ -161,5 +161,23 @@ describe("activate", () => {
   it("removes this window's presence on deactivate", () => {
     deactivate();
     expect(removePresence).toHaveBeenCalledWith("/win", expect.any(Number));
+  });
+
+  it("does not track presence when trackOpenWindows is disabled", () => {
+    setConfig({ trackOpenWindows: false });
+    const { context } = fakeContext();
+    activate(context);
+    expect(writePresence).not.toHaveBeenCalled();
+    expect(window.onDidChangeWindowState).not.toHaveBeenCalled();
+  });
+
+  it("re-stamps presence when the window state changes", () => {
+    const { context } = fakeContext();
+    activate(context);
+    const cb = vi.mocked(window.onDidChangeWindowState).mock.calls[0]?.[0] as (() => void) | undefined;
+    expect(cb).toBeTypeOf("function");
+    vi.mocked(writePresence).mockClear();
+    cb!();
+    expect(writePresence).toHaveBeenCalledTimes(1);
   });
 });
