@@ -3,7 +3,12 @@ import { commands, env, window } from "../_mocks/vscode";
 import { fakeAuth, fakeContext, mkRepos } from "../_helpers/factories";
 
 // ── sibling modules the controller depends on ──────────────────────────────
-vi.mock("../../src/config", () => ({ getConfig: vi.fn() }));
+// Keep the real config constants (DEFAULT_PR_REVIEW_PROMPT, PR_REVIEW_AUTOFIX_CLAUSE,
+// …) faithful — only getConfig is stubbed so tests control the resolved settings.
+vi.mock("../../src/config", async () => {
+  const actual = await vi.importActual<typeof import("../../src/config")>("../../src/config");
+  return { ...actual, getConfig: vi.fn() };
+});
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn() }));
 vi.mock("../../src/engine/workspace", () => ({ openWorkspace: vi.fn(), listWorkspaceFiles: vi.fn(() => []) }));
 vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn((s: unknown) => s) }));
@@ -17,7 +22,7 @@ vi.mock("../../src/jira/client", () => {
   return { JiraAuthError, JiraClient: vi.fn() };
 });
 
-import { getConfig } from "../../src/config";
+import { getConfig, PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
 import { openWorkspace, listWorkspaceFiles } from "../../src/engine/workspace";
 import { createWorktrees } from "../../src/engine/worktree";
@@ -47,6 +52,9 @@ const CFG = {
     { id: "debug", label: "Debug", prompt: "DBG {summary}{files}", slackDm: false },
     { id: "general", label: "General", prompt: "GEN {summary}{files}", slackDm: false },
   ],
+  prReviewStatus: "PR initiated",
+  prReviewAutoFix: true,
+  prReviewPrompt: "PR {key}{files}",
   worktree: "never" as const,
   trackOpenWindows: true,
   stampLabelOnWrite: true,
@@ -122,14 +130,14 @@ describe("ready", () => {
   it("reports authed state with the current user and auto-fetches", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane" });
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated" });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
 
   it("reports unauthed state and does not fetch", async () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null });
+    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated" });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
   });
 
@@ -137,7 +145,7 @@ describe("ready", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, baseUrl: "", project: "" });
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: false, project: "", me: null });
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: false, project: "", me: null, prReviewStatus: "PR initiated" });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
   });
 
@@ -146,7 +154,7 @@ describe("ready", () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
     // A state is posted before (and regardless of) the /myself round-trip…
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: null });
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated" });
     // …and the task list — the real payload — still loads.
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
@@ -154,7 +162,7 @@ describe("ready", () => {
   it("re-establishes state and fetches on retry", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "retry" });
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane" });
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated" });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
 
@@ -170,7 +178,7 @@ describe("fetch", () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "fetch", filter: "mine", size: "any" });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
-    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null });
+    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated" });
   });
 
   it("toggles loading and posts tasks with a services guess", async () => {
@@ -419,7 +427,7 @@ describe("error handling", () => {
     clientStub.fetchTasks.mockRejectedValue(new JiraAuthError("expired"));
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mine", size: "any" });
-    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null });
+    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated" });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
     expect(posted()).toContainEqual({ type: "loading", loading: false });
     // Auth errors re-gate (no persistent error banner — the sign-in screen is the cue).
@@ -783,5 +791,77 @@ describe("explore — open target", () => {
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ existingFolder: "/repos/centaur", mode: "per-window", openIn: "new" }),
     );
+  });
+});
+
+describe("reviewPr", () => {
+  const promptOf = () => (vi.mocked(openWorkspace).mock.calls[0][0] as { promptTemplate: string }).promptTemplate;
+
+  it("routes the reviewPr message to the handler", async () => {
+    const { send } = setup();
+    await send({ type: "reviewPr", key: "ASM-1", services: ["account-service"] });
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ ticket: expect.objectContaining({ key: "ASM-1" }) }),
+    );
+  });
+
+  it("seeds the PR-review prompt (not a task prompt mode) and never prompts for a mode", async () => {
+    const { provider } = setup();
+    await provider.reviewPr("ASM-1", ["account-service"]);
+    expect(promptOf()).toContain("PR {key}"); // from cfg.prReviewPrompt
+    expect(window.showQuickPick).not.toHaveBeenCalled(); // openIn=new-window, 1 repo, forced worktree → no picks
+  });
+
+  it("always creates a worktree even when worktree = never", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "never" });
+    const { provider } = setup();
+    await provider.reviewPr("ASM-1", ["account-service"]);
+    expect(createWorktrees).toHaveBeenCalledWith(
+      [expect.objectContaining({ name: "account-service" })],
+      "ASM-1",
+      "Do the thing",
+      expect.anything(),
+    );
+    expect(openWorkspace).toHaveBeenCalled();
+  });
+
+  it("appends the auto-fix clause before {files} when prReviewAutoFix is on", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, prReviewAutoFix: true });
+    const { provider } = setup();
+    await provider.reviewPr("ASM-1", ["account-service"]);
+    const t = promptOf();
+    expect(t).toContain(PR_REVIEW_AUTOFIX_CLAUSE);
+    expect(t.indexOf(PR_REVIEW_AUTOFIX_CLAUSE)).toBeLessThan(t.indexOf("{files}"));
+  });
+
+  it("omits the auto-fix clause when prReviewAutoFix is off", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, prReviewAutoFix: false });
+    const { provider } = setup();
+    await provider.reviewPr("ASM-1", ["account-service"]);
+    expect(promptOf()).toBe(CFG.prReviewPrompt);
+    expect(promptOf()).not.toContain(PR_REVIEW_AUTOFIX_CLAUSE);
+  });
+
+  it("errors when no repos are checked out", async () => {
+    vi.mocked(discoverRepos).mockReturnValue([]);
+    const { provider, posted } = setup();
+    await provider.reviewPr("ASM-1", ["account-service"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+  });
+
+  it("aborts before opening when the open-target picker is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
+    const { provider } = setup();
+    await provider.reviewPr("ASM-1", ["account-service"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("aborts when sign-in is declined", async () => {
+    vi.mocked(commands.executeCommand).mockResolvedValue(false);
+    const { provider } = setup({ authed: false });
+    await provider.reviewPr("ASM-1", ["account-service"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
   });
 });

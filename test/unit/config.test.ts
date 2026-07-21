@@ -9,6 +9,7 @@ import {
   DEFAULT_EXPLORE_JIRA_TICKET_PROMPT,
   DEFAULT_EXPLORE_DEBUG_PROMPT,
   DEFAULT_EXPLORE_GENERAL_PROMPT,
+  DEFAULT_PR_REVIEW_PROMPT,
 } from "../../src/config";
 import { setConfig } from "../_mocks/vscode";
 import pkg from "../../package.json";
@@ -102,6 +103,35 @@ describe("getConfig — normalization", () => {
   it("passes through openIn: pick-existing", () => {
     setConfig({ openIn: "pick-existing" });
     expect(getConfig().openIn).toBe("pick-existing");
+  });
+});
+
+describe("getConfig — PR review", () => {
+  it("applies the PR-review defaults when nothing is configured", () => {
+    const c = getConfig();
+    expect(c.prReviewStatus).toBe("PR initiated");
+    expect(c.prReviewAutoFix).toBe(true);
+    expect(c.prReviewPrompt).toBe(DEFAULT_PR_REVIEW_PROMPT);
+  });
+
+  it("honors a custom prReviewStatus", () => {
+    setConfig({ prReviewStatus: "PR approved" });
+    expect(getConfig().prReviewStatus).toBe("PR approved");
+  });
+
+  it("honors prReviewAutoFix = false", () => {
+    setConfig({ prReviewAutoFix: false });
+    expect(getConfig().prReviewAutoFix).toBe(false);
+  });
+
+  it("honors a custom prReviewPrompt", () => {
+    setConfig({ prReviewPrompt: "Look at the PR for {key}{files}" });
+    expect(getConfig().prReviewPrompt).toBe("Look at the PR for {key}{files}");
+  });
+
+  it("falls back to the default status for an empty string", () => {
+    setConfig({ prReviewStatus: "" });
+    expect(getConfig().prReviewStatus).toBe("PR initiated");
   });
 });
 

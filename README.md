@@ -19,6 +19,11 @@ orchestrate, not ready to set up.
 - **Open + seed** — writes `.pick-task/TASK.md` into each repo (git-excluded), generates a
   `<KEY>.code-workspace` (or one window per repo, or a per-task git worktree), and pre-fills
   the Claude Code panel with your chosen prompt mode (you press Enter to start).
+- **Review PR** — once a task reaches your PR-review status (default `PR initiated`), a
+  **Review PR** button appears on the card. It kicks off an agent **in a worktree** that finds
+  the task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
+  for your fixes — then, by default, starts implementing the requested changes (toggle with
+  `agentFlow.prReviewAutoFix`).
 
 ## Architecture
 
@@ -89,9 +94,12 @@ loaded. Open the **Agent Flow** icon in the activity bar and complete the first-
 | `agentFlow.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
 | `agentFlow.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
+| `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Review PR** button on a card. |
+| `agentFlow.prReviewAutoFix` | `true` | After the PR-review agent assesses the PR, let it implement the requested changes (off = assess only). |
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
-`agentFlow.explorePrompt`, and `agentFlow.worktree` — see the Settings UI. Per-task
+`agentFlow.explorePrompt`, `agentFlow.prReviewPrompt`, and `agentFlow.worktree` — see the
+Settings UI. The **Review PR** kick-off always runs in a worktree. Per-task
 worktrees are created inside each repo at `.claude/worktrees/<KEY>` (and git-excluded
 automatically). Jira credentials are stored in VS Code **SecretStorage**, never in settings.
 

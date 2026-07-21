@@ -61,6 +61,21 @@ const EXPLORE_ACTION_DEFS: { id: string; label: string; settingKey: string; defa
   { id: "general", label: "General", settingKey: "explorePrompts.general", defaultPrompt: DEFAULT_EXPLORE_GENERAL_PROMPT },
 ];
 
+/** Seed for a PR-review kick-off (a task in the PR-review status). The agent locates
+ * the task's GitHub PR by its Jira key, checks out its branch here, and assesses
+ * readiness. Placeholders: {key} {summary} {url} {brief} {files}. The auto-fix
+ * sentence (below) is appended just before {files} when agentFlow.prReviewAutoFix is on. */
+export const DEFAULT_PR_REVIEW_PROMPT =
+  'Jira {key}: "{summary}". This task has an open GitHub PR — all our PRs carry the Jira key in their title and branch. ' +
+  "Using `gh` (or the GitHub tools available to you): find the PR for {key}, run `gh pr checkout` to bring its branch " +
+  "into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested " +
+  "changes, CI status, merge conflicts, and approval state. Summarize what you find. Ticket: {url}{files}";
+
+/** Appended to the PR-review prompt (just before {files}) when prReviewAutoFix is on. */
+export const PR_REVIEW_AUTOFIX_CLAUSE =
+  "If it's ready, go ahead and implement the requested changes on this branch so it's ready for me to review — " +
+  "do not push or merge without me.";
+
 export interface AgentFlowConfig {
   baseUrl: string;
   project: string;
@@ -76,6 +91,9 @@ export interface AgentFlowConfig {
   promptModes: PromptMode[];
   exploreMode: string; // "ask", or an ExploreAction id
   exploreActions: ExploreAction[];
+  prReviewStatus: string; // task status that reveals the "Review PR" card action
+  prReviewAutoFix: boolean; // after assessing, proceed to implement the PR's requested changes
+  prReviewPrompt: string; // seeded prompt for the PR-review kick-off
   worktree: "ask" | "always" | "never";
   trackOpenWindows: boolean;
   stampLabelOnWrite: boolean;
@@ -137,6 +155,9 @@ export function getConfig(): AgentFlowConfig {
     })(),
     exploreMode: c.get<string>("exploreMode") || "ask",
     exploreActions,
+    prReviewStatus: c.get<string>("prReviewStatus") || "PR initiated",
+    prReviewAutoFix: c.get<boolean>("prReviewAutoFix") ?? true,
+    prReviewPrompt: c.get<string>("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT,
     worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
     trackOpenWindows: c.get<boolean>("trackOpenWindows") ?? true,
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,

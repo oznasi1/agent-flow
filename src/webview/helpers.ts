@@ -40,6 +40,14 @@ export function matchesStatus(task: JiraTask, selected: ReadonlySet<string>): bo
   return selected.size === 0 || selected.has(task.status);
 }
 
+/** Is this task in the configured PR-review status? Case-insensitive, whitespace-trimmed.
+ *  Both sides must be non-empty. Drives the "Review PR" card action. Pure. */
+export function isPrReviewStatus(status: string, configured: string): boolean {
+  const a = (status || "").trim().toLowerCase();
+  const b = (configured || "").trim().toLowerCase();
+  return a.length > 0 && b.length > 0 && a === b;
+}
+
 /** Map a Jira priority name to its card CSS class. Pure. */
 export function prioClass(p: string): string {
   const s = (p || "").toLowerCase();

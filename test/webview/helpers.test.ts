@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveStatuses, fmtEst, matchesStatus, moveKey, prioClass } from "../../src/webview/helpers";
+import { deriveStatuses, fmtEst, isPrReviewStatus, matchesStatus, moveKey, prioClass } from "../../src/webview/helpers";
 import { mkTask } from "../_helpers/factories";
 
 const tasks = (...keys: string[]) => keys.map((k) => mkTask({ key: k }));
@@ -83,6 +83,26 @@ describe("matchesStatus", () => {
 
   it("rejects a task whose status is not selected", () => {
     expect(matchesStatus(t, new Set(["To Do"]))).toBe(false);
+  });
+});
+
+describe("isPrReviewStatus", () => {
+  it("matches the configured status exactly", () => {
+    expect(isPrReviewStatus("PR initiated", "PR initiated")).toBe(true);
+  });
+
+  it("matches case-insensitively and ignoring surrounding whitespace", () => {
+    expect(isPrReviewStatus("pr initiated", "PR initiated")).toBe(true);
+    expect(isPrReviewStatus("  PR Initiated  ", "PR initiated")).toBe(true);
+  });
+
+  it("does not match a different status", () => {
+    expect(isPrReviewStatus("In Progress", "PR initiated")).toBe(false);
+  });
+
+  it("is false when either the status or the configured value is empty", () => {
+    expect(isPrReviewStatus("", "PR initiated")).toBe(false);
+    expect(isPrReviewStatus("PR initiated", "")).toBe(false);
   });
 });
 

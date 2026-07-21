@@ -129,6 +129,16 @@ export const CSS = `
     background: var(--vscode-toolbar-hoverBackground); }
   .sprint-add svg { display: block; }
 
+  /* PR-review kick-off: outlined like sprint-add, tinted to read as "ready to ship" */
+  .review-pr { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500;
+    padding: 3px 11px 3px 9px; border-radius: 14px; cursor: pointer; white-space: nowrap;
+    border: 1px solid var(--vscode-charts-green, #3fb950); background: transparent;
+    color: var(--vscode-charts-green, #3fb950);
+    transition: color .12s ease, border-color .12s ease, background .12s ease; }
+  .review-pr:hover { border-color: var(--vscode-focusBorder);
+    background: var(--vscode-toolbar-hoverBackground); }
+  .review-pr svg { display: block; }
+
   .detail { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
   .detail-loading { font-size: 11px; color: var(--vscode-descriptionForeground); }
   .desc { font-size: 11.5px; line-height: 1.5; color: var(--vscode-descriptionForeground);

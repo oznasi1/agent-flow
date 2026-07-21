@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
-import { getConfig, AgentFlowConfig, ExploreAction } from "./config";
+import { getConfig, AgentFlowConfig, ExploreAction, PR_REVIEW_AUTOFIX_CLAUSE } from "./config";
 import { JiraAuth } from "./jira/auth";
-import { JiraClient, JiraAuthError } from "./jira/client";
+import { JiraClient, JiraAuthError, JiraDetail } from "./jira/client";
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { injectSlackDm } from "./engine/prompt";
@@ -46,6 +46,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage(msg);
   }
 
+  /** Post the panel's `state`, folding in the config-derived fields the webview needs
+   * (project name, and the PR-review status string that gates the "Review PR" action). */
+  private postState(authed: boolean, configured: boolean, me: string | null): void {
+    const cfg = getConfig();
+    this.post({ type: "state", authed, configured, project: cfg.project, me, prReviewStatus: cfg.prReviewStatus });
+  }
+
   private toast(level: "success" | "error" | "info", message: string): void {
     this.post({ type: "toast", level, message });
   }
@@ -81,14 +88,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     } catch {
       authed = false;
     }
-    this.post({ type: "state", authed, configured, project: cfg.project, me: null });
+    this.postState(authed, configured, null);
     if (!configured || !authed) return;
 
     await Promise.all([
       this.client()
         .currentUserName()
         .then((me) => {
-          if (me) this.post({ type: "state", authed: true, configured, project: cfg.project, me });
+          if (me) this.postState(true, configured, me);
         })
         .catch(() => {
           /* display name is best-effort — the task list is the real payload */
@@ -121,7 +128,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
         case "fetch": {
           if (!(await this.auth.isAuthenticated())) {
-            this.post({ type: "state", authed: false, configured: !!cfg.baseUrl && !!cfg.project, project: cfg.project, me: null });
+            this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
             return;
           }
           this.post({ type: "loading", loading: true });
@@ -162,6 +169,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           await this.takeTask(m.key, m.services);
           break;
         }
+        case "reviewPr": {
+          await this.reviewPr(m.key, m.services);
+          break;
+        }
         case "changeStatus": {
           await this.changeStatus(m.key);
           break;
@@ -193,7 +204,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       const msg = e instanceof Error ? e.message : String(e);
       if (e instanceof JiraAuthError) {
         // Auth failures re-gate to the sign-in screen, which is itself the indication.
-        this.post({ type: "state", authed: false, configured: !!cfg.baseUrl && !!cfg.project, project: cfg.project, me: null });
+        this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
       } else {
         // Everything else (unreachable site, timeout, Jira 5xx, bad project key) gets a
         // persistent banner in the panel — a toast alone vanishes before it's read.
@@ -209,7 +220,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.log(`changeStatus ${key}: start`);
     if (!(await this.auth.isAuthenticated())) {
       this.log(`changeStatus ${key}: not authenticated`);
-      this.post({ type: "state", authed: false, configured: !!cfg.baseUrl && !!cfg.project, project: cfg.project, me: null });
+      this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
       return;
     }
     const client = this.client();
@@ -250,7 +261,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const cfg = getConfig();
     this.log(`addToMySprint ${key}: start`);
     if (!(await this.auth.isAuthenticated())) {
-      this.post({ type: "state", authed: false, configured: !!cfg.baseUrl && !!cfg.project, project: cfg.project, me: null });
+      this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
       return;
     }
     const client = this.client();
@@ -384,13 +395,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     ).map((r) => r.service.name);
   }
 
-  /** The pick flow: read ticket → infer services → confirm → choose mode → open + seed.
-   * `preselected` (from the in-card selection) skips the service QuickPick. */
-  public async takeTask(key: string, preselected?: string[]): Promise<void> {
+  /** Read the ticket and resolve the repo set for a kick-off (Take or Review PR):
+   * the auth gate, repo discovery, and the confirm-repos QuickPick. `preselected`
+   * (the in-card selection) skips the QuickPick. Returns undefined on any abort. */
+  private async resolveKickoff(
+    key: string,
+    preselected?: string[],
+  ): Promise<{ detail: JiraDetail; services: ServiceRef[] } | undefined> {
     const cfg = getConfig();
     if (!(await this.auth.isAuthenticated())) {
       const ok = await vscode.commands.executeCommand<boolean>("agentFlow.signIn");
-      if (!ok) return;
+      if (!ok) return undefined;
     }
 
     const detail = await vscode.window.withProgress(
@@ -401,7 +416,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
     if (repos.length === 0) {
       this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
-      return;
+      return undefined;
     }
     let services: ServiceRef[];
     if (preselected && preselected.length) {
@@ -431,33 +446,31 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           ignoreFocusOut: true,
         },
       );
-      if (!picks || picks.length === 0) return;
+      if (!picks || picks.length === 0) return undefined;
       services = picks.map((p) => p.repo);
     }
     if (services.length === 0) {
       this.toast("error", "No valid repos selected for this task.");
-      return;
+      return undefined;
     }
+    return { detail, services };
+  }
 
-    // How should the agent start — pick a prompt mode (or use the configured default).
-    const modes = cfg.promptModes;
-    let promptMode: PromptMode | undefined = modes.find((m) => m.id === cfg.taskMode);
-    if (!promptMode) {
-      const p = await vscode.window.showQuickPick(
-        modes.map((mm) => ({
-          label: mm.label,
-          detail: mm.prompt.replace(/\{[a-z]+\}/g, "").replace(/\s+/g, " ").trim().slice(0, 80),
-          mode: mm,
-        })),
-        { title: `${key} — how should the agent start?`, ignoreFocusOut: true },
-      );
-      if (!p) return;
-      promptMode = p.mode;
-    }
+  /** Open + seed a resolved kick-off: worktree decision → open target → workspace
+   * mode → brief → openWorkspace → success toast. Shared by Take and Review PR.
+   * `forceWorktree` (Review PR) always isolates in a worktree, ignoring cfg.worktree. */
+  private async launch(
+    detail: JiraDetail,
+    services: ServiceRef[],
+    promptTemplate: string,
+    forceWorktree: boolean,
+  ): Promise<void> {
+    const cfg = getConfig();
+    const key = detail.key;
 
     // Isolate in a git worktree?
     let useWorktree: boolean;
-    if (cfg.worktree === "always") useWorktree = true;
+    if (forceWorktree || cfg.worktree === "always") useWorktree = true;
     else if (cfg.worktree === "never") useWorktree = false;
     else {
       const p = await vscode.window.showQuickPick(
@@ -487,7 +500,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       descriptionText: detail.descriptionText,
       services,
       mode: args.mode,
-      promptTemplate: promptMode.prompt,
+      promptTemplate,
       workspaceDir: cfg.workspaceDir,
       seedAgent: cfg.seedAgent,
       openIn: args.openIn,
@@ -511,6 +524,55 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         : "";
       this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${unadded}${seeded}`);
     }
+  }
+
+  /** The pick flow: read ticket → infer services → confirm → choose mode → open + seed.
+   * `preselected` (from the in-card selection) skips the service QuickPick. */
+  public async takeTask(key: string, preselected?: string[]): Promise<void> {
+    const cfg = getConfig();
+    const resolved = await this.resolveKickoff(key, preselected);
+    if (!resolved) return;
+    const { detail, services } = resolved;
+
+    // How should the agent start — pick a prompt mode (or use the configured default).
+    const modes = cfg.promptModes;
+    let promptMode: PromptMode | undefined = modes.find((m) => m.id === cfg.taskMode);
+    if (!promptMode) {
+      const p = await vscode.window.showQuickPick(
+        modes.map((mm) => ({
+          label: mm.label,
+          detail: mm.prompt.replace(/\{[a-z]+\}/g, "").replace(/\s+/g, " ").trim().slice(0, 80),
+          mode: mm,
+        })),
+        { title: `${key} — how should the agent start?`, ignoreFocusOut: true },
+      );
+      if (!p) return;
+      promptMode = p.mode;
+    }
+
+    await this.launch(detail, services, promptMode.prompt, false);
+  }
+
+  /** PR-review kick-off: the same open+seed flow as Take, but always in a worktree and
+   * seeding the PR-review prompt — the agent finds the task's GitHub PR by its Jira key,
+   * checks out its branch, assesses readiness, and (when prReviewAutoFix) implements the
+   * requested changes. Surfaced on a card whose status matches cfg.prReviewStatus. */
+  public async reviewPr(key: string, preselected?: string[]): Promise<void> {
+    const resolved = await this.resolveKickoff(key, preselected);
+    if (!resolved) return;
+    const { detail, services } = resolved;
+    await this.launch(detail, services, this.prReviewTemplate(getConfig()), true);
+  }
+
+  /** Assemble the PR-review prompt: the configured base, with the auto-fix clause
+   * inserted just before the trailing {files} block when prReviewAutoFix is on. */
+  private prReviewTemplate(cfg: AgentFlowConfig): string {
+    const base = cfg.prReviewPrompt;
+    if (!cfg.prReviewAutoFix) return base;
+    const clause = PR_REVIEW_AUTOFIX_CLAUSE;
+    return base.includes("{files}")
+      ? base.replace("{files}", ` ${clause}{files}`)
+      : `${base} ${clause}`;
   }
 
   /** Where to open a taken task — new window, this window, a saved workspace, or a

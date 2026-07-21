@@ -19,7 +19,8 @@ function host(msg: OutboundMessage) {
   });
 }
 
-const authed = () => host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane" });
+const authed = (prReviewStatus = "PR initiated") =>
+  host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus });
 
 beforeEach(() => sent.mockClear());
 
@@ -31,7 +32,7 @@ describe("mount + auth gate", () => {
 
   it("shows the sign-in gate and wires the button when unauthenticated", () => {
     render(<App />);
-    host({ type: "state", authed: false, configured: true, project: "", me: null });
+    host({ type: "state", authed: false, configured: true, project: "", me: null, prReviewStatus: "PR initiated" });
     const button = screen.getByRole("button", { name: /Sign in to Jira/i });
     fireEvent.click(button);
     expect(sent).toHaveBeenCalledWith({ type: "signIn" });
@@ -56,7 +57,7 @@ describe("problem indication", () => {
 
   it("shows a Run setup call-to-action when not configured", () => {
     render(<App />);
-    host({ type: "state", authed: false, configured: false, project: "", me: null });
+    host({ type: "state", authed: false, configured: false, project: "", me: null, prReviewStatus: "PR initiated" });
     expect(screen.queryByText(/Sign in to Jira/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Run setup/i }));
     expect(sent).toHaveBeenCalledWith({ type: "runSetup" });
@@ -74,7 +75,7 @@ describe("problem indication", () => {
     render(<App />);
     host({ type: "error", message: "boom", canRetry: true });
     expect(screen.getByText(/boom/)).toBeInTheDocument();
-    host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane" });
+    host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated" });
     expect(screen.queryByText(/boom/)).not.toBeInTheDocument();
   });
 });
@@ -225,6 +226,29 @@ describe("task card actions", () => {
     withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
     fireEvent.click(screen.getByRole("button", { name: "Take" }));
     expect(sent).toHaveBeenCalledWith({ type: "take", key: "ASM-1", services: undefined });
+  });
+
+  it("shows a Review PR button on a card in the configured PR-review status", () => {
+    withTask(mkTask({ key: "ASM-9", status: "PR initiated", statusCategory: "indeterminate" }));
+    expect(screen.getByRole("button", { name: /Review PR/i })).toBeInTheDocument();
+  });
+
+  it("kicks off a PR review with the task key when clicked", () => {
+    withTask(mkTask({ key: "ASM-9", status: "PR initiated", statusCategory: "indeterminate" }));
+    fireEvent.click(screen.getByRole("button", { name: /Review PR/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "reviewPr", key: "ASM-9", services: undefined });
+  });
+
+  it("hides the Review PR button when the status does not match", () => {
+    withTask(mkTask({ key: "ASM-9", status: "In Progress", statusCategory: "indeterminate" }));
+    expect(screen.queryByRole("button", { name: /Review PR/i })).not.toBeInTheDocument();
+  });
+
+  it("honors a custom PR-review status, matched case-insensitively", () => {
+    render(<App />);
+    authed("PR Approved");
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-9", status: "pr approved", statusCategory: "indeterminate" })] });
+    expect(screen.getByRole("button", { name: /Review PR/i })).toBeInTheDocument();
   });
 
   it("adds an unassigned task to my sprint", () => {

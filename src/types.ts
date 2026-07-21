@@ -92,6 +92,7 @@ export type InboundMessage =
   | { type: "fetch"; filter: Filter; size: Size }
   | { type: "detail"; key: string }
   | { type: "take"; key: string; services?: string[] }
+  | { type: "reviewPr"; key: string; services?: string[] }
   | { type: "changeStatus"; key: string }
   | { type: "addToMySprint"; key: string }
   | { type: "explore" }
@@ -112,7 +113,7 @@ export type OutboundMessage =
   // `configured` is false until the Jira site URL + project key are set (first-run
   // setup). The webview uses it to show a "run setup" call-to-action rather than a
   // blank/loading panel.
-  | { type: "state"; authed: boolean; configured: boolean; project: string; me: string | null }
+  | { type: "state"; authed: boolean; configured: boolean; project: string; me: string | null; prReviewStatus: string }
   | { type: "tasks"; filter: Filter; tasks: JiraTask[] }
   | { type: "detail"; key: string; descriptionText: string; inferred: string[]; repos: string[] }
   | { type: "statusChanged"; key: string; status: string; category: string; removed: boolean }
