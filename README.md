@@ -88,6 +88,7 @@ loaded. Open the **Agent Flow** icon in the activity bar and complete the first-
 | `agentFlow.stampLabelOnWrite` | `true` | Whether to stamp the provenance label. |
 | `agentFlow.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
 | `agentFlow.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
+| `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
 `agentFlow.explorePrompt`, and `agentFlow.worktree` — see the Settings UI. Per-task
@@ -100,6 +101,14 @@ existing `.code-workspace` file and have the task's repos merged into it. That m
 non-destructive: Agent Flow only appends the repos the task needs (preserving the
 workspace file's existing folders, settings, and formatting) and opens it as a
 multi-root workspace; it never overwrites or removes what was already there.
+
+When taking a task (or starting an Explore session) with `agentFlow.openIn` set to
+`ask`, Agent Flow also lists the windows you already have open — a repo folder or a
+saved workspace — so you can drop the task straight into one of them. Choosing an open
+**workspace** window merges the task's repos into it; choosing an open **folder** window
+focuses it and seeds the agent there (a folder window can't gain root folders, so any
+other repos the task touches keep their briefs but aren't added as roots). Set
+`agentFlow.trackOpenWindows` to `false` to turn this off.
 
 ## Status
 
