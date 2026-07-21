@@ -7,11 +7,13 @@ docs/**
 scripts/**
 .github/**
 .claude/**
+.superpowers/**
 esbuild.js
 tsconfig.json
 vitest.config.ts
 **/*.map
 **/*.ts
+**/test-check.cjs
 *.vsix
 .gitignore
 CONTRIBUTING.md
