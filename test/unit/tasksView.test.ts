@@ -7,6 +7,11 @@ vi.mock("../../src/config", () => ({ getConfig: vi.fn() }));
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn() }));
 vi.mock("../../src/engine/workspace", () => ({ openWorkspace: vi.fn(), listWorkspaceFiles: vi.fn(() => []) }));
 vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn((s: unknown) => s) }));
+vi.mock("../../src/engine/presence", () => ({
+  readLiveWindows: vi.fn(() => []),
+  windowIdentity: vi.fn(() => undefined),
+  defaultWindowsDir: vi.fn(() => "/win"),
+}));
 vi.mock("../../src/jira/client", () => {
   class JiraAuthError extends Error {}
   return { JiraAuthError, JiraClient: vi.fn() };
@@ -16,6 +21,7 @@ import { getConfig } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
 import { openWorkspace, listWorkspaceFiles } from "../../src/engine/workspace";
 import { createWorktrees } from "../../src/engine/worktree";
+import { readLiveWindows, windowIdentity } from "../../src/engine/presence";
 import { JiraClient, JiraAuthError } from "../../src/jira/client";
 import { TasksViewProvider } from "../../src/tasksView";
 import type { InboundMessage, OutboundMessage } from "../../src/types";
@@ -454,7 +460,7 @@ describe("takeTask", () => {
   describe("existing workspace open target", () => {
     it("picks 'New window' from the 3-way picker without touching the workspace picker", async () => {
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
-      vi.mocked(window.showQuickPick).mockResolvedValueOnce({ val: "new" } as never);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "new" } } as never);
 
       const { provider } = setup();
       await provider.takeTask("ASM-1", ["account-service"]);
@@ -483,7 +489,7 @@ describe("takeTask", () => {
       // 1st quick-pick → the 3-way open-target picker, choosing "Existing workspace…".
       // 2nd quick-pick → the workspace-file picker, choosing the listed workspace.
       vi.mocked(window.showQuickPick)
-        .mockResolvedValueOnce({ val: "existing" } as never)
+        .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
         .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
@@ -593,5 +599,68 @@ describe("takeTask", () => {
       expect(toast.level).toBe("success");
       expect(toast.message).toContain("Added account-service");
     });
+  });
+});
+
+describe("live-window open targets", () => {
+  const askCfg = () => vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+
+  it("lists an open workspace window and opens the task into it (merge path)", async () => {
+    askCfg();
+    vi.mocked(readLiveWindows).mockReturnValue([
+      { pid: 1, identity: "/ws/team.code-workspace", kind: "workspace", label: "team.code-workspace", folders: 2, updatedAt: 9 },
+    ]);
+    // The open-target picker returns the live workspace window's mapped target.
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "existing", file: "/ws/team.code-workspace" } } as never);
+
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ existingWorkspaceFile: "/ws/team.code-workspace", mode: "multiroot", openIn: "new" }),
+    );
+  });
+
+  it("lists an open folder window and opens the task into it (focus + seed)", async () => {
+    askCfg();
+    vi.mocked(readLiveWindows).mockReturnValue([
+      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, updatedAt: 9 },
+    ]);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/account-service" } } as never);
+
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ existingFolder: "/repos/account-service", mode: "per-window", openIn: "new" }),
+    );
+  });
+
+  it("excludes the current window from the live list", async () => {
+    askCfg();
+    vi.mocked(windowIdentity).mockReturnValue({ identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1 });
+    vi.mocked(readLiveWindows).mockReturnValue([
+      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, updatedAt: 9 },
+      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 8 },
+    ]);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "new" } } as never);
+
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+
+    const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string }[];
+    const labels = items.map((i) => i.label);
+    expect(labels.some((l) => l.includes("centaur"))).toBe(true);
+    expect(labels.some((l) => l.includes("account-service"))).toBe(false); // current window excluded
+  });
+
+  it("does not read live windows when tracking is disabled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", trackOpenWindows: false });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "new" } } as never);
+
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+
+    expect(readLiveWindows).not.toHaveBeenCalled();
   });
 });

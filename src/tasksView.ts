@@ -5,15 +5,20 @@ import { JiraClient, JiraAuthError } from "./jira/client";
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { openWorkspace, listWorkspaceFiles } from "./engine/workspace";
+import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
 import { createWorktrees } from "./engine/worktree";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, WorkspaceMode } from "./types";
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 
-/** Where to open a taken task — a new window, the current one, or merged into an
- * existing .code-workspace file. */
-type OpenTarget = { kind: "new" } | { kind: "current" } | { kind: "existing"; file: string };
+/** Where to open a taken task — a new window, the current one, merged into an
+ * existing .code-workspace file, or focused into an already-open folder window. */
+type OpenTarget =
+  | { kind: "new" }
+  | { kind: "current" }
+  | { kind: "existing"; file: string }
+  | { kind: "live-folder"; folder: string };
 
 export class TasksViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "agentFlow.tasks";
@@ -447,33 +452,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       services = createWorktrees(services, detail.key, detail.summary, this.log);
     }
 
-    // Where should it open — a new window, the current one, or an existing workspace?
+    // Where should it open — new window, this window, a saved workspace, or a live window?
     const target = await this.chooseOpenTarget(cfg);
     if (!target) return;
-
-    // Workspace model. In the current window everything shares one window, so the
-    // multiroot/per-window question only applies when opening a new window. Merging
-    // into an existing workspace is always multiroot (it IS a multi-root file).
-    let mode: WorkspaceMode;
-    if (target.kind === "existing") {
-      mode = "multiroot";
-    } else if (target.kind === "current") {
-      mode = services.length === 1 ? "per-window" : "multiroot";
-    } else if (services.length === 1 || cfg.workspaceMode === "per-window") {
-      mode = "per-window";
-    } else if (cfg.workspaceMode === "ask") {
-      const p = await vscode.window.showQuickPick(
-        [
-          { label: "$(window) One multi-root workspace", detail: "Single window, all repos", mode: "multiroot" as WorkspaceMode },
-          { label: "$(multiple-windows) One window per repo", detail: "Parallel, one per repo", mode: "per-window" as WorkspaceMode },
-        ],
-        { title: `${key} — how should I open ${services.length} repos?`, ignoreFocusOut: true },
-      );
-      if (!p) return;
-      mode = p.mode;
-    } else {
-      mode = "multiroot"; // "auto" (>1 repo) or "multiroot"
-    }
+    const args = await this.targetToOpenArgs(target, services.length, key, cfg);
+    if (!args) return;
 
     const planMd = this.buildBrief(detail);
     const result = await openWorkspace({
@@ -481,12 +464,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       planMd,
       descriptionText: detail.descriptionText,
       services,
-      mode,
+      mode: args.mode,
       promptTemplate: promptMode.prompt,
       workspaceDir: cfg.workspaceDir,
       seedAgent: cfg.seedAgent,
-      openIn: target.kind === "current" ? "current" : "new",
-      existingWorkspaceFile: target.kind === "existing" ? target.file : undefined,
+      openIn: args.openIn,
+      existingWorkspaceFile: args.existingWorkspaceFile,
+      existingFolder: args.existingFolder,
     });
 
     const where = result.workspaceFile
@@ -500,30 +484,67 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       );
     } else {
       const added = result.mergedRepos?.length ? ` Added ${result.mergedRepos.join(", ")}.` : "";
-      this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${seeded}`);
+      const unadded = result.unaddedRepos?.length
+        ? ` ${result.unaddedRepos.join(", ")} couldn't be added as roots to that window — their briefs are still in place.`
+        : "";
+      this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${unadded}${seeded}`);
     }
   }
 
-  /** Where to open a taken task — new window, this window, or an existing workspace. */
+  /** Where to open a taken task — new window, this window, a saved workspace, or a
+   * window you already have open. Live windows appear only in the interactive "ask"
+   * flow (a specific open window is inherently a per-take choice). */
   private async chooseOpenTarget(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
     if (cfg.openIn === "new-window") return { kind: "new" };
     if (cfg.openIn === "this-window") return { kind: "current" };
     if (cfg.openIn === "pick-existing") return this.pickExistingWorkspace(cfg);
-    const p = await vscode.window.showQuickPick(
-      [
-        { label: "$(empty-window) New window", detail: "Open the task in a separate window", val: "new" as const },
-        { label: "$(window) This window", detail: "Open it in the current window (replaces what's here)", val: "current" as const },
-        {
-          label: "$(folder-library) Existing workspace…",
-          detail: "Open the task into a .code-workspace you already have",
-          val: "existing" as const,
-        },
-      ],
-      { title: "Open the task where?", placeHolder: "New window, this window, or an existing workspace", ignoreFocusOut: true },
-    );
+
+    type Pick = OpenTarget | { kind: "existing-pick" };
+    const base: { label: string; detail: string; target: Pick }[] = [
+      { label: "$(empty-window) New window", detail: "Open the task in a separate window", target: { kind: "new" } },
+      { label: "$(window) This window", detail: "Open it in the current window (replaces what's here)", target: { kind: "current" } },
+      { label: "$(folder-library) Existing workspace…", detail: "Open the task into a .code-workspace you already have", target: { kind: "existing-pick" } },
+    ];
+    const live = cfg.trackOpenWindows ? this.liveWindowItems() : [];
+    const p = await vscode.window.showQuickPick([...base, ...live], {
+      title: "Open the task where?",
+      placeHolder: "New window, this window, a saved workspace, or a window you have open",
+      ignoreFocusOut: true,
+    });
     if (!p) return undefined;
-    if (p.val === "existing") return this.pickExistingWorkspace(cfg);
-    return { kind: p.val };
+    if (p.target.kind === "existing-pick") return this.pickExistingWorkspace(cfg);
+    return p.target;
+  }
+
+  /** Live Agent-Flow windows (excluding the current one) as open-target picks. A
+   * workspace window maps to the existing merge+focus path; a folder window focuses
+   * and seeds in place. */
+  private liveWindowItems(): { label: string; detail: string; target: OpenTarget }[] {
+    const self = windowIdentity()?.identity;
+    return readLiveWindows(defaultWindowsDir())
+      .filter((w) => w.identity !== self)
+      .map((w) => ({
+        label: `$(window) ${w.label}`,
+        detail: w.kind === "workspace" ? `open now · ${w.folders} folder${w.folders === 1 ? "" : "s"}` : "open now",
+        target: w.kind === "workspace" ? { kind: "existing", file: w.identity } : { kind: "live-folder", folder: w.identity },
+      }));
+  }
+
+  /** Resolve an OpenTarget to the openWorkspace arguments, asking the multiroot-vs-
+   * per-window question only for a NEW window with more than one repo. Returns
+   * undefined if the user cancels that sub-pick. */
+  private async targetToOpenArgs(
+    target: OpenTarget,
+    count: number,
+    label: string,
+    cfg: AgentFlowConfig,
+  ): Promise<{ mode: WorkspaceMode; openIn: "new" | "current"; existingWorkspaceFile?: string; existingFolder?: string } | undefined> {
+    if (target.kind === "existing") return { mode: "multiroot", openIn: "new", existingWorkspaceFile: target.file };
+    if (target.kind === "live-folder") return { mode: "per-window", openIn: "new", existingFolder: target.folder };
+    if (target.kind === "current") return { mode: count === 1 ? "per-window" : "multiroot", openIn: "current" };
+    const mode = await this.chooseWorkspaceMode(count, cfg.workspaceMode, label);
+    if (!mode) return undefined;
+    return { mode, openIn: "new" };
   }
 
   /** Pick a `.code-workspace` from `cfg.workspaceDir` (or Browse… for one elsewhere). */
