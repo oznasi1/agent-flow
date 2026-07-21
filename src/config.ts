@@ -41,6 +41,7 @@ export interface AgentFlowConfig {
   promptModes: PromptMode[];
   explorePrompt: string;
   worktree: "ask" | "always" | "never";
+  trackOpenWindows: boolean;
   stampLabelOnWrite: boolean;
   provenanceLabel: string;
 }
@@ -75,6 +76,7 @@ export function getConfig(): AgentFlowConfig {
     })(),
     explorePrompt: c.get<string>("explorePrompt") || DEFAULT_EXPLORE_PROMPT,
     worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
+    trackOpenWindows: c.get<boolean>("trackOpenWindows") ?? true,
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,
     provenanceLabel: c.get<string>("provenanceLabel") || "claude-code",
   };

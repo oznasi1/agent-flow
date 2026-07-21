@@ -124,3 +124,11 @@ describe("getConfig — promptModes validation", () => {
     expect(getConfig().promptModes).toEqual(DEFAULT_PROMPT_MODES);
   });
 });
+
+describe("getConfig — trackOpenWindows", () => {
+  it("defaults trackOpenWindows to true and reads an override", () => {
+    expect(getConfig().trackOpenWindows).toBe(true);
+    setConfig({ trackOpenWindows: false });
+    expect(getConfig().trackOpenWindows).toBe(false);
+  });
+});

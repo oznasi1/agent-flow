@@ -253,6 +253,11 @@
           "default": "ask",
           "description": "Whether to isolate the task in a git worktree. Worktrees are created inside each repo at .claude/worktrees/<KEY> (git-excluded automatically)."
         },
+        "agentFlow.trackOpenWindows": {
+          "type": "boolean",
+          "default": true,
+          "description": "Track your open Agent Flow windows so a task can be opened into a window you already have open (shown as extra choices in the \"Open the task where?\" picker)."
+        },
         "agentFlow.stampLabelOnWrite": {
           "type": "boolean",
           "default": true,
