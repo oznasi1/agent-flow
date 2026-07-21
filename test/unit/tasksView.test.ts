@@ -35,7 +35,6 @@ const CFG = {
   promptModes: [{ id: "plan", label: "Plan", prompt: "P {key}" }],
   explorePrompt: "Explore {summary}{files}",
   worktree: "never" as const,
-  worktreeRoot: "/wt",
   stampLabelOnWrite: true,
   provenanceLabel: "claude-code",
 };

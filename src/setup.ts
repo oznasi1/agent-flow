@@ -69,14 +69,14 @@ export async function runSetup(
   });
   if (reposRoot === undefined) return abort(log, "cancelled at repos root");
 
-  // Persist config (global) before credentials. workspaceDir + worktreeRoot are
-  // derived from reposRoot to keep the wizard short; both remain overridable.
+  // Persist config (global) before credentials. workspaceDir is derived from
+  // reposRoot to keep the wizard short; it remains overridable. Per-task worktrees
+  // live inside each repo (.claude/worktrees/<KEY>), so there's no root to configure.
   const cleanRoot = reposRoot.trim().replace(/\/+$/, "");
   await updateGlobal("jira.baseUrl", baseUrl.trim().replace(/\/+$/, ""));
   await updateGlobal("jira.project", project.trim().toUpperCase());
   await updateGlobal("reposRoot", cleanRoot);
   await updateGlobal("workspaceDir", cleanRoot);
-  await updateGlobal("worktreeRoot", `${cleanRoot}/.worktrees`);
   log(`setup: config saved (project ${project.trim().toUpperCase()}, root ${cleanRoot})`);
 
   // Step 4/4: credentials, via the existing two-step sign-in.

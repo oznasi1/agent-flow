@@ -444,7 +444,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       useWorktree = p.yes;
     }
     if (useWorktree) {
-      services = createWorktrees(services, detail.key, detail.summary, cfg.worktreeRoot, this.log);
+      services = createWorktrees(services, detail.key, detail.summary, this.log);
     }
 
     // Where should it open — a new window, the current one, or an existing workspace?

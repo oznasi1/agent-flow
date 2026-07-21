@@ -2,13 +2,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
 import { branchName, createWorktrees } from "../../../src/engine/worktree";
+import { ensureGitExcluded } from "../../../src/engine/gitExclude";
 import { mkRepos } from "../../_helpers/factories";
 
 vi.mock("fs");
 vi.mock("child_process");
+vi.mock("../../../src/engine/gitExclude");
 const existsSync = vi.mocked(fs.existsSync);
 const mkdirSync = vi.mocked(fs.mkdirSync);
 const execFileSync = vi.mocked(childProcess.execFileSync);
+const gitExcluded = vi.mocked(ensureGitExcluded);
 
 describe("branchName", () => {
   it("is key + slugified summary", () => {
@@ -36,37 +39,44 @@ describe("branchName", () => {
 
 describe("createWorktrees", () => {
   const log = vi.fn();
-  const root = "/wt";
 
   beforeEach(() => {
     existsSync.mockReset().mockReturnValue(false);
     mkdirSync.mockReset();
     execFileSync.mockReset();
+    gitExcluded.mockReset().mockReturnValue(true);
     log.mockReset();
   });
 
   it("opens a non-git repo directly, without touching git", () => {
     const [repo] = mkRepos(["frontend"], { isGit: false });
-    expect(createWorktrees([repo], "ASM-1", "summary", root, log)).toEqual([repo]);
+    expect(createWorktrees([repo], "ASM-1", "summary", log)).toEqual([repo]);
     expect(execFileSync).not.toHaveBeenCalled();
+    expect(gitExcluded).not.toHaveBeenCalled();
   });
 
-  it("creates a worktree on a new branch", () => {
+  it("creates a worktree inside the repo, on a new branch", () => {
     const [repo] = mkRepos(["centaur"]);
-    const [out] = createWorktrees([repo], "ASM-1", "fix it", root, log);
-    expect(out).toEqual({ name: "centaur", path: "/wt/ASM-1/centaur", isGit: true });
+    const [out] = createWorktrees([repo], "ASM-1", "fix it", log);
+    expect(out).toEqual({ name: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-1", isGit: true });
     expect(execFileSync).toHaveBeenCalledWith(
       "git",
-      ["-C", repo.path, "worktree", "add", "/wt/ASM-1/centaur", "-b", "ASM-1-fix-it"],
+      ["-C", repo.path, "worktree", "add", "/repos/centaur/.claude/worktrees/ASM-1", "-b", "ASM-1-fix-it"],
       expect.anything(),
     );
+  });
+
+  it("git-excludes .claude/worktrees/ in the main checkout", () => {
+    const [repo] = mkRepos(["centaur"]);
+    createWorktrees([repo], "ASM-1", "fix it", log);
+    expect(gitExcluded).toHaveBeenCalledWith(repo.path, ".claude/worktrees/");
   });
 
   it("reuses an existing worktree directory", () => {
     existsSync.mockReturnValue(true);
     const [repo] = mkRepos(["centaur"]);
-    const [out] = createWorktrees([repo], "ASM-1", "fix it", root, log);
-    expect(out.path).toBe("/wt/ASM-1/centaur");
+    const [out] = createWorktrees([repo], "ASM-1", "fix it", log);
+    expect(out.path).toBe("/repos/centaur/.claude/worktrees/ASM-1");
     expect(execFileSync).not.toHaveBeenCalled();
   });
 
@@ -75,13 +85,13 @@ describe("createWorktrees", () => {
       throw new Error("branch already exists");
     });
     const [repo] = mkRepos(["centaur"]);
-    const [out] = createWorktrees([repo], "ASM-1", "fix it", root, log);
-    expect(out.path).toBe("/wt/ASM-1/centaur");
+    const [out] = createWorktrees([repo], "ASM-1", "fix it", log);
+    expect(out.path).toBe("/repos/centaur/.claude/worktrees/ASM-1");
     expect(execFileSync).toHaveBeenCalledTimes(2);
     // second attempt drops the -b flag
     expect(execFileSync).toHaveBeenLastCalledWith(
       "git",
-      ["-C", repo.path, "worktree", "add", "/wt/ASM-1/centaur", "ASM-1-fix-it"],
+      ["-C", repo.path, "worktree", "add", "/repos/centaur/.claude/worktrees/ASM-1", "ASM-1-fix-it"],
       expect.anything(),
     );
   });
@@ -95,13 +105,13 @@ describe("createWorktrees", () => {
     };
     execFileSync.mockImplementationOnce(boom).mockImplementationOnce(boom);
     const [repo] = mkRepos(["centaur"]);
-    expect(createWorktrees([repo], "ASM-1", "fix it", root, log)).toEqual([repo]);
+    expect(createWorktrees([repo], "ASM-1", "fix it", log)).toEqual([repo]);
   });
 
   it("maps a mixed set independently", () => {
     const repos = [...mkRepos(["a"]), ...mkRepos(["b"], { isGit: false })];
-    const out = createWorktrees(repos, "ASM-9", "x", root, log);
-    expect(out[0].path).toBe("/wt/ASM-9/a");
+    const out = createWorktrees(repos, "ASM-9", "x", log);
+    expect(out[0].path).toBe("/repos/a/.claude/worktrees/ASM-9");
     expect(out[1]).toEqual(repos[1]); // non-git passthrough
   });
 });

@@ -90,8 +90,9 @@ loaded. Open the **Agent Flow** icon in the activity bar and complete the first-
 | `agentFlow.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
-`agentFlow.explorePrompt`, `agentFlow.worktree`, and `agentFlow.worktreeRoot` — see the
-Settings UI. Jira credentials are stored in VS Code **SecretStorage**, never in settings.
+`agentFlow.explorePrompt`, and `agentFlow.worktree` — see the Settings UI. Per-task
+worktrees are created inside each repo at `.claude/worktrees/<KEY>` (and git-excluded
+automatically). Jira credentials are stored in VS Code **SecretStorage**, never in settings.
 
 `agentFlow.openIn` controls where a task you take gets opened: `ask` (ask each time),
 `new-window`, `this-window` (reuse the current window), or `pick-existing` — pick an

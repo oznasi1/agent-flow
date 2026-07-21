@@ -39,7 +39,6 @@ describe("runSetup", () => {
     expect(readCfg("jira.project")).toBe("ABC"); // upper-cased
     expect(readCfg("reposRoot")).toBe("~/code"); // trailing slash trimmed
     expect(readCfg("workspaceDir")).toBe("~/code"); // derived from reposRoot
-    expect(readCfg("worktreeRoot")).toBe("~/code/.worktrees"); // derived from reposRoot
     expect(auth.signIn).toHaveBeenCalledTimes(1);
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBe(true);
     expect(refresh).toHaveBeenCalledTimes(1);

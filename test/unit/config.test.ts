@@ -41,7 +41,6 @@ describe("getConfig — defaults", () => {
       workspaceMode: "auto",
       taskMode: "ask",
       worktree: "ask",
-      worktreeRoot: expandHome("~/projects/.worktrees"),
       stampLabelOnWrite: true,
       provenanceLabel: "claude-code",
     });
@@ -56,11 +55,10 @@ describe("getConfig — normalization", () => {
   });
 
   it("expands ~ in path settings", () => {
-    setConfig({ reposRoot: "~/repos", workspaceDir: "~/ws", worktreeRoot: "~/wt" });
+    setConfig({ reposRoot: "~/repos", workspaceDir: "~/ws" });
     const c = getConfig();
     expect(c.reposRoot).toBe(path.join(os.homedir(), "repos"));
     expect(c.workspaceDir).toBe(path.join(os.homedir(), "ws"));
-    expect(c.worktreeRoot).toBe(path.join(os.homedir(), "wt"));
   });
 
   it("honors explicit boolean settings", () => {

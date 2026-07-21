@@ -251,12 +251,7 @@
             "Always work in the repo directly"
           ],
           "default": "ask",
-          "description": "Whether to isolate the task in a git worktree."
-        },
-        "agentFlow.worktreeRoot": {
-          "type": "string",
-          "default": "~/projects/.worktrees",
-          "description": "Where per-task git worktrees are created (one subdir per ticket, per repo)."
+          "description": "Whether to isolate the task in a git worktree. Worktrees are created inside each repo at .claude/worktrees/<KEY> (git-excluded automatically)."
         },
         "agentFlow.stampLabelOnWrite": {
           "type": "boolean",

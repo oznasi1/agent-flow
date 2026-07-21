@@ -9,6 +9,7 @@ import { extractFileHints, resolveFilesInRepo, mention } from "./files";
 import { renderPrompt } from "./prompt";
 import { writeRun, defaultRunsDir } from "./runs";
 import { gitState } from "./git";
+import { ensureGitExcluded } from "./gitExclude";
 
 const BRIEF_DIR = ".pick-task";
 const BRIEF_FILE = "TASK.md";
@@ -132,35 +133,7 @@ function writePlanFile(plan: PlanFile): void {
   fs.writeFileSync(path.join(PLAN_DIR, `${plan.key}-${plan.createdAt}.json`), JSON.stringify(plan, null, 2));
 }
 
-// ── git exclude + opening ─────────────────────────────────────────────────────
-function ensureGitExcluded(repoPath: string): boolean {
-  const gitPath = path.join(repoPath, ".git");
-  if (!fs.existsSync(gitPath)) return false;
-  let gitDir = gitPath;
-  try {
-    if (fs.statSync(gitPath).isFile()) {
-      const line = fs.readFileSync(gitPath, "utf8").trim();
-      if (line.startsWith("gitdir:")) gitDir = line.slice("gitdir:".length).trim();
-    }
-    // In a worktree, gitDir is .git/worktrees/<name>; the effective info/exclude
-    // lives in the shared common dir (pointed to by a `commondir` file).
-    const commondir = path.join(gitDir, "commondir");
-    if (fs.existsSync(commondir)) {
-      gitDir = path.resolve(gitDir, fs.readFileSync(commondir, "utf8").trim());
-    }
-    const exclude = path.join(gitDir, "info", "exclude");
-    fs.mkdirSync(path.dirname(exclude), { recursive: true });
-    const existing = fs.existsSync(exclude) ? fs.readFileSync(exclude, "utf8") : "";
-    if (!existing.split("\n").includes(`${BRIEF_DIR}/`)) {
-      const sep = existing && !existing.endsWith("\n") ? "\n" : "";
-      fs.appendFileSync(exclude, `${sep}${BRIEF_DIR}/\n`);
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
+// ── opening ───────────────────────────────────────────────────────────────────
 export function openInEditor(target: string, newWindow = true): Promise<boolean> {
   // Reuse the current window: replace its folder(s) in place. This reloads the window,
   // so the seed-on-activation handshake fires here. (`open -a` can't target this window.)
@@ -194,7 +167,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     fs.mkdirSync(dir, { recursive: true });
     const briefPath = path.join(dir, BRIEF_FILE);
     fs.writeFileSync(briefPath, briefMarkdown(ticket, planMd, services, s.name, files));
-    return { repo: s.name, path: briefPath, gitExcluded: ensureGitExcluded(s.path), files: files.length };
+    return { repo: s.name, path: briefPath, gitExcluded: ensureGitExcluded(s.path, `${BRIEF_DIR}/`), files: files.length };
   });
 
   // 2 — build the workspace target + the seed matches

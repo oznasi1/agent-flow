@@ -41,7 +41,6 @@ export interface AgentFlowConfig {
   promptModes: PromptMode[];
   explorePrompt: string;
   worktree: "ask" | "always" | "never";
-  worktreeRoot: string;
   stampLabelOnWrite: boolean;
   provenanceLabel: string;
 }
@@ -76,7 +75,6 @@ export function getConfig(): AgentFlowConfig {
     })(),
     explorePrompt: c.get<string>("explorePrompt") || DEFAULT_EXPLORE_PROMPT,
     worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
-    worktreeRoot: expandHome(c.get<string>("worktreeRoot") || "~/projects/.worktrees"),
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,
     provenanceLabel: c.get<string>("provenanceLabel") || "claude-code",
   };

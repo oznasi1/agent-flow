@@ -2,6 +2,15 @@ import * as fs from "fs";
 import * as path from "path";
 import { execFileSync } from "child_process";
 import { ServiceRef } from "../types";
+import { ensureGitExcluded } from "./gitExclude";
+
+/** In-repo location for per-task worktrees, relative to each repo root. `.claude/` is
+ *  the convention Claude Code's own worktrees use; keeping ours here means the same
+ *  git-exclude entry covers both and existing tooling already skips the directory. */
+const WORKTREE_DIR = path.join(".claude", "worktrees");
+/** The `.git/info/exclude` line that keeps the in-repo worktrees out of `git status`.
+ *  Forward-slashed (git patterns are POSIX) and independent of `path.sep`. */
+const WORKTREE_EXCLUDE = ".claude/worktrees/";
 
 /** Branch/worktree name for a task, e.g. ABC-1234-fix-login-timeout. */
 export function branchName(key: string, summary: string): string {
@@ -20,15 +29,15 @@ function git(repo: string, args: string[]): void {
 
 /**
  * Create a per-task git worktree for each service and return ServiceRefs pointing
- * at the worktrees. Layout: <worktreeRoot>/<KEY>/<repo>. On any failure (non-git
- * repo, branch already checked out, etc.) it falls back to the main checkout so
- * the flow never breaks. `worktreeRoot` must already be absolute.
+ * at the worktrees. Layout: <repo>/.claude/worktrees/<KEY> — i.e. inside each repo,
+ * under the git-excluded `.claude/` dir (see WORKTREE_DIR). On any failure (non-git
+ * repo, branch already checked out, etc.) it falls back to the main checkout so the
+ * flow never breaks.
  */
 export function createWorktrees(
   services: ServiceRef[],
   key: string,
   summary: string,
-  worktreeRoot: string,
   log: (m: string) => void,
 ): ServiceRef[] {
   const branch = branchName(key, summary);
@@ -37,7 +46,10 @@ export function createWorktrees(
       log(`worktree ${s.name}: not a git repo — opening the checkout directly`);
       return s;
     }
-    const wtPath = path.join(worktreeRoot, key, s.name);
+    // Keep the nested worktree out of the main checkout's git status. Do this before
+    // creating it so there's never a window where `.claude/worktrees/` shows untracked.
+    ensureGitExcluded(s.path, WORKTREE_EXCLUDE);
+    const wtPath = path.join(s.path, WORKTREE_DIR, key);
     try {
       if (fs.existsSync(wtPath)) {
         log(`worktree ${s.name}: reusing ${wtPath}`);
