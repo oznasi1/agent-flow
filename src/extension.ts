@@ -3,6 +3,7 @@ import { ApiTokenAuth } from "./jira/auth";
 import { TasksViewProvider } from "./tasksView";
 import { DeckPanel } from "./deckView";
 import { maybeSeedAgent, watchPlansAndSeed } from "./engine/workspace";
+import { windowIdentity, writePresence, removePresence, defaultWindowsDir } from "./engine/presence";
 import { getConfig } from "./config";
 import { maybeRunSetup, runSetup } from "./setup";
 
@@ -61,11 +62,25 @@ export function activate(context: vscode.ExtensionContext): void {
     void maybeSeedAgent(context, log);
     // …and keep watching so an already-open window seeds when a task is taken later.
     context.subscriptions.push(watchPlansAndSeed(context, log));
+    // Record this window's presence so a later "take" can open a task into it.
+    if (getConfig().trackOpenWindows) {
+      const stamp = () => {
+        const id = windowIdentity();
+        if (id) writePresence(defaultWindowsDir(), { ...id, pid: process.pid, updatedAt: Date.now() });
+      };
+      stamp();
+      context.subscriptions.push(vscode.window.onDidChangeWindowState(stamp));
+    }
   } catch (e) {
     log(`activation: optional step failed (extension still active): ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 
 export function deactivate(): void {
-  // nothing to clean up
+  // Best-effort: drop this window's presence record so it stops being offered.
+  try {
+    removePresence(defaultWindowsDir(), process.pid);
+  } catch {
+    /* best-effort */
+  }
 }

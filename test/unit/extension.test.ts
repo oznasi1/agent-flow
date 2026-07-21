@@ -22,10 +22,17 @@ vi.mock("../../src/setup", () => ({
   maybeRunSetup: vi.fn(async () => undefined),
   runSetup: vi.fn(async () => true),
 }));
+vi.mock("../../src/engine/presence", () => ({
+  windowIdentity: vi.fn(() => ({ identity: "/ws/team.code-workspace", kind: "workspace", label: "team.code-workspace", folders: 2 })),
+  writePresence: vi.fn(),
+  removePresence: vi.fn(),
+  defaultWindowsDir: vi.fn(() => "/win"),
+}));
 
-import { activate } from "../../src/extension";
+import { activate, deactivate } from "../../src/extension";
 import { maybeSeedAgent, watchPlansAndSeed } from "../../src/engine/workspace";
 import { maybeRunSetup, runSetup } from "../../src/setup";
+import { windowIdentity, writePresence, removePresence } from "../../src/engine/presence";
 
 const cmd = (id: string) =>
   vi.mocked(commands.registerCommand).mock.calls.find((c) => c[0] === id)?.[1] as
@@ -133,5 +140,26 @@ describe("activate", () => {
     activate(context);
     await cmd("agentFlow.takeTask")!();
     expect(providerStub.takeTask).not.toHaveBeenCalled();
+  });
+
+  it("writes this window's presence on activation", () => {
+    const { context } = fakeContext();
+    activate(context);
+    expect(writePresence).toHaveBeenCalledWith(
+      "/win",
+      expect.objectContaining({ identity: "/ws/team.code-workspace", pid: expect.any(Number) }),
+    );
+  });
+
+  it("does not write presence for a window with no identity", () => {
+    vi.mocked(windowIdentity).mockReturnValueOnce(undefined);
+    const { context } = fakeContext();
+    activate(context);
+    expect(writePresence).not.toHaveBeenCalled();
+  });
+
+  it("removes this window's presence on deactivate", () => {
+    deactivate();
+    expect(removePresence).toHaveBeenCalledWith("/win", expect.any(Number));
   });
 });
