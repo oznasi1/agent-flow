@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderPrompt, type PromptVars } from "../../../src/engine/prompt";
+import { renderPrompt, injectSlackDm, SLACK_DM_SENTENCE, type PromptVars } from "../../../src/engine/prompt";
 
 const V: PromptVars = {
   key: "ASM-5412",
@@ -41,5 +41,23 @@ describe("renderPrompt", () => {
 
   it("returns a template with no placeholders verbatim", () => {
     expect(renderPrompt("just start", V, ["@a"])).toBe("just start");
+  });
+});
+
+describe("injectSlackDm", () => {
+  it("returns the template unchanged when disabled", () => {
+    expect(injectSlackDm("do it{files}", false)).toBe("do it{files}");
+  });
+
+  it("inserts the Slack sentence just before a trailing {files}", () => {
+    expect(injectSlackDm("do it{files}", true)).toBe(`do it ${SLACK_DM_SENTENCE}{files}`);
+  });
+
+  it("appends the Slack sentence when there is no {files} placeholder", () => {
+    expect(injectSlackDm("do it", true)).toBe(`do it ${SLACK_DM_SENTENCE}`);
+  });
+
+  it("inserts before the first {files} only", () => {
+    expect(injectSlackDm("a{files}b{files}", true)).toBe(`a ${SLACK_DM_SENTENCE}{files}b{files}`);
   });
 });
