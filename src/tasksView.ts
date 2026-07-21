@@ -47,7 +47,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Post the panel's `state`, folding in the config-derived fields the webview needs
-   * (project name, and the PR-review status string that gates the "Review PR" action). */
+   * (project name, and the PR-review status string that gates the "Address PR" action). */
   private postState(authed: boolean, configured: boolean, me: string | null): void {
     const cfg = getConfig();
     this.post({ type: "state", authed, configured, project: cfg.project, me, prReviewStatus: cfg.prReviewStatus });
@@ -169,8 +169,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           await this.takeTask(m.key, m.services);
           break;
         }
-        case "reviewPr": {
-          await this.reviewPr(m.key, m.services);
+        case "addressPr": {
+          await this.addressPr(m.key, m.services);
           break;
         }
         case "changeStatus": {
@@ -395,7 +395,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     ).map((r) => r.service.name);
   }
 
-  /** Read the ticket and resolve the repo set for a kick-off (Take or Review PR):
+  /** Read the ticket and resolve the repo set for a kick-off (Take or Address PR):
    * the auth gate, repo discovery, and the confirm-repos QuickPick. `preselected`
    * (the in-card selection) skips the QuickPick. Returns undefined on any abort. */
   private async resolveKickoff(
@@ -457,8 +457,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Open + seed a resolved kick-off: worktree decision → open target → workspace
-   * mode → brief → openWorkspace → success toast. Shared by Take and Review PR.
-   * `forceWorktree` (Review PR) always isolates in a worktree, ignoring cfg.worktree. */
+   * mode → brief → openWorkspace → success toast. Shared by Take and Address PR.
+   * `forceWorktree` (Address PR) always isolates in a worktree, ignoring cfg.worktree. */
   private async launch(
     detail: JiraDetail,
     services: ServiceRef[],
@@ -557,7 +557,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * seeding the PR-review prompt — the agent finds the task's GitHub PR by its Jira key,
    * checks out its branch, assesses readiness, and (when prReviewAutoFix) implements the
    * requested changes. Surfaced on a card whose status matches cfg.prReviewStatus. */
-  public async reviewPr(key: string, preselected?: string[]): Promise<void> {
+  public async addressPr(key: string, preselected?: string[]): Promise<void> {
     const resolved = await this.resolveKickoff(key, preselected);
     if (!resolved) return;
     const { detail, services } = resolved;

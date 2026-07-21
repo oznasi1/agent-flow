@@ -41,7 +41,7 @@ export function matchesStatus(task: JiraTask, selected: ReadonlySet<string>): bo
 }
 
 /** Is this task in the configured PR-review status? Case-insensitive, whitespace-trimmed.
- *  Both sides must be non-empty. Drives the "Review PR" card action. Pure. */
+ *  Both sides must be non-empty. Drives the "Address PR" card action. Pure. */
 export function isPrReviewStatus(status: string, configured: string): boolean {
   const a = (status || "").trim().toLowerCase();
   const b = (configured || "").trim().toLowerCase();

@@ -61,7 +61,7 @@ const SprintAddIcon = () => (
 );
 
 // A git pull-request glyph — kick off the PR-review agent for an approved/initiated PR.
-const PrReviewIcon = () => (
+const AddressPrIcon = () => (
   <svg className="take-icon" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
     <path
       fill="currentColor"
@@ -84,7 +84,7 @@ export function App(): JSX.Element {
   const [error, setError] = React.useState<{ message: string; canRetry: boolean } | null>(null);
   const [project, setProject] = React.useState("");
   const [me, setMe] = React.useState<string | null>(null);
-  // The task status that reveals the "Review PR" card action (configurable; from the host).
+  // The task status that reveals the "Address PR" card action (configurable; from the host).
   const [prReviewStatus, setPrReviewStatus] = React.useState("");
   const [filter, setFilter] = React.useState<Filter>("mysprint");
   const [size, setSize] = React.useState<Size>("any");
@@ -461,8 +461,8 @@ function TaskCard(props: {
   // Offer "add to my sprint" when it isn't already there: unassigned tasks, or tasks
   // already assigned to me that aren't in the active sprint yet.
   const showAddToSprint = unassigned || (isMe && !task.inOpenSprint);
-  // Offer "Review PR" once the ticket reaches the configured PR-review status.
-  const canReviewPr = isPrReviewStatus(task.status, prReviewStatus);
+  // Offer "Address PR" once the ticket reaches the configured PR-review status.
+  const canAddressPr = isPrReviewStatus(task.status, prReviewStatus);
   const armed = React.useRef(false); // true only while a drag started from the grip
 
   const take = (e: React.MouseEvent) => {
@@ -471,10 +471,10 @@ function TaskCard(props: {
     send({ type: "take", key: task.key, services });
   };
 
-  const reviewPr = (e: React.MouseEvent) => {
+  const addressPr = (e: React.MouseEvent) => {
     e.stopPropagation();
     const services = open && detail?.selected ? detail.selected : undefined;
-    send({ type: "reviewPr", key: task.key, services });
+    send({ type: "addressPr", key: task.key, services });
   };
 
   const addToSprint = (e: React.MouseEvent) => {
@@ -545,13 +545,13 @@ function TaskCard(props: {
                 <SprintAddIcon /> Add to my sprint
               </button>
             )}
-            {canReviewPr && (
+            {canAddressPr && (
               <button
-                className="review-pr"
-                onClick={reviewPr}
-                title={`Review the PR for ${task.key} — check it in a worktree and prep our fixes`}
+                className="address-pr"
+                onClick={addressPr}
+                title={`Address the PR for ${task.key} — check it out in a worktree and work through the review feedback`}
               >
-                <PrReviewIcon /> Review PR
+                <AddressPrIcon /> Address PR
               </button>
             )}
             <button className="take" onClick={take} title="Take this task — open its workspace">

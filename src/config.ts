@@ -91,7 +91,7 @@ export interface AgentFlowConfig {
   promptModes: PromptMode[];
   exploreMode: string; // "ask", or an ExploreAction id
   exploreActions: ExploreAction[];
-  prReviewStatus: string; // task status that reveals the "Review PR" card action
+  prReviewStatus: string; // task status that reveals the "Address PR" card action
   prReviewAutoFix: boolean; // after assessing, proceed to implement the PR's requested changes
   prReviewPrompt: string; // seeded prompt for the PR-review kick-off
   worktree: "ask" | "always" | "never";

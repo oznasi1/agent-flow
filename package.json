@@ -2,7 +2,7 @@
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
   "description": "Grab a Jira task and spin up its workspace — a task pool in your sidebar that opens the right repos and pre-seeds a Claude Code agent.",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",
   "license": "MIT",
@@ -316,7 +316,7 @@
         "agentFlow.prReviewStatus": {
           "type": "string",
           "default": "PR initiated",
-          "description": "Task status that reveals the \"Review PR\" button on a card (matched case-insensitively against the Jira status name). When a task reaches this status, clicking the button kicks off an agent — in a worktree — that finds the task's GitHub PR and assesses whether it's ready for our fixes."
+          "description": "Task status that reveals the \"Address PR\" button on a card (matched case-insensitively against the Jira status name). When a task reaches this status, clicking the button kicks off an agent — in a worktree — that finds the task's GitHub PR and assesses whether it's ready for our fixes."
         },
         "agentFlow.prReviewAutoFix": {
           "type": "boolean",
@@ -326,7 +326,7 @@
         "agentFlow.prReviewPrompt": {
           "type": "string",
           "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **Review PR** kick-off. The agent locates the task's GitHub PR by its Jira key and assesses readiness; when `#agentFlow.prReviewAutoFix#` is on, a fixing instruction is appended automatically. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`.",
+          "markdownDescription": "Prompt seeded for the **Address PR** kick-off. The agent locates the task's GitHub PR by its Jira key and assesses readiness; when `#agentFlow.prReviewAutoFix#` is on, a fixing instruction is appended automatically. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`.",
           "default": "Jira {key} ({url}): \"{summary}\". This task has an open GitHub PR — all our PRs carry the Jira key in their title and branch. Using `gh` (or the GitHub tools available to you): find the PR for {key}, run `gh pr checkout` to bring its branch into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}"
         },
         "agentFlow.worktree": {

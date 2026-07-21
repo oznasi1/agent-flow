@@ -794,12 +794,12 @@ describe("explore — open target", () => {
   });
 });
 
-describe("reviewPr", () => {
+describe("addressPr", () => {
   const promptOf = () => (vi.mocked(openWorkspace).mock.calls[0][0] as { promptTemplate: string }).promptTemplate;
 
-  it("routes the reviewPr message to the handler", async () => {
+  it("routes the addressPr message to the handler", async () => {
     const { send } = setup();
-    await send({ type: "reviewPr", key: "ASM-1", services: ["account-service"] });
+    await send({ type: "addressPr", key: "ASM-1", services: ["account-service"] });
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ ticket: expect.objectContaining({ key: "ASM-1" }) }),
     );
@@ -807,7 +807,7 @@ describe("reviewPr", () => {
 
   it("seeds the PR-review prompt (not a task prompt mode) and never prompts for a mode", async () => {
     const { provider } = setup();
-    await provider.reviewPr("ASM-1", ["account-service"]);
+    await provider.addressPr("ASM-1", ["account-service"]);
     expect(promptOf()).toContain("PR {key}"); // from cfg.prReviewPrompt
     expect(window.showQuickPick).not.toHaveBeenCalled(); // openIn=new-window, 1 repo, forced worktree → no picks
   });
@@ -815,7 +815,7 @@ describe("reviewPr", () => {
   it("always creates a worktree even when worktree = never", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "never" });
     const { provider } = setup();
-    await provider.reviewPr("ASM-1", ["account-service"]);
+    await provider.addressPr("ASM-1", ["account-service"]);
     expect(createWorktrees).toHaveBeenCalledWith(
       [expect.objectContaining({ name: "account-service" })],
       "ASM-1",
@@ -828,7 +828,7 @@ describe("reviewPr", () => {
   it("appends the auto-fix clause before {files} when prReviewAutoFix is on", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, prReviewAutoFix: true });
     const { provider } = setup();
-    await provider.reviewPr("ASM-1", ["account-service"]);
+    await provider.addressPr("ASM-1", ["account-service"]);
     const t = promptOf();
     expect(t).toContain(PR_REVIEW_AUTOFIX_CLAUSE);
     expect(t.indexOf(PR_REVIEW_AUTOFIX_CLAUSE)).toBeLessThan(t.indexOf("{files}"));
@@ -837,7 +837,7 @@ describe("reviewPr", () => {
   it("omits the auto-fix clause when prReviewAutoFix is off", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, prReviewAutoFix: false });
     const { provider } = setup();
-    await provider.reviewPr("ASM-1", ["account-service"]);
+    await provider.addressPr("ASM-1", ["account-service"]);
     expect(promptOf()).toBe(CFG.prReviewPrompt);
     expect(promptOf()).not.toContain(PR_REVIEW_AUTOFIX_CLAUSE);
   });
@@ -845,14 +845,14 @@ describe("reviewPr", () => {
   it("appends the auto-fix clause at the end when the prompt has no {files}", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, prReviewPrompt: "Review PR for {key}" });
     const { provider } = setup();
-    await provider.reviewPr("ASM-1", ["account-service"]);
+    await provider.addressPr("ASM-1", ["account-service"]);
     expect(promptOf()).toBe(`Review PR for {key} ${PR_REVIEW_AUTOFIX_CLAUSE}`);
   });
 
   it("errors when no repos are checked out", async () => {
     vi.mocked(discoverRepos).mockReturnValue([]);
     const { provider, posted } = setup();
-    await provider.reviewPr("ASM-1", ["account-service"]);
+    await provider.addressPr("ASM-1", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
@@ -861,14 +861,14 @@ describe("reviewPr", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
     const { provider } = setup();
-    await provider.reviewPr("ASM-1", ["account-service"]);
+    await provider.addressPr("ASM-1", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 
   it("aborts when sign-in is declined", async () => {
     vi.mocked(commands.executeCommand).mockResolvedValue(false);
     const { provider } = setup({ authed: false });
-    await provider.reviewPr("ASM-1", ["account-service"]);
+    await provider.addressPr("ASM-1", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 });

@@ -228,27 +228,27 @@ describe("task card actions", () => {
     expect(sent).toHaveBeenCalledWith({ type: "take", key: "ASM-1", services: undefined });
   });
 
-  it("shows a Review PR button on a card in the configured PR-review status", () => {
+  it("shows an Address PR button on a card in the configured PR-review status", () => {
     withTask(mkTask({ key: "ASM-9", status: "PR initiated", statusCategory: "indeterminate" }));
-    expect(screen.getByRole("button", { name: /Review PR/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Address PR/i })).toBeInTheDocument();
   });
 
   it("kicks off a PR review with the task key when clicked", () => {
     withTask(mkTask({ key: "ASM-9", status: "PR initiated", statusCategory: "indeterminate" }));
-    fireEvent.click(screen.getByRole("button", { name: /Review PR/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "reviewPr", key: "ASM-9", services: undefined });
+    fireEvent.click(screen.getByRole("button", { name: /Address PR/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "addressPr", key: "ASM-9", services: undefined });
   });
 
-  it("hides the Review PR button when the status does not match", () => {
+  it("hides the Address PR button when the status does not match", () => {
     withTask(mkTask({ key: "ASM-9", status: "In Progress", statusCategory: "indeterminate" }));
-    expect(screen.queryByRole("button", { name: /Review PR/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Address PR/i })).not.toBeInTheDocument();
   });
 
   it("honors a custom PR-review status, matched case-insensitively", () => {
     render(<App />);
     authed("PR Approved");
     host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-9", status: "pr approved", statusCategory: "indeterminate" })] });
-    expect(screen.getByRole("button", { name: /Review PR/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Address PR/i })).toBeInTheDocument();
   });
 
   it("adds an unassigned task to my sprint", () => {
