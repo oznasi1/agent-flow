@@ -657,7 +657,7 @@ Add to the imports block:
 import { readLiveWindows, windowIdentity } from "../../src/engine/presence";
 ```
 
-Add `trackOpenWindows: true,` to the `CFG` object.
+Ensure the `CFG` object has `trackOpenWindows: true,` (already added as a Task 1 follow-up — verify it's present, don't duplicate).
 
 **Migrate the existing 3-way-picker items from `val` to `target`** in the `describe("existing workspace open target", ...)` block:
 - `{ val: "new" }` → `{ target: { kind: "new" } }`
