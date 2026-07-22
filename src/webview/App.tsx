@@ -613,9 +613,11 @@ function CardDetail(props: { detail?: DetailState; onSelect: (s: string[]) => vo
   );
 }
 
-/** Command-palette-style repo picker: filter-as-you-type, keyboard-navigable,
- * inline (no floating popup to get clipped by the card's overflow). */
-export function RepoPicker({ available, onAdd }: { available: string[]; onAdd: (name: string) => void }): JSX.Element | null {
+/** Shared scaffolding for the inline command-palette combos (RepoPicker,
+ * RepoMultiSelect): open/query/active state, focus-on-open, active-reset on
+ * change, click-outside-to-close, and Arrow/Enter/Escape handling. The consumer
+ * supplies what Enter does via `onEnter`. */
+export function useComboFilter(items: string[], onEnter: (item: string) => void) {
   const [open, setOpen] = React.useState(false);
   const [q, setQ] = React.useState("");
   const [active, setActive] = React.useState(0);
@@ -623,13 +625,11 @@ export function RepoPicker({ available, onAdd }: { available: string[]; onAdd: (
   const rootRef = React.useRef<HTMLDivElement>(null);
 
   const filtered = React.useMemo(
-    () => available.filter((r) => r.toLowerCase().includes(q.toLowerCase())),
-    [available, q],
+    () => items.filter((r) => r.toLowerCase().includes(q.toLowerCase())),
+    [items, q],
   );
 
-  React.useEffect(() => {
-    if (open) inputRef.current?.focus();
-  }, [open]);
+  React.useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
   React.useEffect(() => setActive(0), [q, open]);
   React.useEffect(() => {
     if (!open) return;
@@ -640,7 +640,21 @@ export function RepoPicker({ available, onAdd }: { available: string[]; onAdd: (
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  if (available.length === 0) return null;
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, filtered.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); if (filtered[active]) onEnter(filtered[active]); }
+    else if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
+  };
+
+  return { open, setOpen, q, setQ, active, setActive, filtered, inputRef, rootRef, onKeyDown };
+}
+
+/** Command-palette-style repo picker: filter-as-you-type, keyboard-navigable,
+ * inline (no floating popup to get clipped by the card's overflow). */
+export function RepoPicker({ available, onAdd }: { available: string[]; onAdd: (name: string) => void }): JSX.Element | null {
+  const { open, setOpen, q, setQ, active, setActive, filtered, inputRef, rootRef, onKeyDown } =
+    useComboFilter(available, (name) => choose(name));
 
   const choose = (name: string) => {
     onAdd(name);
@@ -649,12 +663,7 @@ export function RepoPicker({ available, onAdd }: { available: string[]; onAdd: (
     inputRef.current?.focus();
   };
 
-  const onKey = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, filtered.length - 1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); if (filtered[active]) choose(filtered[active]); }
-    else if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
-  };
+  if (available.length === 0) return null;
 
   return (
     <div className="repo-picker" ref={rootRef}>
@@ -672,7 +681,7 @@ export function RepoPicker({ available, onAdd }: { available: string[]; onAdd: (
               spellCheck={false}
               placeholder="Filter repos…"
               onChange={(e) => setQ(e.target.value)}
-              onKeyDown={onKey}
+              onKeyDown={onKeyDown}
             />
           </div>
           <div className="repo-list" role="listbox">
