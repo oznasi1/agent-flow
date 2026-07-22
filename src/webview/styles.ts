@@ -50,17 +50,38 @@ export const CSS = `
   .est { font-size: 10px; color: var(--vscode-descriptionForeground); white-space: nowrap;
     font-variant-numeric: tabular-nums; }
 
-  .repo-filter { display: flex; align-items: center; gap: 7px; margin: 0 2px 10px;
-    padding: 4px 9px; border-radius: 8px; border: 1px solid var(--vscode-panel-border);
-    background: var(--vscode-input-background, transparent); }
-  .repo-filter:focus-within { border-color: var(--vscode-focusBorder); }
-  .repo-filter svg { flex: none; opacity: .55; }
-  .repo-filter input { flex: 1; min-width: 0; border: none; outline: none; background: transparent;
+  .repo-select { position: relative; margin: 0 2px 10px; }
+  .repo-select-trigger { display: flex; align-items: center; gap: 7px; width: 100%;
+    padding: 5px 9px; border-radius: 8px; border: 1px solid var(--vscode-panel-border);
+    background: var(--vscode-input-background, transparent); cursor: pointer;
     color: var(--vscode-input-foreground, var(--vscode-foreground));
-    font-family: var(--vscode-font-family); font-size: 12px; }
-  .repo-filter input::placeholder { color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground)); }
-  .repo-filter-clear { cursor: pointer; opacity: .6; font-size: 14px; line-height: 1; padding: 0 2px; }
-  .repo-filter-clear:hover { opacity: 1; }
+    font-family: var(--vscode-font-family); font-size: 12px; text-align: left; }
+  .repo-select-trigger:hover { border-color: var(--vscode-focusBorder); }
+  .repo-select-trigger svg { flex: none; opacity: .55; }
+  .repo-select-label { flex: 1; min-width: 0; }
+  .repo-select-label.placeholder { color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground)); }
+  .repo-count { flex: none; font-size: 10px; line-height: 1; padding: 1px 6px; border-radius: 9px;
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .repo-select-caret { flex: none; opacity: .6; font-size: 10px; }
+
+  .repo-pop { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; right: 0;
+    border: 1px solid var(--vscode-focusBorder); border-radius: 8px; overflow: hidden;
+    background: var(--vscode-input-background, var(--vscode-editor-background));
+    box-shadow: 0 6px 20px rgba(0,0,0,.35); animation: repo-in .12s ease; }
+  .repo-opt { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 5px;
+    cursor: pointer; color: var(--vscode-foreground); }
+  .repo-opt.active { background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground); }
+  .repo-box { flex: none; width: 14px; height: 14px; border-radius: 3px;
+    border: 1px solid var(--vscode-checkbox-border, var(--vscode-panel-border));
+    display: flex; align-items: center; justify-content: center; font-size: 10px; }
+  .repo-opt.checked .repo-box { background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground); border-color: var(--vscode-button-background); }
+  .repo-pop-foot { display: flex; justify-content: space-between; align-items: center;
+    padding: 6px 10px; border-top: 1px solid var(--vscode-panel-border);
+    font-size: 11px; color: var(--vscode-descriptionForeground); }
+  .repo-clear-all { background: none; border: none; cursor: pointer; padding: 0; font-size: 11px;
+    color: var(--vscode-textLink-foreground); }
 
   .list { display: flex; flex-direction: column; gap: 6px; }
 

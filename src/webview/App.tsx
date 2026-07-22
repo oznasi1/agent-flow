@@ -51,6 +51,12 @@ const SearchIcon = () => (
   </svg>
 );
 
+const FilterIcon = () => (
+  <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
+    <path fill="currentColor" d="M1 2.5h14L9.4 8.7v4.2l-2.8 1.6V8.7z" />
+  </svg>
+);
+
 // A sprint flag with a "+" badge — "add this to my sprint".
 const SprintAddIcon = () => (
   <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
@@ -93,7 +99,15 @@ export function App(): JSX.Element {
   const [filters, setFilters] = React.useState<FilterVisibility>({ size: true, status: true, repo: true, search: true });
   // Client-side status lens: the set of selected statuses (empty = show all).
   const [statuses, setStatuses] = React.useState<Set<string>>(new Set());
-  const [repoQuery, setRepoQuery] = React.useState("");
+  const [selectedRepos, setSelectedRepos] = React.useState<Set<string>>(new Set());
+  const toggleRepo = (name: string) =>
+    setSelectedRepos((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  const clearRepos = () => setSelectedRepos(new Set());
   const [tasks, setTasks] = React.useState<JiraTask[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string }[]>([]);
@@ -248,15 +262,21 @@ export function App(): JSX.Element {
       return next;
     });
 
-  // Narrow the current pool to tasks touching a repo (matches the inferred service chips)
-  // and, if a status lens is active, to the selected statuses.
-  const q = repoQuery.trim().toLowerCase();
+  // The repos in play across the current pool — options for the multiselect.
+  const allRepos = React.useMemo(
+    () => [...new Set(tasks.flatMap((t) => t.services ?? []))].sort((a, b) => a.localeCompare(b)),
+    [tasks],
+  );
+
+  // Narrow the current pool to tasks touching any selected repo (OR), and, if a
+  // status lens is active, to the selected statuses.
   const visibleTasks = tasks.filter(
     (t) =>
-      (!q || (t.services ?? []).some((s) => s.toLowerCase().includes(q))) && matchesStatus(t, statuses),
+      (selectedRepos.size === 0 || (t.services ?? []).some((s) => selectedRepos.has(s))) &&
+      matchesStatus(t, statuses),
   );
   // Reorder only makes sense on the full My-sprint list, not a filtered subset.
-  const canReorder = filter === "mysprint" && !q && statuses.size === 0;
+  const canReorder = filter === "mysprint" && selectedRepos.size === 0 && statuses.size === 0;
 
   // Toasts float over every state (gate or list), so keep them out of the branch bodies.
   const toastStack = <ToastStack toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />;
@@ -360,18 +380,12 @@ export function App(): JSX.Element {
       )}
 
       {filters.repo && (
-        <div className="repo-filter">
-          <SearchIcon />
-          <input
-            value={repoQuery}
-            spellCheck={false}
-            placeholder="Filter by repo…"
-            onChange={(e) => setRepoQuery(e.target.value)}
-          />
-          {repoQuery && (
-            <span className="repo-filter-clear" title="Clear repo filter" onClick={() => setRepoQuery("")}>×</span>
-          )}
-        </div>
+        <RepoMultiSelect
+          repos={allRepos}
+          selected={selectedRepos}
+          onToggle={toggleRepo}
+          onClear={clearRepos}
+        />
       )}
 
       {filter === "mysprint" && (
@@ -385,8 +399,8 @@ export function App(): JSX.Element {
       {loading && <div className="loading">Loading…</div>}
       {!loading && authed !== null && visibleTasks.length === 0 && (
         <div className="empty">
-          {q
-            ? `No tasks touch “${repoQuery.trim()}”.`
+          {selectedRepos.size > 0
+            ? "No tasks touch the selected repos."
             : statuses.size > 0
               ? "No tasks match the selected status."
               : "No tasks in this view."}
@@ -699,6 +713,77 @@ export function RepoPicker({ available, onAdd }: { available: string[]; onAdd: (
                 <span className="repo-add-hint">add ⏎</span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Multiselect repo filter: a trigger that opens an inline checkbox list —
+ * filter-as-you-type, keyboard-navigable, OR-combining. Inline (no floating
+ * popup) so the list overflow can't clip it. Renders nothing when the pool has
+ * no repos. Shares its command-palette scaffolding with RepoPicker via
+ * useComboFilter; Enter toggles the active repo (the combo stays open). */
+export function RepoMultiSelect({
+  repos,
+  selected,
+  onToggle,
+  onClear,
+}: {
+  repos: string[];
+  selected: Set<string>;
+  onToggle: (name: string) => void;
+  onClear: () => void;
+}): JSX.Element | null {
+  const { open, setOpen, q, setQ, active, setActive, filtered, inputRef, rootRef, onKeyDown } =
+    useComboFilter(repos, onToggle);
+
+  if (repos.length === 0) return null;
+
+  return (
+    <div className="repo-select" ref={rootRef}>
+      <button className="repo-select-trigger" onClick={() => setOpen(!open)}>
+        <FilterIcon />
+        <span className={`repo-select-label${selected.size ? "" : " placeholder"}`}>Filter repos</span>
+        {selected.size > 0 && <span className="repo-count">{selected.size}</span>}
+        <span className="repo-select-caret">▾</span>
+      </button>
+      {open && (
+        <div className="repo-pop">
+          <div className="repo-search">
+            <SearchIcon />
+            <input
+              ref={inputRef}
+              value={q}
+              spellCheck={false}
+              placeholder="Filter repos…"
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={onKeyDown}
+            />
+          </div>
+          <div className="repo-list" role="listbox">
+            {filtered.length === 0 && <div className="repo-empty">No repos match “{q}”</div>}
+            {filtered.map((r, i) => {
+              const on = selected.has(r);
+              return (
+                <div
+                  key={r}
+                  role="option"
+                  aria-selected={on}
+                  className={`repo-opt${i === active ? " active" : ""}${on ? " checked" : ""}`}
+                  onMouseEnter={() => setActive(i)}
+                  onMouseDown={(e) => { e.preventDefault(); onToggle(r); }}
+                >
+                  <span className="repo-box">{on ? "✓" : ""}</span>
+                  <span className="repo-name">{r}</span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="repo-pop-foot">
+            <span>{selected.size} selected</span>
+            <button className="repo-clear-all" onMouseDown={(e) => { e.preventDefault(); onClear(); }}>Clear</button>
           </div>
         </div>
       )}
