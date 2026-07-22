@@ -5,7 +5,7 @@ import { execFileSync } from "child_process";
 import { getConfig } from "./config";
 import { JiraAuth } from "./jira/auth";
 import { JiraClient, JiraAuthError } from "./jira/client";
-import { readRuns, defaultRunsDir } from "./engine/runs";
+import { readRuns, defaultRunsDir, removeRun } from "./engine/runs";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { openInEditor } from "./engine/workspace";
@@ -131,6 +131,10 @@ export class DeckPanel {
         break;
       case "deck:inspect":
         await this.inspect(m.key, m.action, m.repo);
+        break;
+      case "deck:forget":
+        removeRun(defaultRunsDir(), m.key);
+        await this.refresh();
         break;
       case "openExternal":
         await vscode.env.openExternal(vscode.Uri.parse(m.url));

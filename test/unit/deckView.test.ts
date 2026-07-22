@@ -9,8 +9,13 @@ const h = vi.hoisted(() => ({
   runs: [] as Run[],
   openInEditor: vi.fn(async (_t: string) => true),
   buildRunStatus: vi.fn(),
+  removeRun: vi.fn(),
 }));
-vi.mock("../../src/engine/runs", () => ({ defaultRunsDir: () => "/runs", readRuns: () => h.runs }));
+vi.mock("../../src/engine/runs", () => ({
+  defaultRunsDir: () => "/runs",
+  readRuns: () => h.runs,
+  removeRun: h.removeRun,
+}));
 vi.mock("../../src/engine/status", () => ({ buildRunStatus: h.buildRunStatus }));
 vi.mock("../../src/engine/workspace", () => ({ openInEditor: h.openInEditor }));
 vi.mock("../../src/engine/presence", () => ({
@@ -37,6 +42,7 @@ beforeEach(() => {
   h.runs = [mkRun()];
   h.openInEditor.mockClear().mockResolvedValue(true);
   h.buildRunStatus.mockReset().mockImplementation((run: Run) => statusFor(run));
+  h.removeRun.mockClear();
 });
 
 afterEach(() => {
@@ -128,6 +134,14 @@ describe("DeckPanel", () => {
     const toast = posts(p).find((m) => m.type === "toast" && m.level === "error");
     expect(toast).toBeTruthy();
     expect(h.openInEditor).not.toHaveBeenCalled();
+  });
+
+  it("forgets a run and re-posts the board", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:forget", key: "ASM-1" });
+    expect(h.removeRun).toHaveBeenCalledWith("/runs", "ASM-1");
+    expect(posts(p).some((m) => m.type === "deck:runs")).toBe(true);
   });
 
   it("pauses and resumes polling on visibility changes without throwing", async () => {

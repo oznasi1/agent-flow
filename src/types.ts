@@ -115,7 +115,8 @@ export type InboundMessage =
   | { type: "deck:ready" }
   | { type: "deck:refresh" }
   | { type: "deck:setLive"; on: boolean }
-  | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string };
+  | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
+  | { type: "deck:forget"; key: string };
 
 // Messages: host → webview
 export type OutboundMessage =
