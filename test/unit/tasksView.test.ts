@@ -10,7 +10,7 @@ vi.mock("../../src/config", async () => {
   return { ...actual, getConfig: vi.fn() };
 });
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn() }));
-vi.mock("../../src/engine/workspace", () => ({ openWorkspace: vi.fn(), listWorkspaceFiles: vi.fn(() => []) }));
+vi.mock("../../src/engine/workspace", () => ({ openWorkspace: vi.fn(), listWorkspaceFiles: vi.fn(() => []), workspaceFolderPaths: vi.fn(() => []) }));
 vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn((s: unknown) => s) }));
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: vi.fn(() => []),
@@ -24,7 +24,7 @@ vi.mock("../../src/jira/client", () => {
 
 import { getConfig, PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
-import { openWorkspace, listWorkspaceFiles } from "../../src/engine/workspace";
+import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths } from "../../src/engine/workspace";
 import { createWorktrees } from "../../src/engine/worktree";
 import { readLiveWindows, windowIdentity } from "../../src/engine/presence";
 import { JiraClient, JiraAuthError } from "../../src/jira/client";
@@ -499,11 +499,12 @@ describe("takeTask", () => {
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ promptTemplate: "P {key}" }));
   });
 
-  it("aborts when the mode prompt is cancelled", async () => {
+  it("asks the prompt mode first — a cancel there aborts before the ticket is read", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
-    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel the prompt-mode pick
     const { provider } = setup();
     await provider.takeTask("ASM-1", ["account-service"]);
+    expect(clientStub.getDetail).not.toHaveBeenCalled(); // aborted before resolveKickoff read the ticket
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 
@@ -686,6 +687,25 @@ describe("takeTask", () => {
       expect(toast.level).toBe("success");
       expect(toast.message).toContain("Added account-service");
     });
+  });
+
+  it("pre-checks repos the chosen existing workspace already contains", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" }); // no preselection → service pick shows
+    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur"]);
+    vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 }]);
+    // Destination is chosen first: open-target pick → workspace-file pick → service pick.
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
+      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never)
+      .mockResolvedValueOnce([{ repo: mkRepos(["centaur"])[0] }] as never);
+
+    const { provider } = setup();
+    await provider.takeTask("ASM-1"); // no preselected repos
+
+    // 3rd quick-pick is the service pick; centaur is pre-checked because it's in the workspace.
+    const items = vi.mocked(window.showQuickPick).mock.calls[2][0] as Array<{ label: string; picked: boolean }>;
+    expect(items.find((i) => i.label === "centaur")?.picked).toBe(true);
+    expect(items.find((i) => i.label === "account-service")?.picked).toBe(false);
   });
 });
 

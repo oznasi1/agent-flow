@@ -1,11 +1,12 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
 import { getConfig, AgentFlowConfig, ExploreAction, PR_REVIEW_AUTOFIX_CLAUSE } from "./config";
 import { JiraAuth } from "./jira/auth";
 import { JiraClient, JiraAuthError, JiraDetail } from "./jira/client";
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { injectSlackDm, insertBeforeFiles } from "./engine/prompt";
-import { openWorkspace, listWorkspaceFiles } from "./engine/workspace";
+import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths } from "./engine/workspace";
 import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
 import { createWorktrees } from "./engine/worktree";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
@@ -395,13 +396,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     ).map((r) => r.service.name);
   }
 
-  /** Read the ticket and resolve the repo set for a kick-off (Take or Address PR):
-   * the auth gate, repo discovery, and the confirm-repos QuickPick. `preselected`
-   * (the in-card selection) skips the QuickPick. Returns undefined on any abort. */
+  /** Read the ticket and resolve the destination + repo set for a kick-off (Take or
+   * Address PR): auth gate, repo discovery, the destination pick, then the confirm-repos
+   * QuickPick (pre-checking inferred repos AND repos the destination already contains).
+   * `preselected` (the in-card selection) skips the confirm QuickPick. Returns undefined
+   * on any abort. */
   private async resolveKickoff(
     key: string,
     preselected?: string[],
-  ): Promise<{ detail: JiraDetail; services: ServiceRef[] } | undefined> {
+  ): Promise<{ detail: JiraDetail; services: ServiceRef[]; target: OpenTarget } | undefined> {
     const cfg = getConfig();
     if (!(await this.auth.isAuthenticated())) {
       const ok = await vscode.commands.executeCommand<boolean>("agentFlow.signIn");
@@ -418,6 +421,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
       return undefined;
     }
+
+    // Destination first — where the task lands drives which repos the list pre-checks.
+    const target = await this.chooseOpenTarget(cfg);
+    if (!target) return undefined;
+
     let services: ServiceRef[];
     if (preselected && preselected.length) {
       // Selection already made in the expanded card — resolve names to repos, skip QuickPick.
@@ -429,16 +437,24 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         repos,
       );
       const inferredNames = new Set(inferred.map((r) => r.service.name));
+      const inWorkspace = this.prefillPathsForTarget(target);
+      const tag = target.kind === "live-folder" ? "open here" : "in this workspace";
 
-      // Confirm the service set (inferred ones pre-selected).
+      // Confirm the service set (inferred + already-in-destination repos pre-selected).
       const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
-        repos.map((r) => ({
-          label: r.name,
-          description: inferredNames.has(r.name) ? `inferred (${inferred.find((i) => i.service.name === r.name)!.reason})` : "",
-          detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
-          picked: inferredNames.has(r.name),
-          repo: r,
-        })),
+        repos.map((r) => {
+          const present = inWorkspace.has(canon(r.path));
+          const inf = inferredNames.has(r.name)
+            ? `inferred (${inferred.find((i) => i.service.name === r.name)!.reason})`
+            : "";
+          return {
+            label: r.name,
+            description: [inf, present ? tag : ""].filter(Boolean).join(" · "),
+            detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
+            picked: inferredNames.has(r.name) || present,
+            repo: r,
+          };
+        }),
         {
           canPickMany: true,
           title: `${key} — confirm the repos this task touches`,
@@ -453,17 +469,27 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       this.toast("error", "No valid repos selected for this task.");
       return undefined;
     }
-    return { detail, services };
+    return { detail, services, target };
   }
 
-  /** Open + seed a resolved kick-off: worktree decision → open target → workspace
-   * mode → brief → openWorkspace → success toast. Shared by Take and Address PR.
-   * `forceWorktree` (Address PR) always isolates in a worktree, ignoring cfg.worktree. */
+  /** Canonical paths the chosen destination already contains — used to pre-check the
+   * service list. New / current windows contribute nothing (nothing to merge into). */
+  private prefillPathsForTarget(target: OpenTarget): Set<string> {
+    if (target.kind === "existing") return new Set(workspaceFolderPaths(target.file));
+    if (target.kind === "live-folder") return new Set([canon(target.folder)]);
+    return new Set();
+  }
+
+  /** Open + seed a resolved kick-off: worktree decision → workspace mode → brief →
+   * openWorkspace → success toast. Shared by Take and Address PR. The destination
+   * `target` is resolved earlier in resolveKickoff. `forceWorktree` (Address PR) always
+   * isolates in a worktree, ignoring cfg.worktree. */
   private async launch(
     detail: JiraDetail,
     services: ServiceRef[],
     promptTemplate: string,
     forceWorktree: boolean,
+    target: OpenTarget,
   ): Promise<void> {
     const cfg = getConfig();
     const key = detail.key;
@@ -487,9 +513,6 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       services = createWorktrees(services, detail.key, detail.summary, this.log);
     }
 
-    // Where should it open — new window, this window, a saved workspace, or a live window?
-    const target = await this.chooseOpenTarget(cfg);
-    if (!target) return;
     const args = await this.targetToOpenArgs(target, services.length, key, cfg);
     if (!args) return;
 
@@ -526,15 +549,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** The pick flow: read ticket → infer services → confirm → choose mode → open + seed.
+  /** The pick flow: prompt mode → read ticket → destination → confirm services → open + seed.
    * `preselected` (from the in-card selection) skips the service QuickPick. */
   public async takeTask(key: string, preselected?: string[]): Promise<void> {
     const cfg = getConfig();
-    const resolved = await this.resolveKickoff(key, preselected);
-    if (!resolved) return;
-    const { detail, services } = resolved;
 
-    // How should the agent start — pick a prompt mode (or use the configured default).
+    // How should the agent start — pick a prompt mode (or use the configured default) FIRST.
     const modes = cfg.promptModes;
     let promptMode: PromptMode | undefined = modes.find((m) => m.id === cfg.taskMode);
     if (!promptMode) {
@@ -550,7 +570,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       promptMode = p.mode;
     }
 
-    await this.launch(detail, services, promptMode.prompt, false);
+    const resolved = await this.resolveKickoff(key, preselected);
+    if (!resolved) return;
+    const { detail, services, target } = resolved;
+
+    await this.launch(detail, services, promptMode.prompt, false, target);
   }
 
   /** PR-review kick-off: the same open+seed flow as Take, but always in a worktree and
@@ -560,8 +584,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   public async addressPr(key: string, preselected?: string[]): Promise<void> {
     const resolved = await this.resolveKickoff(key, preselected);
     if (!resolved) return;
-    const { detail, services } = resolved;
-    await this.launch(detail, services, this.prReviewTemplate(getConfig()), true);
+    const { detail, services, target } = resolved;
+    await this.launch(detail, services, this.prReviewTemplate(getConfig()), true, target);
   }
 
   /** Assemble the PR-review prompt: the configured base, with the auto-fix clause
@@ -694,4 +718,14 @@ function getNonce(): string {
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   for (let i = 0; i < 32; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
   return s;
+}
+
+/** Resolve symlinks so a destination's folder paths compare equal to discovered repo
+ * paths (matches engine/workspace.ts's canon). */
+function canon(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
 }
