@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.19] — 2026-07-22
+
+### Changed
+- **Refreshed the README screenshots to the current UI.** `media/screenshot.png` now
+  shows the task pool in its current design — reordered filter tabs (**My sprint**
+  first), the **Filter repos** multiselect, the **Search title** fuzzy box, and the
+  per-card **Address PR** action — captured from the real webview with sanitized
+  fictional demo data (no internal names).
+
+### Added
+- **`media/deck.png`** and a **"The Deck — your in-flight board"** README section
+  documenting the Deck (`Agent Flow: Open the Deck (in-flight)`): the four-column
+  pipeline (**In progress · Needs you · In review · Done**) with the live-status
+  vocabulary (working / idle / ended turn / parked / merged), diff-stat chips, the
+  summary strip, and the Live-signal toggle.
+
 ## [0.1.18] — 2026-07-22
 
 ### Fixed

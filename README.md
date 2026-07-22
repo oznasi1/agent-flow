@@ -11,7 +11,7 @@ sidebar that opens the right repos and pre-seeds a Claude Code agent.
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![VS Code ^1.90.0](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC?logo=visualstudiocode&logoColor=white)
 
-<img src="media/screenshot.png" alt="The Agent Flow task pool in the VS Code sidebar, showing a project's tasks with filter tabs, a size lens, and per-card Take / Add to my sprint actions" width="420" />
+<img src="media/screenshot.png" alt="The Agent Flow task pool in the VS Code sidebar — filter tabs, size and status lenses, a repo multiselect and a fuzzy title search, and per-card Take / Address PR actions" width="420" />
 
 </div>
 
@@ -42,6 +42,21 @@ orchestrate, not ready to set up.
   the task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
   for your fixes — then, by default, starts implementing the requested changes (toggle with
   `agentFlow.prReviewAutoFix`).
+
+### The Deck — your in-flight board
+
+Once you've taken tasks, the **Deck** (open it with **"Agent Flow: Open the Deck
+(in-flight)"**) is the board of everything you've launched, in a classic pipeline —
+**In progress · Needs you · In review · Done**.
+
+<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Needs you, In review, Done). Each card shows its branch, per-repo diff stats and dirty/ahead markers, a best-effort live agent status (working, idle, ended turn, parked, or merged), the Jira status, and Open / Diff actions; a summary strip counts each column and a Live-signal toggle is on." />
+
+The columns are a neutral git + Jira backbone; each **card** carries the true live state.
+A best-effort **Live signal** (read from your local Claude Code transcripts) tells `working ·
+Ns ago` from `idle`, `ended turn` (needs you), or `parked` — turn it off and cards fall back
+to git + Jira only. **Open** focuses the window if it's already open (never a duplicate) and
+opens it fresh otherwise; **Diff** shows the working diff; **⋯** offers *Open in Jira* and
+*Forget*.
 
 ## Quick start
 
