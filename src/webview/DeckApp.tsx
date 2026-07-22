@@ -20,13 +20,16 @@ function timeAgo(ms: number | null): string {
   return `${Math.round(s / 86400)}d ago`;
 }
 
-function statusLabel(r: RunStatus, live: boolean): string {
-  if (!live) return "git + Jira";
+type Tone = "working" | "idle" | "needs" | "parked" | "merged";
+
+function stateView(r: RunStatus, live: boolean): { text: string; tone: Tone } {
+  if (r.column === "done") return { text: "merged", tone: "merged" };
+  if (!live || r.agent.state === "unknown") return { text: "parked · git + Jira only", tone: "parked" };
   switch (r.agent.state) {
-    case "working": return `working · ${timeAgo(r.agent.lastActivityMs)}`;
-    case "needs-you": return "needs you";
-    case "idle": return `idle · ${timeAgo(r.agent.lastActivityMs)}`;
-    default: return "no live signal";
+    case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
+    case "needs-you": return { text: `ended turn · ${timeAgo(r.agent.lastActivityMs)}`, tone: "needs" };
+    case "idle": return { text: `idle · ${timeAgo(r.agent.lastActivityMs)}`, tone: "idle" };
+    default: return { text: "parked · git + Jira only", tone: "parked" };
   }
 }
 
@@ -46,10 +49,7 @@ function RepoChip({ g }: { g: RepoGit }): JSX.Element {
 function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
   const col = COLUMNS.find((c) => c.id === r.column)!;
   const accent = `var(${col.varName})`;
-  const st = r.agent.state;
-  const dotClass =
-    !live || st === "unknown" ? "sdot unknown" : st === "working" ? "sdot pulse" : "sdot";
-  const backbone = !live || st === "unknown";
+  const sv = stateView(r, live);
 
   return (
     <div className={`card ${r.column === "needs" ? "needs" : ""}`} style={{ ["--accent" as any]: accent }}>
@@ -57,14 +57,12 @@ function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
         <span className="key" title="Open the ticket" onClick={() => send({ type: "openExternal", url: r.run.url })}>
           {r.run.key}
         </span>
-        <span className="status"><span className={dotClass} style={{ ["--accent" as any]: accent }} />{statusLabel(r, live)}</span>
+        <span className={`status tone-${sv.tone}`}>
+          <span className={`sdot tone-${sv.tone} ${sv.tone === "working" ? "pulse" : ""}`} />
+          {sv.text}
+        </span>
       </div>
       <div className="c-title">{r.run.summary}</div>
-
-      <div className={`c-live ${backbone ? "backbone" : ""}`}>
-        <span className="lv" />
-        {backbone ? "no live signal · git + Jira only" : `claude · ${r.agent.slug ?? "session"}`}
-      </div>
 
       <div className="c-repos">{r.repos.map((g) => <RepoChip key={g.name} g={g} />)}</div>
 

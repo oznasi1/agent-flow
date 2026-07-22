@@ -13,6 +13,7 @@ export const DECK_CSS = `
 
   :root {
     --c-working: var(--vscode-charts-yellow, #d7a531);
+    --c-idle:    var(--vscode-charts-yellow, #d7a531);
     --c-needs:   var(--vscode-charts-red, #e5534b);
     --c-review:  var(--vscode-charts-purple, #b083f0);
     --c-done:    var(--vscode-charts-green, #4ac26b);
@@ -64,20 +65,15 @@ export const DECK_CSS = `
   .key:hover { border-color: var(--vscode-focusBorder); }
   .status { margin-left: auto; display: flex; align-items: center; gap: 6px;
     font-family: var(--mono); font-size: 10.5px; color: var(--vscode-descriptionForeground); }
-  .sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-  .sdot.pulse { animation: pulse 1.6s ease-in-out infinite; }
-  .sdot.unknown { background: var(--vscode-descriptionForeground); opacity: .5; }
-  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 var(--accent); } 50% { box-shadow: 0 0 0 4px transparent; } }
+  .sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-descriptionForeground); flex: none; }
+  .sdot.tone-working { background: var(--c-done); }
+  .sdot.tone-idle    { background: var(--c-idle); }
+  .sdot.tone-needs   { background: var(--c-needs); }
+  .sdot.tone-parked, .sdot.tone-merged { background: transparent; border: 1.5px solid var(--vscode-descriptionForeground); }
+  .sdot.pulse { animation: pulse 1.7s ease-out infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--c-done); } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
   .c-title { font-size: 13px; line-height: 1.35; }
-
-  .c-live { display: flex; align-items: center; gap: 6px; margin-top: 8px;
-    font-family: var(--mono); font-size: 10.5px; color: var(--vscode-foreground);
-    border-left: 2px solid var(--vscode-button-background); padding: 4px 8px;
-    background: var(--vscode-textBlockQuote-background, transparent); border-radius: 0 5px 5px 0; }
-  .c-live .lv { width: 6px; height: 6px; border-radius: 50%; background: var(--vscode-button-background); }
-  .c-live.backbone { border-left-color: var(--hair); color: var(--vscode-descriptionForeground); font-style: italic; background: transparent; }
-  .c-live.backbone .lv { background: var(--vscode-descriptionForeground); opacity: .5; }
 
   .c-repos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
   .repo { font-family: var(--mono); font-size: 10px; border: 1px solid var(--hair); border-radius: 6px;

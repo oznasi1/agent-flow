@@ -79,12 +79,36 @@ describe("DeckApp", () => {
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
   });
 
-  it("toggles the live signal and falls back to the backbone label", () => {
+  it("toggles the live signal and falls back to the parked label", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     fireEvent.click(screen.getByText(/Live signal/i));
     expect(sent).toHaveBeenCalledWith({ type: "deck:setLive", on: false });
-    expect(screen.getByText(/no live signal · git \+ Jira only/i)).toBeInTheDocument();
+    expect(screen.getByText(/parked · git \+ Jira only/i)).toBeInTheDocument();
+  });
+
+  it("labels a working agent with elapsed time", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ agent: { state: "working", lastActivityMs: Date.now(), slug: null } })]));
+    expect(screen.getByText(/working ·/i)).toBeInTheDocument();
+  });
+
+  it("labels a needs-you agent as ended turn", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "needs", agent: { state: "needs-you", lastActivityMs: Date.now(), slug: null } })]));
+    expect(screen.getByText(/ended turn/i)).toBeInTheDocument();
+  });
+
+  it("labels an idle agent as idle", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ agent: { state: "idle", lastActivityMs: Date.now(), slug: null } })]));
+    expect(screen.getByText(/idle ·/i)).toBeInTheDocument();
+  });
+
+  it("labels a done run as merged", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "done", jiraCategory: "done", jiraStatus: "Done" })]));
+    expect(screen.getByText(/merged/i)).toBeInTheDocument();
   });
 
   it("shows a toast message from the host", () => {
