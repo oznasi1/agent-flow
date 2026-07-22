@@ -210,6 +210,22 @@ describe("getConfig — explore actions", () => {
   });
 });
 
+describe("getConfig — filter visibility", () => {
+  it("defaults every filter control to visible when nothing is configured", () => {
+    expect(getConfig().filters).toEqual({ size: true, status: true, repo: true });
+  });
+
+  it("honors an explicit false for each control", () => {
+    setConfig({ "filters.size": false, "filters.status": false, "filters.repo": false });
+    expect(getConfig().filters).toEqual({ size: false, status: false, repo: false });
+  });
+
+  it("hides one control independently of the others", () => {
+    setConfig({ "filters.status": false });
+    expect(getConfig().filters).toEqual({ size: true, status: false, repo: true });
+  });
+});
+
 describe("package.json ⇄ config constants", () => {
   const props = (pkg.contributes.configuration.properties as Record<string, { default?: unknown }>);
 
@@ -222,5 +238,11 @@ describe("package.json ⇄ config constants", () => {
 
   it("keeps the deprecated explorePrompt default equal to the knowledge default (migration target)", () => {
     expect(props["agentFlow.explorePrompt"].default).toBe(DEFAULT_EXPLORE_PROMPT);
+  });
+
+  it("declares the filter-visibility settings with a default of true", () => {
+    expect(props["agentFlow.filters.size"].default).toBe(true);
+    expect(props["agentFlow.filters.status"].default).toBe(true);
+    expect(props["agentFlow.filters.repo"].default).toBe(true);
   });
 });

@@ -19,8 +19,9 @@ function host(msg: OutboundMessage) {
   });
 }
 
-const authed = (prReviewStatus = "PR initiated") =>
-  host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus });
+const ALL_FILTERS = { size: true, status: true, repo: true };
+const authed = (prReviewStatus = "PR initiated", filters = ALL_FILTERS) =>
+  host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus, filters });
 
 beforeEach(() => sent.mockClear());
 
@@ -32,7 +33,7 @@ describe("mount + auth gate", () => {
 
   it("shows the sign-in gate and wires the button when unauthenticated", () => {
     render(<App />);
-    host({ type: "state", authed: false, configured: true, project: "", me: null, prReviewStatus: "PR initiated" });
+    host({ type: "state", authed: false, configured: true, project: "", me: null, prReviewStatus: "PR initiated", filters: ALL_FILTERS });
     const button = screen.getByRole("button", { name: /Sign in to Jira/i });
     fireEvent.click(button);
     expect(sent).toHaveBeenCalledWith({ type: "signIn" });
@@ -57,7 +58,7 @@ describe("problem indication", () => {
 
   it("shows a Run setup call-to-action when not configured", () => {
     render(<App />);
-    host({ type: "state", authed: false, configured: false, project: "", me: null, prReviewStatus: "PR initiated" });
+    host({ type: "state", authed: false, configured: false, project: "", me: null, prReviewStatus: "PR initiated", filters: ALL_FILTERS });
     expect(screen.queryByText(/Sign in to Jira/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Run setup/i }));
     expect(sent).toHaveBeenCalledWith({ type: "runSetup" });
@@ -75,7 +76,7 @@ describe("problem indication", () => {
     render(<App />);
     host({ type: "error", message: "boom", canRetry: true });
     expect(screen.getByText(/boom/)).toBeInTheDocument();
-    host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated" });
+    host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS });
     expect(screen.queryByText(/boom/)).not.toBeInTheDocument();
   });
 });
@@ -160,6 +161,63 @@ describe("status filter lens", () => {
     // New pool has no "In Progress" — the stale selection must be dropped, not hide everything.
     host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-3", summary: "todo two", status: "To Do", statusCategory: "new" })] });
     expect(screen.getByText("ASM-3")).toBeInTheDocument();
+  });
+});
+
+describe("configurable filter visibility", () => {
+  const off = (overrides: Partial<typeof ALL_FILTERS>) => ({ ...ALL_FILTERS, ...overrides });
+  const oneTask = () =>
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", status: "To Do", statusCategory: "new" })] });
+
+  it("shows Size, Status, and Repo controls by default", () => {
+    render(<App />);
+    authed();
+    oneTask();
+    expect(document.querySelector(".sizes")).not.toBeNull();
+    expect(document.querySelector(".statuses")).not.toBeNull();
+    expect(document.querySelector(".repo-filter")).not.toBeNull();
+  });
+
+  it("hides the Size lens when filters.size is off, leaving the others", () => {
+    render(<App />);
+    authed("PR initiated", off({ size: false }));
+    oneTask();
+    expect(document.querySelector(".sizes")).toBeNull();
+    expect(document.querySelector(".statuses")).not.toBeNull();
+    expect(document.querySelector(".repo-filter")).not.toBeNull();
+  });
+
+  it("hides the Status lens when filters.status is off, even with statuses present", () => {
+    render(<App />);
+    authed("PR initiated", off({ status: false }));
+    oneTask();
+    expect(document.querySelector(".statuses")).toBeNull();
+    expect(document.querySelector(".sizes")).not.toBeNull();
+    expect(document.querySelector(".repo-filter")).not.toBeNull();
+  });
+
+  it("hides the Repo search box when filters.repo is off", () => {
+    render(<App />);
+    authed("PR initiated", off({ repo: false }));
+    oneTask();
+    expect(document.querySelector(".repo-filter")).toBeNull();
+    expect(document.querySelector(".sizes")).not.toBeNull();
+    expect(document.querySelector(".statuses")).not.toBeNull();
+  });
+
+  it("a hidden Status lens does not narrow the visible task list", () => {
+    render(<App />);
+    authed("PR initiated", off({ status: false }));
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "ASM-1", summary: "todo one", status: "To Do", statusCategory: "new" }),
+        mkTask({ key: "ASM-2", summary: "wip one", status: "In Progress", statusCategory: "indeterminate" }),
+      ],
+    });
+    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+    expect(screen.getByText("ASM-2")).toBeInTheDocument();
   });
 });
 

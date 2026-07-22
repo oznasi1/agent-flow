@@ -50,7 +50,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * (project name, and the PR-review status string that gates the "Address PR" action). */
   private postState(authed: boolean, configured: boolean, me: string | null): void {
     const cfg = getConfig();
-    this.post({ type: "state", authed, configured, project: cfg.project, me, prReviewStatus: cfg.prReviewStatus });
+    this.post({ type: "state", authed, configured, project: cfg.project, me, prReviewStatus: cfg.prReviewStatus, filters: cfg.filters });
   }
 
   private toast(level: "success" | "error" | "info", message: string): void {

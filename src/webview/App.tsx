@@ -1,7 +1,7 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
 import { deriveStatuses, fmtEst, isPrReviewStatus, matchesStatus, moveKey, prioClass } from "./helpers";
-import { Filter, JiraTask, OutboundMessage, Size } from "../types";
+import { Filter, FilterVisibility, JiraTask, OutboundMessage, Size } from "../types";
 
 let toastSeq = 0;
 
@@ -88,6 +88,9 @@ export function App(): JSX.Element {
   const [prReviewStatus, setPrReviewStatus] = React.useState("");
   const [filter, setFilter] = React.useState<Filter>("mysprint");
   const [size, setSize] = React.useState<Size>("any");
+  // Which secondary filter controls are shown (from settings, via the host). All
+  // shown until the host says otherwise — nothing flashes hidden on first paint.
+  const [filters, setFilters] = React.useState<FilterVisibility>({ size: true, status: true, repo: true });
   // Client-side status lens: the set of selected statuses (empty = show all).
   const [statuses, setStatuses] = React.useState<Set<string>>(new Set());
   const [repoQuery, setRepoQuery] = React.useState("");
@@ -144,6 +147,7 @@ export function App(): JSX.Element {
           setProject(m.project);
           setMe(m.me);
           setPrReviewStatus(m.prReviewStatus);
+          setFilters(m.filters);
           break;
         case "error":
           setLoading(false);
@@ -317,21 +321,23 @@ export function App(): JSX.Element {
         ))}
       </div>
 
-      <div className="sizes">
-        <span className="sizes-label">Size</span>
-        {SIZES.map((s) => (
-          <button
-            key={s.id}
-            className={`size-chip${size === s.id ? " active" : ""}`}
-            title={s.title}
-            onClick={() => refetch(filter, s.id)}
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
+      {filters.size && (
+        <div className="sizes">
+          <span className="sizes-label">Size</span>
+          {SIZES.map((s) => (
+            <button
+              key={s.id}
+              className={`size-chip${size === s.id ? " active" : ""}`}
+              title={s.title}
+              onClick={() => refetch(filter, s.id)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {availableStatuses.length > 0 && (
+      {filters.status && availableStatuses.length > 0 && (
         <div className="statuses">
           <span className="statuses-label">Status</span>
           <button
@@ -353,18 +359,20 @@ export function App(): JSX.Element {
         </div>
       )}
 
-      <div className="repo-filter">
-        <SearchIcon />
-        <input
-          value={repoQuery}
-          spellCheck={false}
-          placeholder="Filter by repo…"
-          onChange={(e) => setRepoQuery(e.target.value)}
-        />
-        {repoQuery && (
-          <span className="repo-filter-clear" title="Clear repo filter" onClick={() => setRepoQuery("")}>×</span>
-        )}
-      </div>
+      {filters.repo && (
+        <div className="repo-filter">
+          <SearchIcon />
+          <input
+            value={repoQuery}
+            spellCheck={false}
+            placeholder="Filter by repo…"
+            onChange={(e) => setRepoQuery(e.target.value)}
+          />
+          {repoQuery && (
+            <span className="repo-filter-clear" title="Clear repo filter" onClick={() => setRepoQuery("")}>×</span>
+          )}
+        </div>
+      )}
 
       {filter === "mysprint" && (
         <div className="reorder-bar">

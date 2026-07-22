@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as os from "os";
 import * as path from "path";
-import { PromptMode } from "./types";
+import { FilterVisibility, PromptMode } from "./types";
 
 export const DEFAULT_PROMPT_MODES: PromptMode[] = [
   {
@@ -98,6 +98,9 @@ export interface AgentFlowConfig {
   trackOpenWindows: boolean;
   stampLabelOnWrite: boolean;
   provenanceLabel: string;
+  // Which secondary filter controls the task-pool sidebar shows. Each defaults to
+  // true; a user hides the ones they don't use. The tab bar is always shown.
+  filters: FilterVisibility;
 }
 
 /** Expand a leading `~` to the user's home directory. */
@@ -162,5 +165,10 @@ export function getConfig(): AgentFlowConfig {
     trackOpenWindows: c.get<boolean>("trackOpenWindows") ?? true,
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,
     provenanceLabel: c.get<string>("provenanceLabel") || "claude-code",
+    filters: {
+      size: c.get<boolean>("filters.size") ?? true,
+      status: c.get<boolean>("filters.status") ?? true,
+      repo: c.get<boolean>("filters.repo") ?? true,
+    },
   };
 }

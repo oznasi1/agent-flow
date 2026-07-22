@@ -150,6 +150,21 @@
           "default": "mysprint",
           "description": "Default task filter lens shown when Agent Flow opens."
         },
+        "agentFlow.filters.size": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Size lens (Any/S/M/L) in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
+        },
+        "agentFlow.filters.status": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Status chip row in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
+        },
+        "agentFlow.filters.repo": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the \"Filter by repo…\" search box in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
+        },
         "agentFlow.seedAgent": {
           "type": "boolean",
           "default": true,

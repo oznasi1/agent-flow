@@ -3,6 +3,14 @@
 export type Filter = "unassigned" | "mine" | "mysprint" | "sprint" | "backlog" | "all";
 export type Size = "any" | "s" | "m" | "l"; // by original time estimate
 
+/** Which secondary filter controls the task-pool sidebar shows. Each defaults to
+ * true; a user hides the ones they don't use. The tab bar is always shown. */
+export interface FilterVisibility {
+  size: boolean;
+  status: boolean;
+  repo: boolean;
+}
+
 export interface JiraTask {
   key: string;
   summary: string;
@@ -113,7 +121,7 @@ export type OutboundMessage =
   // `configured` is false until the Jira site URL + project key are set (first-run
   // setup). The webview uses it to show a "run setup" call-to-action rather than a
   // blank/loading panel.
-  | { type: "state"; authed: boolean; configured: boolean; project: string; me: string | null; prReviewStatus: string }
+  | { type: "state"; authed: boolean; configured: boolean; project: string; me: string | null; prReviewStatus: string; filters: FilterVisibility }
   | { type: "tasks"; filter: Filter; tasks: JiraTask[] }
   | { type: "detail"; key: string; descriptionText: string; inferred: string[]; repos: string[] }
   | { type: "statusChanged"; key: string; status: string; category: string; removed: boolean }

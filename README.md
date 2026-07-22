@@ -10,7 +10,9 @@ orchestrate, not ready to set up.
 ## What it does
 
 - **Sidebar task pool** (webview) with filter tabs (Unassigned · Mine · My sprint · Backlog)
-  and a size lens (S/M/L by original estimate).
+  and a size lens (S/M/L by original estimate). The size lens, status lens, and repo
+  search can each be hidden if you don't use them (`agentFlow.filters.size` /
+  `.status` / `.repo`, all on by default).
 - **Jira fetch** over the REST API. Reads are the default; the only writes are optional
   status changes from a card — which also stamp a provenance label (default `claude-code`,
   configurable via `agentFlow.provenanceLabel`, toggle with `agentFlow.stampLabelOnWrite`).
@@ -92,6 +94,9 @@ loaded. Open the **Agent Flow** icon in the activity bar and complete the first-
 | `agentFlow.provenanceLabel` | `claude-code` | Label stamped on Jira writes when enabled. |
 | `agentFlow.stampLabelOnWrite` | `true` | Whether to stamp the provenance label. |
 | `agentFlow.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
+| `agentFlow.filters.size` | `true` | Show the Size lens (Any/S/M/L) in the sidebar. Off to hide it. |
+| `agentFlow.filters.status` | `true` | Show the Status chip row in the sidebar. Off to hide it. |
+| `agentFlow.filters.repo` | `true` | Show the "Filter by repo…" search box. Off to hide it. |
 | `agentFlow.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
 | `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on a card. |
