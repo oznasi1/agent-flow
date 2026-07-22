@@ -327,12 +327,23 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (raw === undefined) return; // cancelled (empty is allowed → generic focus)
     const topic = raw.trim() || "Codebase exploration";
 
+    // Destination first, so the repo picker can pre-check what it already contains.
+    const target = await this.chooseOpenTarget(cfg);
+    if (!target) return;
+    const inWorkspace = this.prefillPathsForTarget(target);
+    const tag = target.kind === "live-folder" ? "open here" : "in this workspace";
+
     const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
-      repos.map((r) => ({
-        label: r.name,
-        detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
-        repo: r,
-      })),
+      repos.map((r) => {
+        const present = inWorkspace.has(canon(r.path));
+        return {
+          label: r.name,
+          description: present ? tag : "",
+          detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
+          picked: present,
+          repo: r,
+        };
+      }),
       {
         canPickMany: true,
         title: "Explore — pick the repos to open",
@@ -343,8 +354,6 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (!picks || picks.length === 0) return;
     const services = picks.map((p) => p.repo);
 
-    const target = await this.chooseOpenTarget(cfg);
-    if (!target) return;
     const args = await this.targetToOpenArgs(target, services.length, "Explore", cfg);
     if (!args) return;
 
