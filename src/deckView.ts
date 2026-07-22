@@ -7,6 +7,7 @@ import { JiraAuth } from "./jira/auth";
 import { JiraClient, JiraAuthError } from "./jira/client";
 import { readRuns, defaultRunsDir } from "./engine/runs";
 import { buildRunStatus } from "./engine/status";
+import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { openInEditor } from "./engine/workspace";
 import { InboundMessage, OutboundMessage, Run, RunStatus } from "./types";
 
@@ -98,10 +99,11 @@ export class DeckPanel {
     const projectsRoot = path.join(os.homedir(), ".claude", "projects");
     const now = Date.now();
     const authed = await this.auth.isAuthenticated();
+    const openIdentities = new Set(readLiveWindows(defaultWindowsDir()).map((w) => w.identity));
     const out: RunStatus[] = [];
     for (const run of runs) {
       const jira = authed ? await this.jiraStatus(run.key) : null;
-      out.push(buildRunStatus(run, jira, projectsRoot, now, this.liveSignal));
+      out.push(buildRunStatus(run, jira, projectsRoot, now, this.liveSignal, openIdentities));
     }
     return out;
   }
@@ -153,7 +155,7 @@ export class DeckPanel {
         return;
       }
       const ok = await openInEditor(target);
-      this.toast(ok ? "success" : "error", ok ? `Reopening ${key}…` : `Couldn't open ${key}.`);
+      if (!ok) this.toast("error", `Couldn't open ${key}.`);
       return;
     }
     // diff — show the working-tree changes vs HEAD as a read-only diff document.

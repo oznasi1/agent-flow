@@ -13,6 +13,10 @@ const h = vi.hoisted(() => ({
 vi.mock("../../src/engine/runs", () => ({ defaultRunsDir: () => "/runs", readRuns: () => h.runs }));
 vi.mock("../../src/engine/status", () => ({ buildRunStatus: h.buildRunStatus }));
 vi.mock("../../src/engine/workspace", () => ({ openInEditor: h.openInEditor }));
+vi.mock("../../src/engine/presence", () => ({
+  readLiveWindows: () => [],
+  defaultWindowsDir: () => "/windows",
+}));
 
 import { DeckPanel } from "../../src/deckView";
 
@@ -74,7 +78,7 @@ describe("DeckPanel", () => {
     await p._fire({ type: "deck:setLive", on: false });
     const runsPost = posts(p).reverse().find((m) => m.type === "deck:runs");
     expect(runsPost.liveSignal).toBe(false);
-    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.anything(), null, expect.any(String), expect.any(Number), false);
+    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.anything(), null, expect.any(String), expect.any(Number), false, expect.any(Set));
   });
 
   it("inspect open re-opens the repo path via the editor", async () => {
@@ -88,6 +92,24 @@ describe("DeckPanel", () => {
     show();
     await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "open" });
     expect(h.openInEditor).toHaveBeenCalledWith("/ws/ASM-1.code-workspace");
+  });
+
+  it("opens without a success toast (silent focus)", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "open" });
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
+    const successToast = posts(p).find((m) => m.type === "toast" && m.level === "success");
+    expect(successToast).toBeUndefined();
+  });
+
+  it("toasts an error when opening fails", async () => {
+    h.openInEditor.mockResolvedValueOnce(false);
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "open" });
+    const errorToast = posts(p).find((m) => m.type === "toast" && m.level === "error");
+    expect(errorToast).toBeTruthy();
   });
 
   it("inspect diff on a repo with no changes toasts instead of opening a doc", async () => {
