@@ -4,7 +4,7 @@
 
 **Goal:** Replace the single "Filter by repo…" text box in the task-pool sidebar with a repo multiselect dropdown and a fuse.js fuzzy title search, each toggleable via settings.
 
-**Architecture:** This is a VS Code extension. Settings flow host→webview: `config.ts` reads `agentFlow.*` settings into `AgentFlowConfig.filters` (a `FilterVisibility`), `tasksView.ts` forwards it in the `state` message, and `src/webview/App.tsx` (a React app bundled by esbuild) gates each control on its flag. Filtering is entirely client-side in `App.tsx` over the in-memory task pool.
+**Architecture:** This is a VS Code extension. Settings flow host→webview: `config.ts` reads `agentFlow.*` settings into `AgentFlowConfig.filters` (a `FilterVisibility`), `tasksView.ts` forwards it in the `state` message, and `src/webview/App.tsx` (a React app bundled by esbuild) gates each control on its flag. Filtering is entirely client-side in `App.tsx` over the in-memory task pool. The existing per-card `RepoPicker` and the new `RepoMultiSelect` share their command-palette scaffolding through a `useComboFilter` hook.
 
 **Tech Stack:** TypeScript, React 18, esbuild, Vitest + @testing-library/react (jsdom), fuse.js (new runtime dependency).
 
@@ -12,8 +12,9 @@
 
 - **fuse.js must resolve from the public npm registry.** This repo is public OSS; the user's global `~/.npmrc` points npm at At-Bay CodeArtifact, which rewrites `package-lock.json` `resolved` URLs and makes CI fail with `E401`. Always install with `--registry https://registry.npmjs.org` and verify the lockfile entry resolves to `registry.npmjs.org`.
 - **Settings default to `true`** (control shown), read with a `?? true` fallback — matches every existing `agentFlow.filters.*` setting. Additive only; no migration.
-- **Repo label copy is exactly `Filter repos`**; the repo-filter inner search and the search box keep their existing placeholders (`Filter repos…` inside the dropdown, `Search title…` for the fuzzy box).
+- **Repo trigger label copy is exactly `Filter repos`** (no ellipsis); the combo's inner filter input keeps the placeholder `Filter repos…` (with ellipsis); the fuzzy box placeholder is exactly `Search title…`.
 - **Repos combine as OR** (a task passes if it touches any selected repo); the three filter *types* (repo, text, status) combine as AND.
+- **The `useComboFilter` refactor must be behaviour-preserving for `RepoPicker`** — `test/webview/RepoPicker.test.tsx` (10 cases) must stay green untouched.
 - **Settings apply on refresh/reload** — there is no `onDidChangeConfiguration` watcher, consistent with all current settings.
 - **TDD, frequent commits.** Each task ends green (`npm test` for the files it touched, plus `npm run typecheck`) and is committed.
 
@@ -24,9 +25,9 @@
 - `src/types.ts` — `FilterVisibility` gains `search: boolean`.
 - `src/config.ts` — read `filters.search`.
 - `package.json` — add `agentFlow.filters.search` contribution; update `agentFlow.filters.repo` description; add `fuse.js` to `dependencies`.
-- `src/webview/App.tsx` — the two controls (`RepoMultiSelect` component + fuzzy search input), a `FilterIcon`, new state (`selectedRepos`, `textQuery`), filter/sort logic, `canReorder`, empty-state copy.
+- `src/webview/App.tsx` — `useComboFilter` hook; `RepoPicker` refactored onto it; new `RepoMultiSelect` component + `FilterIcon`; fuzzy search input; new state (`selectedRepos`, `textQuery`), filter/sort logic, `canReorder`, empty-state copy.
 - `src/webview/styles.ts` — CSS for `.repo-select` (trigger/popup/checkbox) and `.text-search`; remove the old `.repo-filter` block.
-- Tests: `test/unit/config.test.ts`, `test/unit/tasksView.test.ts`, `test/webview/App.test.tsx`.
+- Tests: `test/unit/config.test.ts`, `test/unit/tasksView.test.ts`, `test/webview/App.test.tsx`. (`test/webview/RepoPicker.test.tsx` stays as the refactor's safety net — do not edit it.)
 
 ---
 
@@ -159,17 +160,161 @@ git commit -m "feat: add filters.search visibility setting"
 
 ---
 
-## Task 2: Repo multiselect dropdown
+## Task 2: Extract `useComboFilter` hook; refactor `RepoPicker` onto it
 
-Replace the `.repo-filter` text box with a `RepoMultiSelect` dropdown. Repo filtering changes from substring-on-`services` to OR-membership over a checkbox list built from the pool's repos. `canReorder` and the empty-state message are updated for the new repo state (text search comes in Task 3).
+Pull the command-palette scaffolding (open/query/active state, focus-on-open, active-reset, click-outside-close, Arrow/Enter/Escape handling) out of `RepoPicker` into a reusable `useComboFilter` hook, and rewrite `RepoPicker` to consume it. This is a **behaviour-preserving refactor** — the existing `test/webview/RepoPicker.test.tsx` (10 cases) is the safety net and must stay green **without edits**. Task 3 will build the multiselect on this hook.
 
 **Files:**
-- Modify: `src/webview/App.tsx` (imports, `App` state + JSX, add `RepoMultiSelect` + `FilterIcon`)
+- Modify: `src/webview/App.tsx` (add `useComboFilter`; rewrite `RepoPicker`, ~lines 616-698)
+- Safety net (do NOT edit): `test/webview/RepoPicker.test.tsx`
+
+**Interfaces:**
+- Produces: `useComboFilter(items: string[], onEnter: (item: string) => void)` returning `{ open, setOpen, q, setQ, active, setActive, filtered, inputRef, rootRef, onKeyDown }` where:
+  - `open: boolean`, `setOpen: (v: boolean) => void`
+  - `q: string`, `setQ: (v: string) => void`
+  - `active: number`, `setActive: React.Dispatch<React.SetStateAction<number>>`
+  - `filtered: string[]` — `items` case-insensitively substring-matched by `q`
+  - `inputRef: React.RefObject<HTMLInputElement>`, `rootRef: React.RefObject<HTMLDivElement>`
+  - `onKeyDown: (e: React.KeyboardEvent) => void` — ArrowUp/Down move `active` (clamped), Enter calls `onEnter(filtered[active])`, Escape sets `open` false.
+- `RepoPicker`'s public signature (`{ available, onAdd }`) is unchanged.
+
+- [ ] **Step 1: Run the RepoPicker safety-net suite to confirm the starting point is green**
+
+Run: `npx vitest run test/webview/RepoPicker.test.tsx`
+Expected: PASS — 10/10 (this suite must still pass identically after the refactor).
+
+- [ ] **Step 2: Add the `useComboFilter` hook**
+
+In `src/webview/App.tsx`, immediately before the `RepoPicker` definition:
+
+```tsx
+/** Shared scaffolding for the inline command-palette combos (RepoPicker,
+ * RepoMultiSelect): open/query/active state, focus-on-open, active-reset on
+ * change, click-outside-to-close, and Arrow/Enter/Escape handling. The consumer
+ * supplies what Enter does via `onEnter`. */
+export function useComboFilter(items: string[], onEnter: (item: string) => void) {
+  const [open, setOpen] = React.useState(false);
+  const [q, setQ] = React.useState("");
+  const [active, setActive] = React.useState(0);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const rootRef = React.useRef<HTMLDivElement>(null);
+
+  const filtered = React.useMemo(
+    () => items.filter((r) => r.toLowerCase().includes(q.toLowerCase())),
+    [items, q],
+  );
+
+  React.useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
+  React.useEffect(() => setActive(0), [q, open]);
+  React.useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, filtered.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); if (filtered[active]) onEnter(filtered[active]); }
+    else if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
+  };
+
+  return { open, setOpen, q, setQ, active, setActive, filtered, inputRef, rootRef, onKeyDown };
+}
+```
+
+- [ ] **Step 3: Rewrite `RepoPicker` to consume the hook**
+
+Replace the entire existing `RepoPicker` function (from its doc-comment through its closing brace) with:
+
+```tsx
+/** Command-palette-style repo picker: filter-as-you-type, keyboard-navigable,
+ * inline (no floating popup to get clipped by the card's overflow). */
+export function RepoPicker({ available, onAdd }: { available: string[]; onAdd: (name: string) => void }): JSX.Element | null {
+  const { open, setOpen, q, setQ, active, setActive, filtered, inputRef, rootRef, onKeyDown } =
+    useComboFilter(available, (name) => choose(name));
+
+  const choose = (name: string) => {
+    onAdd(name);
+    setQ("");
+    setActive(0);
+    inputRef.current?.focus();
+  };
+
+  if (available.length === 0) return null;
+
+  return (
+    <div className="repo-picker" ref={rootRef}>
+      {!open ? (
+        <button className="repo-add" onClick={() => setOpen(true)}>
+          <span className="repo-add-plus">+</span> add repo
+        </button>
+      ) : (
+        <div className="repo-combo">
+          <div className="repo-search">
+            <SearchIcon />
+            <input
+              ref={inputRef}
+              value={q}
+              spellCheck={false}
+              placeholder="Filter repos…"
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={onKeyDown}
+            />
+          </div>
+          <div className="repo-list" role="listbox">
+            {filtered.length === 0 && <div className="repo-empty">No repos match “{q}”</div>}
+            {filtered.map((r, i) => (
+              <div
+                key={r}
+                role="option"
+                aria-selected={i === active}
+                className={`repo-row${i === active ? " active" : ""}`}
+                onMouseEnter={() => setActive(i)}
+                onMouseDown={(e) => { e.preventDefault(); choose(r); }}
+              >
+                <span className="repo-name">{r}</span>
+                <span className="repo-add-hint">add ⏎</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+Note: `useComboFilter(available, (name) => choose(name))` receives a wrapper arrow that references `choose`; `choose` is a closure invoked only on later user interaction, so it is defined by the time Enter fires. `useComboFilter` is called unconditionally before the `available.length === 0` early return (Rules of Hooks).
+
+- [ ] **Step 4: Run the safety-net suite + typecheck to verify behaviour is preserved**
+
+Run: `npm run typecheck && npx vitest run test/webview/RepoPicker.test.tsx`
+Expected: PASS — 10/10, unchanged.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/webview/App.tsx
+git commit -m "refactor: extract useComboFilter hook from RepoPicker"
+```
+
+---
+
+## Task 3: Repo multiselect dropdown
+
+Replace the `.repo-filter` text box with a `RepoMultiSelect` dropdown built on `useComboFilter`. Repo filtering changes from substring-on-`services` to OR-membership over a checkbox list built from the pool's repos. `canReorder` and the empty-state message are updated for the new repo state (text search comes in Task 4).
+
+**Files:**
+- Modify: `src/webview/App.tsx` (add `FilterIcon` + `RepoMultiSelect`; `App` state + JSX + filter logic)
 - Modify: `src/webview/styles.ts` (remove `.repo-filter` block ~lines 53-63; add `.repo-select` styles)
 - Test: `test/webview/App.test.tsx`
 
 **Interfaces:**
-- Consumes: `FilterVisibility.search` unused here; `filters.repo` gates the control.
+- Consumes: `useComboFilter` (Task 2); `filters.repo` gates the control.
 - Produces:
   - `FilterIcon: () => JSX.Element` (funnel SVG, sibling of `SearchIcon`).
   - `RepoMultiSelect({ repos: string[]; selected: Set<string>; onToggle: (name: string) => void; onClear: () => void }): JSX.Element | null` — renders `null` when `repos` is empty.
@@ -177,7 +322,7 @@ Replace the `.repo-filter` text box with a `RepoMultiSelect` dropdown. Repo filt
 
 - [ ] **Step 1: Write the failing tests for the multiselect**
 
-Add this describe block to `test/webview/App.test.tsx` (uses existing `render`, `authed`, `host`, `mkTask`, `fireEvent`, `screen`, `within`):
+Add this describe block to `test/webview/App.test.tsx` (uses existing `render`, `authed`, `host`, `mkTask`, `fireEvent`, `screen`):
 
 ```tsx
 describe("repo multiselect", () => {
@@ -243,9 +388,10 @@ describe("repo multiselect", () => {
 });
 ```
 
-Also update the two pre-existing visibility tests that reference `.repo-filter`:
+Also update the pre-existing filter-visibility tests that reference `.repo-filter`:
 - In `"shows Size, Status, and Repo controls by default"` change `expect(document.querySelector(".repo-filter")).not.toBeNull();` → `expect(document.querySelector(".repo-select")).not.toBeNull();`
-- Delete the old `"hides the Repo search box when filters.repo is off"` test (replaced by `"hides the multiselect when filters.repo is off"` above), and in the remaining `off({ size: false })` / `off({ status: false })` tests change their `.repo-filter` assertions to `.repo-select`.
+- Delete the old `"hides the Repo search box when filters.repo is off"` test (replaced by `"hides the multiselect when filters.repo is off"` above).
+- In the remaining `off({ size: false })` and `off({ status: false })` tests, change their `.repo-filter` assertions to `.repo-select`.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -338,8 +484,9 @@ At the end of `src/webview/App.tsx`, after `RepoPicker`:
 ```tsx
 /** Multiselect repo filter: a trigger that opens an inline checkbox list —
  * filter-as-you-type, keyboard-navigable, OR-combining. Inline (no floating
- * popup) so the card/list overflow can't clip it. Renders nothing when the
- * pool has no repos. */
+ * popup) so the list overflow can't clip it. Renders nothing when the pool has
+ * no repos. Shares its command-palette scaffolding with RepoPicker via
+ * useComboFilter; Enter toggles the active repo (the combo stays open). */
 export function RepoMultiSelect({
   repos,
   selected,
@@ -351,40 +498,14 @@ export function RepoMultiSelect({
   onToggle: (name: string) => void;
   onClear: () => void;
 }): JSX.Element | null {
-  const [open, setOpen] = React.useState(false);
-  const [q, setQ] = React.useState("");
-  const [active, setActive] = React.useState(0);
-  const inputRef = React.useRef<HTMLInputElement>(null);
-  const rootRef = React.useRef<HTMLDivElement>(null);
-
-  const filtered = React.useMemo(
-    () => repos.filter((r) => r.toLowerCase().includes(q.toLowerCase())),
-    [repos, q],
-  );
-
-  React.useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
-  React.useEffect(() => setActive(0), [q, open]);
-  React.useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
+  const { open, setOpen, q, setQ, active, setActive, filtered, inputRef, rootRef, onKeyDown } =
+    useComboFilter(repos, onToggle);
 
   if (repos.length === 0) return null;
 
-  const onKey = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, filtered.length - 1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); if (filtered[active]) onToggle(filtered[active]); }
-    else if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
-  };
-
   return (
     <div className="repo-select" ref={rootRef}>
-      <button className="repo-select-trigger" onClick={() => setOpen((o) => !o)}>
+      <button className="repo-select-trigger" onClick={() => setOpen(!open)}>
         <FilterIcon />
         <span className={`repo-select-label${selected.size ? "" : " placeholder"}`}>Filter repos</span>
         {selected.size > 0 && <span className="repo-count">{selected.size}</span>}
@@ -400,7 +521,7 @@ export function RepoMultiSelect({
               spellCheck={false}
               placeholder="Filter repos…"
               onChange={(e) => setQ(e.target.value)}
-              onKeyDown={onKey}
+              onKeyDown={onKeyDown}
             />
           </div>
           <div className="repo-list" role="listbox">
@@ -476,8 +597,8 @@ In `src/webview/styles.ts`, delete the `.repo-filter` … `.repo-filter-clear:ho
 
 - [ ] **Step 9: Run tests + typecheck to verify green**
 
-Run: `npm run typecheck && npx vitest run test/webview/App.test.tsx`
-Expected: PASS — all repo-multiselect and visibility tests green.
+Run: `npm run typecheck && npx vitest run test/webview/App.test.tsx test/webview/RepoPicker.test.tsx`
+Expected: PASS — all repo-multiselect and visibility tests green; RepoPicker suite still 10/10.
 
 - [ ] **Step 10: Commit**
 
@@ -488,7 +609,7 @@ git commit -m "feat: repo multiselect dropdown replaces repo text filter"
 
 ---
 
-## Task 3: Fuzzy title search (fuse.js)
+## Task 4: Fuzzy title search (fuse.js)
 
 Add the `Search title…` box below the multiselect, powered by fuse.js over each task's `summary`. When the box has text, the visible list is ordered by fuse relevance. Finalize `canReorder` and the empty-state priority to account for text search. Install fuse.js from the public registry.
 
@@ -499,7 +620,7 @@ Add the `Search title…` box below the multiselect, powered by fuse.js over eac
 - Test: `test/webview/App.test.tsx`
 
 **Interfaces:**
-- Consumes: `FilterVisibility.search` gates the box; `selectedRepos` / `statuses` predicates from Task 2.
+- Consumes: `FilterVisibility.search` gates the box; `selectedRepos` / `statuses` predicates from Task 3.
 - Produces: App state `textQuery: string`; visible list ordered by fuse score when `textQuery.trim()` is non-empty.
 
 - [ ] **Step 1: Install fuse.js from the public registry**
@@ -596,7 +717,7 @@ Add a memoized Fuse near `allRepos`:
   );
 ```
 
-Replace the `visibleTasks` definition from Task 2 with a version that searches first (ordered by score) then applies repo/status predicates:
+Replace the `visibleTasks` / `canReorder` block from Task 3 with a version that searches first (ordered by score) then applies the repo/status predicates:
 
 ```tsx
   const q = textQuery.trim();
@@ -611,7 +732,7 @@ Replace the `visibleTasks` definition from Task 2 with a version that searches f
 
 - [ ] **Step 6: Finalize the empty-state priority (text → repo → status)**
 
-Replace the empty-state message body from Task 2 with:
+Replace the empty-state message body from Task 3 with:
 
 ```tsx
           {q
@@ -646,7 +767,7 @@ Immediately after the `{filters.repo && (…)}` block:
 
 - [ ] **Step 8: Add `.text-search` styles**
 
-In `src/webview/styles.ts`, after the `.repo-select` styles from Task 2:
+In `src/webview/styles.ts`, after the `.repo-select` styles from Task 3:
 
 ```css
   .text-search { display: flex; align-items: center; gap: 7px; margin: 0 2px 10px;
@@ -679,15 +800,16 @@ git commit -m "feat: fuzzy title search with fuse.js"
 ## Self-Review
 
 **Spec coverage:**
-- Two controls replacing the single box → Tasks 2 (multiselect) + 3 (search). ✓
-- Repo multiselect: funnel icon, "Filter repos" label, count badge, checkbox list, filter-as-you-type, keyboard nav, click-outside, Clear, OR filter, sorted-union options → Task 2. ✓
-- Fuzzy title search over `summary` via fuse.js, ordered by relevance, non-search path skips Fuse → Task 3. ✓
+- Two controls replacing the single box → Tasks 3 (multiselect) + 4 (search). ✓
+- Repo multiselect: funnel icon, "Filter repos" label, count badge, checkbox list, filter-as-you-type, keyboard nav, click-outside, Clear, OR filter, sorted-union options → Task 3. ✓
+- Shared scaffolding (DRY, per user decision) → `useComboFilter` in Task 2, consumed by both `RepoPicker` (refactored) and `RepoMultiSelect`. ✓
+- Fuzzy title search over `summary` via fuse.js, ordered by relevance, non-search path skips Fuse → Task 4. ✓
 - Title-only (description out of scope) → no description code anywhere. ✓
 - Settings: `filters.repo` repurposed + new `filters.search`, `FilterVisibility.search`, config read, package.json contribution → Task 1. ✓
-- fuse.js public-registry guard → Global Constraints + Task 3 Step 1. ✓
-- `canReorder` includes all three filters; empty-state priority text→repo→status → Task 3 Steps 5-6. ✓
-- Tests: config defaults, visibility toggles, repo OR-filter, fuzzy narrow+order, combined AND → Tasks 1-3. ✓
+- fuse.js public-registry guard → Global Constraints + Task 4 Step 1. ✓
+- `canReorder` includes all three filters; empty-state priority text→repo→status → Task 4 Steps 5-6. ✓
+- Tests: config defaults, visibility toggles, repo OR-filter, fuzzy narrow+order, combined AND, RepoPicker unchanged → Tasks 1-4. ✓
 
 **Placeholder scan:** No TBD/TODO; every code and test step shows complete content. ✓
 
-**Type consistency:** `FilterVisibility { size, status, repo, search }` used identically in types.ts, config.ts, App default, and all test fixtures. `RepoMultiSelect` prop names (`repos`, `selected`, `onToggle`, `onClear`) match its call site in Task 2 Step 6. `selectedRepos`/`toggleRepo`/`clearRepos`/`textQuery`/`allRepos`/`fuse` names are consistent across steps. ✓
+**Type consistency:** `FilterVisibility { size, status, repo, search }` used identically in types.ts, config.ts, App default, and all test fixtures. `useComboFilter`'s returned members (`open/setOpen/q/setQ/active/setActive/filtered/inputRef/rootRef/onKeyDown`) are destructured identically in both `RepoPicker` (Task 2) and `RepoMultiSelect` (Task 3). `RepoMultiSelect` prop names (`repos`, `selected`, `onToggle`, `onClear`) match its call site in Task 3 Step 6. `selectedRepos`/`toggleRepo`/`clearRepos`/`textQuery`/`allRepos`/`fuse` names are consistent across steps. ✓
