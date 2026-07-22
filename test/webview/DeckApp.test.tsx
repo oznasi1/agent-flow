@@ -60,7 +60,28 @@ describe("DeckApp", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" }, column: "needs", agent: { state: "needs-you", lastActivityMs: 1, slug: null } })]));
     expect(screen.getByText("ASM-2")).toBeInTheDocument();
-    expect(screen.getByText(/need you/)).toBeInTheDocument(); // summary chip: "1" + " need you"
+    expect(screen.getByText(/need you/i)).toBeInTheDocument(); // summary strip: "Need you"
+  });
+
+  it("shows the In progress column label", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(screen.getAllByText("In progress").length).toBeGreaterThan(0);
+  });
+
+  it("shows a summary strip with the total count", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
+    expect(screen.getByText(/Total/i)).toBeInTheDocument();
+  });
+
+  it("sorts cards in a column by most-recent activity", () => {
+    render(<DeckApp />);
+    const older = mkStatus({ run: { ...mkStatus().run, key: "OLD-1" }, agent: { state: "idle", lastActivityMs: 100, slug: null } });
+    const newer = mkStatus({ run: { ...mkStatus().run, key: "NEW-1" }, agent: { state: "idle", lastActivityMs: 999, slug: null } });
+    host(runsMsg([older, newer]));
+    const keys = screen.getAllByText(/-1$/).map((el) => el.textContent);
+    expect(keys.indexOf("NEW-1")).toBeLessThan(keys.indexOf("OLD-1"));
   });
 
   it("sends deck:inspect open and diff from the card actions", () => {

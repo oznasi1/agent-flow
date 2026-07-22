@@ -5,7 +5,7 @@ import { DeckColumn, OutboundMessage, RepoGit, RunStatus } from "../types";
 let toastSeq = 0;
 
 const COLUMNS: { id: DeckColumn; label: string; varName: string }[] = [
-  { id: "progress", label: "Working", varName: "--c-working" },
+  { id: "progress", label: "In progress", varName: "--c-progress" },
   { id: "needs", label: "Needs you", varName: "--c-needs" },
   { id: "review", label: "In review", varName: "--c-review" },
   { id: "done", label: "Done", varName: "--c-done" },
@@ -118,9 +118,11 @@ export function DeckApp(): JSX.Element {
     <>
       <div className="hd">
         <div className="title">In-flight<span className="sub">everything you've launched</span></div>
-        <div className="counts">
-          <span><b>{runs.length}</b> in flight</span>
-          {needs > 0 && <span className="alert"><b>{needs}</b> need you</span>}
+        <div className="stats">
+          <div className="stat"><span className="n">{runs.filter((r) => r.column === "progress").length}</span><span className="l">In progress</span></div>
+          <div className={`stat ${needs > 0 ? "alert" : ""}`}><span className="n">{needs}</span><span className="l">Need you</span></div>
+          <div className="stat"><span className="n">{runs.filter((r) => r.column === "review").length}</span><span className="l">In review</span></div>
+          <div className="stat"><span className="n">{runs.length}</span><span className="l">Total</span></div>
         </div>
         <div className="sp" />
         <div className={`ctl ${live ? "on" : ""}`} onClick={toggleLive} title="Best-effort live signal from Claude Code transcripts. Off → git + Jira only.">
@@ -139,7 +141,9 @@ export function DeckApp(): JSX.Element {
       ) : (
         <div className="board">
           {COLUMNS.map((c) => {
-            const list = runs.filter((r) => r.column === c.id);
+            const list = runs
+              .filter((r) => r.column === c.id)
+              .sort((a, b) => (b.agent.lastActivityMs ?? 0) - (a.agent.lastActivityMs ?? 0) || b.run.createdAt - a.run.createdAt);
             return (
               <section className="col" key={c.id}>
                 <div className="col-hd">

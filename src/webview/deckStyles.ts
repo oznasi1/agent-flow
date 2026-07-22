@@ -12,7 +12,7 @@ export const DECK_CSS = `
   #root { height: 100vh; display: flex; flex-direction: column; }
 
   :root {
-    --c-working: var(--vscode-charts-yellow, #d7a531);
+    --c-progress: var(--vscode-charts-blue, #4aa3df);
     --c-idle:    var(--vscode-charts-yellow, #d7a531);
     --c-needs:   var(--vscode-charts-red, #e5534b);
     --c-review:  var(--vscode-charts-purple, #b083f0);
@@ -25,9 +25,13 @@ export const DECK_CSS = `
     padding: 14px 20px; border-bottom: 1px solid var(--hair); }
   .hd .title { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
   .hd .title .sub { color: var(--vscode-descriptionForeground); font-weight: 400; margin-left: 6px; font-size: 12px; }
-  .hd .counts { display: flex; gap: 12px; font-size: 12px; color: var(--vscode-descriptionForeground); }
-  .hd .counts b { color: var(--vscode-foreground); font-variant-numeric: tabular-nums; }
-  .hd .counts .alert b { color: var(--c-needs); }
+  .stats { display: flex; align-items: stretch; gap: 8px; }
+  .stat { display: flex; flex-direction: column; gap: 2px; padding: 4px 12px 5px; border-radius: 8px;
+    border: 1px solid var(--hair); background: var(--vscode-editorWidget-background, transparent); min-width: 62px; }
+  .stat .n { font-size: 16px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1; }
+  .stat .l { font-size: 10px; color: var(--vscode-descriptionForeground); text-transform: uppercase; letter-spacing: .05em; }
+  .stat.alert { border-color: var(--c-needs); }
+  .stat.alert .n { color: var(--c-needs); }
   .hd .sp { flex: 1; }
 
   .ctl { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; user-select: none;
@@ -79,7 +83,7 @@ export const DECK_CSS = `
   .repo { font-family: var(--mono); font-size: 10px; border: 1px solid var(--hair); border-radius: 6px;
     padding: 2px 6px; color: var(--vscode-descriptionForeground); }
   .repo .add { color: var(--c-done); } .repo .del { color: var(--c-needs); margin-left: 4px; }
-  .repo .dirty { color: var(--c-working); margin-left: 5px; }
+  .repo .dirty { color: var(--c-idle); margin-left: 5px; }
 
   .c-foot { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
   .pill { font-family: var(--mono); font-size: 10px; border: 1px solid var(--hair); border-radius: 20px;
