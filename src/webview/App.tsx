@@ -1,4 +1,5 @@
 import * as React from "react";
+import Fuse from "fuse.js";
 import { send } from "./vscodeApi";
 import { deriveStatuses, fmtEst, isPrReviewStatus, matchesStatus, moveKey, prioClass } from "./helpers";
 import { Filter, FilterVisibility, JiraTask, OutboundMessage, Size } from "../types";
@@ -108,6 +109,7 @@ export function App(): JSX.Element {
       return next;
     });
   const clearRepos = () => setSelectedRepos(new Set());
+  const [textQuery, setTextQuery] = React.useState("");
   const [tasks, setTasks] = React.useState<JiraTask[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string }[]>([]);
@@ -268,15 +270,24 @@ export function App(): JSX.Element {
     [tasks],
   );
 
-  // Narrow the current pool to tasks touching any selected repo (OR), and, if a
-  // status lens is active, to the selected statuses.
-  const visibleTasks = tasks.filter(
+  // Fuzzy index over each task's title (summary only — description is out of scope).
+  const fuse = React.useMemo(
+    () => new Fuse(tasks, { keys: ["summary"], threshold: 0.4, ignoreLocation: true }),
+    [tasks],
+  );
+
+  // Search first (ordered by relevance when a query is active), then narrow to
+  // tasks touching any selected repo (OR) and, if a status lens is active, to
+  // the selected statuses. All three filter types combine as AND.
+  const q = textQuery.trim();
+  const searched = q ? fuse.search(q).map((r) => r.item) : tasks;
+  const visibleTasks = searched.filter(
     (t) =>
       (selectedRepos.size === 0 || (t.services ?? []).some((s) => selectedRepos.has(s))) &&
       matchesStatus(t, statuses),
   );
   // Reorder only makes sense on the full My-sprint list, not a filtered subset.
-  const canReorder = filter === "mysprint" && selectedRepos.size === 0 && statuses.size === 0;
+  const canReorder = filter === "mysprint" && selectedRepos.size === 0 && !q && statuses.size === 0;
 
   // Toasts float over every state (gate or list), so keep them out of the branch bodies.
   const toastStack = <ToastStack toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />;
@@ -388,6 +399,21 @@ export function App(): JSX.Element {
         />
       )}
 
+      {filters.search && (
+        <div className="text-search">
+          <SearchIcon />
+          <input
+            value={textQuery}
+            spellCheck={false}
+            placeholder="Search title…"
+            onChange={(e) => setTextQuery(e.target.value)}
+          />
+          {textQuery && (
+            <span className="text-search-clear" title="Clear search" onClick={() => setTextQuery("")}>×</span>
+          )}
+        </div>
+      )}
+
       {filter === "mysprint" && (
         <div className="reorder-bar">
           <button className="reset-order" title="Clear your manual order" onClick={() => send({ type: "resetOrder", size })}>
@@ -399,11 +425,13 @@ export function App(): JSX.Element {
       {loading && <div className="loading">Loading…</div>}
       {!loading && authed !== null && visibleTasks.length === 0 && (
         <div className="empty">
-          {selectedRepos.size > 0
-            ? "No tasks touch the selected repos."
-            : statuses.size > 0
-              ? "No tasks match the selected status."
-              : "No tasks in this view."}
+          {q
+            ? `No titles match “${q}”.`
+            : selectedRepos.size > 0
+              ? "No tasks touch the selected repos."
+              : statuses.size > 0
+                ? "No tasks match the selected status."
+                : "No tasks in this view."}
         </div>
       )}
 

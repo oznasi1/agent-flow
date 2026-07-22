@@ -286,6 +286,59 @@ describe("repo multiselect", () => {
   });
 });
 
+describe("fuzzy title search", () => {
+  const keys = () => Array.from(document.querySelectorAll("a.key")).map((e) => e.textContent);
+  const pool = () =>
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "ASM-1", summary: "Fix rate limiter dropping bursts", services: ["api"] }),
+        mkTask({ key: "ASM-2", summary: "Billing webhook retries", services: ["billing"] }),
+        mkTask({ key: "ASM-3", summary: "Rate-limit config per tenant", services: ["api"] }),
+      ],
+    });
+
+  it("narrows the list to fuzzy title matches", () => {
+    render(<App />);
+    authed();
+    pool();
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "ratelim" } });
+    expect(keys()).toEqual(expect.arrayContaining(["ASM-1", "ASM-3"]));
+    expect(screen.queryByText("ASM-2")).not.toBeInTheDocument();
+  });
+
+  it("shows a text-specific empty state when nothing matches", () => {
+    render(<App />);
+    authed();
+    pool();
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "zzzzz" } });
+    expect(screen.getByText(/No titles match/i)).toBeInTheDocument();
+  });
+
+  it("combines with the repo multiselect (AND across types)", () => {
+    render(<App />);
+    authed();
+    pool();
+    fireEvent.click(screen.getByText("Filter repos"));
+    // Scoped to the popup list — "api" also appears as a service chip on the
+    // ASM-1/ASM-3 cards, so an unscoped getByText would match multiple nodes
+    // (same ambiguity already guarded against in the "repo multiselect" tests above).
+    const repoList = document.querySelector(".repo-list") as HTMLElement;
+    fireEvent.mouseDown(within(repoList).getByText("api").closest(".repo-opt")!);
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "rate" } });
+    expect(keys()).toEqual(expect.arrayContaining(["ASM-1", "ASM-3"]));
+    expect(screen.queryByText("ASM-2")).not.toBeInTheDocument(); // billing filtered out by repo
+  });
+
+  it("hides the search box when filters.search is off", () => {
+    render(<App />);
+    authed("PR initiated", { size: true, status: true, repo: true, search: false });
+    pool();
+    expect(screen.queryByPlaceholderText("Search title…")).not.toBeInTheDocument();
+  });
+});
+
 describe("My-sprint reorder bar", () => {
   it("shows Reset order only in the My-sprint lens and wires it", () => {
     render(<App />);

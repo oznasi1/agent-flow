@@ -83,6 +83,18 @@ export const CSS = `
   .repo-clear-all { background: none; border: none; cursor: pointer; padding: 0; font-size: 11px;
     color: var(--vscode-textLink-foreground); }
 
+  .text-search { display: flex; align-items: center; gap: 7px; margin: 0 2px 10px;
+    padding: 4px 9px; border-radius: 8px; border: 1px solid var(--vscode-panel-border);
+    background: var(--vscode-input-background, transparent); }
+  .text-search:focus-within { border-color: var(--vscode-focusBorder); }
+  .text-search svg { flex: none; opacity: .55; }
+  .text-search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent;
+    color: var(--vscode-input-foreground, var(--vscode-foreground));
+    font-family: var(--vscode-font-family); font-size: 12px; }
+  .text-search input::placeholder { color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground)); }
+  .text-search-clear { cursor: pointer; opacity: .6; font-size: 14px; line-height: 1; padding: 0 2px; }
+  .text-search-clear:hover { opacity: 1; }
+
   .list { display: flex; flex-direction: column; gap: 6px; }
 
   .reorder-bar { display: flex; justify-content: flex-end; margin: -4px 2px 8px; }
