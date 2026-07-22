@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14] — 2026-07-22
+
+### Fixed
+- Build/CI: pin the public npm registry via a committed `.npmrc` so `npm ci`
+  resolves from `registry.npmjs.org` regardless of a contributor's global npm
+  config. Fixes the CI `npm ci` authentication failure and keeps
+  `package-lock.json` free of private-registry URLs.
+
 ## [0.1.13] — 2026-07-22
 
 ### Added
