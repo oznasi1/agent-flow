@@ -6,11 +6,11 @@ import { Filter, FilterVisibility, JiraTask, OutboundMessage, Size } from "../ty
 let toastSeq = 0;
 
 const FILTERS: { id: Filter; label: string }[] = [
-  { id: "unassigned", label: "Unassigned" },
   { id: "mysprint", label: "My sprint" },
   { id: "mine", label: "Mine" },
   { id: "sprint", label: "Sprint" },
   { id: "backlog", label: "Backlog" },
+  { id: "unassigned", label: "Unassigned" },
 ];
 
 const SIZES: { id: Size; label: string; title: string }[] = [
