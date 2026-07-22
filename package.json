@@ -163,7 +163,12 @@
         "agentFlow.filters.repo": {
           "type": "boolean",
           "default": true,
-          "description": "Show the \"Filter by repo…\" search box in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
+          "description": "Show the repo multiselect filter in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
+        },
+        "agentFlow.filters.search": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the fuzzy title search box in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
         },
         "agentFlow.seedAgent": {
           "type": "boolean",
@@ -404,6 +409,7 @@
     "vitest": "^2.1.9"
   },
   "dependencies": {
+    "fuse.js": "^7.5.0",
     "jsonc-parser": "^3.3.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"

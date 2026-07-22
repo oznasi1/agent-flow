@@ -19,7 +19,7 @@ function host(msg: OutboundMessage) {
   });
 }
 
-const ALL_FILTERS = { size: true, status: true, repo: true };
+const ALL_FILTERS = { size: true, status: true, repo: true, search: true };
 const authed = (prReviewStatus = "PR initiated", filters = ALL_FILTERS) =>
   host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus, filters });
 
@@ -166,8 +166,14 @@ describe("status filter lens", () => {
 
 describe("configurable filter visibility", () => {
   const off = (overrides: Partial<typeof ALL_FILTERS>) => ({ ...ALL_FILTERS, ...overrides });
+  // Includes a service so the repo multiselect (which renders nothing when the
+  // pool has no repos) has something to show in these visibility-gating tests.
   const oneTask = () =>
-    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", status: "To Do", statusCategory: "new" })] });
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [mkTask({ key: "ASM-1", status: "To Do", statusCategory: "new", services: ["billing"] })],
+    });
 
   it("shows Size, Status, and Repo controls by default", () => {
     render(<App />);
@@ -175,7 +181,7 @@ describe("configurable filter visibility", () => {
     oneTask();
     expect(document.querySelector(".sizes")).not.toBeNull();
     expect(document.querySelector(".statuses")).not.toBeNull();
-    expect(document.querySelector(".repo-filter")).not.toBeNull();
+    expect(document.querySelector(".repo-select")).not.toBeNull();
   });
 
   it("hides the Size lens when filters.size is off, leaving the others", () => {
@@ -184,7 +190,7 @@ describe("configurable filter visibility", () => {
     oneTask();
     expect(document.querySelector(".sizes")).toBeNull();
     expect(document.querySelector(".statuses")).not.toBeNull();
-    expect(document.querySelector(".repo-filter")).not.toBeNull();
+    expect(document.querySelector(".repo-select")).not.toBeNull();
   });
 
   it("hides the Status lens when filters.status is off, even with statuses present", () => {
@@ -193,16 +199,7 @@ describe("configurable filter visibility", () => {
     oneTask();
     expect(document.querySelector(".statuses")).toBeNull();
     expect(document.querySelector(".sizes")).not.toBeNull();
-    expect(document.querySelector(".repo-filter")).not.toBeNull();
-  });
-
-  it("hides the Repo search box when filters.repo is off", () => {
-    render(<App />);
-    authed("PR initiated", off({ repo: false }));
-    oneTask();
-    expect(document.querySelector(".repo-filter")).toBeNull();
-    expect(document.querySelector(".sizes")).not.toBeNull();
-    expect(document.querySelector(".statuses")).not.toBeNull();
+    expect(document.querySelector(".repo-select")).not.toBeNull();
   });
 
   it("a hidden Status lens does not narrow the visible task list", () => {
@@ -218,6 +215,151 @@ describe("configurable filter visibility", () => {
     });
     expect(screen.getByText("ASM-1")).toBeInTheDocument();
     expect(screen.getByText("ASM-2")).toBeInTheDocument();
+  });
+});
+
+describe("repo multiselect", () => {
+  const threeRepos = () =>
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "ASM-1", summary: "alpha", services: ["billing"] }),
+        mkTask({ key: "ASM-2", summary: "bravo", services: ["web"] }),
+        mkTask({ key: "ASM-3", summary: "charlie", services: ["billing", "worker"] }),
+      ],
+    });
+
+  it("renders the trigger with the 'Filter repos' label, not the old text box", () => {
+    render(<App />);
+    authed();
+    threeRepos();
+    expect(document.querySelector(".repo-filter")).toBeNull();
+    expect(document.querySelector(".repo-select")).not.toBeNull();
+    expect(screen.getByText("Filter repos")).toBeInTheDocument();
+  });
+
+  it("lists the sorted, de-duped union of repos when opened", () => {
+    render(<App />);
+    authed();
+    threeRepos();
+    fireEvent.click(screen.getByText("Filter repos"));
+    const opts = Array.from(document.querySelectorAll(".repo-opt .repo-name")).map((e) => e.textContent);
+    expect(opts).toEqual(["billing", "web", "worker"]);
+  });
+
+  it("OR-filters the list to tasks touching any selected repo", () => {
+    render(<App />);
+    authed();
+    threeRepos();
+    fireEvent.click(screen.getByText("Filter repos"));
+    // Scoped to the popup list — "billing" also appears as a service chip on the
+    // ASM-1/ASM-3 cards, so an unscoped getByText would match multiple nodes.
+    const repoList = document.querySelector(".repo-list") as HTMLElement;
+    fireEvent.mouseDown(within(repoList).getByText("billing").closest(".repo-opt")!);
+    expect(screen.getByText("ASM-1")).toBeInTheDocument(); // billing
+    expect(screen.getByText("ASM-3")).toBeInTheDocument(); // billing + worker
+    expect(screen.queryByText("ASM-2")).not.toBeInTheDocument(); // web only
+  });
+
+  it("Clear resets the selection and restores the full list", () => {
+    render(<App />);
+    authed();
+    threeRepos();
+    fireEvent.click(screen.getByText("Filter repos"));
+    // Scoped to the popup list — "web" also appears as a service chip on the
+    // ASM-2 card, so an unscoped getByText would match multiple nodes.
+    const repoList = document.querySelector(".repo-list") as HTMLElement;
+    fireEvent.mouseDown(within(repoList).getByText("web").closest(".repo-opt")!); // only ASM-2 touches web
+    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByText("Clear"));
+    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    expect(screen.getByText("ASM-3")).toBeInTheDocument();
+  });
+
+  it("hides the multiselect when filters.repo is off", () => {
+    render(<App />);
+    authed("PR initiated", { size: true, status: true, repo: false, search: true });
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", services: ["web"] })] });
+    expect(document.querySelector(".repo-select")).toBeNull();
+  });
+});
+
+describe("fuzzy title search", () => {
+  const keys = () => Array.from(document.querySelectorAll("a.key")).map((e) => e.textContent);
+  const pool = () =>
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "ASM-1", summary: "Fix rate limiter dropping bursts", services: ["api"] }),
+        mkTask({ key: "ASM-2", summary: "Billing webhook retries", services: ["billing"] }),
+        mkTask({ key: "ASM-3", summary: "Rate-limit config per tenant", services: ["api"] }),
+      ],
+    });
+
+  it("narrows the list to fuzzy title matches", () => {
+    render(<App />);
+    authed();
+    pool();
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "ratelim" } });
+    expect(keys()).toEqual(expect.arrayContaining(["ASM-1", "ASM-3"]));
+    expect(screen.queryByText("ASM-2")).not.toBeInTheDocument();
+  });
+
+  it("orders fuzzy matches best-match-first", () => {
+    render(<App />);
+    authed();
+    pool();
+    // Under the app's fuse config (keys: ["summary"], threshold: 0.4, ignoreLocation: true),
+    // "ratelim" scores "Rate-limit config per tenant" (ASM-3, ~0.378) closer than
+    // "Fix rate limiter dropping bursts" (ASM-1, ~0.419) — verified empirically by running
+    // fuse.search("ratelim") against this exact pool. The visible list must reflect that order.
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "ratelim" } });
+    expect(keys()).toEqual(["ASM-3", "ASM-1"]);
+  });
+
+  it("shows a text-specific empty state when nothing matches", () => {
+    render(<App />);
+    authed();
+    pool();
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "zzzzz" } });
+    expect(screen.getByText(/No titles match/i)).toBeInTheDocument();
+  });
+
+  it("combines with the repo multiselect (AND across types)", () => {
+    render(<App />);
+    authed();
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "ASM-1", summary: "Fix rate limiter dropping bursts", services: ["api"] }),
+        mkTask({ key: "ASM-2", summary: "Billing webhook retries", services: ["billing"] }),
+        mkTask({ key: "ASM-3", summary: "Rate-limit config per tenant", services: ["api"] }),
+        // In the selected repo ("api") but its title doesn't fuzzy-match "rate" — correct AND
+        // must exclude it; a buggy repo-OR-text combination would wrongly include it.
+        mkTask({ key: "ASM-4", summary: "Deploy pipeline", services: ["api"] }),
+      ],
+    });
+    fireEvent.click(screen.getByText("Filter repos"));
+    // Scoped to the popup list — "api" also appears as a service chip on the
+    // ASM-1/ASM-3 cards, so an unscoped getByText would match multiple nodes
+    // (same ambiguity already guarded against in the "repo multiselect" tests above).
+    const repoList = document.querySelector(".repo-list") as HTMLElement;
+    fireEvent.mouseDown(within(repoList).getByText("api").closest(".repo-opt")!);
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "rate" } });
+    expect(keys()).toEqual(expect.arrayContaining(["ASM-1", "ASM-3"]));
+    expect(screen.queryByText("ASM-2")).not.toBeInTheDocument(); // billing filtered out by repo
+    expect(screen.queryByText("ASM-4")).not.toBeInTheDocument(); // api but no "rate" match — AND must exclude it
+  });
+
+  it("hides the search box when filters.search is off", () => {
+    render(<App />);
+    authed("PR initiated", { size: true, status: true, repo: true, search: false });
+    pool();
+    expect(screen.queryByPlaceholderText("Search title…")).not.toBeInTheDocument();
   });
 });
 

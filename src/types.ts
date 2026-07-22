@@ -9,6 +9,7 @@ export interface FilterVisibility {
   size: boolean;
   status: boolean;
   repo: boolean;
+  search: boolean;
 }
 
 export interface JiraTask {
