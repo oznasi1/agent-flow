@@ -390,7 +390,7 @@ Expected: PASS — the two new/updated tests pass; every existing takeTask / exi
 
 - [ ] **Step 10: Typecheck + commit**
 
-Run: `npm run check-types`
+Run: `npm run typecheck`
 Expected: no errors.
 
 ```bash
@@ -534,7 +534,7 @@ Expected: PASS — reordered Explore tests, the new prefill test, and all other 
 Run: `npm test`
 Expected: PASS — all files green (≥ the 486 baseline, plus the new tests).
 
-Run: `npm run check-types`
+Run: `npm run typecheck`
 Expected: no errors.
 
 - [ ] **Step 6: Commit**
