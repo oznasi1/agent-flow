@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, type OpenRequest } from "../../../src/engine/workspace";
+import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolderPaths, type OpenRequest } from "../../../src/engine/workspace";
 import { commands, env, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -545,5 +545,29 @@ describe("listWorkspaceFiles", () => {
     readdirSync.mockReturnValue(["dir.code-workspace"] as never);
     statSync.mockReturnValue({ isFile: () => false, mtimeMs: 5 } as unknown as fs.Stats);
     expect(listWorkspaceFiles("/ws")).toEqual([]);
+  });
+});
+
+describe("workspaceFolderPaths", () => {
+  it("returns canonical folder paths, resolving relative paths against the file dir", () => {
+    // realpathSync is mocked to identity in beforeEach, so canon() returns its input.
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }, { "path": "account-service" }] }');
+    const paths = workspaceFolderPaths("/repos/team.code-workspace");
+    expect(paths).toEqual(["/repos/centaur", "/repos/account-service"]);
+  });
+
+  it("returns [] on unparseable input", () => {
+    readFileSync.mockReturnValue("{ not json");
+    expect(workspaceFolderPaths("/ws/bad.code-workspace")).toEqual([]);
+  });
+
+  it("returns [] when the file can't be read", () => {
+    readFileSync.mockImplementation(() => { throw new Error("ENOENT"); });
+    expect(workspaceFolderPaths("/ws/missing.code-workspace")).toEqual([]);
+  });
+
+  it("returns [] when folders is missing or not an array", () => {
+    readFileSync.mockReturnValue('{ "settings": {} }');
+    expect(workspaceFolderPaths("/ws/nofolders.code-workspace")).toEqual([]);
   });
 });

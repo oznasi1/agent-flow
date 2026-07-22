@@ -316,6 +316,31 @@ export function mergeReposIntoWorkspace(
   return { added: missing.map((r) => r.name), ok: true };
 }
 
+/** Canonical absolute paths of the folders declared in a `.code-workspace` file,
+ * resolved against the file's directory. `[]` if the file can't be read or safely
+ * parsed. Mirrors the existing-folder resolution in mergeReposIntoWorkspace so the
+ * "which repos does this workspace already have" check stays consistent with the merge. */
+export function workspaceFolderPaths(file: string): string[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return [];
+  }
+  const errors: ParseError[] = [];
+  const doc = jsoncParse(text, errors, { allowTrailingComma: true }) as
+    | { folders?: { path?: string }[] }
+    | undefined;
+  if (errors.length || !doc || typeof doc !== "object" || Array.isArray(doc) || !Array.isArray(doc.folders)) {
+    return [];
+  }
+  const wsDir = path.dirname(file);
+  return doc.folders
+    .map((f) => f?.path)
+    .filter((p): p is string => typeof p === "string")
+    .map((p) => canon(path.resolve(wsDir, p)));
+}
+
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Resolve symlinks so the plan matchPath (written pre-open) and the window's
