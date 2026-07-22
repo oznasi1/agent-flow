@@ -16,8 +16,8 @@ VSIX="$ROOT/${NAME}-${VERSION}.vsix"
 STAGE=$(mktemp -d)
 mkdir -p "$STAGE/extension/dist" "$STAGE/extension/media"
 cp package.json README.md "$STAGE/extension/"
-cp dist/extension.js dist/webview.js "$STAGE/extension/dist/"
-cp media/*.svg "$STAGE/extension/media/" 2>/dev/null || true
+cp dist/extension.js dist/webview.js dist/deck.js "$STAGE/extension/dist/"
+cp media/*.svg media/*.png "$STAGE/extension/media/" 2>/dev/null || true
 
 cat > "$STAGE/[Content_Types].xml" <<'XML'
 <?xml version="1.0" encoding="utf-8"?>
@@ -25,6 +25,7 @@ cat > "$STAGE/[Content_Types].xml" <<'XML'
 <Default Extension="json" ContentType="application/json"/>
 <Default Extension="js" ContentType="application/javascript"/>
 <Default Extension="svg" ContentType="image/svg+xml"/>
+<Default Extension="png" ContentType="image/png"/>
 <Default Extension="md" ContentType="text/markdown"/>
 <Default Extension="vsixmanifest" ContentType="text/xml"/>
 </Types>
@@ -51,6 +52,7 @@ cat > "$STAGE/extension.vsixmanifest" <<XML
   <Dependencies/>
   <Assets>
     <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true"/>
+    <Asset Type="Microsoft.VisualStudio.Services.Icons.Default" Path="extension/media/icon-store.png" Addressable="true"/>
   </Assets>
 </PackageManifest>
 XML
