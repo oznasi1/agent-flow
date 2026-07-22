@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { window, ViewColumn } from "../_mocks/vscode";
+import { window, ViewColumn, env } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
 import type { Run, RunStatus } from "../../src/types";
 
@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   openInEditor: vi.fn(async (_t: string) => true),
   buildRunStatus: vi.fn(),
   removeRun: vi.fn(),
+  getStatus: vi.fn(async (_k: string) => ({ status: "In Review", category: "indeterminate" })),
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -22,8 +23,14 @@ vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: () => [],
   defaultWindowsDir: () => "/windows",
 }));
+vi.mock("../../src/config", () => ({ getConfig: () => ({ baseUrl: "https://jira", project: "ASM" }) }));
+vi.mock("../../src/jira/client", () => ({
+  JiraAuthError: class JiraAuthError extends Error {},
+  JiraClient: class { getStatus = h.getStatus; },
+}));
 
 import { DeckPanel } from "../../src/deckView";
+import { JiraAuthError } from "../../src/jira/client";
 
 const mkRun = (over: Partial<Run> = {}): Run => ({
   key: "ASM-1", summary: "do it", url: "https://jira/ASM-1", createdAt: 1, mode: "per-window",
@@ -36,13 +43,14 @@ const statusFor = (run: Run): RunStatus => ({
 
 const lastPanel = () => window.createWebviewPanel.mock.results.at(-1)!.value as ReturnType<typeof import("../_mocks/vscode").makeWebviewPanel>;
 const posts = (p: ReturnType<typeof lastPanel>) => p.webview.postMessage.mock.calls.map((c) => c[0] as any);
-const show = () => DeckPanel.show(fakeContext().context as any, fakeAuth({ authed: false }), () => {});
+const show = (authed = false) => DeckPanel.show(fakeContext().context as any, fakeAuth({ authed }), () => {});
 
 beforeEach(() => {
   h.runs = [mkRun()];
   h.openInEditor.mockClear().mockResolvedValue(true);
   h.buildRunStatus.mockReset().mockImplementation((run: Run) => statusFor(run));
   h.removeRun.mockClear();
+  h.getStatus.mockClear().mockResolvedValue({ status: "In Review", category: "indeterminate" });
 });
 
 afterEach(() => {
@@ -141,6 +149,57 @@ describe("DeckPanel", () => {
     const p = lastPanel();
     await p._fire({ type: "deck:forget", key: "ASM-1" });
     expect(h.removeRun).toHaveBeenCalledWith("/runs", "ASM-1");
+    expect(posts(p).some((m) => m.type === "deck:runs")).toBe(true);
+  });
+
+  it("opens an external url via the host (Open in Jira)", async () => {
+    show();
+    await lastPanel()._fire({ type: "openExternal", url: "https://jira/ASM-1" });
+    expect(env.openExternal).toHaveBeenCalled();
+  });
+
+  it("toasts when a run has nothing to open", async () => {
+    h.runs = [mkRun({ repos: [] })];
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "open" });
+    const toast = posts(p).find((m) => m.type === "toast" && /nothing to open/i.test(m.message));
+    expect(toast).toBeTruthy();
+    expect(h.openInEditor).not.toHaveBeenCalled();
+  });
+
+  it("swallows a build error during refresh (no runs posted, no throw)", async () => {
+    h.buildRunStatus.mockReset().mockImplementation(() => { throw new Error("boom"); });
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    expect(posts(p).some((m) => m.type === "deck:runs")).toBe(false);
+  });
+
+  it("fetches Jira status when authenticated and passes it to the builder", async () => {
+    show(true);
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    expect(h.getStatus).toHaveBeenCalledWith("ASM-1");
+    expect(h.buildRunStatus).toHaveBeenCalledWith(
+      expect.anything(), { status: "In Review", category: "indeterminate" },
+      expect.any(String), expect.any(Number), true, expect.any(Set),
+    );
+  });
+
+  it("degrades to the git backbone on a Jira auth error", async () => {
+    h.getStatus.mockRejectedValueOnce(new JiraAuthError("nope"));
+    show(true);
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.anything(), null, expect.any(String), expect.any(Number), true, expect.any(Set));
+  });
+
+  it("keeps rendering when a Jira lookup fails for another reason", async () => {
+    h.getStatus.mockRejectedValueOnce(new Error("timeout"));
+    show(true);
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
     expect(posts(p).some((m) => m.type === "deck:runs")).toBe(true);
   });
 
