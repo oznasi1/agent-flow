@@ -66,7 +66,7 @@ export const CSS = `
 
   .repo-pop { position: absolute; z-index: 10; top: calc(100% + 4px); left: 0; right: 0;
     border: 1px solid var(--vscode-focusBorder); border-radius: 8px; overflow: hidden;
-    background: var(--vscode-input-background, var(--vscode-editor-background));
+    background: var(--vscode-dropdown-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
     box-shadow: 0 6px 20px rgba(0,0,0,.35); animation: repo-in .12s ease; }
   .repo-opt { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 5px;
     cursor: pointer; color: var(--vscode-foreground); }

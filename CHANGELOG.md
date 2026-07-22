@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.18] — 2026-07-22
+
+### Fixed
+- **Filter repos dropdown rendered transparent** on themes whose `input.background`
+  token carries an alpha channel — the task deck bled through the popup. The dropdown
+  now uses an opaque, theme-aware background (`dropdown-background` → widget/editor
+  fallbacks).
+
 ## [0.1.17] — 2026-07-22
 
 ### Added
