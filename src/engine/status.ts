@@ -17,17 +17,17 @@ function isReviewStatus(name?: string | null): boolean {
 /**
  * Decide which board column a run belongs in. Precedence, most-decisive first:
  *   done (Jira done) → the live "needs-you" signal → the live "working" signal →
- *   review (PR open / Jira review status) → else "working" as the in-flight catch-all
+ *   review (PR open / Jira review status) → else "progress" as the in-flight catch-all
  *   (idle / unknown / just-launched).
  * The live agent signals outrank the Jira review stage on purpose: an agent actively
- * addressing review feedback reads as Working, not parked in Review.
+ * addressing review feedback reads as In progress, not parked in Review.
  */
 export function deriveBucket(i: BucketInput): DeckColumn {
   if (i.jiraCategory === "done") return "done";
   if (i.agentState === "needs-you") return "needs";
-  if (i.agentState === "working") return "working";
+  if (i.agentState === "working") return "progress";
   if (i.prOpen || isReviewStatus(i.jiraStatus)) return "review";
-  return "working";
+  return "progress";
 }
 
 const UNKNOWN_AGENT: AgentActivity = { state: "unknown", lastActivityMs: null, slug: null };

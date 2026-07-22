@@ -23,7 +23,7 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
     createdAt: 1, mode: "per-window",
     repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "ASM-1-x" }], briefPaths: [],
   },
-  column: "working",
+  column: "progress",
   jiraStatus: "In Progress",
   jiraCategory: "indeterminate",
   repos: [{ name: "svc", path: "/r/svc", branch: "ASM-1-x", dirty: true, ahead: 1, added: 12, removed: 2, files: 3 }],

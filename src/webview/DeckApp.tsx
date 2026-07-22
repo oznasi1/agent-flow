@@ -5,7 +5,7 @@ import { DeckColumn, OutboundMessage, RepoGit, RunStatus } from "../types";
 let toastSeq = 0;
 
 const COLUMNS: { id: DeckColumn; label: string; varName: string }[] = [
-  { id: "working", label: "Working", varName: "--c-working" },
+  { id: "progress", label: "Working", varName: "--c-working" },
   { id: "needs", label: "Needs you", varName: "--c-needs" },
   { id: "review", label: "In review", varName: "--c-review" },
   { id: "done", label: "Done", varName: "--c-done" },

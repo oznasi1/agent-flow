@@ -21,7 +21,7 @@ const mkRun = (over: Partial<Run> = {}): Run => ({
   repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }], briefPaths: [], ...over,
 });
 const statusFor = (run: Run): RunStatus => ({
-  run, column: "working", jiraStatus: null, jiraCategory: null, repos: [],
+  run, column: "progress", jiraStatus: null, jiraCategory: null, repos: [],
   agent: { state: "unknown", lastActivityMs: null, slug: null },
 });
 

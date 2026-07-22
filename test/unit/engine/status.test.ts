@@ -16,8 +16,8 @@ describe("deriveBucket", () => {
     expect(deriveBucket({ jiraCategory: "indeterminate", agentState: "needs-you" })).toBe("needs");
   });
 
-  it("keeps a working agent in Working even in a review status (live beats review)", () => {
-    expect(deriveBucket({ jiraStatus: "In Review", agentState: "working" })).toBe("working");
+  it("keeps a working agent in In-progress even in a review status (live beats review)", () => {
+    expect(deriveBucket({ jiraStatus: "In Review", agentState: "working" })).toBe("progress");
   });
 
   it("puts an idle agent in a review status into In review", () => {
@@ -28,16 +28,16 @@ describe("deriveBucket", () => {
     expect(deriveBucket({ prOpen: true, agentState: "idle" })).toBe("review");
   });
 
-  it("keeps a working agent in Working even with an open PR", () => {
-    expect(deriveBucket({ prOpen: true, agentState: "working" })).toBe("working");
+  it("keeps a working agent in In-progress even with an open PR", () => {
+    expect(deriveBucket({ prOpen: true, agentState: "working" })).toBe("progress");
   });
 
-  it("falls back to Working (in-flight) for an idle, plain in-progress task", () => {
-    expect(deriveBucket({ jiraCategory: "indeterminate", jiraStatus: "In Progress", agentState: "idle" })).toBe("working");
+  it("falls back to In-progress (in-flight) for an idle, plain in-progress task", () => {
+    expect(deriveBucket({ jiraCategory: "indeterminate", jiraStatus: "In Progress", agentState: "idle" })).toBe("progress");
   });
 
-  it("falls back to Working for an unknown agent with nothing else", () => {
-    expect(deriveBucket({ jiraCategory: "new", agentState: "unknown" })).toBe("working");
+  it("falls back to In-progress for an unknown agent with nothing else", () => {
+    expect(deriveBucket({ jiraCategory: "new", agentState: "unknown" })).toBe("progress");
   });
 });
 
@@ -96,9 +96,9 @@ describe("buildRunStatus", () => {
 
   afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
-  it("combines a live working agent + in-progress Jira into the Working column", () => {
+  it("combines a live working agent + in-progress Jira into the In-progress column", () => {
     const s = buildRunStatus(run, { status: "In Progress", category: "indeterminate" }, projRoot, NOW, true);
-    expect(s.column).toBe("working");
+    expect(s.column).toBe("progress");
     expect(s.agent.state).toBe("working");
     expect(s.repos[0].dirty).toBe(true);
   });
@@ -107,7 +107,7 @@ describe("buildRunStatus", () => {
     const s = buildRunStatus(run, { status: "In Progress", category: "indeterminate" }, projRoot, NOW, false);
     expect(s.agent.state).toBe("unknown");
     expect(s.repos[0].dirty).toBe(true);
-    expect(s.column).toBe("working");
+    expect(s.column).toBe("progress");
   });
 
   it("puts a Jira-done run in Done despite a working agent", () => {
