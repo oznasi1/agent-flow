@@ -200,7 +200,7 @@ export const CSS = `
     background: var(--vscode-input-background, var(--vscode-editor-background));
     animation: repo-in .12s ease; }
   @keyframes repo-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
-  @media (prefers-reduced-motion: reduce) { .repo-combo { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .repo-combo, .repo-pop { animation: none; } }
 
   .repo-search { display: flex; align-items: center; gap: 7px; padding: 6px 10px;
     border-bottom: 1px solid var(--vscode-panel-border); }

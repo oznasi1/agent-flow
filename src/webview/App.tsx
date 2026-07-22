@@ -748,11 +748,14 @@ export function RepoPicker({ available, onAdd }: { available: string[]; onAdd: (
   );
 }
 
-/** Multiselect repo filter: a trigger that opens an inline checkbox list —
- * filter-as-you-type, keyboard-navigable, OR-combining. Inline (no floating
- * popup) so the list overflow can't clip it. Renders nothing when the pool has
- * no repos. Shares its command-palette scaffolding with RepoPicker via
- * useComboFilter; Enter toggles the active repo (the combo stays open). */
+/** Multiselect repo filter: a trigger that opens a checkbox list —
+ * filter-as-you-type, keyboard-navigable, OR-combining. The popup
+ * deliberately floats (`.repo-pop` is `position: absolute`); that's safe here
+ * because the multiselect sits at the top of the sidebar, not inside an
+ * `overflow: hidden` card, so the popup can't get clipped. Renders nothing
+ * when the pool has no repos. Shares its command-palette scaffolding with
+ * RepoPicker via useComboFilter; Enter toggles the active repo (the combo
+ * stays open). */
 export function RepoMultiSelect({
   repos,
   selected,

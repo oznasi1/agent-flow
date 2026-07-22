@@ -308,6 +308,18 @@ describe("fuzzy title search", () => {
     expect(screen.queryByText("ASM-2")).not.toBeInTheDocument();
   });
 
+  it("orders fuzzy matches best-match-first", () => {
+    render(<App />);
+    authed();
+    pool();
+    // Under the app's fuse config (keys: ["summary"], threshold: 0.4, ignoreLocation: true),
+    // "ratelim" scores "Rate-limit config per tenant" (ASM-3, ~0.378) closer than
+    // "Fix rate limiter dropping bursts" (ASM-1, ~0.419) — verified empirically by running
+    // fuse.search("ratelim") against this exact pool. The visible list must reflect that order.
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "ratelim" } });
+    expect(keys()).toEqual(["ASM-3", "ASM-1"]);
+  });
+
   it("shows a text-specific empty state when nothing matches", () => {
     render(<App />);
     authed();
@@ -319,7 +331,18 @@ describe("fuzzy title search", () => {
   it("combines with the repo multiselect (AND across types)", () => {
     render(<App />);
     authed();
-    pool();
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "ASM-1", summary: "Fix rate limiter dropping bursts", services: ["api"] }),
+        mkTask({ key: "ASM-2", summary: "Billing webhook retries", services: ["billing"] }),
+        mkTask({ key: "ASM-3", summary: "Rate-limit config per tenant", services: ["api"] }),
+        // In the selected repo ("api") but its title doesn't fuzzy-match "rate" — correct AND
+        // must exclude it; a buggy repo-OR-text combination would wrongly include it.
+        mkTask({ key: "ASM-4", summary: "Deploy pipeline", services: ["api"] }),
+      ],
+    });
     fireEvent.click(screen.getByText("Filter repos"));
     // Scoped to the popup list — "api" also appears as a service chip on the
     // ASM-1/ASM-3 cards, so an unscoped getByText would match multiple nodes
@@ -329,6 +352,7 @@ describe("fuzzy title search", () => {
     fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "rate" } });
     expect(keys()).toEqual(expect.arrayContaining(["ASM-1", "ASM-3"]));
     expect(screen.queryByText("ASM-2")).not.toBeInTheDocument(); // billing filtered out by repo
+    expect(screen.queryByText("ASM-4")).not.toBeInTheDocument(); // api but no "rate" match — AND must exclude it
   });
 
   it("hides the search box when filters.search is off", () => {
