@@ -1,0 +1,94 @@
+# Changelog
+
+All notable changes to **Agent Flow** are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Changed
+- Documentation overhaul for the open-source release: README with a UI screenshot,
+  quick-start walkthrough, and badges; a `CHANGELOG.md`; and refreshed copyright.
+
+## [0.1.12] — 2026-07-22
+
+### Changed
+- Reordered the task filter tabs so the most-used lens comes first:
+  **My sprint · Unassigned · Mine · Sprint · Backlog**.
+
+## [0.1.11] — 2026-07-22
+
+### Changed
+- Maintenance release (version bump; no user-facing changes).
+
+## [0.1.10] — 2026-07-21
+
+### Changed
+- Renamed the card action **"Review PR" → "Address PR"** to better describe what it
+  kicks off (assess *and* fix, not just review).
+
+## [0.1.9] — 2026-07-21
+
+### Added
+- **Address PR kick-off.** When a task reaches your PR-review status (default
+  `PR initiated`), an **Address PR** button appears on the card. It starts an agent
+  **in a git worktree** that finds the task's GitHub PR by its Jira key, checks out the
+  branch, and assesses readiness — then, by default, implements the requested changes
+  (toggle with `agentFlow.prReviewAutoFix`).
+- **Configurable Explore actions.** Four Explore modes — open a Jira ticket, enhance
+  knowledge/flow, debug, and general — each with its own editable prompt template and an
+  optional "DM me a summary on Slack" toggle.
+- **Open into an already-open window.** A window-presence registry lets you drop a task
+  into a VS Code window you already have open (a repo folder or a saved workspace),
+  instead of always spawning a new one. Toggle with `agentFlow.trackOpenWindows`.
+
+## [0.1.8] — 2026-07-21
+
+### Added
+- **Per-task git worktrees.** Optionally isolate a task in a worktree/branch created
+  inside each repo at `.claude/worktrees/<KEY>` (git-excluded automatically). Controlled
+  by `agentFlow.worktree` (`ask` / `always` / `never`).
+
+## [0.1.7] — 2026-07-20
+
+### Added
+- **Status filter lens.** A client-side multi-select to narrow the task pool by Jira
+  status.
+
+## [0.1.0] — 2026-07-19
+
+Initial release (and the early `0.1.x` patch line that followed on the same day).
+
+### Added
+- **Sidebar task pool** — a React webview with filter tabs and an S/M/L size lens
+  (by original estimate).
+- **Jira integration** over the REST API: JQL builder, search, issue detail, and status
+  transitions. Reads are the default; the only writes are optional status changes from a
+  card, which stamp a configurable provenance label (default `claude-code`).
+- **Service inference** — matches a ticket's components, labels, and text against your
+  local repo checkouts (backend *and* frontend).
+- **Open + seed** — writes a git-excluded `.pick-task/TASK.md` brief into each repo,
+  generates a `<KEY>.code-workspace` (or one window per repo), and pre-fills the Claude
+  Code panel with your chosen prompt mode.
+- **Open-where choices** (`agentFlow.openIn`): a new window, the current window, or
+  merge the task's repos into an existing `.code-workspace` (non-destructive, additive).
+- **Workspace modes** (`agentFlow.workspaceMode`): auto, multi-root, per-window, or ask.
+- **First-run setup wizard** — collects Jira site, project key, and repos directory with
+  no organization-specific defaults baked in; credentials go to encrypted SecretStorage.
+- **Branding** — logo, activity-bar icon, and unique Marketplace identifiers.
+
+### Fixed
+- Hardened activation: an optional step (e.g. a missing command or a dead panel) can no
+  longer crash the extension, and every failure surfaces a clear state instead of a blank
+  loading panel.
+- Bundled `jsonc-parser`'s ESM build so activation stops crashing.
+
+[Unreleased]: https://github.com/oznasi1/agent-flow/compare/v0.1.12...HEAD
+[0.1.12]: https://github.com/oznasi1/agent-flow/releases/tag/v0.1.12
+[0.1.11]: https://github.com/oznasi1/agent-flow/releases/tag/v0.1.11
+[0.1.10]: https://github.com/oznasi1/agent-flow/releases/tag/v0.1.10
+[0.1.9]: https://github.com/oznasi1/agent-flow/releases/tag/v0.1.9
+[0.1.8]: https://github.com/oznasi1/agent-flow/releases/tag/v0.1.8
+[0.1.7]: https://github.com/oznasi1/agent-flow/releases/tag/v0.1.7
+[0.1.0]: https://github.com/oznasi1/agent-flow/releases/tag/v0.1.0

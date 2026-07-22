@@ -42,7 +42,8 @@ complete the first-run setup wizard.
 
 ## Before opening a PR
 
-Run `npm run typecheck` and `npm test`, and make sure `npm run build` succeeds.
+Run `npm run typecheck` and `npm test`, and make sure `npm run build` succeeds. For any
+user-facing change, add an entry under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md).
 
 ## Publishing (maintainers)
 
@@ -51,7 +52,9 @@ publishing to the Marketplace:
 
 1. Confirm `publisher` matches your registered Marketplace publisher id.
 2. Add a top-level `icon` pointing to a 128×128 PNG.
-3. `npm run package` and `vsce publish`.
+3. Move the `## [Unreleased]` notes in [CHANGELOG.md](CHANGELOG.md) under a new version
+   heading, and bump `version` in `package.json`.
+4. `npm run package` and `vsce publish`.
 
 ## License
 
