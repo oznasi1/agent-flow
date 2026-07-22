@@ -151,6 +151,22 @@ describe("DeckApp", () => {
     expect(screen.queryByText(/open now/i)).not.toBeInTheDocument();
   });
 
+  it("forgets a run from the overflow menu", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByTitle(/more actions/i));
+    fireEvent.click(screen.getByText(/^Forget$/));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "ASM-1" });
+  });
+
+  it("opens the ticket in Jira from the overflow menu", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByTitle(/more actions/i));
+    fireEvent.click(screen.getByText(/Open in Jira/i));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+  });
+
   it("shows a toast message from the host", () => {
     render(<DeckApp />);
     host({ type: "toast", level: "error", message: "Nothing to open for ASM-1." });

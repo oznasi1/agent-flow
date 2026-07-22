@@ -50,6 +50,15 @@ function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
   const col = COLUMNS.find((c) => c.id === r.column)!;
   const accent = `var(${col.varName})`;
   const sv = stateView(r, live);
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    const close = () => setMenuOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenuOpen(false);
+    window.addEventListener("click", close);
+    window.addEventListener("keydown", onKey);
+    return () => { window.removeEventListener("click", close); window.removeEventListener("keydown", onKey); };
+  }, [menuOpen]);
 
   return (
     <div className={`card ${r.column === "needs" ? "needs" : ""}`} style={{ ["--accent" as any]: accent }}>
@@ -78,6 +87,15 @@ function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
         <div className="actions">
           <span className="act primary" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open" })}>Open</span>
           <span className="act" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff" })}>Diff</span>
+          <span className="more-wrap">
+            <span className="more" title="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>⋯</span>
+            {menuOpen && (
+              <div className="menu" onClick={(e) => e.stopPropagation()}>
+                <div className="mi" onClick={() => { setMenuOpen(false); send({ type: "openExternal", url: r.run.url }); }}>Open in Jira</div>
+                <div className="mi danger" onClick={() => { setMenuOpen(false); send({ type: "deck:forget", key: r.run.key }); }}>Forget</div>
+              </div>
+            )}
+          </span>
         </div>
       </div>
     </div>

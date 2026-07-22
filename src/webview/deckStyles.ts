@@ -101,6 +101,18 @@ export const DECK_CSS = `
   .act.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: var(--vscode-button-background); }
   .act.primary:hover { background: var(--vscode-button-hoverBackground); }
 
+  .more-wrap { position: relative; display: inline-flex; }
+  .more { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 7px; color: var(--vscode-descriptionForeground); cursor: pointer; }
+  .more:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+  .menu { position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 20; min-width: 130px;
+    border: 1px solid var(--hair); border-radius: 8px; padding: 4px;
+    background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
+    box-shadow: 0 8px 24px -10px rgba(0,0,0,.6); }
+  .mi { font-size: 12px; padding: 6px 9px; border-radius: 5px; cursor: pointer; color: var(--vscode-foreground); }
+  .mi:hover { background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)); }
+  .mi.danger { color: var(--c-needs); }
+
   .empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 8px; color: var(--vscode-descriptionForeground); text-align: center; padding: 40px; }
   .empty .big { font-size: 15px; color: var(--vscode-foreground); }
