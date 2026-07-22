@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.17] — 2026-07-22
+
+### Added
+- **Repo filter is now a multiselect dropdown.** The old free-text *"Filter by repo…"*
+  box is replaced by a **Filter repos** dropdown: pick one or more repos from a
+  checkbox list (filter-as-you-type, keyboard-navigable) and the task list narrows to
+  tasks touching **any** selected repo.
+- **Fuzzy title search.** A new **Search title…** box fuzzy-matches task titles
+  (powered by fuse.js) and orders results best-match-first.
+- New setting **`agentFlow.filters.search`** (default on) to show/hide the search box.
+
+### Changed
+- **`agentFlow.filters.repo`** now shows/hides the repo **multiselect** (previously the
+  free-text repo box).
+
 ## [0.1.16] — 2026-07-22
 
 ### Changed
