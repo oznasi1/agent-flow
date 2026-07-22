@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.13] — 2026-07-22
+
 ### Added
 - **Configurable filter visibility.** Three settings — `agentFlow.filters.size`,
   `agentFlow.filters.status`, and `agentFlow.filters.repo` (all default `true`) — let you
@@ -17,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Documentation overhaul for the open-source release: README with a UI screenshot,
   quick-start walkthrough, and badges; a `CHANGELOG.md`; and refreshed copyright.
+
+### Fixed
+- Packaging: include the Deck webview bundle (`dist/deck.js`) and the PNG marketplace
+  icon in the `.vsix`, declare the `png` content type, and register the icon in the
+  manifest. Previously only `dist/{extension,webview}.js` and `media/*.svg` were packaged.
 
 ## [0.1.12] — 2026-07-22
 
