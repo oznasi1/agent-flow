@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.16] — 2026-07-22
+
+### Changed
+- **Take a task & Explore:** you now choose *where* the task opens **before** the repo
+  list, not after. The destination picker (new window · this window · an existing
+  `.code-workspace` · a live window) comes first, and the repo list then **pre-checks
+  the repos that destination already contains** — so opening into a workspace you've
+  already set up no longer means re-picking everything.
+- **Take a task:** the *"how should the agent start?"* prompt-mode question is now the
+  first step (when `agentFlow.taskMode` is `ask`).
+
 ## [0.1.15] — 2026-07-22
 
 ### Changed
