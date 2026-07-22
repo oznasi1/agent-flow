@@ -64,10 +64,17 @@ function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
       </div>
       <div className="c-title">{r.run.summary}</div>
 
+      {r.run.repos[0]?.branch && (
+        <div className="c-branch">⎇ {r.run.repos[0].branch}</div>
+      )}
+
       <div className="c-repos">{r.repos.map((g) => <RepoChip key={g.name} g={g} />)}</div>
+
+      {r.windowOpen && <div className="c-openhint">open now — Open will focus this window</div>}
 
       <div className="c-foot">
         <span className="pill">{r.jiraStatus ?? "—"}</span>
+        <span className="elapsed">launched {timeAgo(r.run.createdAt)}</span>
         <div className="actions">
           <span className="act primary" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open" })}>Open</span>
           <span className="act" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff" })}>Diff</span>

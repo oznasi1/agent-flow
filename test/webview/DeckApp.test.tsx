@@ -132,6 +132,25 @@ describe("DeckApp", () => {
     expect(screen.getByText(/merged/i)).toBeInTheDocument();
   });
 
+  it("shows the branch and a launched-ago time on a card", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(screen.getByText(/ASM-1-x/)).toBeInTheDocument();
+    expect(screen.getByText(/^launched/i)).toBeInTheDocument();
+  });
+
+  it("hints that Open will focus an already-open window", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ windowOpen: true })]));
+    expect(screen.getByText(/open now/i)).toBeInTheDocument();
+  });
+
+  it("shows no open-now hint when the window is not open", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ windowOpen: false })]));
+    expect(screen.queryByText(/open now/i)).not.toBeInTheDocument();
+  });
+
   it("shows a toast message from the host", () => {
     render(<DeckApp />);
     host({ type: "toast", level: "error", message: "Nothing to open for ASM-1." });

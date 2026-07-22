@@ -79,6 +79,12 @@ export const DECK_CSS = `
 
   .c-title { font-size: 13px; line-height: 1.35; }
 
+  .c-branch { margin-top: 8px; font-family: var(--mono); font-size: 10px; color: var(--vscode-descriptionForeground); }
+  .c-openhint { margin-top: 9px; font-size: 10px; font-family: var(--mono); color: var(--c-done);
+    display: inline-flex; align-items: center; gap: 5px; }
+  .c-openhint::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c-done); }
+  .elapsed { font-size: 10.5px; color: var(--vscode-descriptionForeground); font-family: var(--mono); }
+
   .c-repos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
   .repo { font-family: var(--mono); font-size: 10px; border: 1px solid var(--hair); border-radius: 6px;
     padding: 2px 6px; color: var(--vscode-descriptionForeground); }
