@@ -19,7 +19,7 @@ function host(msg: OutboundMessage) {
   });
 }
 
-const ALL_FILTERS = { size: true, status: true, repo: true };
+const ALL_FILTERS = { size: true, status: true, repo: true, search: true };
 const authed = (prReviewStatus = "PR initiated", filters = ALL_FILTERS) =>
   host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus, filters });
 

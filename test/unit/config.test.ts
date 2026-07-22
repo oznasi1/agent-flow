@@ -212,17 +212,17 @@ describe("getConfig — explore actions", () => {
 
 describe("getConfig — filter visibility", () => {
   it("defaults every filter control to visible when nothing is configured", () => {
-    expect(getConfig().filters).toEqual({ size: true, status: true, repo: true });
+    expect(getConfig().filters).toEqual({ size: true, status: true, repo: true, search: true });
   });
 
   it("honors an explicit false for each control", () => {
-    setConfig({ "filters.size": false, "filters.status": false, "filters.repo": false });
-    expect(getConfig().filters).toEqual({ size: false, status: false, repo: false });
+    setConfig({ "filters.size": false, "filters.status": false, "filters.repo": false, "filters.search": false });
+    expect(getConfig().filters).toEqual({ size: false, status: false, repo: false, search: false });
   });
 
   it("hides one control independently of the others", () => {
-    setConfig({ "filters.status": false });
-    expect(getConfig().filters).toEqual({ size: true, status: false, repo: true });
+    setConfig({ "filters.search": false });
+    expect(getConfig().filters).toEqual({ size: true, status: true, repo: true, search: false });
   });
 });
 
@@ -244,5 +244,6 @@ describe("package.json ⇄ config constants", () => {
     expect(props["agentFlow.filters.size"].default).toBe(true);
     expect(props["agentFlow.filters.status"].default).toBe(true);
     expect(props["agentFlow.filters.repo"].default).toBe(true);
+    expect(props["agentFlow.filters.search"].default).toBe(true);
   });
 });

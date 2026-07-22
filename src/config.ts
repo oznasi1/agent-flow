@@ -169,6 +169,7 @@ export function getConfig(): AgentFlowConfig {
       size: c.get<boolean>("filters.size") ?? true,
       status: c.get<boolean>("filters.status") ?? true,
       repo: c.get<boolean>("filters.repo") ?? true,
+      search: c.get<boolean>("filters.search") ?? true,
     },
   };
 }

@@ -90,7 +90,7 @@ export function App(): JSX.Element {
   const [size, setSize] = React.useState<Size>("any");
   // Which secondary filter controls are shown (from settings, via the host). All
   // shown until the host says otherwise — nothing flashes hidden on first paint.
-  const [filters, setFilters] = React.useState<FilterVisibility>({ size: true, status: true, repo: true });
+  const [filters, setFilters] = React.useState<FilterVisibility>({ size: true, status: true, repo: true, search: true });
   // Client-side status lens: the set of selected statuses (empty = show all).
   const [statuses, setStatuses] = React.useState<Set<string>>(new Set());
   const [repoQuery, setRepoQuery] = React.useState("");

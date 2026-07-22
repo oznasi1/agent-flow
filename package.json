@@ -163,7 +163,12 @@
         "agentFlow.filters.repo": {
           "type": "boolean",
           "default": true,
-          "description": "Show the \"Filter by repo…\" search box in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
+          "description": "Show the repo multiselect filter in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
+        },
+        "agentFlow.filters.search": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the fuzzy title search box in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
         },
         "agentFlow.seedAgent": {
           "type": "boolean",
