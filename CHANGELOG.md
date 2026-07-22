@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.15] — 2026-07-22
+
+### Changed
+- **The Deck (in-flight board):** renamed the **Working** column to **In progress**
+  and moved the true live state onto each card, so an idle task reads *idle* and a
+  parked task reads *parked* instead of everything collapsing into one column.
+  Columns now run in pipeline order — **In progress → Needs you → In review → Done**.
+- Cards carry a state-driven status dot (working = green pulse, idle = amber,
+  needs-you = red, parked/merged = hollow), a branch chip, a "launched … ago" stamp,
+  and the header now shows a summary strip of counts.
+- **Open** is presence-aware: an already-open window is silently focused (no duplicate,
+  no toast) and marked with an "open now" hint; only failures notify.
+
+### Added
+- Per-card **⋯** overflow menu with **Forget** (drop a stale/merged run from the board)
+  and **Open in Jira**.
+
 ## [0.1.14] — 2026-07-22
 
 ### Fixed
