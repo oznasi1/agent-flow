@@ -43,3 +43,9 @@ export function readRuns(dir: string): Run[] {
 export function removeRun(dir: string, key: string): void {
   fs.rmSync(fileFor(dir, key), { force: true });
 }
+
+/** The path the Deck's "Open" acts on for a run: the multi-root workspace file,
+ * else the first repo. Undefined when a run somehow has neither. */
+export function runTarget(run: Run): string | undefined {
+  return run.workspaceFile ?? run.repos[0]?.path;
+}

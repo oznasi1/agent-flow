@@ -92,6 +92,7 @@ export interface RunStatus {
   jiraCategory: string | null; // "new" | "indeterminate" | "done"
   repos: RepoGit[];
   agent: AgentActivity;
+  windowOpen: boolean; // is this run's target window currently open? (from presence)
 }
 
 // Messages: webview → host

@@ -1,5 +1,7 @@
+import * as fs from "fs";
 import { AgentActivity, AgentState, DeckColumn, Run, RunStatus } from "../types";
 import { gitState } from "./git";
+import { runTarget } from "./runs";
 import { readAgentActivity } from "./transcript";
 
 /** Inputs to the column decision — every field observable, none required. */
@@ -31,6 +33,16 @@ export function deriveBucket(i: BucketInput): DeckColumn {
 }
 
 const UNKNOWN_AGENT: AgentActivity = { state: "unknown", lastActivityMs: null, slug: null };
+
+/** Resolve symlinks so a run's target compares equal to a presence identity
+ * across /var↔/private/var etc. Presence identities are already canonical. */
+function canon(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
 const STATE_RANK: Record<AgentState, number> = { working: 3, "needs-you": 2, idle: 1, unknown: 0 };
 
 /** The liveliest agent across a run's repos — a multi-repo task's session may live
@@ -57,6 +69,7 @@ export function buildRunStatus(
   projectsRoot: string,
   nowMs: number,
   liveSignal = true,
+  openIdentities: ReadonlySet<string> = new Set(),
 ): RunStatus {
   const repos = run.repos.map((r) => gitState(r.name, r.path));
   const agent = liveSignal
@@ -67,5 +80,7 @@ export function buildRunStatus(
     jiraStatus: jira?.status ?? null,
     agentState: agent.state,
   });
-  return { run, column, jiraStatus: jira?.status ?? null, jiraCategory: jira?.category ?? null, repos, agent };
+  const target = runTarget(run);
+  const windowOpen = target ? openIdentities.has(canon(target)) : false;
+  return { run, column, jiraStatus: jira?.status ?? null, jiraCategory: jira?.category ?? null, repos, agent, windowOpen };
 }

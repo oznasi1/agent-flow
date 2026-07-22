@@ -22,7 +22,7 @@ const mkRun = (over: Partial<Run> = {}): Run => ({
 });
 const statusFor = (run: Run): RunStatus => ({
   run, column: "progress", jiraStatus: null, jiraCategory: null, repos: [],
-  agent: { state: "unknown", lastActivityMs: null, slug: null },
+  agent: { state: "unknown", lastActivityMs: null, slug: null }, windowOpen: false,
 });
 
 const lastPanel = () => window.createWebviewPanel.mock.results.at(-1)!.value as ReturnType<typeof import("../_mocks/vscode").makeWebviewPanel>;

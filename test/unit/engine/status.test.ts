@@ -120,4 +120,19 @@ describe("buildRunStatus", () => {
     expect(s.repos[0].name).toBe("repo");
     expect(s.jiraStatus).toBeNull();
   });
+
+  it("marks windowOpen when the run's target is an open window identity", () => {
+    const ids = new Set([fs.realpathSync(repoPath)]);
+    const s = buildRunStatus(run, null, projRoot, NOW, true, ids);
+    expect(s.windowOpen).toBe(true);
+  });
+
+  it("leaves windowOpen false when no identity matches", () => {
+    const s = buildRunStatus(run, null, projRoot, NOW, true, new Set(["/somewhere/else"]));
+    expect(s.windowOpen).toBe(false);
+  });
+
+  it("defaults windowOpen to false when no identities are passed", () => {
+    expect(buildRunStatus(run, null, projRoot, NOW, true).windowOpen).toBe(false);
+  });
 });

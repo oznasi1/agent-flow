@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { writeRun, readRuns, removeRun } from "../../../src/engine/runs";
+import { writeRun, readRuns, removeRun, runTarget } from "../../../src/engine/runs";
 import { Run } from "../../../src/types";
 
 const mkRun = (key: string, createdAt: number): Run => ({
@@ -61,5 +61,22 @@ describe("runs store", () => {
 
   it("returns [] for a missing dir (no throw)", () => {
     expect(readRuns(path.join(dir, "nope"))).toEqual([]);
+  });
+});
+
+describe("runTarget", () => {
+  const base = { key: "K-1", summary: "s", url: "u", createdAt: 1, mode: "per-window" as const, briefPaths: [] };
+
+  it("prefers the multi-root workspace file", () => {
+    expect(runTarget({ ...base, mode: "multiroot", workspaceFile: "/ws/K-1.code-workspace",
+      repos: [{ name: "a", path: "/r/a", isGit: true }] })).toBe("/ws/K-1.code-workspace");
+  });
+
+  it("falls back to the first repo path", () => {
+    expect(runTarget({ ...base, repos: [{ name: "a", path: "/r/a", isGit: true }] })).toBe("/r/a");
+  });
+
+  it("is undefined when there is nothing to open", () => {
+    expect(runTarget({ ...base, repos: [] })).toBeUndefined();
   });
 });

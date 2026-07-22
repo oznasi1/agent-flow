@@ -28,6 +28,7 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   jiraCategory: "indeterminate",
   repos: [{ name: "svc", path: "/r/svc", branch: "ASM-1-x", dirty: true, ahead: 1, added: 12, removed: 2, files: 3 }],
   agent: { state: "working", lastActivityMs: 1_000, slug: "export-streaming" },
+  windowOpen: false,
   ...over,
 });
 
