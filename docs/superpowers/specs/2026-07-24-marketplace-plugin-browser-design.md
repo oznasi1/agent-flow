@@ -94,8 +94,11 @@ Derivation rules:
 
 - **Marketplace**: `name` (the install `@handle`), `description` ?? `metadata.description`,
   `owner.name`, and the resolved plugin root (`metadata.pluginRoot`, default repo root).
-- **Plugins** from `plugins[]`: `name`, `description`, and the resolved `source` directory
-  (join with `pluginRoot` when `source` is relative).
+- **Plugins** from `plugins[]`: `name`, `description`, and the resolved `source` directory.
+  When `source` is present it is already repo-root-relative and is used as-is (no join with
+  `pluginRoot` — real marketplaces put a full repo-root-relative path in `source`). `pluginRoot`
+  is consulted only when a plugin omits `source`, in which case the plugin is located by name
+  under the root: `pluginRoot`/`name`.
 - **Skills / agents / commands** per plugin, derived from `treePaths` scoped to the plugin's
   `source` dir, by convention:
   - skill = a path matching `<source>/skills/<name>/SKILL.md` → skill name `<name>`.

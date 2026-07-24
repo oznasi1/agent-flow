@@ -95,11 +95,15 @@ export function buildMarketplaceView(repo: string, manifestJson: string, treePat
   const owner: string =
     typeof m?.owner === "string" ? m.owner : typeof m?.owner?.name === "string" ? m.owner.name : "";
 
+  const pluginRoot = cleanPath(typeof m?.metadata?.pluginRoot === "string" ? m.metadata.pluginRoot : "");
   const plugins: PluginView[] = Array.isArray(m?.plugins)
     ? m.plugins
         .filter((p: any) => p && typeof p.name === "string")
         .map((p: any): PluginView => {
-          const source = cleanPath(typeof p.source === "string" ? p.source : p.name);
+          const source =
+            typeof p.source === "string"
+              ? cleanPath(p.source)
+              : cleanPath([pluginRoot, p.name].filter(Boolean).join("/"));
           return {
             name: p.name,
             description: typeof p.description === "string" ? p.description : "",

@@ -108,6 +108,20 @@ describe("buildMarketplaceView", () => {
     expect(p.agents).toEqual([]);
   });
 
+  it("resolves a nameless-source plugin under metadata.pluginRoot", () => {
+    const manifest = JSON.stringify({
+      name: "mkt",
+      metadata: { pluginRoot: "./plugins" },
+      plugins: [{ name: "foo" }],
+    });
+    const tree = ["plugins/foo/skills/x/SKILL.md", "plugins/foo/commands/run.md"];
+    const v = buildMarketplaceView("o/r", manifest, tree);
+    const p = v.plugins[0];
+    expect(p.source).toBe("plugins/foo");
+    expect(p.skills.map((s) => s.name)).toEqual(["x"]);
+    expect(p.commands.map((c) => c.name)).toEqual(["run"]);
+  });
+
   it("throws MarketplaceParseError on malformed JSON", () => {
     expect(() => buildMarketplaceView("o/r", "{ not json", [])).toThrow(MarketplaceParseError);
   });

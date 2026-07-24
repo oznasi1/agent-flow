@@ -51,6 +51,16 @@ describe("MarketplacePanel", () => {
     expect(h.fetchMarketplace).toHaveBeenCalledWith("o/r");
   });
 
+  it("normalizes and de-dupes repos read from config, dropping invalid entries", async () => {
+    setConfig({ marketplaces: ["good/repo", "garbage-no-slash", "good/repo"] });
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    expect(h.fetchMarketplace).toHaveBeenCalledWith("good/repo");
+    expect(h.fetchMarketplace).toHaveBeenCalledTimes(1);
+    expect(h.fetchMarketplace).not.toHaveBeenCalledWith("garbage-no-slash");
+  });
+
   it("adds a repo: normalizes, writes global config, fetches, re-posts", async () => {
     setConfig({ marketplaces: [] });
     show();

@@ -46,7 +46,14 @@ export class MarketplacePanel {
 
   private repos(): string[] {
     const v = vscode.workspace.getConfiguration("agentFlow").get<string[]>("marketplaces");
-    return Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.length > 0) : [];
+    if (!Array.isArray(v)) return [];
+    const out: string[] = [];
+    for (const x of v) {
+      if (typeof x !== "string" || !x.length) continue;
+      const n = normalizeRepo(x);
+      if (n && !out.includes(n)) out.push(n);
+    }
+    return out;
   }
   private async writeRepos(next: string[]): Promise<void> {
     await vscode.workspace.getConfiguration("agentFlow").update("marketplaces", next, vscode.ConfigurationTarget.Global);
