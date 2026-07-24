@@ -14,6 +14,11 @@ import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceR
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 
+/** Delay between opening successive batch windows — reduces focus-stealing and
+ *  `open -a` thrash when several windows launch back-to-back. */
+const BATCH_STAGGER_MS = 250;
+const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
 /** Where to open a taken task — a new window, the current one, merged into an
  * existing .code-workspace file, or focused into an already-open folder window. */
 type OpenTarget =
@@ -168,6 +173,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
         case "take": {
           await this.takeTask(m.key, m.services);
+          break;
+        }
+        case "takeBatch": {
+          await this.takeBatch(m.keys, m.repo);
           break;
         }
         case "addressPr": {
@@ -558,32 +567,115 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** Resolve the task prompt mode: the configured `taskMode` when it names a known
+   * mode, otherwise a QuickPick. Returns undefined only when the picker is cancelled. */
+  private async choosePromptMode(cfg: AgentFlowConfig, title: string): Promise<PromptMode | undefined> {
+    const modes = cfg.promptModes;
+    const configured = modes.find((m) => m.id === cfg.taskMode);
+    if (configured) return configured;
+    const p = await vscode.window.showQuickPick(
+      modes.map((mm) => ({
+        label: mm.label,
+        detail: mm.prompt.replace(/\{[a-z]+\}/g, "").replace(/\s+/g, " ").trim().slice(0, 80),
+        mode: mm,
+      })),
+      { title, ignoreFocusOut: true },
+    );
+    return p?.mode;
+  }
+
   /** The pick flow: prompt mode → read ticket → destination → confirm services → open + seed.
    * `preselected` (from the in-card selection) skips the service QuickPick. */
   public async takeTask(key: string, preselected?: string[]): Promise<void> {
     const cfg = getConfig();
 
     // How should the agent start — pick a prompt mode (or use the configured default) FIRST.
-    const modes = cfg.promptModes;
-    let promptMode: PromptMode | undefined = modes.find((m) => m.id === cfg.taskMode);
-    if (!promptMode) {
-      const p = await vscode.window.showQuickPick(
-        modes.map((mm) => ({
-          label: mm.label,
-          detail: mm.prompt.replace(/\{[a-z]+\}/g, "").replace(/\s+/g, " ").trim().slice(0, 80),
-          mode: mm,
-        })),
-        { title: `${key} — how should the agent start?`, ignoreFocusOut: true },
-      );
-      if (!p) return;
-      promptMode = p.mode;
-    }
+    const promptMode = await this.choosePromptMode(cfg, `${key} — how should the agent start?`);
+    if (!promptMode) return;
 
     const resolved = await this.resolveKickoff(key, preselected);
     if (!resolved) return;
     const { detail, services, target } = resolved;
 
     await this.launch(detail, services, promptMode.prompt, false, target);
+  }
+
+  /** Launch several tasks in parallel, each in its own git worktree + new window with
+   * its own seeded Claude session. Offered by the webview only when the repo filter is
+   * one repo; every task opens a worktree in that repo. The prompt mode is asked once
+   * and applied to all; one task's failure never aborts the rest. */
+  public async takeBatch(keys: string[], repo: string): Promise<void> {
+    const cfg = getConfig();
+    if (!keys.length) return;
+
+    if (!(await this.auth.isAuthenticated())) {
+      const ok = await vscode.commands.executeCommand<boolean>("agentFlow.signIn");
+      if (!ok) return;
+    }
+
+    const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+    const repoRef = repos.find((r) => r.name === repo);
+    if (!repoRef) {
+      this.toast("error", `Repo "${repo}" not found under ${cfg.reposRoot}.`);
+      return;
+    }
+    if (!repoRef.isGit) {
+      this.toast("error", `Batch launch needs a git repo — "${repo}" isn't one. Each task opens its own worktree.`);
+      return;
+    }
+
+    if (keys.length > cfg.batchLaunchConfirmThreshold) {
+      const go = await vscode.window.showWarningMessage(
+        `Launch ${keys.length} tasks in parallel? That opens ${keys.length} windows, each with its own Claude Code session.`,
+        { modal: true },
+        "Launch",
+      );
+      if (go !== "Launch") return;
+    }
+
+    const promptMode = await this.choosePromptMode(cfg, `Launch ${keys.length} selected task(s) — how should the agents start?`);
+    if (!promptMode) return;
+
+    let launched = 0;
+    const failed: string[] = [];
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      try {
+        const detail = await this.client().getDetail(key);
+        const services = createWorktrees([repoRef], detail.key, detail.summary, this.log);
+        // A worktree is mandatory here: two batch tasks sharing the main checkout would
+        // clobber each other's .pick-task/TASK.md brief. createWorktrees returns the
+        // original (main-checkout) ref when `git worktree add` fails — detect that and
+        // fail the task honestly instead of launching into a shared, colliding checkout.
+        if (services[0].path === repoRef.path) {
+          throw new Error("couldn't create a git worktree (would collide with the shared checkout)");
+        }
+        await openWorkspace({
+          ticket: { key: detail.key, summary: detail.summary, url: detail.url },
+          planMd: this.buildBrief(detail),
+          descriptionText: detail.descriptionText,
+          services,
+          mode: "per-window",
+          promptTemplate: promptMode.prompt,
+          workspaceDir: cfg.workspaceDir,
+          seedAgent: cfg.seedAgent,
+          openIn: "new",
+        });
+        launched++;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        failed.push(`${key} (${msg})`);
+        this.log(`takeBatch ${key}: failed — ${msg}`);
+      }
+      if (i < keys.length - 1) await delay(BATCH_STAGGER_MS);
+    }
+
+    const summary = `Launched ${launched} of ${keys.length} in parallel.`;
+    if (failed.length) {
+      const shown = failed.slice(0, 5).join("; ");
+      const more = failed.length > 5 ? ` (and ${failed.length - 5} more)` : "";
+      this.toast("error", `${summary} Failed: ${shown}${more}`);
+    } else this.toast("success", `${summary} A worktree + Claude session per task.`);
   }
 
   /** PR-review kick-off: the same open+seed flow as Take, but always in a worktree and

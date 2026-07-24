@@ -102,6 +102,7 @@ export type InboundMessage =
   | { type: "fetch"; filter: Filter; size: Size }
   | { type: "detail"; key: string }
   | { type: "take"; key: string; services?: string[] }
+  | { type: "takeBatch"; keys: string[]; repo: string }
   | { type: "addressPr"; key: string; services?: string[] }
   | { type: "changeStatus"; key: string }
   | { type: "addToMySprint"; key: string }

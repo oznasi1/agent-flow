@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { commands, env, window } from "../_mocks/vscode";
 import { fakeAuth, fakeContext, mkRepos } from "../_helpers/factories";
 
@@ -56,6 +56,7 @@ const CFG = {
   prReviewAutoFix: true,
   prReviewPrompt: "PR {key}{files}",
   worktree: "never" as const,
+  batchLaunchConfirmThreshold: 6,
   trackOpenWindows: true,
   stampLabelOnWrite: true,
   provenanceLabel: "claude-code",
@@ -706,6 +707,135 @@ describe("takeTask", () => {
     const items = vi.mocked(window.showQuickPick).mock.calls[2][0] as Array<{ label: string; picked: boolean }>;
     expect(items.find((i) => i.label === "centaur")?.picked).toBe(true);
     expect(items.find((i) => i.label === "account-service")?.picked).toBe(false);
+  });
+});
+
+describe("takeBatch", () => {
+  const twoKeys = ["ASM-1", "ASM-2"];
+
+  // With the worktree-fallback guard in place, a *successful* worktree must return a
+  // path different from the main checkout. Simulate that here; restore the identity
+  // default in afterEach so this impl doesn't leak into later describes.
+  beforeEach(() => {
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+  });
+  afterEach(() => {
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+
+  it("is a no-op for an empty selection", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider } = setup();
+    await provider.takeBatch([], "api");
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(discoverRepos).not.toHaveBeenCalled();
+  });
+
+  it("launches when the over-threshold confirmation is accepted", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, batchLaunchConfirmThreshold: 1 });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], "api"); // 2 > 1 → confirm
+    expect(window.showWarningMessage).toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips a task whose worktree creation falls back to the main checkout and reports it failed", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s) => s); // fallback: path stays === repoRef.path
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], "api");
+    expect(openWorkspace).not.toHaveBeenCalled();
+    const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
+    expect(toast.level).toBe("error");
+    expect(toast.message).toContain("Launched 0 of 1");
+  });
+
+  it("launches one worktree'd new window per selected task in the filtered repo", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "billing"]));
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, "api");
+    expect(vi.mocked(createWorktrees)).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(createWorktrees).mock.calls[0][0]).toEqual([expect.objectContaining({ name: "api" })]);
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "per-window", openIn: "new" }));
+  });
+
+  it("uses the configured task prompt mode without prompting", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], "api"); // CFG.taskMode = "plan" is a known mode
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ promptTemplate: "P {key}" }));
+  });
+
+  it("asks the prompt mode once when taskMode is 'ask' and applies it to all", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: CFG.promptModes[0] } as never);
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, "api");
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1); // once, not per task
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it("aborts when the prompt-mode pick is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, "api");
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("errors when the filtered repo is not a git repo", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"], { isGit: false }));
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], "api");
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+  });
+
+  it("errors when the repo name is not found", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing"]));
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], "api");
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+  });
+
+  it("continues past a failing task and reports the failure count", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(openWorkspace)
+      .mockRejectedValueOnce(new Error("disk full"))
+      .mockResolvedValueOnce({ mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/x"] });
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, "api");
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+    const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
+    expect(toast.level).toBe("error");
+    expect(toast.message).toContain("Launched 1 of 2");
+  });
+
+  it("confirms before launching more than the threshold, and aborts if dismissed", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, batchLaunchConfirmThreshold: 1 });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showWarningMessage).mockResolvedValueOnce(undefined); // dismissed
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, "api"); // 2 > 1 → confirm
+    expect(window.showWarningMessage).toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("routes the takeBatch message through onMessage to the handler", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { send } = setup();
+    await send({ type: "takeBatch", keys: ["ASM-1"], repo: "api" });
+    expect(openWorkspace).toHaveBeenCalled();
   });
 });
 
