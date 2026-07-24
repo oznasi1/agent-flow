@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.20] — 2026-07-24
+
+### Added
+- **Multi-select & parallel launch.** When the repo filter is narrowed to a single
+  repo, a checkbox appears on each task card and a **Launch in parallel** bar lets you
+  kick off several tasks at once. Each selected task opens in its own git worktree
+  (its own branch) in its own window, with its own Claude Code session pre-seeded —
+  several agents working the same repo simultaneously. The prompt mode is asked once
+  and applied to the whole batch; a task whose worktree can't be created is skipped
+  and reported rather than launched into the shared checkout.
+- **`agentFlow.batchLaunchConfirmThreshold`** (default `6`) — batches larger than this
+  prompt a confirmation first, guarding against accidentally opening a swarm of windows.
+
 ## [0.1.19] — 2026-07-22
 
 ### Changed
