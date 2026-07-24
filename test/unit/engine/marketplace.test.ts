@@ -112,3 +112,60 @@ describe("buildMarketplaceView", () => {
     expect(() => buildMarketplaceView("o/r", "{ not json", [])).toThrow(MarketplaceParseError);
   });
 });
+
+import { fetchMarketplace, GhRunner } from "../../../src/engine/marketplace";
+
+const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64");
+
+// A GhRunner scripted by matching a substring of the joined args.
+function runner(map: { treePaths?: string[]; manifest?: string; fail?: (args: string[]) => Partial<GhResultLike> | null }): GhRunner {
+  return async (args: string[]) => {
+    const joined = args.join(" ");
+    const forced = map.fail?.(args);
+    if (forced) return { ok: false, stdout: "", stderr: "", ...forced } as any;
+    if (joined.includes("git/trees")) {
+      return { ok: true, stdout: (map.treePaths ?? []).join("\n"), stderr: "" };
+    }
+    if (joined.includes("marketplace.json")) {
+      return { ok: true, stdout: b64(map.manifest ?? "{}"), stderr: "" };
+    }
+    return { ok: false, stdout: "", stderr: "unexpected" };
+  };
+}
+type GhResultLike = { ok: boolean; stdout: string; stderr: string };
+
+describe("fetchMarketplace", () => {
+  it("returns a built view on success", async () => {
+    const manifest = JSON.stringify({ name: "mkt", plugins: [{ name: "p", source: "./p", description: "d" }] });
+    const v = await fetchMarketplace("o/r", runner({ treePaths: ["p/skills/x/SKILL.md"], manifest }));
+    expect(v.error).toBeUndefined();
+    expect(v.name).toBe("mkt");
+    expect(v.plugins[0].skills[0].name).toBe("x");
+  });
+
+  it("maps a missing gh binary (ENOENT) to gh-missing", async () => {
+    const run: GhRunner = async () => { const e: any = new Error("spawn gh ENOENT"); e.code = "ENOENT"; throw e; };
+    const v = await fetchMarketplace("o/r", run);
+    expect(v.error?.kind).toBe("gh-missing");
+  });
+
+  it("maps an auth failure to gh-unauthenticated", async () => {
+    const v = await fetchMarketplace("o/r", runner({ fail: () => ({ stderr: "gh auth login required (HTTP 401)" }) }));
+    expect(v.error?.kind).toBe("gh-unauthenticated");
+  });
+
+  it("maps a 404 on the tree call to repo-not-found", async () => {
+    const v = await fetchMarketplace("o/r", runner({ fail: (a) => (a.join(" ").includes("git/trees") ? { stderr: "gh: Not Found (HTTP 404)" } : null) }));
+    expect(v.error?.kind).toBe("repo-not-found");
+  });
+
+  it("maps a 404 on the manifest to not-a-marketplace", async () => {
+    const v = await fetchMarketplace("o/r", runner({ treePaths: [], fail: (a) => (a.join(" ").includes("marketplace.json") ? { stderr: "gh: Not Found (HTTP 404)" } : null) }));
+    expect(v.error?.kind).toBe("not-a-marketplace");
+  });
+
+  it("maps malformed manifest JSON to parse-error", async () => {
+    const v = await fetchMarketplace("o/r", runner({ treePaths: [], manifest: "{ nope" }));
+    expect(v.error?.kind).toBe("parse-error");
+  });
+});

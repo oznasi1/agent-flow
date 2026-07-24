@@ -119,3 +119,78 @@ export function buildMarketplaceView(repo: string, manifestJson: string, treePat
     plugins,
   };
 }
+
+export interface GhResult {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+}
+export type GhRunner = (args: string[]) => Promise<GhResult>;
+
+const GH_TIMEOUT_MS = 20_000;
+
+/** Default runner: shell out to the `gh` CLI. Never throws for a non-zero exit —
+ * only a spawn failure (e.g. gh missing) rejects, which fetchMarketplace catches. */
+const defaultGh: GhRunner = async (args: string[]) => {
+  try {
+    const { stdout, stderr } = await execFileAsync("gh", args, {
+      timeout: GH_TIMEOUT_MS,
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return { ok: true, stdout, stderr };
+  } catch (e: any) {
+    if (e && e.code === "ENOENT") throw e; // gh not installed — surface to the mapper
+    return { ok: false, stdout: e?.stdout ?? "", stderr: e?.stderr ?? String(e?.message ?? e) };
+  }
+};
+
+function mapStderr(stderr: string): MarketplaceErrorKind | null {
+  if (/HTTP 401|HTTP 403|auth|login|Bad credentials/i.test(stderr)) return "gh-unauthenticated";
+  if (/HTTP 404|Not Found|Could not resolve/i.test(stderr)) return "repo-not-found";
+  return null;
+}
+
+function errView(repo: string, kind: MarketplaceErrorKind): MarketplaceView {
+  const messages: Record<MarketplaceErrorKind, string> = {
+    "gh-missing": "GitHub CLI (gh) not found. Install it to browse marketplaces.",
+    "gh-unauthenticated": "Not authenticated. Run `gh auth login` to browse marketplaces.",
+    "repo-not-found": "Repo not found, or you don't have access.",
+    "not-a-marketplace": "No .claude-plugin/marketplace.json — this repo isn't a Claude Code marketplace.",
+    "parse-error": "Couldn't read this marketplace's manifest (invalid JSON).",
+    unknown: "Couldn't load this marketplace.",
+  };
+  return { repo, name: repo, description: "", owner: "", addCommand: `/plugin marketplace add ${repo}`, plugins: [], error: { kind, message: messages[kind] } };
+}
+
+/** Read a marketplace repo via gh (2 calls). Never rejects — failures become an
+ * `error` on the returned view so one bad repo can't break the panel. */
+export async function fetchMarketplace(repo: string, run: GhRunner = defaultGh): Promise<MarketplaceView> {
+  // 1) tree
+  let tree: GhResult;
+  try {
+    tree = await run(["api", `repos/${repo}/git/trees/HEAD?recursive=1`, "--jq", ".tree[].path"]);
+  } catch (e: any) {
+    return errView(repo, e?.code === "ENOENT" ? "gh-missing" : "unknown");
+  }
+  if (!tree.ok) return errView(repo, mapStderr(tree.stderr) ?? "unknown");
+  const treePaths = tree.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+
+  // 2) manifest
+  let manifest: GhResult;
+  try {
+    manifest = await run(["api", `repos/${repo}/contents/.claude-plugin/marketplace.json`, "--jq", ".content"]);
+  } catch (e: any) {
+    return errView(repo, e?.code === "ENOENT" ? "gh-missing" : "unknown");
+  }
+  if (!manifest.ok) {
+    const kind = mapStderr(manifest.stderr);
+    return errView(repo, kind === "repo-not-found" ? "not-a-marketplace" : kind ?? "unknown");
+  }
+  const json = Buffer.from(manifest.stdout.replace(/\s+/g, ""), "base64").toString("utf8");
+  try {
+    return buildMarketplaceView(repo, json, treePaths);
+  } catch (e) {
+    if (e instanceof MarketplaceParseError) return errView(repo, "parse-error");
+    return errView(repo, "unknown");
+  }
+}
