@@ -237,6 +237,18 @@ describe("getConfig — filter visibility", () => {
   });
 });
 
+describe("getConfig — marketplaces", () => {
+  it("defaults marketplaces to an empty array", () => {
+    setConfig({});
+    expect(getConfig().marketplaces).toEqual([]);
+  });
+
+  it("reads marketplaces and drops non-string / empty entries", () => {
+    setConfig({ marketplaces: ["owner/repo", "", 42, "a/b"] });
+    expect(getConfig().marketplaces).toEqual(["owner/repo", "a/b"]);
+  });
+});
+
 describe("package.json ⇄ config constants", () => {
   const props = (pkg.contributes.configuration.properties as Record<string, { default?: unknown }>);
 

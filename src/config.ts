@@ -103,6 +103,7 @@ export interface AgentFlowConfig {
   // Which secondary filter controls the task-pool sidebar shows. Each defaults to
   // true; a user hides the ones they don't use. The tab bar is always shown.
   filters: FilterVisibility;
+  marketplaces: string[];
 }
 
 /** Expand a leading `~` to the user's home directory. */
@@ -148,6 +149,10 @@ export function getConfig(): AgentFlowConfig {
     repoBlocklist: (() => {
       const b = c.get<string[]>("repoBlocklist");
       return Array.isArray(b) ? b.filter((x) => typeof x === "string" && x.length) : [];
+    })(),
+    marketplaces: (() => {
+      const m = c.get<string[]>("marketplaces");
+      return Array.isArray(m) ? m.filter((x) => typeof x === "string" && x.length > 0) : [];
     })(),
     defaultFilter: c.get<string>("defaultFilter") || "mysprint",
     seedAgent: c.get<boolean>("seedAgent") ?? true,
