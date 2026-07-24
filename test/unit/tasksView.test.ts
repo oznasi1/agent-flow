@@ -691,23 +691,77 @@ describe("takeTask", () => {
     });
   });
 
-  it("pre-checks repos the chosen existing workspace already contains", async () => {
-    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" }); // no preselection → service pick shows
-    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur"]);
-    vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 }]);
-    // Destination is chosen first: open-target pick → workspace-file pick → service pick.
-    vi.mocked(window.showQuickPick)
-      .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
-      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never)
-      .mockResolvedValueOnce([{ repo: mkRepos(["centaur"])[0] }] as never);
+  describe("existing/live-folder destinations skip the repo picker", () => {
+    it("uses the existing workspace's repos and never shows the service pick", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+      vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur"]);
+      vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 }]);
+      // Destination picks only: open-target pick → workspace-file pick. No service pick follows.
+      vi.mocked(window.showQuickPick)
+        .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
+        .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
-    const { provider } = setup();
-    await provider.takeTask("ASM-1"); // no preselected repos
+      const { provider } = setup();
+      await provider.takeTask("ASM-1"); // no preselected repos
 
-    // 3rd quick-pick is the service pick; centaur is pre-checked because it's in the workspace.
-    const items = vi.mocked(window.showQuickPick).mock.calls[2][0] as Array<{ label: string; picked: boolean }>;
-    expect(items.find((i) => i.label === "centaur")?.picked).toBe(true);
-    expect(items.find((i) => i.label === "account-service")?.picked).toBe(false);
+      expect(window.showQuickPick).toHaveBeenCalledTimes(2); // no third (service) pick
+      expect(openWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          existingWorkspaceFile: "/ws/team.code-workspace",
+          services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
+        }),
+      );
+    });
+
+    it("builds a ServiceRef from a live folder that lives outside reposRoot", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce(
+        { target: { kind: "live-folder", folder: "/other/legacy-app" } } as never,
+      );
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1"); // no preselected repos
+
+      expect(window.showQuickPick).toHaveBeenCalledTimes(1); // destination pick only
+      expect(openWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          existingFolder: "/other/legacy-app",
+          services: [{ name: "legacy-app", path: "/other/legacy-app", isGit: false }],
+        }),
+      );
+    });
+
+    it("honors an in-card preselection over the existing workspace's repos", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+      vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur"]);
+      vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 }]);
+      vi.mocked(window.showQuickPick)
+        .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
+        .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", ["account-service"]); // preselected wins
+
+      expect(openWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          existingWorkspaceFile: "/ws/team.code-workspace",
+          services: [expect.objectContaining({ name: "account-service" })],
+        }),
+      );
+    });
+
+    it("aborts when the existing workspace resolves to no repos", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "pick-existing" });
+      vi.mocked(workspaceFolderPaths).mockReturnValue([]);
+      vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/empty.code-workspace", folders: 0, mtimeMs: 1 }]);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/empty.code-workspace" } as never);
+
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1"); // no preselected repos
+
+      expect(openWorkspace).not.toHaveBeenCalled();
+      expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+    });
   });
 });
 
@@ -913,12 +967,13 @@ describe("explore — open target", () => {
     // exploreMode set to a real action id so chooseExploreAction returns without a pick,
     // keeping this test focused on the open-target step.
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
-    // topic input → open-target pick (existing workspace) → ws pick → repo multi-pick
+    // topic input → open-target pick (existing workspace) → ws pick. No repo pick — the
+    // workspace's own folders are used.
     vi.mocked(window.showInputBox).mockResolvedValueOnce("retries");
     vi.mocked(window.showQuickPick)
       .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)  // open where (first)
-      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never)    // which workspace
-      .mockResolvedValueOnce([{ repo: mkRepos(["account-service"])[0] }] as never); // repos (last)
+      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);   // which workspace
+    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/account-service"]);
     vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 }]);
 
     await runExplore();
@@ -945,22 +1000,38 @@ describe("explore — open target", () => {
     );
   });
 
-  it("pre-checks repos the chosen existing workspace already contains", async () => {
+  it("skips the repo pick and uses the existing workspace's repos", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
     vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur"]);
     vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 }]);
     vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
     vi.mocked(window.showQuickPick)
       .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
-      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never)
-      .mockResolvedValueOnce([{ repo: mkRepos(["centaur"])[0] }] as never);
+      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
     await runExplore();
 
-    // 3rd quick-pick is the repo picker; centaur is pre-checked (present in the workspace).
-    const items = vi.mocked(window.showQuickPick).mock.calls[2][0] as Array<{ label: string; picked: boolean }>;
-    expect(items.find((i) => i.label === "centaur")?.picked).toBe(true);
-    expect(items.find((i) => i.label === "account-service")?.picked).toBe(false);
+    expect(window.showQuickPick).toHaveBeenCalledTimes(2); // destination picks only, no repo pick
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        existingWorkspaceFile: "/ws/team.code-workspace",
+        services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
+      }),
+    );
+  });
+
+  it("aborts an Explore into an existing workspace that resolves to no repos", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "pick-existing", exploreMode: "knowledge" });
+    vi.mocked(workspaceFolderPaths).mockReturnValue([]);
+    vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/empty.code-workspace", folders: 0, mtimeMs: 1 }]);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/empty.code-workspace" } as never);
+
+    const { provider, posted } = setup();
+    await (provider as unknown as { explore: () => Promise<void> }).explore();
+
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
 });
 
