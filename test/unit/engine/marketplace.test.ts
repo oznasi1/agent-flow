@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeRepo } from "../../../src/engine/marketplace";
+import { normalizeRepo, buildMarketplaceView, MarketplaceParseError } from "../../../src/engine/marketplace";
 
 describe("normalizeRepo", () => {
   it("accepts owner/repo", () => {
@@ -31,5 +31,84 @@ describe("normalizeRepo", () => {
   });
   it("strips a trailing slash after .git in an scp URL", () => {
     expect(normalizeRepo("git@github.com:owner/repo.git/")).toBe("owner/repo");
+  });
+});
+
+const ATBAY_MANIFEST = JSON.stringify({
+  name: "atbay-plugins",
+  owner: { name: "At-Bay plugins marketplace" },
+  metadata: { description: "At-Bay's Claude Code plugin marketplace", pluginRoot: "./plugins" },
+  plugins: [
+    { name: "cicd-plugin", source: "./plugins/cicd-plugin", description: "CI/CD automation" },
+    { name: "ui-ux-pro-max", source: "./plugins/ui-ux", description: "UI/UX design" },
+  ],
+});
+const ATBAY_TREE = [
+  ".claude-plugin/marketplace.json",
+  "plugins/cicd-plugin/.claude-plugin/plugin.json",
+  "plugins/cicd-plugin/commands/build.md",
+  "plugins/cicd-plugin/commands/deploy.md",
+  "plugins/cicd-plugin/agents/pipeline-agent.md",
+  "plugins/cicd-plugin/skills/build/SKILL.md",
+  "plugins/cicd-plugin/README.md",
+  "plugins/ui-ux/.claude/skills/ui-ux-pro-max/SKILL.md", // custom (non-conventional) skill path
+];
+
+describe("buildMarketplaceView", () => {
+  it("derives marketplace name, description, owner and addCommand", () => {
+    const v = buildMarketplaceView("cyberjackgit/atbay-plugins", ATBAY_MANIFEST, ATBAY_TREE);
+    expect(v.name).toBe("atbay-plugins");
+    expect(v.owner).toBe("At-Bay plugins marketplace");
+    expect(v.description).toBe("At-Bay's Claude Code plugin marketplace");
+    expect(v.addCommand).toBe("/plugin marketplace add cyberjackgit/atbay-plugins");
+    expect(v.error).toBeUndefined();
+    expect(v.plugins).toHaveLength(2);
+  });
+
+  it("discovers skills/agents/commands by convention and builds installCommand", () => {
+    const v = buildMarketplaceView("cyberjackgit/atbay-plugins", ATBAY_MANIFEST, ATBAY_TREE);
+    const cicd = v.plugins.find((p) => p.name === "cicd-plugin")!;
+    expect(cicd.source).toBe("plugins/cicd-plugin");
+    expect(cicd.commands.map((c) => c.name)).toEqual(["build", "deploy"]);
+    expect(cicd.agents.map((a) => a.name)).toEqual(["pipeline-agent"]);
+    expect(cicd.skills.map((s) => s.name)).toEqual(["build"]);
+    expect(cicd.installCommand).toBe("/plugin install cicd-plugin@atbay-plugins");
+  });
+
+  it("discovers a skill under a non-conventional path (parent folder = skill name)", () => {
+    const v = buildMarketplaceView("cyberjackgit/atbay-plugins", ATBAY_MANIFEST, ATBAY_TREE);
+    const ui = v.plugins.find((p) => p.name === "ui-ux-pro-max")!;
+    expect(ui.skills.map((s) => s.name)).toEqual(["ui-ux-pro-max"]);
+    expect(ui.agents).toEqual([]);
+    expect(ui.commands).toEqual([]);
+  });
+
+  it("falls back to metadata.description and repo name when top-level fields are absent", () => {
+    const manifest = JSON.stringify({ metadata: { description: "meta desc" }, plugins: [] });
+    const v = buildMarketplaceView("o/r", manifest, []);
+    expect(v.name).toBe("o/r"); // no name → repo
+    expect(v.description).toBe("meta desc");
+    expect(v.owner).toBe("");
+    expect(v.plugins).toEqual([]);
+  });
+
+  it("handles a commands-only plugin (empty skill/agent rows)", () => {
+    const manifest = JSON.stringify({
+      name: "official",
+      plugins: [{ name: "commit-commands", source: "./plugins/commit-commands", description: "commits" }],
+    });
+    const tree = [
+      "plugins/commit-commands/commands/commit.md",
+      "plugins/commit-commands/commands/commit-push-pr.md",
+    ];
+    const v = buildMarketplaceView("anthropics/claude-plugins", manifest, tree);
+    const p = v.plugins[0];
+    expect(p.commands.map((c) => c.name).sort()).toEqual(["commit", "commit-push-pr"]);
+    expect(p.skills).toEqual([]);
+    expect(p.agents).toEqual([]);
+  });
+
+  it("throws MarketplaceParseError on malformed JSON", () => {
+    expect(() => buildMarketplaceView("o/r", "{ not json", [])).toThrow(MarketplaceParseError);
   });
 });
