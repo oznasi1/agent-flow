@@ -2,7 +2,7 @@
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
   "description": "Grab a Jira task and spin up its workspace — a task pool in your sidebar that opens the right repos and pre-seeds a Claude Code agent.",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",
   "license": "MIT",
@@ -397,7 +397,9 @@
         },
         "agentFlow.marketplaces": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "scope": "application",
           "markdownDescription": "GitHub repos that are Claude Code plugin marketplaces. Accepts `owner/repo` or a full github.com URL. Managed from the Marketplace panel (the puzzle-piece button beside the Deck)."
