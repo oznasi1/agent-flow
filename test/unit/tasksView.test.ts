@@ -61,6 +61,7 @@ const CFG = {
   stampLabelOnWrite: true,
   provenanceLabel: "claude-code",
   filters: { size: true, status: true, repo: true, search: true },
+  marketplaces: [] as string[],
 };
 
 let clientStub: Record<string, ReturnType<typeof vi.fn>>;

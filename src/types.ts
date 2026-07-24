@@ -96,6 +96,44 @@ export interface RunStatus {
   windowOpen: boolean; // is this run's target window currently open? (from presence)
 }
 
+// ── The Marketplace: plugin/skill browser ───────────────────────────────────
+
+/** A named item inside a plugin (skill, agent, or command) + its repo-relative path. */
+export interface SkillRef {
+  name: string;
+  path: string;
+}
+
+/** One plugin listed by a marketplace, with its discovered contents. */
+export interface PluginView {
+  name: string;
+  description: string;
+  source: string; // repo-relative plugin directory, e.g. "plugins/cicd-plugin"
+  skills: SkillRef[];
+  agents: SkillRef[];
+  commands: SkillRef[];
+  installCommand: string; // "/plugin install <name>@<marketplace-name>"
+}
+
+export type MarketplaceErrorKind =
+  | "gh-missing"
+  | "gh-unauthenticated"
+  | "repo-not-found"
+  | "not-a-marketplace"
+  | "parse-error"
+  | "unknown";
+
+/** A resolved marketplace repo — either its parsed contents, or a scoped error. */
+export interface MarketplaceView {
+  repo: string; // canonical "owner/repo"
+  name: string; // marketplace.json name (the @handle for installs)
+  description: string;
+  owner: string;
+  addCommand: string; // "/plugin marketplace add owner/repo"
+  plugins: PluginView[];
+  error?: { kind: MarketplaceErrorKind; message: string };
+}
+
 // Messages: webview → host
 export type InboundMessage =
   | { type: "ready" }
@@ -118,7 +156,13 @@ export type InboundMessage =
   | { type: "deck:refresh" }
   | { type: "deck:setLive"; on: boolean }
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
-  | { type: "deck:forget"; key: string };
+  | { type: "deck:forget"; key: string }
+  // The Marketplace (separate webview panel)
+  | { type: "mkt:ready" }
+  | { type: "mkt:refresh" }
+  | { type: "mkt:add"; repo: string }
+  | { type: "mkt:remove"; repo: string }
+  | { type: "mkt:copy"; text: string };
 
 // Messages: host → webview
 export type OutboundMessage =
@@ -136,4 +180,7 @@ export type OutboundMessage =
   | { type: "loading"; loading: boolean }
   // The Deck
   | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean }
-  | { type: "deck:loading"; loading: boolean };
+  | { type: "deck:loading"; loading: boolean }
+  // The Marketplace
+  | { type: "mkt:state"; marketplaces: MarketplaceView[] }
+  | { type: "mkt:loading"; loading: boolean };

@@ -79,19 +79,29 @@
         "command": "agentFlow.openDeck",
         "title": "Agent Flow: Open the Deck (in-flight)",
         "icon": "$(dashboard)"
+      },
+      {
+        "command": "agentFlow.openMarketplace",
+        "title": "Agent Flow: Open the Marketplace",
+        "icon": "$(extensions)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "agentFlow.openDeck",
+          "command": "agentFlow.openMarketplace",
           "when": "view == agentFlow.tasks",
           "group": "navigation@1"
         },
         {
-          "command": "agentFlow.refresh",
+          "command": "agentFlow.openDeck",
           "when": "view == agentFlow.tasks",
           "group": "navigation@2"
+        },
+        {
+          "command": "agentFlow.refresh",
+          "when": "view == agentFlow.tasks",
+          "group": "navigation@3"
         }
       ]
     },
@@ -384,6 +394,13 @@
           "type": "string",
           "default": "claude-code",
           "description": "Label stamped on Jira items this extension updates when agentFlow.stampLabelOnWrite is enabled."
+        },
+        "agentFlow.marketplaces": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "scope": "application",
+          "markdownDescription": "GitHub repos that are Claude Code plugin marketplaces. Accepts `owner/repo` or a full github.com URL. Managed from the Marketplace panel (the puzzle-piece button beside the Deck)."
         }
       }
     }

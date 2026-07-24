@@ -63,6 +63,19 @@ to git + Jira only. **Open** focuses the window if it's already open (never a du
 opens it fresh otherwise; **Diff** shows the working diff; **⋯** offers *Open in Jira* and
 *Forget*.
 
+### The Marketplace — browse plugins & skills
+
+The **Marketplace** (open it with the puzzle-piece (`$(extensions)`) button beside the
+Deck's button in the sidebar title bar) lets you register GitHub repos that are Claude
+Code plugin marketplaces and browse what they offer — each plugin, and its skills, agents,
+and commands.
+
+Paste an `owner/repo` or a `github.com/...` URL into the panel's add bar to register a
+repo; it reads via your existing `gh` CLI login, so private and internal repos work just
+as well as public ones. The panel is read-only — it shows the exact `/plugin marketplace
+add …` and `/plugin install …@…` commands to copy into Claude Code, it doesn't install
+anything itself.
+
 ## Quick start
 
 > Agent Flow ships with **no organization-specific defaults** — everything you need is
@@ -123,6 +136,7 @@ each repo, so they never get committed.
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
 | `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on a card. |
 | `agentFlow.prReviewAutoFix` | `true` | After the PR-review agent assesses the PR, let it implement the requested changes (off = assess only). |
+| `agentFlow.marketplaces` | `[]` | GitHub repos registered as Claude Code plugin marketplaces (`owner/repo` or a full URL). Managed from the Marketplace panel. |
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
 `agentFlow.exploreMode`, `agentFlow.explorePrompts.*`, `agentFlow.prReviewPrompt`, and

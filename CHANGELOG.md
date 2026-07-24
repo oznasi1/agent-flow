@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.21] — 2026-07-24
+
+### Added
+- **The Marketplace** — a new panel (puzzle-piece button beside the Deck) to register
+  GitHub Claude Code plugin-marketplace repos and browse their plugins, skills, agents,
+  and commands, with copy-able `/plugin` install commands. Reads repos via your `gh` CLI
+  login (public + private).
+
 ## [0.1.20] — 2026-07-24
 
 ### Added
