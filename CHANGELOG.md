@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.22] — 2026-07-24
+
+### Changed
+- **Skip the repo picker for existing-workspace destinations.** When you open a task
+  (Explore, Take, or Address PR) into an existing workspace or a live folder, the
+  destination already fixes which repos are present — so Agent Flow now uses that repo
+  set directly instead of prompting you to pick repos again. The picker still appears
+  for new / current-window destinations. Workspace folders outside `reposRoot` are
+  honored too.
+
 ## [0.1.21] — 2026-07-24
 
 ### Added
