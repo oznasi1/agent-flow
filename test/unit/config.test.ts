@@ -172,6 +172,17 @@ describe("getConfig — trackOpenWindows", () => {
   });
 });
 
+describe("getConfig — batch launch", () => {
+  it("defaults batchLaunchConfirmThreshold to 6", () => {
+    expect(getConfig().batchLaunchConfirmThreshold).toBe(6);
+  });
+
+  it("honors an explicit threshold", () => {
+    setConfig({ batchLaunchConfirmThreshold: 3 });
+    expect(getConfig().batchLaunchConfirmThreshold).toBe(3);
+  });
+});
+
 describe("getConfig — explore actions", () => {
   it("defaults to four actions with built-in labels and default prompts, all Slack-off", () => {
     expect(getConfig().exploreActions).toEqual([
@@ -245,5 +256,9 @@ describe("package.json ⇄ config constants", () => {
     expect(props["agentFlow.filters.status"].default).toBe(true);
     expect(props["agentFlow.filters.repo"].default).toBe(true);
     expect(props["agentFlow.filters.search"].default).toBe(true);
+  });
+
+  it("declares batchLaunchConfirmThreshold with a default of 6", () => {
+    expect(props["agentFlow.batchLaunchConfirmThreshold"].default).toBe(6);
   });
 });

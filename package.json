@@ -364,6 +364,12 @@
           "default": "ask",
           "description": "Whether to isolate the task in a git worktree. Worktrees are created inside each repo at .claude/worktrees/<KEY> (git-excluded automatically)."
         },
+        "agentFlow.batchLaunchConfirmThreshold": {
+          "type": "number",
+          "default": 6,
+          "minimum": 1,
+          "markdownDescription": "When you multi-select tasks (with the repo filter narrowed to a single repo) and launch them in parallel, batches **larger than** this number prompt a confirmation first — a guard against accidentally opening a swarm of windows, one per task."
+        },
         "agentFlow.trackOpenWindows": {
           "type": "boolean",
           "default": true,
