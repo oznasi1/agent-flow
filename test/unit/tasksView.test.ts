@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { commands, env, window } from "../_mocks/vscode";
 import { fakeAuth, fakeContext, mkRepos } from "../_helpers/factories";
 
@@ -712,6 +712,47 @@ describe("takeTask", () => {
 
 describe("takeBatch", () => {
   const twoKeys = ["ASM-1", "ASM-2"];
+
+  // With the worktree-fallback guard in place, a *successful* worktree must return a
+  // path different from the main checkout. Simulate that here; restore the identity
+  // default in afterEach so this impl doesn't leak into later describes.
+  beforeEach(() => {
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+  });
+  afterEach(() => {
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+
+  it("is a no-op for an empty selection", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider } = setup();
+    await provider.takeBatch([], "api");
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(discoverRepos).not.toHaveBeenCalled();
+  });
+
+  it("launches when the over-threshold confirmation is accepted", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, batchLaunchConfirmThreshold: 1 });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], "api"); // 2 > 1 → confirm
+    expect(window.showWarningMessage).toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips a task whose worktree creation falls back to the main checkout and reports it failed", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s) => s); // fallback: path stays === repoRef.path
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], "api");
+    expect(openWorkspace).not.toHaveBeenCalled();
+    const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
+    expect(toast.level).toBe("error");
+    expect(toast.message).toContain("Launched 0 of 1");
+  });
 
   it("launches one worktree'd new window per selected task in the filtered repo", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "billing"]));

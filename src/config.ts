@@ -164,7 +164,7 @@ export function getConfig(): AgentFlowConfig {
     prReviewAutoFix: c.get<boolean>("prReviewAutoFix") ?? true,
     prReviewPrompt: c.get<string>("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT,
     worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
-    batchLaunchConfirmThreshold: c.get<number>("batchLaunchConfirmThreshold") ?? 6,
+    batchLaunchConfirmThreshold: Math.max(1, c.get<number>("batchLaunchConfirmThreshold") ?? 6),
     trackOpenWindows: c.get<boolean>("trackOpenWindows") ?? true,
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,
     provenanceLabel: c.get<string>("provenanceLabel") || "claude-code",

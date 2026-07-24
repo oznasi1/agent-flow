@@ -374,6 +374,26 @@ describe("multi-select & parallel launch", () => {
     apiPool(); // new tasks message
     expect(screen.queryByRole("button", { name: /Launch in parallel/i })).not.toBeInTheDocument();
   });
+
+  it("drops a checked task from the launch once a search filter hides it", () => {
+    render(<App />);
+    authed();
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "ASM-1", summary: "alpha rate", services: ["api"] }),
+        mkTask({ key: "ASM-2", summary: "beta cache", services: ["api"] }),
+      ],
+    });
+    selectRepo("api");
+    fireEvent.click(checks()[0]); // ASM-1
+    fireEvent.click(checks()[1]); // ASM-2
+    // Search narrows the visible list to ASM-1; ASM-2 is still checked in state but hidden.
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "alpha" } });
+    fireEvent.click(screen.getByRole("button", { name: /Launch in parallel/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["ASM-1"], repo: "api" });
+  });
 });
 
 describe("fuzzy title search", () => {

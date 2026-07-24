@@ -636,13 +636,20 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const promptMode = await this.choosePromptMode(cfg, `Launch ${keys.length} selected task(s) — how should the agents start?`);
     if (!promptMode) return;
 
-    let ok = 0;
+    let launched = 0;
     const failed: string[] = [];
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
       try {
         const detail = await this.client().getDetail(key);
         const services = createWorktrees([repoRef], detail.key, detail.summary, this.log);
+        // A worktree is mandatory here: two batch tasks sharing the main checkout would
+        // clobber each other's .pick-task/TASK.md brief. createWorktrees returns the
+        // original (main-checkout) ref when `git worktree add` fails — detect that and
+        // fail the task honestly instead of launching into a shared, colliding checkout.
+        if (services[0].path === repoRef.path) {
+          throw new Error("couldn't create a git worktree (would collide with the shared checkout)");
+        }
         await openWorkspace({
           ticket: { key: detail.key, summary: detail.summary, url: detail.url },
           planMd: this.buildBrief(detail),
@@ -654,7 +661,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           seedAgent: cfg.seedAgent,
           openIn: "new",
         });
-        ok++;
+        launched++;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         failed.push(`${key} (${msg})`);
@@ -663,9 +670,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       if (i < keys.length - 1) await delay(BATCH_STAGGER_MS);
     }
 
-    const summary = `Launched ${ok} of ${keys.length} in parallel.`;
-    if (failed.length) this.toast("error", `${summary} Failed: ${failed.join("; ")}`);
-    else this.toast("success", `${summary} A worktree + Claude session per task.`);
+    const summary = `Launched ${launched} of ${keys.length} in parallel.`;
+    if (failed.length) {
+      const shown = failed.slice(0, 5).join("; ");
+      const more = failed.length > 5 ? ` (and ${failed.length - 5} more)` : "";
+      this.toast("error", `${summary} Failed: ${shown}${more}`);
+    } else this.toast("success", `${summary} A worktree + Claude session per task.`);
   }
 
   /** PR-review kick-off: the same open+seed flow as Take, but always in a worktree and

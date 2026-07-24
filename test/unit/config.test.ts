@@ -181,6 +181,11 @@ describe("getConfig — batch launch", () => {
     setConfig({ batchLaunchConfirmThreshold: 3 });
     expect(getConfig().batchLaunchConfirmThreshold).toBe(3);
   });
+
+  it("clamps a below-minimum threshold up to 1", () => {
+    setConfig({ batchLaunchConfirmThreshold: 0 });
+    expect(getConfig().batchLaunchConfirmThreshold).toBe(1);
+  });
 });
 
 describe("getConfig — explore actions", () => {
