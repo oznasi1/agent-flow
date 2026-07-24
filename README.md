@@ -42,6 +42,11 @@ orchestrate, not ready to set up.
   the task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
   for your fixes — then, by default, starts implementing the requested changes (toggle with
   `agentFlow.prReviewAutoFix`).
+- **Launch in parallel** — narrow the repo filter to a single repo and a checkbox
+  appears on each task. Tick several, then **Launch in parallel**: each task opens
+  in its own git worktree (its own branch) in its own window, with its own Claude
+  Code session pre-seeded — several agents working the same repo at once. Batches
+  larger than `agentFlow.batchLaunchConfirmThreshold` (default 6) ask first.
 
 ### The Deck — your in-flight board
 
