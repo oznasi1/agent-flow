@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { ApiTokenAuth } from "./jira/auth";
 import { TasksViewProvider } from "./tasksView";
 import { DeckPanel } from "./deckView";
+import { MarketplacePanel } from "./marketplaceView";
 import { maybeSeedAgent, watchPlansAndSeed } from "./engine/workspace";
 import { windowIdentity, writePresence, removePresence, defaultWindowsDir } from "./engine/presence";
 import { getConfig } from "./config";
@@ -45,6 +46,8 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand("agentFlow.openDeck", () => DeckPanel.show(context, auth, log)),
+
+    vscode.commands.registerCommand("agentFlow.openMarketplace", () => MarketplacePanel.show(context, log)),
 
     vscode.commands.registerCommand("agentFlow.setup", () =>
       runSetup(context, auth, log, () => provider.refresh()),

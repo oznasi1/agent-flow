@@ -30,6 +30,8 @@ export default defineConfig({
         "src/webview/deckStyles.ts",
         "src/webview/index.tsx",
         "src/webview/deck.tsx",
+        "src/webview/marketplaceStyles.ts",
+        "src/webview/marketplace.tsx",
         "src/webview/vscodeApi.ts",
         "src/types.ts",
       ],

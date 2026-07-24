@@ -28,11 +28,15 @@ vi.mock("../../src/engine/presence", () => ({
   removePresence: vi.fn(),
   defaultWindowsDir: vi.fn(() => "/win"),
 }));
+vi.mock("../../src/marketplaceView", () => ({
+  MarketplacePanel: { show: vi.fn() },
+}));
 
 import { activate, deactivate } from "../../src/extension";
 import { maybeSeedAgent, watchPlansAndSeed } from "../../src/engine/workspace";
 import { maybeRunSetup, runSetup } from "../../src/setup";
 import { windowIdentity, writePresence, removePresence } from "../../src/engine/presence";
+import { MarketplacePanel } from "../../src/marketplaceView";
 
 const cmd = (id: string) =>
   vi.mocked(commands.registerCommand).mock.calls.find((c) => c[0] === id)?.[1] as
@@ -57,6 +61,8 @@ describe("activate", () => {
         "agentFlow.signOut",
         "agentFlow.takeTask",
         "agentFlow.setup",
+        "agentFlow.openDeck",
+        "agentFlow.openMarketplace",
       ]),
     );
     expect(maybeSeedAgent).toHaveBeenCalledWith(context, expect.any(Function));
@@ -96,6 +102,14 @@ describe("activate", () => {
     activate(context);
     await cmd("agentFlow.refresh")!();
     expect(providerStub.refresh).toHaveBeenCalled();
+  });
+
+  it("registers the openMarketplace command and delegates to MarketplacePanel.show", async () => {
+    const { context } = fakeContext();
+    activate(context);
+    expect(cmd("agentFlow.openMarketplace")).toBeTypeOf("function");
+    await cmd("agentFlow.openMarketplace")!();
+    expect(MarketplacePanel.show).toHaveBeenCalledWith(context, expect.any(Function));
   });
 
   it("signIn command refreshes and notifies on success", async () => {

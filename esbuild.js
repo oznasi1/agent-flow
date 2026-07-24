@@ -44,13 +44,20 @@ const deckConfig = {
   outfile: "dist/deck.js",
 };
 
+// The Marketplace panel is a third, independent browser bundle.
+const marketplaceConfig = {
+  ...webviewConfig,
+  entryPoints: ["src/webview/marketplace.tsx"],
+  outfile: "dist/marketplace.js",
+};
+
 async function main() {
   if (watch) {
-    const ctxs = await Promise.all([extensionConfig, webviewConfig, deckConfig].map((c) => esbuild.context(c)));
+    const ctxs = await Promise.all([extensionConfig, webviewConfig, deckConfig, marketplaceConfig].map((c) => esbuild.context(c)));
     await Promise.all(ctxs.map((c) => c.watch()));
     console.log("[esbuild] watching…");
   } else {
-    await Promise.all([extensionConfig, webviewConfig, deckConfig].map((c) => esbuild.build(c)));
+    await Promise.all([extensionConfig, webviewConfig, deckConfig, marketplaceConfig].map((c) => esbuild.build(c)));
     console.log("[esbuild] build complete");
   }
 }
