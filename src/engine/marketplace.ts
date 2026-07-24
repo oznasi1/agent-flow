@@ -14,10 +14,11 @@ const execFileAsync = promisify(execFile);
 export function normalizeRepo(input: string): string | null {
   const s = (input ?? "").trim();
   if (!s) return null;
+  const SLUG = /^[A-Za-z0-9._-]+$/;
   const strip = (owner: string, repo: string): string | null => {
     const o = owner.trim();
-    const r = repo.trim().replace(/\.git$/i, "").replace(/\/+$/, "");
-    return o && r && !o.includes("/") && !r.includes("/") ? `${o}/${r}` : null;
+    const r = repo.trim().replace(/\/+$/, "").replace(/\.git$/i, "").replace(/\/+$/, "");
+    return o && r && SLUG.test(o) && SLUG.test(r) ? `${o}/${r}` : null;
   };
   // git@github.com:owner/repo.git
   const scp = s.match(/^git@github\.com:([^/]+)\/(.+)$/i);
