@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
+import * as path from "path";
 import { getConfig, AgentFlowConfig, ExploreAction, PR_REVIEW_AUTOFIX_CLAUSE } from "./config";
 import { JiraAuth } from "./jira/auth";
 import { JiraClient, JiraAuthError, JiraDetail } from "./jira/client";
@@ -336,32 +337,34 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (raw === undefined) return; // cancelled (empty is allowed → generic focus)
     const topic = raw.trim() || "Codebase exploration";
 
-    // Destination first, so the repo picker can pre-check what it already contains.
+    // Destination first — an existing workspace / live folder already fixes its repos.
     const target = await this.chooseOpenTarget(cfg);
     if (!target) return;
-    const inWorkspace = this.prefillPathsForTarget(target);
-    const tag = target.kind === "live-folder" ? "open here" : "in this workspace";
 
-    const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
-      repos.map((r) => {
-        const present = inWorkspace.has(canon(r.path));
-        return {
+    let services: ServiceRef[];
+    if (target.kind === "existing" || target.kind === "live-folder") {
+      services = this.servicesFromExistingDestination(target, repos);
+      if (services.length === 0) {
+        this.toast("error", "That workspace has no repos to open.");
+        return;
+      }
+    } else {
+      const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
+        repos.map((r) => ({
           label: r.name,
-          description: present ? tag : "",
           detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
-          picked: present,
           repo: r,
-        };
-      }),
-      {
-        canPickMany: true,
-        title: "Explore — pick the repos to open",
-        placeHolder: "Space to toggle · Enter to open",
-        ignoreFocusOut: true,
-      },
-    );
-    if (!picks || picks.length === 0) return;
-    const services = picks.map((p) => p.repo);
+        })),
+        {
+          canPickMany: true,
+          title: "Explore — pick the repos to open",
+          placeHolder: "Space to toggle · Enter to open",
+          ignoreFocusOut: true,
+        },
+      );
+      if (!picks || picks.length === 0) return;
+      services = picks.map((p) => p.repo);
+    }
 
     const args = await this.targetToOpenArgs(target, services.length, "Explore", cfg);
     if (!args) return;
@@ -449,30 +452,27 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       // Selection already made in the expanded card — resolve names to repos, skip QuickPick.
       const byName = new Map(repos.map((r) => [r.name, r]));
       services = preselected.map((n) => byName.get(n)).filter((r): r is ServiceRef => !!r);
+    } else if (target.kind === "existing" || target.kind === "live-folder") {
+      // The destination already fixes its repo set — use it as-is, no service pick.
+      services = this.servicesFromExistingDestination(target, repos);
     } else {
+      // New / this window — confirm the repos the task touches (inferred pre-selected).
       const inferred = inferServices(
         { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
         repos,
       );
       const inferredNames = new Set(inferred.map((r) => r.service.name));
-      const inWorkspace = this.prefillPathsForTarget(target);
-      const tag = target.kind === "live-folder" ? "open here" : "in this workspace";
 
-      // Confirm the service set (inferred + already-in-destination repos pre-selected).
       const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
-        repos.map((r) => {
-          const present = inWorkspace.has(canon(r.path));
-          const inf = inferredNames.has(r.name)
+        repos.map((r) => ({
+          label: r.name,
+          description: inferredNames.has(r.name)
             ? `inferred (${inferred.find((i) => i.service.name === r.name)!.reason})`
-            : "";
-          return {
-            label: r.name,
-            description: [inf, present ? tag : ""].filter(Boolean).join(" · "),
-            detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
-            picked: inferredNames.has(r.name) || present,
-            repo: r,
-          };
-        }),
+            : "",
+          detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
+          picked: inferredNames.has(r.name),
+          repo: r,
+        })),
         {
           canPickMany: true,
           title: `${key} — confirm the repos this task touches`,
@@ -490,12 +490,23 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return { detail, services, target };
   }
 
-  /** Canonical paths the chosen destination already contains — used to pre-check the
-   * service list. New / current windows contribute nothing (nothing to merge into). */
+  /** Canonical paths the chosen destination already contains. New / current windows
+   * contribute nothing (nothing to merge into). */
   private prefillPathsForTarget(target: OpenTarget): Set<string> {
     if (target.kind === "existing") return new Set(workspaceFolderPaths(target.file));
     if (target.kind === "live-folder") return new Set([canon(target.folder)]);
     return new Set();
+  }
+
+  /** Repos already in an existing / live-folder destination, as ServiceRefs — the set
+   * used when we skip the picker for such destinations. Matches discovered repos by
+   * canonical path where possible; otherwise builds one from the folder path, so
+   * workspace folders outside reposRoot are honored too. */
+  private servicesFromExistingDestination(target: OpenTarget, repos: ServiceRef[]): ServiceRef[] {
+    const byPath = new Map(repos.map((r) => [canon(r.path), r]));
+    return [...this.prefillPathsForTarget(target)].map(
+      (p) => byPath.get(p) ?? { name: path.basename(p), path: p, isGit: fs.existsSync(path.join(p, ".git")) },
+    );
   }
 
   /** Open + seed a resolved kick-off: worktree decision → workspace mode → brief →
