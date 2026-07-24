@@ -286,6 +286,96 @@ describe("repo multiselect", () => {
   });
 });
 
+describe("multi-select & parallel launch", () => {
+  const apiPool = () =>
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "ASM-1", summary: "one", services: ["api"] }),
+        mkTask({ key: "ASM-2", summary: "two", services: ["api"] }),
+        mkTask({ key: "ASM-3", summary: "three", services: ["billing"] }),
+      ],
+    });
+  // Open the repo multiselect popup and toggle a repo option by name.
+  const selectRepo = (name: string) => {
+    fireEvent.click(screen.getByText("Filter repos"));
+    const repoList = document.querySelector(".repo-list") as HTMLElement;
+    fireEvent.mouseDown(within(repoList).getByText(name).closest(".repo-opt")!);
+  };
+  const checks = () => document.querySelectorAll(".card-check");
+
+  it("shows no checkboxes until exactly one repo is filtered", () => {
+    render(<App />);
+    authed();
+    apiPool();
+    expect(checks().length).toBe(0);
+  });
+
+  it("shows a checkbox on each visible card when one repo is filtered", () => {
+    render(<App />);
+    authed();
+    apiPool();
+    selectRepo("api"); // narrows the pool to ASM-1 + ASM-2
+    expect(checks().length).toBe(2);
+  });
+
+  it("hides checkboxes again once a second repo is added", () => {
+    render(<App />);
+    authed();
+    apiPool();
+    // Open the popup ONCE and toggle two repos — re-clicking the trigger would close it.
+    fireEvent.click(screen.getByText("Filter repos"));
+    const repoList = document.querySelector(".repo-list") as HTMLElement;
+    fireEvent.mouseDown(within(repoList).getByText("api").closest(".repo-opt")!);
+    fireEvent.mouseDown(within(repoList).getByText("billing").closest(".repo-opt")!);
+    expect(checks().length).toBe(0); // 2 repos selected → batch mode off
+  });
+
+  it("launches the checked, visible tasks with the filtered repo name", () => {
+    render(<App />);
+    authed();
+    apiPool();
+    selectRepo("api");
+    fireEvent.click(checks()[0]); // ASM-1
+    fireEvent.click(checks()[1]); // ASM-2
+    fireEvent.click(screen.getByRole("button", { name: /Launch in parallel/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["ASM-1", "ASM-2"], repo: "api" });
+  });
+
+  it("does not expand a card when its checkbox is clicked", () => {
+    render(<App />);
+    authed();
+    apiPool();
+    selectRepo("api");
+    sent.mockClear();
+    fireEvent.click(checks()[0]);
+    expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "detail" }));
+  });
+
+  it("Clear selection empties the batch and hides the action bar", () => {
+    render(<App />);
+    authed();
+    apiPool();
+    selectRepo("api");
+    fireEvent.click(checks()[0]);
+    expect(screen.getByRole("button", { name: /Launch in parallel/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Clear selection/i }));
+    expect(screen.queryByRole("button", { name: /Launch in parallel/i })).not.toBeInTheDocument();
+  });
+
+  it("clears the batch selection when a fresh pool arrives", () => {
+    render(<App />);
+    authed();
+    apiPool();
+    selectRepo("api");
+    fireEvent.click(checks()[0]);
+    expect(screen.getByRole("button", { name: /Launch in parallel/i })).toBeInTheDocument();
+    apiPool(); // new tasks message
+    expect(screen.queryByRole("button", { name: /Launch in parallel/i })).not.toBeInTheDocument();
+  });
+});
+
 describe("fuzzy title search", () => {
   const keys = () => Array.from(document.querySelectorAll("a.key")).map((e) => e.textContent);
   const pool = () =>

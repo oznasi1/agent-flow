@@ -259,4 +259,18 @@ export const CSS = `
   .toast--error .toast-ico   { color: var(--vscode-errorForeground, #f85149); }
   .toast--info .toast-ico    { color: var(--vscode-focusBorder, #4daafc); }
   .toast-msg { flex: 1; }
+
+  .card-check { flex: 0 0 auto; margin: 0 6px 0 0; cursor: pointer;
+    accent-color: var(--vscode-button-background); }
+  .batch-bar { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; gap: 8px;
+    margin-top: 6px; padding: 8px 10px;
+    background: var(--vscode-sideBar-background);
+    border-top: 1px solid var(--vscode-panel-border); }
+  .batch-count { font-size: 11px; color: var(--vscode-descriptionForeground); }
+  .batch-selectall, .batch-clear { background: none; border: none; cursor: pointer; padding: 0;
+    font-size: 11px; color: var(--vscode-textLink-foreground); }
+  .batch-launch { margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+    font-size: 12px; padding: 4px 12px; border-radius: 8px; border: none; cursor: pointer;
+    background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  .batch-launch:hover { background: var(--vscode-button-hoverBackground); }
 `;

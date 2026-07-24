@@ -109,6 +109,16 @@ export function App(): JSX.Element {
       return next;
     });
   const clearRepos = () => setSelectedRepos(new Set());
+  // Multi-select batch launch (only surfaced when the repo filter is one repo).
+  const [batchSelected, setBatchSelected] = React.useState<Set<string>>(new Set());
+  const toggleBatch = (key: string) =>
+    setBatchSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  const clearBatch = () => setBatchSelected(new Set());
   const [textQuery, setTextQuery] = React.useState("");
   const [tasks, setTasks] = React.useState<JiraTask[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -174,6 +184,7 @@ export function App(): JSX.Element {
           setFilter(m.filter);
           setTasks(m.tasks);
           setExpanded(new Set());
+          setBatchSelected(new Set());
           // Drop status selections that no longer exist in the fresh pool — otherwise
           // a selected status with no chip would silently hide everything.
           setStatuses((prev) => {
@@ -286,6 +297,12 @@ export function App(): JSX.Element {
       (selectedRepos.size === 0 || (t.services ?? []).some((s) => selectedRepos.has(s))) &&
       matchesStatus(t, statuses),
   );
+  // Multi-select is offered only when the repo filter resolves to exactly one repo.
+  const batchMode = selectedRepos.size === 1;
+  const theRepo = batchMode ? [...selectedRepos][0] : null;
+  // Only currently-visible tasks are launchable: a status/search filter that hides a
+  // selected card silently drops it (state is untouched, just never launched).
+  const selectedVisible = batchMode ? visibleTasks.filter((t) => batchSelected.has(t.key)) : [];
   // Reorder only makes sense on the full My-sprint list, not a filtered subset.
   const canReorder = filter === "mysprint" && selectedRepos.size === 0 && !q && statuses.size === 0;
 
@@ -453,6 +470,7 @@ export function App(): JSX.Element {
             detail={details[t.key]}
             onToggle={() => toggleExpand(t.key)}
             onSelect={(sel) => setSelected(t.key, sel)}
+            batch={batchMode ? { checked: batchSelected.has(t.key), onToggle: () => toggleBatch(t.key) } : undefined}
             dnd={
               canReorder
                 ? {
@@ -469,6 +487,25 @@ export function App(): JSX.Element {
         ))}
       </div>
 
+      {batchMode && selectedVisible.length > 0 && (
+        <div className="batch-bar">
+          <span className="batch-count">{selectedVisible.length} selected</span>
+          <button
+            className="batch-selectall"
+            onClick={() => setBatchSelected(new Set(visibleTasks.map((t) => t.key)))}
+          >
+            Select all visible
+          </button>
+          <button className="batch-clear" onClick={clearBatch}>Clear selection</button>
+          <button
+            className="batch-launch"
+            title={`Open ${selectedVisible.length} worktrees in ${theRepo}, each with its own Claude Code session`}
+            onClick={() => send({ type: "takeBatch", keys: selectedVisible.map((t) => t.key), repo: theRepo! })}
+          >
+            <PlayIcon /> Launch in parallel
+          </button>
+        </div>
+      )}
       {toastStack}
     </div>
   );
@@ -503,9 +540,10 @@ function TaskCard(props: {
   detail?: DetailState;
   onToggle: () => void;
   onSelect: (selected: string[]) => void;
+  batch?: { checked: boolean; onToggle: () => void };
   dnd?: CardDnd;
 }): JSX.Element {
-  const { task, me, prReviewStatus, open, detail, onToggle, onSelect, dnd } = props;
+  const { task, me, prReviewStatus, open, detail, onToggle, onSelect, batch, dnd } = props;
   const unassigned = !task.assignee || task.assignee.toLowerCase() === "unassigned";
   const isMe = !!me && task.assignee === me;
   // Offer "add to my sprint" when it isn't already there: unassigned tasks, or tasks
@@ -561,6 +599,16 @@ function TaskCard(props: {
     >
       <div className="card-main" onClick={onToggle}>
         <div className="card-top">
+          {batch && (
+            <input
+              type="checkbox"
+              className="card-check"
+              checked={batch.checked}
+              title="Select for parallel launch"
+              onClick={(e) => e.stopPropagation()}
+              onChange={() => batch.onToggle()}
+            />
+          )}
           {dnd && (
             <span
               className="grip"
