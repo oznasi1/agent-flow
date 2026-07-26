@@ -1,30 +1,36 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { window, ViewColumn, env, workspace, setConfig, ConfigurationTarget } from "../_mocks/vscode";
+import { window, ViewColumn, env, commands, workspace } from "../_mocks/vscode";
 import { fakeContext } from "../_helpers/factories";
-import type { MarketplaceView } from "../../src/types";
+import type { ClaudeAssetsView } from "../../src/types";
 
 const h = vi.hoisted(() => ({
-  fetchMarketplace: vi.fn(),
-  normalizeRepo: vi.fn((s: string): string | null => s),
+  scanClaudeAssets: vi.fn(),
+  fsReader: vi.fn(() => ({})),
+  claudeConfigDir: vi.fn(() => "/home/u/.claude"),
 }));
-vi.mock("../../src/engine/marketplace", () => ({
-  fetchMarketplace: h.fetchMarketplace,
-  normalizeRepo: h.normalizeRepo,
-}));
+vi.mock("../../src/engine/claudeAssets", () => ({ scanClaudeAssets: h.scanClaudeAssets }));
+vi.mock("../../src/engine/claudeAssetsFs", () => ({ fsReader: h.fsReader, claudeConfigDir: h.claudeConfigDir }));
 
 import { MarketplacePanel } from "../../src/marketplaceView";
 
-const mkView = (over: Partial<MarketplaceView> = {}): MarketplaceView => ({
-  repo: "o/r", name: "mkt", description: "", owner: "", addCommand: "/plugin marketplace add o/r", plugins: [], ...over,
+const view = (over: Partial<ClaudeAssetsView> = {}): ClaudeAssetsView => ({
+  marketplaces: [{ name: "atbay", kind: "github", origin: "org/atbay", pluginCount: 1, stale: false }],
+  plugins: [],
+  assets: [{
+    type: "skill", name: "build", description: "d", plugin: "cicd", marketplace: "atbay",
+    file: "/home/u/.claude/plugins/cache/atbay/cicd/1/skills/build/SKILL.md",
+    rel: "skills/build/SKILL.md", enabled: true, state: "installed",
+  }],
+  notSetUp: false,
+  scannedAt: 1,
+  ...over,
 });
 const lastPanel = () => window.createWebviewPanel.mock.results.at(-1)!.value as ReturnType<typeof import("../_mocks/vscode").makeWebviewPanel>;
 const posts = (p: ReturnType<typeof lastPanel>) => p.webview.postMessage.mock.calls.map((c) => c[0] as any);
 const show = () => MarketplacePanel.show(fakeContext().context as any, () => {});
 
 beforeEach(() => {
-  setConfig({ marketplaces: ["o/r"] });
-  h.fetchMarketplace.mockReset().mockResolvedValue(mkView());
-  h.normalizeRepo.mockReset().mockImplementation((s: string) => (s.includes("/") ? s : null));
+  h.scanClaudeAssets.mockReset().mockReturnValue(view());
 });
 afterEach(() => {
   const r = window.createWebviewPanel.mock.results.at(-1);
@@ -41,63 +47,77 @@ describe("MarketplacePanel", () => {
     expect(lastPanel().reveal).toHaveBeenCalled();
   });
 
-  it("posts mkt:state with a fetched view on ready", async () => {
+  it("posts mkt:assets on ready", async () => {
     show();
     const p = lastPanel();
     await p._fire({ type: "mkt:ready" });
-    const state = posts(p).reverse().find((m) => m.type === "mkt:state");
-    expect(state.marketplaces).toHaveLength(1);
-    expect(state.marketplaces[0].name).toBe("mkt");
-    expect(h.fetchMarketplace).toHaveBeenCalledWith("o/r");
+    const msg = posts(p).reverse().find((m) => m.type === "mkt:assets");
+    expect(msg.view.assets).toHaveLength(1);
+    expect(h.scanClaudeAssets).toHaveBeenCalled();
   });
 
-  it("normalizes and de-dupes repos read from config, dropping invalid entries", async () => {
-    setConfig({ marketplaces: ["good/repo", "garbage-no-slash", "good/repo"] });
+  it("passes the workspace folder into the scan when one is open", async () => {
+    workspace.workspaceFolders = [{ uri: { fsPath: "/ws/my-repo" } }] as any;
+    show();
+    await lastPanel()._fire({ type: "mkt:ready" });
+    expect(h.scanClaudeAssets).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      claudeDir: "/home/u/.claude", workspaceDir: "/ws/my-repo", workspaceName: "my-repo",
+    }));
+  });
+
+  it("rescans on mkt:refresh", async () => {
     show();
     const p = lastPanel();
     await p._fire({ type: "mkt:ready" });
-    expect(h.fetchMarketplace).toHaveBeenCalledWith("good/repo");
-    expect(h.fetchMarketplace).toHaveBeenCalledTimes(1);
-    expect(h.fetchMarketplace).not.toHaveBeenCalledWith("garbage-no-slash");
+    h.scanClaudeAssets.mockClear();
+    await p._fire({ type: "mkt:refresh" });
+    expect(h.scanClaudeAssets).toHaveBeenCalledTimes(1);
   });
 
-  it("adds a repo: normalizes, writes global config, fetches, re-posts", async () => {
-    setConfig({ marketplaces: [] });
+  it("brackets each scan with mkt:loading true/false", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "mkt:add", repo: "new/repo" });
-    expect(workspace.getConfiguration("agentFlow").get("marketplaces")).toContain("new/repo");
-    expect(h.fetchMarketplace).toHaveBeenCalledWith("new/repo");
-    expect(posts(p).some((m) => m.type === "mkt:state")).toBe(true);
+    await p._fire({ type: "mkt:ready" });
+    const loads = posts(p).filter((m) => m.type === "mkt:loading").map((m) => m.loading);
+    expect(loads[0]).toBe(true);
+    expect(loads.at(-1)).toBe(false);
   });
 
-  it("rejects an invalid repo with an error toast and no config write", async () => {
-    setConfig({ marketplaces: [] });
-    h.normalizeRepo.mockReturnValue(null);
+  it("opens a file that the last scan emitted", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "mkt:add", repo: "garbage" });
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:open", file: view().assets[0].file });
+    expect(workspace.openTextDocument).toHaveBeenCalled();
+    expect(window.showTextDocument).toHaveBeenCalled();
+  });
+
+  it("refuses to open a path the scan never emitted", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:open", file: "/etc/passwd" });
+    expect(workspace.openTextDocument).not.toHaveBeenCalled();
     expect(posts(p).some((m) => m.type === "toast" && m.level === "error")).toBe(true);
-    expect(workspace.getConfiguration("agentFlow").get("marketplaces")).toEqual([]);
   });
 
-  it("does not add a duplicate repo", async () => {
-    setConfig({ marketplaces: ["o/r"] });
-    show();
-    await lastPanel()._fire({ type: "mkt:add", repo: "o/r" });
-    expect(workspace.getConfiguration("agentFlow").get("marketplaces")).toEqual(["o/r"]);
-  });
-
-  it("removes a repo from config and re-posts", async () => {
-    setConfig({ marketplaces: ["o/r", "a/b"] });
+  it("reveals a known file in the OS file manager", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "mkt:remove", repo: "o/r" });
-    expect(workspace.getConfiguration("agentFlow").get("marketplaces")).toEqual(["a/b"]);
-    expect(posts(p).some((m) => m.type === "mkt:state")).toBe(true);
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:reveal", file: view().assets[0].file });
+    expect(commands.executeCommand).toHaveBeenCalledWith("revealFileInOS", expect.anything());
   });
 
-  it("copies text to the clipboard and toasts success", async () => {
+  it("refuses to reveal an unknown path", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:reveal", file: "/etc/hosts" });
+    expect(commands.executeCommand).not.toHaveBeenCalledWith("revealFileInOS", expect.anything());
+  });
+
+  it("copies text and toasts success", async () => {
     show();
     const p = lastPanel();
     await p._fire({ type: "mkt:copy", text: "/plugin install x@y" });
@@ -107,25 +127,43 @@ describe("MarketplacePanel", () => {
 
   it("opens an external url via the host", async () => {
     show();
-    await lastPanel()._fire({ type: "openExternal", url: "https://github.com/o/r" });
+    await lastPanel()._fire({ type: "openExternal", url: "https://example.com" });
     expect(env.openExternal).toHaveBeenCalled();
   });
 
-  it("refresh re-fetches even when cached", async () => {
+  it("rescans when the panel becomes visible again after the stale window", async () => {
+    const nowSpy = vi.spyOn(Date, "now");
+    nowSpy.mockReturnValue(0);
     show();
     const p = lastPanel();
     await p._fire({ type: "mkt:ready" });
-    h.fetchMarketplace.mockClear();
-    await p._fire({ type: "mkt:refresh" });
-    expect(h.fetchMarketplace).toHaveBeenCalledWith("o/r");
+    h.scanClaudeAssets.mockClear();
+    nowSpy.mockReturnValue(60_000);
+    await p._fireViewState();
+    expect(h.scanClaudeAssets).toHaveBeenCalledTimes(1);
+    nowSpy.mockRestore();
   });
 
-  it("renders a scoped error view without throwing", async () => {
-    h.fetchMarketplace.mockResolvedValue(mkView({ error: { kind: "repo-not-found", message: "nope" } }));
+  it("does not rescan on a visibility change inside the stale window", async () => {
+    const nowSpy = vi.spyOn(Date, "now");
+    nowSpy.mockReturnValue(0);
     show();
     const p = lastPanel();
     await p._fire({ type: "mkt:ready" });
-    const state = posts(p).reverse().find((m) => m.type === "mkt:state");
-    expect(state.marketplaces[0].error.kind).toBe("repo-not-found");
+    h.scanClaudeAssets.mockClear();
+    nowSpy.mockReturnValue(1_000);
+    await p._fireViewState();
+    expect(h.scanClaudeAssets).not.toHaveBeenCalled();
+    nowSpy.mockRestore();
+  });
+
+  it("still posts a view when the scan throws", async () => {
+    h.scanClaudeAssets.mockImplementation(() => { throw new Error("boom"); });
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    const msg = posts(p).reverse().find((m) => m.type === "mkt:assets");
+    expect(msg.view.assets).toEqual([]);
+    expect(msg.view.notSetUp).toBe(true);
   });
 });

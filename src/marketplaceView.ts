@@ -1,16 +1,19 @@
 import * as vscode from "vscode";
-import { fetchMarketplace, normalizeRepo } from "./engine/marketplace";
-import { InboundMessage, OutboundMessage, MarketplaceView } from "./types";
+import { scanClaudeAssets } from "./engine/claudeAssets";
+import { claudeConfigDir, fsReader } from "./engine/claudeAssetsFs";
+import { InboundMessage, OutboundMessage, ClaudeAssetsView } from "./types";
 
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1h — marketplace contents are effectively static
+const STALE_MS = 30_000; // re-scan on re-focus only if the last scan is older than this
 
-/** The Marketplace: a full-window board of registered plugin-marketplace repos and
- * their plugins/skills. Singleton editor-area panel; read-only (browse + copy). */
+/** The Marketplace: a searchable board of every Claude Code skill, command, agent
+ * and hook on this machine. Singleton editor-area panel; strictly read-only. */
 export class MarketplacePanel {
   private static current: MarketplacePanel | undefined;
   private readonly panel: vscode.WebviewPanel;
   private readonly disposables: vscode.Disposable[] = [];
-  private readonly cache = new Map<string, { at: number; view: MarketplaceView }>();
+  /** Paths the last scan emitted — the allow-list for open/reveal. */
+  private openable = new Set<string>();
+  private lastScan = 0;
 
   static show(context: vscode.ExtensionContext, log: (m: string) => void): void {
     if (MarketplacePanel.current) {
@@ -35,6 +38,14 @@ export class MarketplacePanel {
     this.panel.webview.html = this.html(this.panel.webview);
     this.panel.webview.onDidReceiveMessage((m: InboundMessage) => this.onMessage(m), null, this.disposables);
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    // Cheap enough (a full scan measured ~0.2s) that re-focus after a pause just rescans.
+    this.panel.onDidChangeViewState(
+      () => {
+        if (this.panel.visible && Date.now() - this.lastScan > STALE_MS) this.render();
+      },
+      null,
+      this.disposables,
+    );
   }
 
   private post(msg: OutboundMessage): void {
@@ -44,69 +55,55 @@ export class MarketplacePanel {
     this.post({ type: "toast", level, message });
   }
 
-  private repos(): string[] {
-    const v = vscode.workspace.getConfiguration("agentFlow").get<string[]>("marketplaces");
-    if (!Array.isArray(v)) return [];
-    const out: string[] = [];
-    for (const x of v) {
-      if (typeof x !== "string" || !x.length) continue;
-      const n = normalizeRepo(x);
-      if (n && !out.includes(n)) out.push(n);
-    }
-    return out;
-  }
-  private async writeRepos(next: string[]): Promise<void> {
-    await vscode.workspace.getConfiguration("agentFlow").update("marketplaces", next, vscode.ConfigurationTarget.Global);
+  private scan(): ClaudeAssetsView {
+    const workspaceDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    return scanClaudeAssets(fsReader(), {
+      claudeDir: claudeConfigDir(),
+      workspaceDir,
+      workspaceName: workspaceDir ? workspaceDir.split("/").filter(Boolean).pop() : undefined,
+      now: Date.now(),
+    });
   }
 
-  private async view(repo: string, force: boolean): Promise<MarketplaceView> {
-    const hit = this.cache.get(repo);
-    if (!force && hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.view;
-    const view = await fetchMarketplace(repo);
-    this.cache.set(repo, { at: Date.now(), view });
-    return view;
-  }
-
-  private async render(force: boolean): Promise<void> {
+  private render(): void {
     this.post({ type: "mkt:loading", loading: true });
-    const repos = this.repos();
-    const marketplaces: MarketplaceView[] = [];
-    for (const repo of repos) {
-      try {
-        marketplaces.push(await this.view(repo, force));
-      } catch (e) {
-        this.log(`marketplace: unexpected failure for ${repo}: ${e}`);
-        marketplaces.push({ repo, name: repo, description: "", owner: "", addCommand: `/plugin marketplace add ${repo}`, plugins: [], error: { kind: "unknown", message: "Couldn't load this marketplace." } });
-      }
+    let view: ClaudeAssetsView;
+    try {
+      view = this.scan();
+    } catch (e) {
+      this.log(`marketplace: scan failed: ${e}`);
+      view = { marketplaces: [], plugins: [], assets: [], notSetUp: true, scannedAt: Date.now() };
     }
-    this.post({ type: "mkt:state", marketplaces });
+    this.lastScan = Date.now();
+    this.openable = new Set(view.assets.map((a) => a.file));
+    this.post({ type: "mkt:assets", view });
     this.post({ type: "mkt:loading", loading: false });
+  }
+
+  /** Only paths the last scan emitted may be opened — the webview must never be
+   * able to talk the host into opening an arbitrary file. */
+  private allowed(file: string): boolean {
+    if (this.openable.has(file)) return true;
+    this.log(`marketplace: refused to open unlisted path ${file}`);
+    this.toast("error", "That file isn't part of the current scan.");
+    return false;
   }
 
   private async onMessage(m: InboundMessage): Promise<void> {
     switch (m.type) {
       case "mkt:ready":
-        await this.render(false);
-        break;
       case "mkt:refresh":
-        this.cache.clear();
-        await this.render(true);
+        this.render();
         break;
-      case "mkt:add": {
-        const repo = normalizeRepo(m.repo);
-        if (!repo) {
-          this.toast("error", `"${m.repo}" isn't a GitHub repo (use owner/repo or a github.com URL).`);
-          return;
-        }
-        const current = this.repos();
-        if (!current.includes(repo)) await this.writeRepos([...current, repo]);
-        await this.render(false);
+      case "mkt:open": {
+        if (!this.allowed(m.file)) return;
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(m.file));
+        await vscode.window.showTextDocument(doc, { preview: true });
         break;
       }
-      case "mkt:remove":
-        await this.writeRepos(this.repos().filter((r) => r !== m.repo));
-        this.cache.delete(m.repo);
-        await this.render(false);
+      case "mkt:reveal":
+        if (!this.allowed(m.file)) return;
+        await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(m.file));
         break;
       case "mkt:copy":
         await vscode.env.clipboard.writeText(m.text);
