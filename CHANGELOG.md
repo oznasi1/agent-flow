@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.28] — 2026-07-26
+
+### Fixed
+
+- **In-flight columns scroll instead of clipping cards.** A column holding more cards than
+  fit squeezed every card flat, so card content was cut off mid-card and no scrollbar ever
+  appeared. Cards now keep their natural height and the column scrolls, with a fade at the
+  bottom edge showing there is more below.
+
+### Changed
+
+- **In-flight cards read at a glance.** Each card leads with its agent state from the same
+  position, so a column scans as one strip of what needs you, and the ticket key trails as
+  quiet metadata instead of a mono block that wrapped to three lines. The summary is now the
+  most prominent line (clamped to three lines, full text on hover), long branches and keys
+  truncate to one line, and the footer no longer flips between one and two rows. Cards that
+  need you carry a full-strength rail, red status text and a faint wash. Card controls are
+  real buttons with visible focus rings, and motion respects `prefers-reduced-motion`.
+
 ## [0.1.27] — 2026-07-26
 
 ### Added
