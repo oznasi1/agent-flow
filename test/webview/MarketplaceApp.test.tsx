@@ -585,6 +585,36 @@ describe("MarketplaceApp file preview", () => {
     expect(reads()).toEqual([]); // just cached — must not have been dropped
   });
 
+  // The two eviction/reinsert tests above only ever check entries that end up
+  // evicted (or retained) identically whether the cap is 50 or 49 — a `>` to
+  // `>=` off-by-one in the eviction condition slips past both. Only an
+  // assertion that straddles the boundary itself — the 50th entry survives,
+  // the 51st evicts it — catches that.
+  it("keeps the 50th distinct entry cached right up to, but not past, the boundary", () => {
+    render(<MarketplaceApp />);
+    // Kept selected first/last so its own auto-read doesn't land on bf0's file.
+    const decoy = asset({ name: "boundary-decoy", file: "/b/decoy.md", rel: "b/decoy.md" });
+    const many = Array.from({ length: 51 }, (_, i) => asset({ name: `bf${i}`, file: `/b/${i}.md`, rel: `b/${i}.md` }));
+    host(assetsMsg(view({ assets: [decoy, ...many] })));
+    sent.mockClear();
+
+    // Exactly 50 distinct arrivals (bf0..bf49) — the cache sits right at the
+    // cap. A `>=` bound would already have dropped bf0 by now.
+    for (let i = 0; i < 50; i++) {
+      host({ type: "mkt:file", file: `/b/${i}.md`, text: `# ${i}\n`, truncated: false });
+    }
+    fireEvent.click(rowText("bf0"));
+    expect(reads()).toEqual([]); // still cached at exactly 50 — nothing evicted yet
+
+    // Look elsewhere, then push the 51st distinct entry: only now should bf0
+    // fall out of the cache.
+    fireEvent.click(rowText("boundary-decoy"));
+    sent.mockClear();
+    host({ type: "mkt:file", file: "/b/50.md", text: "# 50\n", truncated: false });
+    fireEvent.click(rowText("bf0"));
+    expect(reads()).toEqual([{ type: "mkt:read", file: "/b/0.md" }]); // now evicted
+  });
+
   it("keeps a re-arrived file as the newest, so a later push evicts around it instead of it", () => {
     render(<MarketplaceApp />);
     const decoy = asset({ name: "reinsert-decoy", file: "/r/decoy.md", rel: "r/decoy.md" });
