@@ -375,8 +375,25 @@ function canon(p: string): string {
   }
 }
 
+// Passes must not overlap: a pass holds plans whose `seeded:` guard isn't set
+// until their turn, so a second concurrent pass would re-collect and re-seed
+// them. Chain rather than drop — a pass triggered mid-batch still has to run.
+let seedPass: Promise<void> = Promise.resolve();
+
 // ── Public: seed-on-activation (runs in every window our extension activates in) ─
-export async function maybeSeedAgent(context: vscode.ExtensionContext, log: (m: string) => void): Promise<void> {
+export function maybeSeedAgent(context: vscode.ExtensionContext, log: (m: string) => void): Promise<void> {
+  const thisPass = seedPass.then(() => runSeedPass(context, log));
+  // The stored chain must never reject — a failed pass would otherwise wedge
+  // every later call (activation, the watcher, or the next test) forever.
+  // The caller's own promise (`thisPass`) still carries the rejection.
+  seedPass = thisPass.then(
+    () => undefined,
+    () => undefined,
+  );
+  return thisPass;
+}
+
+async function runSeedPass(context: vscode.ExtensionContext, log: (m: string) => void): Promise<void> {
   const identity = windowIdentity()?.identity;
   log(`activation: window identity = ${identity ?? "(no single workspace)"}`);
   if (!identity) return;

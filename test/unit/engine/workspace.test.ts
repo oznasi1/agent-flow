@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolderPaths, type OpenRequest } from "../../../src/engine/workspace";
+import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolderPaths, agentPrompt, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef } from "../../../src/engine/workspace";
 import { commands, env, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -183,6 +183,20 @@ describe("openWorkspace — relevant files", () => {
   });
 });
 
+describe("agentPrompt", () => {
+  const ticket: TicketRef = { key: "ASM-1", summary: "Do the thing", url: "https://jira/ASM-1" };
+
+  it("defaults {brief} to the relative BRIEF_DIR/BRIEF_FILE path", () => {
+    expect(agentPrompt(ticket, [], "{brief}")).toBe(`${BRIEF_DIR}/${BRIEF_FILE}`);
+  });
+
+  it("uses an explicit briefPath verbatim when given — the shared-window case", () => {
+    // Task 4's shared window has N worktree roots each holding the same relative
+    // .pick-task/TASK.md, so the seeded prompt needs an absolute, disambiguated path.
+    expect(agentPrompt(ticket, [], "{brief}", "/abs/wt/.pick-task/TASK.md")).toBe("/abs/wt/.pick-task/TASK.md");
+  });
+});
+
 describe("maybeSeedAgent", () => {
   const planJson = (over: Record<string, unknown> = {}) =>
     JSON.stringify({
@@ -264,106 +278,150 @@ describe("maybeSeedAgent", () => {
   });
 
   it("seeds every plan matching this window, in (createdAt, seq) order", async () => {
-    withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-2-1.json", "ASM-1-1.json"] as never);
-    readFileSync.mockImplementation((p) =>
-      String(p).includes("ASM-1")
-        ? planJson({ key: "ASM-1", seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
-        : planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
-    );
-    commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
-    const { context } = fakeContext();
-
     vi.useFakeTimers();
-    const pending = maybeSeedAgent(context, () => {});
-    await vi.runAllTimersAsync();
-    await pending;
-    vi.useRealTimers();
+    try {
+      withWorkspaceFile();
+      readdirSync.mockReturnValue(["ASM-2-1.json", "ASM-1-1.json"] as never);
+      readFileSync.mockImplementation((p) =>
+        String(p).includes("ASM-1")
+          ? planJson({ key: "ASM-1", seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
+          : planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
+      );
+      commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
+      const { context } = fakeContext();
 
-    const seeds = commands.executeCommand.mock.calls.filter((c) => String(c[0]).startsWith("claude-vscode."));
-    expect(seeds.map((c) => c[2])).toEqual(["first", "second"]);
+      const pending = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await pending;
+
+      const seeds = commands.executeCommand.mock.calls.filter((c) => String(c[0]).startsWith("claude-vscode."));
+      expect(seeds.map((c) => c[2])).toEqual(["first", "second"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("uses the new-tab command when seeding more than one session", async () => {
-    withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
-    readFileSync.mockImplementation((p) =>
-      String(p).includes("ASM-1")
-        ? planJson({ key: "ASM-1", seq: 0 })
-        : planJson({ key: "ASM-2", seq: 1 }),
-    );
-    commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
-    const { context } = fakeContext();
-
     vi.useFakeTimers();
-    const pending = maybeSeedAgent(context, () => {});
-    await vi.runAllTimersAsync();
-    await pending;
-    vi.useRealTimers();
+    try {
+      withWorkspaceFile();
+      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readFileSync.mockImplementation((p) =>
+        String(p).includes("ASM-1")
+          ? planJson({ key: "ASM-1", seq: 0 })
+          : planJson({ key: "ASM-2", seq: 1 }),
+      );
+      commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
+      const { context } = fakeContext();
 
-    expect(commands.executeCommand).toHaveBeenCalledWith("claude-vscode.editor.open", undefined, "do it");
-    expect(commands.executeCommand).not.toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+      const pending = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await pending;
+
+      expect(commands.executeCommand).toHaveBeenCalledWith("claude-vscode.editor.open", undefined, "do it");
+      expect(commands.executeCommand).not.toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("falls back to the primary-editor command when the new-tab command is unregistered", async () => {
-    withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
-    readFileSync.mockImplementation((p) =>
-      String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
-    );
-    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
-    const { context } = fakeContext();
-
     vi.useFakeTimers();
-    const pending = maybeSeedAgent(context, () => {});
-    await vi.runAllTimersAsync();
-    await pending;
-    vi.useRealTimers();
+    try {
+      withWorkspaceFile();
+      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readFileSync.mockImplementation((p) =>
+        String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
+      );
+      commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+      const { context } = fakeContext();
 
-    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+      const pending = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await pending;
+
+      expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("seeds the remaining plans when one is already consumed", async () => {
-    withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
-    readFileSync.mockImplementation((p) =>
-      String(p).includes("ASM-1")
-        ? planJson({ key: "ASM-1", seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
-        : planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
-    );
-    commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
-    const { context } = fakeContext({
-      globalState: { "seeded:ASM-1:/ws/ASM-1.code-workspace": true },
-    });
-
     vi.useFakeTimers();
-    const pending = maybeSeedAgent(context, () => {});
-    await vi.runAllTimersAsync();
-    await pending;
-    vi.useRealTimers();
+    try {
+      withWorkspaceFile();
+      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readFileSync.mockImplementation((p) =>
+        String(p).includes("ASM-1")
+          ? planJson({ key: "ASM-1", seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
+          : planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
+      );
+      commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
+      const { context } = fakeContext({
+        globalState: { "seeded:ASM-1:/ws/ASM-1.code-workspace": true },
+      });
 
-    const seeds = commands.executeCommand.mock.calls.filter((c) => String(c[0]).startsWith("claude-vscode."));
-    expect(seeds.map((c) => c[2])).toEqual(["second"]);
+      const pending = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await pending;
+
+      const seeds = commands.executeCommand.mock.calls.filter((c) => String(c[0]).startsWith("claude-vscode."));
+      expect(seeds.map((c) => c[2])).toEqual(["second"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("skips the clipboard fallback when seeding several sessions", async () => {
-    withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
-    readFileSync.mockImplementation((p) =>
-      String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
-    );
-    commands.getCommands.mockResolvedValue([]); // no Claude command at all
-    env.openExternal.mockResolvedValue(false); // URI handler fails too
-    const { context } = fakeContext();
-
     vi.useFakeTimers();
-    const pending = maybeSeedAgent(context, () => {});
-    await vi.runAllTimersAsync();
-    await pending;
-    vi.useRealTimers();
+    try {
+      withWorkspaceFile();
+      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readFileSync.mockImplementation((p) =>
+        String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
+      );
+      commands.getCommands.mockResolvedValue([]); // no Claude command at all
+      env.openExternal.mockResolvedValue(false); // URI handler fails too
+      const { context } = fakeContext();
 
-    expect(env.clipboard.writeText).not.toHaveBeenCalled();
-    expect(window.showInformationMessage).toHaveBeenCalled();
+      const pending = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await pending;
+
+      expect(env.clipboard.writeText).not.toHaveBeenCalled();
+      expect(window.showInformationMessage).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("serializes overlapping passes so a batch is never seeded twice", async () => {
+    vi.useFakeTimers();
+    try {
+      withWorkspaceFile();
+      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readFileSync.mockImplementation((p) =>
+        String(p).includes("ASM-1")
+          ? planJson({ key: "ASM-1", seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
+          : planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
+      );
+      commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
+      const { context } = fakeContext();
+
+      // Simulates the watcher's debounce firing a second pass mid-batch — e.g. another
+      // plan-dir write lands while the first pass is still staggering between sessions.
+      // Without serializing, the second pass would re-collect the still-unguarded ASM-2
+      // (its `seeded:` guard isn't written until its turn in the first pass) and seed it again.
+      const first = maybeSeedAgent(context, () => {});
+      const second = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await Promise.all([first, second]);
+
+      const seeds = commands.executeCommand.mock.calls.filter((c) => String(c[0]).startsWith("claude-vscode."));
+      expect(seeds.map((c) => c[2])).toEqual(["first", "second"]); // each plan seeded exactly once
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -510,51 +568,57 @@ describe("seedClaudeCode — remote control", () => {
 });
 
 describe("watchPlansAndSeed", () => {
-  it("debounces plan-dir changes and re-runs seeding, and disposes cleanly", () => {
+  it("debounces plan-dir changes and re-runs seeding, and disposes cleanly", async () => {
     vi.useFakeTimers();
-    const close = vi.fn();
-    let fire: (() => void) | undefined;
-    watch.mockImplementation(((_dir: string, cb: () => void) => {
-      fire = cb;
-      return { close } as unknown as fs.FSWatcher;
-    }) as never);
-    // Resolve a single-workspace identity so maybeSeedAgent proceeds far enough to
-    // read the plan dir; readdirSync (no plan files, per the default mock) is the
-    // observable signal for "ran once" that lets this test prove the debounce.
-    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+    try {
+      const close = vi.fn();
+      let fire: (() => void) | undefined;
+      watch.mockImplementation(((_dir: string, cb: () => void) => {
+        fire = cb;
+        return { close } as unknown as fs.FSWatcher;
+      }) as never);
+      // Resolve a single-workspace identity so maybeSeedAgent proceeds far enough to
+      // read the plan dir; readdirSync (no plan files, per the default mock) is the
+      // observable signal for "ran once" that lets this test prove the debounce.
+      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
 
-    const disp = watchPlansAndSeed(fakeContext().context, () => {});
-    expect(fs.mkdirSync).toHaveBeenCalled(); // ensured PLAN_DIR exists
+      const disp = watchPlansAndSeed(fakeContext().context, () => {});
+      expect(fs.mkdirSync).toHaveBeenCalled(); // ensured PLAN_DIR exists
 
-    fire!();
-    fire!(); // two rapid changes
-    expect(readdirSync).not.toHaveBeenCalled(); // still debounced — timer hasn't fired yet
-    vi.advanceTimersByTime(300);
-    expect(readdirSync).toHaveBeenCalledTimes(1); // maybeSeedAgent read the plan dir once (debounced)
+      fire!();
+      fire!(); // two rapid changes
+      expect(readdirSync).not.toHaveBeenCalled(); // still debounced — timer hasn't fired yet
+      // Async: maybeSeedAgent now chains onto a module-level promise (serializing
+      // passes), so invoking it needs a flushed microtask, not just the timer firing.
+      await vi.advanceTimersByTimeAsync(300);
+      expect(readdirSync).toHaveBeenCalledTimes(1); // maybeSeedAgent read the plan dir once (debounced)
 
-    disp.dispose();
-    expect(close).toHaveBeenCalled(); // closes the real fs.watch, which stops further callbacks
-
-    vi.useRealTimers();
+      disp.dispose();
+      expect(close).toHaveBeenCalled(); // closes the real fs.watch, which stops further callbacks
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("clears a pending debounce timer on dispose so it never fires", () => {
+  it("clears a pending debounce timer on dispose so it never fires", async () => {
     vi.useFakeTimers();
-    const close = vi.fn();
-    let fire: (() => void) | undefined;
-    watch.mockImplementation(((_dir: string, cb: () => void) => {
-      fire = cb;
-      return { close } as unknown as fs.FSWatcher;
-    }) as never);
-    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+    try {
+      const close = vi.fn();
+      let fire: (() => void) | undefined;
+      watch.mockImplementation(((_dir: string, cb: () => void) => {
+        fire = cb;
+        return { close } as unknown as fs.FSWatcher;
+      }) as never);
+      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
 
-    const disp = watchPlansAndSeed(fakeContext().context, () => {});
-    fire!(); // schedules a debounced maybeSeedAgent call
-    disp.dispose(); // must clear that pending timer before it fires
-    vi.advanceTimersByTime(300);
-    expect(readdirSync).not.toHaveBeenCalled();
-
-    vi.useRealTimers();
+      const disp = watchPlansAndSeed(fakeContext().context, () => {});
+      fire!(); // schedules a debounced maybeSeedAgent call
+      disp.dispose(); // must clear that pending timer before it fires
+      await vi.advanceTimersByTimeAsync(300);
+      expect(readdirSync).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
