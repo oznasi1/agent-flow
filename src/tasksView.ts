@@ -11,7 +11,7 @@ import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths } from "./engin
 import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
 import { createWorktrees } from "./engine/worktree";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
-import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, WorkspaceMode } from "./types";
+import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 
@@ -192,6 +192,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           await this.addToMySprint(m.key);
           break;
         }
+        case "removeFromSprint": {
+          await this.removeFromSprint(m.key, m.size);
+          break;
+        }
         case "explore": {
           await this.explore();
           break;
@@ -300,6 +304,43 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const removed = this.lastFilter === "unassigned" || this.lastFilter === "backlog";
     this.post({ type: "movedToSprint", key, assignee: me.displayName, removed });
     this.toast("success", `${key} → your sprint`);
+  }
+
+  /** Remove a ticket from the active sprint by moving it to the backlog. Leaves
+   * assignee and status untouched. Offers a one-click Undo via a native notification. */
+  public async removeFromSprint(key: string, size: Size): Promise<void> {
+    const cfg = getConfig();
+    this.log(`removeFromSprint ${key}: start`);
+    if (!(await this.auth.isAuthenticated())) {
+      this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
+      return;
+    }
+    const client = this.client();
+    await client.removeIssueFromSprint(key);
+    this.log(`removeFromSprint ${key}: moved to backlog`);
+    if (cfg.stampLabelOnWrite) {
+      try {
+        await client.addLabel(key, cfg.provenanceLabel);
+      } catch (e) {
+        this.log(`label stamp failed for ${key}: ${e}`);
+      }
+    }
+    // Drop it from the saved manual order so no ghost rank lingers.
+    const saved = this.savedOrder();
+    if (saved.includes(key)) await this.saveOrder(saved.filter((k) => k !== key));
+    this.post({ type: "removedFromSprint", key });
+    this.toast("success", `${key} → backlog`);
+    // Undo: put it back into the active sprint and refetch so the card returns.
+    const choice = await vscode.window.showInformationMessage(`${key} removed from your sprint`, "Undo");
+    if (choice !== "Undo") return;
+    const sprintId = await client.getActiveSprintId();
+    if (sprintId == null) {
+      this.toast("error", `No active sprint on the ${cfg.project} board.`);
+      return;
+    }
+    await client.addIssueToSprint(sprintId, key);
+    this.log(`removeFromSprint ${key}: undo → sprint ${sprintId}`);
+    await this.onMessage({ type: "fetch", filter: "mysprint", size });
   }
 
   /** Pick which Explore action to run. Uses cfg.exploreMode directly when it names a
