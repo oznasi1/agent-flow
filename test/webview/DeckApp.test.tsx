@@ -139,6 +139,22 @@ describe("DeckApp", () => {
     expect(screen.getByText(/^launched/i)).toBeInTheDocument();
   });
 
+  it("omits the Jira status pill when the run has no Jira status", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ jiraStatus: null })]));
+    expect(screen.getByText("Export fails on large accounts")).toBeInTheDocument();
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
+  });
+
+  it("exposes the card controls as buttons so they are keyboard reachable", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    for (const label of ["ASM-1", "Open", "Diff"]) {
+      expect(screen.getByText(label).tagName).toBe("BUTTON");
+    }
+    expect(screen.getByTitle(/more actions/i).tagName).toBe("BUTTON");
+  });
+
   it("hints that Open will focus an already-open window", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ windowOpen: true })]));

@@ -33,10 +33,11 @@ function stateView(r: RunStatus, live: boolean): { text: string; tone: Tone } {
   }
 }
 
+// No ⎇ here: that glyph means "branch" on this card, and a repo chip is a repo.
 function RepoChip({ g }: { g: RepoGit }): JSX.Element {
   return (
-    <span className="repo">
-      ⎇ {g.name}
+    <span className="repo" title={g.path}>
+      {g.name}
       {g.files > 0 && (
         <> <span className="add">+{g.added}</span><span className="del">−{g.removed}</span></>
       )}
@@ -62,37 +63,41 @@ function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
 
   return (
     <div className={`card ${r.column === "needs" ? "needs" : ""}`} style={{ ["--accent" as any]: accent }}>
+      {/* State leads, identity trails: the dot sits at the same x on every card, so a column
+          scans top-to-bottom as one strip of "who needs me". */}
       <div className="c-top">
-        <span className="key" title="Open the ticket" onClick={() => send({ type: "openExternal", url: r.run.url })}>
-          {r.run.key}
-        </span>
         <span className={`status tone-${sv.tone}`}>
           <span className={`sdot tone-${sv.tone} ${sv.tone === "working" ? "pulse" : ""}`} />
           {sv.text}
         </span>
+        <button className="key" title={`Open ${r.run.key} in Jira`} onClick={() => send({ type: "openExternal", url: r.run.url })}>
+          {r.run.key}
+        </button>
       </div>
-      <div className="c-title">{r.run.summary}</div>
+      <div className="c-title" title={r.run.summary}>{r.run.summary}</div>
 
       {r.run.repos[0]?.branch && (
-        <div className="c-branch">⎇ {r.run.repos[0].branch}</div>
+        <div className="c-branch" title={r.run.repos[0].branch}>⎇ {r.run.repos[0].branch}</div>
       )}
 
-      <div className="c-repos">{r.repos.map((g) => <RepoChip key={g.name} g={g} />)}</div>
+      <div className="c-repos">
+        {r.repos.map((g) => <RepoChip key={g.name} g={g} />)}
+        <span className="elapsed">launched {timeAgo(r.run.createdAt)}</span>
+      </div>
 
       {r.windowOpen && <div className="c-openhint">open now — Open will focus this window</div>}
 
       <div className="c-foot">
-        <span className="pill">{r.jiraStatus ?? "—"}</span>
-        <span className="elapsed">launched {timeAgo(r.run.createdAt)}</span>
+        {r.jiraStatus && <span className="pill" title={`Jira status: ${r.jiraStatus}`}>{r.jiraStatus}</span>}
         <div className="actions">
-          <span className="act primary" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open" })}>Open</span>
-          <span className="act" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff" })}>Diff</span>
+          <button className="act primary" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open" })}>Open</button>
+          <button className="act" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff" })}>Diff</button>
           <span className="more-wrap">
-            <span className="more" title="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>⋯</span>
+            <button className="more" title="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>⋯</button>
             {menuOpen && (
               <div className="menu" onClick={(e) => e.stopPropagation()}>
-                <div className="mi" onClick={() => { setMenuOpen(false); send({ type: "openExternal", url: r.run.url }); }}>Open in Jira</div>
-                <div className="mi danger" onClick={() => { setMenuOpen(false); send({ type: "deck:forget", key: r.run.key }); }}>Forget</div>
+                <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "openExternal", url: r.run.url }); }}>Open in Jira</button>
+                <button className="mi danger" onClick={() => { setMenuOpen(false); send({ type: "deck:forget", key: r.run.key }); }}>Forget</button>
               </div>
             )}
           </span>
