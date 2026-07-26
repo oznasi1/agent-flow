@@ -159,8 +159,8 @@ New message pair:
 ```
 
 The host reuses the `openable` allow-list that already guards open and reveal, so the webview still
-cannot talk it into reading an arbitrary path. Files over **256 KB** return truncated at that boundary
-with `truncated: true`, and the pane shows a "truncated — Open file for the rest" footer.
+cannot talk it into reading an arbitrary path. Files over **262144 characters** return truncated at that
+boundary with `truncated: true`, and the pane shows a "truncated — Open file for the rest" footer.
 
 Contents are not part of the scan payload: 353 markdown bodies would bloat every rescan, and the panel
 rescans on refocus. They load per selection into a bounded `Map<file, text>` in the webview — 50 entries,
@@ -214,7 +214,7 @@ Webview tests:
 Host tests:
 
 - `mkt:read` rejects a path outside the allow-list
-- the 256 KB truncation boundary, on both sides
+- the 262144-character truncation boundary, on both sides
 
 The repo's existing coverage thresholds (90 statements / 85 branches / 85 functions / 90 lines) hold.
 

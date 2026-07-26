@@ -15,7 +15,7 @@
 - `src/engine/**` must **never** import `vscode` or `fs`. It is pure over injected readers and unit-tested from fixture trees via `memReader`.
 - **No `dangerouslySetInnerHTML` anywhere in the preview path.** Third-party marketplace content is rendered as React elements from a typed tree.
 - The webview may only read paths the host's `openable` allow-list contains.
-- Preview truncation boundary: **262144 bytes** (256 KB).
+- Preview truncation boundary: **262144 characters** — a proxy for parse/render cost, not wire size.
 - Preview cache bound: **50 entries**, oldest evicted, cleared on rescan.
 - Section order: **Yours** first, then categories by descending asset count (ties alphabetical by raw category), **Uncategorized** last.
 - Category values are lower-cased raw manifest strings. Title-casing is display-only; filtering compares raw values.
@@ -31,7 +31,7 @@
 | `src/engine/claudeAssets.ts` | *(modify)* populate `category` and `readme` during the scan |
 | `src/engine/sections.ts` | *(create)* category display labels and section ordering — pure |
 | `src/engine/markdown.ts` | *(create)* markdown subset → typed block/inline tree — pure |
-| `src/marketplaceView.ts` | *(modify)* `mkt:read` handler, readmes in the allow-list, 256 KB cap |
+| `src/marketplaceView.ts` | *(modify)* `mkt:read` handler, readmes in the allow-list, 262144-char cap |
 | `src/webview/Markdown.tsx` | *(create)* renders a `Block[]` tree as React elements |
 | `src/webview/PluginPicker.tsx` | *(create)* the searchable multi-select dropdown |
 | `src/webview/FilePreview.tsx` | *(create)* the preview body — loading, empty, truncated, rendered |
@@ -857,7 +857,7 @@ In `OutboundMessage`, after `| { type: "mkt:loading"; loading: boolean }`:
 Beside `STALE_MS`:
 
 ```ts
-const MAX_PREVIEW = 262_144; // 256 KB — past this the preview links out to the editor
+const MAX_PREVIEW = 262_144; // chars, not bytes — bounds parse/render cost, which scales with length
 ```
 
 In `render()`, widen the allow-list:
@@ -2389,7 +2389,7 @@ This repo releases on merge to main: bump the version in `package.json`, run `np
 | Type pill counts recompute | 6 (test), 7 (test) |
 | Selection index resets on filter change | 6, 7, 8 (`setSel(0)` in every toggle) |
 | Preview layout — detail on top, file below | 9 |
-| `mkt:read` / `mkt:file`, allow-list, 256 KB | 4 |
+| `mkt:read` / `mkt:file`, allow-list, 262144 chars | 4 |
 | Cache of 50, cleared on rescan, no duplicate reads | 9 |
 | Loading placeholder | 9 |
 | Per-kind source (md / hooks.json / README) | 9 |

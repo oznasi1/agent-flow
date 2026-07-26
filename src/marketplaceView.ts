@@ -4,7 +4,7 @@ import { claudeConfigDir, fsReader } from "./engine/claudeAssetsFs";
 import { InboundMessage, OutboundMessage, ClaudeAssetsView } from "./types";
 
 const STALE_MS = 30_000; // re-scan on re-focus only if the last scan is older than this
-const MAX_PREVIEW = 262_144; // 256 KB — past this the preview links out to the editor
+const MAX_PREVIEW = 262_144; // chars, not bytes — bounds parse/render cost, which scales with length
 
 /** The Marketplace: a searchable board of every Claude Code skill, command, agent
  * and hook on this machine. Singleton editor-area panel; strictly read-only. */
