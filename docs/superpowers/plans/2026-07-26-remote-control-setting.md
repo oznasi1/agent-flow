@@ -606,6 +606,13 @@ In `src/tasksView.ts`, add this private method just above `private async launch(
     );
     return p?.yes === true;
   }
+
+  /** Toast fragment for a launch that asked for Remote Control and didn't get it —
+   * `openWorkspace` withholds it when the launch opens more than one window. Without
+   * this the user waits for a `/remote-control` prompt that never arrives. */
+  private remoteControlNote(wanted: boolean, applied: boolean): string {
+    return wanted && !applied ? " Remote Control skipped — it needs a single window." : "";
+  }
 ```
 
 - [ ] **Step 4: Wire `launch()` (covers Take and Address PR)**
@@ -622,14 +629,10 @@ Add to the `openWorkspace({ ... })` call:
       remoteControl: wantRemoteControl,
 ```
 
-Then, so a withheld offer does not leave the user waiting for a prompt that never comes,
-add above the toast block:
+Then, above the toast block:
 
 ```ts
-    const rcNote =
-      wantRemoteControl && !result.remoteControl
-        ? " Remote Control skipped — it needs a single window."
-        : "";
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
 ```
 
 and append `${rcNote}` to both the `mergeFailed` and success toast messages.
@@ -643,13 +646,10 @@ After its `if (!args) return;` and before the `const slug = ...` line:
 ```
 
 Add `remoteControl: wantRemoteControl,` to its `openWorkspace({ ... })` call, and append
-the same note to its success toast:
+the same note to its success toast using the shared helper:
 
 ```ts
-    const rcNote =
-      wantRemoteControl && !result.remoteControl
-        ? " Remote Control skipped — it needs a single window."
-        : "";
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     this.toast("success", `Opened ${where} to explore. Brief seeded in each repo.${seeded}${rcNote}`);
 ```
 
