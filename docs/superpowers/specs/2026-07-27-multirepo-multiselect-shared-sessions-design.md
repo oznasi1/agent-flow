@@ -98,8 +98,9 @@ bundle and always deploy together.
 1. **No keys** → return.
 2. **Auth gate** — unchanged.
 3. **Resolve the filter set.** `discoverRepos(...)`, map each name to its
-   `ServiceRef`. Names that resolve to nothing are dropped and named in a
-   warning toast; if none resolve, abort.
+   `ServiceRef`. Names that resolve to nothing are dropped and named in an info
+   toast (the toast levels are `success` / `error` / `info` — there is no
+   warning level); if none resolve, abort.
 4. **Git guard.** Non-git repos are **dropped from the set** with an info note
    naming them, rather than aborting the batch — with several repos selected,
    one non-git folder should not block the rest. Abort only if the set empties.
@@ -245,7 +246,11 @@ Two changes to the seeder, both additive:
 **`maybeSeedAgent` seeds every match, not the first.** It currently `return`s
 after the first matching plan. It becomes: collect all plans whose match equals
 this window's identity and whose `seeded:` guard is unset, sort by
-`(createdAt, seq)`, then seed each in turn with a ~600 ms stagger. The consumed
+`(createdAt, seq)`, then seed each in turn with a `SEED_STAGGER_MS = 400`
+pause between sessions. The pause is load-bearing, not cosmetic: `createPanel`
+picks its column by scanning `vscode.window.tabGroups` for an existing Claude
+group, and that tab model does not update synchronously — two back-to-back calls
+would both see "no Claude group" and open in two different columns. The consumed
 guard is already keyed per ticket, so it needs no change; expired plans are still
 pruned in the same pass. This covers both entry points unchanged — activation
 (the `current`-window reload, and a brand-new window) and the plan-dir watcher
@@ -264,7 +269,7 @@ carry the same context and are one click away in the folder roots.
 
 | Case | Behaviour |
 | --- | --- |
-| Some filter repos unresolvable | Dropped, named in a warning; abort only if none resolve. |
+| Some filter repos unresolvable | Dropped, named in an info toast; abort only if none resolve. |
 | Some filter repos non-git | Dropped, named in an info note; abort only if the set empties. |
 | A task infers no repo in the set | Falls back to the whole (resolved, git) filter set. |
 | `createWorktrees` falls back to the main checkout | That task fails and is reported; the rest launch. |
