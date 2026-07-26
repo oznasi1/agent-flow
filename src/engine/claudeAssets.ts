@@ -1,7 +1,14 @@
 // Reads Claude Code's on-disk state (~/.claude and the open workspace) and derives
 // the browsable asset list. Pure over an injected AssetReader so every rule here is
 // unit-testable from fixture trees — this module must never import "vscode" or "fs".
-import { AssetType, AssetView, PluginState } from "../types";
+import {
+  AssetType,
+  AssetView,
+  ClaudeAssetsView,
+  MarketplaceSourceView,
+  PluginRowView,
+  PluginState,
+} from "../types";
 
 export interface DirEntry {
   name: string;
@@ -201,4 +208,181 @@ export function discoverAssets(
 
   const byName = (a: AssetView, b: AssetView) => a.name.localeCompare(b.name);
   return [...skills.sort(byName), ...commands.sort(byName), ...agents.sort(byName), ...hooks];
+}
+
+/** One parsed settings.json, in increasing precedence order. */
+export interface SettingsLayer {
+  enabledPlugins?: Record<string, unknown>;
+  skillOverrides?: Record<string, unknown>;
+  hooks?: unknown;
+}
+
+/** Enabled state for "<plugin>@<marketplace>". Later layers win; a ref that no
+ * layer mentions is `null` (unknown), which renders as no badge — deliberately
+ * distinct from an explicit `false`, which renders as "disabled". */
+export function resolveEnabled(ref: string, layers: SettingsLayer[]): boolean | null {
+  let out: boolean | null = null;
+  for (const l of layers) {
+    const v = l.enabledPlugins?.[ref];
+    if (typeof v === "boolean") out = v;
+  }
+  return out;
+}
+
+export interface ScanOptions {
+  claudeDir: string;
+  workspaceDir?: string;
+  workspaceName?: string;
+  now: number;
+}
+
+interface InstallEntry {
+  scope?: string;
+  version?: string;
+  installPath?: string;
+}
+
+/** Strip a leading "./" and any trailing "/" from a manifest-declared path. */
+function cleanPath(p: string): string {
+  return (p ?? "").replace(/^\.\//, "").replace(/\/+$/, "");
+}
+
+function readJson(reader: AssetReader, path: string): any {
+  const raw = reader.readFile(path);
+  if (raw === null) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/** Where a plugin's content lives: the installed copy if present, else the
+ * marketplace clone if `source` is a real string path, else nowhere. */
+export function resolveContentDir(
+  reader: AssetReader,
+  plugin: { name: string; source?: unknown },
+  installLocation: string,
+  pluginRoot: string,
+  installs: InstallEntry[],
+): { dir: string; state: PluginState } {
+  for (const i of installs) {
+    if (i.installPath && reader.isDir(i.installPath)) return { dir: i.installPath, state: "installed" };
+  }
+  const rel =
+    typeof plugin.source === "string"
+      ? cleanPath(plugin.source)
+      : cleanPath([pluginRoot, plugin.name].filter(Boolean).join("/"));
+  const dir = `${installLocation}/${rel}`;
+  if (rel && reader.isDir(dir)) return { dir, state: "clone" };
+  return { dir: "", state: "manifest" };
+}
+
+const EMPTY_COUNTS = (): Record<AssetType, number> => ({ skill: 0, command: 0, agent: 0, hook: 0 });
+
+function countsOf(assets: AssetView[]): Record<AssetType, number> {
+  const c = EMPTY_COUNTS();
+  for (const a of assets) c[a.type]++;
+  return c;
+}
+
+/** Read every local source and derive the browsable view. Never throws: an
+ * unreadable file degrades its own entry and the rest of the scan continues. */
+export function scanClaudeAssets(reader: AssetReader, opts: ScanOptions): ClaudeAssetsView {
+  const pluginsDir = `${opts.claudeDir}/plugins`;
+  const marketplaces: MarketplaceSourceView[] = [];
+  const plugins: PluginRowView[] = [];
+  const assets: AssetView[] = [];
+
+  const userSettings: SettingsLayer = readJson(reader, `${opts.claudeDir}/settings.json`) ?? {};
+  const wsSettings: SettingsLayer = opts.workspaceDir
+    ? readJson(reader, `${opts.workspaceDir}/.claude/settings.json`) ?? {}
+    : {};
+  const wsLocal: SettingsLayer = opts.workspaceDir
+    ? readJson(reader, `${opts.workspaceDir}/.claude/settings.local.json`) ?? {}
+    : {};
+  const layers = [userSettings, wsSettings, wsLocal];
+  const skillOff = new Set(
+    layers.flatMap((l) => Object.entries(l.skillOverrides ?? {}).filter(([, v]) => v === "off").map(([k]) => k)),
+  );
+
+  const notSetUp = !reader.isDir(pluginsDir);
+  const known = notSetUp ? null : readJson(reader, `${pluginsDir}/known_marketplaces.json`);
+  const installed = notSetUp ? null : readJson(reader, `${pluginsDir}/installed_plugins.json`);
+  const installsByRef: Record<string, InstallEntry[]> = (installed?.plugins ?? {}) as any;
+
+  for (const [key, meta] of Object.entries<any>(known ?? {})) {
+    const installLocation: string = typeof meta?.installLocation === "string" ? meta.installLocation : "";
+    const src = meta?.source ?? {};
+    const kind: MarketplaceSourceView["kind"] = src.source === "directory" ? "directory" : "github";
+    const origin: string = src.repo ?? src.path ?? "";
+    const stale = !installLocation || !reader.isDir(installLocation);
+    const manifest = stale ? null : readJson(reader, `${installLocation}/.claude-plugin/marketplace.json`);
+    const name: string = typeof manifest?.name === "string" && manifest.name ? manifest.name : key;
+    const pluginRoot = cleanPath(typeof manifest?.metadata?.pluginRoot === "string" ? manifest.metadata.pluginRoot : "");
+    const list: any[] = Array.isArray(manifest?.plugins) ? manifest.plugins : [];
+
+    marketplaces.push({ name, kind, origin, pluginCount: list.length, stale });
+
+    for (const p of list) {
+      if (!p || typeof p.name !== "string" || !p.name) continue;
+      const ref = `${p.name}@${name}`;
+      const installs = Array.isArray(installsByRef[ref]) ? installsByRef[ref] : [];
+      const { dir, state } = resolveContentDir(reader, p, installLocation, pluginRoot, installs);
+      const enabled = resolveEnabled(ref, layers);
+      const used = installs.find((i) => i.installPath && reader.isDir(i.installPath));
+      const mine = dir ? discoverAssets(reader, dir, { plugin: p.name, marketplace: name, state, enabled }) : [];
+      for (const a of mine) {
+        if (a.type === "skill" && skillOff.has(a.name)) a.enabled = false;
+        assets.push(a);
+      }
+      plugins.push({
+        name: p.name,
+        marketplace: name,
+        description: typeof p.description === "string" ? p.description : "",
+        state,
+        enabled,
+        scopes: [...new Set(installs.map((i) => i.scope).filter((s): s is string => !!s))].sort(),
+        version: used?.version ?? "",
+        counts: countsOf(mine),
+        installCommand: `/plugin install ${ref}`,
+      });
+    }
+  }
+
+  // ── assets you wrote yourself, plus settings-level hooks ──────────────────
+  const own = (dir: string, plugin: string, marketplace: string, settings: SettingsLayer): void => {
+    const attr: Attribution = { plugin, marketplace, state: "user", enabled: true };
+    // SKIP_DIRS_OWN, not the plugin default: this walk starts at ~/.claude (or a
+    // workspace .claude), whose siblings include the plugin cache, hundreds of MB
+    // of transcripts, and git worktrees — none of which hold user-authored assets.
+    const found = discoverAssets(reader, dir, attr, SKIP_DIRS_OWN);
+    const hooks = flattenHooks(JSON.stringify(settings.hooks ?? null), `${dir}/settings.json`, "settings.json", attr);
+    const all = [...found, ...hooks];
+    for (const a of all) {
+      if (a.type === "skill" && skillOff.has(a.name)) a.enabled = false;
+      assets.push(a);
+    }
+    if (all.length) {
+      marketplaces.push({ name: marketplace, kind: "user", origin: marketplace, pluginCount: 1, stale: false });
+      plugins.push({
+        name: plugin,
+        marketplace,
+        description: "Skills, commands, agents and hooks outside any plugin.",
+        state: "user",
+        enabled: true,
+        scopes: [plugin === "(user)" ? "user" : "workspace"],
+        version: "",
+        counts: countsOf(all),
+        installCommand: "",
+      });
+    }
+  };
+
+  own(opts.claudeDir, "(user)", "~/.claude", userSettings);
+  if (opts.workspaceDir) {
+    own(`${opts.workspaceDir}/.claude`, "(workspace)", opts.workspaceName || "workspace", { ...wsSettings, ...wsLocal });
+  }
+
+  return { marketplaces, plugins, assets, notSetUp, scannedAt: opts.now };
 }
