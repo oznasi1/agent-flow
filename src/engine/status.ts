@@ -82,5 +82,5 @@ export function buildRunStatus(
   });
   const target = runTarget(run);
   const windowOpen = target ? openIdentities.has(canon(target)) : false;
-  return { run, column, jiraStatus: jira?.status ?? null, jiraCategory: jira?.category ?? null, repos, agent, windowOpen };
+  return { run, column, jiraStatus: jira?.status ?? null, jiraCategory: jira?.category ?? null, repos, agent, windowOpen, prs: {} };
 }
