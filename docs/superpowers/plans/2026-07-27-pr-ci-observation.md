@@ -59,6 +59,7 @@ Tasks 1–4 are independent leaves and can be implemented in any order. Task 5 c
 
 **Files:**
 - Modify: `src/types.ts` (append a new section after the `RunStatus` interface, currently ending line 97)
+- Modify: `src/engine/status.ts` (one line in `buildRunStatus`'s return, so this commit typechecks)
 - Create: `src/engine/pr/facts.ts`
 - Test: `test/unit/engine/pr/facts.test.ts`
 
@@ -430,15 +431,27 @@ export function parseRepoFromUrl(url: string): { owner: string; repo: string } |
 Run: `npx vitest run test/unit/engine/pr/facts.test.ts`
 Expected: PASS, all tests green.
 
-- [ ] **Step 6: Typecheck**
+- [ ] **Step 6: Satisfy the new required field so this commit typechecks**
 
-Run: `npm run typecheck`
-Expected: no errors. (`RunStatus.prs` is now required, so this will fail in `deckView.ts`/`status.ts` if you made it non-optional — declare it required and let Task 5 satisfy it; if typecheck flags call sites now, that is expected and Task 5 fixes them. If you prefer a green typecheck at every commit, land Task 5 before committing this one.)
+`RunStatus.prs` is required, and `buildRunStatus` is the only place a `RunStatus` is constructed. Add the literal empty map to its return so the type is satisfied now; Task 5 replaces it with the computed value.
 
-- [ ] **Step 7: Commit**
+In `src/engine/status.ts`, in `buildRunStatus`'s return statement, append `prs: {}` as the last property:
+
+```ts
+  return { run, column, jiraStatus: jira?.status ?? null, jiraCategory: jira?.category ?? null, repos, agent, windowOpen, prs: {} };
+```
+
+Do **not** add a parameter or any PR logic here — that is Task 5's job. This is a one-line placeholder whose only purpose is keeping every commit green.
+
+- [ ] **Step 7: Run the full suite and typecheck**
+
+Run: `npm test && npm run typecheck`
+Expected: both clean. Every pre-existing test still passes — `prs: {}` is additive, and no existing assertion does an exact-object comparison on a `RunStatus`.
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/types.ts src/engine/pr/facts.ts test/unit/engine/pr/facts.test.ts
+git add src/types.ts src/engine/status.ts src/engine/pr/facts.ts test/unit/engine/pr/facts.test.ts
 git commit -m "feat(pr): normalise gh PR JSON into PrFacts"
 ```
 
@@ -1352,7 +1365,7 @@ export function prSignals(prs: PrEntryMap): { open: boolean; blocked: boolean; m
 }
 ```
 
-Then extend `buildRunStatus` — add the parameter, compute the signals, and carry `prs` onto the result:
+Then extend `buildRunStatus` — add the parameter, compute the signals, and replace Task 1's `prs: {}` placeholder in the return with the real map:
 
 ```ts
 export function buildRunStatus(
@@ -1391,7 +1404,7 @@ Expected: PASS, including every pre-existing case.
 - [ ] **Step 5: Typecheck**
 
 Run: `npm run typecheck`
-Expected: only `deckView.ts` may complain about the now-required `RunStatus.prs` if it constructs one directly. It does not — it delegates to `buildRunStatus` — so this should be clean.
+Expected: clean. `buildRunStatus` is the only constructor of a `RunStatus`, and its new parameter is optional, so no call site changes.
 
 - [ ] **Step 6: Commit**
 
