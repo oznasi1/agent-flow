@@ -72,7 +72,9 @@ the plugins you've installed, and the skills, slash commands, agents and hooks i
 — plus any skills or commands you wrote yourself in `~/.claude` or in the open workspace's
 `.claude/`.
 
-Search across every asset, filter by type or down to just what's installed or enabled, then
+Search is fuzzy and ranked — `revw` finds `/review`, `mkpl` finds `marketplace` — with the
+best match selected as you type and the type tallies following the query. Filter by type or
+down to just what's installed or enabled, then
 open a skill's `SKILL.md` in an editor tab or copy the command you'd type to use it. It
 shows which plugins are disabled, and lists the plugins your marketplaces catalogue but
 haven't downloaded yet, with the `/plugin install` command to get them.
