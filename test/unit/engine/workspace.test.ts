@@ -510,6 +510,41 @@ describe("openWorkspace — existing folder window", () => {
   });
 });
 
+describe("openWorkspace — remote control", () => {
+  const planOf = () => {
+    const w = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
+    return JSON.parse(String(w![1]));
+  };
+
+  it("records remoteControl on the plan for a single-window launch", async () => {
+    const result = await openWorkspace(baseReq({ remoteControl: true }));
+    expect(result.remoteControl).toBe(true);
+    expect(planOf().remoteControl).toBe(true);
+  });
+
+  it("records false when the launch did not ask", async () => {
+    const result = await openWorkspace(baseReq());
+    expect(result.remoteControl).toBe(false);
+    expect(planOf().remoteControl).toBe(false);
+  });
+
+  it("withholds it when the launch opens more than one window", async () => {
+    // per-window across two repos → two matches → two windows, one clipboard
+    const result = await openWorkspace(baseReq({ mode: "per-window", remoteControl: true }));
+    expect(planOf().matches).toHaveLength(2);
+    expect(result.remoteControl).toBe(false);
+    expect(planOf().remoteControl).toBe(false);
+  });
+
+  it("allows it for a per-window launch of a single repo", async () => {
+    const result = await openWorkspace(
+      baseReq({ mode: "per-window", services: mkRepos(["account-service"]), remoteControl: true }),
+    );
+    expect(planOf().matches).toHaveLength(1);
+    expect(result.remoteControl).toBe(true);
+  });
+});
+
 describe("listWorkspaceFiles", () => {
   it("lists only .code-workspace files, newest first, with folder counts", () => {
     readdirSync.mockReturnValue(["b.code-workspace", "notes.txt", "a.code-workspace"] as never);

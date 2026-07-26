@@ -39,6 +39,7 @@ export interface OpenRequest {
   openIn?: "new" | "current"; // "current" reuses the running window; default "new"
   existingWorkspaceFile?: string; // when set: open the task into this .code-workspace
   existingFolder?: string; // when set: focus this already-open folder window + seed it
+  remoteControl?: boolean; // offer Claude Code's Remote Control in the opened session
 }
 
 export interface OpenResult {
@@ -49,12 +50,14 @@ export interface OpenResult {
   mergedRepos?: string[]; // repos appended to an existing workspace
   mergeFailed?: boolean;  // existing workspace could not be parsed; opened as-is
   unaddedRepos?: string[]; // repos that couldn't be added as roots to a folder window
+  remoteControl: boolean; // whether Remote Control actually applies (see the single-window guard)
 }
 
 interface PlanFile {
   key: string;
   createdAt: number;
   seedAgent: boolean;
+  remoteControl?: boolean;
   matches: { matchPath: string; prompt: string }[];
 }
 
@@ -219,10 +222,14 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     }
   }
 
+  // One clipboard, one window. A launch that opens several windows would leave every
+  // window but the last pasting another task's brief, so withhold it entirely.
+  const remoteControl = !!req.remoteControl && matches.length === 1;
+
   // 3 — durable writes BEFORE opening: reusing the current window reloads this
   //     extension host, which would otherwise race these to disk.
   if (seedAgent) {
-    writePlanFile({ key: ticket.key, createdAt: Date.now(), seedAgent: true, matches });
+    writePlanFile({ key: ticket.key, createdAt: Date.now(), seedAgent: true, remoteControl, matches });
   }
   const run: Run = {
     key: ticket.key,
@@ -257,7 +264,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     }
   }
 
-  return { mode: effMode, workspaceFile, briefs, opened, mergedRepos, mergeFailed, unaddedRepos };
+  return { mode: effMode, workspaceFile, briefs, opened, mergedRepos, mergeFailed, unaddedRepos, remoteControl };
 }
 
 /** Additively merge `repos` into an existing `.code-workspace` file, preserving

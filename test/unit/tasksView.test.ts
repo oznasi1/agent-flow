@@ -100,6 +100,7 @@ beforeEach(() => {
     workspaceFile: undefined,
     briefs: [],
     opened: ["/repos/account-service"],
+    remoteControl: false,
   });
   vi.mocked(readLiveWindows).mockReturnValue([]);
   vi.mocked(windowIdentity).mockReturnValue(undefined);
@@ -579,6 +580,7 @@ describe("takeTask", () => {
       workspaceFile: "/ws/ASM-1.code-workspace",
       briefs: [],
       opened: ["/ws/ASM-1.code-workspace"],
+      remoteControl: false,
     });
     const { provider, posted } = setup();
     await provider.takeTask("ASM-1", ["account-service", "centaur"]);
@@ -697,6 +699,7 @@ describe("takeTask", () => {
         briefs: [],
         opened: ["/ws/team.code-workspace"],
         mergeFailed: true,
+        remoteControl: false,
       });
 
       const { provider, posted } = setup();
@@ -719,6 +722,7 @@ describe("takeTask", () => {
         briefs: [],
         opened: ["/ws/team.code-workspace"],
         mergedRepos: ["account-service"],
+        remoteControl: false,
       });
 
       const { provider, posted } = setup();
@@ -906,7 +910,7 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(openWorkspace)
       .mockRejectedValueOnce(new Error("disk full"))
-      .mockResolvedValueOnce({ mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/x"] });
+      .mockResolvedValueOnce({ mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/x"], remoteControl: false });
     const { provider, posted } = setup();
     await provider.takeBatch(twoKeys, "api");
     expect(openWorkspace).toHaveBeenCalledTimes(2);
