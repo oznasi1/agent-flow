@@ -35,28 +35,28 @@ describe("PluginPicker", () => {
     // getByLabelText returns the checkbox, whose own textContent is empty — read
     // the enclosing label for the row's text.
     expect(screen.getByText("superpowers").closest("label")!.textContent).toContain("17");
-    expect(screen.getByLabelText("figma")).toBeInTheDocument();
+    expect(screen.getByLabelText("figma (official)")).toBeInTheDocument();
   });
 
   it("narrows the list as you type", () => {
     setup();
     fireEvent.click(screen.getByRole("button", { name: /^Plugins/ }));
     fireEvent.change(screen.getByPlaceholderText(/filter plugins/i), { target: { value: "cicd" } });
-    expect(screen.getByLabelText("cicd-plugin")).toBeInTheDocument();
-    expect(screen.queryByLabelText("superpowers")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("cicd-plugin (atbay)")).toBeInTheDocument();
+    expect(screen.queryByLabelText("superpowers (official)")).not.toBeInTheDocument();
   });
 
   it("reports a toggle with the item's key", () => {
     const { onToggle } = setup();
     fireEvent.click(screen.getByRole("button", { name: /^Plugins/ }));
-    fireEvent.click(screen.getByLabelText("superpowers"));
+    fireEvent.click(screen.getByLabelText("superpowers (official)"));
     expect(onToggle).toHaveBeenCalledWith("superpowers@official");
   });
 
   it("shows a checked box for a selected item", () => {
     setup(["superpowers@official"]);
     fireEvent.click(screen.getByRole("button", { name: /^Plugins/ }));
-    expect(screen.getByLabelText("superpowers")).toBeChecked();
+    expect(screen.getByLabelText("superpowers (official)")).toBeChecked();
   });
 
   it("disambiguates two plugins that share a name", () => {
@@ -75,6 +75,10 @@ describe("PluginPicker", () => {
     expect(screen.getAllByText("build")).toHaveLength(2);
     expect(screen.getByText("a")).toBeInTheDocument();
     expect(screen.getByText("b")).toBeInTheDocument();
+    // Visually the ".pm" span disambiguates them; a screen reader only has the
+    // checkbox's accessible name, so it must carry the marketplace too.
+    expect(screen.getByLabelText("build (a)")).toBeInTheDocument();
+    expect(screen.getByLabelText("build (b)")).toBeInTheDocument();
   });
 
   it("offers a clear action only when something is selected", () => {

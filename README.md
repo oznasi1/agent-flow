@@ -92,7 +92,8 @@ Selecting a row **renders its file** in the pane on the right, under the metadat
 skill's `SKILL.md`, a hook's `hooks.json` as a fenced JSON block, a plugin's README — so
 you can read what something actually does without opening it; **Open file** still opens
 it in an editor tab, and **Copy** grabs the command you'd type to use it. Files over
-262,144 characters are truncated, with a link into the editor for the rest. The renderer
+262,144 characters are truncated, with the same **Open file** button covering the rest
+in the editor. The renderer
 builds elements from a parsed tree instead of injecting HTML, so a hostile file from a
 third-party marketplace can't run anything; only `http`/`https` links become clickable.
 

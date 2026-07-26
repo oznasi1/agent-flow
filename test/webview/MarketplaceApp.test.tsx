@@ -304,7 +304,7 @@ describe("MarketplaceApp plugin filter", () => {
     render(<MarketplaceApp />);
     host(assetsMsg());
     openPicker();
-    fireEvent.click(screen.getByLabelText("gc-plugin"));
+    fireEvent.click(screen.getByLabelText("gc-plugin (atbay)"));
     expect(rowText("watch")).toBeInTheDocument();
     expect(screen.queryByText("/deploy")).not.toBeInTheDocument();
   });
@@ -313,8 +313,8 @@ describe("MarketplaceApp plugin filter", () => {
     render(<MarketplaceApp />);
     host(assetsMsg());
     openPicker();
-    fireEvent.click(screen.getByLabelText("gc-plugin"));
-    fireEvent.click(screen.getByLabelText("cicd-plugin"));
+    fireEvent.click(screen.getByLabelText("gc-plugin (atbay)"));
+    fireEvent.click(screen.getByLabelText("cicd-plugin (atbay)"));
     expect(rowText("watch")).toBeInTheDocument();
     expect(screen.getAllByText("/deploy").length).toBeGreaterThan(0);
   });
@@ -347,7 +347,7 @@ describe("MarketplaceApp plugin filter", () => {
     // cicd-plugin has one skill among its four assets; gc-plugin has its one.
     expect(item("cicd-plugin").textContent).toContain("1");
     // Selecting one plugin must not zero the others out of reach of their own box.
-    fireEvent.click(screen.getByLabelText("gc-plugin"));
+    fireEvent.click(screen.getByLabelText("gc-plugin (atbay)"));
     expect(item("cicd-plugin")).toBeTruthy();
   });
 
@@ -374,7 +374,7 @@ describe("MarketplaceApp plugin filter", () => {
     const { container } = render(<MarketplaceApp />);
     host(assetsMsg());
     openPicker();
-    fireEvent.click(screen.getByLabelText("gc-plugin"));
+    fireEvent.click(screen.getByLabelText("gc-plugin (atbay)"));
     // gc-plugin's only asset is "watch", which "deploy" doesn't match — narrowing
     // by the search box (a dimension the picker's own sift pass never skips)
     // drives gc-plugin's count to zero, which is exactly the case the zero-count

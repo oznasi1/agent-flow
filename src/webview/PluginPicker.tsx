@@ -45,7 +45,11 @@ export function PluginPicker({
               <label key={i.key} className="pitem">
                 <input
                   type="checkbox"
-                  aria-label={i.name}
+                  // Same-named plugins from different marketplaces are a real case
+                  // (it's why the selection key is `plugin@marketplace`) — fold the
+                  // marketplace into the accessible name so they're distinguishable
+                  // by screen reader too, not just by the visual `.pm` span.
+                  aria-label={`${i.name} (${i.marketplace})`}
                   checked={selected.includes(i.key)}
                   onChange={() => onToggle(i.key)}
                 />

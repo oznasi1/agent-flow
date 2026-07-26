@@ -23,7 +23,7 @@ export function FilePreview({
       <Markdown text={text} />
       {cached.truncated && (
         <div className="mdtrunc">
-          Truncated at 256 KB.{" "}
+          Truncated at 262,144 characters.{" "}
           <button type="button" className="btn" onClick={onOpen}>
             Open file
           </button>{" "}
