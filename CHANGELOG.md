@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.23] — 2026-07-26
+
+### Added
+- **Remove from sprint.** Each card on the **My sprint** tab now has a **Remove**
+  button that moves the ticket to the backlog — taking it out of the active sprint
+  while leaving its assignee and status untouched. Removal is instant, and a native
+  VS Code notification offers a one-click **Undo** that puts the ticket back in the
+  sprint. The action appears only on the My sprint tab.
+
 ## [0.1.22] — 2026-07-24
 
 ### Changed
