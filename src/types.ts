@@ -115,6 +115,9 @@ export interface AssetView {
   rel: string; // shown in the detail pane
   enabled: boolean | null; // null = not declared in any settings file
   state: PluginState;
+  /** The plugin manifest's `category`, lower-cased; "yours" for your own assets,
+   * "uncategorized" when the manifest omits it. Groups the browse list. */
+  category: string;
 }
 
 /** A plugin row — shown under the "Plugins" filter, including ones not on disk. */
@@ -127,6 +130,8 @@ export interface PluginRowView {
   scopes: string[];
   version: string;
   counts: Record<AssetType, number>;
+  category: string; // same vocabulary as AssetView.category
+  readme: string; // absolute path to the README in the content dir, or ""
   installCommand: string; // "/plugin install <plugin>@<marketplace>"
 }
 

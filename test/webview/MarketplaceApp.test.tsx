@@ -17,12 +17,12 @@ function host(msg: OutboundMessage) {
 const asset = (over: Partial<AssetView> = {}): AssetView => ({
   type: "skill", name: "build", description: "Builds the thing", plugin: "cicd-plugin",
   marketplace: "atbay", file: "/a/skills/build/SKILL.md", rel: "skills/build/SKILL.md",
-  enabled: true, state: "installed", ...over,
+  enabled: true, state: "installed", category: "deployment", ...over,
 });
 const plugin = (over: Partial<PluginRowView> = {}): PluginRowView => ({
   name: "remote-one", marketplace: "atbay", description: "Lives elsewhere", state: "manifest",
   enabled: null, scopes: [], version: "", counts: { skill: 0, command: 0, agent: 0, hook: 0 },
-  installCommand: "/plugin install remote-one@atbay", ...over,
+  category: "deployment", readme: "", installCommand: "/plugin install remote-one@atbay", ...over,
 });
 const view = (over: Partial<ClaudeAssetsView> = {}): ClaudeAssetsView => ({
   marketplaces: [{ name: "atbay", kind: "github", origin: "org/atbay", pluginCount: 2, stale: false }],

@@ -46,7 +46,7 @@ describe("parseFrontmatter", () => {
 
 import { discoverAssets, memReader } from "../../../src/engine/claudeAssets";
 
-const ATTR = { plugin: "cicd-plugin", marketplace: "atbay-plugins", state: "installed" as const, enabled: true };
+const ATTR = { plugin: "cicd-plugin", marketplace: "atbay-plugins", category: "deployment", state: "installed" as const, enabled: true };
 
 describe("discoverAssets", () => {
   it("finds a skill at any depth, naming it from the parent folder", () => {
@@ -355,5 +355,58 @@ describe("scanClaudeAssets", () => {
     });
     const v = scan(tree, { workspaceDir: "/ws", workspaceName: "ws" });
     expect(v.plugins.find((p) => p.name === "installed-one")!.enabled).toBe(true);
+  });
+});
+
+describe("scanClaudeAssets categories", () => {
+  const tree = (over: Record<string, string> = {}) => ({
+    "/h/.claude/plugins/known_marketplaces.json": JSON.stringify({
+      atbay: { installLocation: "/mk", source: { source: "github", repo: "org/atbay" } },
+    }),
+    "/h/.claude/plugins/installed_plugins.json": JSON.stringify({ plugins: {} }),
+    "/mk/.claude-plugin/marketplace.json": JSON.stringify({
+      name: "atbay",
+      plugins: [
+        { name: "cicd", description: "Ships things", category: "Deployment" },
+        { name: "plain", description: "No category" },
+      ],
+    }),
+    "/mk/cicd/skills/build/SKILL.md": "---\nname: build\ndescription: d\n---",
+    "/mk/cicd/hooks/hooks.json": JSON.stringify({ PreToolUse: [{ hooks: [{ command: "x.sh" }] }] }),
+    "/mk/cicd/README.md": "# cicd",
+    "/mk/plain/skills/other/SKILL.md": "---\nname: other\ndescription: d\n---",
+    ...over,
+  });
+  const scan = (over?: Record<string, string>) =>
+    scanClaudeAssets(memReader(tree(over)), { claudeDir: "/h/.claude", now: 1 });
+
+  it("lower-cases the manifest category onto the plugin and its assets", () => {
+    const v = scan();
+    expect(v.plugins.find((p) => p.name === "cicd")!.category).toBe("deployment");
+    expect(v.assets.find((a) => a.name === "build")!.category).toBe("deployment");
+  });
+
+  it("carries the category onto hooks too", () => {
+    expect(scan().assets.find((a) => a.type === "hook")!.category).toBe("deployment");
+  });
+
+  it("falls back to uncategorized when the manifest omits the field", () => {
+    const v = scan();
+    expect(v.plugins.find((p) => p.name === "plain")!.category).toBe("uncategorized");
+    expect(v.assets.find((a) => a.name === "other")!.category).toBe("uncategorized");
+  });
+
+  it("resolves a README in the plugin's content dir, case-insensitively", () => {
+    expect(scan().plugins.find((p) => p.name === "cicd")!.readme).toBe("/mk/cicd/README.md");
+    expect(scan().plugins.find((p) => p.name === "plain")!.readme).toBe("");
+    const lower = scan({ "/mk/plain/readme.md": "# plain" });
+    expect(lower.plugins.find((p) => p.name === "plain")!.readme).toBe("/mk/plain/readme.md");
+  });
+
+  it("labels your own assets 'yours' and gives their row no readme", () => {
+    const v = scan({ "/h/.claude/skills/mine/SKILL.md": "---\nname: mine\ndescription: d\n---" });
+    expect(v.assets.find((a) => a.name === "mine")!.category).toBe("yours");
+    expect(v.plugins.find((p) => p.name === "(user)")!.category).toBe("yours");
+    expect(v.plugins.find((p) => p.name === "(user)")!.readme).toBe("");
   });
 });

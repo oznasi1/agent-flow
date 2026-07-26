@@ -19,7 +19,7 @@ const view = (over: Partial<ClaudeAssetsView> = {}): ClaudeAssetsView => ({
   assets: [{
     type: "skill", name: "build", description: "d", plugin: "cicd", marketplace: "atbay",
     file: "/home/u/.claude/plugins/cache/atbay/cicd/1/skills/build/SKILL.md",
-    rel: "skills/build/SKILL.md", enabled: true, state: "installed",
+    rel: "skills/build/SKILL.md", enabled: true, state: "installed", category: "deployment",
   }],
   notSetUp: false,
   scannedAt: 1,

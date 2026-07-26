@@ -67,6 +67,7 @@ const MAX_DEPTH = 8;
 export interface Attribution {
   plugin: string;
   marketplace: string;
+  category: string;
   state: PluginState;
   enabled: boolean | null;
 }
@@ -134,6 +135,7 @@ function mdAsset(
     description: fm.description ?? "",
     plugin: attr.plugin,
     marketplace: attr.marketplace,
+    category: attr.category,
     file: `${dir}/${rel}`,
     rel,
     enabled: attr.enabled,
@@ -168,6 +170,7 @@ export function flattenHooks(json: string | null, file: string, rel: string, att
           description: String(h.command ?? h.type ?? ""),
           plugin: attr.plugin,
           marketplace: attr.marketplace,
+          category: attr.category,
           file,
           rel: guard ? `${rel} (${guard})` : rel,
           enabled: attr.enabled,
@@ -289,6 +292,22 @@ function countsOf(assets: AssetView[]): Record<AssetType, number> {
   return c;
 }
 
+/** The manifest's category, normalised. Lower-cased so "Deployment" and
+ * "deployment" are one section; absent becomes an explicit bucket rather than an
+ * empty string, because "we don't know" is a thing the UI has to name. */
+function categoryOf(plugin: { category?: unknown }): string {
+  const raw = typeof plugin.category === "string" ? plugin.category.trim() : "";
+  return raw ? raw.toLowerCase() : "uncategorized";
+}
+
+/** The plugin's own README, if it shipped one. Matched case-insensitively —
+ * both README.md and readme.md occur in the wild. */
+function readmeIn(reader: AssetReader, dir: string): string {
+  if (!dir) return "";
+  const hit = reader.readDir(dir).find((e) => !e.isDir && e.name.toLowerCase() === "readme.md");
+  return hit ? `${dir}/${hit.name}` : "";
+}
+
 /** Read every local source and derive the browsable view. Never throws: an
  * unreadable file degrades its own entry and the rest of the scan continues. */
 export function scanClaudeAssets(reader: AssetReader, opts: ScanOptions): ClaudeAssetsView {
@@ -334,7 +353,8 @@ export function scanClaudeAssets(reader: AssetReader, opts: ScanOptions): Claude
       const { dir, state } = resolveContentDir(reader, p, installLocation, pluginRoot, installs);
       const enabled = resolveEnabled(ref, layers);
       const used = installs.find((i) => i.installPath && reader.isDir(i.installPath));
-      const mine = dir ? discoverAssets(reader, dir, { plugin: p.name, marketplace: name, state, enabled }) : [];
+      const category = categoryOf(p);
+      const mine = dir ? discoverAssets(reader, dir, { plugin: p.name, marketplace: name, category, state, enabled }) : [];
       for (const a of mine) {
         if (a.type === "skill" && skillOff.has(a.name)) a.enabled = false;
         assets.push(a);
@@ -348,6 +368,8 @@ export function scanClaudeAssets(reader: AssetReader, opts: ScanOptions): Claude
         scopes: [...new Set(installs.map((i) => i.scope).filter((s): s is string => !!s))].sort(),
         version: used?.version ?? "",
         counts: countsOf(mine),
+        category,
+        readme: readmeIn(reader, dir),
         installCommand: `/plugin install ${ref}`,
       });
     }
@@ -355,7 +377,7 @@ export function scanClaudeAssets(reader: AssetReader, opts: ScanOptions): Claude
 
   // ── assets you wrote yourself, plus settings-level hooks ──────────────────
   const own = (dir: string, plugin: string, marketplace: string, settings: SettingsLayer): void => {
-    const attr: Attribution = { plugin, marketplace, state: "user", enabled: true };
+    const attr: Attribution = { plugin, marketplace, category: "yours", state: "user", enabled: true };
     // SKIP_DIRS_OWN, not the plugin default: this walk starts at ~/.claude (or a
     // workspace .claude), whose siblings include the plugin cache, hundreds of MB
     // of transcripts, and git worktrees — none of which hold user-authored assets.
@@ -377,6 +399,8 @@ export function scanClaudeAssets(reader: AssetReader, opts: ScanOptions): Claude
         scopes: [plugin === "(user)" ? "user" : "workspace"],
         version: "",
         counts: countsOf(all),
+        category: "yours",
+        readme: "",
         installCommand: "",
       });
     }
