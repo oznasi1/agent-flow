@@ -56,6 +56,11 @@ export const MARKETPLACE_CSS = `
   .tag.off { text-decoration: line-through; }
   .tag.bad { color: var(--vscode-errorForeground); border-color: var(--vscode-errorForeground); }
   .tag.dim { opacity: .8; }
+  button.tag { cursor: pointer; font-family: inherit; background: transparent; }
+  button.tag:hover { background: var(--vscode-toolbar-hoverBackground); }
+  button.tag.on { border-color: var(--vscode-focusBorder);
+    background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground); }
 
   .loading { flex: none; padding: 8px 18px; color: var(--vscode-descriptionForeground); font-size: 12px; }
   .split { flex: 1; min-height: 0; display: flex; }

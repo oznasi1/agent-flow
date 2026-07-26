@@ -463,3 +463,38 @@ describe("MarketplaceApp category sections", () => {
     expect(headings()).toEqual(["Monitoring", "Uncategorized"]);
   });
 });
+
+describe("MarketplaceApp marketplace filter", () => {
+  const v = () => view({
+    marketplaces: [
+      { name: "atbay", kind: "github", origin: "org/atbay", pluginCount: 2, stale: false },
+      { name: "~/.claude", kind: "user", origin: "~/.claude", pluginCount: 1, stale: false },
+    ],
+  });
+
+  it("narrows to a marketplace when its tag is clicked", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(v()));
+    fireEvent.click(screen.getByRole("button", { name: "~/.claude" }));
+    expect(rowText("mine")).toBeInTheDocument();
+    expect(screen.queryByText("pipeline")).not.toBeInTheDocument();
+  });
+
+  it("keeps several marketplaces at once and clears from the chip", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(v()));
+    fireEvent.click(screen.getByRole("button", { name: "~/.claude" }));
+    fireEvent.click(screen.getByRole("button", { name: "atbay" }));
+    expect(screen.getAllByText("pipeline").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /atbay ×/ }));
+    expect(screen.queryByText("pipeline")).not.toBeInTheDocument();
+  });
+
+  it("AND-s the marketplace with the plugin selection", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(v()));
+    fireEvent.click(screen.getByRole("button", { name: "~/.claude" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Plugins ▾/ }));
+    expect(screen.queryByLabelText("gc-plugin")).not.toBeInTheDocument();
+  });
+});

@@ -151,6 +151,7 @@ export function MarketplaceApp(): JSX.Element {
   const [sel, setSel] = React.useState(0);
   const [cat, setCat] = React.useState<string | null>(null);
   const [pluginSel, setPluginSel] = React.useState<string[]>([]);
+  const [mktSel, setMktSel] = React.useState<string[]>([]);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string }[]>([]);
 
   React.useEffect(() => {
@@ -184,13 +185,14 @@ export function MarketplaceApp(): JSX.Element {
         if (scope === "enabled" && r.enabled === false) continue;
         if (skip !== "category" && cat && r.category !== cat) continue;
         if (skip !== "plugin" && pluginSel.length && !pluginSel.includes(pluginKey(r))) continue;
+        if (mktSel.length && !mktSel.includes(r.marketplace)) continue;
         const score = searching ? rowScore(r, terms) : 0;
         if (score === null) continue;
         out.push({ ...r, score });
       }
       return out;
     },
-    [terms, searching, scope, cat, pluginSel],
+    [terms, searching, scope, cat, pluginSel, mktSel],
   );
 
   const assetRows = React.useMemo(() => view.assets.map(assetRow), [view]);
@@ -237,6 +239,11 @@ export function MarketplaceApp(): JSX.Element {
 
   const togglePlugin = (key: string): void => {
     setPluginSel((s) => (s.includes(key) ? s.filter((k) => k !== key) : [...s, key]));
+    setSel(0);
+  };
+
+  const toggleMkt = (name: string): void => {
+    setMktSel((s) => (s.includes(name) ? s.filter((n) => n !== name) : [...s, name]));
     setSel(0);
   };
 
@@ -328,7 +335,7 @@ export function MarketplaceApp(): JSX.Element {
             onClear={() => { setPluginSel([]); setSel(0); }}
           />
         </div>
-        {(cat || pluginSel.length > 0) && (
+        {(cat || pluginSel.length > 0 || mktSel.length > 0) && (
           <div className="chips">
             {cat && (
               <button type="button" className="chip" onClick={() => { setCat(null); setSel(0); }}>
@@ -340,10 +347,15 @@ export function MarketplaceApp(): JSX.Element {
                 {splitPluginKey(k).name} ×
               </button>
             ))}
+            {mktSel.map((n) => (
+              <button key={n} type="button" className="chip" onClick={() => toggleMkt(n)}>
+                {n} ×
+              </button>
+            ))}
             <button
               type="button"
               className="chip clear"
-              onClick={() => { setCat(null); setPluginSel([]); setSel(0); }}
+              onClick={() => { setCat(null); setPluginSel([]); setMktSel([]); setSel(0); }}
             >
               Clear
             </button>
@@ -352,9 +364,15 @@ export function MarketplaceApp(): JSX.Element {
         {view.marketplaces.length > 0 && (
           <div className="srcs">
             {view.marketplaces.map((m) => (
-              <span key={`${m.name}:${m.origin}`} className={`tag${m.stale ? " bad" : ""}`} title={m.origin}>
+              <button
+                key={`${m.name}:${m.origin}`}
+                type="button"
+                className={`tag${m.stale ? " bad" : ""}${mktSel.includes(m.name) ? " on" : ""}`}
+                title={m.origin}
+                onClick={() => toggleMkt(m.name)}
+              >
                 {m.stale ? `${m.name} — stale` : m.name}
-              </span>
+              </button>
             ))}
           </div>
         )}
