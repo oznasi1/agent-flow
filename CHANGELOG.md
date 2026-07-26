@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.29] — 2026-07-27
+
+### Fixed
+
+- **The In-flight deck scrolls as one board.** Vertical scrolling was per column, so each
+  column moved on its own and a card's position told you nothing about the cards beside it.
+  The board now scrolls as a whole, vertically and horizontally, and the column headers stay
+  pinned while their cards pass underneath. The per-column bottom fade added in 0.1.28 is
+  gone with it — it advertised a scroll the columns no longer own, and it would have sat on
+  top of the board's horizontal scrollbar.
+
 ## [0.1.28] — 2026-07-26
 
 ### Fixed
