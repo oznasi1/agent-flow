@@ -7,27 +7,43 @@ vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
 import { MarketplaceApp } from "../../src/webview/MarketplaceApp";
 import { send } from "../../src/webview/vscodeApi";
-import type { OutboundMessage, MarketplaceView } from "../../src/types";
+import type { AssetView, ClaudeAssetsView, OutboundMessage, PluginRowView } from "../../src/types";
 
 const sent = vi.mocked(send);
 function host(msg: OutboundMessage) {
   act(() => { window.dispatchEvent(new MessageEvent("message", { data: msg })); });
 }
-const mkView = (over: Partial<MarketplaceView> = {}): MarketplaceView => ({
-  repo: "o/r", name: "atbay-plugins", description: "At-Bay plugins", owner: "At-Bay",
-  addCommand: "/plugin marketplace add o/r",
-  plugins: [{
-    name: "cicd-plugin", description: "CI/CD automation", source: "plugins/cicd-plugin",
-    skills: [{ name: "build", path: "plugins/cicd-plugin/skills/build/SKILL.md" }],
-    agents: [{ name: "pipeline-agent", path: "plugins/cicd-plugin/agents/pipeline-agent.md" }],
-    commands: [{ name: "deploy", path: "plugins/cicd-plugin/commands/deploy.md" }],
-    installCommand: "/plugin install cicd-plugin@atbay-plugins",
-  }],
+
+const asset = (over: Partial<AssetView> = {}): AssetView => ({
+  type: "skill", name: "build", description: "Builds the thing", plugin: "cicd-plugin",
+  marketplace: "atbay", file: "/a/skills/build/SKILL.md", rel: "skills/build/SKILL.md",
+  enabled: true, state: "installed", ...over,
+});
+const plugin = (over: Partial<PluginRowView> = {}): PluginRowView => ({
+  name: "remote-one", marketplace: "atbay", description: "Lives elsewhere", state: "manifest",
+  enabled: null, scopes: [], version: "", counts: { skill: 0, command: 0, agent: 0, hook: 0 },
+  installCommand: "/plugin install remote-one@atbay", ...over,
+});
+const view = (over: Partial<ClaudeAssetsView> = {}): ClaudeAssetsView => ({
+  marketplaces: [{ name: "atbay", kind: "github", origin: "org/atbay", pluginCount: 2, stale: false }],
+  plugins: [plugin()],
+  assets: [
+    asset(),
+    asset({ type: "command", name: "deploy", description: "Ships it", file: "/a/commands/deploy.md", rel: "commands/deploy.md" }),
+    asset({ type: "agent", name: "pipeline", description: "Runs CI", file: "/a/agents/pipeline.md", rel: "agents/pipeline.md" }),
+    asset({ type: "hook", name: "SessionStart", description: "node hook.js", file: "/a/hooks/hooks.json", rel: "hooks/hooks.json" }),
+  ],
+  notSetUp: false,
+  scannedAt: 1,
   ...over,
 });
-const stateMsg = (marketplaces: MarketplaceView[]): OutboundMessage => ({ type: "mkt:state", marketplaces });
+const assetsMsg = (v: ClaudeAssetsView = view()): OutboundMessage => ({ type: "mkt:assets", view: v });
 
 beforeEach(() => sent.mockClear());
+
+// The detail pane repeats the selected row's name, so any name that is BOTH listed
+// and selected appears twice. Assert with getAllByText for those, never getByText.
+const rowText = (t: string) => screen.getAllByText(t)[0];
 
 describe("MarketplaceApp", () => {
   it("announces readiness on mount", () => {
@@ -35,55 +51,145 @@ describe("MarketplaceApp", () => {
     expect(sent).toHaveBeenCalledWith({ type: "mkt:ready" });
   });
 
-  it("shows the empty state with no marketplaces", () => {
+  it("lists every asset with its description", () => {
     render(<MarketplaceApp />);
-    host(stateMsg([]));
-    expect(screen.getByText(/No marketplaces yet/i)).toBeInTheDocument();
+    host(assetsMsg());
+    expect(screen.getAllByText("build").length).toBeGreaterThan(0); // also in the detail pane
+    expect(screen.getByText("/deploy")).toBeInTheDocument();
+    expect(screen.getByText("pipeline")).toBeInTheDocument();
+    expect(screen.getByText("SessionStart")).toBeInTheDocument();
+    expect(screen.getAllByText(/Builds the thing/).length).toBeGreaterThan(0);
   });
 
-  it("renders a marketplace card with its plugin and item chips", () => {
+  it("filters by the search box", () => {
     render(<MarketplaceApp />);
-    host(stateMsg([mkView()]));
-    expect(screen.getByText("atbay-plugins")).toBeInTheDocument();
-    expect(screen.getByText("cicd-plugin")).toBeInTheDocument();
-    expect(screen.getByText("build")).toBeInTheDocument();
-    expect(screen.getByText("pipeline-agent")).toBeInTheDocument();
-    expect(screen.getByText("deploy")).toBeInTheDocument();
+    host(assetsMsg());
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "deploy" } });
+    expect(screen.getAllByText("/deploy").length).toBeGreaterThan(0);
+    expect(screen.queryByText("pipeline")).not.toBeInTheDocument();
   });
 
-  it("sends mkt:add when a repo is typed and Add is clicked", () => {
+  it("filters to one type via its pill", () => {
     render(<MarketplaceApp />);
-    fireEvent.change(screen.getByPlaceholderText(/owner\/repo/i), { target: { value: "new/repo" } });
-    fireEvent.click(screen.getByRole("button", { name: /add/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "mkt:add", repo: "new/repo" });
+    host(assetsMsg());
+    fireEvent.click(screen.getByRole("button", { name: /^Agents/i }));
+    expect(screen.getAllByText("pipeline").length).toBeGreaterThan(0);
+    expect(screen.queryByText("build")).not.toBeInTheDocument();
   });
 
-  it("sends mkt:remove when the card's × is clicked", () => {
+  it("shows plugin rows under the Plugins pill, including not-downloaded ones", () => {
     render(<MarketplaceApp />);
-    host(stateMsg([mkView()]));
-    fireEvent.click(screen.getByTitle(/remove/i));
-    expect(sent).toHaveBeenCalledWith({ type: "mkt:remove", repo: "o/r" });
+    host(assetsMsg());
+    fireEvent.click(screen.getByRole("button", { name: /^Plugins/i }));
+    expect(screen.getAllByText("remote-one").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/not downloaded/i).length).toBeGreaterThan(0);
   });
 
-  it("sends mkt:copy with the install snippet when Copy is clicked", () => {
+  it("sends mkt:open when Open file is clicked", () => {
     render(<MarketplaceApp />);
-    host(stateMsg([mkView()]));
-    fireEvent.click(screen.getByRole("button", { name: /copy/i }));
-    expect(sent).toHaveBeenCalledWith({
-      type: "mkt:copy",
-      text: "/plugin marketplace add o/r\n/plugin install cicd-plugin@atbay-plugins",
-    });
+    host(assetsMsg());
+    fireEvent.click(screen.getByRole("button", { name: /open file/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "mkt:open", file: "/a/skills/build/SKILL.md" });
   });
 
-  it("sends mkt:refresh when Refresh is clicked", () => {
+  it("sends mkt:reveal when Reveal is clicked", () => {
     render(<MarketplaceApp />);
-    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+    host(assetsMsg());
+    fireEvent.click(screen.getByRole("button", { name: /reveal/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "mkt:reveal", file: "/a/skills/build/SKILL.md" });
+  });
+
+  it("copies a command as /name and a skill as its bare name", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.click(screen.getByRole("button", { name: /^copy$/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "mkt:copy", text: "build" });
+    sent.mockClear();
+    fireEvent.click(screen.getByText("/deploy"));
+    fireEvent.click(screen.getByRole("button", { name: /^copy$/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "mkt:copy", text: "/deploy" });
+  });
+
+  it("copies the install command for a plugin row", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.click(screen.getByRole("button", { name: /^Plugins/i }));
+    fireEvent.click(rowText("remote-one")); // the list row, not the detail heading
+    fireEvent.click(screen.getByRole("button", { name: /^copy$/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "mkt:copy", text: "/plugin install remote-one@atbay" });
+  });
+
+  it("moves the selection with the arrow keys", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    const box = screen.getByPlaceholderText(/search/i);
+    fireEvent.keyDown(box, { key: "ArrowDown" });
+    fireEvent.click(screen.getByRole("button", { name: /open file/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "mkt:open", file: "/a/commands/deploy.md" });
+  });
+
+  it("restricts to installed assets via the scope pill", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(view({ assets: [asset(), asset({ name: "listed", state: "manifest", file: "/b.md" })] })));
+    fireEvent.click(screen.getByRole("button", { name: /installed only/i }));
+    expect(screen.getAllByText("build").length).toBeGreaterThan(0);
+    expect(screen.queryByText("listed")).not.toBeInTheDocument();
+  });
+
+  it("hides explicitly disabled assets under Enabled only", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(view({ assets: [asset(), asset({ name: "off-one", enabled: false, file: "/c.md" })] })));
+    fireEvent.click(screen.getByRole("button", { name: /enabled only/i }));
+    expect(screen.queryByText("off-one")).not.toBeInTheDocument();
+  });
+
+  it("marks a disabled asset in the list", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(view({ assets: [asset({ enabled: false })] })));
+    expect(screen.getAllByText(/disabled/i).length).toBeGreaterThan(0);
+  });
+
+  it("shows the not-set-up state", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(view({ notSetUp: true, assets: [], plugins: [], marketplaces: [] })));
+    expect(screen.getByText(/isn't set up on this machine/i)).toBeInTheDocument();
+  });
+
+  it("shows a no-match state for a query that matches nothing", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "zzzz" } });
+    expect(screen.getByText(/nothing matches/i)).toBeInTheDocument();
+  });
+
+  it("flags a stale marketplace", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(view({ marketplaces: [{ name: "ghost", kind: "directory", origin: "/gone", pluginCount: 0, stale: true }] })));
+    expect(screen.getByText(/stale/i)).toBeInTheDocument();
+  });
+
+  it("sends mkt:refresh when Rescan is clicked", () => {
+    render(<MarketplaceApp />);
+    fireEvent.click(screen.getByRole("button", { name: /rescan/i }));
     expect(sent).toHaveBeenCalledWith({ type: "mkt:refresh" });
   });
 
-  it("renders a scoped error message on a card", () => {
+  it("copies the marketplace-add hint", () => {
     render(<MarketplaceApp />);
-    host(stateMsg([mkView({ plugins: [], error: { kind: "repo-not-found", message: "Repo not found, or you don't have access." } })]));
-    expect(screen.getByText(/Repo not found/i)).toBeInTheDocument();
+    host(assetsMsg());
+    fireEvent.click(screen.getByRole("button", { name: /add a marketplace/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "mkt:copy", text: "/plugin marketplace add owner/repo" });
+  });
+
+  it("renders a toast from the host", () => {
+    render(<MarketplaceApp />);
+    host({ type: "toast", level: "success", message: "Copied to clipboard." });
+    expect(screen.getByText("Copied to clipboard.")).toBeInTheDocument();
+  });
+
+  it("shows a loading line while the host scans", () => {
+    render(<MarketplaceApp />);
+    host({ type: "mkt:loading", loading: true });
+    expect(screen.getByText(/scanning/i)).toBeInTheDocument();
   });
 });
