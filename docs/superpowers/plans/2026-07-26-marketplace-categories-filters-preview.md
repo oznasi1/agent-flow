@@ -423,6 +423,12 @@ describe("parseInline", () => {
     expect(parseInline("a * b")).toEqual([text("a * b")]);
     expect(parseInline("`unclosed")).toEqual([text("`unclosed")]);
   });
+
+  it("keeps a balanced paren inside an href", () => {
+    expect(parseInline("[wiki](https://x.dev/a_(b))")).toEqual([
+      { kind: "link", href: "https://x.dev/a_(b)", children: [text("wiki")] },
+    ]);
+  });
 });
 
 describe("parseMarkdown", () => {
@@ -582,7 +588,10 @@ export function parseInline(src: string): Inline[] {
       i += m[0].length;
       continue;
     }
-    m = /^\[([^\]]*)\]\(([^)\s]*)\)/.exec(rest);
+    // URLs legitimately contain balanced parens — Wikipedia titles are the usual
+    // case — and a naive [^)]* stops at the first one, leaking the remainder into
+    // the text run. One level of nesting covers everything seen in the wild.
+    m = /^\[([^\]]*)\]\(([^()\s]*(?:\([^()\s]*\)[^()\s]*)*)\)/.exec(rest);
     if (m) {
       flush();
       const label = m[1] || m[2];
@@ -713,7 +722,7 @@ export function parseMarkdown(src: string): Block[] {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run test/unit/engine/markdown.test.ts`
-Expected: PASS — 19 tests.
+Expected: PASS — 20 tests.
 
 - [ ] **Step 5: Commit**
 
