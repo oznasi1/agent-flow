@@ -495,7 +495,7 @@ describe("MarketplaceApp marketplace filter", () => {
     host(assetsMsg(v()));
     fireEvent.click(screen.getByRole("button", { name: "~/.claude" }));
     fireEvent.click(screen.getByRole("button", { name: /^Plugins ▾/ }));
-    expect(screen.queryByLabelText("gc-plugin")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("gc-plugin (atbay)")).not.toBeInTheDocument();
   });
 });
 
