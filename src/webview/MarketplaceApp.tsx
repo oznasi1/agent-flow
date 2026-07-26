@@ -1,6 +1,7 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
 import { fuzzyScore, phraseScore } from "../engine/fuzzy";
+import { categoryLabel, orderSections, Section } from "../engine/sections";
 import { AssetType, AssetView, ClaudeAssetsView, OutboundMessage, PluginRowView } from "../types";
 
 let toastSeq = 0;
@@ -30,6 +31,10 @@ interface Row {
   display: string;
   description: string;
   where: string;
+  plugin: string; // raw, for the plugin filter — `where` is a display string
+  marketplace: string; // raw, for the marketplace filter
+  category: string;
+  readme: string; // plugin rows only; "" for assets
   enabled: boolean | null;
   state: AssetView["state"];
   file: string;
@@ -62,6 +67,10 @@ function assetRow(a: AssetView, i: number): Row {
     display: a.type === "command" ? `/${a.name}` : a.name,
     description: a.description,
     where: `${a.plugin}${a.marketplace ? ` · ${a.marketplace}` : ""}`,
+    plugin: a.plugin,
+    marketplace: a.marketplace,
+    category: a.category,
+    readme: "",
     enabled: a.enabled,
     state: a.state,
     file: a.file,
@@ -81,6 +90,10 @@ function pluginRow(p: PluginRowView): Row {
     display: p.name,
     description: p.description,
     where: p.marketplace,
+    plugin: p.name,
+    marketplace: p.marketplace,
+    category: p.category,
+    readme: p.readme,
     enabled: p.enabled,
     state: p.state,
     file: "",
@@ -124,6 +137,7 @@ export function MarketplaceApp(): JSX.Element {
   const [type, setType] = React.useState<TypeFilter>("all");
   const [scope, setScope] = React.useState<ScopeFilter>("all");
   const [sel, setSel] = React.useState(0);
+  const [cat, setCat] = React.useState<string | null>(null);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string }[]>([]);
 
   React.useEffect(() => {
@@ -145,25 +159,33 @@ export function MarketplaceApp(): JSX.Element {
   const terms = React.useMemo(() => q.trim().split(/\s+/).filter(Boolean), [q]);
   const searching = terms.length > 0;
 
-  // Query and scope are applied before the type filter, so the pills can tally
-  // what the query actually leaves and the counts move as you type.
+  /** Query and scope are applied before the type filter, so the pills can tally
+   * what the query actually leaves and the counts move as you type. `skip` drops
+   * one dimension so a control can count the rows it would reveal rather than the
+   * rows already surviving it. */
   const sift = React.useCallback(
-    (base: Row[]): Scored[] => {
+    (base: Row[], skip: "category" | "" = ""): Scored[] => {
       const out: Scored[] = [];
       for (const r of base) {
         if (scope === "installed" && r.state !== "installed" && r.state !== "user") continue;
         if (scope === "enabled" && r.enabled === false) continue;
+        if (skip !== "category" && cat && r.category !== cat) continue;
         const score = searching ? rowScore(r, terms) : 0;
         if (score === null) continue;
         out.push({ ...r, score });
       }
       return out;
     },
-    [terms, searching, scope],
+    [terms, searching, scope, cat],
   );
 
-  const assets = React.useMemo(() => sift(view.assets.map(assetRow)), [view, sift]);
-  const plugins = React.useMemo(() => sift(view.plugins.map(pluginRow)), [view, sift]);
+  const assetRows = React.useMemo(() => view.assets.map(assetRow), [view]);
+  const pluginRows = React.useMemo(() => view.plugins.map(pluginRow), [view]);
+
+  const assets = React.useMemo(() => sift(assetRows), [assetRows, sift]);
+  const plugins = React.useMemo(() => sift(pluginRows), [pluginRows, sift]);
+  const assetsNoCat = React.useMemo(() => sift(assetRows, "category"), [assetRows, sift]);
+  const pluginsNoCat = React.useMemo(() => sift(pluginRows, "category"), [pluginRows, sift]);
 
   const counts = React.useMemo(() => {
     const c: Record<AssetType, number> = { skill: 0, command: 0, agent: 0, hook: 0 };
@@ -171,15 +193,32 @@ export function MarketplaceApp(): JSX.Element {
     return c;
   }, [assets]);
 
+  /** Rows of the active type, from a pair that has already been sifted. */
+  const forType = React.useCallback(
+    (a: Scored[], p: Scored[]): Scored[] =>
+      type === "plugins" ? p : type === "all" ? a : a.filter((r) => r.type === type),
+    [type],
+  );
+
+  // Sections count what they would reveal, so they exclude the category dimension
+  // but honour every other one.
+  const sections: Section[] = React.useMemo(
+    () => (searching || cat ? [] : orderSections(forType(assetsNoCat, pluginsNoCat))),
+    [assetsNoCat, pluginsNoCat, forType, searching, cat],
+  );
+
   const rows = React.useMemo(() => {
-    const picked =
-      type === "plugins" ? plugins : type === "all" ? assets : assets.filter((r) => r.type === type);
-    // Best match first while searching; otherwise one clean block per type. Both
-    // sorts are stable, so the scan's plugin-clustered order survives inside each.
-    return searching
-      ? [...picked].sort((a, b) => b.score - a.score)
-      : [...picked].sort((a, b) => (a.type ? TYPE_ORDER[a.type] : 0) - (b.type ? TYPE_ORDER[b.type] : 0));
-  }, [assets, plugins, type, searching]);
+    const picked = forType(assets, plugins);
+    if (searching) return [...picked].sort((a, b) => b.score - a.score);
+    // Section order first, then the old type order inside a section, so a block
+    // still reads Skills → Commands → Agents → Hooks. Both sorts are stable, so
+    // the scan's plugin-clustered order survives inside each run.
+    const rank = new Map(sections.map((s, i) => [s.category, i]));
+    const byType = (r: Scored) => (r.type ? TYPE_ORDER[r.type] : 0);
+    return [...picked].sort(
+      (a, b) => (rank.get(a.category) ?? 0) - (rank.get(b.category) ?? 0) || byType(a) - byType(b),
+    );
+  }, [assets, plugins, forType, searching, sections]);
 
   const index = Math.min(sel, rows.length - 1);
   const active = rows[index];
@@ -191,10 +230,11 @@ export function MarketplaceApp(): JSX.Element {
     else if (e.key === "Enter" && active?.file) send({ type: "mkt:open", file: active.file });
   };
 
-  let lastType: AssetType | null | undefined;
-  // Type blocks only when browsing: a search is ranked by relevance, so grouping
-  // it would put a header above nearly every row.
-  const grouped = type === "all" && !searching;
+  let lastCat: string | undefined;
+  // Headers only when browsing: a search is ranked by relevance, so grouping it
+  // would put a header above nearly every row. A focused category needs none —
+  // the chip already says which one you are in.
+  const grouped = !searching && !cat;
 
   return (
     <>
@@ -238,6 +278,13 @@ export function MarketplaceApp(): JSX.Element {
           <Pill on={scope === "installed"} onClick={() => { setScope("installed"); setSel(0); }}>Installed only</Pill>
           <Pill on={scope === "enabled"} onClick={() => { setScope("enabled"); setSel(0); }}>Enabled only</Pill>
         </div>
+        {cat && (
+          <div className="chips">
+            <button type="button" className="chip" onClick={() => { setCat(null); setSel(0); }}>
+              {categoryLabel(cat)} ×
+            </button>
+          </div>
+        )}
         {view.marketplaces.length > 0 && (
           <div className="srcs">
             {view.marketplaces.map((m) => (
@@ -269,14 +316,20 @@ export function MarketplaceApp(): JSX.Element {
               </div>
             ) : (
               rows.map((r, i) => {
-                const head = grouped && r.type !== lastType ? ((lastType = r.type), r.type) : null;
+                const head = grouped && r.category !== lastCat ? ((lastCat = r.category), r.category) : null;
+                const section = head ? sections.find((s) => s.category === head) : null;
                 return (
                   <React.Fragment key={r.key}>
-                    {head && (
-                      <div className="grouphd">
-                        <span className="lb">{LABEL[head]}</span>
+                    {section && (
+                      <button
+                        type="button"
+                        className="grouphd"
+                        onClick={() => { setCat(section.category); setSel(0); }}
+                      >
+                        <span className="lb">{section.label}</span>
+                        <span className="n">{section.count}</span>
                         <span className="rule" />
-                      </div>
+                      </button>
                     )}
                     <div className={`row t-${r.type ?? "plugin"}${i === index ? " on" : ""}`} onClick={() => setSel(i)}>
                       <span className="glyph">{r.type ? GLYPH[r.type] : "P"}</span>

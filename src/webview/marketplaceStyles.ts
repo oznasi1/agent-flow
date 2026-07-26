@@ -60,10 +60,20 @@ export const MARKETPLACE_CSS = `
   .loading { flex: none; padding: 8px 18px; color: var(--vscode-descriptionForeground); font-size: 12px; }
   .split { flex: 1; min-height: 0; display: flex; }
   .results { flex: 1; min-width: 0; overflow-y: auto; border-right: 1px solid var(--hair); padding: 6px 0 30px; }
-  .grouphd { display: flex; align-items: center; gap: 8px; padding: 11px 18px 5px; }
+  .grouphd { display: flex; align-items: center; gap: 8px; width: 100%; padding: 11px 18px 5px;
+    background: transparent; border: 0; cursor: pointer; font-family: inherit; text-align: left; }
+  .grouphd:hover .lb { color: var(--vscode-foreground); }
   .grouphd .lb { font-size: 10px; text-transform: uppercase; letter-spacing: .09em;
     color: var(--vscode-descriptionForeground); font-weight: 600; }
+  .grouphd .n { font-family: var(--mono); font-size: 10px; color: var(--vscode-descriptionForeground); }
   .grouphd .rule { flex: 1; height: 1px; background: var(--hair); }
+
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+  .chip { cursor: pointer; font-family: inherit; font-size: 11px; padding: 3px 9px; border-radius: 20px;
+    border: 1px solid var(--vscode-focusBorder); background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground); }
+  .chip:hover { opacity: .85; }
+  .chip.clear { border-color: var(--hair); background: transparent; color: var(--vscode-descriptionForeground); }
 
   .row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 18px; cursor: pointer;
     border-left: 2px solid transparent; }

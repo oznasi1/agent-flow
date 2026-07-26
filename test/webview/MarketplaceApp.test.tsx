@@ -32,6 +32,8 @@ const view = (over: Partial<ClaudeAssetsView> = {}): ClaudeAssetsView => ({
     asset({ type: "command", name: "deploy", description: "Ships it", file: "/a/commands/deploy.md", rel: "commands/deploy.md" }),
     asset({ type: "agent", name: "pipeline", description: "Runs CI", file: "/a/agents/pipeline.md", rel: "agents/pipeline.md" }),
     asset({ type: "hook", name: "SessionStart", description: "node hook.js", file: "/a/hooks/hooks.json", rel: "hooks/hooks.json" }),
+    asset({ name: "watch", description: "Watches things", plugin: "gc-plugin", category: "monitoring", file: "/b/skills/watch/SKILL.md" }),
+    asset({ name: "mine", description: "My own skill", plugin: "(user)", marketplace: "~/.claude", category: "yours", state: "user", file: "/u/skills/mine/SKILL.md" }),
   ],
   notSetUp: false,
   scannedAt: 1,
@@ -54,7 +56,7 @@ describe("MarketplaceApp", () => {
   it("lists every asset with its description", () => {
     render(<MarketplaceApp />);
     host(assetsMsg());
-    expect(screen.getAllByText("build").length).toBeGreaterThan(0); // also in the detail pane
+    expect(screen.getAllByText("build").length).toBeGreaterThan(0);
     expect(screen.getByText("/deploy")).toBeInTheDocument();
     expect(screen.getByText("pipeline")).toBeInTheDocument();
     expect(screen.getByText("SessionStart")).toBeInTheDocument();
@@ -95,19 +97,22 @@ describe("MarketplaceApp", () => {
     expect(screen.queryByText("PostToolUse")).not.toBeInTheDocument();
   });
 
-  it("heads each type group once, however the scan interleaves them", () => {
+  // Grouping is by category now, not type — so the interleaving that matters is
+  // across categories, not asset types. Two categories, evenly split, tie-break
+  // alphabetically: "deployment" sorts before "monitoring".
+  it("heads each category section once, however the scan interleaves them", () => {
     render(<MarketplaceApp />);
     host(assetsMsg(view({
       assets: [
-        asset({ name: "a-skill" }),
-        asset({ type: "hook", name: "Stop", file: "/1", rel: "1" }),
-        asset({ name: "b-skill", file: "/2" }),
-        asset({ type: "hook", name: "SessionEnd", file: "/3", rel: "3" }),
+        asset({ name: "a-skill", category: "monitoring" }),
+        asset({ type: "hook", name: "Stop", file: "/1", rel: "1", category: "deployment" }),
+        asset({ name: "b-skill", file: "/2", category: "monitoring" }),
+        asset({ type: "hook", name: "SessionEnd", file: "/3", rel: "3", category: "deployment" }),
       ],
     })));
     const heads = [...document.querySelectorAll(".grouphd .lb")].map((e) => e.textContent);
     expect(heads).toEqual([...new Set(heads)]);
-    expect(heads).toEqual(["Skills", "Hooks"]);
+    expect(heads).toEqual(["Deployment", "Monitoring"]);
   });
 
   it("matches a fuzzy subsequence rather than only substrings", () => {
@@ -174,22 +179,23 @@ describe("MarketplaceApp", () => {
   it("sends mkt:open when Open file is clicked", () => {
     render(<MarketplaceApp />);
     host(assetsMsg());
+    // Rows sort Yours-first, so "mine" is the default selection, not "build".
     fireEvent.click(screen.getByRole("button", { name: /open file/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "mkt:open", file: "/a/skills/build/SKILL.md" });
+    expect(sent).toHaveBeenCalledWith({ type: "mkt:open", file: "/u/skills/mine/SKILL.md" });
   });
 
   it("sends mkt:reveal when Reveal is clicked", () => {
     render(<MarketplaceApp />);
     host(assetsMsg());
     fireEvent.click(screen.getByRole("button", { name: /reveal/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "mkt:reveal", file: "/a/skills/build/SKILL.md" });
+    expect(sent).toHaveBeenCalledWith({ type: "mkt:reveal", file: "/u/skills/mine/SKILL.md" });
   });
 
   it("copies a command as /name and a skill as its bare name", () => {
     render(<MarketplaceApp />);
     host(assetsMsg());
     fireEvent.click(screen.getByRole("button", { name: /^copy$/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "mkt:copy", text: "build" });
+    expect(sent).toHaveBeenCalledWith({ type: "mkt:copy", text: "mine" });
     sent.mockClear();
     fireEvent.click(screen.getByText("/deploy"));
     fireEvent.click(screen.getByRole("button", { name: /^copy$/i }));
@@ -209,9 +215,10 @@ describe("MarketplaceApp", () => {
     render(<MarketplaceApp />);
     host(assetsMsg());
     const box = screen.getByPlaceholderText(/search/i);
+    // Yours-first ordering puts "mine" at index 0 and "build" at index 1.
     fireEvent.keyDown(box, { key: "ArrowDown" });
     fireEvent.click(screen.getByRole("button", { name: /open file/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "mkt:open", file: "/a/commands/deploy.md" });
+    expect(sent).toHaveBeenCalledWith({ type: "mkt:open", file: "/a/skills/build/SKILL.md" });
   });
 
   it("restricts to installed assets via the scope pill", () => {
@@ -277,5 +284,69 @@ describe("MarketplaceApp", () => {
     render(<MarketplaceApp />);
     host({ type: "mkt:loading", loading: true });
     expect(screen.getByText(/scanning/i)).toBeInTheDocument();
+  });
+});
+
+describe("MarketplaceApp category sections", () => {
+  const headings = () => screen.getAllByRole("button", { name: /^(Yours|Development|Monitoring|Deployment|Uncategorized)\b/ })
+    .map((b) => b.textContent!.replace(/\d+$/, "").trim());
+
+  it("groups the browse list by category, Yours first", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    expect(headings()).toEqual(["Yours", "Deployment", "Monitoring"]);
+  });
+
+  it("counts the rows in each section header", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    expect(screen.getByRole("button", { name: /^Deployment/ }).textContent).toContain("4");
+    expect(screen.getByRole("button", { name: /^Monitoring/ }).textContent).toContain("1");
+  });
+
+  it("sections the Skills tab too, not only All", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.click(screen.getByRole("button", { name: /^Skills/ }));
+    expect(headings()).toEqual(["Yours", "Deployment", "Monitoring"]);
+  });
+
+  it("shows no headers while searching, because the list is ranked", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "watch" } });
+    expect(screen.queryByRole("button", { name: /^Monitoring/ })).not.toBeInTheDocument();
+  });
+
+  it("focuses a category when its header is clicked, and drops the other sections", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.click(screen.getByRole("button", { name: /^Monitoring/ }));
+    expect(rowText("watch")).toBeInTheDocument();
+    expect(screen.queryByText("pipeline")).not.toBeInTheDocument();
+    // Not a name match on "Monitoring": the chip's own label starts with the same
+    // word, so that query would also catch the chip. ".grouphd" is unambiguous.
+    expect(document.querySelectorAll(".grouphd")).toHaveLength(0);
+  });
+
+  it("clears the focus from its chip", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.click(screen.getByRole("button", { name: /^Monitoring/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Monitoring ×/ }));
+    expect(screen.getAllByText("pipeline").length).toBeGreaterThan(0);
+  });
+
+  it("hides the chip row entirely when nothing is selected", () => {
+    const { container } = render(<MarketplaceApp />);
+    host(assetsMsg());
+    expect(container.querySelector(".chips")).toBeNull();
+  });
+
+  it("keeps the type pill counts honest while a category is focused", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.click(screen.getByRole("button", { name: /^Monitoring/ }));
+    expect(screen.getByRole("button", { name: /^Skills/ }).textContent).toContain("1");
   });
 });
