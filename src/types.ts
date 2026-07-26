@@ -134,6 +134,56 @@ export interface MarketplaceView {
   error?: { kind: MarketplaceErrorKind; message: string };
 }
 
+// ── The Marketplace: local asset browser ────────────────────────────────────
+
+export type AssetType = "skill" | "command" | "agent" | "hook";
+
+/** Where a plugin's content came from. "user" = yours, not from a plugin at all
+ * (covers both ~/.claude and the open workspace). */
+export type PluginState = "installed" | "clone" | "manifest" | "user";
+
+/** One discoverable thing: a skill, slash command, subagent, or hook. */
+export interface AssetView {
+  type: AssetType;
+  name: string;
+  description: string;
+  plugin: string; // "(user)" for ~/.claude, "(workspace)" for the open folder
+  marketplace: string; // "~/.claude" or the workspace folder name, for those two
+  file: string; // absolute path, for open/reveal
+  rel: string; // shown in the detail pane
+  enabled: boolean | null; // null = not declared in any settings file
+  state: PluginState;
+}
+
+/** A plugin row — shown under the "Plugins" filter, including ones not on disk. */
+export interface PluginRowView {
+  name: string;
+  marketplace: string;
+  description: string;
+  state: PluginState;
+  enabled: boolean | null;
+  scopes: string[];
+  version: string;
+  counts: Record<AssetType, number>;
+  installCommand: string; // "/plugin install <plugin>@<marketplace>"
+}
+
+export interface MarketplaceSourceView {
+  name: string;
+  kind: "github" | "directory" | "user";
+  origin: string; // "owner/repo", an absolute path, or "~/.claude"
+  pluginCount: number;
+  stale: boolean; // installLocation is gone from disk
+}
+
+export interface ClaudeAssetsView {
+  marketplaces: MarketplaceSourceView[];
+  plugins: PluginRowView[];
+  assets: AssetView[];
+  notSetUp: boolean; // no ~/.claude/plugins at all
+  scannedAt: number;
+}
+
 // Messages: webview → host
 export type InboundMessage =
   | { type: "ready" }
@@ -163,7 +213,9 @@ export type InboundMessage =
   | { type: "mkt:refresh" }
   | { type: "mkt:add"; repo: string }
   | { type: "mkt:remove"; repo: string }
-  | { type: "mkt:copy"; text: string };
+  | { type: "mkt:copy"; text: string }
+  | { type: "mkt:open"; file: string }
+  | { type: "mkt:reveal"; file: string };
 
 // Messages: host → webview
 export type OutboundMessage =
@@ -185,4 +237,5 @@ export type OutboundMessage =
   | { type: "deck:loading"; loading: boolean }
   // The Marketplace
   | { type: "mkt:state"; marketplaces: MarketplaceView[] }
+  | { type: "mkt:assets"; view: ClaudeAssetsView }
   | { type: "mkt:loading"; loading: boolean };
