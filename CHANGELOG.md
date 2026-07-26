@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.26] — 2026-07-26
+
 ### Added
 
 - **Marketplace category sections.** The browse list groups by each plugin's manifest
@@ -22,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   README — truncated at 262,144 characters. The renderer builds elements from a parsed
   tree and never injects HTML, so a hostile file from a third-party marketplace can't run
   anything.
+
+### Fixed
+
+- **A marketplace manifest can no longer point the scan outside its own directory.** A
+  plugin's `source` (and a marketplace's `metadata.pluginRoot`) comes from a third-party
+  repo, and the scan joined it onto the install location without resolving `..` — so a
+  manifest declaring `../../../..` reached files anywhere on disk, on every scan, whether
+  or not the plugin was installed. Those paths are now resolved and contained; anything
+  climbing out is treated as not-on-disk. This mattered more with the file preview
+  landing in the same release, which serves the full contents of whatever the scan found.
 
 ## [0.1.25] — 2026-07-26
 
