@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.25] — 2026-07-26
+
+### Fixed
+
+- **Hooks no longer show up under every Marketplace filter.** A plugin can register
+  several hooks that share an event, matcher and file and differ only by an `if` guard,
+  which the scan discarded — the rows became identical, so did their React keys, and
+  React left the duplicates mounted through every later filter change. Hooks now carry
+  their `if` guard, so those declarations are told apart in both the list and the detail
+  pane, and rows are keyed by their position in the scan.
+- **One heading per type when browsing All.** Assets are scanned plugin by plugin, so the
+  type headings repeated once per run — dozens of times on a well-stocked machine. Rows
+  are now ordered by type, with each plugin's grouping preserved inside a block.
+
+### Changed
+
+- **Search is fuzzy and ranked.** `revw` finds `/review`, `mkpl` finds `marketplace`, and
+  the best match is selected as you type. Names match as subsequences; descriptions match
+  literally, so a short query no longer drags in nearly every asset. Extra words narrow
+  the result rather than widening it, and the type pills retally against the query so it
+  is obvious where the remaining matches are.
+
 ## [0.1.24] — 2026-07-26
 
 ### Changed
