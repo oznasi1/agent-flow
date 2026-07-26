@@ -10,6 +10,7 @@ import { injectSlackDm, insertBeforeFiles } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths } from "./engine/workspace";
 import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
 import { createWorktrees } from "./engine/worktree";
+import { openSharedWorkspace, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
 
@@ -177,7 +178,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "takeBatch": {
-          await this.takeBatch(m.keys, m.repo);
+          await this.takeBatch(m.keys, m.repos);
           break;
         }
         case "addressPr": {
@@ -701,11 +702,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     await this.launch(detail, services, promptMode.prompt, false, target);
   }
 
-  /** Launch several tasks in parallel, each in its own git worktree + new window with
-   * its own seeded Claude session. Offered by the webview only when the repo filter is
-   * one repo; every task opens a worktree in that repo. The prompt mode is asked once
-   * and applied to all; one task's failure never aborts the rest. */
-  public async takeBatch(keys: string[], repo: string): Promise<void> {
+  /** Launch several tasks at once, each in its own git worktree with its own seeded
+   * Claude session. The prompt mode, destination and layout are asked once and applied
+   * to all; one task's failure never aborts the rest. Each task opens worktrees in the
+   * repos it's inferred to touch, narrowed to the filtered set. */
+  public async takeBatch(keys: string[], repos: string[]): Promise<void> {
     const cfg = getConfig();
     if (!keys.length) return;
 
@@ -714,20 +715,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       if (!ok) return;
     }
 
-    const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
-    const repoRef = repos.find((r) => r.name === repo);
-    if (!repoRef) {
-      this.toast("error", `Repo "${repo}" not found under ${cfg.reposRoot}.`);
-      return;
-    }
-    if (!repoRef.isGit) {
-      this.toast("error", `Batch launch needs a git repo — "${repo}" isn't one. Each task opens its own worktree.`);
-      return;
-    }
+    const filterSet = this.resolveBatchRepos(repos, cfg);
+    if (!filterSet.length) return;
 
     if (keys.length > cfg.batchLaunchConfirmThreshold) {
       const go = await vscode.window.showWarningMessage(
-        `Launch ${keys.length} tasks in parallel? That opens ${keys.length} windows, each with its own Claude Code session.`,
+        `Launch ${keys.length} tasks in parallel? That's ${keys.length} Claude Code sessions.`,
         { modal: true },
         "Launch",
       );
@@ -737,59 +730,156 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const promptMode = await this.choosePromptMode(cfg, `Launch ${keys.length} selected task(s) — how should the agents start?`);
     if (!promptMode) return;
 
-    // One clipboard can't serve a window per task — but a one-key "batch" opens exactly
-    // one window, so it's an ordinary single-window launch: resolve it like Take/Explore.
+    const target = await this.chooseOpenTarget(cfg);
+    if (!target) return;
+
+    // Only a new window can go either way; the other destinations ARE a single window.
+    // A one-key batch is an ordinary single-window launch, so it needs no layout pick.
+    let shared = target.kind !== "new";
+    if (target.kind === "new" && keys.length > 1) {
+      const p = await vscode.window.showQuickPick(
+        [
+          { label: "$(multiple-windows) Separate windows", detail: "One window per task", shared: false },
+          { label: "$(window) One shared window", detail: `All ${keys.length} tasks in one window, a session each`, shared: true },
+        ],
+        { title: `Launch ${keys.length} tasks — how should I lay them out?`, ignoreFocusOut: true },
+      );
+      if (!p) return;
+      shared = p.shared;
+    }
+
+    // One clipboard can't serve several sessions — but a one-key "batch" is a single
+    // launch, so it resolves Remote Control exactly like Take does.
     const isBatch = keys.length > 1;
     const rcSkipped = isBatch && cfg.remoteControl !== "off";
-    if (rcSkipped) this.log("takeBatch: Remote Control skipped — one clipboard, several windows");
+    if (rcSkipped) this.log("takeBatch: Remote Control skipped — one clipboard, several sessions");
     const wantRemoteControl = isBatch ? false : await this.resolveRemoteControl(cfg);
 
-    let launched = 0;
-    let appliedRemoteControl = false;
+    const resolved: { task: BatchTask; key: string }[] = [];
     const failed: string[] = [];
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
+    for (const key of keys) {
       try {
         const detail = await this.client().getDetail(key);
-        const services = createWorktrees([repoRef], detail.key, detail.summary, this.log);
-        // A worktree is mandatory here: two batch tasks sharing the main checkout would
-        // clobber each other's .pick-task/TASK.md brief. createWorktrees returns the
-        // original (main-checkout) ref when `git worktree add` fails — detect that and
-        // fail the task honestly instead of launching into a shared, colliding checkout.
-        if (services[0].path === repoRef.path) {
+        const wanted = this.reposForTask(detail, filterSet);
+        const services = createWorktrees(wanted, detail.key, detail.summary, this.log);
+        // A worktree is mandatory: two tasks sharing a checkout would clobber each
+        // other's brief. createWorktrees returns the original ref when `git worktree
+        // add` fails — detect that and fail the task rather than launch into a collision.
+        if (services.some((s, i) => s.path === wanted[i].path)) {
           throw new Error("couldn't create a git worktree (would collide with the shared checkout)");
         }
-        const result = await openWorkspace({
-          ticket: { key: detail.key, summary: detail.summary, url: detail.url },
-          planMd: this.buildBrief(detail),
-          descriptionText: detail.descriptionText,
-          services,
-          mode: "per-window",
-          promptTemplate: promptMode.prompt,
-          workspaceDir: cfg.workspaceDir,
-          seedAgent: cfg.seedAgent,
-          openIn: "new",
-          remoteControl: wantRemoteControl,
+        resolved.push({
+          key,
+          task: {
+            ticket: { key: detail.key, summary: detail.summary, url: detail.url },
+            planMd: this.buildBrief(detail),
+            descriptionText: detail.descriptionText,
+            services,
+          },
         });
-        appliedRemoteControl = result.remoteControl;
-        launched++;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         failed.push(`${key} (${msg})`);
         this.log(`takeBatch ${key}: failed — ${msg}`);
       }
-      if (i < keys.length - 1) await delay(BATCH_STAGGER_MS);
     }
 
-    const summary = `Launched ${launched} of ${keys.length} in parallel.`;
-    const rcNote = isBatch
-      ? (rcSkipped ? " Remote Control skipped — one clipboard can't serve several windows." : "")
-      : this.remoteControlNote(wantRemoteControl, appliedRemoteControl);
+    let launched = 0;
+    let extra = "";
+    if (shared && resolved.length) {
+      try {
+        const result = await openSharedWorkspace({
+          tasks: resolved.map((r) => r.task),
+          promptTemplate: promptMode.prompt,
+          workspaceDir: cfg.workspaceDir,
+          seedAgent: cfg.seedAgent,
+          // OpenTarget and SharedTarget are the same four shapes — no cast needed.
+          target,
+        });
+        launched = resolved.length;
+        if (result.mergeFailed) extra = " That workspace's folders couldn't be parsed — the worktrees weren't added.";
+        else if (result.unaddedFolders?.length) {
+          extra = ` ${result.unaddedFolders.join(", ")} couldn't be added as roots to that window — the briefs are still in place.`;
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        for (const r of resolved) failed.push(`${r.key} (${msg})`);
+        this.log(`takeBatch: shared window failed — ${msg}`);
+      }
+    } else {
+      let appliedRemoteControl = false;
+      for (let i = 0; i < resolved.length; i++) {
+        const { key, task } = resolved[i];
+        try {
+          const result = await openWorkspace({
+            ticket: task.ticket,
+            planMd: task.planMd,
+            descriptionText: task.descriptionText,
+            services: task.services,
+            mode: "per-window",
+            promptTemplate: promptMode.prompt,
+            workspaceDir: cfg.workspaceDir,
+            seedAgent: cfg.seedAgent,
+            openIn: "new",
+            remoteControl: wantRemoteControl,
+          });
+          appliedRemoteControl = result.remoteControl;
+          launched++;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          failed.push(`${key} (${msg})`);
+          this.log(`takeBatch ${key}: failed — ${msg}`);
+        }
+        if (i < resolved.length - 1) await delay(BATCH_STAGGER_MS);
+      }
+      if (!isBatch) extra += this.remoteControlNote(wantRemoteControl, appliedRemoteControl);
+    }
+
+    const where = shared ? "in one shared window" : "in parallel";
+    const summary = `Launched ${launched} of ${keys.length} ${where}.`;
+    const rcNote = isBatch && rcSkipped ? " Remote Control skipped — one clipboard can't serve several sessions." : "";
     if (failed.length) {
       const shown = failed.slice(0, 5).join("; ");
       const more = failed.length > 5 ? ` (and ${failed.length - 5} more)` : "";
-      this.toast("error", `${summary} Failed: ${shown}${more}${rcNote}`);
-    } else this.toast("success", `${summary} A worktree + Claude session per task.${rcNote}`);
+      this.toast("error", `${summary} Failed: ${shown}${more}${extra}${rcNote}`);
+    } else {
+      this.toast("success", `${summary} A worktree + Claude session per task.${extra}${rcNote}`);
+    }
+  }
+
+  /** The filtered repo names as git ServiceRefs. Names that don't resolve, and repos
+   * that aren't git, are dropped with a note rather than aborting the batch — with
+   * several repos filtered, one bad entry shouldn't block the others. Returns [] (and
+   * has already toasted) when nothing usable remains. */
+  private resolveBatchRepos(names: string[], cfg: AgentFlowConfig): ServiceRef[] {
+    const discovered = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+    const byName = new Map(discovered.map((r) => [r.name, r]));
+    const missing = names.filter((n) => !byName.has(n));
+    const found = names.map((n) => byName.get(n)).filter((r): r is ServiceRef => !!r);
+    const nonGit = found.filter((r) => !r.isGit).map((r) => r.name);
+    const usable = found.filter((r) => r.isGit);
+
+    if (!usable.length) {
+      this.toast("error", `No git repo among ${names.join(", ")} under ${cfg.reposRoot}. Each task opens a worktree.`);
+      return [];
+    }
+    if (missing.length) this.toast("info", `Skipping ${missing.join(", ")} — not found under ${cfg.reposRoot}.`);
+    if (nonGit.length) this.toast("info", `Skipping ${nonGit.join(", ")} — not a git repo, and each task opens a worktree.`);
+    return usable;
+  }
+
+  /** The repos a batched task opens: its inferred repos narrowed to the filtered set,
+   * falling back to the whole set when inference finds nothing there — a task must
+   * never launch with no repo at all. */
+  private reposForTask(detail: JiraDetail, filterSet: ServiceRef[]): ServiceRef[] {
+    const inferred = new Set(
+      inferServices(
+        { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
+        filterSet,
+      ).map((r) => r.service.name),
+    );
+    const narrowed = filterSet.filter((r) => inferred.has(r.name));
+    return narrowed.length ? narrowed : filterSet;
   }
 
   /** PR-review kick-off: the same open+seed flow as Take, but always in a worktree and
