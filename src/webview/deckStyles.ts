@@ -10,6 +10,11 @@ export const DECK_CSS = `
     background: var(--vscode-editor-background);
     overflow: hidden; }
   #root { height: 100vh; display: flex; flex-direction: column; }
+  button { font: inherit; color: inherit; }
+  :focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; border-radius: 4px; }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
 
   :root {
     --c-progress: var(--vscode-charts-blue, #4aa3df);
@@ -46,29 +51,46 @@ export const DECK_CSS = `
   .ctl.on .switch::after { transform: translateX(11px); background: var(--vscode-button-foreground); }
   .synced { font-size: 11px; color: var(--vscode-descriptionForeground); font-family: var(--mono); }
 
-  .board { flex: 1; min-height: 0; display: flex; gap: 14px; padding: 16px 20px; overflow-x: auto; overflow-y: hidden; }
-  .col { flex: 0 0 300px; display: flex; flex-direction: column; min-height: 0; }
+  .board { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 16px 20px 0; overflow-x: auto; overflow-y: hidden; }
+  /* min-width: 0 keeps the fixed basis honest — a card's unbreakable branch/key text would
+     otherwise raise the column's automatic minimum width and stretch the whole board. */
+  .col { position: relative; flex: 0 0 318px; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
   .col-hd { display: flex; align-items: center; gap: 8px; padding: 0 2px 10px; flex: none; }
   .col-hd .dot { width: 9px; height: 9px; border-radius: 50%; }
   .col-hd .nm { font-size: 12px; font-weight: 600; }
   .col-hd .ct { font-family: var(--mono); font-size: 11px; color: var(--vscode-descriptionForeground);
     border: 1px solid var(--hair); border-radius: 20px; padding: 0 7px; }
   .col-hd .rule { flex: 1; height: 1px; background: var(--hair); }
-  .col-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; padding: 2px 2px 30px; }
+  .col-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
+    display: flex; flex-direction: column; gap: 10px; padding: 1px 6px 34px 2px; }
+  /* Cards scrolling past the board's bottom edge fade out, so a column that has more
+     below reads as scrollable instead of looking like it ends mid-card. */
+  .col::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 28px; pointer-events: none;
+    background: linear-gradient(to top, var(--vscode-editor-background) 40%, transparent); }
 
-  .card { position: relative; border: 1px solid var(--hair); border-radius: 8px;
-    background: var(--vscode-editorWidget-background, var(--vscode-sideBar-background));
-    padding: 11px 12px; overflow: hidden; }
-  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--accent); opacity: 0; }
-  .card.needs::before { opacity: .9; }
-  .card:hover { border-color: var(--vscode-focusBorder); }
+  /* \`flex: none\` is load-bearing: .card sets overflow:hidden to clip the accent rail, which
+     zeroes its automatic minimum size — without it the flex column squeezes every card and
+     clips its content instead of letting .col-body scroll. */
+  .card { position: relative; flex: none; border: 1px solid var(--hair); border-radius: 10px;
+    background: color-mix(in srgb, var(--vscode-foreground) 4%, var(--vscode-editor-background));
+    padding: 10px 12px 9px 14px; overflow: hidden;
+    transition: border-color .12s ease, background-color .12s ease; }
+  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .32; }
+  .card.needs::before { opacity: 1; }
+  .card.needs { background: color-mix(in srgb, var(--c-needs) 7%, var(--vscode-editor-background)); }
+  .card:hover { border-color: color-mix(in srgb, var(--vscode-foreground) 25%, transparent); }
+  .card:focus-within { border-color: var(--vscode-focusBorder); }
 
-  .c-top { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
-  .key { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 5px;
-    border: 1px solid var(--hair); color: var(--vscode-foreground); cursor: pointer; }
-  .key:hover { border-color: var(--vscode-focusBorder); }
-  .status { margin-left: auto; display: flex; align-items: center; gap: 6px;
-    font-family: var(--mono); font-size: 10.5px; color: var(--vscode-descriptionForeground); }
+  /* State leads every card from the same x, so a column scans as one strip of status. */
+  .c-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto;
+    font-family: var(--mono); font-size: 10.5px; color: var(--vscode-descriptionForeground);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status.tone-needs { color: var(--c-needs); }
+  .key { margin-left: auto; flex: 0 1 auto; min-width: 0; max-width: 46%; font-family: var(--mono); font-size: 10.5px;
+    padding: 0; border: 0; background: none; color: var(--vscode-descriptionForeground); cursor: pointer;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .key:hover { color: var(--vscode-textLink-foreground, var(--vscode-foreground)); }
   .sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-descriptionForeground); flex: none; }
   .sdot.tone-working { background: var(--c-done); }
   .sdot.tone-idle    { background: var(--c-idle); }
@@ -77,39 +99,51 @@ export const DECK_CSS = `
   .sdot.pulse { animation: pulse 1.7s ease-out infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--c-done); } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
-  .c-title { font-size: 13px; line-height: 1.35; }
+  /* Clamped so long summaries can't stretch one card out of the column's rhythm; the full
+     text stays available on hover. */
+  .c-title { margin-top: 6px; font-size: 13px; font-weight: 500; line-height: 1.42; letter-spacing: -.005em;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 
-  .c-branch { margin-top: 8px; font-family: var(--mono); font-size: 10px; color: var(--vscode-descriptionForeground); }
+  .c-branch { margin-top: 6px; font-family: var(--mono); font-size: 10px; color: var(--vscode-descriptionForeground);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .c-openhint { margin-top: 9px; font-size: 10px; font-family: var(--mono); color: var(--c-done);
     display: inline-flex; align-items: center; gap: 5px; }
-  .c-openhint::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c-done); }
-  .elapsed { font-size: 10.5px; color: var(--vscode-descriptionForeground); font-family: var(--mono); }
+  .c-openhint::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c-done); flex: none; }
+  .elapsed { flex: none; font-size: 10px; color: var(--vscode-descriptionForeground); font-family: var(--mono); }
 
-  .c-repos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
-  .repo { font-family: var(--mono); font-size: 10px; border: 1px solid var(--hair); border-radius: 6px;
-    padding: 2px 6px; color: var(--vscode-descriptionForeground); }
+  .c-repos { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 6px; margin-top: 7px; }
+  .repo { font-family: var(--mono); font-size: 10px; border: 1px solid var(--hair); border-radius: 5px;
+    padding: 1px 6px; color: var(--vscode-descriptionForeground); }
   .repo .add { color: var(--c-done); } .repo .del { color: var(--c-needs); margin-left: 4px; }
   .repo .dirty { color: var(--c-idle); margin-left: 5px; }
 
-  .c-foot { display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
-  .pill { font-family: var(--mono); font-size: 10px; border: 1px solid var(--hair); border-radius: 20px;
-    padding: 1px 8px; color: var(--vscode-descriptionForeground); }
-  .actions { margin-left: auto; display: flex; gap: 5px; }
-  .act { font-size: 11px; padding: 3px 9px; border-radius: 6px; cursor: pointer;
+  .c-foot { display: flex; align-items: center; gap: 8px; margin-top: 9px; min-width: 0; }
+  .pill { flex: 0 1 auto; min-width: 0; font-family: var(--mono); font-size: 10px;
+    border: 1px solid var(--hair); border-radius: 20px; padding: 1px 8px;
+    color: var(--vscode-descriptionForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Secondary controls stay legible at rest and come up to full contrast on the card you're
+     pointing at. The dimming lives on the buttons, not on .actions: opacity on the container
+     would composite the whole subtree and make the overflow menu see-through. */
+  .actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 4px; }
+  .act:not(.primary), .more { opacity: .72; transition: opacity .12s ease; }
+  .card:hover .act, .card:focus-within .act,
+  .card:hover .more, .card:focus-within .more { opacity: 1; }
+  .act { font-size: 11px; height: 24px; padding: 0 10px; border-radius: 6px; cursor: pointer; white-space: nowrap;
     border: 1px solid var(--hair); background: transparent; color: var(--vscode-foreground); }
   .act:hover { background: var(--vscode-toolbar-hoverBackground); border-color: var(--vscode-focusBorder); }
   .act.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: var(--vscode-button-background); }
   .act.primary:hover { background: var(--vscode-button-hoverBackground); }
 
   .more-wrap { position: relative; display: inline-flex; }
-  .more { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
-    border-radius: 7px; color: var(--vscode-descriptionForeground); cursor: pointer; }
+  .more { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
+    border: 0; background: none; border-radius: 6px; color: var(--vscode-descriptionForeground); cursor: pointer; }
   .more:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
   .menu { position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 20; min-width: 130px;
     border: 1px solid var(--hair); border-radius: 8px; padding: 4px;
     background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
     box-shadow: 0 8px 24px -10px rgba(0,0,0,.6); }
-  .mi { font-size: 12px; padding: 6px 9px; border-radius: 5px; cursor: pointer; color: var(--vscode-foreground); }
+  .mi { display: block; width: 100%; text-align: left; font-size: 12px; padding: 6px 9px; border: 0;
+    border-radius: 5px; cursor: pointer; background: none; color: var(--vscode-foreground); white-space: nowrap; }
   .mi:hover { background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)); }
   .mi.danger { color: var(--c-needs); }
 
