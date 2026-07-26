@@ -180,7 +180,8 @@ export type InboundMessage =
   | { type: "mkt:refresh" }
   | { type: "mkt:copy"; text: string }
   | { type: "mkt:open"; file: string }
-  | { type: "mkt:reveal"; file: string };
+  | { type: "mkt:reveal"; file: string }
+  | { type: "mkt:read"; file: string };
 
 // Messages: host → webview
 export type OutboundMessage =
@@ -202,4 +203,7 @@ export type OutboundMessage =
   | { type: "deck:loading"; loading: boolean }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
-  | { type: "mkt:loading"; loading: boolean };
+  | { type: "mkt:loading"; loading: boolean }
+  // Contents of one previewed file. Never part of the scan payload: 350-odd
+  // markdown bodies would bloat every rescan, and the panel rescans on refocus.
+  | { type: "mkt:file"; file: string; text: string; truncated: boolean };
