@@ -162,6 +162,16 @@ export const CSS = `
     background: var(--vscode-toolbar-hoverBackground); }
   .sprint-add svg { display: block; }
 
+  /* Secondary action: remove from my sprint (move to backlog) */
+  .sprint-remove { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500;
+    padding: 3px 11px 3px 9px; border-radius: 14px; cursor: pointer; white-space: nowrap;
+    border: 1px solid var(--vscode-panel-border); background: transparent;
+    color: var(--vscode-descriptionForeground);
+    transition: color .12s ease, border-color .12s ease, background .12s ease; }
+  .sprint-remove:hover { color: var(--vscode-foreground); border-color: var(--vscode-focusBorder);
+    background: var(--vscode-toolbar-hoverBackground); }
+  .sprint-remove svg { display: block; }
+
   /* PR-review kick-off: outlined like sprint-add, tinted to read as "ready to ship" */
   .address-pr { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500;
     padding: 3px 11px 3px 9px; border-radius: 14px; cursor: pointer; white-space: nowrap;
