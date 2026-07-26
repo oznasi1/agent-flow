@@ -107,6 +107,14 @@ function pluginRow(p: PluginRowView): Row {
 /** Plugin identity for filtering. Names collide across marketplaces. */
 const pluginKey = (r: { plugin: string; marketplace: string }): string => `${r.plugin}@${r.marketplace}`;
 
+/** Split a selection key back apart. The separator is the FIRST "@": plugin names
+ * are manifest identifiers, but a marketplace name can be a workspace folder name
+ * and may contain one of its own. */
+const splitPluginKey = (key: string): { name: string; marketplace: string } => {
+  const at = key.indexOf("@");
+  return { name: key.slice(0, at), marketplace: key.slice(at + 1) };
+};
+
 /** How well a row answers every term in the query, or null if it misses one.
  * The name carries the most weight, then the blurb, then where it came from — so
  * a skill named "deploy" outranks one that merely mentions deploying. Terms are
@@ -221,7 +229,7 @@ export function MarketplaceApp(): JSX.Element {
     }
     for (const key of pluginSel) {
       if (by.has(key)) continue;
-      const [name, marketplace] = [key.slice(0, key.lastIndexOf("@")), key.slice(key.lastIndexOf("@") + 1)];
+      const { name, marketplace } = splitPluginKey(key);
       by.set(key, { key, name, marketplace, count: 0 });
     }
     return [...by.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
@@ -329,7 +337,7 @@ export function MarketplaceApp(): JSX.Element {
             )}
             {pluginSel.map((k) => (
               <button key={k} type="button" className="chip" onClick={() => togglePlugin(k)}>
-                {k.slice(0, k.lastIndexOf("@"))} ×
+                {splitPluginKey(k).name} ×
               </button>
             ))}
             <button
@@ -397,14 +405,22 @@ export function MarketplaceApp(): JSX.Element {
                       <span className="body">
                         <span className="top">
                           <span className={`nm${r.type === "command" ? " mono" : ""}`}>{r.display}</span>
-                          <button
-                            type="button"
-                            className="meta link"
-                            onClick={(e) => { e.stopPropagation(); togglePlugin(pluginKey(r)); }}
-                          >
-                            {r.plugin}
-                          </button>
-                          {r.kind === "asset" && <span className="meta">· {r.marketplace}</span>}
+                          {r.kind === "asset" ? (
+                            <>
+                              {/* Plugin rows have no name to disambiguate — r.plugin equals
+                                  r.display there, so the clickable button is asset-only. */}
+                              <button
+                                type="button"
+                                className="meta link"
+                                onClick={(e) => { e.stopPropagation(); togglePlugin(pluginKey(r)); }}
+                              >
+                                {r.plugin}
+                              </button>
+                              <span className="meta">· {r.marketplace}</span>
+                            </>
+                          ) : (
+                            <span className="meta">{r.marketplace}</span>
+                          )}
                           {r.enabled === false && <span className="tag off">disabled</span>}
                           {r.kind === "plugin" && <span className="tag dim">{stateLabel[r.state]}</span>}
                         </span>

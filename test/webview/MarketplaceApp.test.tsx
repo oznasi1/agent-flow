@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as React from "react";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
@@ -177,6 +177,13 @@ describe("MarketplaceApp", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Plugins \d/i }));
     expect(screen.getAllByText("remote-one").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/not downloaded/i).length).toBeGreaterThan(0);
+    // A plugin row's own name must not repeat as the clickable plugin-name
+    // button (that button, and the "· marketplace" it carries, are asset-only);
+    // the row keeps its marketplace, just as plain text instead.
+    const row = document.querySelector<HTMLElement>(".row.t-plugin")!;
+    expect(within(row).getAllByText("remote-one")).toHaveLength(1);
+    expect(within(row).getByText("atbay")).toBeInTheDocument();
+    expect(row.querySelector(".meta.link")).toBeNull();
   });
 
   it("sends mkt:open when Open file is clicked", () => {
@@ -350,6 +357,31 @@ describe("MarketplaceApp plugin filter", () => {
     fireEvent.click(screen.getAllByText("gc-plugin")[0]);
     fireEvent.click(screen.getByRole("button", { name: /^Clear$/ }));
     expect(screen.queryByRole("button", { name: /gc-plugin ×/ })).not.toBeInTheDocument();
+  });
+
+  // The selection key is `${plugin}@${marketplace}`, and only the plugin name is
+  // a manifest identifier — the marketplace can be a workspace folder name and
+  // may itself contain an "@". Splitting on the LAST "@" (the original bug) would
+  // read this chip as "cicd-plugin@service ×" instead of "cicd-plugin ×".
+  it("splits a selection key on the first @, not the last, so an @ in the marketplace survives", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(view({ assets: [asset({ marketplace: "service@2" })] })));
+    fireEvent.click(screen.getAllByText("cicd-plugin")[0]);
+    expect(screen.getByRole("button", { name: /^cicd-plugin ×$/ })).toBeInTheDocument();
+  });
+
+  it("keeps a selected plugin's checkbox listed at zero once every other dimension narrows it away", () => {
+    const { container } = render(<MarketplaceApp />);
+    host(assetsMsg());
+    openPicker();
+    fireEvent.click(screen.getByLabelText("gc-plugin"));
+    // gc-plugin's only asset is "watch", which "deploy" doesn't match — narrowing
+    // by the search box (a dimension the picker's own sift pass never skips)
+    // drives gc-plugin's count to zero, which is exactly the case the zero-count
+    // backfill in pickerItems exists to cover.
+    fireEvent.change(screen.getByPlaceholderText(/search skills/i), { target: { value: "deploy" } });
+    const item = [...container.querySelectorAll(".pop .pitem")].find((l) => l.textContent!.startsWith("gc-plugin"));
+    expect(item?.textContent).toContain("0");
   });
 });
 
