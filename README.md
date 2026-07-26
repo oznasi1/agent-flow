@@ -161,12 +161,22 @@ each repo, so they never get committed.
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
 | `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on a card. |
 | `agentFlow.prReviewAutoFix` | `true` | After the PR-review agent assesses the PR, let it implement the requested changes (off = assess only). |
+| `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
 `agentFlow.exploreMode`, `agentFlow.explorePrompts.*`, `agentFlow.prReviewPrompt`, and
 `agentFlow.worktree` — see the Settings UI. The **Address PR** kick-off always runs in a
 worktree. Per-task worktrees are created inside each repo at `.claude/worktrees/<KEY>`
 (and git-excluded automatically).
+
+**Remote Control.** With `agentFlow.remoteControl` set to `on` or `ask`, the Claude Code
+panel is pre-filled with `/remote-control <KEY>` instead of the task prompt, and the task
+prompt goes to your clipboard: press Enter to connect the session, then paste and press
+Enter to start the task. The Jira key names the remote session, so several are tellable
+apart on claude.ai. It takes two steps because Claude Code can't run a slash command and a
+prompt in one submission. Launches that open more than one window — a parallel batch, or a
+per-window Take across several repos — keep the normal single-Enter seeding and say so,
+since one clipboard can't carry a different prompt for each window.
 
 ### Where a task opens
 

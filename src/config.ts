@@ -95,6 +95,9 @@ export interface AgentFlowConfig {
   prReviewAutoFix: boolean; // after assessing, proceed to implement the PR's requested changes
   prReviewPrompt: string; // seeded prompt for the PR-review kick-off
   worktree: "ask" | "always" | "never";
+  // Offer Claude Code's Remote Control for the session we open: the panel is seeded
+  // with /remote-control <KEY> and the task prompt goes to the clipboard.
+  remoteControl: "off" | "on" | "ask";
   // Batch sizes strictly greater than this prompt a confirmation before parallel launch.
   batchLaunchConfirmThreshold: number;
   trackOpenWindows: boolean;
@@ -164,6 +167,10 @@ export function getConfig(): AgentFlowConfig {
     prReviewAutoFix: c.get<boolean>("prReviewAutoFix") ?? true,
     prReviewPrompt: c.get<string>("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT,
     worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
+    remoteControl: (() => {
+      const v = c.get<string>("remoteControl");
+      return v === "on" || v === "ask" ? v : "off";
+    })(),
     batchLaunchConfirmThreshold: Math.max(1, c.get<number>("batchLaunchConfirmThreshold") ?? 6),
     trackOpenWindows: c.get<boolean>("trackOpenWindows") ?? true,
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,

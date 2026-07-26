@@ -39,6 +39,7 @@ export interface OpenRequest {
   openIn?: "new" | "current"; // "current" reuses the running window; default "new"
   existingWorkspaceFile?: string; // when set: open the task into this .code-workspace
   existingFolder?: string; // when set: focus this already-open folder window + seed it
+  remoteControl?: boolean; // offer Claude Code's Remote Control in the opened session
 }
 
 export interface OpenResult {
@@ -49,12 +50,14 @@ export interface OpenResult {
   mergedRepos?: string[]; // repos appended to an existing workspace
   mergeFailed?: boolean;  // existing workspace could not be parsed; opened as-is
   unaddedRepos?: string[]; // repos that couldn't be added as roots to a folder window
+  remoteControl: boolean; // whether Remote Control actually applies (see the single-window guard)
 }
 
 interface PlanFile {
   key: string;
   createdAt: number;
   seedAgent: boolean;
+  remoteControl?: boolean;
   matches: { matchPath: string; prompt: string }[];
 }
 
@@ -219,10 +222,16 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     }
   }
 
+  // One clipboard, one window. A launch that opens several windows would leave every
+  // window but the last pasting another task's brief, so withhold it entirely. Also
+  // withhold it when seedAgent is off: nothing seeds without a plan file (below), so
+  // "applies" must never be true when no plan file will carry it.
+  const remoteControl = !!req.remoteControl && seedAgent && matches.length === 1;
+
   // 3 — durable writes BEFORE opening: reusing the current window reloads this
   //     extension host, which would otherwise race these to disk.
   if (seedAgent) {
-    writePlanFile({ key: ticket.key, createdAt: Date.now(), seedAgent: true, matches });
+    writePlanFile({ key: ticket.key, createdAt: Date.now(), seedAgent: true, remoteControl, matches });
   }
   const run: Run = {
     key: ticket.key,
@@ -257,7 +266,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     }
   }
 
-  return { mode: effMode, workspaceFile, briefs, opened, mergedRepos, mergeFailed, unaddedRepos };
+  return { mode: effMode, workspaceFile, briefs, opened, mergedRepos, mergeFailed, unaddedRepos, remoteControl };
 }
 
 /** Additively merge `repos` into an existing `.code-workspace` file, preserving
@@ -391,7 +400,7 @@ export async function maybeSeedAgent(context: vscode.ExtensionContext, log: (m: 
       continue;
     }
     await context.globalState.update(consumedKey, true);
-    await seedClaudeCode(match.prompt, plan.key, log);
+    await seedClaudeCode(match.prompt, plan.key, log, plan.remoteControl === true);
     return;
   }
 }
@@ -428,16 +437,39 @@ export function watchPlansAndSeed(
 }
 
 /** Open the Claude Code panel with the prompt pre-filled. Polls for the verified
- * command (handles the activation race), then the URI handler, then clipboard. */
-async function seedClaudeCode(prompt: string, key: string, log: (m: string) => void): Promise<void> {
+ * command (handles the activation race), then the URI handler, then clipboard.
+ *
+ * With `remoteControl`, the panel gets `/remote-control <key>` instead and the task
+ * prompt travels on the clipboard — the slash command is `local-jsx`, so Claude Code
+ * cannot stack it ahead of a prompt in one submission, and the panel takes a single
+ * buffer with a single Enter. */
+async function seedClaudeCode(
+  prompt: string,
+  key: string,
+  log: (m: string) => void,
+  remoteControl = false,
+): Promise<void> {
+  const seedText = remoteControl ? `/remote-control ${key}` : prompt;
+  // Write it before the panel opens so it's already there to paste.
+  if (remoteControl) await vscode.env.clipboard.writeText(prompt);
+
+  const announceRemoteControl = () => {
+    if (!remoteControl) return;
+    const paste = process.platform === "darwin" ? "⌘V" : "Ctrl+V";
+    vscode.window.showInformationMessage(
+      `Agent Flow: ${key} — press Enter to connect Remote Control, then ${paste} + Enter to start the task (it's on your clipboard).`,
+    );
+  };
+
   // 1 — verified command claude-vscode.primaryEditor.open(session, prompt);
   //     poll because our extension and Claude Code both activate onStartupFinished.
   for (let attempt = 1; attempt <= 7; attempt++) {
     try {
       const cmds = await vscode.commands.getCommands(true);
       if (cmds.includes(CLAUDE_OPEN_CMD)) {
-        await vscode.commands.executeCommand(CLAUDE_OPEN_CMD, undefined, prompt);
-        log(`seed ${key}: opened Claude Code via command (attempt ${attempt})`);
+        await vscode.commands.executeCommand(CLAUDE_OPEN_CMD, undefined, seedText);
+        log(`seed ${key}: opened Claude Code via command (attempt ${attempt})${remoteControl ? " + Remote Control" : ""}`);
+        announceRemoteControl();
         return;
       }
     } catch (e) {
@@ -449,9 +481,10 @@ async function seedClaudeCode(prompt: string, key: string, log: (m: string) => v
 
   // 2 — URI handler
   try {
-    const uri = `${vscode.env.uriScheme}://Anthropic.claude-code/open?prompt=${encodeURIComponent(prompt)}`;
+    const uri = `${vscode.env.uriScheme}://Anthropic.claude-code/open?prompt=${encodeURIComponent(seedText)}`;
     if (await vscode.env.openExternal(vscode.Uri.parse(uri))) {
-      log(`seed ${key}: opened via URI`);
+      log(`seed ${key}: opened via URI${remoteControl ? " + Remote Control" : ""}`);
+      announceRemoteControl();
       return;
     }
   } catch (e) {
@@ -459,6 +492,7 @@ async function seedClaudeCode(prompt: string, key: string, log: (m: string) => v
   }
 
   // 3 — clipboard fallback
+  if (remoteControl) log(`seed ${key}: Remote Control dropped — the clipboard is needed for the prompt`);
   await vscode.env.clipboard.writeText(prompt);
   vscode.window.showInformationMessage(
     `Agent Flow: opened workspace for ${key}. Claude Code prompt copied — paste it into the panel to start.`,

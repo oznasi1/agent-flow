@@ -317,6 +317,95 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
   });
 });
 
+describe("seedClaudeCode — remote control", () => {
+  const seedPlan = (over: Record<string, unknown> = {}) => {
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readFileSync.mockReturnValue(
+      JSON.stringify({
+        key: "ASM-1",
+        createdAt: Date.now(),
+        seedAgent: true,
+        matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "do it" }],
+        ...over,
+      }),
+    );
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+  };
+
+  it("seeds the slash command and puts the task prompt on the clipboard", async () => {
+    seedPlan({ remoteControl: true });
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "/remote-control ASM-1");
+    expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining("Remote Control"));
+  });
+
+  it("seeds the prompt and leaves the clipboard alone when not requested", async () => {
+    seedPlan({ remoteControl: false });
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+    expect(env.clipboard.writeText).not.toHaveBeenCalled();
+    // Removing the `if (!remoteControl) return` guard in announceRemoteControl would still
+    // pass every assertion above — this is what actually catches that regression.
+    expect(window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it("treats an absent remoteControl flag as off", async () => {
+    seedPlan();
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+    expect(env.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it("sends the slash command through the URI handler too", async () => {
+    vi.useFakeTimers();
+    try {
+      seedPlan({ remoteControl: true });
+      commands.getCommands.mockResolvedValue([]); // command never registers
+      env.openExternal.mockResolvedValue(true);
+      const { context } = fakeContext();
+
+      const p = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await p;
+
+      const uri = String(vi.mocked(env.openExternal).mock.calls[0][0]);
+      expect(uri).toContain(encodeURIComponent("/remote-control ASM-1"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops Remote Control and keeps the task prompt when it falls back to the clipboard", async () => {
+    vi.useFakeTimers();
+    try {
+      seedPlan({ remoteControl: true });
+      commands.getCommands.mockResolvedValue([]);
+      env.openExternal.mockResolvedValue(false);
+      const { context } = fakeContext();
+
+      const p = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await p;
+
+      // the prompt — not the slash command — is what the user is told to paste
+      expect(env.clipboard.writeText).toHaveBeenLastCalledWith("do it");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("watchPlansAndSeed", () => {
   it("debounces plan-dir changes and re-runs seeding, and disposes cleanly", () => {
     vi.useFakeTimers();
@@ -507,6 +596,47 @@ describe("openWorkspace — existing folder window", () => {
     const brief = writeArg((p) => p === "/other/open-window/.pick-task/TASK.md");
     expect(brief).toBeTruthy();
     expect(String(brief![1])).toContain("ASM-1");
+  });
+});
+
+describe("openWorkspace — remote control", () => {
+  const planOf = () => {
+    const w = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
+    return JSON.parse(String(w![1]));
+  };
+
+  it("records remoteControl on the plan for a single-window launch", async () => {
+    const result = await openWorkspace(baseReq({ remoteControl: true }));
+    expect(result.remoteControl).toBe(true);
+    expect(planOf().remoteControl).toBe(true);
+  });
+
+  it("records false when the launch did not ask", async () => {
+    const result = await openWorkspace(baseReq());
+    expect(result.remoteControl).toBe(false);
+    expect(planOf().remoteControl).toBe(false);
+  });
+
+  it("withholds it when the launch opens more than one window", async () => {
+    // per-window across two repos → two matches → two windows, one clipboard
+    const result = await openWorkspace(baseReq({ mode: "per-window", remoteControl: true }));
+    expect(planOf().matches).toHaveLength(2);
+    expect(result.remoteControl).toBe(false);
+    expect(planOf().remoteControl).toBe(false);
+  });
+
+  it("allows it for a per-window launch of a single repo", async () => {
+    const result = await openWorkspace(
+      baseReq({ mode: "per-window", services: mkRepos(["account-service"]), remoteControl: true }),
+    );
+    expect(planOf().matches).toHaveLength(1);
+    expect(result.remoteControl).toBe(true);
+  });
+
+  it("withholds it when seedAgent is off — no plan file means nothing could ever seed it", async () => {
+    const result = await openWorkspace(baseReq({ seedAgent: false, remoteControl: true }));
+    expect(result.remoteControl).toBe(false);
+    expect(writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"))).toBeUndefined();
   });
 });
 

@@ -374,6 +374,17 @@
           "default": "ask",
           "description": "Whether to isolate the task in a git worktree. Worktrees are created inside each repo at .claude/worktrees/<KEY> (git-excluded automatically)."
         },
+        "agentFlow.remoteControl": {
+          "type": "string",
+          "enum": ["off", "on", "ask"],
+          "enumDescriptions": [
+            "Never offer Remote Control",
+            "Offer Remote Control for every session Agent Flow launches",
+            "Ask once each time you launch"
+          ],
+          "default": "off",
+          "markdownDescription": "Offer Claude Code's **Remote Control** for the session Agent Flow opens, so you can drive it from claude.ai or the Claude mobile app. The panel is pre-filled with `/remote-control <KEY>` and your task prompt goes to the clipboard: press Enter to connect, then paste to start the task. Skipped for launches that open more than one window, because a single clipboard can't serve them."
+        },
         "agentFlow.batchLaunchConfirmThreshold": {
           "type": "number",
           "default": 6,

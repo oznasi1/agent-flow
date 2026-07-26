@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.27] — 2026-07-26
+
+### Added
+
+- **Remote Control for the session you just opened.** A new `agentFlow.remoteControl`
+  setting (`off` / `on` / `ask`, default `off`) pre-fills the Claude Code panel with
+  `/remote-control <KEY>` and puts the task prompt on your clipboard, so a task taken from
+  the pool can be driven from claude.ai or the Claude mobile app: Enter to connect, paste
+  and Enter to start. Nothing global is written — it applies only to the session being
+  opened. Launches that open more than one window (a parallel batch, or a per-window Take
+  across several repos) keep the normal seeding and say that Remote Control was skipped,
+  because one clipboard can't carry a different task prompt for each window.
+
 ## [0.1.26] — 2026-07-26
 
 ### Added

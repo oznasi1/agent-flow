@@ -56,6 +56,7 @@ const CFG = {
   prReviewAutoFix: true,
   prReviewPrompt: "PR {key}{files}",
   worktree: "never" as const,
+  remoteControl: "off" as const,
   batchLaunchConfirmThreshold: 6,
   trackOpenWindows: true,
   stampLabelOnWrite: true,
@@ -99,6 +100,7 @@ beforeEach(() => {
     workspaceFile: undefined,
     briefs: [],
     opened: ["/repos/account-service"],
+    remoteControl: false,
   });
   vi.mocked(readLiveWindows).mockReturnValue([]);
   vi.mocked(windowIdentity).mockReturnValue(undefined);
@@ -578,6 +580,7 @@ describe("takeTask", () => {
       workspaceFile: "/ws/ASM-1.code-workspace",
       briefs: [],
       opened: ["/ws/ASM-1.code-workspace"],
+      remoteControl: false,
     });
     const { provider, posted } = setup();
     await provider.takeTask("ASM-1", ["account-service", "centaur"]);
@@ -696,6 +699,7 @@ describe("takeTask", () => {
         briefs: [],
         opened: ["/ws/team.code-workspace"],
         mergeFailed: true,
+        remoteControl: false,
       });
 
       const { provider, posted } = setup();
@@ -718,6 +722,7 @@ describe("takeTask", () => {
         briefs: [],
         opened: ["/ws/team.code-workspace"],
         mergedRepos: ["account-service"],
+        remoteControl: false,
       });
 
       const { provider, posted } = setup();
@@ -905,7 +910,7 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(openWorkspace)
       .mockRejectedValueOnce(new Error("disk full"))
-      .mockResolvedValueOnce({ mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/x"] });
+      .mockResolvedValueOnce({ mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/x"], remoteControl: false });
     const { provider, posted } = setup();
     await provider.takeBatch(twoKeys, "api");
     expect(openWorkspace).toHaveBeenCalledTimes(2);
@@ -1149,5 +1154,121 @@ describe("addressPr", () => {
     const { provider } = setup({ authed: false });
     await provider.addressPr("ASM-1", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
+  });
+});
+
+describe("remote control", () => {
+  const lastOpen = () =>
+    vi.mocked(openWorkspace).mock.calls[vi.mocked(openWorkspace).mock.calls.length - 1][0];
+
+  it("passes false and never prompts when the setting is off", async () => {
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(lastOpen().remoteControl).toBe(false);
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+  });
+
+  it("passes true without prompting when the setting is on", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(lastOpen().remoteControl).toBe(true);
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+  });
+
+  it("ask: choosing Enable passes true", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(lastOpen().remoteControl).toBe(true);
+  });
+
+  it("ask: dismissing passes false and the launch still proceeds", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // dismissed
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(lastOpen().remoteControl).toBe(false);
+  });
+
+  it("asks once per launch, not once per repo", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service", "centaur"]);
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+  });
+
+  it("ask: never shows the picker when seedAgent is off — no plan file could ever carry the answer", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask", seedAgent: false });
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(lastOpen().remoteControl).toBe(false);
+  });
+
+  it("says so when a multi-window launch withheld it", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window",
+      workspaceFile: undefined,
+      briefs: [],
+      opened: ["/a", "/b"],
+      remoteControl: false, // withheld by the single-window guard
+    });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", ["account-service", "centaur"]);
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).toContain("Remote Control skipped");
+  });
+
+  it("explore resolves it once", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on", exploreMode: "knowledge" });
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("the retry path" as never);
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(lastOpen().remoteControl).toBe(true);
+  });
+
+  it("takeBatch never offers it for a real batch (2+ keys), even with the setting on", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], "api");
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(vi.mocked(openWorkspace).mock.calls.every((c) => !c[0].remoteControl)).toBe(true);
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).toContain("Remote Control skipped — one clipboard can't serve several windows");
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+
+  it("takeBatch offers it for a one-key batch — one window, one clipboard, same as an ordinary launch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window",
+      workspaceFile: undefined,
+      briefs: [],
+      opened: ["/x"],
+      remoteControl: true,
+    });
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], "api");
+    expect(window.showQuickPick).not.toHaveBeenCalled(); // "on" resolves without a picker
+    expect(lastOpen().remoteControl).toBe(true);
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).not.toContain("Remote Control skipped");
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
   });
 });
