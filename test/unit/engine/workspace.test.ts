@@ -317,6 +317,92 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
   });
 });
 
+describe("seedClaudeCode — remote control", () => {
+  const seedPlan = (over: Record<string, unknown> = {}) => {
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readFileSync.mockReturnValue(
+      JSON.stringify({
+        key: "ASM-1",
+        createdAt: Date.now(),
+        seedAgent: true,
+        matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "do it" }],
+        ...over,
+      }),
+    );
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+  };
+
+  it("seeds the slash command and puts the task prompt on the clipboard", async () => {
+    seedPlan({ remoteControl: true });
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "/remote-control ASM-1");
+    expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining("Remote Control"));
+  });
+
+  it("seeds the prompt and leaves the clipboard alone when not requested", async () => {
+    seedPlan({ remoteControl: false });
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+    expect(env.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it("treats an absent remoteControl flag as off", async () => {
+    seedPlan();
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+    expect(env.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it("sends the slash command through the URI handler too", async () => {
+    vi.useFakeTimers();
+    try {
+      seedPlan({ remoteControl: true });
+      commands.getCommands.mockResolvedValue([]); // command never registers
+      env.openExternal.mockResolvedValue(true);
+      const { context } = fakeContext();
+
+      const p = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await p;
+
+      const uri = String(vi.mocked(env.openExternal).mock.calls[0][0]);
+      expect(uri).toContain(encodeURIComponent("/remote-control ASM-1"));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops Remote Control and keeps the task prompt when it falls back to the clipboard", async () => {
+    vi.useFakeTimers();
+    try {
+      seedPlan({ remoteControl: true });
+      commands.getCommands.mockResolvedValue([]);
+      env.openExternal.mockResolvedValue(false);
+      const { context } = fakeContext();
+
+      const p = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await p;
+
+      // the prompt — not the slash command — is what the user is told to paste
+      expect(env.clipboard.writeText).toHaveBeenLastCalledWith("do it");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("watchPlansAndSeed", () => {
   it("debounces plan-dir changes and re-runs seeding, and disposes cleanly", () => {
     vi.useFakeTimers();
