@@ -66,40 +66,47 @@ opens it fresh otherwise; **Diff** shows the working diff; **⋯** offers *Open 
 ### The Marketplace — browse your skills, commands & agents
 
 The **Marketplace** (open it with the puzzle-piece (`$(extensions)`) button beside the
-Deck's button in the sidebar title bar) is a searchable browser of everything Claude Code
-can do on this machine. It reads your local `~/.claude` — the marketplaces you've added,
-the plugins you've installed, and the skills, slash commands, agents and hooks inside them
-— plus any skills or commands you wrote yourself in `~/.claude` or in the open workspace's
-`.claude/`.
+Deck's button in the sidebar title bar, or **"Agent Flow: Open the Marketplace"**) is a
+searchable browser of everything Claude Code can do on this machine. It reads your local
+`~/.claude` — the marketplaces you've added, the plugins you've installed, and the skills,
+slash commands, agents and hooks inside them — plus any skills or commands you wrote
+yourself in `~/.claude` or in the open workspace's `.claude/`.
+
+<img src="media/marketplace.png" alt="The Agent Flow Marketplace: a search box over type pills (All, Skills, Commands, Agents, Hooks, Plugins) with live counts, scope pills (Everywhere, Installed only, Enabled only) and a Plugins picker, and a row of clickable marketplace tags. The browse list is grouped into category sections — Yours first, then Development — each row showing its type glyph, name, plugin, marketplace and blurb, with disabled ones struck through. The detail pane on the right shows the selected skill's tags, description, where it came from, a Copy snippet, Open file / Reveal in Finder actions, and its SKILL.md rendered underneath." />
 
 Search is fuzzy and ranked — `revw` finds `/review`, `mkpl` finds `marketplace` — with the
-best match selected as you type and the type tallies following the query. When you aren't
-searching, the list groups into **category sections** read from each plugin's own
-manifest — Development, Monitoring, Deployment, and so on — with everything you wrote
-yourself under **Yours** first, the rest ordered by descending size, and anything whose
-manifest omits the field under **Uncategorized** last. Click a section header to focus
-that category.
+best match selected as you type and the type tallies following the query. From the search
+box, **↑/↓** move the selection and **Enter** opens its file. When you aren't searching,
+the list groups into **category sections** read from each plugin's own manifest —
+Development, Monitoring, Deployment, and so on — with everything you wrote yourself under
+**Yours** first, the rest ordered by descending size, and anything whose manifest omits
+the field under **Uncategorized** last. Click a section header to focus that category.
 
 Narrow further by type, by what's installed or enabled, by **several plugins at once**
 (the searchable `Plugins ▾` picker, or click a plugin name in any row), or by marketplace
 (click its tag). Query, type, scope, category, plugins and marketplace all AND together,
 and active selections show up as removable chips with a **Clear** action — the chip row
-disappears when nothing is selected. It also shows which plugins are disabled, and lists
-the plugins your marketplaces catalogue but haven't downloaded yet, with the
-`/plugin install` command to get them.
+disappears when nothing is selected.
+
+<img src="media/marketplace-filters.png" alt="The same panel with the Plugins picker open: a filter box above a checkbox list of plugins, each with its marketplace and the number of rows it would reveal, two of them ticked, and a Clear 2 button. The ticked plugins appear as removable chips beside a Clear action, the type counts have dropped to match, and the list behind now shows only those plugins' assets." />
+
+It also shows which plugins are disabled, and lists the plugins your marketplaces
+catalogue but haven't downloaded yet, with the `/plugin install` command to get them.
 
 Selecting a row **renders its file** in the pane on the right, under the metadata — a
 skill's `SKILL.md`, a hook's `hooks.json` as a fenced JSON block, a plugin's README — so
-you can read what something actually does without opening it; **Open file** still opens
-it in an editor tab, and **Copy** grabs the command you'd type to use it. Files over
-262,144 characters are truncated, with the same **Open file** button covering the rest
-in the editor. The renderer
-builds elements from a parsed tree instead of injecting HTML, so a hostile file from a
-third-party marketplace can't run anything; only `http`/`https` links become clickable.
+you can read what something actually does without opening it; **Open file** still opens it
+in an editor tab, **Reveal in Finder** shows it on disk, and **Copy** grabs the command
+you'd type to use it. Files over 262,144 characters are truncated, with the same **Open
+file** button covering the rest in the editor. The renderer builds elements from a parsed
+tree instead of injecting HTML, so a hostile file from a third-party marketplace can't run
+anything; only `http`/`https` links become clickable.
 
 The panel is **read-only and offline** — it never writes to `~/.claude`, never runs
-`/plugin install`, and makes no network calls. Add marketplaces in Claude Code itself
-(`/plugin marketplace add owner/repo`) and they show up here on the next scan.
+`/plugin install`, and makes no network calls. **⟳ Rescan** re-reads the disk (so does
+coming back to the panel after a pause), and **+ Add a marketplace** copies the
+`/plugin marketplace add owner/repo` command for you to run in Claude Code itself — new
+marketplaces show up here on the next scan.
 
 ## Quick start
 
@@ -201,18 +208,27 @@ other repos the task touches keep their briefs but aren't added as roots). Set
 src/
 ├── extension.ts        # activation, commands, first-run + seed-on-activation hooks
 ├── setup.ts            # guided first-run configuration wizard
-├── tasksView.ts        # webview provider + the pick→confirm→open flow
+├── tasksView.ts        # sidebar webview provider + the pick→confirm→open flow
+├── deckView.ts         # the Deck panel: in-flight runs, live signal, open/diff
+├── marketplaceView.ts  # the Marketplace panel: scan, file reads, open/reveal/copy
 ├── config.ts           # settings accessor
 ├── types.ts            # shared host ↔ webview message types
 ├── jira/
 │   ├── auth.ts         # JiraAuth interface + ApiTokenAuth (SecretStorage)
-│   └── client.ts       # REST client: JQL builder, search, getIssue, transitions
-├── engine/
+│   ├── client.ts       # REST client: search, getIssue, transitions
+│   └── jql.ts          # the JQL behind each filter lens
+├── engine/             # the logic, kept out of the views so it can be tested directly
 │   ├── repos.ts        # discover local repo checkouts
 │   ├── infer.ts        # component/label/text → service matching
 │   ├── worktree.ts     # per-task git worktrees + branch naming
-│   └── workspace.ts    # briefs, .code-workspace, plan.json, open windows, agent seed
-└── webview/            # React task-pool UI (bundled separately by esbuild)
+│   ├── workspace.ts    # briefs, .code-workspace, plan.json, open windows, agent seed
+│   ├── runs.ts         # what you've launched, for the Deck
+│   ├── transcript.ts   # best-effort live agent state from ~/.claude/projects
+│   ├── claudeAssets.ts # scan ~/.claude: marketplaces, plugins, skills, commands, hooks
+│   ├── sections.ts     # the Marketplace's category order (Yours → size → Uncategorized)
+│   ├── fuzzy.ts        # the ranked fuzzy match behind the Marketplace's search
+│   └── markdown.ts     # the parse-to-tree markdown renderer behind the file preview
+└── webview/            # React UIs — task pool, Deck, Marketplace (three esbuild bundles)
 ```
 
 Auth is behind the `JiraAuth` interface: v1 ships the API-token provider; the OAuth
@@ -236,7 +252,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full command list and conventions
 ## Status
 
 v1 — task pool, filters, size lens, service inference, worktrees, open + seed, and status
-changes from a card. The agent seed calls the Claude Code extension command
+changes from a card, plus the **Deck** (the in-flight board) and the **Marketplace** (the
+read-only browser over `~/.claude`). The agent seed calls the Claude Code extension command
 (`claude-vscode.primaryEditor.open`) with a URI-handler and clipboard fallback; the seeded
 brief is the guaranteed fallback. Deferred: OAuth web sign-in, cloning not-yet-checked-out
 repos, multi-project.
