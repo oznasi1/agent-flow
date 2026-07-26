@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.30] — 2026-07-27
+
+### Added
+
+- **The Marketplace is documented with screenshots.** `media/marketplace.png` shows the
+  browse view — the search box, the type and scope pills with their live counts, the
+  marketplace tags, the **category sections** (Yours first) and a selected skill's
+  `SKILL.md` rendered in the detail pane. `media/marketplace-filters.png` shows the
+  `Plugins ▾` picker open with two plugins ticked and the matching chips. Both are
+  captured from the real webview with sanitized fictional demo data.
+
+### Changed
+
+- **The README's Marketplace section now covers what wasn't written down** — keyboard
+  navigation (**↑/↓** to move, **Enter** to open), **Reveal in Finder**, **⟳ Rescan** and
+  the rescan when the panel regains focus, and that **+ Add a marketplace** copies the
+  `/plugin marketplace add` command rather than running it. The architecture tree, which
+  still described the pre-Deck layout, now lists `deckView.ts`, `marketplaceView.ts` and
+  the engine modules behind them, and **Status** names the Deck and the Marketplace.
+
 ## [0.1.29] — 2026-07-27
 
 ### Fixed
