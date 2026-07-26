@@ -1,6 +1,7 @@
 // Reads Claude Code's on-disk state (~/.claude and the open workspace) and derives
 // the browsable asset list. Pure over an injected AssetReader so every rule here is
 // unit-testable from fixture trees — this module must never import "vscode" or "fs".
+import { AssetType, AssetView, PluginState } from "../types";
 
 export interface DirEntry {
   name: string;
@@ -43,4 +44,161 @@ export function parseFrontmatter(text: string): Record<string, string> {
 
 function unquote(s: string): string {
   return s.replace(/^["']|["']$/g, "").trim();
+}
+
+/** Never descended into, at any level. */
+export const SKIP_DIRS = new Set([".git", "node_modules", "tests", "test"]);
+/** Additionally skipped when walking ~/.claude or a workspace .claude, where the
+ * neighbouring plugin cache, transcripts and worktrees are large and irrelevant. */
+export const SKIP_DIRS_OWN = new Set([
+  ...SKIP_DIRS, "plugins", "projects", "cache", "backups", "sessions",
+  "shell-snapshots", "file-history", "history", "todos", "downloads",
+  "paste-cache", "worktrees", "debug", "statsig", "ide", "telemetry",
+]);
+const MAX_DEPTH = 8;
+
+export interface Attribution {
+  plugin: string;
+  marketplace: string;
+  state: PluginState;
+  enabled: boolean | null;
+}
+
+/** An in-memory AssetReader over a flat {absolutePath: contents} map. Exported so
+ * the engine tests and any future fixture-driven test share one implementation. */
+export function memReader(tree: Record<string, string>): AssetReader {
+  const paths = Object.keys(tree);
+  const dirs = new Set<string>();
+  for (const p of paths) {
+    const segs = p.split("/");
+    for (let i = 1; i < segs.length; i++) dirs.add(segs.slice(0, i).join("/") || "/");
+  }
+  return {
+    readFile: (p) => (p in tree ? tree[p] : null),
+    isDir: (p) => dirs.has(p.replace(/\/+$/, "")),
+    readDir: (p) => {
+      const base = p.replace(/\/+$/, "");
+      const seen = new Map<string, boolean>();
+      for (const full of paths) {
+        if (!full.startsWith(base + "/")) continue;
+        const rest = full.slice(base.length + 1);
+        const slash = rest.indexOf("/");
+        const name = slash === -1 ? rest : rest.slice(0, slash);
+        if (name) seen.set(name, slash !== -1);
+      }
+      return [...seen].map(([name, isDir]) => ({ name, isDir })).sort((a, b) => a.name.localeCompare(b.name));
+    },
+  };
+}
+
+/** Every file under `dir`, depth-capped, skipping noise directories.
+ * Returns paths relative to `dir`, in stable sorted order. */
+function walk(reader: AssetReader, dir: string, skip: Set<string>): string[] {
+  const out: string[] = [];
+  const visit = (rel: string, depth: number): void => {
+    if (depth > MAX_DEPTH) return;
+    const abs = rel ? `${dir}/${rel}` : dir;
+    for (const e of reader.readDir(abs)) {
+      if (e.isDir) {
+        if (skip.has(e.name)) continue;
+        visit(rel ? `${rel}/${e.name}` : e.name, depth + 1);
+      } else {
+        out.push(rel ? `${rel}/${e.name}` : e.name);
+      }
+    }
+  };
+  if (!reader.isDir(dir)) return out;
+  visit("", 0);
+  return out;
+}
+
+function mdAsset(
+  reader: AssetReader,
+  dir: string,
+  rel: string,
+  type: AssetType,
+  fallbackName: string,
+  attr: Attribution,
+): AssetView {
+  const fm = parseFrontmatter(reader.readFile(`${dir}/${rel}`) ?? "");
+  return {
+    type,
+    name: fm.name || fallbackName,
+    description: fm.description ?? "",
+    plugin: attr.plugin,
+    marketplace: attr.marketplace,
+    file: `${dir}/${rel}`,
+    rel,
+    enabled: attr.enabled,
+    state: attr.state,
+  };
+}
+
+/** Flatten a hooks.json body. Accepts {"hooks":{Event:[…]}} and bare {Event:[…]}. */
+export function flattenHooks(json: string | null, file: string, rel: string, attr: Attribution): AssetView[] {
+  if (json === null) return [];
+  let parsed: any;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  const byEvent = parsed && typeof parsed === "object" ? (parsed.hooks ?? parsed) : null;
+  if (!byEvent || typeof byEvent !== "object") return [];
+  const out: AssetView[] = [];
+  for (const [event, entries] of Object.entries<any>(byEvent)) {
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      for (const h of entry?.hooks ?? []) {
+        if (!h || typeof h !== "object") continue;
+        const matcher = typeof entry.matcher === "string" ? entry.matcher : "";
+        out.push({
+          type: "hook",
+          name: event,
+          description: String(h.command ?? h.type ?? ""),
+          plugin: attr.plugin,
+          marketplace: attr.marketplace,
+          file,
+          rel: matcher ? `${rel} (${matcher})` : rel,
+          enabled: attr.enabled,
+          state: attr.state,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/** Skills, commands, agents and hooks inside one plugin (or user) directory. */
+export function discoverAssets(
+  reader: AssetReader,
+  dir: string,
+  attr: Attribution,
+  skip: Set<string> = SKIP_DIRS,
+): AssetView[] {
+  const rels = walk(reader, dir, skip);
+  const skills: AssetView[] = [];
+  const commands: AssetView[] = [];
+  const agents: AssetView[] = [];
+
+  for (const rel of rels) {
+    const segs = rel.split("/");
+    const base = segs[segs.length - 1];
+    if (base === "SKILL.md") {
+      const folder = segs.length >= 2 ? segs[segs.length - 2] : "";
+      skills.push(mdAsset(reader, dir, rel, "skill", folder, attr));
+      continue;
+    }
+    if (!base.endsWith(".md")) continue;
+    const bucket = segs[0] === "commands" ? commands : segs[0] === "agents" ? agents : null;
+    if (!bucket || segs.length < 2) continue;
+    const name = segs.slice(1).join(":").replace(/\.md$/, "");
+    bucket.push(mdAsset(reader, dir, rel, segs[0] === "commands" ? "command" : "agent", name, attr));
+  }
+
+  const hookRel = "hooks/hooks.json";
+  const hooks = flattenHooks(reader.readFile(`${dir}/${hookRel}`), `${dir}/${hookRel}`, hookRel, attr);
+
+  const byName = (a: AssetView, b: AssetView) => a.name.localeCompare(b.name);
+  return [...skills.sort(byName), ...commands.sort(byName), ...agents.sort(byName), ...hooks];
 }
