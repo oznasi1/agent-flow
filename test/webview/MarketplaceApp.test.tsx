@@ -526,6 +526,19 @@ describe("MarketplaceApp file preview", () => {
     expect(reads()).toEqual([]);
   });
 
+  // The "does not re-read" test above re-selects a row whose file already
+  // arrived, so `files.has(previewFile)` alone would satisfy it even with the
+  // `asked` ref deleted. The ref exists for the case where the active row's own
+  // read is still outstanding when an unrelated file's body arrives — that
+  // arrival changes `files` (a dependency of the request effect), re-running it
+  // while the active row hasn't changed at all.
+  it("does not re-ask for the active file while its read is still outstanding and an unrelated file arrives", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg()); // "mine" is active; its mkt:read went out and is left unanswered here
+    host({ type: "mkt:file", file: "/b/skills/watch/SKILL.md", text: "# Watch\n", truncated: false });
+    expect(reads()).toEqual([{ type: "mkt:read", file: "/u/skills/mine/SKILL.md" }]);
+  });
+
   it("previews a plugin's README rather than a source file", () => {
     render(<MarketplaceApp />);
     host(assetsMsg(view({ plugins: [plugin({ name: "cicd-plugin", readme: "/mk/cicd/README.md" })] })));
@@ -541,6 +554,66 @@ describe("MarketplaceApp file preview", () => {
     sent.mockClear();
     host(assetsMsg());
     expect(reads()).toEqual([{ type: "mkt:read", file: "/u/skills/mine/SKILL.md" }]);
+  });
+
+  it("evicts the oldest cached file once more than 50 distinct files have arrived", () => {
+    render(<MarketplaceApp />);
+    // A decoy stays selected throughout so its own auto-read doesn't interfere
+    // with the reads we assert on below.
+    const decoy = asset({ name: "cache-decoy", file: "/e/decoy.md", rel: "e/decoy.md" });
+    const many = Array.from({ length: 52 }, (_, i) => asset({ name: `ef${i}`, file: `/e/${i}.md`, rel: `e/${i}.md` }));
+    host(assetsMsg(view({ assets: [decoy, ...many] })));
+    sent.mockClear();
+
+    // Fill the cache to exactly 50 (ef0..ef49), then push ef50: the 51st distinct
+    // entry, which must evict the oldest one, ef0.
+    for (let i = 0; i <= 50; i++) {
+      host({ type: "mkt:file", file: `/e/${i}.md`, text: `# ${i}\n`, truncated: false });
+    }
+    fireEvent.click(rowText("ef0"));
+    expect(reads()).toEqual([{ type: "mkt:read", file: "/e/0.md" }]); // evicted — asked again
+    sent.mockClear();
+
+    // Push one further file: eviction must keep firing on every push past the
+    // cap (not just once), while what's still within the cap must survive —
+    // otherwise the cache is either leaking unboundedly or dropping too much.
+    host({ type: "mkt:file", file: "/e/51.md", text: "# 51\n", truncated: false });
+    fireEvent.click(rowText("ef1"));
+    expect(reads()).toEqual([{ type: "mkt:read", file: "/e/1.md" }]); // now evicted too
+    sent.mockClear();
+    fireEvent.click(rowText("ef51"));
+    expect(reads()).toEqual([]); // just cached — must not have been dropped
+  });
+
+  it("keeps a re-arrived file as the newest, so a later push evicts around it instead of it", () => {
+    render(<MarketplaceApp />);
+    const decoy = asset({ name: "reinsert-decoy", file: "/r/decoy.md", rel: "r/decoy.md" });
+    const rowA = asset({ name: "rowA", file: "/r/A.md", rel: "r/A.md" });
+    const others = Array.from({ length: 49 }, (_, i) => asset({ name: `rg${i}`, file: `/r/g${i}.md`, rel: `r/g${i}.md` }));
+    const rowLast = asset({ name: "rowLast", file: "/r/last.md", rel: "r/last.md" });
+    host(assetsMsg(view({ assets: [decoy, rowA, ...others, rowLast] })));
+    sent.mockClear();
+
+    // Cache A first, so it starts out as the oldest entry, then 49 more to reach
+    // the 50-entry cap with no eviction yet.
+    host({ type: "mkt:file", file: "/r/A.md", text: "# A\n", truncated: false });
+    for (let i = 0; i < 49; i++) {
+      host({ type: "mkt:file", file: `/r/g${i}.md`, text: `# g${i}\n`, truncated: false });
+    }
+    // Re-arrive A: this must move it to the newest position, not merely refresh
+    // its body in place.
+    host({ type: "mkt:file", file: "/r/A.md", text: "# A again\n", truncated: false });
+    // One more distinct file pushes the cache past 50. A naive eviction (delete
+    // the oldest key without the reinsert moving A first) would drop A here,
+    // since A was the very first entry cached; the correct one drops g0 instead,
+    // since g0 is now the oldest.
+    host({ type: "mkt:file", file: "/r/last.md", text: "# Last\n", truncated: false });
+
+    fireEvent.click(rowText("rowA"));
+    expect(reads()).toEqual([]); // still cached — protected by the reinsert
+    sent.mockClear();
+    fireEvent.click(rowText("rg0"));
+    expect(reads()).toEqual([{ type: "mkt:read", file: "/r/g0.md" }]); // g0 was evicted instead
   });
 
   it("keeps the detail block above the preview", () => {
