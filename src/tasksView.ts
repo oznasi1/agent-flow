@@ -410,6 +410,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const args = await this.targetToOpenArgs(target, services.length, "Explore", cfg);
     if (!args) return;
 
+    const wantRemoteControl = await this.resolveRemoteControl(cfg);
+
     const slug = topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "explore";
     const planMd = `## Exploration: ${topic}\n\n_No Jira ticket yet — a knowledge/exploration session. If it turns into work, open a ticket afterwards._`;
     const result = await openWorkspace({
@@ -424,13 +426,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       openIn: args.openIn,
       existingWorkspaceFile: args.existingWorkspaceFile,
       existingFolder: args.existingFolder,
+      remoteControl: wantRemoteControl,
     });
 
     const where = result.workspaceFile
       ? `workspace ${result.workspaceFile.split("/").pop()}`
       : `${result.opened.length} window(s)`;
     const seeded = cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : "";
-    this.toast("success", `Opened ${where} to explore. Brief seeded in each repo.${seeded}`);
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
+    this.toast("success", `Opened ${where} to explore. Brief seeded in each repo.${seeded}${rcNote}`);
   }
 
   /** One repo → its own window; multiple → per the workspaceMode setting (asking if configured). */
@@ -550,6 +554,34 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     );
   }
 
+  /** Whether this launch offers Claude Code's Remote Control. Resolved once per launch
+   * action. Dismissing the picker means "no", not "cancel": by the time this runs,
+   * worktrees and briefs already exist, and abandoning the launch over an optional
+   * toggle is the worse failure. */
+  private async resolveRemoteControl(cfg: AgentFlowConfig): Promise<boolean> {
+    if (cfg.remoteControl === "off") return false;
+    if (cfg.remoteControl === "on") return true;
+    const p = await vscode.window.showQuickPick(
+      [
+        {
+          label: "$(radio-tower) Enable Remote Control",
+          detail: "Connect first, then paste the task prompt to start",
+          yes: true,
+        },
+        { label: "$(circle-slash) Local only", detail: "Seed the task prompt as usual", yes: false },
+      ],
+      { title: "Enable Remote Control for this session?", ignoreFocusOut: true },
+    );
+    return p?.yes === true;
+  }
+
+  /** Toast fragment for a launch that asked for Remote Control and didn't get it —
+   * `openWorkspace` withholds it when the launch opens more than one window. Without
+   * this the user waits for a `/remote-control` prompt that never arrives. */
+  private remoteControlNote(wanted: boolean, applied: boolean): string {
+    return wanted && !applied ? " Remote Control skipped — it needs a single window." : "";
+  }
+
   /** Open + seed a resolved kick-off: worktree decision → workspace mode → brief →
    * openWorkspace → success toast. Shared by Take and Address PR. The destination
    * `target` is resolved earlier in resolveKickoff. `forceWorktree` (Address PR) always
@@ -586,6 +618,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const args = await this.targetToOpenArgs(target, services.length, key, cfg);
     if (!args) return;
 
+    const wantRemoteControl = await this.resolveRemoteControl(cfg);
+
     const planMd = this.buildBrief(detail);
     const result = await openWorkspace({
       ticket: { key: detail.key, summary: detail.summary, url: detail.url },
@@ -599,23 +633,25 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       openIn: args.openIn,
       existingWorkspaceFile: args.existingWorkspaceFile,
       existingFolder: args.existingFolder,
+      remoteControl: wantRemoteControl,
     });
 
     const where = result.workspaceFile
       ? `workspace ${result.workspaceFile.split("/").pop()}`
       : `${result.opened.length} window(s)`;
     const seeded = cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : "";
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     if (result.mergeFailed) {
       this.toast(
         "info",
-        `Opened ${where} for ${key}, but its folders couldn't be parsed — repos weren't added. Brief seeded in each repo.${seeded}`,
+        `Opened ${where} for ${key}, but its folders couldn't be parsed — repos weren't added. Brief seeded in each repo.${seeded}${rcNote}`,
       );
     } else {
       const added = result.mergedRepos?.length ? ` Added ${result.mergedRepos.join(", ")}.` : "";
       const unadded = result.unaddedRepos?.length
         ? ` ${result.unaddedRepos.join(", ")} couldn't be added as roots to that window — their briefs are still in place.`
         : "";
-      this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${unadded}${seeded}`);
+      this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${unadded}${seeded}${rcNote}`);
     }
   }
 
@@ -688,6 +724,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const promptMode = await this.choosePromptMode(cfg, `Launch ${keys.length} selected task(s) — how should the agents start?`);
     if (!promptMode) return;
 
+    // One clipboard can't serve a window per task — don't offer Remote Control here.
+    const rcSkipped = cfg.remoteControl !== "off";
+    if (rcSkipped) this.log("takeBatch: Remote Control skipped — one clipboard, several windows");
+
     let launched = 0;
     const failed: string[] = [];
     for (let i = 0; i < keys.length; i++) {
@@ -723,11 +763,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
 
     const summary = `Launched ${launched} of ${keys.length} in parallel.`;
+    const rcNote = rcSkipped ? " Remote Control skipped — one clipboard can't serve several windows." : "";
     if (failed.length) {
       const shown = failed.slice(0, 5).join("; ");
       const more = failed.length > 5 ? ` (and ${failed.length - 5} more)` : "";
-      this.toast("error", `${summary} Failed: ${shown}${more}`);
-    } else this.toast("success", `${summary} A worktree + Claude session per task.`);
+      this.toast("error", `${summary} Failed: ${shown}${more}${rcNote}`);
+    } else this.toast("success", `${summary} A worktree + Claude session per task.${rcNote}`);
   }
 
   /** PR-review kick-off: the same open+seed flow as Take, but always in a worktree and

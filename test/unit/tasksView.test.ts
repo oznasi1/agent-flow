@@ -1156,3 +1156,89 @@ describe("addressPr", () => {
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 });
+
+describe("remote control", () => {
+  const lastOpen = () =>
+    vi.mocked(openWorkspace).mock.calls[vi.mocked(openWorkspace).mock.calls.length - 1][0];
+
+  it("passes false and never prompts when the setting is off", async () => {
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(lastOpen().remoteControl).toBe(false);
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+  });
+
+  it("passes true without prompting when the setting is on", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(lastOpen().remoteControl).toBe(true);
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+  });
+
+  it("ask: choosing Enable passes true", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(lastOpen().remoteControl).toBe(true);
+  });
+
+  it("ask: dismissing passes false and the launch still proceeds", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // dismissed
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(lastOpen().remoteControl).toBe(false);
+  });
+
+  it("asks once per launch, not once per repo", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service", "centaur"]);
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+  });
+
+  it("says so when a multi-window launch withheld it", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window",
+      workspaceFile: undefined,
+      briefs: [],
+      opened: ["/a", "/b"],
+      remoteControl: false, // withheld by the single-window guard
+    });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", ["account-service", "centaur"]);
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).toContain("Remote Control skipped");
+  });
+
+  it("explore resolves it once", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on", exploreMode: "knowledge" });
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("the retry path" as never);
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(lastOpen().remoteControl).toBe(true);
+  });
+
+  it("takeBatch never offers it, even with the setting on", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], "api");
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(vi.mocked(openWorkspace).mock.calls.every((c) => !c[0].remoteControl)).toBe(true);
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).toContain("Remote Control skipped");
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+});
