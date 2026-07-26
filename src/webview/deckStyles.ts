@@ -51,26 +51,31 @@ export const DECK_CSS = `
   .ctl.on .switch::after { transform: translateX(11px); background: var(--vscode-button-foreground); }
   .synced { font-size: 11px; color: var(--vscode-descriptionForeground); font-family: var(--mono); }
 
-  .board { flex: 1; min-height: 0; display: flex; gap: 12px; padding: 16px 20px 0; overflow-x: auto; overflow-y: hidden; }
+  /* The board is the one scrollport for both axes: y scrolls the whole deck rather than each
+     column on its own, so a card's vertical position is comparable across columns. align-items
+     stays flex-start so every column keeps its natural height — stretching them to the board's
+     height would cap how far a sticky header can travel. The 16px top gap lives on .col-hd
+     instead of here: sticky offsets resolve against the scrollport, so padding-top on the
+     scroll container would scroll away and leave the headers flush against the toolbar. */
+  .board { flex: 1; min-height: 0; display: flex; align-items: flex-start; gap: 12px;
+    padding: 0 20px 20px; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
   /* min-width: 0 keeps the fixed basis honest — a card's unbreakable branch/key text would
      otherwise raise the column's automatic minimum width and stretch the whole board. */
-  .col { position: relative; flex: 0 0 318px; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
-  .col-hd { display: flex; align-items: center; gap: 8px; padding: 0 2px 10px; flex: none; }
+  .col { position: relative; flex: 0 0 318px; min-width: 0; display: flex; flex-direction: column; }
+  /* Sticky so the column you're reading stays labelled once the board scrolls; opaque because
+     cards pass underneath it. */
+  .col-hd { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px;
+    padding: 16px 2px 10px; flex: none; background: var(--vscode-editor-background); }
   .col-hd .dot { width: 9px; height: 9px; border-radius: 50%; }
   .col-hd .nm { font-size: 12px; font-weight: 600; }
   .col-hd .ct { font-family: var(--mono); font-size: 11px; color: var(--vscode-descriptionForeground);
     border: 1px solid var(--hair); border-radius: 20px; padding: 0 7px; }
   .col-hd .rule { flex: 1; height: 1px; background: var(--hair); }
-  .col-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
-    display: flex; flex-direction: column; gap: 10px; padding: 1px 6px 34px 2px; }
-  /* Cards scrolling past the board's bottom edge fade out, so a column that has more
-     below reads as scrollable instead of looking like it ends mid-card. */
-  .col::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 28px; pointer-events: none;
-    background: linear-gradient(to top, var(--vscode-editor-background) 40%, transparent); }
+  .col-body { display: flex; flex-direction: column; gap: 10px; padding: 1px 3px 3px; }
 
   /* \`flex: none\` is load-bearing: .card sets overflow:hidden to clip the accent rail, which
      zeroes its automatic minimum size — without it the flex column squeezes every card and
-     clips its content instead of letting .col-body scroll. */
+     clips its content instead of growing the column. */
   .card { position: relative; flex: none; border: 1px solid var(--hair); border-radius: 10px;
     background: color-mix(in srgb, var(--vscode-foreground) 4%, var(--vscode-editor-background));
     padding: 10px 12px 9px 14px; overflow: hidden;
@@ -164,7 +169,7 @@ export const DECK_CSS = `
   .toast.error { border-color: var(--c-needs); }
   .toast.success { border-color: var(--c-done); }
 
-  .board::-webkit-scrollbar, .col-body::-webkit-scrollbar { width: 9px; height: 9px; }
-  .board::-webkit-scrollbar-thumb, .col-body::-webkit-scrollbar-thumb {
-    background: var(--vscode-scrollbarSlider-background); border-radius: 8px; }
+  .board::-webkit-scrollbar { width: 9px; height: 9px; }
+  .board::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 8px; }
+  .board::-webkit-scrollbar-corner { background: transparent; }
 `;
