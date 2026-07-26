@@ -3,9 +3,12 @@ import { send } from "./vscodeApi";
 import { fuzzyScore, phraseScore } from "../engine/fuzzy";
 import { categoryLabel, orderSections, sectionKey, Section } from "../engine/sections";
 import { AssetType, AssetView, ClaudeAssetsView, OutboundMessage, PluginRowView } from "../types";
+import { FilePreview } from "./FilePreview";
 import { PickerItem, PluginPicker } from "./PluginPicker";
 
 let toastSeq = 0;
+
+const CACHE_MAX = 50; // bodies, not bytes — a rescan clears the lot anyway
 
 const EMPTY: ClaudeAssetsView = { marketplaces: [], plugins: [], assets: [], notSetUp: false, scannedAt: 0 };
 const TYPES: { k: AssetType; label: string; glyph: string }[] = [
@@ -153,12 +156,28 @@ export function MarketplaceApp(): JSX.Element {
   const [pluginSel, setPluginSel] = React.useState<string[]>([]);
   const [mktSel, setMktSel] = React.useState<string[]>([]);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string }[]>([]);
+  const [files, setFiles] = React.useState<Map<string, { text: string; truncated: boolean }>>(new Map());
+  // Reads already in flight. Kept out of state so arrival doesn't re-trigger the
+  // effect that asked for them.
+  const asked = React.useRef(new Set<string>());
 
   React.useEffect(() => {
     const handler = (ev: MessageEvent<OutboundMessage>) => {
       const m = ev.data;
-      if (m.type === "mkt:assets") setView(m.view);
-      else if (m.type === "mkt:loading") setLoading(m.loading);
+      if (m.type === "mkt:assets") {
+        setView(m.view);
+        // A rescan may have found edited files; the old bodies are no longer true.
+        setFiles(new Map());
+        asked.current.clear();
+      } else if (m.type === "mkt:file") {
+        setFiles((prev) => {
+          const next = new Map(prev);
+          next.delete(m.file); // re-insert so Map order is least-recently-added first
+          next.set(m.file, { text: m.text, truncated: m.truncated });
+          while (next.size > CACHE_MAX) next.delete(next.keys().next().value as string);
+          return next;
+        });
+      } else if (m.type === "mkt:loading") setLoading(m.loading);
       else if (m.type === "toast") {
         const id = ++toastSeq;
         setToasts((t) => [...t.slice(-2), { id, level: m.level, message: m.message }]);
@@ -274,6 +293,15 @@ export function MarketplaceApp(): JSX.Element {
   const index = Math.min(sel, rows.length - 1);
   const active = rows[index];
   const setFilter = (next: TypeFilter) => { setType(next); setSel(0); };
+
+  // A plugin row has no source file of its own; its README is the closest thing.
+  const previewFile = active ? (active.kind === "plugin" ? active.readme : active.file) : "";
+
+  React.useEffect(() => {
+    if (!previewFile || files.has(previewFile) || asked.current.has(previewFile)) return;
+    asked.current.add(previewFile);
+    send({ type: "mkt:read", file: previewFile });
+  }, [previewFile, files]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown") { setSel((s) => Math.min(s + 1, rows.length - 1)); e.preventDefault(); }
@@ -492,6 +520,12 @@ export function MarketplaceApp(): JSX.Element {
                   </button>
                 </div>
               )}
+              <FilePreview
+                file={previewFile}
+                cached={files.get(previewFile)}
+                fence={active.type === "hook" ? "json" : ""}
+                onOpen={() => send({ type: "mkt:open", file: previewFile })}
+              />
             </div>
           )}
         </div>

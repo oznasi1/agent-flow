@@ -498,3 +498,55 @@ describe("MarketplaceApp marketplace filter", () => {
     expect(screen.queryByLabelText("gc-plugin")).not.toBeInTheDocument();
   });
 });
+
+describe("MarketplaceApp file preview", () => {
+  const reads = () => sent.mock.calls.map((c) => c[0]).filter((m: any) => m.type === "mkt:read");
+
+  it("asks the host for the selected row's file exactly once", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    expect(reads()).toEqual([{ type: "mkt:read", file: "/u/skills/mine/SKILL.md" }]);
+  });
+
+  it("renders the file when it arrives", () => {
+    const { container } = render(<MarketplaceApp />);
+    host(assetsMsg());
+    host({ type: "mkt:file", file: "/u/skills/mine/SKILL.md", text: "# Mine\n", truncated: false });
+    expect(container.querySelector(".preview h1")).toHaveTextContent("Mine");
+  });
+
+  it("does not re-read a file already in the cache", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    host({ type: "mkt:file", file: "/u/skills/mine/SKILL.md", text: "# Mine\n", truncated: false });
+    fireEvent.click(rowText("watch"));
+    host({ type: "mkt:file", file: "/b/skills/watch/SKILL.md", text: "# Watch\n", truncated: false });
+    sent.mockClear();
+    fireEvent.click(rowText("mine"));
+    expect(reads()).toEqual([]);
+  });
+
+  it("previews a plugin's README rather than a source file", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(view({ plugins: [plugin({ name: "cicd-plugin", readme: "/mk/cicd/README.md" })] })));
+    sent.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: /^Plugins\s*\d/ }));
+    expect(reads()).toEqual([{ type: "mkt:read", file: "/mk/cicd/README.md" }]);
+  });
+
+  it("drops the cache on a rescan so an edited file reloads", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    host({ type: "mkt:file", file: "/u/skills/mine/SKILL.md", text: "# Mine\n", truncated: false });
+    sent.mockClear();
+    host(assetsMsg());
+    expect(reads()).toEqual([{ type: "mkt:read", file: "/u/skills/mine/SKILL.md" }]);
+  });
+
+  it("keeps the detail block above the preview", () => {
+    const { container } = render(<MarketplaceApp />);
+    host(assetsMsg());
+    expect(container.querySelector(".detail .dn")).toHaveTextContent("mine");
+    expect(container.querySelector(".detail .mdnone")).toBeInTheDocument();
+  });
+});

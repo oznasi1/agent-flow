@@ -99,8 +99,8 @@ export const MARKETPLACE_CSS = `
   .t-hook .glyph { background: color-mix(in srgb, var(--hook) 18%, transparent); color: var(--hook); }
   .t-plugin .glyph { background: color-mix(in srgb, var(--plugin) 18%, transparent); color: var(--plugin); }
 
-  .detail { flex: 0 0 39%; max-width: 460px; overflow-y: auto; padding: 18px;
-    display: flex; flex-direction: column; gap: 13px; }
+  .detail { flex: 0 0 44%; min-width: 340px; overflow-y: auto; padding: 18px;
+    display: flex; flex-direction: column; gap: 11px; }
   .detail .dh { display: flex; align-items: center; gap: 9px; }
   .detail .dn { font-size: 16px; font-weight: 600; word-break: break-word; }
   .detail .tags, .acts { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -113,6 +113,33 @@ export const MARKETPLACE_CSS = `
     background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.1));
     border: 1px solid var(--hair); border-radius: 7px; padding: 9px 74px 9px 11px; }
   .snip .cp { position: absolute; top: 6px; right: 6px; }
+
+  .preview, .mdnone { border-top: 1px solid var(--hair); padding-top: 13px; }
+  .mdnone { color: var(--vscode-descriptionForeground); font-size: 12px; }
+  .mdtrunc { margin-top: 14px; font-size: 11.5px; color: var(--vscode-descriptionForeground); }
+
+  .md { font-size: 12.5px; line-height: 1.55; }
+  .md > *:first-child { margin-top: 0; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 16px 0 7px; line-height: 1.3; }
+  .md h1 { font-size: 16px; }
+  .md h2 { font-size: 14.5px; }
+  .md h3 { font-size: 13px; }
+  .md h4, .md h5, .md h6 { font-size: 12.5px; color: var(--vscode-descriptionForeground); }
+  .md p, .md ul, .md ol, .md blockquote, .md pre, .md table { margin: 0 0 10px; }
+  .md ul, .md ol { padding-left: 20px; }
+  .md li { margin: 2px 0; }
+  .md code { font-family: var(--mono); font-size: 11.5px; padding: 1px 4px; border-radius: 4px;
+    background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.12)); }
+  .md pre { overflow-x: auto; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--hair);
+    background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.1)); }
+  .md pre code { padding: 0; background: none; }
+  .md blockquote { padding-left: 11px; border-left: 2px solid var(--hair);
+    color: var(--vscode-descriptionForeground); }
+  .md hr { border: 0; border-top: 1px solid var(--hair); margin: 14px 0; }
+  .md a { color: var(--vscode-textLink-foreground); cursor: pointer; }
+  .md table { border-collapse: collapse; display: block; overflow-x: auto; font-size: 11.5px; }
+  .md th, .md td { border: 1px solid var(--hair); padding: 4px 8px; text-align: left; }
+  .md th { font-weight: 600; background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.08)); }
 
   .empty { padding: 44px 20px; text-align: center; color: var(--vscode-descriptionForeground); }
   .empty .big { font-size: 15px; color: var(--vscode-foreground); margin-bottom: 5px; }
