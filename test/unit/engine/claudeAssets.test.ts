@@ -155,7 +155,7 @@ describe("discoverAssets", () => {
   });
 });
 
-import { resolveEnabled, scanClaudeAssets } from "../../../src/engine/claudeAssets";
+import { resolveEnabled, resolveContentDir, scanClaudeAssets } from "../../../src/engine/claudeAssets";
 
 describe("resolveEnabled", () => {
   it("returns null when the ref appears nowhere", () => {
@@ -174,6 +174,50 @@ describe("resolveEnabled", () => {
   it("ignores a layer that does not mention the ref", () => {
     const layers = [{ enabledPlugins: { "p@m": true } }, { enabledPlugins: { "other@m": false } }];
     expect(resolveEnabled("p@m", layers)).toBe(true);
+  });
+});
+
+// marketplace.json comes from a cloned third-party repo, so `source` and
+// `metadata.pluginRoot` are attacker-controlled. resolveContentDir must never
+// hand back a directory outside `installLocation`, no matter how the manifest
+// tries to climb out of it.
+describe("resolveContentDir containment", () => {
+  const root = "/home/u/.claude/plugins/marketplaces/atbay";
+
+  it("refuses a source that climbs out of installLocation", () => {
+    // memReader has no real ".." resolution — it matches literal path strings.
+    // So a naive `${root}/${rel}` concatenation (the pre-fix bug) would find
+    // this literal directory and treat it as a legitimate clone dir. Lexical
+    // containment must refuse the source before that join ever happens.
+    const reader = memReader({ [`${root}/../../../../etc/passwd`]: "root:x:0:0:root:/root:/bin/bash" });
+    const { dir, state } = resolveContentDir(reader, { name: "evil", source: "../../../../etc" }, root, "", []);
+    expect(state).toBe("manifest");
+    expect(dir).toBe("");
+  });
+
+  it("contains a pluginRoot that climbs out via metadata, even with no source", () => {
+    // No `source`, so resolveContentDir falls back to `${pluginRoot}/${name}` —
+    // the literal path a naive join would have produced from this pluginRoot.
+    const reader = memReader({ [`${root}/../../../../etc/p/x`]: "root:x:0:0:root:/root:/bin/bash" });
+    const { dir, state } = resolveContentDir(reader, { name: "p" }, root, "../../../../etc", []);
+    expect(state).toBe("manifest");
+    expect(dir).toBe("");
+  });
+
+  it("resolves a legitimately dotted relative path onto installLocation", () => {
+    const reader = memReader({ [`${root}/b/skills/x/SKILL.md`]: "" });
+    const { dir, state } = resolveContentDir(reader, { name: "p", source: "a/../b" }, root, "", []);
+    expect(state).toBe("clone");
+    expect(dir).toBe(`${root}/b`);
+  });
+
+  it("still resolves the ordinary happy path identically", () => {
+    const reader = memReader({ [`${root}/plugins/installed-one/skills/x/SKILL.md`]: "" });
+    const { dir, state } = resolveContentDir(
+      reader, { name: "installed-one", source: "./plugins/installed-one" }, root, "", [],
+    );
+    expect(state).toBe("clone");
+    expect(dir).toBe(`${root}/plugins/installed-one`);
   });
 });
 
@@ -258,6 +302,26 @@ describe("scanClaudeAssets", () => {
     expect(p.enabled).toBeNull();
     expect(p.counts).toEqual({ skill: 0, command: 0, agent: 0, hook: 0 });
     expect(v.assets.some((a) => a.plugin === "remote-one")).toBe(false);
+  });
+
+  it("refuses a plugin source that climbs out of installLocation", () => {
+    const tree = fixture();
+    const mkt = `${P}/marketplaces/atbay`;
+    tree[`${mkt}/.claude-plugin/marketplace.json`] = JSON.stringify({
+      name: "atbay",
+      metadata: { pluginRoot: "./plugins" },
+      plugins: [{ name: "escapee", description: "hostile", source: "../../../../etc" }],
+    });
+    // memReader matches literal path strings rather than resolving "..", so the
+    // pre-fix `${installLocation}/${rel}` concatenation would land exactly here
+    // and treat it as a legitimate clone dir — the fix must refuse before that.
+    tree[`${mkt}/../../../../etc/passwd`] = "root:x:0:0:root:/root:/bin/bash";
+    const v = scan(tree);
+    const p = v.plugins.find((x) => x.name === "escapee")!;
+    expect(p.state).toBe("manifest");
+    expect(p.readme).toBe("");
+    expect(p.counts).toEqual({ skill: 0, command: 0, agent: 0, hook: 0 });
+    expect(v.assets.some((a) => a.plugin === "escapee")).toBe(false);
   });
 
   it("falls back to pluginRoot/name when a plugin omits source", () => {

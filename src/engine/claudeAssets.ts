@@ -253,6 +253,28 @@ function cleanPath(p: string): string {
   return (p ?? "").replace(/^\.\//, "").replace(/\/+$/, "");
 }
 
+/** Join a manifest-declared relative path onto a root, resolving "." and ".."
+ * lexically and refusing anything that climbs out. A marketplace.json comes from
+ * a third-party repo, so `source` (and `metadata.pluginRoot`, folded into `rel`
+ * by the caller) is attacker-controlled — and everything the scan discovers
+ * becomes readable through the panel's preview. Returns null both when the path
+ * climbs above the root and when it resolves to the root itself: no caller here
+ * has ever relied on "the whole marketplace clone is this plugin's content",
+ * and treating it as valid would attribute every sibling plugin's files to it. */
+function containedJoin(root: string, rel: string): string | null {
+  const out: string[] = [];
+  for (const seg of rel.split("/")) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") {
+      if (!out.length) return null;
+      out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return out.length ? `${root}/${out.join("/")}` : null;
+}
+
 function readJson(reader: AssetReader, path: string): any {
   const raw = reader.readFile(path);
   if (raw === null) return null;
@@ -279,8 +301,8 @@ export function resolveContentDir(
     typeof plugin.source === "string"
       ? cleanPath(plugin.source)
       : cleanPath([pluginRoot, plugin.name].filter(Boolean).join("/"));
-  const dir = `${installLocation}/${rel}`;
-  if (rel && reader.isDir(dir)) return { dir, state: "clone" };
+  const dir = rel ? containedJoin(installLocation, rel) : null;
+  if (dir && reader.isDir(dir)) return { dir, state: "clone" };
   return { dir: "", state: "manifest" };
 }
 
