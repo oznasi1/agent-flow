@@ -2,230 +2,206 @@
 
 **Date:** 2026-07-26
 **Status:** Approved, ready for planning
+**Revision:** 2 — the mechanism changed from a global Claude settings key to seeding the
+`/remote-control` slash command per session. Revision 1's ownership tracking, global
+settings writes, and configuration listener are all dropped.
 
 ## Summary
 
 Add a tri-state setting, `agentFlow.remoteControl` (`off` / `on` / `ask`, default
-`off`), that starts Claude Code's **Remote Control** bridge for the sessions Agent
-Flow launches — so a session taken from the task pool can be driven from claude.ai
-or the Claude mobile app without touching the keyboard that started it.
+`off`), that offers Claude Code's **Remote Control** for the session Agent Flow just
+opened — so a task taken from the pool can be driven from claude.ai or the Claude
+mobile app.
 
-Claude Code exposes no per-launch flag through the VS Code panel; the panel honors
-a settings key, `remoteControlAtStartup` ("Start Remote Control bridge
-automatically each session"). Agent Flow therefore enables the feature by writing
-that key to the **global** Claude settings file, and tracks whether it was the one
-that wrote it so it can put things back.
+When it is on, Agent Flow pre-fills the Claude Code panel with `/remote-control <KEY>`
+instead of the task prompt, and puts the task prompt on the clipboard. The user presses
+Enter to enable Remote Control, then pastes and presses Enter to start the task.
 
 ## Decisions
 
 | Question | Decision |
 |----------|----------|
-| How is Remote Control enabled? | Write `remoteControlAtStartup: true` to Claude's **global** settings (`$CLAUDE_CONFIG_DIR ?? ~/.claude` + `/settings.json`). The VS Code panel reads it at session start. |
+| How is Remote Control enabled? | Seed the `/remote-control <KEY>` slash command into the panel; the user presses Enter. Scoped to that one session — nothing global is written. |
+| Where does the task prompt go? | The clipboard, with a toast telling the user to paste it after enabling. |
 | Setting shape? | `agentFlow.remoteControl`: `"off" \| "on" \| "ask"`, default `"off"` — the same tri-state shape as `agentFlow.worktree`. |
-| Turning it back off? | **Ownership tracking.** Agent Flow records that it set the key, plus the value that was there before, and restores that prior value on `off` / `ask`+No. A value you set by hand is never overwritten or cleared. |
-| Ask cadence? | **Once per launch action.** A parallel batch of N tasks asks once, not N times — all N sessions share the same global key, so a per-task answer could not be honored. |
-| Dismissing the prompt? | **Escape means "no", not "cancel."** The launch proceeds without Remote Control. |
-| Which launch paths? | All of them — Take, Explore, Address PR, and parallel batch launch. |
-| Write mechanism? | `jsonc-parser` `modify`/`applyEdits`, preserving the user's formatting and comments. An unparseable file means no write. |
+| Ask cadence? | Once per launch action. |
+| Multi-window launches? | **Skipped.** There is one clipboard and N windows — the others would paste the wrong task's brief. Applies to parallel batch launches and per-window launches across more than one repo. |
+| Session naming? | `/remote-control <KEY>` — the Jira key (or `explore-<slug>`) names the remote session, so several are tellable apart on claude.ai. |
 
 ## Approach rationale
 
-- **Global scope, deliberately.** Per-folder `.claude/settings.local.json` would
-  scope the change to exactly the sessions Agent Flow opens, but it persists in
-  permanent checkouts and silently changes `claude` runs the user starts there by
-  hand. Global is one place, always effective, and honest about its reach — at the
-  cost of also covering sessions Agent Flow did not start. That cost is documented
-  in the setting's own description rather than left to be discovered.
-- **Ownership tracking over "set and never revert."** The naive version leaks:
-  turn the feature on once and every Claude session on the machine is remote-
-  controlled until the user notices and edits their settings by hand. Recording
-  ownership makes `off` mean off, while still refusing to stomp a value the user
-  set themselves.
-- **Storing the prior value, not just clearing.** If the user had an explicit
-  `remoteControlAtStartup: false`, reverting by deleting the key would leave the
-  same behavior but quietly erase their stated preference. Restoring the recorded
-  prior value — including "the key was absent" — leaves the file as it was found.
-- **`jsonc-parser` over parse-and-rewrite.** A real `~/.claude/settings.json`
-  carries permissions, hooks, plugins, and a statusline. `JSON.parse` +
-  `JSON.stringify` would reformat all of it. This mirrors the existing
-  `mergeReposIntoWorkspace` treatment of `.code-workspace` files, including its
-  failure posture: on a parse error, return without writing.
-- **`CLAUDE_CONFIG_DIR` honored.** Claude Code resolves its config directory
-  through that variable; a hardcoded `~/.claude` would silently write to a file
-  nothing reads for anyone who sets it.
-- **Once per launch action.** Because the key is global, the answer cannot be
-  per-session — the last write would win for every session in a batch. Asking once
-  per action is the granularity the mechanism can actually honor.
+- **Why the slash command and not a settings key.** `remoteControlAtStartup` in the
+  global Claude settings would work with no keystrokes, but it is machine-wide: every
+  Claude session started while it is on becomes remote-controlled, including ones Agent
+  Flow did not launch. The slash command is scoped to exactly the session being opened,
+  which is what the feature is for, and it leaves no state behind to clean up.
+- **Why the task prompt cannot ride along.** Claude Code only stacks a slash command
+  ahead of a prompt when the command is `type: "prompt"`
+  (`peelStackedPromptCommands` breaks on anything else). `/remote-control` is
+  `type: "local-jsx"` with an optional `[name]` argument, so a buffer holding
+  `/remote-control` followed by the task brief would submit the entire brief as the
+  session *name*. The panel takes one pre-filled buffer and one Enter —
+  `createPanel(sessionId, prompt, column)` exposes no programmatic submit — so the two
+  cannot share a submission. The clipboard is the second channel.
+- **Why multi-window launches are skipped rather than partially supported.** The
+  clipboard is a single global slot. Three windows opening 250 ms apart would each be
+  pre-filled with their own `/remote-control <KEY>`, but only the last-seeded task
+  prompt survives on the clipboard — the first two would paste another task's brief.
+  Silently pasting the wrong brief is worse than not offering the feature, so a launch
+  that opens more than one window keeps today's behavior and says so.
+- **Naming the session after the ticket.** `/remote-control` takes an optional name.
+  Passing the Jira key costs nothing and makes several concurrent remote sessions
+  distinguishable on claude.ai, which is exactly the situation Agent Flow creates.
 
 ## Components
 
 ### 1. Setting — `package.json` + `src/config.ts`
-
-`package.json`, alongside the other launch settings:
 
 ```json
 "agentFlow.remoteControl": {
   "type": "string",
   "enum": ["off", "on", "ask"],
   "enumDescriptions": [
-    "Never enable Remote Control",
-    "Every session Agent Flow launches starts with Remote Control on",
+    "Never offer Remote Control",
+    "Offer Remote Control for every session Agent Flow launches",
     "Ask once each time you launch"
   ],
   "default": "off",
-  "markdownDescription": "Start Claude Code's **Remote Control** bridge for sessions Agent Flow launches, so you can drive them from claude.ai or the Claude mobile app. This works by setting `remoteControlAtStartup` in your **global** Claude settings — while it is on, Claude sessions you start yourself are remote-controlled too. Agent Flow restores the previous value when you set this back to `off`."
+  "markdownDescription": "Offer Claude Code's **Remote Control** for the session Agent Flow opens, so you can drive it from claude.ai or the Claude mobile app. The panel is pre-filled with `/remote-control <KEY>` and your task prompt goes to the clipboard: press Enter to connect, then paste to start the task. Skipped for launches that open more than one window, because a single clipboard can't serve them."
 }
 ```
 
-`src/config.ts`: add `remoteControl: "off" | "on" | "ask"` to `AgentFlowConfig`, and
-resolve it against the enum rather than with a bare `||` fallback — a stale or
-hand-edited value like `"true"` must land on `off`, not flow through untyped:
+`src/config.ts`: add `remoteControl: "off" | "on" | "ask"` to `AgentFlowConfig`, resolved
+against the enum rather than with a bare `||` fallback so a stale value like `"true"`
+lands on `off`.
+
+### 2. Threading the decision to the window that seeds
+
+The seeding does not happen in the launching window. `openWorkspace` writes a plan file
+to `~/.agentflow/plans`; the newly opened window reads it during activation
+(`maybeSeedAgent`) and calls `seedClaudeCode`. The decision therefore has to travel in
+the plan file.
+
+- `OpenRequest` gains `remoteControl?: boolean` — what the launch asked for.
+- `PlanFile` gains `remoteControl?: boolean` — what actually applies.
+- `OpenResult` gains `remoteControl: boolean` — what actually applied, so the launching
+  window's toast can be honest.
+
+In `openWorkspace`, after `matches` is built:
 
 ```ts
-remoteControl: (() => {
-  const v = c.get<string>("remoteControl");
-  return v === "on" || v === "ask" ? v : "off";
-})(),
+// One clipboard, one window. A launch that opens several windows would leave every
+// window but the last pasting another task's brief.
+const remoteControl = !!req.remoteControl && matches.length === 1;
 ```
 
-### 2. New module — `src/engine/remoteControl.ts`
+That guard covers a per-window launch across several repos. The parallel batch path is a
+separate concern — see §4.
 
-No `vscode` import, so it unit-tests against a temp directory like `worktree.ts`:
+### 3. Seeding — `src/engine/workspace.ts`
+
+`maybeSeedAgent` passes `plan.remoteControl` through:
 
 ```ts
-/** Claude Code's global settings file, honoring CLAUDE_CONFIG_DIR. */
-export function claudeSettingsPath(): string;
-
-/** Current value of remoteControlAtStartup — undefined if absent or unreadable. */
-export function readRemoteControlAtStartup(file: string): boolean | undefined;
-
-/** Set (or, with `undefined`, remove) remoteControlAtStartup, preserving the
- *  file's formatting and comments. Returns false if the file can't be parsed
- *  or written — the caller degrades, it never throws. */
-export function writeRemoteControlAtStartup(file: string, value: boolean | undefined): boolean;
+await seedClaudeCode(match.prompt, plan.key, log, plan.remoteControl === true);
 ```
 
-A missing file is created with `{ "remoteControlAtStartup": true }`; a missing
-parent directory is created with `mkdirSync(..., { recursive: true })`.
+`seedClaudeCode(prompt, key, log, remoteControl = false)`:
 
-### 3. Ownership state + sync — `src/engine/remoteControl.ts`
+1. When `remoteControl`, the buffer to seed is `/remote-control ${key}` and the task
+   prompt goes to the clipboard first, so it is already there when the panel opens.
+2. The existing three-tier delivery (verified command → URI handler → clipboard) is
+   unchanged apart from seeding that buffer instead of the prompt.
+3. On success with `remoteControl`, a toast explains the two steps:
 
-One `globalState` record under `agentFlow.remoteControlOwned`:
+   ```
+   Agent Flow: ASM-1234 — press Enter to connect Remote Control, then ⌘V + Enter to
+   start the task (it's on your clipboard).
+   ```
 
-```ts
-interface RemoteControlOwnership {
-  owned: boolean;                       // Agent Flow wrote the current value
-  prior: boolean | undefined;           // what was there before (undefined = key absent)
-}
-```
-
-The single entry point both the launch paths and the config listener call:
-
-```ts
-/** Bring the global Claude setting in line with `mode`. `ask` consults `confirm`
- *  (omitted by the config listener, which treats `ask` as "leave alone").
- *  Returns whether Remote Control is on for sessions started from here. */
-export async function syncRemoteControl(
-  state: OwnershipStore,                       // thin wrapper over context.globalState
-  mode: "off" | "on" | "ask",
-  confirm?: () => Promise<boolean>,
-): Promise<boolean>;
-```
-
-Resolution:
-
-| Mode | Behavior |
-|------|----------|
-| `on`, `ask`+Yes | Already `true` → nothing. Otherwise record `prior`, write `true`, `owned = true`. |
-| `ask`+No, `off` | `owned` → restore `prior` (removing the key when `prior` is `undefined`), `owned = false`. Not owned → leave the file alone. |
-| `ask` with no `confirm` | Leave the file alone (the config-listener case). |
-
-Called at each launch — which also catches a settings file edited out of band —
-and from an `onDidChangeConfiguration` listener in `extension.ts`, so flipping the
-setting to `off` takes effect immediately rather than at the next launch.
+   The paste chord is `⌘V` on darwin and `Ctrl+V` elsewhere.
+4. **Tier-3 collision.** The last-resort fallback already uses the clipboard for the
+   prompt. If delivery gets that far with `remoteControl` on, Remote Control is dropped
+   and the existing behavior stands (clipboard holds the prompt, message says to paste
+   it) — the clipboard cannot carry both, and the task prompt is the one that matters.
+   Log that it was dropped.
 
 ### 4. Launch integration — `src/tasksView.ts`
 
-A private helper wraps the QuickPick and the sync:
-
 ```ts
-/** Resolve Remote Control for this launch action. Called once per action —
- *  a batch of N tasks asks once, since all N share the global key.
- *  Returns whether sessions started from here are remote-controlled. */
+/** Resolve whether this launch offers Remote Control. `ask` prompts once per launch
+ *  action; dismissing the picker means no, not cancel. */
 private async resolveRemoteControl(cfg: AgentFlowConfig): Promise<boolean>;
 ```
 
-The `ask` picker, styled like the existing worktree prompt:
+The `ask` picker:
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│ ABC-12 — enable Remote Control for this session?               │
+│ Enable Remote Control for this session?                        │
 ├────────────────────────────────────────────────────────────────┤
 │ 📡 Enable Remote Control                                        │
-│    Drive this session from claude.ai or the Claude mobile app   │
+│    Connect first, then paste the task prompt to start           │
 │ ⊘  Local only                                                   │
-│    No remote bridge                                             │
+│    Seed the task prompt as usual                                │
 └────────────────────────────────────────────────────────────────┘
         Escape → Local only (the launch continues)
 ```
 
-Escape resolves to "no" rather than aborting: by the time this prompt appears in
-`launch()`, worktrees have already been created, and cancelling the whole launch
-over an optional toggle is the worse failure.
+Escape resolves to "no" rather than aborting: by the time this runs in `launch()`,
+worktrees and briefs already exist, and abandoning a launch over an optional toggle is
+the worse failure.
 
-Three call sites, each immediately before `openWorkspace`:
+| Path | Behavior |
+|------|----------|
+| Take (`launch()`) | Resolve once, pass to `openWorkspace`. |
+| Address PR (`launch()`) | Same — it shares `launch()`. |
+| Explore | Resolve once, pass to `openWorkspace`. |
+| Parallel batch | **Never offered.** No picker, `remoteControl` is not passed. When the setting is `on` or `ask`, the completion toast notes it was skipped. |
 
-| Path | Site |
-|------|------|
-| Take + Address PR | `launch()` — `src/tasksView.ts:590` |
-| Explore | `explore()` — `src/tasksView.ts:415` |
-| Parallel batch | `takeBatch()` — `src/tasksView.ts:705`, once **before** the loop |
-
-### 5. Known limitation (documented, not fixed)
-
-Opening into an already-live window (the `pick-existing` and `live-folder`
-targets) seeds a Claude Code session that may already be running. That session
-does not re-read the global setting; the change applies to the next session
-started in that window. Fixing it would require a per-session toggle the Claude
-Code extension does not expose. This goes in the README, not in code.
+When a launch asked for Remote Control but `openWorkspace` withheld it (more than one
+window), the toast says so rather than leaving the user waiting for a prompt that never
+comes.
 
 ## Testing
 
-- **Module unit** (`test/unit/engine/remoteControl.test.ts`), against a temp dir:
-  - `claudeSettingsPath()` honors `CLAUDE_CONFIG_DIR` and falls back to `~/.claude`.
-  - Writing into a populated settings file preserves the other keys, the
-    formatting, and comments.
-  - `read` returns `true` / `false` / `undefined` for present, present-false, and
-    absent keys.
-  - Missing file and missing parent directory are created.
-  - An unparseable file returns `false` and leaves the bytes untouched.
-- **Ownership unit** (same file, fake store):
-  - `on` records `prior` and writes `true`; a second `on` is a no-op.
-  - `off` with `owned` restores `prior` — both the `false` case and the
-    absent-key case.
-  - `off` without `owned` leaves a hand-set `true` alone.
-  - `ask` without `confirm` never writes.
-- **Config unit** (`test/unit/config.test.ts`): default is `"off"`; each enum
-  value round-trips; an unknown value falls back to `"off"`.
+- **Config unit** (`test/unit/config.test.ts`): default `"off"`; each enum value
+  round-trips; a value outside the enum falls back to `"off"`; the `package.json` schema
+  declares the default and the enum.
+- **Workspace unit** (`test/unit/engine/workspace.test.ts`):
+  - `openWorkspace` records `remoteControl: true` in the plan file for a single-match
+    launch that asked for it, and `false` when it did not ask.
+  - A launch that produces more than one match records `false` even when asked, and
+    `OpenResult.remoteControl` is `false`.
+  - `maybeSeedAgent` with `remoteControl: true` seeds `/remote-control <KEY>` and writes
+    the task prompt to the clipboard.
+  - `maybeSeedAgent` with `remoteControl` absent or `false` seeds the prompt and does not
+    touch the clipboard.
+  - The tier-3 clipboard fallback still writes the task prompt when Remote Control was
+    requested.
 - **Host unit** (`test/unit/tasksView.test.ts`):
-  - `off` never shows the picker.
-  - `on` enables without a picker.
-  - `ask` shows the picker exactly once for a batch of N tasks.
-  - Escaping the picker does not enable, and the launch still proceeds.
+  - `off` never shows the picker and passes `remoteControl: false`.
+  - `on` passes `remoteControl: true` without a picker.
+  - `ask` shows the picker once; choosing Enable passes `true`, dismissing passes `false`
+    and the launch still proceeds.
+  - `takeBatch` never shows the picker and never passes `remoteControl: true`, even with
+    the setting on.
 - **Manual / end-to-end:**
-  1. Set `ask`, take a task, choose Enable → the new session shows Remote Control
-     active and appears on claude.ai.
-  2. Set the setting back to `off` → the key is gone from `~/.claude/settings.json`.
-  3. Set `remoteControlAtStartup: true` by hand, then set Agent Flow to `off` →
-     the hand-set value survives.
-  4. Launch 3 tasks in parallel with `ask` → one prompt, all three remote-controlled.
+  1. Set `ask`, take a task, choose Enable. The panel shows `/remote-control ASM-1234`;
+     Enter connects it and the session appears on claude.ai; paste + Enter starts the task.
+  2. Set `off` and take a task — the task prompt is seeded exactly as before.
+  3. Take a task spanning two repos in per-window mode with the setting `on` — both
+     windows seed their task prompt normally and the toast says Remote Control was skipped.
+  4. Launch three tasks in parallel with the setting `on` — no picker, all three seed
+     normally, the toast notes the skip.
 
 ## Out of scope
 
-- No per-session or per-repo scoping — the mechanism Claude Code exposes is a
-  global setting, and that is the scope this ships with.
-- No Remote Control session naming (`--remote-control-session-name-prefix`).
-- No retrofitting an already-running session in a live window (see §5).
+- No Remote Control for parallel batch or multi-window launches (see §4). Supporting it
+  needs a second channel for the task prompt that isn't the clipboard.
+- No retrofitting a session that is already running in a live window.
+- No global `remoteControlAtStartup` setting management — explicitly dropped in this
+  revision.
 - No Deck surfacing of which in-flight sessions are remote-controlled.
-- No CLI-based launch path (`claude --remote-control`) — Agent Flow keeps seeding
-  through the Claude Code panel.
+- No CLI launch path (`claude --remote-control`) — Agent Flow keeps seeding through the
+  Claude Code panel.
