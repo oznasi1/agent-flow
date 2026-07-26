@@ -223,8 +223,10 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   }
 
   // One clipboard, one window. A launch that opens several windows would leave every
-  // window but the last pasting another task's brief, so withhold it entirely.
-  const remoteControl = !!req.remoteControl && matches.length === 1;
+  // window but the last pasting another task's brief, so withhold it entirely. Also
+  // withhold it when seedAgent is off: nothing seeds without a plan file (below), so
+  // "applies" must never be true when no plan file will carry it.
+  const remoteControl = !!req.remoteControl && seedAgent && matches.length === 1;
 
   // 3 — durable writes BEFORE opening: reusing the current window reloads this
   //     extension host, which would otherwise race these to disk.

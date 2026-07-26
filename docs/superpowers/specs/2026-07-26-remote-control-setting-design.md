@@ -199,6 +199,12 @@ comes.
 
 - No Remote Control for parallel batch or multi-window launches (see §4). Supporting it
   needs a second channel for the task prompt that isn't the clipboard.
+- The single-clipboard guard is per-launch, not global. Taking ASM-1 with Remote Control
+  and then taking ASM-2 with Remote Control before pasting ASM-1's prompt overwrites the
+  clipboard — ASM-1's rendered prompt is lost permanently (its brief still survives at
+  `.pick-task/TASK.md`, but the seeded prompt does not). Plan files live 15 minutes, so
+  the window for this collision is wide. No cross-launch clipboard reservation is
+  implemented.
 - No retrofitting a session that is already running in a live window.
 - No global `remoteControlAtStartup` setting management — explicitly dropped in this
   revision.

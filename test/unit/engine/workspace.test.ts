@@ -352,6 +352,9 @@ describe("seedClaudeCode — remote control", () => {
 
     expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
     expect(env.clipboard.writeText).not.toHaveBeenCalled();
+    // Removing the `if (!remoteControl) return` guard in announceRemoteControl would still
+    // pass every assertion above — this is what actually catches that regression.
+    expect(window.showInformationMessage).not.toHaveBeenCalled();
   });
 
   it("treats an absent remoteControl flag as off", async () => {
@@ -628,6 +631,12 @@ describe("openWorkspace — remote control", () => {
     );
     expect(planOf().matches).toHaveLength(1);
     expect(result.remoteControl).toBe(true);
+  });
+
+  it("withholds it when seedAgent is off — no plan file means nothing could ever seed it", async () => {
+    const result = await openWorkspace(baseReq({ seedAgent: false, remoteControl: true }));
+    expect(result.remoteControl).toBe(false);
+    expect(writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"))).toBeUndefined();
   });
 });
 

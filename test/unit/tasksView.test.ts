@@ -1201,6 +1201,14 @@ describe("remote control", () => {
     expect(window.showQuickPick).toHaveBeenCalledTimes(1);
   });
 
+  it("ask: never shows the picker when seedAgent is off — no plan file could ever carry the answer", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask", seedAgent: false });
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(lastOpen().remoteControl).toBe(false);
+  });
+
   it("says so when a multi-window launch withheld it", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
     vi.mocked(openWorkspace).mockResolvedValue({
@@ -1227,7 +1235,7 @@ describe("remote control", () => {
     expect(lastOpen().remoteControl).toBe(true);
   });
 
-  it("takeBatch never offers it, even with the setting on", async () => {
+  it("takeBatch never offers it for a real batch (2+ keys), even with the setting on", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(createWorktrees).mockImplementation((s, key) =>
@@ -1238,7 +1246,29 @@ describe("remote control", () => {
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(vi.mocked(openWorkspace).mock.calls.every((c) => !c[0].remoteControl)).toBe(true);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
-    expect(toast.message).toContain("Remote Control skipped");
+    expect(toast.message).toContain("Remote Control skipped — one clipboard can't serve several windows");
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+
+  it("takeBatch offers it for a one-key batch — one window, one clipboard, same as an ordinary launch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window",
+      workspaceFile: undefined,
+      briefs: [],
+      opened: ["/x"],
+      remoteControl: true,
+    });
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], "api");
+    expect(window.showQuickPick).not.toHaveBeenCalled(); // "on" resolves without a picker
+    expect(lastOpen().remoteControl).toBe(true);
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).not.toContain("Remote Control skipped");
     vi.mocked(createWorktrees).mockImplementation((s) => s);
   });
 });

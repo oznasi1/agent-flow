@@ -432,7 +432,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const where = result.workspaceFile
       ? `workspace ${result.workspaceFile.split("/").pop()}`
       : `${result.opened.length} window(s)`;
-    const seeded = cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : "";
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     this.toast("success", `Opened ${where} to explore. Brief seeded in each repo.${seeded}${rcNote}`);
   }
@@ -555,11 +555,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Whether this launch offers Claude Code's Remote Control. Resolved once per launch
-   * action. Dismissing the picker means "no", not "cancel": by the time this runs,
-   * worktrees and briefs already exist, and abandoning the launch over an optional
-   * toggle is the worse failure. */
+   * action. Dismissing the picker means "no", not "cancel": by the time this runs, the
+   * destination (and any worktrees) are already settled and the launch is committed —
+   * abandoning it over an optional toggle would be the worse failure. */
   private async resolveRemoteControl(cfg: AgentFlowConfig): Promise<boolean> {
     if (cfg.remoteControl === "off") return false;
+    // seedAgent off means no plan file ever carries the decision (openWorkspace's guard),
+    // so nothing could ever seed /remote-control — asking would promise what can't be kept.
+    if (!cfg.seedAgent) return false;
     if (cfg.remoteControl === "on") return true;
     const p = await vscode.window.showQuickPick(
       [
@@ -580,6 +583,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * this the user waits for a `/remote-control` prompt that never arrives. */
   private remoteControlNote(wanted: boolean, applied: boolean): string {
     return wanted && !applied ? " Remote Control skipped — it needs a single window." : "";
+  }
+
+  /** Toast fragment announcing the pre-seed, shared by `launch()` and `explore()`. With
+   * Remote Control applied, Enter only connects the bridge — the task itself starts on
+   * the later paste + Enter — so the plain "press Enter to start" copy would be wrong. */
+  private seededNote(seedAgent: boolean, remoteControl: boolean): string {
+    if (!seedAgent) return "";
+    return remoteControl
+      ? " Claude Code pre-seeded with /remote-control — Enter to connect, then paste."
+      : " Claude Code pre-seeded — press Enter to start.";
   }
 
   /** Open + seed a resolved kick-off: worktree decision → workspace mode → brief →
@@ -639,7 +652,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const where = result.workspaceFile
       ? `workspace ${result.workspaceFile.split("/").pop()}`
       : `${result.opened.length} window(s)`;
-    const seeded = cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : "";
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     if (result.mergeFailed) {
       this.toast(
@@ -724,11 +737,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const promptMode = await this.choosePromptMode(cfg, `Launch ${keys.length} selected task(s) — how should the agents start?`);
     if (!promptMode) return;
 
-    // One clipboard can't serve a window per task — don't offer Remote Control here.
-    const rcSkipped = cfg.remoteControl !== "off";
+    // One clipboard can't serve a window per task — but a one-key "batch" opens exactly
+    // one window, so it's an ordinary single-window launch: resolve it like Take/Explore.
+    const isBatch = keys.length > 1;
+    const rcSkipped = isBatch && cfg.remoteControl !== "off";
     if (rcSkipped) this.log("takeBatch: Remote Control skipped — one clipboard, several windows");
+    const wantRemoteControl = isBatch ? false : await this.resolveRemoteControl(cfg);
 
     let launched = 0;
+    let appliedRemoteControl = false;
     const failed: string[] = [];
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];
@@ -742,7 +759,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         if (services[0].path === repoRef.path) {
           throw new Error("couldn't create a git worktree (would collide with the shared checkout)");
         }
-        await openWorkspace({
+        const result = await openWorkspace({
           ticket: { key: detail.key, summary: detail.summary, url: detail.url },
           planMd: this.buildBrief(detail),
           descriptionText: detail.descriptionText,
@@ -752,7 +769,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           workspaceDir: cfg.workspaceDir,
           seedAgent: cfg.seedAgent,
           openIn: "new",
+          remoteControl: wantRemoteControl,
         });
+        appliedRemoteControl = result.remoteControl;
         launched++;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -763,7 +782,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
 
     const summary = `Launched ${launched} of ${keys.length} in parallel.`;
-    const rcNote = rcSkipped ? " Remote Control skipped — one clipboard can't serve several windows." : "";
+    const rcNote = isBatch
+      ? (rcSkipped ? " Remote Control skipped — one clipboard can't serve several windows." : "")
+      : this.remoteControlNote(wantRemoteControl, appliedRemoteControl);
     if (failed.length) {
       const shown = failed.slice(0, 5).join("; ");
       const more = failed.length > 5 ? ` (and ${failed.length - 5} more)` : "";
