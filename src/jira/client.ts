@@ -218,6 +218,14 @@ export class JiraClient {
     });
   }
 
+  /** Move an issue to the backlog — removes it from any active/future sprint (Jira Agile WRITE). */
+  async removeIssueFromSprint(key: string): Promise<void> {
+    await this.request(`/rest/agile/1.0/backlog/issue`, {
+      method: "POST",
+      body: JSON.stringify({ issues: [key] }),
+    });
+  }
+
   /** Assign an issue to an account (Jira WRITE). */
   async assignIssue(key: string, accountId: string): Promise<void> {
     await this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/assignee`, {

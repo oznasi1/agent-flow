@@ -567,6 +567,34 @@ describe("task card actions", () => {
     expect(sent).toHaveBeenCalledWith({ type: "addToMySprint", key: "ASM-1" });
   });
 
+  it("shows Remove on the My sprint tab and sends removeFromSprint", () => {
+    render(<App />);
+    authed();
+    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "ASM-1", assignee: "Jane", inOpenSprint: true })] });
+    fireEvent.click(screen.getByRole("button", { name: /Remove/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "removeFromSprint", key: "ASM-1", size: "any" });
+  });
+
+  it("does not show Remove on other tabs", () => {
+    render(<App />);
+    authed();
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", assignee: "Jane", inOpenSprint: true })] });
+    expect(screen.queryByRole("button", { name: /Remove/i })).not.toBeInTheDocument();
+  });
+
+  it("drops the card when removedFromSprint arrives", () => {
+    render(<App />);
+    authed();
+    host({
+      type: "tasks",
+      filter: "mysprint",
+      tasks: [mkTask({ key: "ASM-1", summary: "First card" }), mkTask({ key: "ASM-2", summary: "Second card" })],
+    });
+    host({ type: "removedFromSprint", key: "ASM-1" });
+    expect(screen.queryByText("First card")).not.toBeInTheDocument();
+    expect(screen.getByText("Second card")).toBeInTheDocument();
+  });
+
   it("hides Add-to-my-sprint for a task assigned to someone else", () => {
     withTask(mkTask({ key: "ASM-1", assignee: "Someone Else" }));
     expect(screen.queryByText(/Add to my sprint/i)).not.toBeInTheDocument();

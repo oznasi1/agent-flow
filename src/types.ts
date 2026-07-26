@@ -151,6 +151,7 @@ export type InboundMessage =
   | { type: "retry" }
   | { type: "reorder"; order: string[] }
   | { type: "resetOrder"; size: Size }
+  | { type: "removeFromSprint"; key: string; size: Size }
   // The Deck (separate webview panel)
   | { type: "deck:ready" }
   | { type: "deck:refresh" }
@@ -174,6 +175,7 @@ export type OutboundMessage =
   | { type: "detail"; key: string; descriptionText: string; inferred: string[]; repos: string[] }
   | { type: "statusChanged"; key: string; status: string; category: string; removed: boolean }
   | { type: "movedToSprint"; key: string; assignee: string; removed: boolean }
+  | { type: "removedFromSprint"; key: string }
   | { type: "toast"; level: "success" | "error" | "info"; message: string }
   // A persistent, actionable failure banner (unlike a toast, it stays until resolved).
   | { type: "error"; message: string; canRetry: boolean }

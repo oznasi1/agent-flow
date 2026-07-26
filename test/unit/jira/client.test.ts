@@ -378,4 +378,12 @@ describe("write methods", () => {
     expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/ASM-1/assignee`);
     expect(bodyOf(fetchMock, 0)).toEqual({ accountId: "acc-1" });
   });
+
+  it("removeIssueFromSprint posts the key to the backlog", async () => {
+    const fetchMock = installFetch([emptyResponse()]);
+    await client().removeIssueFromSprint("ASM-1");
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/agile/1.0/backlog/issue`);
+    expect(fetchMock.mock.calls[0][1].method).toBe("POST");
+    expect(bodyOf(fetchMock, 0)).toEqual({ issues: ["ASM-1"] });
+  });
 });

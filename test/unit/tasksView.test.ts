@@ -84,6 +84,7 @@ function makeClient() {
     addLabel: vi.fn(async () => undefined),
     getActiveSprintId: vi.fn(async () => 42),
     addIssueToSprint: vi.fn(async () => undefined),
+    removeIssueFromSprint: vi.fn(async () => undefined),
     assignIssue: vi.fn(async () => undefined),
   };
 }
@@ -339,6 +340,43 @@ describe("addToMySprint", () => {
     expect(clientStub.assignIssue).toHaveBeenCalledWith("ASM-1", "a1");
     expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
     expect(posted()).toContainEqual({ type: "movedToSprint", key: "ASM-1", assignee: "Jane", removed: true });
+  });
+});
+
+describe("removeFromSprint", () => {
+  it("moves to backlog, stamps the label, prunes saved order, and posts removedFromSprint", async () => {
+    const { provider, posted, workspaceState } = setup({
+      workspaceState: { "agentFlow.sprintOrder": ["ASM-1", "ASM-2"] },
+    });
+    await provider.removeFromSprint("ASM-1", "any");
+    expect(clientStub.removeIssueFromSprint).toHaveBeenCalledWith("ASM-1");
+    expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
+    expect(workspaceState.update).toHaveBeenCalledWith("agentFlow.sprintOrder", ["ASM-2"]);
+    expect(posted()).toContainEqual({ type: "removedFromSprint", key: "ASM-1" });
+  });
+
+  it("skips the label stamp when stampLabelOnWrite is off", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, stampLabelOnWrite: false });
+    const { provider } = setup();
+    await provider.removeFromSprint("ASM-1", "any");
+    expect(clientStub.addLabel).not.toHaveBeenCalled();
+  });
+
+  it("does not remove the card when the backlog write fails", async () => {
+    clientStub.removeIssueFromSprint.mockRejectedValue(new Error("boom"));
+    const { send, posted } = setup();
+    await send({ type: "removeFromSprint", key: "ASM-1", size: "any" });
+    expect(posted()).not.toContainEqual(expect.objectContaining({ type: "removedFromSprint" }));
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+  });
+
+  it("re-adds to the active sprint and refetches when Undo is chosen", async () => {
+    vi.mocked(window.showInformationMessage).mockResolvedValue("Undo");
+    const { provider, posted } = setup();
+    await provider.removeFromSprint("ASM-1", "any");
+    expect(clientStub.getActiveSprintId).toHaveBeenCalled();
+    expect(clientStub.addIssueToSprint).toHaveBeenCalledWith(42, "ASM-1");
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "tasks", filter: "mysprint" }));
   });
 });
 

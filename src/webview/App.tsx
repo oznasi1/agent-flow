@@ -67,6 +67,15 @@ const SprintAddIcon = () => (
   </svg>
 );
 
+// A sprint column with a minus — remove the ticket from the active sprint (to backlog).
+const SprintRemoveIcon = () => (
+  <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
+    <path fill="currentColor" d="M3 1.4a.7.7 0 0 1 1.4 0V14.6a.7.7 0 0 1-1.4 0z" />
+    <path fill="currentColor" d="M5 2.3h6.4L10.1 4.7l1.3 2.4H5z" />
+    <path fill="currentColor" d="M9.3 11.3h5v1.3h-5z" />
+  </svg>
+);
+
 // A git pull-request glyph — kick off the PR-review agent for an approved/initiated PR.
 const AddressPrIcon = () => (
   <svg className="take-icon" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
@@ -213,6 +222,9 @@ export function App(): JSX.Element {
               ? prev.filter((t) => t.key !== m.key)
               : prev.map((t) => (t.key === m.key ? { ...t, assignee: m.assignee, inOpenSprint: true } : t)),
           );
+          break;
+        case "removedFromSprint":
+          setTasks((prev) => prev.filter((t) => t.key !== m.key));
           break;
         case "loading":
           setLoading(m.loading);
@@ -483,6 +495,7 @@ export function App(): JSX.Element {
                   }
                 : undefined
             }
+            onRemoveFromSprint={filter === "mysprint" ? () => send({ type: "removeFromSprint", key: t.key, size }) : undefined}
           />
         ))}
       </div>
@@ -542,8 +555,9 @@ function TaskCard(props: {
   onSelect: (selected: string[]) => void;
   batch?: { checked: boolean; onToggle: () => void };
   dnd?: CardDnd;
+  onRemoveFromSprint?: () => void;
 }): JSX.Element {
-  const { task, me, prReviewStatus, open, detail, onToggle, onSelect, batch, dnd } = props;
+  const { task, me, prReviewStatus, open, detail, onToggle, onSelect, batch, dnd, onRemoveFromSprint } = props;
   const unassigned = !task.assignee || task.assignee.toLowerCase() === "unassigned";
   const isMe = !!me && task.assignee === me;
   // Offer "add to my sprint" when it isn't already there: unassigned tasks, or tasks
@@ -641,6 +655,15 @@ function TaskCard(props: {
                 title={`Add ${task.key} to your active sprint${unassigned ? " and assign it to you" : ""}`}
               >
                 <SprintAddIcon /> Add to my sprint
+              </button>
+            )}
+            {onRemoveFromSprint && (
+              <button
+                className="sprint-remove"
+                onClick={(e) => { e.stopPropagation(); onRemoveFromSprint(); }}
+                title={`Remove ${task.key} from your active sprint (move it to the backlog)`}
+              >
+                <SprintRemoveIcon /> Remove
               </button>
             )}
             {canAddressPr && (
