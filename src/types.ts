@@ -96,42 +96,54 @@ export interface RunStatus {
   windowOpen: boolean; // is this run's target window currently open? (from presence)
 }
 
-// ── The Marketplace: plugin/skill browser ───────────────────────────────────
+// ── The Marketplace: local asset browser ────────────────────────────────────
 
-/** A named item inside a plugin (skill, agent, or command) + its repo-relative path. */
-export interface SkillRef {
-  name: string;
-  path: string;
-}
+export type AssetType = "skill" | "command" | "agent" | "hook";
 
-/** One plugin listed by a marketplace, with its discovered contents. */
-export interface PluginView {
+/** Where a plugin's content came from. "user" = yours, not from a plugin at all
+ * (covers both ~/.claude and the open workspace). */
+export type PluginState = "installed" | "clone" | "manifest" | "user";
+
+/** One discoverable thing: a skill, slash command, subagent, or hook. */
+export interface AssetView {
+  type: AssetType;
   name: string;
   description: string;
-  source: string; // repo-relative plugin directory, e.g. "plugins/cicd-plugin"
-  skills: SkillRef[];
-  agents: SkillRef[];
-  commands: SkillRef[];
-  installCommand: string; // "/plugin install <name>@<marketplace-name>"
+  plugin: string; // "(user)" for ~/.claude, "(workspace)" for the open folder
+  marketplace: string; // "~/.claude" or the workspace folder name, for those two
+  file: string; // absolute path, for open/reveal
+  rel: string; // shown in the detail pane
+  enabled: boolean | null; // null = not declared in any settings file
+  state: PluginState;
 }
 
-export type MarketplaceErrorKind =
-  | "gh-missing"
-  | "gh-unauthenticated"
-  | "repo-not-found"
-  | "not-a-marketplace"
-  | "parse-error"
-  | "unknown";
-
-/** A resolved marketplace repo — either its parsed contents, or a scoped error. */
-export interface MarketplaceView {
-  repo: string; // canonical "owner/repo"
-  name: string; // marketplace.json name (the @handle for installs)
+/** A plugin row — shown under the "Plugins" filter, including ones not on disk. */
+export interface PluginRowView {
+  name: string;
+  marketplace: string;
   description: string;
-  owner: string;
-  addCommand: string; // "/plugin marketplace add owner/repo"
-  plugins: PluginView[];
-  error?: { kind: MarketplaceErrorKind; message: string };
+  state: PluginState;
+  enabled: boolean | null;
+  scopes: string[];
+  version: string;
+  counts: Record<AssetType, number>;
+  installCommand: string; // "/plugin install <plugin>@<marketplace>"
+}
+
+export interface MarketplaceSourceView {
+  name: string;
+  kind: "github" | "directory" | "user";
+  origin: string; // "owner/repo", an absolute path, or "~/.claude"
+  pluginCount: number;
+  stale: boolean; // installLocation is gone from disk
+}
+
+export interface ClaudeAssetsView {
+  marketplaces: MarketplaceSourceView[];
+  plugins: PluginRowView[];
+  assets: AssetView[];
+  notSetUp: boolean; // no ~/.claude/plugins at all
+  scannedAt: number;
 }
 
 // Messages: webview → host
@@ -161,9 +173,9 @@ export type InboundMessage =
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }
-  | { type: "mkt:add"; repo: string }
-  | { type: "mkt:remove"; repo: string }
-  | { type: "mkt:copy"; text: string };
+  | { type: "mkt:copy"; text: string }
+  | { type: "mkt:open"; file: string }
+  | { type: "mkt:reveal"; file: string };
 
 // Messages: host → webview
 export type OutboundMessage =
@@ -184,5 +196,5 @@ export type OutboundMessage =
   | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean }
   | { type: "deck:loading"; loading: boolean }
   // The Marketplace
-  | { type: "mkt:state"; marketplaces: MarketplaceView[] }
+  | { type: "mkt:assets"; view: ClaudeAssetsView }
   | { type: "mkt:loading"; loading: boolean };

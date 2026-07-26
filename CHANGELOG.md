@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.24] — 2026-07-26
+
+### Changed
+
+- **The Marketplace is now a local asset browser.** It reads `~/.claude` and the open
+  workspace instead of GitHub repos you had to register by hand, so it shows your skills,
+  slash commands, agents and hooks with no setup and no `gh`. Search across everything,
+  filter by type or down to installed/enabled only, open a source file in an editor tab,
+  or copy the invocation. Disabled plugins, `skillOverrides`, and plugins your
+  marketplaces catalogue but haven't downloaded are all surfaced.
+
+### Removed
+
+- The `agentFlow.marketplaces` setting and the `gh`-backed remote fetch, along with the
+  auth and not-found failure modes that came with them. Add marketplaces in Claude Code
+  (`/plugin marketplace add owner/repo`); they appear here on the next scan.
+
 ## [0.1.23] — 2026-07-26
 
 ### Added
