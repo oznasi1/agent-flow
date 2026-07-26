@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Marketplace category sections.** The browse list groups by each plugin's manifest
+  `category` — Yours first, then by descending size, Uncategorized last. Grouping applies
+  under any type filter and drops away while searching. Click a header to focus that
+  category.
+- **Multi-select plugin and marketplace filters.** A searchable `Plugins ▾` picker, plus
+  click-a-name-in-a-row, plus clickable marketplace tags, all with removable chips and a
+  Clear action. All six filter dimensions — query, type, scope, category, plugins,
+  marketplaces — AND together.
+- **File preview in the detail pane.** Selecting a row renders its file under the
+  metadata — a skill's `SKILL.md`, a hook's `hooks.json` as fenced JSON, a plugin's
+  README — truncated at 262,144 characters. The renderer builds elements from a parsed
+  tree and never injects HTML, so a hostile file from a third-party marketplace can't run
+  anything.
+
 ## [0.1.25] — 2026-07-26
 
 ### Fixed

@@ -73,11 +73,28 @@ the plugins you've installed, and the skills, slash commands, agents and hooks i
 `.claude/`.
 
 Search is fuzzy and ranked — `revw` finds `/review`, `mkpl` finds `marketplace` — with the
-best match selected as you type and the type tallies following the query. Filter by type or
-down to just what's installed or enabled, then
-open a skill's `SKILL.md` in an editor tab or copy the command you'd type to use it. It
-shows which plugins are disabled, and lists the plugins your marketplaces catalogue but
-haven't downloaded yet, with the `/plugin install` command to get them.
+best match selected as you type and the type tallies following the query. When you aren't
+searching, the list groups into **category sections** read from each plugin's own
+manifest — Development, Monitoring, Deployment, and so on — with everything you wrote
+yourself under **Yours** first, the rest ordered by descending size, and anything whose
+manifest omits the field under **Uncategorized** last. Click a section header to focus
+that category.
+
+Narrow further by type, by what's installed or enabled, by **several plugins at once**
+(the searchable `Plugins ▾` picker, or click a plugin name in any row), or by marketplace
+(click its tag). Query, type, scope, category, plugins and marketplace all AND together,
+and active selections show up as removable chips with a **Clear** action — the chip row
+disappears when nothing is selected. It also shows which plugins are disabled, and lists
+the plugins your marketplaces catalogue but haven't downloaded yet, with the
+`/plugin install` command to get them.
+
+Selecting a row **renders its file** in the pane on the right, under the metadata — a
+skill's `SKILL.md`, a hook's `hooks.json` as a fenced JSON block, a plugin's README — so
+you can read what something actually does without opening it; **Open file** still opens
+it in an editor tab, and **Copy** grabs the command you'd type to use it. Files over
+262,144 characters are truncated, with a link into the editor for the rest. The renderer
+builds elements from a parsed tree instead of injecting HTML, so a hostile file from a
+third-party marketplace can't run anything; only `http`/`https` links become clickable.
 
 The panel is **read-only and offline** — it never writes to `~/.claude`, never runs
 `/plugin install`, and makes no network calls. Add marketplaces in Claude Code itself
