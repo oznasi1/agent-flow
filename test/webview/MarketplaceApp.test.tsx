@@ -77,6 +77,92 @@ describe("MarketplaceApp", () => {
     expect(screen.queryByText("build")).not.toBeInTheDocument();
   });
 
+  // Regression: several hooks can share an event, matcher and file, which used to
+  // give them the same React key. Duplicate keys orphan the DOM nodes, so those
+  // rows survived every later filter change and showed up under Skills.
+  it("drops hooks under another type pill even when several share an event and file", () => {
+    const twin = (description: string) =>
+      asset({ type: "hook", name: "PostToolUse", description, file: "/a/hooks/hooks.json", rel: "hooks/hooks.json (Bash)" });
+    render(<MarketplaceApp />);
+    // A surviving row after the twins matters: it forces React down the keyed-map
+    // reconciliation path, which is where duplicate keys orphan a node.
+    host(assetsMsg(view({
+      assets: [asset(), twin("commit.sh"), twin("push.sh"), twin("create.sh"), asset({ name: "later", file: "/z" })],
+    })));
+    expect(document.querySelectorAll(".row.t-hook")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("button", { name: /^Skills/i }));
+    expect(document.querySelectorAll(".row.t-hook")).toHaveLength(0);
+    expect(screen.queryByText("PostToolUse")).not.toBeInTheDocument();
+  });
+
+  it("heads each type group once, however the scan interleaves them", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(view({
+      assets: [
+        asset({ name: "a-skill" }),
+        asset({ type: "hook", name: "Stop", file: "/1", rel: "1" }),
+        asset({ name: "b-skill", file: "/2" }),
+        asset({ type: "hook", name: "SessionEnd", file: "/3", rel: "3" }),
+      ],
+    })));
+    const heads = [...document.querySelectorAll(".grouphd .lb")].map((e) => e.textContent);
+    expect(heads).toEqual([...new Set(heads)]);
+    expect(heads).toEqual(["Skills", "Hooks"]);
+  });
+
+  it("matches a fuzzy subsequence rather than only substrings", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "ppln" } });
+    expect(screen.getAllByText("pipeline").length).toBeGreaterThan(0);
+    expect(screen.queryByText("/deploy")).not.toBeInTheDocument();
+  });
+
+  it("ranks a name hit above a description-only hit", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(view({
+      assets: [
+        asset({ name: "unrelated", description: "handles deploy paperwork", file: "/1" }),
+        asset({ name: "deploy", description: "nothing to see", file: "/2" }),
+      ],
+    })));
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "deploy" } });
+    expect(document.querySelector(".row .nm")?.textContent).toBe("deploy");
+  });
+
+  it("matches prose literally, so a subsequence of a blurb is not a hit", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(view({ assets: [asset({ name: "aaa", description: "Builds the thing" })] })));
+    // "bldt" threads through "Builds the thing" as a subsequence; matching prose
+    // that loosely would return nearly the whole list on any short query.
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "bldt" } });
+    expect(screen.getByText(/nothing matches/i)).toBeInTheDocument();
+  });
+
+  it("narrows, not widens, when a second term is typed", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(view({
+      assets: [
+        asset({ name: "deploy-web", description: "Ships the site", file: "/1" }),
+        asset({ name: "deploy-api", description: "Ships the service", file: "/2" }),
+      ],
+    })));
+    const box = screen.getByPlaceholderText(/search/i);
+    fireEvent.change(box, { target: { value: "deploy" } });
+    expect(document.querySelectorAll(".results > .row")).toHaveLength(2);
+    fireEvent.change(box, { target: { value: "deploy site" } });
+    expect(document.querySelectorAll(".results > .row")).toHaveLength(1);
+    expect(document.querySelector(".row .nm")?.textContent).toBe("deploy-web");
+  });
+
+  it("retallies the type pills against the query", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.change(screen.getByPlaceholderText(/search/i), { target: { value: "deploy" } });
+    expect(screen.getByRole("button", { name: /^Commands/i }).textContent).toBe("Commands1");
+    expect(screen.getByRole("button", { name: /^Skills/i }).textContent).toBe("Skills0");
+  });
+
   it("shows plugin rows under the Plugins pill, including not-downloaded ones", () => {
     render(<MarketplaceApp />);
     host(assetsMsg());

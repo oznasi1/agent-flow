@@ -159,6 +159,9 @@ export function flattenHooks(json: string | null, file: string, rel: string, att
       for (const h of entry?.hooks ?? []) {
         if (!h || typeof h !== "object") continue;
         const matcher = typeof entry.matcher === "string" ? entry.matcher : "";
+        // Several hooks routinely share an event and matcher and differ only by
+        // their `if` guard — prefer it, or they render as indistinguishable rows.
+        const guard = typeof h.if === "string" && h.if ? h.if : matcher;
         out.push({
           type: "hook",
           name: event,
@@ -166,7 +169,7 @@ export function flattenHooks(json: string | null, file: string, rel: string, att
           plugin: attr.plugin,
           marketplace: attr.marketplace,
           file,
-          rel: matcher ? `${rel} (${matcher})` : rel,
+          rel: guard ? `${rel} (${guard})` : rel,
           enabled: attr.enabled,
           state: attr.state,
         });

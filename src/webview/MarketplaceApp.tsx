@@ -1,5 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
+import { fuzzyScore, phraseScore } from "../engine/fuzzy";
 import { AssetType, AssetView, ClaudeAssetsView, OutboundMessage, PluginRowView } from "../types";
 
 let toastSeq = 0;
@@ -14,6 +15,8 @@ const TYPES: { k: AssetType; label: string; glyph: string }[] = [
 const LABEL: Record<AssetType, string> = { skill: "Skills", command: "Commands", agent: "Agents", hook: "Hooks" };
 const GLYPH: Record<AssetType, string> = { skill: "S", command: "/", agent: "A", hook: "H" };
 const COUNT_KEY: Record<AssetType, AssetType> = { skill: "skill", command: "command", agent: "agent", hook: "hook" };
+/** The order type blocks appear in when browsing, matching the pills. */
+const TYPE_ORDER: Record<AssetType, number> = { skill: 0, command: 1, agent: 2, hook: 3 };
 
 type TypeFilter = AssetType | "all" | "plugins";
 type ScopeFilter = "all" | "installed" | "enabled";
@@ -35,6 +38,11 @@ interface Row {
   extra: string[];
 }
 
+/** A row that survived the current query, carrying how well it matched. */
+interface Scored extends Row {
+  score: number;
+}
+
 const stateLabel: Record<AssetView["state"], string> = {
   installed: "installed",
   clone: "on disk",
@@ -42,9 +50,12 @@ const stateLabel: Record<AssetView["state"], string> = {
   user: "yours",
 };
 
-function assetRow(a: AssetView): Row {
+function assetRow(a: AssetView, i: number): Row {
   return {
-    key: `a:${a.type}:${a.marketplace}:${a.plugin}:${a.rel}:${a.name}`,
+    // Position in the scan, not the asset's fields: a plugin can register several
+    // hooks sharing an event, matcher and file, and duplicate React keys orphan
+    // DOM nodes that then survive every later filter change.
+    key: `a${i}:${a.type}:${a.name}`,
     kind: "asset",
     type: a.type,
     name: a.name,
@@ -77,6 +88,25 @@ function pluginRow(p: PluginRowView): Row {
     copy: p.installCommand,
     extra: [...(p.version ? [`v${p.version}`] : []), ...p.scopes.map((s) => `${s} scope`), ...counts],
   };
+}
+
+/** How well a row answers every term in the query, or null if it misses one.
+ * The name carries the most weight, then the blurb, then where it came from — so
+ * a skill named "deploy" outranks one that merely mentions deploying. Terms are
+ * ANDed, which is what makes a second word narrow the list instead of widen it. */
+function rowScore(r: Row, terms: string[]): number | null {
+  const weigh = (s: number | null, k: number) => (s === null ? -Infinity : s * k);
+  let total = 0;
+  for (const t of terms) {
+    const best = Math.max(
+      weigh(fuzzyScore(t, r.display), 3),
+      weigh(phraseScore(t, r.description), 1),
+      weigh(phraseScore(t, r.where), 0.8),
+    );
+    if (best === -Infinity) return null;
+    total += best;
+  }
+  return total;
 }
 
 function Pill({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }): JSX.Element {
@@ -112,23 +142,44 @@ export function MarketplaceApp(): JSX.Element {
     return () => window.removeEventListener("message", handler);
   }, []);
 
+  const terms = React.useMemo(() => q.trim().split(/\s+/).filter(Boolean), [q]);
+  const searching = terms.length > 0;
+
+  // Query and scope are applied before the type filter, so the pills can tally
+  // what the query actually leaves and the counts move as you type.
+  const sift = React.useCallback(
+    (base: Row[]): Scored[] => {
+      const out: Scored[] = [];
+      for (const r of base) {
+        if (scope === "installed" && r.state !== "installed" && r.state !== "user") continue;
+        if (scope === "enabled" && r.enabled === false) continue;
+        const score = searching ? rowScore(r, terms) : 0;
+        if (score === null) continue;
+        out.push({ ...r, score });
+      }
+      return out;
+    },
+    [terms, searching, scope],
+  );
+
+  const assets = React.useMemo(() => sift(view.assets.map(assetRow)), [view, sift]);
+  const plugins = React.useMemo(() => sift(view.plugins.map(pluginRow)), [view, sift]);
+
   const counts = React.useMemo(() => {
     const c: Record<AssetType, number> = { skill: 0, command: 0, agent: 0, hook: 0 };
-    for (const a of view.assets) c[a.type]++;
+    for (const r of assets) if (r.type) c[r.type]++;
     return c;
-  }, [view]);
+  }, [assets]);
 
   const rows = React.useMemo(() => {
-    const base: Row[] = type === "plugins" ? view.plugins.map(pluginRow) : view.assets.map(assetRow);
-    const needle = q.trim().toLowerCase();
-    return base.filter((r) => {
-      if (type !== "all" && type !== "plugins" && r.type !== type) return false;
-      if (scope === "installed" && r.state !== "installed" && r.state !== "user") return false;
-      if (scope === "enabled" && r.enabled === false) return false;
-      if (!needle) return true;
-      return `${r.name} ${r.description} ${r.where}`.toLowerCase().includes(needle);
-    });
-  }, [view, q, type, scope]);
+    const picked =
+      type === "plugins" ? plugins : type === "all" ? assets : assets.filter((r) => r.type === type);
+    // Best match first while searching; otherwise one clean block per type. Both
+    // sorts are stable, so the scan's plugin-clustered order survives inside each.
+    return searching
+      ? [...picked].sort((a, b) => b.score - a.score)
+      : [...picked].sort((a, b) => (a.type ? TYPE_ORDER[a.type] : 0) - (b.type ? TYPE_ORDER[b.type] : 0));
+  }, [assets, plugins, type, searching]);
 
   const index = Math.min(sel, rows.length - 1);
   const active = rows[index];
@@ -141,6 +192,9 @@ export function MarketplaceApp(): JSX.Element {
   };
 
   let lastType: AssetType | null | undefined;
+  // Type blocks only when browsing: a search is ranked by relevance, so grouping
+  // it would put a header above nearly every row.
+  const grouped = type === "all" && !searching;
 
   return (
     <>
@@ -169,14 +223,14 @@ export function MarketplaceApp(): JSX.Element {
           />
         </div>
         <div className="pills">
-          <Pill on={type === "all"} onClick={() => setFilter("all")}>All<span className="n">{view.assets.length}</span></Pill>
+          <Pill on={type === "all"} onClick={() => setFilter("all")}>All<span className="n">{assets.length}</span></Pill>
           {TYPES.map((t) => (
             <Pill key={t.k} on={type === t.k} onClick={() => setFilter(t.k)}>
               {t.label}<span className="n">{counts[t.k]}</span>
             </Pill>
           ))}
           <Pill on={type === "plugins"} onClick={() => setFilter("plugins")}>
-            Plugins<span className="n">{view.plugins.length}</span>
+            Plugins<span className="n">{plugins.length}</span>
           </Pill>
         </div>
         <div className="pills">
@@ -215,7 +269,7 @@ export function MarketplaceApp(): JSX.Element {
               </div>
             ) : (
               rows.map((r, i) => {
-                const head = type === "all" && r.type !== lastType ? ((lastType = r.type), r.type) : null;
+                const head = grouped && r.type !== lastType ? ((lastType = r.type), r.type) : null;
                 return (
                   <React.Fragment key={r.key}>
                     {head && (

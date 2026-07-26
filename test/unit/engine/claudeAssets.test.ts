@@ -104,6 +104,27 @@ describe("discoverAssets", () => {
     expect(h[0].rel).toContain("Bash");
   });
 
+  it("keeps hooks that share an event and matcher distinguishable by their if guard", () => {
+    const r = memReader({
+      "/p/hooks/hooks.json": JSON.stringify({
+        PostToolUse: [
+          {
+            matcher: "Bash",
+            hooks: [
+              { type: "command", command: "review.sh", if: "Bash(git commit:*)" },
+              { type: "command", command: "review.sh", if: "Bash(git push:*)" },
+            ],
+          },
+        ],
+      }),
+    });
+    const h = discoverAssets(r, "/p", ATTR).filter((a) => a.type === "hook");
+    expect(h).toHaveLength(2);
+    expect(h[0].rel).toContain("git commit");
+    expect(h[1].rel).toContain("git push");
+    expect(h[0].rel).not.toBe(h[1].rel);
+  });
+
   it("ignores malformed hooks.json without throwing", () => {
     const r = memReader({ "/p/hooks/hooks.json": "{ not json" });
     expect(discoverAssets(r, "/p", ATTR)).toEqual([]);
