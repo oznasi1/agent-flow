@@ -63,18 +63,23 @@ to git + Jira only. **Open** focuses the window if it's already open (never a du
 opens it fresh otherwise; **Diff** shows the working diff; **⋯** offers *Open in Jira* and
 *Forget*.
 
-### The Marketplace — browse plugins & skills
+### The Marketplace — browse your skills, commands & agents
 
 The **Marketplace** (open it with the puzzle-piece (`$(extensions)`) button beside the
-Deck's button in the sidebar title bar) lets you register GitHub repos that are Claude
-Code plugin marketplaces and browse what they offer — each plugin, and its skills, agents,
-and commands.
+Deck's button in the sidebar title bar) is a searchable browser of everything Claude Code
+can do on this machine. It reads your local `~/.claude` — the marketplaces you've added,
+the plugins you've installed, and the skills, slash commands, agents and hooks inside them
+— plus any skills or commands you wrote yourself in `~/.claude` or in the open workspace's
+`.claude/`.
 
-Paste an `owner/repo` or a `github.com/...` URL into the panel's add bar to register a
-repo; it reads via your existing `gh` CLI login, so private and internal repos work just
-as well as public ones. The panel is read-only — it shows the exact `/plugin marketplace
-add …` and `/plugin install …@…` commands to copy into Claude Code, it doesn't install
-anything itself.
+Search across every asset, filter by type or down to just what's installed or enabled, then
+open a skill's `SKILL.md` in an editor tab or copy the command you'd type to use it. It
+shows which plugins are disabled, and lists the plugins your marketplaces catalogue but
+haven't downloaded yet, with the `/plugin install` command to get them.
+
+The panel is **read-only and offline** — it never writes to `~/.claude`, never runs
+`/plugin install`, and makes no network calls. Add marketplaces in Claude Code itself
+(`/plugin marketplace add owner/repo`) and they show up here on the next scan.
 
 ## Quick start
 
@@ -136,7 +141,6 @@ each repo, so they never get committed.
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
 | `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on a card. |
 | `agentFlow.prReviewAutoFix` | `true` | After the PR-review agent assesses the PR, let it implement the requested changes (off = assess only). |
-| `agentFlow.marketplaces` | `[]` | GitHub repos registered as Claude Code plugin marketplaces (`owner/repo` or a full URL). Managed from the Marketplace panel. |
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
 `agentFlow.exploreMode`, `agentFlow.explorePrompts.*`, `agentFlow.prReviewPrompt`, and
