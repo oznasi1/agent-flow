@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.26] — 2026-07-26
+
+### Added
+
+- **Marketplace category sections.** The browse list groups by each plugin's manifest
+  `category` — Yours first, then by descending size, Uncategorized last. Grouping applies
+  under any type filter and drops away while searching. Click a header to focus that
+  category.
+- **Multi-select plugin and marketplace filters.** A searchable `Plugins ▾` picker, plus
+  click-a-name-in-a-row, plus clickable marketplace tags, all with removable chips and a
+  Clear action. All six filter dimensions — query, type, scope, category, plugins,
+  marketplaces — AND together.
+- **File preview in the detail pane.** Selecting a row renders its file under the
+  metadata — a skill's `SKILL.md`, a hook's `hooks.json` as fenced JSON, a plugin's
+  README — truncated at 262,144 characters. The renderer builds elements from a parsed
+  tree and never injects HTML, so a hostile file from a third-party marketplace can't run
+  anything.
+
+### Fixed
+
+- **A marketplace manifest can no longer point the scan outside its own directory.** A
+  plugin's `source` (and a marketplace's `metadata.pluginRoot`) comes from a third-party
+  repo, and the scan joined it onto the install location without resolving `..` — so a
+  manifest declaring `../../../..` reached files anywhere on disk, on every scan, whether
+  or not the plugin was installed. Those paths are now resolved and contained; anything
+  climbing out is treated as not-on-disk. This mattered more with the file preview
+  landing in the same release, which serves the full contents of whatever the scan found.
+
+## [0.1.25] — 2026-07-26
+
+### Fixed
+
+- **Hooks no longer show up under every Marketplace filter.** A plugin can register
+  several hooks that share an event, matcher and file and differ only by an `if` guard,
+  which the scan discarded — the rows became identical, so did their React keys, and
+  React left the duplicates mounted through every later filter change. Hooks now carry
+  their `if` guard, so those declarations are told apart in both the list and the detail
+  pane, and rows are keyed by their position in the scan.
+- **One heading per type when browsing All.** Assets are scanned plugin by plugin, so the
+  type headings repeated once per run — dozens of times on a well-stocked machine. Rows
+  are now ordered by type, with each plugin's grouping preserved inside a block.
+
+### Changed
+
+- **Search is fuzzy and ranked.** `revw` finds `/review`, `mkpl` finds `marketplace`, and
+  the best match is selected as you type. Names match as subsequences; descriptions match
+  literally, so a short query no longer drags in nearly every asset. Extra words narrow
+  the result rather than widening it, and the type pills retally against the query so it
+  is obvious where the remaining matches are.
+
 ## [0.1.24] — 2026-07-26
 
 ### Changed

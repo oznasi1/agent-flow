@@ -115,6 +115,9 @@ export interface AssetView {
   rel: string; // shown in the detail pane
   enabled: boolean | null; // null = not declared in any settings file
   state: PluginState;
+  /** The plugin manifest's `category`, lower-cased; "yours" for your own assets,
+   * "uncategorized" when the manifest omits it. Groups the browse list. */
+  category: string;
 }
 
 /** A plugin row — shown under the "Plugins" filter, including ones not on disk. */
@@ -127,6 +130,8 @@ export interface PluginRowView {
   scopes: string[];
   version: string;
   counts: Record<AssetType, number>;
+  category: string; // same vocabulary as AssetView.category
+  readme: string; // absolute path to the README in the content dir, or ""
   installCommand: string; // "/plugin install <plugin>@<marketplace>"
 }
 
@@ -175,7 +180,8 @@ export type InboundMessage =
   | { type: "mkt:refresh" }
   | { type: "mkt:copy"; text: string }
   | { type: "mkt:open"; file: string }
-  | { type: "mkt:reveal"; file: string };
+  | { type: "mkt:reveal"; file: string }
+  | { type: "mkt:read"; file: string };
 
 // Messages: host → webview
 export type OutboundMessage =
@@ -197,4 +203,7 @@ export type OutboundMessage =
   | { type: "deck:loading"; loading: boolean }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
-  | { type: "mkt:loading"; loading: boolean };
+  | { type: "mkt:loading"; loading: boolean }
+  // Contents of one previewed file. Never part of the scan payload: 350-odd
+  // markdown bodies would bloat every rescan, and the panel rescans on refocus.
+  | { type: "mkt:file"; file: string; text: string; truncated: boolean };

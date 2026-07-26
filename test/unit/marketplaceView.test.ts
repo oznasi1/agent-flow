@@ -5,9 +5,11 @@ import type { ClaudeAssetsView } from "../../src/types";
 
 const h = vi.hoisted(() => ({
   scanClaudeAssets: vi.fn(),
-  fsReader: vi.fn(() => ({})),
+  readFile: vi.fn<(p: string) => string | null>(() => null),
+  fsReader: vi.fn(),
   claudeConfigDir: vi.fn(() => "/home/u/.claude"),
 }));
+h.fsReader.mockImplementation(() => ({ readFile: h.readFile, readDir: () => [], isDir: () => false }));
 vi.mock("../../src/engine/claudeAssets", () => ({ scanClaudeAssets: h.scanClaudeAssets }));
 vi.mock("../../src/engine/claudeAssetsFs", () => ({ fsReader: h.fsReader, claudeConfigDir: h.claudeConfigDir }));
 
@@ -19,7 +21,7 @@ const view = (over: Partial<ClaudeAssetsView> = {}): ClaudeAssetsView => ({
   assets: [{
     type: "skill", name: "build", description: "d", plugin: "cicd", marketplace: "atbay",
     file: "/home/u/.claude/plugins/cache/atbay/cicd/1/skills/build/SKILL.md",
-    rel: "skills/build/SKILL.md", enabled: true, state: "installed",
+    rel: "skills/build/SKILL.md", enabled: true, state: "installed", category: "deployment",
   }],
   notSetUp: false,
   scannedAt: 1,
@@ -31,6 +33,7 @@ const show = () => MarketplacePanel.show(fakeContext().context as any, () => {})
 
 beforeEach(() => {
   h.scanClaudeAssets.mockReset().mockReturnValue(view());
+  h.readFile.mockReset().mockReturnValue(null);
 });
 afterEach(() => {
   const r = window.createWebviewPanel.mock.results.at(-1);
@@ -165,5 +168,72 @@ describe("MarketplacePanel", () => {
     const msg = posts(p).reverse().find((m) => m.type === "mkt:assets");
     expect(msg.view.assets).toEqual([]);
     expect(msg.view.notSetUp).toBe(true);
+  });
+});
+
+describe("MarketplacePanel file preview", () => {
+  const FILE = "/home/u/.claude/plugins/cache/atbay/cicd/1/skills/build/SKILL.md";
+
+  it("returns a listed file's contents", async () => {
+    h.readFile.mockReturnValue("# Build\n");
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:read", file: FILE });
+    expect(posts(p).at(-1)).toEqual({ type: "mkt:file", file: FILE, text: "# Build\n", truncated: false });
+  });
+
+  it("returns empty text rather than an error when the file cannot be read", async () => {
+    h.readFile.mockReturnValue(null);
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:read", file: FILE });
+    expect(posts(p).at(-1)).toEqual({ type: "mkt:file", file: FILE, text: "", truncated: false });
+  });
+
+  it("refuses a path the last scan never listed", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:read", file: "/etc/passwd" });
+    expect(posts(p).some((m) => m.type === "mkt:file")).toBe(false);
+    expect(posts(p).at(-1).type).toBe("toast");
+  });
+
+  it("serves a plugin README, which the scan lists alongside asset files", async () => {
+    h.scanClaudeAssets.mockReturnValue(view({
+      plugins: [{
+        name: "cicd", marketplace: "atbay", description: "d", state: "installed", enabled: true,
+        scopes: [], version: "", counts: { skill: 0, command: 0, agent: 0, hook: 0 },
+        category: "deployment", readme: "/mk/cicd/README.md", installCommand: "",
+      }],
+    }));
+    h.readFile.mockReturnValue("# cicd");
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:read", file: "/mk/cicd/README.md" });
+    expect(posts(p).at(-1)).toMatchObject({ type: "mkt:file", text: "# cicd" });
+  });
+
+  it("truncates at 256 KB and says so", async () => {
+    h.readFile.mockReturnValue("x".repeat(262_145));
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:read", file: FILE });
+    const msg = posts(p).at(-1);
+    expect(msg.truncated).toBe(true);
+    expect(msg.text).toHaveLength(262_144);
+  });
+
+  it("does not flag a file that lands exactly on the boundary", async () => {
+    h.readFile.mockReturnValue("x".repeat(262_144));
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:read", file: FILE });
+    expect(posts(p).at(-1).truncated).toBe(false);
   });
 });

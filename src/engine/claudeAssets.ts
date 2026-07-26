@@ -67,6 +67,7 @@ const MAX_DEPTH = 8;
 export interface Attribution {
   plugin: string;
   marketplace: string;
+  category: string;
   state: PluginState;
   enabled: boolean | null;
 }
@@ -134,6 +135,7 @@ function mdAsset(
     description: fm.description ?? "",
     plugin: attr.plugin,
     marketplace: attr.marketplace,
+    category: attr.category,
     file: `${dir}/${rel}`,
     rel,
     enabled: attr.enabled,
@@ -159,14 +161,18 @@ export function flattenHooks(json: string | null, file: string, rel: string, att
       for (const h of entry?.hooks ?? []) {
         if (!h || typeof h !== "object") continue;
         const matcher = typeof entry.matcher === "string" ? entry.matcher : "";
+        // Several hooks routinely share an event and matcher and differ only by
+        // their `if` guard — prefer it, or they render as indistinguishable rows.
+        const guard = typeof h.if === "string" && h.if ? h.if : matcher;
         out.push({
           type: "hook",
           name: event,
           description: String(h.command ?? h.type ?? ""),
           plugin: attr.plugin,
           marketplace: attr.marketplace,
+          category: attr.category,
           file,
-          rel: matcher ? `${rel} (${matcher})` : rel,
+          rel: guard ? `${rel} (${guard})` : rel,
           enabled: attr.enabled,
           state: attr.state,
         });
@@ -247,6 +253,34 @@ function cleanPath(p: string): string {
   return (p ?? "").replace(/^\.\//, "").replace(/\/+$/, "");
 }
 
+/** Join a manifest-declared relative path onto a root, resolving "." and ".."
+ * lexically and refusing anything that climbs out. A marketplace.json comes from
+ * a third-party repo, so `source` (and `metadata.pluginRoot`, folded into `rel`
+ * by the caller) is attacker-controlled — and everything the scan discovers
+ * becomes readable through the panel's preview. Splits on "\" as well as "/":
+ * POSIX treats a backslash as an ordinary filename character, but Node on
+ * Windows treats it as a real separator, so a manifest written with backslashes
+ * needs the same containment on every platform, not just the one the scan
+ * happens to run on. Resolves to `root` itself — not a refusal — when `rel`
+ * collapses to no segments at all (e.g. `source: "."`, a real pattern for a
+ * single-plugin repo whose content is the repo root): the caller only invokes
+ * this with a non-empty `rel`, so this is a legitimate answer, and the root is
+ * inside the container so it costs nothing security-wise. Returns null only for
+ * a genuine climb above the root. */
+function containedJoin(root: string, rel: string): string | null {
+  const out: string[] = [];
+  for (const seg of rel.split(/[/\\]/)) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") {
+      if (!out.length) return null;
+      out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return out.length ? `${root}/${out.join("/")}` : root;
+}
+
 function readJson(reader: AssetReader, path: string): any {
   const raw = reader.readFile(path);
   if (raw === null) return null;
@@ -273,8 +307,8 @@ export function resolveContentDir(
     typeof plugin.source === "string"
       ? cleanPath(plugin.source)
       : cleanPath([pluginRoot, plugin.name].filter(Boolean).join("/"));
-  const dir = `${installLocation}/${rel}`;
-  if (rel && reader.isDir(dir)) return { dir, state: "clone" };
+  const dir = rel ? containedJoin(installLocation, rel) : null;
+  if (dir && reader.isDir(dir)) return { dir, state: "clone" };
   return { dir: "", state: "manifest" };
 }
 
@@ -284,6 +318,22 @@ function countsOf(assets: AssetView[]): Record<AssetType, number> {
   const c = EMPTY_COUNTS();
   for (const a of assets) c[a.type]++;
   return c;
+}
+
+/** The manifest's category, normalised. Lower-cased so "Deployment" and
+ * "deployment" are one section; absent becomes an explicit bucket rather than an
+ * empty string, because "we don't know" is a thing the UI has to name. */
+function categoryOf(plugin: { category?: unknown }): string {
+  const raw = typeof plugin.category === "string" ? plugin.category.trim() : "";
+  return raw ? raw.toLowerCase() : "uncategorized";
+}
+
+/** The plugin's own README, if it shipped one. Matched case-insensitively —
+ * both README.md and readme.md occur in the wild. */
+function readmeIn(reader: AssetReader, dir: string): string {
+  if (!dir) return "";
+  const hit = reader.readDir(dir).find((e) => !e.isDir && e.name.toLowerCase() === "readme.md");
+  return hit ? `${dir}/${hit.name}` : "";
 }
 
 /** Read every local source and derive the browsable view. Never throws: an
@@ -331,7 +381,8 @@ export function scanClaudeAssets(reader: AssetReader, opts: ScanOptions): Claude
       const { dir, state } = resolveContentDir(reader, p, installLocation, pluginRoot, installs);
       const enabled = resolveEnabled(ref, layers);
       const used = installs.find((i) => i.installPath && reader.isDir(i.installPath));
-      const mine = dir ? discoverAssets(reader, dir, { plugin: p.name, marketplace: name, state, enabled }) : [];
+      const category = categoryOf(p);
+      const mine = dir ? discoverAssets(reader, dir, { plugin: p.name, marketplace: name, category, state, enabled }) : [];
       for (const a of mine) {
         if (a.type === "skill" && skillOff.has(a.name)) a.enabled = false;
         assets.push(a);
@@ -345,6 +396,8 @@ export function scanClaudeAssets(reader: AssetReader, opts: ScanOptions): Claude
         scopes: [...new Set(installs.map((i) => i.scope).filter((s): s is string => !!s))].sort(),
         version: used?.version ?? "",
         counts: countsOf(mine),
+        category,
+        readme: readmeIn(reader, dir),
         installCommand: `/plugin install ${ref}`,
       });
     }
@@ -352,7 +405,7 @@ export function scanClaudeAssets(reader: AssetReader, opts: ScanOptions): Claude
 
   // ── assets you wrote yourself, plus settings-level hooks ──────────────────
   const own = (dir: string, plugin: string, marketplace: string, settings: SettingsLayer): void => {
-    const attr: Attribution = { plugin, marketplace, state: "user", enabled: true };
+    const attr: Attribution = { plugin, marketplace, category: "yours", state: "user", enabled: true };
     // SKIP_DIRS_OWN, not the plugin default: this walk starts at ~/.claude (or a
     // workspace .claude), whose siblings include the plugin cache, hundreds of MB
     // of transcripts, and git worktrees — none of which hold user-authored assets.
@@ -374,6 +427,8 @@ export function scanClaudeAssets(reader: AssetReader, opts: ScanOptions): Claude
         scopes: [plugin === "(user)" ? "user" : "workspace"],
         version: "",
         counts: countsOf(all),
+        category: "yours",
+        readme: "",
         installCommand: "",
       });
     }

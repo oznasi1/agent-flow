@@ -4,6 +4,7 @@ import { claudeConfigDir, fsReader } from "./engine/claudeAssetsFs";
 import { InboundMessage, OutboundMessage, ClaudeAssetsView } from "./types";
 
 const STALE_MS = 30_000; // re-scan on re-focus only if the last scan is older than this
+const MAX_PREVIEW = 262_144; // chars, not bytes — bounds parse/render cost, which scales with length
 
 /** The Marketplace: a searchable board of every Claude Code skill, command, agent
  * and hook on this machine. Singleton editor-area panel; strictly read-only. */
@@ -75,7 +76,10 @@ export class MarketplacePanel {
       view = { marketplaces: [], plugins: [], assets: [], notSetUp: true, scannedAt: Date.now() };
     }
     this.lastScan = Date.now();
-    this.openable = new Set(view.assets.map((a) => a.file));
+    this.openable = new Set([
+      ...view.assets.map((a) => a.file),
+      ...view.plugins.map((p) => p.readme).filter(Boolean),
+    ]);
     this.post({ type: "mkt:assets", view });
     this.post({ type: "mkt:loading", loading: false });
   }
@@ -105,6 +109,18 @@ export class MarketplacePanel {
         if (!this.allowed(m.file)) return;
         await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(m.file));
         break;
+      case "mkt:read": {
+        if (!this.allowed(m.file)) return;
+        const raw = fsReader().readFile(m.file) ?? "";
+        const truncated = raw.length > MAX_PREVIEW;
+        this.post({
+          type: "mkt:file",
+          file: m.file,
+          text: truncated ? raw.slice(0, MAX_PREVIEW) : raw,
+          truncated,
+        });
+        break;
+      }
       case "mkt:copy":
         await vscode.env.clipboard.writeText(m.text);
         this.toast("success", "Copied to clipboard.");

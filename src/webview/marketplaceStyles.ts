@@ -56,14 +56,29 @@ export const MARKETPLACE_CSS = `
   .tag.off { text-decoration: line-through; }
   .tag.bad { color: var(--vscode-errorForeground); border-color: var(--vscode-errorForeground); }
   .tag.dim { opacity: .8; }
+  button.tag { cursor: pointer; font-family: inherit; background: transparent; }
+  button.tag:hover { background: var(--vscode-toolbar-hoverBackground); }
+  button.tag.on { border-color: var(--vscode-focusBorder);
+    background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground); }
 
   .loading { flex: none; padding: 8px 18px; color: var(--vscode-descriptionForeground); font-size: 12px; }
   .split { flex: 1; min-height: 0; display: flex; }
   .results { flex: 1; min-width: 0; overflow-y: auto; border-right: 1px solid var(--hair); padding: 6px 0 30px; }
-  .grouphd { display: flex; align-items: center; gap: 8px; padding: 11px 18px 5px; }
+  .grouphd { display: flex; align-items: center; gap: 8px; width: 100%; padding: 11px 18px 5px;
+    background: transparent; border: 0; cursor: pointer; font-family: inherit; text-align: left; }
+  .grouphd:hover .lb { color: var(--vscode-foreground); }
   .grouphd .lb { font-size: 10px; text-transform: uppercase; letter-spacing: .09em;
     color: var(--vscode-descriptionForeground); font-weight: 600; }
+  .grouphd .n { font-family: var(--mono); font-size: 10px; color: var(--vscode-descriptionForeground); }
   .grouphd .rule { flex: 1; height: 1px; background: var(--hair); }
+
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
+  .chip { cursor: pointer; font-family: inherit; font-size: 11px; padding: 3px 9px; border-radius: 20px;
+    border: 1px solid var(--vscode-focusBorder); background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground); }
+  .chip:hover { opacity: .85; }
+  .chip.clear { border-color: var(--hair); background: transparent; color: var(--vscode-descriptionForeground); }
 
   .row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 18px; cursor: pointer;
     border-left: 2px solid transparent; }
@@ -84,8 +99,8 @@ export const MARKETPLACE_CSS = `
   .t-hook .glyph { background: color-mix(in srgb, var(--hook) 18%, transparent); color: var(--hook); }
   .t-plugin .glyph { background: color-mix(in srgb, var(--plugin) 18%, transparent); color: var(--plugin); }
 
-  .detail { flex: 0 0 39%; max-width: 460px; overflow-y: auto; padding: 18px;
-    display: flex; flex-direction: column; gap: 13px; }
+  .detail { flex: 0 0 44%; min-width: 340px; overflow-y: auto; padding: 18px;
+    display: flex; flex-direction: column; gap: 11px; }
   .detail .dh { display: flex; align-items: center; gap: 9px; }
   .detail .dn { font-size: 16px; font-weight: 600; word-break: break-word; }
   .detail .tags, .acts { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -98,6 +113,33 @@ export const MARKETPLACE_CSS = `
     background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.1));
     border: 1px solid var(--hair); border-radius: 7px; padding: 9px 74px 9px 11px; }
   .snip .cp { position: absolute; top: 6px; right: 6px; }
+
+  .preview, .mdnone { border-top: 1px solid var(--hair); padding-top: 13px; }
+  .mdnone { color: var(--vscode-descriptionForeground); font-size: 12px; }
+  .mdtrunc { margin-top: 14px; font-size: 11.5px; color: var(--vscode-descriptionForeground); }
+
+  .md { font-size: 12.5px; line-height: 1.55; }
+  .md > *:first-child { margin-top: 0; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 16px 0 7px; line-height: 1.3; }
+  .md h1 { font-size: 16px; }
+  .md h2 { font-size: 14.5px; }
+  .md h3 { font-size: 13px; }
+  .md h4, .md h5, .md h6 { font-size: 12.5px; color: var(--vscode-descriptionForeground); }
+  .md p, .md ul, .md ol, .md blockquote, .md pre, .md table { margin: 0 0 10px; }
+  .md ul, .md ol { padding-left: 20px; }
+  .md li { margin: 2px 0; }
+  .md code { font-family: var(--mono); font-size: 11.5px; padding: 1px 4px; border-radius: 4px;
+    background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.12)); }
+  .md pre { overflow-x: auto; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--hair);
+    background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.1)); }
+  .md pre code { padding: 0; background: none; }
+  .md blockquote { padding-left: 11px; border-left: 2px solid var(--hair);
+    color: var(--vscode-descriptionForeground); }
+  .md hr { border: 0; border-top: 1px solid var(--hair); margin: 14px 0; }
+  .md a { color: var(--vscode-textLink-foreground); cursor: pointer; }
+  .md table { border-collapse: collapse; display: block; overflow-x: auto; font-size: 11.5px; }
+  .md th, .md td { border: 1px solid var(--hair); padding: 4px 8px; text-align: left; }
+  .md th { font-weight: 600; background: var(--vscode-textCodeBlock-background, rgba(127,127,127,.08)); }
 
   .empty { padding: 44px 20px; text-align: center; color: var(--vscode-descriptionForeground); }
   .empty .big { font-size: 15px; color: var(--vscode-foreground); margin-bottom: 5px; }
@@ -112,4 +154,24 @@ export const MARKETPLACE_CSS = `
   .results::-webkit-scrollbar, .detail::-webkit-scrollbar { width: 9px; }
   .results::-webkit-scrollbar-thumb, .detail::-webkit-scrollbar-thumb {
     background: var(--vscode-scrollbarSlider-background); border-radius: 8px; }
+
+  .picker { position: relative; }
+  .pop { position: absolute; z-index: 5; top: calc(100% + 5px); left: 0; width: 290px; padding: 8px;
+    display: flex; flex-direction: column; gap: 7px; border-radius: 8px; border: 1px solid var(--hair);
+    background: var(--vscode-editorWidget-background); box-shadow: 0 6px 20px rgba(0,0,0,.28); }
+  .pq { padding: 5px 8px; border-radius: 6px; font-size: 12px; font-family: inherit;
+    border: 1px solid var(--hair); background: var(--vscode-input-background); color: var(--vscode-input-foreground); }
+  .pq:focus { outline: none; border-color: var(--vscode-focusBorder); }
+  .plist { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; }
+  .pitem { display: flex; align-items: center; gap: 7px; padding: 4px 5px; border-radius: 5px;
+    font-size: 12px; cursor: pointer; }
+  .pitem:hover { background: var(--vscode-list-hoverBackground); }
+  .pitem .pn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pitem .pm { font-size: 10px; color: var(--vscode-descriptionForeground); }
+  .pempty { padding: 10px 5px; font-size: 11.5px; color: var(--vscode-descriptionForeground); }
+  .pclear { align-self: flex-start; }
+
+  .row .meta.link { background: transparent; border: 0; padding: 0; font-family: inherit;
+    font-size: 11.5px; cursor: pointer; color: var(--vscode-descriptionForeground); }
+  .row .meta.link:hover { color: var(--vscode-textLink-foreground); text-decoration: underline; }
 `;
