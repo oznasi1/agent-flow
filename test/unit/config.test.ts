@@ -242,6 +242,29 @@ describe("getConfig — filter visibility", () => {
   });
 });
 
+describe("getConfig — remoteControl", () => {
+  it("defaults to off", () => {
+    expect(getConfig().remoteControl).toBe("off");
+  });
+
+  it("honors on and ask", () => {
+    setConfig({ remoteControl: "on" });
+    expect(getConfig().remoteControl).toBe("on");
+    setConfig({ remoteControl: "ask" });
+    expect(getConfig().remoteControl).toBe("ask");
+  });
+
+  it("falls back to off for a value outside the enum", () => {
+    setConfig({ remoteControl: "true" });
+    expect(getConfig().remoteControl).toBe("off");
+  });
+
+  it("falls back to off for an empty string", () => {
+    setConfig({ remoteControl: "" });
+    expect(getConfig().remoteControl).toBe("off");
+  });
+});
+
 describe("package.json ⇄ config constants", () => {
   const props = (pkg.contributes.configuration.properties as Record<string, { default?: unknown }>);
 
@@ -265,5 +288,11 @@ describe("package.json ⇄ config constants", () => {
 
   it("declares batchLaunchConfirmThreshold with a default of 6", () => {
     expect(props["agentFlow.batchLaunchConfirmThreshold"].default).toBe(6);
+  });
+
+  it("declares remoteControl with a default of off and the three-value enum", () => {
+    const p = props["agentFlow.remoteControl"] as { default?: unknown; enum?: unknown };
+    expect(p.default).toBe("off");
+    expect(p.enum).toEqual(["off", "on", "ask"]);
   });
 });

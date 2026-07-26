@@ -56,6 +56,7 @@ const CFG = {
   prReviewAutoFix: true,
   prReviewPrompt: "PR {key}{files}",
   worktree: "never" as const,
+  remoteControl: "off" as const,
   batchLaunchConfirmThreshold: 6,
   trackOpenWindows: true,
   stampLabelOnWrite: true,
