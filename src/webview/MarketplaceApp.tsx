@@ -1,7 +1,7 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
 import { fuzzyScore, phraseScore } from "../engine/fuzzy";
-import { categoryLabel, orderSections, Section } from "../engine/sections";
+import { categoryLabel, orderSections, sectionKey, Section } from "../engine/sections";
 import { AssetType, AssetView, ClaudeAssetsView, OutboundMessage, PluginRowView } from "../types";
 
 let toastSeq = 0;
@@ -213,10 +213,14 @@ export function MarketplaceApp(): JSX.Element {
     // Section order first, then the old type order inside a section, so a block
     // still reads Skills → Commands → Agents → Hooks. Both sorts are stable, so
     // the scan's plugin-clustered order survives inside each run.
+    // Rank is keyed the same way orderSections bucketed the rows (sectionKey), or
+    // a row with a raw "" category misses the "uncategorized" entry and falls
+    // through to rank 0 instead of pinning to the end.
     const rank = new Map(sections.map((s, i) => [s.category, i]));
     const byType = (r: Scored) => (r.type ? TYPE_ORDER[r.type] : 0);
     return [...picked].sort(
-      (a, b) => (rank.get(a.category) ?? 0) - (rank.get(b.category) ?? 0) || byType(a) - byType(b),
+      (a, b) =>
+        (rank.get(sectionKey(a.category)) ?? 0) - (rank.get(sectionKey(b.category)) ?? 0) || byType(a) - byType(b),
     );
   }, [assets, plugins, forType, searching, sections]);
 
@@ -316,7 +320,12 @@ export function MarketplaceApp(): JSX.Element {
               </div>
             ) : (
               rows.map((r, i) => {
-                const head = grouped && r.category !== lastCat ? ((lastCat = r.category), r.category) : null;
+                // Bucket by sectionKey, not the raw category: a raw "" is falsy, so
+                // comparing raw values would both miss the header (an empty head is
+                // indistinguishable from "no header here") and could re-head every
+                // uncategorized row if one ever sat next to a literal "uncategorized".
+                const key = sectionKey(r.category);
+                const head = grouped && key !== lastCat ? ((lastCat = key), key) : null;
                 const section = head ? sections.find((s) => s.category === head) : null;
                 return (
                   <React.Fragment key={r.key}>

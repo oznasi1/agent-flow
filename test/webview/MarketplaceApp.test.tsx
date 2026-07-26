@@ -349,4 +349,19 @@ describe("MarketplaceApp category sections", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Monitoring/ }));
     expect(screen.getByRole("button", { name: /^Skills/ }).textContent).toContain("1");
   });
+
+  // An asset whose manifest omits `category` scans in as "" (not the literal string
+  // "uncategorized"), so the component's own bucketing must agree with
+  // orderSections' — otherwise the row gets no header at all, or sorts into
+  // whichever section happens to occupy rank 0 instead of pinning to the end.
+  it("buckets an empty category under an Uncategorized header, sorted last", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg(view({
+      assets: [
+        asset({ name: "orphan", category: "", file: "/o" }),
+        asset({ name: "watch2", category: "monitoring", file: "/w2" }),
+      ],
+    })));
+    expect(headings()).toEqual(["Monitoring", "Uncategorized"]);
+  });
 });

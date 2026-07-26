@@ -23,13 +23,19 @@ export function categoryLabel(category: string): string {
     .join(" ");
 }
 
+/** The key a row's category buckets under. `orderSections` and every consumer
+ * must agree on this, or a row lands in a section whose header never renders. */
+export function sectionKey(category: string): string {
+  return category || LAST;
+}
+
 /** Sections in display order: Yours, then by descending row count, then
  * Uncategorized. Count ties break alphabetically so two scans of the same disk
  * never reorder the page under the user. */
 export function orderSections<T extends { category: string }>(rows: T[]): Section[] {
   const counts = new Map<string, number>();
   for (const r of rows) {
-    const c = r.category || LAST;
+    const c = sectionKey(r.category);
     counts.set(c, (counts.get(c) ?? 0) + 1);
   }
   const rank = (c: string) => (c === FIRST ? -1 : c === LAST ? 1 : 0);

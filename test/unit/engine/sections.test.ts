@@ -49,4 +49,10 @@ describe("orderSections", () => {
   it("omits Yours and Uncategorized when nothing falls in them", () => {
     expect(orderSections(rows("development")).map((x) => x.category)).toEqual(["development"]);
   });
+
+  it("buckets a row with an empty category under uncategorized, pinned last", () => {
+    const s = orderSections(rows("development", ""));
+    expect(s.map((x) => x.category)).toEqual(["development", "uncategorized"]);
+    expect(s.find((x) => x.category === "uncategorized")?.count).toBe(1);
+  });
 });
