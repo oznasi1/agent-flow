@@ -305,7 +305,7 @@ describe("multi-select & parallel launch", () => {
   };
   const checks = () => document.querySelectorAll(".card-check");
 
-  it("shows no checkboxes until exactly one repo is filtered", () => {
+  it("shows no checkboxes until at least one repo is filtered", () => {
     render(<App />);
     authed();
     apiPool();
@@ -320,7 +320,7 @@ describe("multi-select & parallel launch", () => {
     expect(checks().length).toBe(2);
   });
 
-  it("hides checkboxes again once a second repo is added", () => {
+  it("keeps checkboxes when a second repo is added, showing both repos' tasks", () => {
     render(<App />);
     authed();
     apiPool();
@@ -329,7 +329,7 @@ describe("multi-select & parallel launch", () => {
     const repoList = document.querySelector(".repo-list") as HTMLElement;
     fireEvent.mouseDown(within(repoList).getByText("api").closest(".repo-opt")!);
     fireEvent.mouseDown(within(repoList).getByText("billing").closest(".repo-opt")!);
-    expect(checks().length).toBe(0); // 2 repos selected → batch mode off
+    expect(checks().length).toBe(3); // ASM-1, ASM-2 (api) + ASM-3 (billing)
   });
 
   it("launches the checked, visible tasks with the filtered repo name", () => {
@@ -340,7 +340,7 @@ describe("multi-select & parallel launch", () => {
     fireEvent.click(checks()[0]); // ASM-1
     fireEvent.click(checks()[1]); // ASM-2
     fireEvent.click(screen.getByRole("button", { name: /Launch in parallel/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["ASM-1", "ASM-2"], repo: "api" });
+    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["ASM-1", "ASM-2"], repos: ["api"] });
   });
 
   it("does not expand a card when its checkbox is clicked", () => {
@@ -392,7 +392,25 @@ describe("multi-select & parallel launch", () => {
     // Search narrows the visible list to ASM-1; ASM-2 is still checked in state but hidden.
     fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "alpha" } });
     fireEvent.click(screen.getByRole("button", { name: /Launch in parallel/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["ASM-1"], repo: "api" });
+    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["ASM-1"], repos: ["api"] });
+  });
+
+  it("sends every selected repo when two are filtered", () => {
+    render(<App />);
+    authed();
+    apiPool();
+    fireEvent.click(screen.getByText("Filter repos"));
+    const repoList = document.querySelector(".repo-list") as HTMLElement;
+    fireEvent.mouseDown(within(repoList).getByText("api").closest(".repo-opt")!);
+    fireEvent.mouseDown(within(repoList).getByText("billing").closest(".repo-opt")!);
+    fireEvent.click(checks()[0]); // ASM-1 (api)
+    fireEvent.click(checks()[2]); // ASM-3 (billing)
+    fireEvent.click(screen.getByRole("button", { name: /Launch in parallel/i }));
+    expect(sent).toHaveBeenCalledWith({
+      type: "takeBatch",
+      keys: ["ASM-1", "ASM-3"],
+      repos: ["api", "billing"],
+    });
   });
 });
 
