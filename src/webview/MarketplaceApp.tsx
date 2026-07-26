@@ -3,6 +3,7 @@ import { send } from "./vscodeApi";
 import { fuzzyScore, phraseScore } from "../engine/fuzzy";
 import { categoryLabel, orderSections, sectionKey, Section } from "../engine/sections";
 import { AssetType, AssetView, ClaudeAssetsView, OutboundMessage, PluginRowView } from "../types";
+import { PickerItem, PluginPicker } from "./PluginPicker";
 
 let toastSeq = 0;
 
@@ -103,6 +104,9 @@ function pluginRow(p: PluginRowView): Row {
   };
 }
 
+/** Plugin identity for filtering. Names collide across marketplaces. */
+const pluginKey = (r: { plugin: string; marketplace: string }): string => `${r.plugin}@${r.marketplace}`;
+
 /** How well a row answers every term in the query, or null if it misses one.
  * The name carries the most weight, then the blurb, then where it came from — so
  * a skill named "deploy" outranks one that merely mentions deploying. Terms are
@@ -138,6 +142,7 @@ export function MarketplaceApp(): JSX.Element {
   const [scope, setScope] = React.useState<ScopeFilter>("all");
   const [sel, setSel] = React.useState(0);
   const [cat, setCat] = React.useState<string | null>(null);
+  const [pluginSel, setPluginSel] = React.useState<string[]>([]);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string }[]>([]);
 
   React.useEffect(() => {
@@ -164,19 +169,20 @@ export function MarketplaceApp(): JSX.Element {
    * one dimension so a control can count the rows it would reveal rather than the
    * rows already surviving it. */
   const sift = React.useCallback(
-    (base: Row[], skip: "category" | "" = ""): Scored[] => {
+    (base: Row[], skip: "category" | "plugin" | "" = ""): Scored[] => {
       const out: Scored[] = [];
       for (const r of base) {
         if (scope === "installed" && r.state !== "installed" && r.state !== "user") continue;
         if (scope === "enabled" && r.enabled === false) continue;
         if (skip !== "category" && cat && r.category !== cat) continue;
+        if (skip !== "plugin" && pluginSel.length && !pluginSel.includes(pluginKey(r))) continue;
         const score = searching ? rowScore(r, terms) : 0;
         if (score === null) continue;
         out.push({ ...r, score });
       }
       return out;
     },
-    [terms, searching, scope, cat],
+    [terms, searching, scope, cat, pluginSel],
   );
 
   const assetRows = React.useMemo(() => view.assets.map(assetRow), [view]);
@@ -186,6 +192,8 @@ export function MarketplaceApp(): JSX.Element {
   const plugins = React.useMemo(() => sift(pluginRows), [pluginRows, sift]);
   const assetsNoCat = React.useMemo(() => sift(assetRows, "category"), [assetRows, sift]);
   const pluginsNoCat = React.useMemo(() => sift(pluginRows, "category"), [pluginRows, sift]);
+  const assetsNoPlugin = React.useMemo(() => sift(assetRows, "plugin"), [assetRows, sift]);
+  const pluginsNoPlugin = React.useMemo(() => sift(pluginRows, "plugin"), [pluginRows, sift]);
 
   const counts = React.useMemo(() => {
     const c: Record<AssetType, number> = { skill: 0, command: 0, agent: 0, hook: 0 };
@@ -199,6 +207,30 @@ export function MarketplaceApp(): JSX.Element {
       type === "plugins" ? p : type === "all" ? a : a.filter((r) => r.type === type),
     [type],
   );
+
+  // Counted against every dimension except the plugin one, so the numbers show
+  // what checking a box would reveal. Already-selected plugins stay listed even at
+  // zero — a selection must never be stranded out of reach of its own checkbox.
+  const pickerItems: PickerItem[] = React.useMemo(() => {
+    const by = new Map<string, PickerItem>();
+    for (const r of forType(assetsNoPlugin, pluginsNoPlugin)) {
+      const key = pluginKey(r);
+      const at = by.get(key);
+      if (at) at.count++;
+      else by.set(key, { key, name: r.plugin, marketplace: r.marketplace, count: 1 });
+    }
+    for (const key of pluginSel) {
+      if (by.has(key)) continue;
+      const [name, marketplace] = [key.slice(0, key.lastIndexOf("@")), key.slice(key.lastIndexOf("@") + 1)];
+      by.set(key, { key, name, marketplace, count: 0 });
+    }
+    return [...by.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [assetsNoPlugin, pluginsNoPlugin, forType, pluginSel]);
+
+  const togglePlugin = (key: string): void => {
+    setPluginSel((s) => (s.includes(key) ? s.filter((k) => k !== key) : [...s, key]));
+    setSel(0);
+  };
 
   // Sections count what they would reveal, so they exclude the category dimension
   // but honour every other one.
@@ -281,11 +313,31 @@ export function MarketplaceApp(): JSX.Element {
           <Pill on={scope === "all"} onClick={() => { setScope("all"); setSel(0); }}>Everywhere</Pill>
           <Pill on={scope === "installed"} onClick={() => { setScope("installed"); setSel(0); }}>Installed only</Pill>
           <Pill on={scope === "enabled"} onClick={() => { setScope("enabled"); setSel(0); }}>Enabled only</Pill>
+          <PluginPicker
+            items={pickerItems}
+            selected={pluginSel}
+            onToggle={togglePlugin}
+            onClear={() => { setPluginSel([]); setSel(0); }}
+          />
         </div>
-        {cat && (
+        {(cat || pluginSel.length > 0) && (
           <div className="chips">
-            <button type="button" className="chip" onClick={() => { setCat(null); setSel(0); }}>
-              {categoryLabel(cat)} ×
+            {cat && (
+              <button type="button" className="chip" onClick={() => { setCat(null); setSel(0); }}>
+                {categoryLabel(cat)} ×
+              </button>
+            )}
+            {pluginSel.map((k) => (
+              <button key={k} type="button" className="chip" onClick={() => togglePlugin(k)}>
+                {k.slice(0, k.lastIndexOf("@"))} ×
+              </button>
+            ))}
+            <button
+              type="button"
+              className="chip clear"
+              onClick={() => { setCat(null); setPluginSel([]); setSel(0); }}
+            >
+              Clear
             </button>
           </div>
         )}
@@ -345,7 +397,14 @@ export function MarketplaceApp(): JSX.Element {
                       <span className="body">
                         <span className="top">
                           <span className={`nm${r.type === "command" ? " mono" : ""}`}>{r.display}</span>
-                          <span className="meta">{r.where}</span>
+                          <button
+                            type="button"
+                            className="meta link"
+                            onClick={(e) => { e.stopPropagation(); togglePlugin(pluginKey(r)); }}
+                          >
+                            {r.plugin}
+                          </button>
+                          {r.kind === "asset" && <span className="meta">· {r.marketplace}</span>}
                           {r.enabled === false && <span className="tag off">disabled</span>}
                           {r.kind === "plugin" && <span className="tag dim">{stateLabel[r.state]}</span>}
                         </span>

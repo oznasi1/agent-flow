@@ -122,4 +122,24 @@ export const MARKETPLACE_CSS = `
   .results::-webkit-scrollbar, .detail::-webkit-scrollbar { width: 9px; }
   .results::-webkit-scrollbar-thumb, .detail::-webkit-scrollbar-thumb {
     background: var(--vscode-scrollbarSlider-background); border-radius: 8px; }
+
+  .picker { position: relative; }
+  .pop { position: absolute; z-index: 5; top: calc(100% + 5px); left: 0; width: 290px; padding: 8px;
+    display: flex; flex-direction: column; gap: 7px; border-radius: 8px; border: 1px solid var(--hair);
+    background: var(--vscode-editorWidget-background); box-shadow: 0 6px 20px rgba(0,0,0,.28); }
+  .pq { padding: 5px 8px; border-radius: 6px; font-size: 12px; font-family: inherit;
+    border: 1px solid var(--hair); background: var(--vscode-input-background); color: var(--vscode-input-foreground); }
+  .pq:focus { outline: none; border-color: var(--vscode-focusBorder); }
+  .plist { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; }
+  .pitem { display: flex; align-items: center; gap: 7px; padding: 4px 5px; border-radius: 5px;
+    font-size: 12px; cursor: pointer; }
+  .pitem:hover { background: var(--vscode-list-hoverBackground); }
+  .pitem .pn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pitem .pm { font-size: 10px; color: var(--vscode-descriptionForeground); }
+  .pempty { padding: 10px 5px; font-size: 11.5px; color: var(--vscode-descriptionForeground); }
+  .pclear { align-self: flex-start; }
+
+  .row .meta.link { background: transparent; border: 0; padding: 0; font-family: inherit;
+    font-size: 11.5px; cursor: pointer; color: var(--vscode-descriptionForeground); }
+  .row .meta.link:hover { color: var(--vscode-textLink-foreground); text-decoration: underline; }
 `;

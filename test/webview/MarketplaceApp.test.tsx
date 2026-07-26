@@ -171,7 +171,10 @@ describe("MarketplaceApp", () => {
   it("shows plugin rows under the Plugins pill, including not-downloaded ones", () => {
     render(<MarketplaceApp />);
     host(assetsMsg());
-    fireEvent.click(screen.getByRole("button", { name: /^Plugins/i }));
+    // \d anchors on the type pill's "Plugins<count>" text — the plugin picker
+    // button also starts with "Plugins" (as "Plugins ▾"), which would otherwise
+    // ambiguously match too.
+    fireEvent.click(screen.getByRole("button", { name: /^Plugins \d/i }));
     expect(screen.getAllByText("remote-one").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/not downloaded/i).length).toBeGreaterThan(0);
   });
@@ -205,7 +208,7 @@ describe("MarketplaceApp", () => {
   it("copies the install command for a plugin row", () => {
     render(<MarketplaceApp />);
     host(assetsMsg());
-    fireEvent.click(screen.getByRole("button", { name: /^Plugins/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Plugins \d/i }));
     fireEvent.click(rowText("remote-one")); // the list row, not the detail heading
     fireEvent.click(screen.getByRole("button", { name: /^copy$/i }));
     expect(sent).toHaveBeenCalledWith({ type: "mkt:copy", text: "/plugin install remote-one@atbay" });
@@ -284,6 +287,69 @@ describe("MarketplaceApp", () => {
     render(<MarketplaceApp />);
     host({ type: "mkt:loading", loading: true });
     expect(screen.getByText(/scanning/i)).toBeInTheDocument();
+  });
+});
+
+describe("MarketplaceApp plugin filter", () => {
+  const openPicker = () => fireEvent.click(screen.getByRole("button", { name: /^Plugins ▾/ }));
+
+  it("narrows to the checked plugins and AND-s them with the type pill", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    openPicker();
+    fireEvent.click(screen.getByLabelText("gc-plugin"));
+    expect(rowText("watch")).toBeInTheDocument();
+    expect(screen.queryByText("/deploy")).not.toBeInTheDocument();
+  });
+
+  it("keeps several plugins at once", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    openPicker();
+    fireEvent.click(screen.getByLabelText("gc-plugin"));
+    fireEvent.click(screen.getByLabelText("cicd-plugin"));
+    expect(rowText("watch")).toBeInTheDocument();
+    expect(screen.getAllByText("/deploy").length).toBeGreaterThan(0);
+  });
+
+  it("adds a plugin from the name in a result row", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.click(screen.getAllByText("gc-plugin")[0]);
+    expect(screen.getByRole("button", { name: /gc-plugin ×/ })).toBeInTheDocument();
+    expect(screen.queryByText("pipeline")).not.toBeInTheDocument();
+  });
+
+  it("removes a plugin from its chip", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.click(screen.getAllByText("gc-plugin")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /gc-plugin ×/ }));
+    expect(screen.getAllByText("pipeline").length).toBeGreaterThan(0);
+  });
+
+  it("counts picker items against every dimension but the plugin one", () => {
+    const { container } = render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.click(screen.getByRole("button", { name: /^Skills/ }));
+    openPicker();
+    // "cicd-plugin" also appears as the clickable plugin name on every one of its
+    // rows, so scope the lookup to the popup rather than the whole document.
+    const item = (name: string) =>
+      [...container.querySelectorAll(".pop .pitem")].find((l) => l.textContent!.startsWith(name))!;
+    // cicd-plugin has one skill among its four assets; gc-plugin has its one.
+    expect(item("cicd-plugin").textContent).toContain("1");
+    // Selecting one plugin must not zero the others out of reach of their own box.
+    fireEvent.click(screen.getByLabelText("gc-plugin"));
+    expect(item("cicd-plugin")).toBeTruthy();
+  });
+
+  it("clears every chip at once", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    fireEvent.click(screen.getAllByText("gc-plugin")[0]);
+    fireEvent.click(screen.getByRole("button", { name: /^Clear$/ }));
+    expect(screen.queryByRole("button", { name: /gc-plugin ×/ })).not.toBeInTheDocument();
   });
 });
 
