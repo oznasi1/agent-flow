@@ -262,6 +262,109 @@ describe("maybeSeedAgent", () => {
     await maybeSeedAgent(context, () => {});
     expect(commands.executeCommand).not.toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
   });
+
+  it("seeds every plan matching this window, in (createdAt, seq) order", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["ASM-2-1.json", "ASM-1-1.json"] as never);
+    readFileSync.mockImplementation((p) =>
+      String(p).includes("ASM-1")
+        ? planJson({ key: "ASM-1", seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
+        : planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
+    );
+    commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext();
+
+    vi.useFakeTimers();
+    const pending = maybeSeedAgent(context, () => {});
+    await vi.runAllTimersAsync();
+    await pending;
+    vi.useRealTimers();
+
+    const seeds = commands.executeCommand.mock.calls.filter((c) => String(c[0]).startsWith("claude-vscode."));
+    expect(seeds.map((c) => c[2])).toEqual(["first", "second"]);
+  });
+
+  it("uses the new-tab command when seeding more than one session", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+    readFileSync.mockImplementation((p) =>
+      String(p).includes("ASM-1")
+        ? planJson({ key: "ASM-1", seq: 0 })
+        : planJson({ key: "ASM-2", seq: 1 }),
+    );
+    commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext();
+
+    vi.useFakeTimers();
+    const pending = maybeSeedAgent(context, () => {});
+    await vi.runAllTimersAsync();
+    await pending;
+    vi.useRealTimers();
+
+    expect(commands.executeCommand).toHaveBeenCalledWith("claude-vscode.editor.open", undefined, "do it");
+    expect(commands.executeCommand).not.toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+  });
+
+  it("falls back to the primary-editor command when the new-tab command is unregistered", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+    readFileSync.mockImplementation((p) =>
+      String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
+    );
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext();
+
+    vi.useFakeTimers();
+    const pending = maybeSeedAgent(context, () => {});
+    await vi.runAllTimersAsync();
+    await pending;
+    vi.useRealTimers();
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+  });
+
+  it("seeds the remaining plans when one is already consumed", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+    readFileSync.mockImplementation((p) =>
+      String(p).includes("ASM-1")
+        ? planJson({ key: "ASM-1", seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
+        : planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
+    );
+    commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext({
+      globalState: { "seeded:ASM-1:/ws/ASM-1.code-workspace": true },
+    });
+
+    vi.useFakeTimers();
+    const pending = maybeSeedAgent(context, () => {});
+    await vi.runAllTimersAsync();
+    await pending;
+    vi.useRealTimers();
+
+    const seeds = commands.executeCommand.mock.calls.filter((c) => String(c[0]).startsWith("claude-vscode."));
+    expect(seeds.map((c) => c[2])).toEqual(["second"]);
+  });
+
+  it("skips the clipboard fallback when seeding several sessions", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+    readFileSync.mockImplementation((p) =>
+      String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
+    );
+    commands.getCommands.mockResolvedValue([]); // no Claude command at all
+    env.openExternal.mockResolvedValue(false); // URI handler fails too
+    const { context } = fakeContext();
+
+    vi.useFakeTimers();
+    const pending = maybeSeedAgent(context, () => {});
+    await vi.runAllTimersAsync();
+    await pending;
+    vi.useRealTimers();
+
+    expect(env.clipboard.writeText).not.toHaveBeenCalled();
+    expect(window.showInformationMessage).toHaveBeenCalled();
+  });
 });
 
 describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {

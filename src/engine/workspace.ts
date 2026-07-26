@@ -12,14 +12,20 @@ import { gitState } from "./git";
 import { ensureGitExcluded } from "./gitExclude";
 import { windowIdentity } from "./presence";
 
-const BRIEF_DIR = ".pick-task";
-const BRIEF_FILE = "TASK.md";
+export const BRIEF_DIR = ".pick-task";
+export const BRIEF_FILE = "TASK.md";
 const PLAN_DIR = path.join(os.homedir(), ".agentflow", "plans");
 const PLAN_TTL_MS = 15 * 60 * 1000; // seed handshake valid for 15 min
+
+/** Pause between sessions when one window seeds a whole batch (see maybeSeedAgent). */
+const SEED_STAGGER_MS = 400;
 
 // The Claude Code extension command that opens the panel with a pre-filled prompt.
 // Verified against anthropic.claude-code 2.1.x — its URI /open handler calls exactly this.
 const CLAUDE_OPEN_CMD = "claude-vscode.primaryEditor.open";
+// Claude Code's "Open in New Tab". Unlike primaryEditor.open it joins the existing
+// Claude tab group, so a batch's sessions stack in one column instead of one per launch.
+const CLAUDE_NEW_TAB_CMD = "claude-vscode.editor.open";
 
 export interface TicketRef {
   key: string;
@@ -53,11 +59,14 @@ export interface OpenResult {
   remoteControl: boolean; // whether Remote Control actually applies (see the single-window guard)
 }
 
-interface PlanFile {
+export interface PlanFile {
   key: string;
   createdAt: number;
   seedAgent: boolean;
   remoteControl?: boolean;
+  /** Position in a batch. Several plans written in one loop can share a
+   * createdAt millisecond; this keeps the seeded tabs in selection order. */
+  seq?: number;
   matches: { matchPath: string; prompt: string }[];
 }
 
@@ -101,7 +110,7 @@ export function listWorkspaceFiles(dir: string): WorkspaceListItem[] {
 }
 
 // ── Brief + prompt ────────────────────────────────────────────────────────────
-function briefMarkdown(
+export function briefMarkdown(
   t: TicketRef, planMd: string, services: ServiceRef[], thisRepo: string, files: string[],
 ): string {
   const svcLines = services
@@ -130,11 +139,15 @@ ${svcLines}
 `;
 }
 
-function agentPrompt(t: TicketRef, mentions: string[], template: string): string {
-  return renderPrompt(template, { key: t.key, summary: t.summary, url: t.url, brief: `${BRIEF_DIR}/${BRIEF_FILE}` }, mentions);
+export function agentPrompt(t: TicketRef, mentions: string[], template: string, briefPath?: string): string {
+  return renderPrompt(
+    template,
+    { key: t.key, summary: t.summary, url: t.url, brief: briefPath ?? `${BRIEF_DIR}/${BRIEF_FILE}` },
+    mentions,
+  );
 }
 
-function writePlanFile(plan: PlanFile): void {
+export function writePlanFile(plan: PlanFile): void {
   fs.mkdirSync(PLAN_DIR, { recursive: true });
   fs.writeFileSync(path.join(PLAN_DIR, `${plan.key}-${plan.createdAt}.json`), JSON.stringify(plan, null, 2));
 }
@@ -377,6 +390,7 @@ export async function maybeSeedAgent(context: vscode.ExtensionContext, log: (m: 
   }
 
   const now = Date.now();
+  const due: PlanFile[] = [];
   for (const f of files) {
     const full = path.join(PLAN_DIR, f);
     let plan: PlanFile;
@@ -393,15 +407,28 @@ export async function maybeSeedAgent(context: vscode.ExtensionContext, log: (m: 
     const match = plan.matches.find((m) => canon(m.matchPath) === identity);
     log(`plan ${plan.key}: ${match ? "MATCHED this window" : "no match"}`);
     if (!match) continue;
-
-    const consumedKey = `seeded:${plan.key}:${identity}`;
-    if (context.globalState.get<boolean>(consumedKey)) {
+    if (context.globalState.get<boolean>(`seeded:${plan.key}:${identity}`)) {
       log(`plan ${plan.key}: already seeded this window — skipping`);
       continue;
     }
-    await context.globalState.update(consumedKey, true);
-    await seedClaudeCode(match.prompt, plan.key, log, plan.remoteControl === true);
-    return;
+    due.push(plan);
+  }
+  if (!due.length) return;
+
+  // A batch lands N plans on one window. Order them the way the user selected them:
+  // plans written in one loop can share a createdAt millisecond, so seq breaks the tie.
+  due.sort((a, b) => a.createdAt - b.createdAt || (a.seq ?? 0) - (b.seq ?? 0));
+
+  const multi = due.length > 1;
+  for (let i = 0; i < due.length; i++) {
+    const plan = due[i];
+    const match = plan.matches.find((m) => canon(m.matchPath) === identity)!;
+    await context.globalState.update(`seeded:${plan.key}:${identity}`, true);
+    await seedClaudeCode(match.prompt, plan.key, log, plan.remoteControl === true, multi);
+    // Claude Code picks a session's column by scanning the tab groups for an existing
+    // Claude group, and that model doesn't update synchronously — without this pause
+    // consecutive sessions each decide there is no group yet and land in separate columns.
+    if (i < due.length - 1) await delay(SEED_STAGGER_MS);
   }
 }
 
@@ -448,6 +475,7 @@ async function seedClaudeCode(
   key: string,
   log: (m: string) => void,
   remoteControl = false,
+  multi = false,
 ): Promise<void> {
   const seedText = remoteControl ? `/remote-control ${key}` : prompt;
   // Write it before the panel opens so it's already there to paste.
@@ -463,12 +491,14 @@ async function seedClaudeCode(
 
   // 1 — verified command claude-vscode.primaryEditor.open(session, prompt);
   //     poll because our extension and Claude Code both activate onStartupFinished.
+  const preferred = multi ? [CLAUDE_NEW_TAB_CMD, CLAUDE_OPEN_CMD] : [CLAUDE_OPEN_CMD];
   for (let attempt = 1; attempt <= 7; attempt++) {
     try {
       const cmds = await vscode.commands.getCommands(true);
-      if (cmds.includes(CLAUDE_OPEN_CMD)) {
-        await vscode.commands.executeCommand(CLAUDE_OPEN_CMD, undefined, seedText);
-        log(`seed ${key}: opened Claude Code via command (attempt ${attempt})${remoteControl ? " + Remote Control" : ""}`);
+      const cmd = preferred.find((c) => cmds.includes(c));
+      if (cmd) {
+        await vscode.commands.executeCommand(cmd, undefined, seedText);
+        log(`seed ${key}: opened Claude Code via ${cmd} (attempt ${attempt})${remoteControl ? " + Remote Control" : ""}`);
         announceRemoteControl();
         return;
       }
@@ -477,7 +507,7 @@ async function seedClaudeCode(
     }
     await delay(700);
   }
-  log(`seed ${key}: '${CLAUDE_OPEN_CMD}' never registered — trying URI handler`);
+  log(`seed ${key}: no Claude Code open command registered — trying URI handler`);
 
   // 2 — URI handler
   try {
@@ -491,7 +521,15 @@ async function seedClaudeCode(
     log(`seed ${key}: URI failed: ${e}`);
   }
 
-  // 3 — clipboard fallback
+  // 3 — fallback. One clipboard can't carry N prompts, so a batch gets a pointer to
+  // the briefs instead — they hold the same context and sit in the window's roots.
+  if (multi) {
+    vscode.window.showInformationMessage(
+      `Agent Flow: couldn't start Claude Code for ${key}. Its brief is in ${BRIEF_DIR}/${BRIEF_FILE} — open it to start the task.`,
+    );
+    log(`seed ${key}: no Claude Code available — pointed at the brief (batch, clipboard withheld)`);
+    return;
+  }
   if (remoteControl) log(`seed ${key}: Remote Control dropped — the clipboard is needed for the prompt`);
   await vscode.env.clipboard.writeText(prompt);
   vscode.window.showInformationMessage(
