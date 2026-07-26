@@ -257,13 +257,19 @@ function cleanPath(p: string): string {
  * lexically and refusing anything that climbs out. A marketplace.json comes from
  * a third-party repo, so `source` (and `metadata.pluginRoot`, folded into `rel`
  * by the caller) is attacker-controlled — and everything the scan discovers
- * becomes readable through the panel's preview. Returns null both when the path
- * climbs above the root and when it resolves to the root itself: no caller here
- * has ever relied on "the whole marketplace clone is this plugin's content",
- * and treating it as valid would attribute every sibling plugin's files to it. */
+ * becomes readable through the panel's preview. Splits on "\" as well as "/":
+ * POSIX treats a backslash as an ordinary filename character, but Node on
+ * Windows treats it as a real separator, so a manifest written with backslashes
+ * needs the same containment on every platform, not just the one the scan
+ * happens to run on. Resolves to `root` itself — not a refusal — when `rel`
+ * collapses to no segments at all (e.g. `source: "."`, a real pattern for a
+ * single-plugin repo whose content is the repo root): the caller only invokes
+ * this with a non-empty `rel`, so this is a legitimate answer, and the root is
+ * inside the container so it costs nothing security-wise. Returns null only for
+ * a genuine climb above the root. */
 function containedJoin(root: string, rel: string): string | null {
   const out: string[] = [];
-  for (const seg of rel.split("/")) {
+  for (const seg of rel.split(/[/\\]/)) {
     if (!seg || seg === ".") continue;
     if (seg === "..") {
       if (!out.length) return null;
@@ -272,7 +278,7 @@ function containedJoin(root: string, rel: string): string | null {
     }
     out.push(seg);
   }
-  return out.length ? `${root}/${out.join("/")}` : null;
+  return out.length ? `${root}/${out.join("/")}` : root;
 }
 
 function readJson(reader: AssetReader, path: string): any {

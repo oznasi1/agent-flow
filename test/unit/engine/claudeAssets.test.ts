@@ -211,6 +211,46 @@ describe("resolveContentDir containment", () => {
     expect(dir).toBe(`${root}/b`);
   });
 
+  it("refuses a source that climbs out using backslashes", () => {
+    // Node on Windows treats "\" as a path separator even though POSIX doesn't —
+    // splitting only on "/" left "..\..\.." as one opaque segment, so the pre-fix
+    // `${root}/${rel}` concatenation landed on this exact literal string. Plant
+    // it (memReader has no real ".." resolution) to prove the old split "finds" it.
+    const reader = memReader({ [`${root}/..\\..\\../secret`]: "root:x:0:0:root:/root:/bin/bash" });
+    const { dir, state } = resolveContentDir(reader, { name: "evil", source: "..\\..\\.." }, root, "", []);
+    expect(state).toBe("manifest");
+    expect(dir).toBe("");
+  });
+
+  it("resolves a legitimately dotted relative path written with backslashes", () => {
+    // Consistent with the forward-slash case above: "a" is pushed then popped
+    // by "..", leaving "b" — not "a/b". A manifest author who writes backslash
+    // separators (e.g. authored on Windows) gets the same answer either way.
+    const reader = memReader({ [`${root}/b/skills/x/SKILL.md`]: "" });
+    const { dir, state } = resolveContentDir(reader, { name: "p", source: "a\\..\\b" }, root, "", []);
+    expect(state).toBe("clone");
+    expect(dir).toBe(`${root}/b`);
+  });
+
+  it("resolves source '.' to installLocation itself, not to manifest", () => {
+    // A real pattern on this machine: a single-plugin marketplace repo whose
+    // `source` is "." because the plugin *is* the repo root. Pre-fix this
+    // collapsed to installLocation via the real filesystem; containment must
+    // preserve that, not just refuse escapes — the root is inside the
+    // container, so returning it costs nothing security-wise.
+    const reader = memReader({ [`${root}/SKILL.md`]: "" });
+    const { dir, state } = resolveContentDir(reader, { name: "ui-ux-pro-max", source: "." }, root, "", []);
+    expect(state).toBe("clone");
+    expect(dir).toBe(root);
+  });
+
+  it("still refuses a climb-out after the '.' fix", () => {
+    const reader = memReader({ [`${root}/../../../../etc/passwd`]: "root:x:0:0:root:/root:/bin/bash" });
+    const { dir, state } = resolveContentDir(reader, { name: "evil", source: "../../../../etc" }, root, "", []);
+    expect(state).toBe("manifest");
+    expect(dir).toBe("");
+  });
+
   it("still resolves the ordinary happy path identically", () => {
     const reader = memReader({ [`${root}/plugins/installed-one/skills/x/SKILL.md`]: "" });
     const { dir, state } = resolveContentDir(
