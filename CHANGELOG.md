@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.35] — 2026-07-27
+
+### Fixed
+
+- **Exploration sessions showed someone else's pull request.** A session with no
+  Jira ticket has a made-up key and no branch Agent Flow named, so looking it up
+  asked Jira about an issue that doesn't exist and asked GitHub for pull requests
+  from the default branch — which matched whatever was opened from it last, quite
+  possibly a colleague's. Ticketless cards are now left out of both lookups, their
+  key is no longer a dead "open in Jira" button, and an Explore session says
+  `explore` instead of its internal slug.
+- **Diff said a task had changed nothing the moment it committed.** The button
+  diffed against `HEAD`, which goes blank as soon as an agent commits — so every
+  task that got as far as opening a PR reported "no uncommitted changes". Diff now
+  shows everything the task changed since it left the default branch, committed
+  work included. A large diff no longer comes back empty either; it was hitting a
+  1 MB buffer limit that read as "nothing to show".
+- **Forget felt like nothing had happened.** The card stayed on the board through a
+  full rebuild — a Jira round trip per run plus git per repo — with nothing on
+  screen to say the Deck was working. The card now leaves immediately, the refresh
+  button spins while a rebuild is in flight, and the next authoritative update
+  brings the card back if the delete really did fail.
+
+### Changed
+
+- **The board stopped fighting itself on refresh.** Overlapping refreshes are
+  sequenced, so a slow pass that started before a Forget can no longer put the
+  forgotten card back; `origin/HEAD` is checked before it's trusted, since it goes
+  stale after a default-branch rename; and a refresh's Jira lookups now run
+  concurrently instead of one run at a time, which is most of what a cold refresh
+  used to spend its time on.
+
 ## [0.1.34] — 2026-07-27
 
 ### Fixed
