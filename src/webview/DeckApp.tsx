@@ -22,14 +22,15 @@ function timeAgo(ms: number | null): string {
 
 type Tone = "working" | "idle" | "needs" | "parked" | "merged";
 
-/** Did any of this run's PRs actually land? `column === "done"` alone can mean
- * only that Jira says done, which is not the same claim. */
-function anyMerged(prs: PrEntryMap): boolean {
-  return Object.values(prs).some((e) => e.facts?.state === "MERGED");
+/** Did every PR this run has actually land? Mirrors prSignals' `merged` rule in
+ * status.ts — a run whose backend merged and whose frontend has not is not merged. */
+function allMerged(prs: PrEntryMap): boolean {
+  const facts = Object.values(prs).map((e) => e.facts).filter((f): f is PrFacts => f !== null);
+  return facts.length > 0 && facts.every((f) => f.state === "MERGED");
 }
 
 function stateView(r: RunStatus, live: boolean): { text: string; tone: Tone } {
-  if (r.column === "done") return { text: anyMerged(r.prs) ? "merged" : "done", tone: "merged" };
+  if (r.column === "done") return { text: allMerged(r.prs) ? "merged" : "done", tone: "merged" };
   if (!live || r.agent.state === "unknown") return { text: "parked · git + Jira only", tone: "parked" };
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };

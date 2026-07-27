@@ -10,7 +10,7 @@ import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { openInEditor } from "./engine/workspace";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
-import { GhProvider, PrProvider, ghAvailable } from "./engine/pr/provider";
+import { FetchResult, GhProvider, PrProvider, ghAvailable } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
 import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, Run, RunStatus } from "./types";
 
@@ -103,9 +103,13 @@ export class DeckPanel {
   private ghReady(): boolean {
     if (!this.prFacts) return false;
     if (this.ghProbe === null) {
-      this.ghProbe = ghAvailable();
-      void this.ghProbe.then((ok) => {
-        this.ghOk = ok;
+      const p = (this.ghProbe = ghAvailable());
+      void p.then((ok) => {
+        // A probe orphaned by a toggle (deck:setPrFacts resets ghProbe and starts
+        // a fresh one) must not win if it resolves after the fresh probe already
+        // has — that would let a stale `false` clobber a fresh `true` right after
+        // the user ran `gh auth login`, defeating the whole point of re-probing.
+        if (this.ghProbe === p) this.ghOk = ok;
       });
     }
     return this.ghOk === true;
@@ -119,7 +123,16 @@ export class DeckPanel {
   private enqueuePr(key: string, repo: { name: string; path: string }, branch: string | null, previous?: PrEntry): void {
     const epoch = this.prEpoch.get(key) ?? 0;
     this.prQueue.push(repo.path, async () => {
-      const res = await this.pr.fetch(repo.path, branch, key);
+      let res: FetchResult;
+      try {
+        res = await this.pr.fetch(repo.path, branch, key);
+      } catch {
+        // A provider must never throw, but a thrown error here must still not
+        // leave this entry unstamped — an unstamped entry reads as stale on
+        // every tick and re-enqueues the same repo forever, since
+        // isStale(undefined, …) is always true.
+        res = { ok: false };
+      }
       if ((this.prEpoch.get(key) ?? 0) !== epoch) return; // forgotten mid-flight
       if (!res.ok) this.log(`deck: pr fetch ${key}/${repo.name} failed`);
       const entry: PrEntry = res.ok
@@ -153,7 +166,15 @@ export class DeckPanel {
     const out: RunStatus[] = [];
     for (const run of runs) {
       const jira = authed ? await this.jiraStatus(run.key) : null;
-      const prs: PrEntryMap = this.prFacts ? readPrEntries(defaultPrFactsDir(), run.key) : {};
+      const stored = this.prFacts ? readPrEntries(defaultPrFactsDir(), run.key) : {};
+      // Drop entries for repos that have left the run — re-taking a task with a
+      // different repo selection can leave one behind. It is never re-staled
+      // (only repos in run.repos are checked below), yet an orphan would still
+      // render as a PrBlock and vote in prSignals, pinning a card in Needs you
+      // or out of Done with Forget as the only escape.
+      const prs: PrEntryMap = Object.fromEntries(
+        run.repos.filter((r) => stored[r.name]).map((r) => [r.name, stored[r.name]]),
+      );
       if (ghReady) {
         const ttlMs = getConfig().prFactsTtlSeconds * 1000;
         for (const repo of run.repos) {
@@ -217,9 +238,17 @@ export class DeckPanel {
         this.prEpoch.set(m.key, (this.prEpoch.get(m.key) ?? 0) + 1);
         await this.refresh();
         break;
-      case "openExternal":
-        await vscode.env.openExternal(vscode.Uri.parse(m.url));
+      case "openExternal": {
+        const u = vscode.Uri.parse(m.url);
+        // f.url and every failing check's detailsUrl/targetUrl now come from
+        // GitHub's API, which a check-run producer controls — unlike our own
+        // Jira urls, that is not a trusted source for a scheme handed straight
+        // to the OS (e.g. a vscode://<publisher>.<ext>/… reaching another
+        // extension's UriHandler).
+        if (u.scheme !== "https" && u.scheme !== "http") break;
+        await vscode.env.openExternal(u);
         break;
+      }
     }
   }
 

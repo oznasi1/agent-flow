@@ -17,8 +17,20 @@ function fileFor(dir: string, key: string): string {
  * cache must degrade to "no facts", never break the board. */
 export function readPrEntries(dir: string, key: string): PrEntryMap {
   try {
-    const parsed = JSON.parse(fs.readFileSync(fileFor(dir, key), "utf8")) as PrEntryMap;
-    return parsed && typeof parsed === "object" ? parsed : {};
+    const parsed = JSON.parse(fs.readFileSync(fileFor(dir, key), "utf8")) as unknown;
+    // Reject anything that isn't a plain object — an array passes `typeof ===
+    // "object"` but `all[repo] = entry` on an array sets a non-index property
+    // that JSON.stringify silently drops, leaving the file stuck at "[]" forever.
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    // Filter to values that actually look like a PrEntry. A value like `null`
+    // (e.g. `{"api": null}`) would otherwise reach prSignals/allMerged, both of
+    // which deref `.facts` on it — the TypeError propagates out of buildAll and
+    // freezes the whole board, since refresh's catch means no deck:runs at all.
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        ([, v]) => !!v && typeof v === "object" && typeof (v as PrEntry).fetchedAt === "number",
+      ),
+    ) as PrEntryMap;
   } catch {
     return {};
   }

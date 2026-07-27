@@ -288,6 +288,22 @@ describe("DeckApp PR-facts chrome", () => {
     expect(screen.queryByText("merged")).toBeNull();
   });
 
+  it("says done, not merged, when only one of two repos' PRs merged (F2)", () => {
+    // The spec's prMerged rule requires EVERY PR-bearing repo to be MERGED — a
+    // two-repo run whose backend merged and whose frontend is still open must
+    // not claim "merged" just because `.some()` finds one.
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "done",
+      prs: {
+        svc: { facts: prFacts({ state: "MERGED" }), fetchedAt: 1 },
+        web: { facts: prFacts({ number: 99, url: "https://github.com/acme/web/pull/99", state: "OPEN" }), fetchedAt: 1 },
+      },
+    })]));
+    expect(screen.getByText("done")).toBeTruthy();
+    expect(screen.queryByText("merged")).toBeNull();
+  });
+
   it("toggles PR facts", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));

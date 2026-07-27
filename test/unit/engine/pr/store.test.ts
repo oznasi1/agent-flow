@@ -99,6 +99,39 @@ describe("readPrEntries / writePrEntry", () => {
   });
 });
 
+describe("readPrEntries — malformed shapes (F3)", () => {
+  it("returns {} for a top-level null rather than admitting it as a map", () => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "ASM-1.json"), "null");
+    expect(readPrEntries(dir, "ASM-1")).toEqual({});
+  });
+
+  it("returns {} for a top-level number", () => {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "ASM-1.json"), "5");
+    expect(readPrEntries(dir, "ASM-1")).toEqual({});
+  });
+
+  it("returns {} for a top-level array rather than treating it as a repo map", () => {
+    // A bare array passes `typeof parsed === "object"`. Left unguarded, the
+    // caller's `all[repo] = entry` sets a non-index property that JSON.stringify
+    // silently drops for an array, so the file never becomes writable again.
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "ASM-1.json"), "[]");
+    expect(readPrEntries(dir, "ASM-1")).toEqual({});
+  });
+
+  it("filters out a value that is not a PrEntry, keeping the ones that are", () => {
+    // `{"api": null}` must not reach prSignals/allMerged — both deref `.facts`
+    // on the entry and would throw on a bare `null`, which propagates out of
+    // buildAll and freezes the whole board (no deck:runs posted at all).
+    fs.mkdirSync(dir, { recursive: true });
+    const web: PrEntry = { facts: facts(), fetchedAt: 123 };
+    fs.writeFileSync(path.join(dir, "ASM-1.json"), JSON.stringify({ api: null, web }));
+    expect(readPrEntries(dir, "ASM-1")).toEqual({ web });
+  });
+});
+
 describe("removePrEntries", () => {
   it("drops a run's file", () => {
     writePrEntry(dir, "ASM-1", "api", { facts: null, fetchedAt: 1 });

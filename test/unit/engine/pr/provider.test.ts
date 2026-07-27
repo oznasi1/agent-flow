@@ -87,6 +87,15 @@ describe("GhProvider.fetch — results", () => {
     const { run } = scripted(JSON.stringify({ message: "Not Found" }));
     expect(await new GhProvider(run).fetch("/r/api", "b", "ASM-1")).toEqual({ ok: false });
   });
+
+  it("reports failure rather than throwing when statusCheckRollup contains a malformed entry", async () => {
+    // A null element inside statusCheckRollup makes mapRollup's `c.name` throw a
+    // TypeError. toPrFacts must stay inside fetch's own try/catch so that surfaces
+    // as `{ ok: false }` — an uncaught throw here would leave enqueuePr's write
+    // unreached and re-arm this repo's fetch on every tick, forever (F1).
+    const { run } = scripted(JSON.stringify([pr({ statusCheckRollup: [null] })]));
+    expect(await new GhProvider(run).fetch("/r/api", "b", "ASM-1")).toEqual({ ok: false });
+  });
 });
 
 describe("GhProvider.fetch — review threads", () => {

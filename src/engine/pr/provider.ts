@@ -52,20 +52,25 @@ export class GhProvider implements PrProvider {
   constructor(private readonly run: Runner = execRunner) {}
 
   async fetch(repoPath: string, branch: string | null, key: string): Promise<FetchResult> {
-    let chosen: GhPr | undefined;
     try {
+      let chosen: GhPr | undefined;
       // The live branch is exact, and correct for Address PR runs too — the agent
       // checked out the PR's own head. The key search only covers a PR opened from
       // a branch Agent Flow didn't name.
       if (branch) chosen = pickPr(await this.list(repoPath, ["--head", branch]));
       if (!chosen) chosen = pickPr(await this.list(repoPath, ["--search", `${key} in:title`]));
+      if (!chosen) return { ok: true, facts: null };
+
+      // toPrFacts (and the rollup mapper inside it) must stay inside this try:
+      // a malformed statusCheckRollup entry from gh (e.g. a bare null) must
+      // degrade to `{ ok: false }`, never throw out of fetch — an uncaught throw
+      // here leaves the caller's cache entry unstamped, which re-arms this
+      // repo's fetch on every tick, forever.
+      const unresolved = chosen.reviewDecision ? await this.unresolved(repoPath, chosen) : null;
+      return { ok: true, facts: toPrFacts(chosen, unresolved) };
     } catch {
       return { ok: false };
     }
-    if (!chosen) return { ok: true, facts: null };
-
-    const unresolved = chosen.reviewDecision ? await this.unresolved(repoPath, chosen) : null;
-    return { ok: true, facts: toPrFacts(chosen, unresolved) };
   }
 
   private async list(repoPath: string, selector: string[]): Promise<GhPr[]> {

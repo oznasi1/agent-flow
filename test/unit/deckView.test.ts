@@ -191,6 +191,21 @@ describe("DeckPanel", () => {
     expect(env.openExternal).toHaveBeenCalled();
   });
 
+  it("refuses a non-http(s) scheme from the webview (F5)", async () => {
+    // f.url and every failing check's detailsUrl/targetUrl now come from GitHub's
+    // API, which a check-run producer controls — a vscode://<publisher>.<ext>/…
+    // url must never reach openExternal.
+    show();
+    await lastPanel()._fire({ type: "openExternal", url: "vscode://malicious.ext/handler" });
+    expect(env.openExternal).not.toHaveBeenCalled();
+  });
+
+  it("opens an https url from the webview (F5)", async () => {
+    show();
+    await lastPanel()._fire({ type: "openExternal", url: "https://github.com/acme/api/pull/4821" });
+    expect(env.openExternal).toHaveBeenCalled();
+  });
+
   it("toasts when a run has nothing to open", async () => {
     h.runs = [mkRun({ repos: [] })];
     show();
@@ -452,5 +467,55 @@ describe("DeckPanel PR facts", () => {
     // If the queue had merely paused rather than dropped the queued job, a 5th
     // call would show up here once the active slots freed up.
     expect(h.prFetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("stamps an error entry when the fetch itself rejects, rather than leaving nothing written (F1)", async () => {
+    // RefreshQueue.pump swallows a rejected job (the queue owns the slot, not the
+    // error) — so if enqueuePr doesn't catch this itself, writePrEntry is never
+    // reached, the entry is never stamped, and isStale(undefined, …) re-enqueues
+    // the same repo forever.
+    h.prFetch.mockRejectedValue(new Error("gh exploded"));
+    await showAndWarm();
+    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "ASM-1", "svc", expect.objectContaining({ error: true }));
+  });
+
+  it("drops a stored PR entry for a repo that has left the run (F4)", async () => {
+    // Re-taking a task with a different repo selection can leave an entry behind
+    // for a repo no longer in run.repos. It must never reach buildRunStatus —
+    // rendering and voting on an orphaned entry can pin a card in Needs you (or
+    // out of Done) with Forget as the only escape.
+    const svcEntry = { facts: null, fetchedAt: Date.now() };
+    h.prEntries = { svc: svcEntry, ghost: { facts: null, fetchedAt: Date.now() } };
+    show();
+    await settled();
+    expect(h.buildRunStatus).toHaveBeenCalledWith(
+      expect.anything(), null, expect.any(String), expect.any(Number),
+      expect.any(Boolean), expect.any(Set), { svc: svcEntry },
+    );
+  });
+
+  it("does not let a probe orphaned by a toggle overwrite a fresher one (F6)", async () => {
+    // Two probes end up in flight: the one this test lets resolve late must not
+    // win over the one started by the re-probe on `deck:setPrFacts on: true`.
+    let resolveFirst!: (v: boolean) => void;
+    let resolveSecond!: (v: boolean) => void;
+    h.ghAvailable
+      .mockImplementationOnce(() => new Promise((res) => { resolveFirst = res; }))
+      .mockImplementationOnce(() => new Promise((res) => { resolveSecond = res; }));
+    show();
+    await settled(); // starts the first probe (left pending)
+    const p = lastPanel();
+    await p._fire({ type: "deck:setPrFacts", on: false });
+    await p._fire({ type: "deck:setPrFacts", on: true }); // resets ghProbe, starts a second probe
+    await settled();
+
+    resolveSecond(true); // the fresh probe: the user just ran `gh auth login`
+    await settled();
+    resolveFirst(false); // the orphaned probe, resolving late
+    await settled();
+
+    await p._fire({ type: "deck:refresh" });
+    const note = posts(p).filter((m) => m.type === "deck:runs").at(-1)?.ghNote;
+    expect(note).toBeNull();
   });
 });
