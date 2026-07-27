@@ -172,4 +172,19 @@ export const DECK_CSS = `
   .board::-webkit-scrollbar { width: 9px; height: 9px; }
   .board::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 8px; }
   .board::-webkit-scrollbar-corner { background: transparent; }
+
+  .pr-block { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--hair);
+    font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; }
+  .pr-repo { color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
+  .pr-line { display: flex; align-items: baseline; gap: 6px; line-height: 1.5; }
+  .pr-lbl { width: 42px; flex: none; color: var(--vscode-descriptionForeground); }
+  .pr-link { background: none; border: 0; padding: 0; cursor: pointer;
+    text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
+  .pr-ok { color: var(--c-done); }
+  .pr-warn { color: var(--c-idle); }
+  .pr-bad { color: var(--c-needs); }
+  .pr-bad .pr-link { color: inherit; }
+  .pr-wait { color: var(--vscode-descriptionForeground); }
+  .pr-draft { color: var(--vscode-descriptionForeground); }
+  .legend .note.warn { color: var(--c-idle); }
 `;
