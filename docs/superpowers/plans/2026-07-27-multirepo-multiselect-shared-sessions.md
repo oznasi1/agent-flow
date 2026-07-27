@@ -1252,7 +1252,9 @@ In `src/tasksView.ts`, replace the whole `takeBatch` method (lines 704–793) wi
             planMd: task.planMd,
             descriptionText: task.descriptionText,
             services: task.services,
-            mode: "per-window",
+            // Per task, not fixed: a batched task can now span repos, and a fixed
+            // "per-window" makes openWorkspace open one window PER REPO per task.
+            mode: task.services.length === 1 || cfg.workspaceMode === "per-window" ? "per-window" : "multiroot",
             promptTemplate: promptMode.prompt,
             workspaceDir: cfg.workspaceDir,
             seedAgent: cfg.seedAgent,
