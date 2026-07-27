@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.36] — 2026-07-28
+
+### Added
+
+- **Four more ways to start a task.** The "how should the agent start?" picker
+  now offers **Test-driven** (write the failing test first, then implement until
+  it's green), **Investigate & root-cause** (reproduce and trace it, propose a
+  fix, no code edits), **Orchestrator** (split the ticket into parallel subtasks,
+  then integrate and verify), and **Refine the ticket** (sharpen the description
+  and acceptance criteria instead of building it) — alongside Plan first and
+  Implementation.
+
+### Fixed
+
+- **The prompt-mode picker mangled its own descriptions.** The line under each
+  mode's name was built by stripping the `{placeholders}` out of the prompt
+  template and cutting the remainder at 80 characters, so it read
+  `Jira : "". Read the task brief at .` and stopped mid-word. Each mode now
+  carries a description written for the person reading the picker. A mode without
+  one shows just its name, the way the Explore picker beside it already did.
+
+If you have customized `agentFlow.promptModes`, your own list still applies and
+you won't see the four new modes — that setting replaces the whole array rather
+than adding to it. Copy the ones you want out of the setting's default, where a
+new optional `detail` field holds the description line.
+
 ## [0.1.35] — 2026-07-27
 
 ### Fixed
