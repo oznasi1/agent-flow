@@ -46,9 +46,23 @@ describe("request — error & response mapping", () => {
     await expect(client().getTransitions("ASM-1")).rejects.toBeInstanceOf(mod.JiraAuthError);
   });
 
-  it("throws a generic Error with the status + body on other non-2xx", async () => {
+  it("throws a JiraApiError carrying the parsed envelope on other non-2xx", async () => {
+    installFetch([
+      textResponse(
+        JSON.stringify({ errorMessages: ["Ticket cannot be closed unless Resolution will be provided"], errors: {} }),
+        400,
+      ),
+    ]);
+    const err = await client().getTransitions("ASM-1").catch((e) => e);
+    expect(err).toBeInstanceOf(mod.JiraApiError);
+    expect(err.status).toBe(400);
+    expect(err.messages).toEqual(["Ticket cannot be closed unless Resolution will be provided"]);
+    expect(err.message).toBe("Ticket cannot be closed unless Resolution will be provided.");
+  });
+
+  it("does not leak a non-JSON error body into the message", async () => {
     installFetch([textResponse("server boom", 500)]);
-    await expect(client().getTransitions("ASM-1")).rejects.toThrow(/Jira 500: server boom/);
+    await expect(client().getTransitions("ASM-1")).rejects.toThrow("Jira is having trouble (500) — try again shortly.");
   });
 
   it("throws JiraAuthError (without fetching) when not signed in", async () => {
@@ -316,7 +330,7 @@ describe("getTransitions", () => {
       }),
     ]);
     expect(await client().getTransitions("ASM-1")).toEqual([
-      { id: "31", name: "Start Progress", toName: "In Progress", toCategory: "indeterminate" },
+      { id: "31", name: "Start Progress", toName: "In Progress", toCategory: "indeterminate", fields: {} },
     ]);
   });
 
@@ -385,5 +399,79 @@ describe("write methods", () => {
     expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/agile/1.0/backlog/issue`);
     expect(fetchMock.mock.calls[0][1].method).toBe("POST");
     expect(bodyOf(fetchMock, 0)).toEqual({ issues: ["ASM-1"] });
+  });
+});
+
+describe("transitions", () => {
+  const TRANSITIONS = {
+    transitions: [
+      {
+        id: "41",
+        name: "Resolve",
+        to: { name: "Done", statusCategory: { key: "done" } },
+        fields: {
+          resolution: {
+            required: true,
+            name: "Resolution",
+            schema: { type: "resolution", system: "resolution" },
+            allowedValues: [{ id: "10000", name: "Done" }],
+          },
+        },
+      },
+    ],
+  };
+
+  it("asks Jira to expand the transition screen fields", async () => {
+    const fetchMock = installFetch([jsonResponse(TRANSITIONS)]);
+    await client().getTransitions("ASM-1");
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/ASM-1/transitions?expand=transitions.fields`);
+  });
+
+  it("surfaces the field metadata alongside the status names", async () => {
+    installFetch([jsonResponse(TRANSITIONS)]);
+    const [t] = await client().getTransitions("ASM-1");
+    expect(t).toMatchObject({ id: "41", name: "Resolve", toName: "Done", toCategory: "done" });
+    expect(t.fields.resolution.allowedValues).toEqual([{ id: "10000", name: "Done" }]);
+  });
+
+  it("defaults fields to an empty record when Jira omits them", async () => {
+    installFetch([jsonResponse({ transitions: [{ id: "31", name: "Start", to: { name: "In Progress" } }] })]);
+    const [t] = await client().getTransitions("ASM-1");
+    expect(t.fields).toEqual({});
+  });
+
+  it("posts only the transition id when there are no fields", async () => {
+    const fetchMock = installFetch([emptyResponse(204)]);
+    await client().transition("ASM-1", "41");
+    expect(bodyOf(fetchMock, 0)).toEqual({ transition: { id: "41" } });
+  });
+
+  it("omits an empty fields object rather than sending `fields: {}`", async () => {
+    const fetchMock = installFetch([emptyResponse(204)]);
+    await client().transition("ASM-1", "41", {});
+    expect(bodyOf(fetchMock, 0)).toEqual({ transition: { id: "41" } });
+  });
+
+  it("includes collected fields in the transition body", async () => {
+    const fetchMock = installFetch([emptyResponse(204)]);
+    await client().transition("ASM-1", "41", { resolution: { id: "10000" } });
+    expect(bodyOf(fetchMock, 0)).toEqual({ transition: { id: "41" }, fields: { resolution: { id: "10000" } } });
+  });
+});
+
+describe("listResolutions", () => {
+  it("maps the site resolution list to id + name", async () => {
+    installFetch([jsonResponse([{ id: "10000", name: "Done" }, { id: "10001", name: "Won't Do" }])]);
+    await expect(client().listResolutions()).resolves.toEqual([
+      { id: "10000", name: "Done" },
+      { id: "10001", name: "Won't Do" },
+    ]);
+  });
+
+  it("drops entries without a name and tolerates a non-array body", async () => {
+    installFetch([jsonResponse([{ id: "1" }, { id: "2", name: "Done" }])]);
+    await expect(client().listResolutions()).resolves.toEqual([{ id: "2", name: "Done" }]);
+    installFetch([jsonResponse({ nope: true })]);
+    await expect(client().listResolutions()).resolves.toEqual([]);
   });
 });

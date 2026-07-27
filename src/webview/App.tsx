@@ -131,7 +131,9 @@ export function App(): JSX.Element {
   const [textQuery, setTextQuery] = React.useState("");
   const [tasks, setTasks] = React.useState<JiraTask[]>([]);
   const [loading, setLoading] = React.useState(false);
-  const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string }[]>([]);
+  const [toasts, setToasts] = React.useState<
+    { id: number; level: string; message: string; action?: { label: string; url: string } }[]
+  >([]);
   const [expanded, setExpanded] = React.useState<Set<string>>(new Set());
   const [details, setDetails] = React.useState<Record<string, DetailState>>({});
   const [dragKey, setDragKey] = React.useState<string | null>(null);
@@ -231,8 +233,12 @@ export function App(): JSX.Element {
           break;
         case "toast": {
           const id = ++toastSeq;
-          setToasts((t) => [...t.slice(-2), { id, level: m.level, message: m.message }]);
-          setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
+          setToasts((t) => [...t.slice(-2), { id, level: m.level, message: m.message, action: m.action }]);
+          // Errors stay until dismissed — a Jira validator message is longer than
+          // 4.2s of reading, and it usually needs acting on.
+          if (m.level !== "error") {
+            setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
+          }
           break;
         }
       }
@@ -529,7 +535,7 @@ function ToastStack({
   toasts,
   onDismiss,
 }: {
-  toasts: { id: number; level: string; message: string }[];
+  toasts: { id: number; level: string; message: string; action?: { label: string; url: string } }[];
   onDismiss: (id: number) => void;
 }): JSX.Element | null {
   if (toasts.length === 0) return null;
@@ -540,6 +546,19 @@ function ToastStack({
         <div key={t.id} className={`toast toast--${t.level}`} role="status" onClick={() => onDismiss(t.id)}>
           <span className="toast-ico">{icon(t.level)}</span>
           <span className="toast-msg">{t.message}</span>
+          {t.action && (
+            <button
+              className="toast-action"
+              onClick={(e) => {
+                // The toast dismisses on click; opening the ticket must not also
+                // close the message explaining why you're being sent there.
+                e.stopPropagation();
+                send({ type: "openExternal", url: t.action!.url });
+              }}
+            >
+              {t.action.label}
+            </button>
+          )}
         </div>
       ))}
     </div>

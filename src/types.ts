@@ -243,7 +243,9 @@ export type OutboundMessage =
   | { type: "statusChanged"; key: string; status: string; category: string; removed: boolean }
   | { type: "movedToSprint"; key: string; assignee: string; removed: boolean }
   | { type: "removedFromSprint"; key: string }
-  | { type: "toast"; level: "success" | "error" | "info"; message: string }
+  // `action` renders a button beside the message — a refused write can hand the user
+  // straight to the ticket, which is the only place left to resolve it.
+  | { type: "toast"; level: "success" | "error" | "info"; message: string; action?: { label: string; url: string } }
   // A persistent, actionable failure banner (unlike a toast, it stays until resolved).
   | { type: "error"; message: string; canRetry: boolean }
   | { type: "loading"; loading: boolean }
