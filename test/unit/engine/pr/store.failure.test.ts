@@ -1,15 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { readPrEntries, writePrEntry } from "../../../../src/engine/pr/store";
 import type { PrEntry, PrFacts } from "../../../../src/types";
-
-vi.mock("fs");
-
-const readFileSync = vi.mocked(fs.readFileSync);
-const writeFileSync = vi.mocked(fs.writeFileSync);
-const mkdirSync = vi.mocked(fs.mkdirSync);
-const renameSync = vi.mocked(fs.renameSync);
-const rmSync = vi.mocked(fs.rmSync);
 
 const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
   number: 1, url: "https://github.com/o/r/pull/1", title: "t", state: "OPEN", isDraft: false,
@@ -17,72 +11,51 @@ const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
   mergeable: "clean", ciAdvisory: false, ...over,
 });
 
-beforeEach(() => {
-  readFileSync.mockReset().mockReturnValue("");
-  writeFileSync.mockReset();
-  mkdirSync.mockReset();
-  renameSync.mockReset();
-  rmSync.mockReset();
+let dir: string;
+beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-prfacts-failure-")); });
+afterEach(() => {
+  // Restore permissions in case a test left the dir read-only
+  try {
+    fs.chmodSync(dir, 0o755);
+  } catch {
+    /* ignore */
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
-describe("writePrEntry with fs failures", () => {
-  it("leaves unrelated repos intact when rename fails mid-write", () => {
-    // Simulate an existing cache with two repos: api and web
-    const existingCache = JSON.stringify({
-      api: { facts: null, fetchedAt: 1000 },
-      web: { facts: null, fetchedAt: 2000 },
-    });
+describe("writePrEntry with real file failures", () => {
+  it.skipIf(process.getuid?.() === 0)("leaves unrelated repos intact when write fails due to read-only directory", () => {
+    // Step 1: Pre-populate cache with two repos through real code
+    writePrEntry(dir, "RUN-1", "api", { facts: null, fetchedAt: 1000 });
+    writePrEntry(dir, "RUN-1", "web", { facts: null, fetchedAt: 2000 });
 
-    // First read returns the existing cache (both repos)
-    readFileSync.mockReturnValueOnce(existingCache);
-    // Rename fails, simulating I/O error
-    renameSync.mockImplementation(() => {
-      throw new Error("EACCES: permission denied");
-    });
-
-    // Try to update 'api'. The write should fail silently.
-    writePrEntry("/test", "RUN-1", "api", { facts: facts({ number: 99 }), fetchedAt: 5000 });
-
-    // Verify that renameSync was called (the write attempted)
-    expect(renameSync).toHaveBeenCalled();
-
-    // Now simulate a subsequent successful read of the cache
-    readFileSync.mockReturnValueOnce(existingCache);
-
-    // Read should return the original cache, unchanged
-    const entries = readPrEntries("/test", "RUN-1");
+    // Verify both are really there
+    let entries = readPrEntries(dir, "RUN-1");
+    expect(Object.keys(entries).sort()).toEqual(["api", "web"]);
     expect(entries.api.fetchedAt).toBe(1000);
     expect(entries.web.fetchedAt).toBe(2000);
-  });
 
-  it("leaves unrelated repos intact when writeFileSync fails mid-write", () => {
-    // Simulate an existing cache with two repos: api and web
-    const existingCache = JSON.stringify({
-      api: { facts: null, fetchedAt: 1000 },
-      web: { facts: null, fetchedAt: 2000 },
-    });
+    // Step 2: Make directory read-only (readable and traversable, not writable)
+    fs.chmodSync(dir, 0o555);
 
-    // First read returns the existing cache (both repos)
-    readFileSync.mockReturnValueOnce(existingCache);
-    // Write fails, simulating disk full or I/O error
-    writeFileSync.mockImplementation(() => {
-      throw new Error("ENOSPC: no space left on device");
-    });
+    try {
+      // Step 3: Try to update a third repo. Creating the temp file will fail with EACCES.
+      // The call must not throw (best-effort).
+      writePrEntry(dir, "RUN-1", "thirdrepo", { facts: facts({ number: 99 }), fetchedAt: 3000 });
 
-    // Try to update 'web'. The write should fail silently.
-    writePrEntry("/test", "RUN-1", "web", { facts: facts({ number: 88 }), fetchedAt: 6000 });
+      // Step 4: Make directory writable again so we can read
+      fs.chmodSync(dir, 0o755);
 
-    // Verify that writeFileSync was called
-    expect(writeFileSync).toHaveBeenCalled();
-    // Verify that cleanup was attempted (rmSync for the temp file)
-    expect(rmSync).toHaveBeenCalled();
-
-    // Now simulate a subsequent successful read of the cache
-    readFileSync.mockReturnValueOnce(existingCache);
-
-    // Read should return the original cache, unchanged
-    const entries = readPrEntries("/test", "RUN-1");
-    expect(entries.api.fetchedAt).toBe(1000);
-    expect(entries.web.fetchedAt).toBe(2000);
+      // Step 5: Verify the original two repos are still there with their exact original values,
+      // and the third repo was not added. This is the core guarantee: unrelated entries survive.
+      entries = readPrEntries(dir, "RUN-1");
+      expect(Object.keys(entries).sort()).toEqual(["api", "web"]);
+      expect(entries.api.fetchedAt).toBe(1000);
+      expect(entries.web.fetchedAt).toBe(2000);
+      expect(entries.thirdrepo).toBeUndefined();
+    } finally {
+      // Restore permissions so cleanup can remove the dir
+      fs.chmodSync(dir, 0o755);
+    }
   });
 });
