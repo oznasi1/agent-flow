@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.34] — 2026-07-27
+
+### Fixed
+
+- **The Agent Flow icon in the activity bar looked smaller than its neighbours.**
+  Every view-container icon is normalised into the same 24px box, so only the
+  artwork's extent inside it decides how big the mark reads — and ours filled 18.90
+  of 24 against the ~21px Files, Search and Source Control occupy. The mark is now
+  scaled to match the rail around it, with the same 16-dot design.
+- **The Marketplace button wore Cursor's own Extensions icon.** The "Open the
+  Marketplace" action in the Tasks header used `$(extensions)`, byte-for-byte the
+  glyph Cursor uses for its extension marketplace, so the button read as "open
+  Cursor's extensions". It now uses a distinct library glyph.
+
 ## [0.1.33] — 2026-07-27
 
 ### Fixed
