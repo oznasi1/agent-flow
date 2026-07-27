@@ -827,12 +827,15 @@ describe("takeBatch", () => {
       s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
     );
     // Default answer for the layout pick; tests that drive the picker themselves
-    // shadow this with mockResolvedValueOnce.
+    // shadow this with mockResolvedValueOnce. No afterEach reset needed for this one —
+    // the global beforeEach (test/_setup.ts's resetVscodeMocks) already resets
+    // showQuickPick before every test, so this default can't leak past this block.
     vi.mocked(window.showQuickPick).mockResolvedValue({ shared: false } as never);
   });
   afterEach(() => {
+    // createWorktrees has no global reset, unlike showQuickPick — this restore IS
+    // load-bearing, or the identity-mapping impl above would leak into later describes.
     vi.mocked(createWorktrees).mockImplementation((s) => s);
-    vi.mocked(window.showQuickPick).mockReset();
   });
 
   it("is a no-op for an empty selection", async () => {
@@ -915,6 +918,16 @@ describe("takeBatch", () => {
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "info" }));
   });
 
+  it("drops a name absent from the discovered repos and launches on the rest", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api", "ghost"]);
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createWorktrees).mock.calls[0][0]).toEqual([expect.objectContaining({ name: "api" })]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "info") as { message: string };
+    expect(toast.message).toContain("ghost");
+  });
+
   it("errors when no selected repo resolves to a git repo", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"], { isGit: false }));
     const { provider, posted } = setup();
@@ -955,12 +968,15 @@ describe("takeBatch", () => {
   });
 
   it("gives each task the repos it touches, intersected with the filter set", async () => {
+    // The summary mentions only ONE of the two filter-set repos, so a correct
+    // intersection is a strict subset of the filter set — this fails equally under
+    // "always return filterSet" (no real intersection) and under a broken intersection.
     // inferServices ignores repo names under 5 chars as too generic to trust (see
-    // src/engine/infer.ts), so "api"/"web" would never text-match — use longer names.
-    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments", "webhooks"]));
+    // src/engine/infer.ts), so keep names 5+ chars.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
     clientStub.getDetail.mockResolvedValue({
       key: "ASM-1",
-      summary: "fix the billing payments webhooks flow",
+      summary: "fix the billing flow",
       descriptionText: "desc",
       labels: [],
       components: [],
@@ -969,8 +985,7 @@ describe("takeBatch", () => {
     const { provider } = setup();
     await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
     const picked = vi.mocked(createWorktrees).mock.calls[0][0].map((r) => r.name);
-    expect(picked.sort()).toEqual(["billing", "payments"]);
-    expect(picked).not.toContain("webhooks"); // outside the filter set, even if inferred
+    expect(picked).toEqual(["billing"]); // payments is in the filter set but not inferred — excluded
   });
 
   it("falls back to the whole filter set when a task infers no repo in it", async () => {
@@ -1015,6 +1030,16 @@ describe("takeBatch", () => {
     );
     const req = vi.mocked(openSharedWorkspace).mock.calls[0][0];
     expect(req.tasks.map((t) => t.ticket.key)).toEqual(twoKeys);
+  });
+
+  it("aborts when the layout pick is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(openSharedWorkspace).not.toHaveBeenCalled();
   });
 
   it("skips the layout pick for this-window and goes straight to the shared path", async () => {
@@ -1066,6 +1091,25 @@ describe("takeBatch", () => {
     expect(toast.message).toContain("ASM-1-api");
   });
 
+  it("says so when merging into an existing workspace fails to parse", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({
+      target: { kind: "existing", file: "/ws/team.code-workspace" },
+    } as never);
+    vi.mocked(openSharedWorkspace).mockResolvedValue({
+      workspaceFile: "/ws/team.code-workspace",
+      opened: true,
+      briefs: [],
+      mergeFailed: true,
+      seeded: 2,
+    });
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).toContain("couldn't be parsed");
+  });
+
   it("fails every resolved task when the shared window itself throws", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
@@ -1078,6 +1122,17 @@ describe("takeBatch", () => {
     expect(toast.message).toContain("Launched 0 of 2");
     expect(toast.message).toContain("ASM-1 (disk full)");
     expect(toast.message).toContain("ASM-2 (disk full)");
+  });
+
+  it("skips Remote Control without asking for a one-key batch to a shared (non-new) destination", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window", remoteControl: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(window.showQuickPick).not.toHaveBeenCalled(); // resolveRemoteControl's picker never fires
+    expect(openSharedWorkspace).toHaveBeenCalledTimes(1);
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).toContain("Remote Control skipped — a shared window seeds each session from its own plan file.");
   });
 });
 

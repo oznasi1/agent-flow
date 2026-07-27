@@ -749,11 +749,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
 
     // One clipboard can't serve several sessions — but a one-key "batch" is a single
-    // launch, so it resolves Remote Control exactly like Take does.
+    // launch, so it resolves Remote Control exactly like Take does. A shared window
+    // seeds every session straight from its own plan file rather than a clipboard
+    // paste, so it can't carry the answer either — don't even ask when shared.
     const isBatch = keys.length > 1;
     const rcSkipped = isBatch && cfg.remoteControl !== "off";
     if (rcSkipped) this.log("takeBatch: Remote Control skipped — one clipboard, several sessions");
-    const wantRemoteControl = isBatch ? false : await this.resolveRemoteControl(cfg);
+    const wantRemoteControl = isBatch || shared ? false : await this.resolveRemoteControl(cfg);
 
     const resolved: { task: BatchTask; key: string }[] = [];
     const failed: string[] = [];
@@ -800,6 +802,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         if (result.mergeFailed) extra = " That workspace's folders couldn't be parsed — the worktrees weren't added.";
         else if (result.unaddedFolders?.length) {
           extra = ` ${result.unaddedFolders.join(", ")} couldn't be added as roots to that window — the briefs are still in place.`;
+        }
+        // A shared window seeds every session straight from its plan file — there's no
+        // single clipboard paste for Remote Control to attach to, even for one task.
+        if (!isBatch && cfg.remoteControl !== "off") {
+          extra += " Remote Control skipped — a shared window seeds each session from its own plan file.";
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
