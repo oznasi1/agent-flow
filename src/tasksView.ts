@@ -3,11 +3,15 @@ import * as fs from "fs";
 import * as path from "path";
 import { getConfig, AgentFlowConfig, ExploreAction, PR_REVIEW_AUTOFIX_CLAUSE } from "./config";
 import { JiraAuth } from "./jira/auth";
-import { JiraClient, JiraAuthError, JiraDetail, TransitionOption } from "./jira/client";
+import { JiraClient, JiraAuthError, JiraApiError, JiraDetail, TransitionOption } from "./jira/client";
+import { describeJiraError } from "./jira/errors";
 import {
   promptableFields,
   toJiraValue,
   validateFieldInput,
+  missingFieldIds,
+  mentionsResolution,
+  fieldDisplayNames,
   type FieldPrompt,
 } from "./jira/transitionFields";
 import { discoverRepos } from "./engine/repos";
@@ -67,8 +71,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.post({ type: "state", authed, configured, project: cfg.project, me, prReviewStatus: cfg.prReviewStatus, filters: cfg.filters });
   }
 
-  private toast(level: "success" | "error" | "info", message: string): void {
-    this.post({ type: "toast", level, message });
+  private toast(
+    level: "success" | "error" | "info",
+    message: string,
+    action?: { label: string; url: string },
+  ): void {
+    this.post({ type: "toast", level, message, ...(action ? { action } : {}) });
   }
 
   private client(): JiraClient {
@@ -227,9 +235,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       if (e instanceof JiraAuthError) {
         // Auth failures re-gate to the sign-in screen, which is itself the indication.
         this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
-      } else {
-        // Everything else (unreachable site, timeout, Jira 5xx, bad project key) gets a
-        // persistent banner in the panel — a toast alone vanishes before it's read.
+      } else if (m.type === "ready" || m.type === "retry" || m.type === "fetch") {
+        // Only the messages that populate the panel may replace it: if the list
+        // never loaded there is nothing to preserve. A failed write keeps its
+        // list on screen and settles for a toast.
         this.post({ type: "error", message: msg, canRetry: true });
       }
       this.toast("error", msg);
@@ -276,7 +285,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    await client.transition(key, target.id, fields);
+    try {
+      await client.transition(key, target.id, fields);
+    } catch (e) {
+      if (!(e instanceof JiraApiError)) throw e;
+      const recovered = await this.recoverTransition(client, key, target, e, fields);
+      if (!recovered) return; // already reported, or the user backed out
+    }
     this.log(`changeStatus ${key}: transition POST ok → ${target.toName}`);
     if (cfg.stampLabelOnWrite) {
       try {
@@ -330,6 +345,54 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       }
     }
     return out;
+  }
+
+  /** One rescue attempt after Jira refuses a transition. Screen metadata can't see
+   *  custom workflow validators, so the rejection itself is the only place some
+   *  requirements are ever stated. Returns true when the retry succeeded. */
+  private async recoverTransition(
+    client: JiraClient,
+    key: string,
+    target: TransitionOption,
+    err: JiraApiError,
+    already: Record<string, unknown>,
+  ): Promise<boolean> {
+    const meta = target.fields ?? {};
+    const names = fieldDisplayNames(meta);
+    const ids = missingFieldIds(meta, err);
+    let prompts: FieldPrompt[] = ids.length ? promptableFields(meta, { only: ids }).prompts : [];
+
+    if (!prompts.length && mentionsResolution(err)) {
+      const resolutions = await client.listResolutions().catch(() => []);
+      if (resolutions.length) {
+        prompts = [{ kind: "pick", id: "resolution", name: "Resolution", choices: resolutions }];
+      }
+    }
+    if (!prompts.length) {
+      this.reportWriteFailure(key, err, names);
+      return false;
+    }
+
+    this.log(`changeStatus ${key}: rejected — re-prompting ${prompts.map((p) => p.name).join(", ")}`);
+    const extra = await this.collectFields(key, target.toName, prompts);
+    if (extra === undefined) return false;
+    try {
+      await client.transition(key, target.id, { ...already, ...extra });
+      return true;
+    } catch (e) {
+      if (!(e instanceof JiraApiError)) throw e;
+      this.reportWriteFailure(key, e, names);
+      return false;
+    }
+  }
+
+  /** A refused write leaves the list valid, so it gets a toast — never the gate —
+   *  with a way out to the ticket itself. */
+  private reportWriteFailure(key: string, err: JiraApiError, names: Record<string, string>): void {
+    const cfg = getConfig();
+    const message = `Couldn't update ${key}. ${describeJiraError(err, names)}`;
+    this.log(`changeStatus ${key}: ${err.status} — ${message}`);
+    this.toast("error", message, { label: "Open in Jira", url: `${cfg.baseUrl}/browse/${key}` });
   }
 
   /** Add a ticket to the active sprint and assign it to the current user — the two

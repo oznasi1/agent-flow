@@ -18,11 +18,16 @@ vi.mock("../../src/engine/presence", () => ({
   windowIdentity: vi.fn(() => undefined),
   defaultWindowsDir: vi.fn(() => "/win"),
 }));
-vi.mock("../../src/jira/client", () => {
+// This file mocks the client wholesale, so `JiraApiError` would be undefined inside
+// tasksView and every `instanceof` check would throw. Re-export the genuine class so
+// the real parseJiraError produces instances the production code recognises.
+vi.mock("../../src/jira/client", async () => {
+  const errors = await vi.importActual<typeof import("../../src/jira/errors")>("../../src/jira/errors");
   class JiraAuthError extends Error {}
-  return { JiraAuthError, JiraClient: vi.fn() };
+  return { JiraAuthError, JiraApiError: errors.JiraApiError, JiraClient: vi.fn() };
 });
 
+import { parseJiraError } from "../../src/jira/errors";
 import { getConfig, PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths } from "../../src/engine/workspace";
@@ -412,6 +417,136 @@ describe("changeStatus", () => {
     await provider.changeStatus("ASM-1");
     expect(window.showInputBox).not.toHaveBeenCalled();
     expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "71", {});
+  });
+
+  // `src/jira/client` is mocked in this file, but `src/jira/errors` is not — the
+  // real parser gives the recovery path a faithful JiraApiError to react to.
+  const apiError = (messages: string[], fieldErrors: Record<string, string> = {}) =>
+    parseJiraError(400, JSON.stringify({ errorMessages: messages, errors: fieldErrors }));
+
+  it("re-prompts from a workflow validator that names a screen field, then retries once", async () => {
+    clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
+    clientStub.transition
+      .mockRejectedValueOnce(apiError(["Ticket cannot be closed unless Resolution will be provided"]))
+      .mockResolvedValueOnce(undefined);
+    // The upfront pass already asks for Resolution, so answer it twice.
+    answerPicks({ t: DONE_WITH_RESOLUTION }, { label: "Done" }, { label: "Won't Do" });
+    const { provider, posted } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.transition).toHaveBeenCalledTimes(2);
+    expect(clientStub.transition).toHaveBeenLastCalledWith("ASM-1", "41", { resolution: { id: "10001" } });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "statusChanged", key: "ASM-1" }));
+  });
+
+  it("re-prompts from explicit field errors even when the field wasn't required", async () => {
+    const t = {
+      id: "41",
+      name: "Resolve",
+      toName: "Done",
+      toCategory: "done",
+      fields: {
+        customfield_1: {
+          required: false,
+          name: "Root Cause",
+          schema: { type: "option" },
+          allowedValues: [{ id: "9", name: "Config drift" }],
+        },
+      },
+    };
+    clientStub.getTransitions.mockResolvedValue([t]);
+    clientStub.transition
+      .mockRejectedValueOnce(apiError([], { customfield_1: "Field is required" }))
+      .mockResolvedValueOnce(undefined);
+    answerPicks({ t }, { label: "Config drift" });
+    const { provider } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.transition).toHaveBeenLastCalledWith("ASM-1", "41", { customfield_1: { id: "9" } });
+  });
+
+  it("falls back to the site resolution list when the screen declared no fields", async () => {
+    const t = { id: "41", name: "Resolve", toName: "Done", toCategory: "done", fields: {} };
+    clientStub.getTransitions.mockResolvedValue([t]);
+    clientStub.listResolutions.mockResolvedValue([{ id: "10000", name: "Done" }]);
+    clientStub.transition
+      .mockRejectedValueOnce(apiError(["Ticket cannot be closed unless Resolution will be provided"]))
+      .mockResolvedValueOnce(undefined);
+    answerPicks({ t }, { label: "Done" });
+    const { provider } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.listResolutions).toHaveBeenCalled();
+    expect(clientStub.transition).toHaveBeenLastCalledWith("ASM-1", "41", { resolution: { id: "10000" } });
+  });
+
+  it("reports a readable toast with an Open in Jira action when nothing can be re-prompted", async () => {
+    const t = { id: "41", name: "Resolve", toName: "Done", toCategory: "done", fields: {} };
+    clientStub.getTransitions.mockResolvedValue([t]);
+    clientStub.transition.mockRejectedValue(apiError(["Transition is not valid"]));
+    answerPicks({ t });
+    const { provider, posted } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.transition).toHaveBeenCalledTimes(1);
+    expect(posted()).toContainEqual({
+      type: "toast",
+      level: "error",
+      message: "Couldn't update ASM-1. Transition is not valid.",
+      action: { label: "Open in Jira", url: "https://jira/browse/ASM-1" },
+    });
+    expect(posted().some((p) => p.type === "statusChanged")).toBe(false);
+  });
+
+  it("names the field in the message when the rejection is field-scoped", async () => {
+    const t = {
+      id: "41",
+      name: "Resolve",
+      toName: "Done",
+      toCategory: "done",
+      fields: { customfield_1: { required: false, name: "Root Cause", schema: { type: "option-with-child" } } },
+    };
+    clientStub.getTransitions.mockResolvedValue([t]);
+    clientStub.transition.mockRejectedValue(apiError([], { customfield_1: "Field is required" }));
+    answerPicks({ t });
+    const { provider, posted } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(posted()).toContainEqual(
+      expect.objectContaining({ message: "Couldn't update ASM-1. Root Cause: Field is required." }),
+    );
+  });
+
+  it("does not retry a second time", async () => {
+    clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
+    clientStub.transition.mockRejectedValue(apiError(["Ticket cannot be closed unless Resolution will be provided"]));
+    answerPicks({ t: DONE_WITH_RESOLUTION }, { label: "Done" }, { label: "Done" });
+    const { provider, posted } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.transition).toHaveBeenCalledTimes(2);
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+  });
+
+  it("stays silent when the recovery prompt is cancelled", async () => {
+    clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
+    clientStub.transition.mockRejectedValue(apiError(["Ticket cannot be closed unless Resolution will be provided"]));
+    answerPicks({ t: DONE_WITH_RESOLUTION }, { label: "Done" }, undefined);
+    const { provider, posted } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.transition).toHaveBeenCalledTimes(1);
+    expect(posted().filter((p) => p.type === "toast")).toEqual([]);
+  });
+});
+
+describe("failure routing", () => {
+  it("gates the panel when the task fetch fails", async () => {
+    clientStub.fetchTasks.mockRejectedValue(new Error("Couldn't reach Jira"));
+    const { send, posted } = setup();
+    await send({ type: "fetch", filter: "mysprint", size: "any" });
+    expect(posted()).toContainEqual({ type: "error", message: "Couldn't reach Jira", canRetry: true });
+  });
+
+  it("leaves the list up when a write fails — toast only", async () => {
+    clientStub.getTransitions.mockRejectedValue(new Error("Couldn't reach Jira"));
+    const { send, posted } = setup();
+    await send({ type: "changeStatus", key: "ASM-1" });
+    expect(posted().some((p) => p.type === "error")).toBe(false);
+    expect(posted()).toContainEqual({ type: "toast", level: "error", message: "Couldn't reach Jira" });
   });
 });
 
