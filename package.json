@@ -83,7 +83,7 @@
       {
         "command": "agentFlow.openMarketplace",
         "title": "Agent Flow: Open the Marketplace",
-        "icon": "$(extensions)"
+        "icon": "$(library)"
       }
     ],
     "menus": {
