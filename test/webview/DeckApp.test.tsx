@@ -199,9 +199,10 @@ describe("DeckApp PR block", () => {
   });
 
   it("renders no block for a repo whose entry resolved to no PR", () => {
-    render(<DeckApp />);
+    const { container } = render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: null, fetchedAt: 1 } } })]));
     expect(screen.queryByText("pr")).toBeNull();
+    expect(container.querySelector(".pr-block")).toBeNull();
   });
 
   it("shows the PR number, failing checks, review state and mergeability", () => {
@@ -263,6 +264,11 @@ describe("DeckApp PR block", () => {
   it("does not linkify a failing check with no url", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ ci: { passing: 0, pending: 0, failing: [{ name: "build", url: "" }] } }), fetchedAt: 1 } } })]));
+    // Structural: must fail if "build" ever regresses to an <a> or a <button> — not just
+    // that clicking it happens to send nothing (a dead <a href=""> or handler-less
+    // <button> would pass that check too).
+    expect(screen.queryByRole("link", { name: "build" })).toBeNull();
+    expect(screen.getByText("build").tagName).toBe("SPAN");
     fireEvent.click(screen.getByText("build"));
     expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openExternal" }));
   });
