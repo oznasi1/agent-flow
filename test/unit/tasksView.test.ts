@@ -867,6 +867,28 @@ describe("takeBatch", () => {
     expect(toast.message).toContain("Launched 0 of 1");
   });
 
+  it("names the repo whose worktree fell back, so a multi-repo task's failure is actionable", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "nothing recognisable here",
+      descriptionText: "",
+      labels: [],
+      components: [],
+      url: "https://jira/browse/ASM-1",
+    });
+    // billing gets its worktree; payments falls back to the main checkout.
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => (r.name === "payments" ? r : { ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
+    expect(toast.message).toContain("payments");
+    expect(toast.message).not.toContain("billing");
+  });
+
   it("launches one worktree'd new window per selected task in the filtered repo", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "billing"]));
     const { provider } = setup();
@@ -1002,6 +1024,58 @@ describe("takeBatch", () => {
     await provider.takeBatch(["ASM-1"], ["api", "billing"]);
     const picked = vi.mocked(createWorktrees).mock.calls[0][0].map((r) => r.name);
     expect(picked.sort()).toEqual(["api", "billing"]);
+  });
+
+  // The separate-windows layout promises "one window per task". A batched task can now
+  // span several repos, so the layout has to be decided per task from its repo count —
+  // a fixed per-window mode would fan a two-repo task out into two windows.
+  it("gives a multi-repo task ONE multi-root window, not one window per repo", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "nothing recognisable here",
+      descriptionText: "",
+      labels: [],
+      components: [],
+      url: "https://jira/browse/ASM-1",
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "multiroot" }));
+    const req = vi.mocked(openWorkspace).mock.calls[0][0];
+    expect(req.services.map((s) => s.name)).toEqual(["billing", "payments"]);
+  });
+
+  it("gives a single-repo task its own plain window", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "fix the billing flow",
+      descriptionText: "",
+      labels: [],
+      components: [],
+      url: "https://jira/browse/ASM-1",
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "per-window" }));
+  });
+
+  it("honours workspaceMode 'per-window' for a multi-repo task", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, workspaceMode: "per-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "nothing recognisable here",
+      descriptionText: "",
+      labels: [],
+      components: [],
+      url: "https://jira/browse/ASM-1",
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "per-window" }));
   });
 
   it("asks the destination once for the whole batch", async () => {

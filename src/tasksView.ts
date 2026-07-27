@@ -767,8 +767,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         // A worktree is mandatory: two tasks sharing a checkout would clobber each
         // other's brief. createWorktrees returns the original ref when `git worktree
         // add` fails — detect that and fail the task rather than launch into a collision.
-        if (services.some((s, i) => s.path === wanted[i].path)) {
-          throw new Error("couldn't create a git worktree (would collide with the shared checkout)");
+        // Name the repos: a task spans several now, and this message is all the user gets
+        // in the summary toast, so without them there's nothing to go and fix.
+        const collided = services.filter((s, i) => s.path === wanted[i].path).map((s) => s.name);
+        if (collided.length) {
+          throw new Error(
+            `couldn't create a git worktree in ${collided.join(", ")} (would collide with the shared checkout)`,
+          );
         }
         resolved.push({
           key,
@@ -823,7 +828,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             planMd: task.planMd,
             descriptionText: task.descriptionText,
             services: task.services,
-            mode: "per-window",
+            // A batched task can span repos now (reposForTask keeps every filtered repo
+            // when inference finds none), and this layout promised one window per TASK —
+            // so the layout is per task's repo count, the same call chooseWorkspaceMode
+            // makes for a single Take. Fixing it to "per-window" would open one window,
+            // worktree and agent per repo, several of them unaware of each other on the
+            // same ticket. The loop stays non-interactive, so the "ask" setting can't be
+            // honoured here; it means "one window for a multi-repo task", like "auto".
+            mode: task.services.length === 1 || cfg.workspaceMode === "per-window" ? "per-window" : "multiroot",
             promptTemplate: promptMode.prompt,
             workspaceDir: cfg.workspaceDir,
             seedAgent: cfg.seedAgent,
