@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.31] — 2026-07-27
+
+### Added
+
+- **Launch a multi-select batch across several repos, into any destination.** The task
+  checkboxes used to appear only with exactly one repo filtered, and every batch ignored
+  where you wanted it and took its own new window per task. Now the checkboxes appear with
+  **one or more** repos filtered, and each ticked task gets a worktree in the repos it's
+  inferred to touch that are in your filter — falling back to the whole filtered set when
+  the ticket names none, so a task never launches with no repo. The batch then walks the
+  same destination chain a single **Take** does (new window, this window, a saved
+  `.code-workspace`, or a window you already have open), and for a new window it asks how to
+  lay the tasks out: **separate windows**, one per task, or **one shared window** holding
+  every task's worktrees with a Claude Code session seeded per task — each stacked as a tab
+  in one Claude group, in the order you selected them, carrying its own brief. Every other
+  destination *is* a single window, so it goes straight to the shared layout. Remote Control
+  is skipped for a shared window, because each session is seeded from its own plan file and
+  there's no clipboard paste to attach it to, and the toast says so.
+
+### Fixed
+
+- **Re-taking a task seeds its agent again.** The "already seeded this window" guard was
+  keyed on the ticket key and the window alone and nothing ever cleared it, while the
+  workspace file a launch generates is deterministic — so taking the same task into the same
+  window a second time opened it with the right folders and briefs and no Claude session at
+  all, while the toast still promised one. The guard now carries the launch's own timestamp,
+  so a fresh launch is never mistaken for one already consumed.
+
 ## [0.1.30] — 2026-07-27
 
 ### Added

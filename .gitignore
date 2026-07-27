@@ -5,6 +5,8 @@ coverage/
 .DS_Store
 preview/
 .claude/
+# Scratch workspace for subagent-driven plan execution (ledger, briefs, diffs).
+.superpowers/
 # Design mockups are generated from the local ~/.claude tree and embed real
 # plugin inventories — keep them out of this public repo.
 docs/mockups/

@@ -12,6 +12,7 @@ vi.mock("../../src/config", async () => {
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn() }));
 vi.mock("../../src/engine/workspace", () => ({ openWorkspace: vi.fn(), listWorkspaceFiles: vi.fn(() => []), workspaceFolderPaths: vi.fn(() => []) }));
 vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn((s: unknown) => s) }));
+vi.mock("../../src/engine/batchWorkspace", () => ({ openSharedWorkspace: vi.fn() }));
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: vi.fn(() => []),
   windowIdentity: vi.fn(() => undefined),
@@ -26,6 +27,7 @@ import { getConfig, PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths } from "../../src/engine/workspace";
 import { createWorktrees } from "../../src/engine/worktree";
+import { openSharedWorkspace } from "../../src/engine/batchWorkspace";
 import { readLiveWindows, windowIdentity } from "../../src/engine/presence";
 import { JiraClient, JiraAuthError } from "../../src/jira/client";
 import { TasksViewProvider } from "../../src/tasksView";
@@ -72,13 +74,13 @@ function makeClient() {
     currentUserName: vi.fn(async () => "Jane"),
     getMyself: vi.fn(async () => ({ accountId: "a1", displayName: "Jane" })),
     fetchTasks: vi.fn(async () => []),
-    getDetail: vi.fn(async () => ({
-      key: "ASM-1",
+    getDetail: vi.fn(async (key: string) => ({
+      key,
       summary: "Do the thing",
       descriptionText: "desc",
       labels: [],
       components: [],
-      url: "https://jira/browse/ASM-1",
+      url: `https://jira/browse/${key}`,
     })),
     getTransitions: vi.fn(async () => [] as unknown[]),
     transition: vi.fn(async () => undefined),
@@ -104,6 +106,12 @@ beforeEach(() => {
   });
   vi.mocked(readLiveWindows).mockReturnValue([]);
   vi.mocked(windowIdentity).mockReturnValue(undefined);
+  vi.mocked(openSharedWorkspace).mockResolvedValue({
+    workspaceFile: "/ws/ASM-1+1.code-workspace",
+    opened: true,
+    briefs: [],
+    seeded: 2,
+  });
 });
 
 /** Instantiate the provider and capture its webview message handler + post spy. */
@@ -818,15 +826,22 @@ describe("takeBatch", () => {
     vi.mocked(createWorktrees).mockImplementation((s, key) =>
       s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
     );
+    // Default answer for the layout pick; tests that drive the picker themselves
+    // shadow this with mockResolvedValueOnce. No afterEach reset needed for this one —
+    // the global beforeEach (test/_setup.ts's resetVscodeMocks) already resets
+    // showQuickPick before every test, so this default can't leak past this block.
+    vi.mocked(window.showQuickPick).mockResolvedValue({ shared: false } as never);
   });
   afterEach(() => {
+    // createWorktrees has no global reset, unlike showQuickPick — this restore IS
+    // load-bearing, or the identity-mapping impl above would leak into later describes.
     vi.mocked(createWorktrees).mockImplementation((s) => s);
   });
 
   it("is a no-op for an empty selection", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     const { provider } = setup();
-    await provider.takeBatch([], "api");
+    await provider.takeBatch([], ["api"]);
     expect(openWorkspace).not.toHaveBeenCalled();
     expect(discoverRepos).not.toHaveBeenCalled();
   });
@@ -836,7 +851,7 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1", "ASM-2"], "api"); // 2 > 1 → confirm
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]); // 2 > 1 → confirm
     expect(window.showWarningMessage).toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(2);
   });
@@ -845,17 +860,39 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(createWorktrees).mockImplementation((s) => s); // fallback: path stays === repoRef.path
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], "api");
+    await provider.takeBatch(["ASM-1"], ["api"]);
     expect(openWorkspace).not.toHaveBeenCalled();
     const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
     expect(toast.level).toBe("error");
     expect(toast.message).toContain("Launched 0 of 1");
   });
 
+  it("names the repo whose worktree fell back, so a multi-repo task's failure is actionable", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "nothing recognisable here",
+      descriptionText: "",
+      labels: [],
+      components: [],
+      url: "https://jira/browse/ASM-1",
+    });
+    // billing gets its worktree; payments falls back to the main checkout.
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => (r.name === "payments" ? r : { ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
+    expect(toast.message).toContain("payments");
+    expect(toast.message).not.toContain("billing");
+  });
+
   it("launches one worktree'd new window per selected task in the filtered repo", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "billing"]));
     const { provider } = setup();
-    await provider.takeBatch(twoKeys, "api");
+    await provider.takeBatch(twoKeys, ["api"]);
     expect(vi.mocked(createWorktrees)).toHaveBeenCalledTimes(2);
     expect(vi.mocked(createWorktrees).mock.calls[0][0]).toEqual([expect.objectContaining({ name: "api" })]);
     expect(openWorkspace).toHaveBeenCalledTimes(2);
@@ -865,7 +902,7 @@ describe("takeBatch", () => {
   it("uses the configured task prompt mode without prompting", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], "api"); // CFG.taskMode = "plan" is a known mode
+    await provider.takeBatch(["ASM-1"], ["api"]); // CFG.taskMode = "plan" is a known mode
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ promptTemplate: "P {key}" }));
   });
@@ -873,10 +910,12 @@ describe("takeBatch", () => {
   it("asks the prompt mode once when taskMode is 'ask' and applies it to all", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
-    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: CFG.promptModes[0] } as never);
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ mode: CFG.promptModes[0] } as never)
+      .mockResolvedValueOnce({ shared: false } as never);
     const { provider } = setup();
-    await provider.takeBatch(twoKeys, "api");
-    expect(window.showQuickPick).toHaveBeenCalledTimes(1); // once, not per task
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(window.showQuickPick).toHaveBeenCalledTimes(2); // prompt mode + layout, each once — not per task
     expect(openWorkspace).toHaveBeenCalledTimes(2);
   });
 
@@ -885,23 +924,37 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
     const { provider } = setup();
-    await provider.takeBatch(twoKeys, "api");
+    await provider.takeBatch(twoKeys, ["api"]);
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 
-  it("errors when the filtered repo is not a git repo", async () => {
+  it("drops a non-git repo from the set and launches on the rest", async () => {
+    vi.mocked(discoverRepos).mockReturnValue([
+      { name: "api", path: "/repos/api", isGit: true },
+      { name: "docs", path: "/repos/docs", isGit: false },
+    ]);
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api", "docs"]);
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createWorktrees).mock.calls[0][0]).toEqual([expect.objectContaining({ name: "api" })]);
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "info" }));
+  });
+
+  it("drops a name absent from the discovered repos and launches on the rest", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api", "ghost"]);
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(createWorktrees).mock.calls[0][0]).toEqual([expect.objectContaining({ name: "api" })]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "info") as { message: string };
+    expect(toast.message).toContain("ghost");
+  });
+
+  it("errors when no selected repo resolves to a git repo", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"], { isGit: false }));
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], "api");
+    await provider.takeBatch(["ASM-1"], ["api"]);
     expect(createWorktrees).not.toHaveBeenCalled();
-    expect(openWorkspace).not.toHaveBeenCalled();
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
-  });
-
-  it("errors when the repo name is not found", async () => {
-    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing"]));
-    const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], "api");
     expect(openWorkspace).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
@@ -912,7 +965,7 @@ describe("takeBatch", () => {
       .mockRejectedValueOnce(new Error("disk full"))
       .mockResolvedValueOnce({ mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/x"], remoteControl: false });
     const { provider, posted } = setup();
-    await provider.takeBatch(twoKeys, "api");
+    await provider.takeBatch(twoKeys, ["api"]);
     expect(openWorkspace).toHaveBeenCalledTimes(2);
     const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
     expect(toast.level).toBe("error");
@@ -924,7 +977,7 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(window.showWarningMessage).mockResolvedValueOnce(undefined); // dismissed
     const { provider } = setup();
-    await provider.takeBatch(twoKeys, "api"); // 2 > 1 → confirm
+    await provider.takeBatch(twoKeys, ["api"]); // 2 > 1 → confirm
     expect(window.showWarningMessage).toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
   });
@@ -932,8 +985,228 @@ describe("takeBatch", () => {
   it("routes the takeBatch message through onMessage to the handler", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     const { send } = setup();
-    await send({ type: "takeBatch", keys: ["ASM-1"], repo: "api" });
+    await send({ type: "takeBatch", keys: ["ASM-1"], repos: ["api"] });
     expect(openWorkspace).toHaveBeenCalled();
+  });
+
+  it("gives each task the repos it touches, intersected with the filter set", async () => {
+    // The summary mentions only ONE of the two filter-set repos, so a correct
+    // intersection is a strict subset of the filter set — this fails equally under
+    // "always return filterSet" (no real intersection) and under a broken intersection.
+    // inferServices ignores repo names under 5 chars as too generic to trust (see
+    // src/engine/infer.ts), so keep names 5+ chars.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "fix the billing flow",
+      descriptionText: "desc",
+      labels: [],
+      components: [],
+      url: "https://jira/browse/ASM-1",
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    const picked = vi.mocked(createWorktrees).mock.calls[0][0].map((r) => r.name);
+    expect(picked).toEqual(["billing"]); // payments is in the filter set but not inferred — excluded
+  });
+
+  it("falls back to the whole filter set when a task infers no repo in it", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "billing"]));
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "nothing recognisable here",
+      descriptionText: "",
+      labels: [],
+      components: [],
+      url: "https://jira/browse/ASM-1",
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["api", "billing"]);
+    const picked = vi.mocked(createWorktrees).mock.calls[0][0].map((r) => r.name);
+    expect(picked.sort()).toEqual(["api", "billing"]);
+  });
+
+  // The separate-windows layout promises "one window per task". A batched task can now
+  // span several repos, so the layout has to be decided per task from its repo count —
+  // a fixed per-window mode would fan a two-repo task out into two windows.
+  it("gives a multi-repo task ONE multi-root window, not one window per repo", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "nothing recognisable here",
+      descriptionText: "",
+      labels: [],
+      components: [],
+      url: "https://jira/browse/ASM-1",
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "multiroot" }));
+    const req = vi.mocked(openWorkspace).mock.calls[0][0];
+    expect(req.services.map((s) => s.name)).toEqual(["billing", "payments"]);
+  });
+
+  it("gives a single-repo task its own plain window", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "fix the billing flow",
+      descriptionText: "",
+      labels: [],
+      components: [],
+      url: "https://jira/browse/ASM-1",
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "per-window" }));
+  });
+
+  it("honours workspaceMode 'per-window' for a multi-repo task", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, workspaceMode: "per-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "nothing recognisable here",
+      descriptionText: "",
+      labels: [],
+      components: [],
+      url: "https://jira/browse/ASM-1",
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "per-window" }));
+  });
+
+  it("asks the destination once for the whole batch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    // 1st pick: destination (new window). 2nd: layout (separate windows).
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ target: { kind: "new" } } as never)
+      .mockResolvedValueOnce({ shared: false } as never);
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(window.showQuickPick).toHaveBeenCalledTimes(2); // destination + layout, not per task
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks the layout only for a new window, and uses the shared path when chosen", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: true } as never);
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(openSharedWorkspace).toHaveBeenCalledTimes(1);
+    expect(openSharedWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { kind: "new" } }),
+    );
+    const req = vi.mocked(openSharedWorkspace).mock.calls[0][0];
+    expect(req.tasks.map((t) => t.ticket.key)).toEqual(twoKeys);
+  });
+
+  it("aborts when the layout pick is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(openSharedWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("skips the layout pick for this-window and goes straight to the shared path", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(openSharedWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { kind: "current" } }),
+    );
+  });
+
+  it("skips the layout pick for a one-key batch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts when the destination pick is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(openSharedWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("warns about worktrees a live window couldn't take", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({
+      target: { kind: "live-folder", folder: "/repos/web" },
+    } as never);
+    vi.mocked(openSharedWorkspace).mockResolvedValue({
+      workspaceFile: undefined,
+      opened: true,
+      briefs: [],
+      unaddedFolders: ["ASM-1-api", "ASM-2-api"],
+      seeded: 2,
+    });
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).toContain("ASM-1-api");
+  });
+
+  it("says so when merging into an existing workspace fails to parse", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({
+      target: { kind: "existing", file: "/ws/team.code-workspace" },
+    } as never);
+    vi.mocked(openSharedWorkspace).mockResolvedValue({
+      workspaceFile: "/ws/team.code-workspace",
+      opened: true,
+      briefs: [],
+      mergeFailed: true,
+      seeded: 2,
+    });
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).toContain("couldn't be parsed");
+  });
+
+  it("fails every resolved task when the shared window itself throws", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: true } as never);
+    vi.mocked(openSharedWorkspace).mockRejectedValueOnce(new Error("disk full"));
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
+    expect(toast.level).toBe("error");
+    expect(toast.message).toContain("Launched 0 of 2");
+    expect(toast.message).toContain("ASM-1 (disk full)");
+    expect(toast.message).toContain("ASM-2 (disk full)");
+  });
+
+  it("skips Remote Control without asking for a one-key batch to a shared (non-new) destination", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window", remoteControl: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(window.showQuickPick).not.toHaveBeenCalled(); // resolveRemoteControl's picker never fires
+    expect(openSharedWorkspace).toHaveBeenCalledTimes(1);
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).toContain("Remote Control skipped — a shared window seeds each session from its own plan file.");
   });
 });
 
@@ -1241,12 +1514,13 @@ describe("remote control", () => {
     vi.mocked(createWorktrees).mockImplementation((s, key) =>
       s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
     );
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: false } as never); // layout pick
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1", "ASM-2"], "api");
-    expect(window.showQuickPick).not.toHaveBeenCalled();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1); // layout pick only — never a remote-control pick
     expect(vi.mocked(openWorkspace).mock.calls.every((c) => !c[0].remoteControl)).toBe(true);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
-    expect(toast.message).toContain("Remote Control skipped — one clipboard can't serve several windows");
+    expect(toast.message).toContain("Remote Control skipped — one clipboard can't serve several sessions");
     vi.mocked(createWorktrees).mockImplementation((s) => s);
   });
 
@@ -1264,7 +1538,7 @@ describe("remote control", () => {
       remoteControl: true,
     });
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], "api");
+    await provider.takeBatch(["ASM-1"], ["api"]);
     expect(window.showQuickPick).not.toHaveBeenCalled(); // "on" resolves without a picker
     expect(lastOpen().remoteControl).toBe(true);
     const toast = posted().find((m) => m.type === "toast") as { message: string };

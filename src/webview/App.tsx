@@ -309,9 +309,10 @@ export function App(): JSX.Element {
       (selectedRepos.size === 0 || (t.services ?? []).some((s) => selectedRepos.has(s))) &&
       matchesStatus(t, statuses),
   );
-  // Multi-select is offered only when the repo filter resolves to exactly one repo.
-  const batchMode = selectedRepos.size === 1;
-  const theRepo = batchMode ? [...selectedRepos][0] : null;
+  // Multi-select needs a repo filter — without one there is no bounded repo set to
+  // map each task onto, and the host has nothing to intersect its inference against.
+  const batchMode = selectedRepos.size >= 1;
+  const batchRepos = [...selectedRepos];
   // Only currently-visible tasks are launchable: a status/search filter that hides a
   // selected card silently drops it (state is untouched, just never launched).
   const selectedVisible = batchMode ? visibleTasks.filter((t) => batchSelected.has(t.key)) : [];
@@ -512,8 +513,8 @@ export function App(): JSX.Element {
           <button className="batch-clear" onClick={clearBatch}>Clear selection</button>
           <button
             className="batch-launch"
-            title={`Open ${selectedVisible.length} worktrees in ${theRepo}, each with its own Claude Code session`}
-            onClick={() => send({ type: "takeBatch", keys: selectedVisible.map((t) => t.key), repo: theRepo! })}
+            title={`Open ${selectedVisible.length} ${selectedVisible.length === 1 ? "task" : "tasks"} across ${batchRepos.join(", ")}, each in its own worktree with its own Claude Code session`}
+            onClick={() => send({ type: "takeBatch", keys: selectedVisible.map((t) => t.key), repos: batchRepos })}
           >
             <PlayIcon /> Launch in parallel
           </button>
