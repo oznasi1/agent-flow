@@ -228,3 +228,62 @@ describe("fieldDisplayNames", () => {
       .toEqual({ resolution: "Resolution" });
   });
 });
+
+// Jira's metadata is JSON from a remote system, so every fallback in here is a
+// shape some site actually sends. These pin the fallbacks rather than trusting them.
+describe("promptableFields — fallback shapes", () => {
+  it("labels a choice by its id when Jira sends neither name nor value", () => {
+    const { prompts } = promptableFields({
+      f: { required: true, name: "F", schema: { type: "option" }, allowedValues: [{ id: "42" }] },
+    });
+    expect(prompts[0]).toMatchObject({ kind: "pick", choices: [{ id: "42", name: "42" }] });
+  });
+
+  it("skips a field whose allowedValues carry nothing nameable", () => {
+    const { prompts, skipped } = promptableFields({
+      f: { required: true, name: "F", schema: { type: "option" }, allowedValues: [{}] },
+    });
+    expect(prompts).toEqual([]);
+    expect(skipped).toEqual(["F"]);
+  });
+
+  it("skips a field that arrives with no schema at all", () => {
+    const { prompts, skipped } = promptableFields({ f: { required: true, name: "Mystery" } });
+    expect(prompts).toEqual([]);
+    expect(skipped).toEqual(["Mystery"]);
+  });
+
+  it("names a skipped field by its id when Jira sends no display name", () => {
+    const { skipped } = promptableFields({ customfield_7: { required: true, schema: { type: "user" } } });
+    expect(skipped).toEqual(["customfield_7"]);
+  });
+
+  it("tolerates an `only` id whose metadata entry is undefined", () => {
+    const fields = { ghost: undefined } as unknown as Record<string, TransitionFieldMeta>;
+    const { prompts, skipped } = promptableFields(fields, { only: ["ghost"] });
+    expect(prompts).toEqual([]);
+    expect(skipped).toEqual(["ghost"]);
+  });
+});
+
+describe("toJiraValue — input shape tolerance", () => {
+  it("accepts a single value for a multipick", () => {
+    const multi: FieldPrompt = { kind: "multipick", id: "f", name: "F", choices: [{ id: "1", name: "A" }] };
+    expect(toJiraValue(multi, "A")).toEqual([{ id: "1" }]);
+  });
+
+  it("accepts an already-split array for labels", () => {
+    const labels: FieldPrompt = { kind: "labels", id: "labels", name: "Labels" };
+    expect(toJiraValue(labels, ["x", " y ", ""])).toEqual(["x", "y"]);
+  });
+});
+
+describe("missingFieldIds — unnamed fields", () => {
+  it("cannot match prose against a field Jira never named", () => {
+    const ids = missingFieldIds({ f: { required: true, schema: { type: "string" } } }, {
+      fieldErrors: {},
+      messages: ["Resolution is required"],
+    });
+    expect(ids).toEqual([]);
+  });
+});
