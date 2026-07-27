@@ -9,7 +9,10 @@ import { readRuns, defaultRunsDir, removeRun } from "./engine/runs";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { openInEditor } from "./engine/workspace";
-import { InboundMessage, OutboundMessage, Run, RunStatus } from "./types";
+import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
+import { FetchResult, GhProvider, PrProvider, ghAvailable } from "./engine/pr/provider";
+import { RefreshQueue } from "./engine/pr/queue";
+import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, Run, RunStatus } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
@@ -23,6 +26,15 @@ export class DeckPanel {
   private timer: ReturnType<typeof setInterval> | undefined;
   private liveSignal = true;
   private readonly jiraCache = new Map<string, { at: number; status: string | null; category: string | null }>();
+  private prFacts: boolean; // seeded from config in the constructor; the only writer after that is deck:setPrFacts
+  private readonly prQueue = new RefreshQueue();
+  private readonly pr: PrProvider = new GhProvider();
+  private ghProbe: Promise<boolean> | null = null;
+  /** null until the probe resolves; false disables PR facts with a footer note. */
+  private ghOk: boolean | null = null;
+  /** Bumped when a run is forgotten, so a fetch still in flight for the old
+   * incarnation cannot recreate the cache file we just deleted. */
+  private readonly prEpoch = new Map<string, number>();
 
   static show(context: vscode.ExtensionContext, auth: JiraAuth, log: (m: string) => void): void {
     if (DeckPanel.current) {
@@ -45,6 +57,10 @@ export class DeckPanel {
     private readonly log: (m: string) => void,
   ) {
     this.panel = panel;
+    // Seed from the persisted setting; after this, only the webview's
+    // deck:setPrFacts toggle changes it — a later refresh must not stomp the
+    // user's in-session toggle by re-reading config on every tick.
+    this.prFacts = getConfig().prFacts;
     this.panel.webview.html = this.html(this.panel.webview);
     this.panel.webview.onDidReceiveMessage((m: InboundMessage) => this.onMessage(m), null, this.disposables);
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
@@ -78,6 +94,52 @@ export class DeckPanel {
   private stopPolling(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    this.prQueue.clear();
+  }
+
+  /** Is `gh` usable? Kicks the probe off on first call and returns what we know
+   * so far — never awaited, because a 10s `gh auth status` must not sit in front
+   * of a paint. An unresolved probe reads as "not yet": queue nothing this tick. */
+  private ghReady(): boolean {
+    if (!this.prFacts) return false;
+    if (this.ghProbe === null) {
+      const p = (this.ghProbe = ghAvailable());
+      void p.then((ok) => {
+        // A probe orphaned by a toggle (deck:setPrFacts resets ghProbe and starts
+        // a fresh one) must not win if it resolves after the fresh probe already
+        // has — that would let a stale `false` clobber a fresh `true` right after
+        // the user ran `gh auth login`, defeating the whole point of re-probing.
+        if (this.ghProbe === p) this.ghOk = ok;
+      });
+    }
+    return this.ghOk === true;
+  }
+
+  /** Queue a stale repo's refresh. Deliberately not awaited by the caller: a
+   * hanging `gh` must never stall the git and transcript reads. The epoch is
+   * captured at enqueue time so a fetch still in flight when the run is
+   * forgotten can detect that and skip its write, rather than recreating the
+   * cache file `deck:forget` just deleted. */
+  private enqueuePr(key: string, repo: { name: string; path: string }, branch: string | null, previous?: PrEntry): void {
+    const epoch = this.prEpoch.get(key) ?? 0;
+    this.prQueue.push(repo.path, async () => {
+      let res: FetchResult;
+      try {
+        res = await this.pr.fetch(repo.path, branch, key);
+      } catch {
+        // A provider must never throw, but a thrown error here must still not
+        // leave this entry unstamped — an unstamped entry reads as stale on
+        // every tick and re-enqueues the same repo forever, since
+        // isStale(undefined, …) is always true.
+        res = { ok: false };
+      }
+      if ((this.prEpoch.get(key) ?? 0) !== epoch) return; // forgotten mid-flight
+      if (!res.ok) this.log(`deck: pr fetch ${key}/${repo.name} failed`);
+      const entry: PrEntry = res.ok
+        ? { facts: res.facts, fetchedAt: Date.now() }
+        : { facts: previous?.facts ?? null, fetchedAt: Date.now(), error: true };
+      writePrEntry(defaultPrFactsDir(), key, repo.name, entry);
+    });
   }
 
   private async jiraStatus(key: string): Promise<{ status: string | null; category: string | null } | null> {
@@ -99,11 +161,32 @@ export class DeckPanel {
     const projectsRoot = path.join(os.homedir(), ".claude", "projects");
     const now = Date.now();
     const authed = await this.auth.isAuthenticated();
+    const ghReady = this.ghReady();
     const openIdentities = new Set(readLiveWindows(defaultWindowsDir()).map((w) => w.identity));
     const out: RunStatus[] = [];
     for (const run of runs) {
       const jira = authed ? await this.jiraStatus(run.key) : null;
-      out.push(buildRunStatus(run, jira, projectsRoot, now, this.liveSignal, openIdentities));
+      const stored = this.prFacts ? readPrEntries(defaultPrFactsDir(), run.key) : {};
+      // Drop entries for repos that have left the run — re-taking a task with a
+      // different repo selection can leave one behind. It is never re-staled
+      // (only repos in run.repos are checked below), yet an orphan would still
+      // render as a PrBlock and vote in prSignals, pinning a card in Needs you
+      // or out of Done with Forget as the only escape.
+      const prs: PrEntryMap = Object.fromEntries(
+        run.repos.filter((r) => stored[r.name]).map((r) => [r.name, stored[r.name]]),
+      );
+      if (ghReady) {
+        const ttlMs = getConfig().prFactsTtlSeconds * 1000;
+        for (const repo of run.repos) {
+          // A non-git service (worktree.ts can hand one through unchanged) has no
+          // PR to fetch — `gh pr list` would just fail there forever, re-arming
+          // every TTL and burning a queue slot each cycle.
+          if (repo.isGit && isStale(prs[repo.name], ttlMs, now)) {
+            this.enqueuePr(run.key, repo, repo.branch ?? null, prs[repo.name]);
+          }
+        }
+      }
+      out.push(buildRunStatus(run, jira, projectsRoot, now, this.liveSignal, openIdentities, prs));
     }
     return out;
   }
@@ -111,7 +194,13 @@ export class DeckPanel {
   private async refresh(): Promise<void> {
     try {
       const runs = await this.buildAll();
-      this.post({ type: "deck:runs", runs, liveSignal: this.liveSignal });
+      this.post({
+        type: "deck:runs",
+        runs,
+        liveSignal: this.liveSignal,
+        prFacts: this.prFacts,
+        ghNote: this.prFacts && this.ghOk === false ? "gh not found or not signed in — PR facts off" : null,
+      });
     } catch (e) {
       this.log(`deck: refresh failed: ${e}`);
     }
@@ -129,16 +218,37 @@ export class DeckPanel {
         this.liveSignal = m.on;
         await this.refresh();
         break;
+      case "deck:setPrFacts":
+        this.prFacts = m.on;
+        if (m.on) {
+          // Re-probe: the user may have run `gh auth login` since the last check.
+          this.ghOk = null;
+          this.ghProbe = null;
+        }
+        await this.refresh();
+        break;
       case "deck:inspect":
         await this.inspect(m.key, m.action, m.repo);
         break;
       case "deck:forget":
         removeRun(defaultRunsDir(), m.key);
+        removePrEntries(defaultPrFactsDir(), m.key);
+        // Any fetch already in flight for this key belongs to the incarnation we
+        // just deleted — bump the epoch so its write is a no-op if it lands late.
+        this.prEpoch.set(m.key, (this.prEpoch.get(m.key) ?? 0) + 1);
         await this.refresh();
         break;
-      case "openExternal":
-        await vscode.env.openExternal(vscode.Uri.parse(m.url));
+      case "openExternal": {
+        const u = vscode.Uri.parse(m.url);
+        // f.url and every failing check's detailsUrl/targetUrl now come from
+        // GitHub's API, which a check-run producer controls — unlike our own
+        // Jira urls, that is not a trusted source for a scheme handed straight
+        // to the OS (e.g. a vscode://<publisher>.<ext>/… reaching another
+        // extension's UriHandler).
+        if (u.scheme !== "https" && u.scheme !== "http") break;
+        await vscode.env.openExternal(u);
         break;
+      }
     }
   }
 

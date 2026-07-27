@@ -7,7 +7,7 @@ vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
 import { DeckApp } from "../../src/webview/DeckApp";
 import { send } from "../../src/webview/vscodeApi";
-import type { OutboundMessage, RunStatus } from "../../src/types";
+import type { OutboundMessage, PrFacts, RunStatus } from "../../src/types";
 
 const sent = vi.mocked(send);
 
@@ -29,10 +29,11 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   repos: [{ name: "svc", path: "/r/svc", branch: "ASM-1-x", dirty: true, ahead: 1, added: 12, removed: 2, files: 3 }],
   agent: { state: "working", lastActivityMs: 1_000, slug: "export-streaming" },
   windowOpen: false,
+  prs: {},
   ...over,
 });
 
-const runsMsg = (runs: RunStatus[]): OutboundMessage => ({ type: "deck:runs", runs, liveSignal: true });
+const runsMsg = (runs: RunStatus[]): OutboundMessage => ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, ghNote: null });
 
 beforeEach(() => sent.mockClear());
 
@@ -126,12 +127,6 @@ describe("DeckApp", () => {
     expect(screen.getByText(/idle ·/i)).toBeInTheDocument();
   });
 
-  it("labels a done run as merged", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus({ column: "done", jiraCategory: "done", jiraStatus: "Done" })]));
-    expect(screen.getByText(/merged/i)).toBeInTheDocument();
-  });
-
   it("shows the branch and a launched-ago time on a card", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
@@ -187,5 +182,138 @@ describe("DeckApp", () => {
     render(<DeckApp />);
     host({ type: "toast", level: "error", message: "Nothing to open for ASM-1." });
     expect(screen.getByText("Nothing to open for ASM-1.")).toBeInTheDocument();
+  });
+});
+
+const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
+  number: 4821, url: "https://github.com/acme/svc/pull/4821", title: "Fix export",
+  state: "OPEN", isDraft: false, ci: { passing: 6, pending: 0, failing: [] },
+  review: "none", unresolved: null, mergeable: "clean", ciAdvisory: false, ...over,
+});
+
+describe("DeckApp PR block", () => {
+  it("renders no block for a run with no PR entries", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(screen.queryByText("pr")).toBeNull();
+  });
+
+  it("renders no block for a repo whose entry resolved to no PR", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({ prs: { svc: { facts: null, fetchedAt: 1 } } })]));
+    expect(screen.queryByText("pr")).toBeNull();
+    expect(container.querySelector(".pr-block")).toBeNull();
+  });
+
+  it("shows the PR number, failing checks, review state and mergeability", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      prs: { svc: { facts: prFacts({
+        ci: { passing: 4, pending: 0, failing: [{ name: "build-backend", url: "https://ci/1" }, { name: "lint", url: "https://ci/2" }] },
+        review: "changes_requested", unresolved: 3, mergeable: "blocked",
+      }), fetchedAt: 1 } },
+    })]));
+
+    expect(screen.getByText("#4821")).toBeTruthy();
+    expect(screen.getByText("build-backend")).toBeTruthy();
+    expect(screen.getByText("lint")).toBeTruthy();
+    expect(screen.getByText(/changes/)).toBeTruthy();
+    expect(screen.getByText(/3 open/)).toBeTruthy();
+    expect(screen.getByText("blocked")).toBeTruthy();
+  });
+
+  it("omits the thread count when unresolved is null", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ review: "changes_requested", unresolved: null }), fetchedAt: 1 } } })]));
+    expect(screen.queryByText(/open$/)).toBeNull();
+  });
+
+  it("shows a passing-check count when nothing is failing", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts(), fetchedAt: 1 } } })]));
+    expect(screen.getByText(/6 passing/)).toBeTruthy();
+  });
+
+  it("heads each block with its repo name only when more than one repo has a PR", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts(), fetchedAt: 1 } } })]));
+    expect(screen.queryByText("svc", { selector: ".pr-repo" })).toBeNull();
+
+    host(runsMsg([mkStatus({ prs: {
+      svc: { facts: prFacts(), fetchedAt: 1 },
+      web: { facts: prFacts({ number: 99, url: "https://github.com/acme/web/pull/99" }), fetchedAt: 1 },
+    } })]));
+    expect(screen.getByText("svc", { selector: ".pr-repo" })).toBeTruthy();
+    expect(screen.getByText("web", { selector: ".pr-repo" })).toBeTruthy();
+  });
+
+  it("opens the PR externally from its number", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts(), fetchedAt: 1 } } })]));
+    fireEvent.click(screen.getByText("#4821"));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://github.com/acme/svc/pull/4821" });
+  });
+
+  it("opens a failing check's run externally", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ ci: { passing: 0, pending: 0, failing: [{ name: "build", url: "https://ci/run/7" }] } }), fetchedAt: 1 } } })]));
+    fireEvent.click(screen.getByText("build"));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://ci/run/7" });
+  });
+
+  it("does not linkify a failing check with no url", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ ci: { passing: 0, pending: 0, failing: [{ name: "build", url: "" }] } }), fetchedAt: 1 } } })]));
+    // Structural: must fail if "build" ever regresses to an <a> or a <button> — not just
+    // that clicking it happens to send nothing (a dead <a href=""> or handler-less
+    // <button> would pass that check too).
+    expect(screen.queryByRole("link", { name: "build" })).toBeNull();
+    expect(screen.getByText("build").tagName).toBe("SPAN");
+    fireEvent.click(screen.getByText("build"));
+    expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openExternal" }));
+  });
+});
+
+describe("DeckApp PR-facts chrome", () => {
+  it("says merged only when a PR actually merged", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "done", prs: { svc: { facts: prFacts({ state: "MERGED" }), fetchedAt: 1 } } })]));
+    expect(screen.getByText("merged")).toBeTruthy();
+  });
+
+  it("says done for a Jira-done run with no merged PR", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "done" })]));
+    expect(screen.getByText("done")).toBeTruthy();
+    expect(screen.queryByText("merged")).toBeNull();
+  });
+
+  it("says done, not merged, when only one of two repos' PRs merged (F2)", () => {
+    // The spec's prMerged rule requires EVERY PR-bearing repo to be MERGED — a
+    // two-repo run whose backend merged and whose frontend is still open must
+    // not claim "merged" just because `.some()` finds one.
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "done",
+      prs: {
+        svc: { facts: prFacts({ state: "MERGED" }), fetchedAt: 1 },
+        web: { facts: prFacts({ number: 99, url: "https://github.com/acme/web/pull/99", state: "OPEN" }), fetchedAt: 1 },
+      },
+    })]));
+    expect(screen.getByText("done")).toBeTruthy();
+    expect(screen.queryByText("merged")).toBeNull();
+  });
+
+  it("toggles PR facts", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByText("PR facts"));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:setPrFacts", on: false });
+  });
+
+  it("shows the gh note when the host sends one", () => {
+    render(<DeckApp />);
+    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, ghNote: "gh not found or not signed in — PR facts off" });
+    expect(screen.getByText(/gh not found/)).toBeTruthy();
   });
 });

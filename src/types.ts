@@ -94,7 +94,43 @@ export interface RunStatus {
   repos: RepoGit[];
   agent: AgentActivity;
   windowOpen: boolean; // is this run's target window currently open? (from presence)
+  prs: PrEntryMap; // repo name → observed PR state ({} when prFacts is off)
 }
+
+// ── PR & CI observation ─────────────────────────────────────────────────────
+
+/** One CI check, named and linkable. */
+export interface PrCheck {
+  name: string;
+  url: string; // "" when gh reports no details URL
+}
+
+/** One repo's observed pull-request state. Every field derived, none required. */
+export interface PrFacts {
+  number: number;
+  url: string;
+  title: string;
+  state: "OPEN" | "CLOSED" | "MERGED";
+  isDraft: boolean;
+  ci: { passing: number; pending: number; failing: PrCheck[] };
+  review: "approved" | "changes_requested" | "review_required" | "none";
+  unresolved: number | null; // null = the GraphQL call was skipped
+  mergeable: "clean" | "conflicting" | "behind" | "blocked" | "unknown";
+  /** Every required check passed and something optional did not
+   * (`mergeStateStatus === "UNSTABLE"`). Failing checks render, but do not block. */
+  ciAdvisory: boolean;
+}
+
+/** What the store holds per repo. The wrapper — not `PrFacts` — carries the
+ * timestamp, so that "this repo has no PR" is itself a cacheable answer. */
+export interface PrEntry {
+  facts: PrFacts | null; // null = resolved, and there is no PR for this repo
+  fetchedAt: number; // epoch ms
+  error?: boolean; // last attempt failed; `facts` is the previous value, if any
+}
+
+/** Repo name → its PR entry, as stored per run and rendered per card. */
+export type PrEntryMap = Record<string, PrEntry>;
 
 // ── The Marketplace: local asset browser ────────────────────────────────────
 
@@ -173,6 +209,7 @@ export type InboundMessage =
   | { type: "deck:ready" }
   | { type: "deck:refresh" }
   | { type: "deck:setLive"; on: boolean }
+  | { type: "deck:setPrFacts"; on: boolean }
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
   | { type: "deck:forget"; key: string }
   // The Marketplace (separate webview panel)
@@ -199,7 +236,7 @@ export type OutboundMessage =
   | { type: "error"; message: string; canRetry: boolean }
   | { type: "loading"; loading: boolean }
   // The Deck
-  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean }
+  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; ghNote: string | null }
   | { type: "deck:loading"; loading: boolean }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }

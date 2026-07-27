@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The Deck reads your PRs.** Every card now shows the PR state of each repo it
+  touches — number, CI with failing check names linked to their runs, review
+  decision with unresolved-thread count, and mergeability — read from GitHub with
+  the `gh` CLI. A blocked PR (failing required checks, requested changes, or a
+  conflict) pulls its card into **Needs you**; a merged PR moves it to **Done**.
+  Settings: `agentFlow.prFacts` (default on) and `agentFlow.prFactsTtlSeconds`
+  (default 120). All access is read-only, through your existing `gh` login.
+
+### Fixed
+
+- A Deck card said *merged* whenever Jira said done, regardless of the PR. It now
+  says *merged* only when a PR actually merged, and *done* otherwise.
+
 ## [0.1.31] — 2026-07-27
 
 ### Added

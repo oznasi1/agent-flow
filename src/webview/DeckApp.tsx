@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { DeckColumn, OutboundMessage, RepoGit, RunStatus } from "../types";
+import { DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, RunStatus } from "../types";
 
 let toastSeq = 0;
 
@@ -22,8 +22,15 @@ function timeAgo(ms: number | null): string {
 
 type Tone = "working" | "idle" | "needs" | "parked" | "merged";
 
+/** Did every PR this run has actually land? Mirrors prSignals' `merged` rule in
+ * status.ts — a run whose backend merged and whose frontend has not is not merged. */
+function allMerged(prs: PrEntryMap): boolean {
+  const facts = Object.values(prs).map((e) => e.facts).filter((f): f is PrFacts => f !== null);
+  return facts.length > 0 && facts.every((f) => f.state === "MERGED");
+}
+
 function stateView(r: RunStatus, live: boolean): { text: string; tone: Tone } {
-  if (r.column === "done") return { text: "merged", tone: "merged" };
+  if (r.column === "done") return { text: allMerged(r.prs) ? "merged" : "done", tone: "merged" };
   if (!live || r.agent.state === "unknown") return { text: "parked · git + Jira only", tone: "parked" };
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
@@ -31,6 +38,56 @@ function stateView(r: RunStatus, live: boolean): { text: string; tone: Tone } {
     case "idle": return { text: `idle · ${timeAgo(r.agent.lastActivityMs)}`, tone: "idle" };
     default: return { text: "parked · git + Jira only", tone: "parked" };
   }
+}
+
+const REVIEW_TEXT: Record<PrFacts["review"], string> = {
+  approved: "approved",
+  changes_requested: "changes",
+  review_required: "required",
+  none: "pending",
+};
+
+function PrBlock({ repo, f, showRepo }: { repo: string; f: PrFacts; showRepo: boolean }): JSX.Element {
+  const ci = f.ci.failing.length > 0
+    ? <span className="pr-bad">
+        ✗ {f.ci.failing.map((c, i) => (
+          <React.Fragment key={c.name}>
+            {i > 0 && ", "}
+            {c.url
+              ? <button className="pr-link" title={c.url} onClick={() => send({ type: "openExternal", url: c.url })}>{c.name}</button>
+              : <span>{c.name}</span>}
+          </React.Fragment>
+        ))}
+      </span>
+    : f.ci.pending > 0
+      ? <span className="pr-wait">· {f.ci.pending} running</span>
+      : <span className="pr-ok">✓ {f.ci.passing} passing</span>;
+
+  return (
+    <div className="pr-block">
+      {showRepo && <div className="pr-repo">{repo}</div>}
+      <div className="pr-line">
+        <span className="pr-lbl">pr</span>
+        <button className="pr-link" title={f.title} onClick={() => send({ type: "openExternal", url: f.url })}>
+          #{f.number}
+        </button>
+        {f.isDraft && <span className="pr-draft">draft</span>}
+      </div>
+      <div className="pr-line"><span className="pr-lbl">ci</span>{ci}</div>
+      <div className="pr-line">
+        <span className="pr-lbl">review</span>
+        <span className={f.review === "changes_requested" ? "pr-warn" : f.review === "approved" ? "pr-ok" : ""}>
+          {REVIEW_TEXT[f.review]}{f.unresolved !== null && f.unresolved > 0 ? ` · ${f.unresolved} open` : ""}
+        </span>
+      </div>
+      <div className="pr-line">
+        <span className="pr-lbl">merge</span>
+        <span className={f.mergeable === "conflicting" ? "pr-warn" : f.mergeable === "clean" ? "pr-ok" : ""}>
+          {f.mergeable === "conflicting" ? "conflicts" : f.mergeable}
+        </span>
+      </div>
+    </div>
+  );
 }
 
 // No ⎇ here: that glyph means "branch" on this card, and a repo chip is a repo.
@@ -85,6 +142,13 @@ function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
         <span className="elapsed">launched {timeAgo(r.run.createdAt)}</span>
       </div>
 
+      {(() => {
+        const withPr = Object.entries(r.prs).filter(([, e]) => e.facts !== null) as [string, { facts: PrFacts }][];
+        return withPr.map(([name, e]) => (
+          <PrBlock key={name} repo={name} f={e.facts} showRepo={withPr.length > 1} />
+        ));
+      })()}
+
       {r.windowOpen && <div className="c-openhint">open now — Open will focus this window</div>}
 
       <div className="c-foot">
@@ -110,6 +174,8 @@ function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
 export function DeckApp(): JSX.Element {
   const [runs, setRuns] = React.useState<RunStatus[]>([]);
   const [live, setLive] = React.useState(true);
+  const [prFacts, setPrFacts] = React.useState(true);
+  const [ghNote, setGhNote] = React.useState<string | null>(null);
   const [syncedAt, setSyncedAt] = React.useState<number | null>(null);
   const [, forceTick] = React.useState(0);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string }[]>([]);
@@ -120,6 +186,8 @@ export function DeckApp(): JSX.Element {
       if (m.type === "deck:runs") {
         setRuns(m.runs);
         setLive(m.liveSignal);
+        setPrFacts(m.prFacts);
+        setGhNote(m.ghNote);
         setSyncedAt(Date.now());
       } else if (m.type === "toast") {
         const id = ++toastSeq;
@@ -158,6 +226,9 @@ export function DeckApp(): JSX.Element {
         <div className={`ctl ${live ? "on" : ""}`} onClick={toggleLive} title="Best-effort live signal from Claude Code transcripts. Off → git + Jira only.">
           <span className="switch" />Live signal
         </div>
+        <div className={`ctl ${prFacts ? "on" : ""}`} onClick={() => { const next = !prFacts; setPrFacts(next); send({ type: "deck:setPrFacts", on: next }); }} title="Read each task's PR state from GitHub with the gh CLI. Off → git + Jira only.">
+          <span className="switch" />PR facts
+        </div>
         <div className="ctl" onClick={() => send({ type: "deck:refresh" })}>
           ⟳ <span className="synced">{syncedAt ? `synced ${timeAgo(syncedAt)}` : "refresh"}</span>
         </div>
@@ -195,6 +266,7 @@ export function DeckApp(): JSX.Element {
         {COLUMNS.map((c) => (
           <span className="lg" key={c.id}><span className="dot" style={{ background: `var(${c.varName})` }} />{c.label}</span>
         ))}
+        {ghNote && <span className="note warn">{ghNote}</span>}
         <span className="note">git + Jira backbone · best-effort live from ~/.claude/projects</span>
       </div>
 

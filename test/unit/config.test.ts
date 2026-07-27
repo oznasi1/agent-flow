@@ -265,6 +265,29 @@ describe("getConfig — remoteControl", () => {
   });
 });
 
+describe("PR facts settings", () => {
+  it("defaults prFacts on and the TTL to 120 seconds", () => {
+    const c = getConfig();
+    expect(c.prFacts).toBe(true);
+    expect(c.prFactsTtlSeconds).toBe(120);
+  });
+
+  it("honours prFacts set to false", () => {
+    setConfig({ prFacts: false });
+    expect(getConfig().prFacts).toBe(false);
+  });
+
+  it("honours a custom TTL", () => {
+    setConfig({ prFactsTtlSeconds: 300 });
+    expect(getConfig().prFactsTtlSeconds).toBe(300);
+  });
+
+  it("floors an absurdly small TTL at 30s so a typo cannot hammer the GitHub API", () => {
+    setConfig({ prFactsTtlSeconds: 1 });
+    expect(getConfig().prFactsTtlSeconds).toBe(30);
+  });
+});
+
 describe("package.json ⇄ config constants", () => {
   const props = (pkg.contributes.configuration.properties as Record<string, { default?: unknown }>);
 
@@ -294,5 +317,12 @@ describe("package.json ⇄ config constants", () => {
     const p = props["agentFlow.remoteControl"] as { default?: unknown; enum?: unknown };
     expect(p.default).toBe("off");
     expect(p.enum).toEqual(["off", "on", "ask"]);
+  });
+
+  it("declares prFacts defaulting to true and prFactsTtlSeconds to 120 with a floor of 30", () => {
+    expect(props["agentFlow.prFacts"].default).toBe(true);
+    const ttl = props["agentFlow.prFactsTtlSeconds"] as { default?: unknown; minimum?: unknown };
+    expect(ttl.default).toBe(120);
+    expect(ttl.minimum).toBe(30);
   });
 });

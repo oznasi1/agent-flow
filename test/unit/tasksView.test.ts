@@ -61,6 +61,8 @@ const CFG = {
   remoteControl: "off" as const,
   batchLaunchConfirmThreshold: 6,
   trackOpenWindows: true,
+  prFacts: true,
+  prFactsTtlSeconds: 120,
   stampLabelOnWrite: true,
   provenanceLabel: "claude-code",
   filters: { size: true, status: true, repo: true, search: true },
