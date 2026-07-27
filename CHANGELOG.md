@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.37] — 2026-07-28
+
+### Added
+
+- **Change Status now asks for the fields your workflow requires.** Closing a
+  ticket on a workflow that demands a Resolution used to fail outright. Agent Flow
+  now reads the transition's screen and prompts for each required field first —
+  a pick list for Resolution and friends, an input box for text, numbers and
+  dates — then sends them with the transition. Escape at any prompt and nothing
+  is written.
+- Some workflows enforce requirements that aren't on the transition screen at all,
+  so a refusal gets **one rescue attempt**: Agent Flow reads which field the
+  rejection names, asks for it, and retries once. A second refusal is reported
+  rather than retried.
+
+### Fixed
+
+- **Jira failures read as sentences instead of raw JSON.** A refused write used to
+  surface as `Jira 400: {"errorMessages":[…],"errors":{}}`. It now reads
+  *"Couldn't update ASM-1. Ticket cannot be closed unless Resolution will be
+  provided."*, with field-level problems named by their display name rather than
+  their `customfield_10042` id. Error pages and empty bodies become a plain
+  status sentence instead of being dumped on screen.
+- **A failed write no longer clears your task list.** Any Jira error used to
+  replace the whole panel with an error banner, so one refused status change threw
+  away the list you were working from. Only the actions that populate the panel can
+  replace it now; a failed write leaves everything on screen and reports itself in
+  a toast.
+- **Error toasts stay until you dismiss them**, and carry an **Open in Jira**
+  button. They used to vanish after 4.2 seconds — less time than it takes to read
+  a workflow validator's message, let alone act on it. Success and info toasts are
+  unchanged.
+
 ## [0.1.36] — 2026-07-28
 
 ### Added
