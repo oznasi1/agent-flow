@@ -3,10 +3,16 @@ import * as os from "os";
 import * as path from "path";
 import { FilterVisibility, PromptMode } from "./types";
 
+/** The stock "how should the agent start" modes, in picker order. `detail` is the
+ * line shown under the label — written for the user reading the picker, never
+ * derived from the prompt. Keep this array identical to the `agentFlow.promptModes`
+ * default in package.json; that manifest default is what VS Code serves to users
+ * who never touched the setting. A test enforces the two staying in step. */
 export const DEFAULT_PROMPT_MODES: PromptMode[] = [
   {
     id: "plan",
     label: "Plan first",
+    detail: "Propose a step-by-step plan and wait for approval — no code edits",
     prompt:
       'Jira {key}: "{summary}". Read the task brief at {brief} for context and the repos involved. ' +
       "Propose a step-by-step PLAN for this task and wait for my approval — do not edit any code yet. Ticket: {url}{files}",
@@ -14,9 +20,48 @@ export const DEFAULT_PROMPT_MODES: PromptMode[] = [
   {
     id: "implementation",
     label: "Implementation",
+    detail: "Start building; check in only when something's ambiguous",
     prompt:
       'Jira {key}: "{summary}". Read the task brief at {brief} for context and the repos involved. ' +
       "Begin implementing. Confirm your approach with me only if something is ambiguous. Ticket: {url}{files}",
+  },
+  {
+    id: "tdd",
+    label: "Test-driven",
+    detail: "Write the failing test first, then implement until it's green",
+    prompt:
+      'Jira {key}: "{summary}". Read the task brief at {brief} for context and the repos involved. ' +
+      "Work test-first: write the failing test that captures this ticket's acceptance criteria, confirm it fails " +
+      "for the right reason, then implement until it passes. Ticket: {url}{files}",
+  },
+  {
+    id: "investigate",
+    label: "Investigate & root-cause",
+    detail: "Reproduce, trace to a root cause, propose a fix — no code edits",
+    prompt:
+      'Jira {key}: "{summary}". Read the task brief at {brief} for context and the repos involved. ' +
+      "Reproduce the problem, trace it to a root cause, and explain what's going wrong with evidence from the code. " +
+      "Propose a fix, but don't change code unless I ask. Ticket: {url}{files}",
+  },
+  {
+    id: "orchestrator",
+    label: "Orchestrator",
+    detail: "Split into parallel subtasks, then integrate and verify",
+    prompt:
+      'Jira {key}: "{summary}". Read the task brief at {brief} for context and the repos involved. ' +
+      "Break this into independent subtasks and tell me the breakdown before you start. Then dispatch a subagent " +
+      "per subtask so they run in parallel, integrate the results yourself, and verify the whole thing works. " +
+      "Ticket: {url}{files}",
+  },
+  {
+    id: "refine",
+    label: "Refine the ticket",
+    detail: "Sharpen the description and acceptance criteria — no code",
+    prompt:
+      'Jira {key}: "{summary}". Read the task brief at {brief} for context and the repos involved. ' +
+      "This ticket needs sharpening before anyone builds it: dig into the code, then rewrite the description and " +
+      "acceptance criteria so they're unambiguous and testable, and list what's still unclear. Update the ticket " +
+      "and add the `claude-code` label. Don't implement it. Ticket: {url}{files}",
   },
 ];
 

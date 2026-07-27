@@ -199,9 +199,13 @@ each repo, so they never get committed.
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
 `agentFlow.exploreMode`, `agentFlow.explorePrompts.*`, `agentFlow.prReviewPrompt`, and
-`agentFlow.worktree` — see the Settings UI. The **Address PR** kick-off always runs in a
-worktree. Per-task worktrees are created inside each repo at `.claude/worktrees/<KEY>`
-(and git-excluded automatically).
+`agentFlow.worktree` — see the Settings UI. Taking a task asks how the agent should
+start: **Plan first**, **Implementation**, **Test-driven**, **Investigate &
+root-cause**, **Orchestrator**, or **Refine the ticket**. Edit those prompts, or add
+your own mode, under `agentFlow.promptModes`; pin one with `agentFlow.taskMode` to skip
+the question. The **Address PR** kick-off always runs in a worktree. Per-task worktrees
+are created inside each repo at `.claude/worktrees/<KEY>` (and git-excluded
+automatically).
 
 **Remote Control.** With `agentFlow.remoteControl` set to `on` or `ask`, the Claude Code
 panel is pre-filled with `/remote-control <KEY>` instead of the task prompt, and the task
