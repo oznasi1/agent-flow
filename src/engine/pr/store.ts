@@ -28,6 +28,11 @@ export function readPrEntries(dir: string, key: string): PrEntryMap {
  * never fail a refresh. Uses atomic write (temp + rename) so a failed write
  * never truncates or evicts unrelated repos' entries. */
 export function writePrEntry(dir: string, key: string, repo: string, entry: PrEntry): void {
+  const target = fileFor(dir, key);
+  const tempFile = path.join(
+    dir,
+    `.${key}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+  );
   try {
     const all = readPrEntries(dir, key);
     all[repo] = entry;
@@ -35,15 +40,15 @@ export function writePrEntry(dir: string, key: string, repo: string, entry: PrEn
     // Write to a temp file first, then atomically rename. On POSIX and
     // same-volume on Windows, rename is atomic: a failed write leaves the
     // previous file completely untouched.
-    const target = fileFor(dir, key);
-    const tempFile = path.join(
-      dir,
-      `.${key}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
-    );
     fs.writeFileSync(tempFile, JSON.stringify(all, null, 2) + "\n");
     fs.renameSync(tempFile, target);
   } catch {
     /* the cache is a convenience — never fail a caller over it */
+    try {
+      fs.rmSync(tempFile, { force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
   }
 }
 
