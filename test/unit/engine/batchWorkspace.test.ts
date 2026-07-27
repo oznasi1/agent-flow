@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
 import { openSharedWorkspace, type SharedOpenRequest } from "../../../src/engine/batchWorkspace";
+import { commands } from "../../_mocks/vscode";
 
 vi.mock("fs");
 vi.mock("child_process");
@@ -11,6 +12,7 @@ const readFileSync = vi.mocked(fs.readFileSync);
 const writeFileSync = vi.mocked(fs.writeFileSync);
 const realpathSync = vi.mocked(fs.realpathSync);
 const execSync = vi.mocked(childProcess.execSync);
+const execFileSync = vi.mocked(childProcess.execFileSync);
 const exec = vi.mocked(childProcess.exec);
 
 beforeEach(() => {
@@ -21,6 +23,7 @@ beforeEach(() => {
   readFileSync.mockReset().mockReturnValue("");
   realpathSync.mockReset().mockImplementation((p) => String(p));
   execSync.mockReset().mockReturnValue(""); // git ls-files → no files
+  execFileSync.mockReset().mockReturnValue(""); // gitState's git calls → no state
   exec.mockReset().mockImplementation(((_c: string, cb: (e: unknown) => void) => cb(null)) as never);
 });
 
@@ -142,9 +145,88 @@ describe("openSharedWorkspace", () => {
     expect(plans.every((p) => p.matches[0].matchPath === "/repos/web")).toBe(true);
   });
 
+  it("bares the mentions for a live folder window, whose roots never gain the worktrees", async () => {
+    execSync.mockReturnValue("src/foo.ts\n");
+    await openSharedWorkspace(
+      baseReq({
+        target: { kind: "live-folder", folder: "/repos/web" },
+        tasks: [
+          {
+            ticket: { key: "ASM-1", summary: "one", url: "" },
+            planMd: "p",
+            descriptionText: "look at `src/foo.ts`",
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+          },
+        ],
+      }),
+    );
+    const plan = JSON.parse(String(writes((p) => p.includes("/plans/"))[0][1]));
+    expect(plan.matches[0].prompt).toContain("@src/foo.ts");
+    expect(plan.matches[0].prompt).not.toContain("@ASM-1-api/src/foo.ts");
+  });
+
+  it("bares the mentions when merging into an existing workspace failed", async () => {
+    execSync.mockReturnValue("src/foo.ts\n");
+    readFileSync.mockReturnValue("{ not json");
+    await openSharedWorkspace(
+      baseReq({
+        target: { kind: "existing", file: "/ws/team.code-workspace" },
+        tasks: [
+          {
+            ticket: { key: "ASM-1", summary: "one", url: "" },
+            planMd: "p",
+            descriptionText: "look at `src/foo.ts`",
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+          },
+        ],
+      }),
+    );
+    const plan = JSON.parse(String(writes((p) => p.includes("/plans/"))[0][1]));
+    expect(plan.matches[0].prompt).not.toContain("@ASM-1-api/src/foo.ts");
+  });
+
+  // The plan-dir watcher coalesces events 300ms after the last one, so an N-plan batch
+  // is only seen as one batch if its plan files land back-to-back. gitState spawns four
+  // git subprocesses per repo, which is enough to split the debounce window.
+  it("writes every plan file back-to-back, with no git subprocess between them", async () => {
+    const order: string[] = [];
+    writeFileSync.mockImplementation((p) => {
+      const s = String(p);
+      if (s.includes("/plans/")) order.push("plan");
+      else if (s.includes("/runs/")) order.push("run");
+    });
+    execFileSync.mockImplementation((() => {
+      order.push("git");
+      return "";
+    }) as never);
+
+    await openSharedWorkspace(baseReq());
+
+    expect(order.filter((o) => o === "plan")).toHaveLength(2);
+    const first = order.indexOf("plan");
+    const last = order.lastIndexOf("plan");
+    expect(order.slice(first, last + 1)).toEqual(["plan", "plan"]);
+    // …and the durable writes still all precede the open.
+    expect(order.indexOf("run")).toBeGreaterThan(last);
+    expect(exec).toHaveBeenCalledTimes(1);
+  });
+
   it("opens the destination exactly once", async () => {
     await openSharedWorkspace(baseReq());
     expect(exec).toHaveBeenCalledTimes(1);
     expect(String(exec.mock.calls[0][0])).toContain("/ws/ASM-1+1.code-workspace");
+  });
+
+  // `target.kind !== "current"` is the whole this-window flow: the current window has to
+  // be replaced in place (which reloads it, firing the seed handshake), never spawned.
+  it("reloads the current window instead of spawning one for target 'current'", async () => {
+    const result = await openSharedWorkspace(baseReq({ target: { kind: "current" } }));
+    expect(exec).not.toHaveBeenCalled();
+    expect(commands.executeCommand).toHaveBeenCalledWith(
+      "vscode.openFolder",
+      expect.objectContaining({ fsPath: "/ws/ASM-1+1.code-workspace" }),
+      { forceNewWindow: false },
+    );
+    expect(result.opened).toBe(true);
   });
 });

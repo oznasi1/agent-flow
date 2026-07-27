@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { Run, ServiceRef } from "../types";
+import { Run, ServiceRef, WorkspaceMode } from "../types";
 import { extractFileHints, resolveFilesInRepo, mention } from "./files";
 import { ensureGitExcluded } from "./gitExclude";
 import { gitState } from "./git";
@@ -124,16 +124,27 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
     openTarget = workspaceFile;
   }
   const matchPath = workspaceFile ?? openTarget;
+  // A `@<folder>/<rel>` mention only resolves against a root the window actually has.
+  // The live-folder destination never gets the worktrees (above), and a failed merge
+  // never wrote them into the existing workspace either — in both cases the qualified
+  // form names nothing, so fall back to the bare relative form the single-task
+  // existingFolder path uses (workspace.ts).
+  const mentionMode: WorkspaceMode = workspaceFile && !mergeFailed ? "multiroot" : "per-window";
 
   // 4 — one plan + one run per task, all naming the same window. Durable writes come
   //     before the open: reusing the current window reloads this extension host.
   const createdAt = Date.now();
-  let seeded = 0;
-  tasks.forEach((t, i) => {
-    if (seedAgent) {
+
+  // The plan files must land back-to-back: the plan-dir watcher debounces 300ms after
+  // the last event and seeds whatever one pass collects, and a pass holding a single
+  // plan opens a plain session instead of stacking tabs in one Claude group. Writing
+  // the Run records in the same loop would put gitState's four git subprocesses per
+  // repo between consecutive plans — easily past the debounce.
+  if (seedAgent) {
+    tasks.forEach((t, i) => {
       const mentions = t.services.flatMap((s) =>
         (filesByPair.get(`${t.ticket.key}:${s.name}`) ?? []).map((f) =>
-          mention("multiroot", folderName(t.ticket.key, s.name), f),
+          mention(mentionMode, folderName(t.ticket.key, s.name), f),
         ),
       );
       // Absolute, not the usual relative path: N worktree roots each hold
@@ -141,8 +152,10 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
       const prompt = agentPrompt(t.ticket, mentions, promptTemplate, briefPathFor.get(t.ticket.key));
       // Remote Control is never offered here — one clipboard can't serve N sessions.
       writePlanFile({ key: t.ticket.key, createdAt, seedAgent: true, seq: i, matches: [{ matchPath, prompt }] });
-      seeded++;
-    }
+    });
+  }
+
+  tasks.forEach((t) => {
     const run: Run = {
       key: t.ticket.key,
       summary: t.ticket.summary,
@@ -167,5 +180,13 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
 
   // 5 — open once.
   const opened = await openInEditor(openTarget, target.kind !== "current");
-  return { workspaceFile, opened, briefs, mergedFolders, mergeFailed, unaddedFolders, seeded };
+  return {
+    workspaceFile,
+    opened,
+    briefs,
+    mergedFolders,
+    mergeFailed,
+    unaddedFolders,
+    seeded: seedAgent ? tasks.length : 0,
+  };
 }
