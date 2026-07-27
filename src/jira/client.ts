@@ -110,6 +110,24 @@ export class JiraClient {
     }
   }
 
+  /** `getMyself()` with the swallowing removed, for Doctor. That method returns
+   *  `null` for a rejected token, a timeout *and* an unreachable host alike, so a
+   *  check that must fail on bad credentials but only warn on a dead network cannot
+   *  be built on it. Let both kinds through and let the caller classify:
+   *  `JiraAuthError` means the credentials, any other Error means reaching Jira. */
+  async probeMyself(): Promise<{ accountId: string; displayName: string }> {
+    const me = await this.request("/rest/api/3/myself");
+    return { accountId: me?.accountId ?? "", displayName: me?.displayName || me?.emailAddress || "" };
+  }
+
+  /** Does the configured project key resolve for this user? A valid token with a
+   *  renamed or mistyped key renders an empty panel and explains nothing. Throws
+   *  `JiraApiError` (404 when the key isn't visible). */
+  async getProject(key: string): Promise<{ id: string; key: string; name: string }> {
+    const p = await this.request(`/rest/api/3/project/${encodeURIComponent(key)}`);
+    return { id: p?.id ?? "", key: p?.key ?? key, name: p?.name ?? "" };
+  }
+
   /** Resolve (once, per site) the id of the Sprint custom field. */
   private async sprintFieldId(): Promise<string | null> {
     if (cachedSprintFieldId !== undefined) return cachedSprintFieldId;
