@@ -51,9 +51,14 @@ export function gitState(name: string, repoPath: string): RepoGit {
  * to compare with — a local-only checkout, or a fresh init. */
 function defaultRemoteRef(repoPath: string): string {
   const head = git(repoPath, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
-  if (head) return head;
   // origin/HEAD is only written by `git clone` and goes stale after a default-branch
-  // rename, so a working clone very often has no such ref.
+  // rename, so a working clone very often has no such ref — or keeps one naming the
+  // retired branch that the next `fetch --prune` deleted. Hence the verify before
+  // trusting it and the fallback below: an unresolvable base is worse than no base,
+  // because merge-base then fails, git() hands back "", and taskDiff degrades to
+  // `diff HEAD` — silently reinstating the "committed work reads as no work" defect
+  // this function exists to fix.
+  if (head && git(repoPath, ["rev-parse", "--verify", "--quiet", head])) return head;
   for (const ref of ["origin/main", "origin/master"]) {
     if (git(repoPath, ["rev-parse", "--verify", "--quiet", ref])) return ref;
   }

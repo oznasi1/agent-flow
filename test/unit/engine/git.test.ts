@@ -128,6 +128,36 @@ describe("taskDiff", () => {
     fs.rmSync(solo, { recursive: true, force: true });
   });
 
+  it("falls back to a real branch when origin/HEAD names one that no longer exists", () => {
+    // Its own repo, so the shared fixture above keeps its refs and its ordering.
+    const stale = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-stale-head-"));
+    const staleOrigin = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-stale-origin-"));
+    const s = (...a: string[]) => execFileSync("git", ["-C", stale, ...a], { stdio: ["ignore", "pipe", "ignore"] });
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "--bare", "-q", staleOrigin]);
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", stale]);
+    s("config", "user.email", "t@t.dev");
+    s("config", "user.name", "T");
+    fs.writeFileSync(path.join(stale, "a.txt"), "1\n");
+    s("add", "-A");
+    s("commit", "-q", "-m", "init");
+    s("remote", "add", "origin", staleOrigin);
+    s("push", "-q", "-u", "origin", "HEAD");
+    // What a remote default-branch rename leaves behind: origin/HEAD still names the
+    // retired branch, which `fetch --prune` then deleted. Written directly rather
+    // than by renaming and fetching, because git ≥ 2.50 re-points origin/HEAD on
+    // fetch and older gits do not — the dangling ref is the state under test either way.
+    s("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master");
+    s("checkout", "-qb", "ASM-9-stale");
+    fs.appendFileSync(path.join(stale, "a.txt"), "committed\n");
+    s("add", "-A");
+    s("commit", "-q", "-m", "work");
+    // Trusting origin/HEAD here makes merge-base fail, which git() turns into "",
+    // which sends taskDiff back to `diff HEAD` — blank, the original defect.
+    expect(taskDiff(stale)).toContain("+committed");
+    fs.rmSync(stale, { recursive: true, force: true });
+    fs.rmSync(staleOrigin, { recursive: true, force: true });
+  });
+
   it("returns empty for a path that is not a git repo", () => {
     expect(taskDiff("/definitely/not/here")).toBe("");
   });
