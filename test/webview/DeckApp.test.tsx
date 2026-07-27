@@ -170,6 +170,38 @@ describe("DeckApp", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "ASM-1" });
   });
 
+  it("removes a forgotten card immediately, without waiting for the host", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
+    fireEvent.click(screen.getAllByTitle(/more actions/i)[0]);
+    fireEvent.click(screen.getByText(/^Forget$/));
+    // No deck:runs has arrived; the card is gone regardless.
+    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "ASM-1" });
+  });
+
+  it("restores an optimistically removed card if the host still reports it", () => {
+    // The host post is authoritative — a delete that failed must not vanish the run.
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByTitle(/more actions/i));
+    fireEvent.click(screen.getByText(/^Forget$/));
+    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    host(runsMsg([mkStatus()]));
+    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+  });
+
+  it("shows a syncing indicator while the host is refreshing", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(screen.getByText(/synced/i)).toBeInTheDocument();
+    host({ type: "deck:loading", loading: true });
+    expect(screen.getByText(/syncing/i)).toBeInTheDocument();
+    host({ type: "deck:loading", loading: false });
+    expect(screen.getByText(/synced/i)).toBeInTheDocument();
+  });
+
   it("opens the ticket in Jira from the overflow menu", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
