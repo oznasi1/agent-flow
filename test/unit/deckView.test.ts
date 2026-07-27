@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { window, ViewColumn, env } from "../_mocks/vscode";
+import { window, ViewColumn, env, workspace } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
 import type { PrFacts, Run, RunStatus } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
@@ -9,6 +9,7 @@ import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 const h = vi.hoisted(() => ({
   runs: [] as Run[],
   openInEditor: vi.fn(async (_t: string) => true),
+  taskDiff: vi.fn((_p: string) => ""),
   buildRunStatus: vi.fn(),
   removeRun: vi.fn(),
   getStatus: vi.fn(async (_k: string) => ({ status: "In Review", category: "indeterminate" })),
@@ -33,6 +34,7 @@ vi.mock("../../src/engine/runs", () => ({
 }));
 vi.mock("../../src/engine/status", () => ({ buildRunStatus: h.buildRunStatus }));
 vi.mock("../../src/engine/workspace", () => ({ openInEditor: h.openInEditor }));
+vi.mock("../../src/engine/git", () => ({ taskDiff: h.taskDiff }));
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: () => [],
   defaultWindowsDir: () => "/windows",
@@ -76,6 +78,7 @@ const show = (authed = false) => DeckPanel.show(fakeContext().context as any, fa
 beforeEach(() => {
   h.runs = [mkRun()];
   h.openInEditor.mockClear().mockResolvedValue(true);
+  h.taskDiff.mockClear().mockReturnValue("");
   h.buildRunStatus.mockReset().mockImplementation((run: Run) => statusFor(run));
   h.removeRun.mockClear();
   h.getStatus.mockClear().mockResolvedValue({ status: "In Review", category: "indeterminate" });
@@ -166,7 +169,34 @@ describe("DeckPanel", () => {
     const p = lastPanel();
     await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
     const toast = posts(p).find((m) => m.type === "toast");
-    expect(toast.message).toMatch(/No uncommitted changes/i);
+    expect(toast.message).toMatch(/No changes to show/i);
+    expect(workspace.openTextDocument).not.toHaveBeenCalled();
+  });
+
+  it("inspect diff opens the task's whole diff as a read-only diff document", async () => {
+    // Not `git diff HEAD`: committed work counts, or a run with a PR shows nothing.
+    h.taskDiff.mockReturnValue("diff --git a/a.txt b/a.txt\n+committed\n");
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    expect(h.taskDiff).toHaveBeenCalledWith("/r/svc");
+    expect(workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("+committed"), language: "diff" }),
+    );
+  });
+
+  it("labels each repo's chunk when a run spans more than one", async () => {
+    h.runs = [mkRun({ repos: [
+      { name: "svc", path: "/r/svc", isGit: true, branch: "b" },
+      { name: "web", path: "/r/web", isGit: true, branch: "b" },
+    ] })];
+    h.taskDiff.mockReturnValue("diff --git a/a.txt b/a.txt\n+x\n");
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    const arg = workspace.openTextDocument.mock.calls.at(-1)![0] as { content: string };
+    expect(arg.content).toContain("# svc");
+    expect(arg.content).toContain("# web");
   });
 
   it("toasts an error when inspecting an unknown run", async () => {

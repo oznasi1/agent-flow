@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import * as os from "os";
 import * as path from "path";
-import { execFileSync } from "child_process";
 import { getConfig } from "./config";
 import { JiraAuth } from "./jira/auth";
 import { JiraClient, JiraAuthError } from "./jira/client";
@@ -9,6 +8,7 @@ import { readRuns, defaultRunsDir, removeRun } from "./engine/runs";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { openInEditor } from "./engine/workspace";
+import { taskDiff } from "./engine/git";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
@@ -291,27 +291,20 @@ export class DeckPanel {
       if (!ok) this.toast("error", `Couldn't open ${key}.`);
       return;
     }
-    // diff — show the working-tree changes vs HEAD as a read-only diff document.
+    // diff — everything this task changed, committed work included, as a read-only
+    // diff document.
     const repos = repoName ? run.repos.filter((r) => r.name === repoName) : run.repos;
     const chunks: string[] = [];
     for (const r of repos) {
-      const d = this.gitDiff(r.path);
+      const d = taskDiff(r.path);
       if (d.trim()) chunks.push(run.repos.length > 1 ? `# ${r.name}\n${d}` : d);
     }
     if (chunks.length === 0) {
-      this.toast("info", `No uncommitted changes for ${key}.`);
+      this.toast("info", `No changes to show for ${key}.`);
       return;
     }
     const doc = await vscode.workspace.openTextDocument({ content: chunks.join("\n\n"), language: "diff" });
     await vscode.window.showTextDocument(doc, { preview: true });
-  }
-
-  private gitDiff(repoPath: string): string {
-    try {
-      return execFileSync("git", ["-C", repoPath, "diff", "HEAD"], { stdio: ["ignore", "pipe", "ignore"] }).toString();
-    } catch {
-      return "";
-    }
   }
 
   private dispose(): void {
