@@ -2,11 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { RefreshQueue } from "../../../../src/engine/pr/queue";
 
 /** A promise you resolve by hand, so concurrency is observable without timers. */
-function deferred(): { promise: Promise<void>; resolve: () => void; reject: (e: Error) => void } {
+function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
-  let reject!: (e: Error) => void;
-  const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
-  return { promise, resolve, reject };
+  const promise = new Promise<void>((res) => { resolve = res; });
+  return { promise, resolve };
 }
 const flush = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -92,5 +91,29 @@ describe("RefreshQueue", () => {
     d.resolve();
     await q.idle();
     expect(never).not.toHaveBeenCalled();
+  });
+
+  it("frees a slot when a synchronously-throwing thunk is called", async () => {
+    const q = new RefreshQueue(1);
+    const after = vi.fn(async () => {});
+    // Non-async function that throws synchronously
+    q.push("a", () => { throw new Error("sync boom"); });
+    q.push("b", after);
+    await q.idle();
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(q.inFlight).toBe(0);
+  });
+
+  it("ignores duplicate push for a key already queued", async () => {
+    const q = new RefreshQueue(1);
+    const d = deferred();
+    q.push("a", () => d.promise);
+    await flush();
+    q.push("b", async () => {});
+    expect(q.pending).toBe(1);
+    q.push("b", async () => {});
+    expect(q.pending).toBe(1);
+    d.resolve();
+    await q.idle();
   });
 });

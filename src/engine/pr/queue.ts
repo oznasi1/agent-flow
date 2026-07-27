@@ -45,8 +45,8 @@ export class RefreshQueue {
     while (this.queued.length > 0 && this.active.size < this.limit) {
       const job = this.queued.shift() as Job;
       this.active.add(job.key);
-      void job
-        .work()
+      void Promise.resolve()
+        .then(() => job.work())
         .catch(() => {
           /* a job owns its own errors; the queue only owns the slot */
         })
