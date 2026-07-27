@@ -375,6 +375,18 @@ function canon(p: string): string {
   }
 }
 
+/** The "this window already seeded that plan" guard. It carries the plan's createdAt
+ * because nothing ever clears these keys and the workspace filename a launch picks is
+ * deterministic (`<KEY>.code-workspace`, `<KEY1>+<N-1>.code-workspace`): keyed on
+ * key+window alone, re-launching the same selection would find every plan already
+ * consumed and open a window with briefs but no Claude session at all. Writing a plan
+ * file IS the intent to seed, and each one gets its own createdAt, so a new plan can
+ * never be mistaken for a spent one. Keys from older plans just go unreachable —
+ * they're booleans, and PLAN_TTL_MS already bounds how long a plan can be seeded. */
+function seededGuard(plan: PlanFile, identity: string): string {
+  return `seeded:${plan.key}:${plan.createdAt}:${identity}`;
+}
+
 // Passes must not overlap: a pass holds plans whose `seeded:` guard isn't set
 // until their turn, so a second concurrent pass would re-collect and re-seed
 // them. Chain rather than drop — a pass triggered mid-batch still has to run.
@@ -424,7 +436,7 @@ async function runSeedPass(context: vscode.ExtensionContext, log: (m: string) =>
     const match = plan.matches.find((m) => canon(m.matchPath) === identity);
     log(`plan ${plan.key}: ${match ? "MATCHED this window" : "no match"}`);
     if (!match) continue;
-    if (context.globalState.get<boolean>(`seeded:${plan.key}:${identity}`)) {
+    if (context.globalState.get<boolean>(seededGuard(plan, identity))) {
       log(`plan ${plan.key}: already seeded this window — skipping`);
       continue;
     }
@@ -440,7 +452,7 @@ async function runSeedPass(context: vscode.ExtensionContext, log: (m: string) =>
   for (let i = 0; i < due.length; i++) {
     const plan = due[i];
     const match = plan.matches.find((m) => canon(m.matchPath) === identity)!;
-    await context.globalState.update(`seeded:${plan.key}:${identity}`, true);
+    await context.globalState.update(seededGuard(plan, identity), true);
     await seedClaudeCode(match.prompt, plan.key, log, plan.remoteControl === true, multi);
     // Claude Code picks a session's column by scanning the tab groups for an existing
     // Claude group, and that model doesn't update synchronously — without this pause

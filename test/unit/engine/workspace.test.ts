@@ -211,6 +211,11 @@ describe("maybeSeedAgent", () => {
     workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
   };
 
+  /** The "already seeded this window" guard for one plan file. It carries the plan's
+   * createdAt, so a test that pre-sets it has to pin the same value into the plan. */
+  const guardKey = (createdAt: number, key = "ASM-1", identity = "/ws/ASM-1.code-workspace") =>
+    `seeded:${key}:${createdAt}:${identity}`;
+
   it("returns early with no single-workspace identity", async () => {
     workspace.workspaceFile = undefined;
     workspace.workspaceFolders = undefined;
@@ -230,15 +235,16 @@ describe("maybeSeedAgent", () => {
 
   it("seeds the matching plan via the Claude Code command", async () => {
     withWorkspaceFile();
+    const createdAt = Date.now();
     readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
-    readFileSync.mockReturnValue(planJson());
+    readFileSync.mockReturnValue(planJson({ createdAt }));
     commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
     const { context, globalState } = fakeContext();
 
     await maybeSeedAgent(context, () => {});
 
     expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
-    expect(globalState.update).toHaveBeenCalledWith("seeded:ASM-1:/ws/ASM-1.code-workspace", true);
+    expect(globalState.update).toHaveBeenCalledWith(guardKey(createdAt), true);
   });
 
   it("deletes an expired plan and does not seed", async () => {
@@ -264,17 +270,47 @@ describe("maybeSeedAgent", () => {
     expect(commands.executeCommand).not.toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
   });
 
-  it("does not re-seed a window already seeded (globalState guard)", async () => {
+  // Within one plan's life this guard is what stops the watcher and activation from
+  // both seeding the same session.
+  it("does not re-seed a window already seeded from this very plan (globalState guard)", async () => {
     withWorkspaceFile();
+    const createdAt = Date.now();
     readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
-    readFileSync.mockReturnValue(planJson());
+    readFileSync.mockReturnValue(planJson({ createdAt }));
     commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
-    const { context } = fakeContext({
-      globalState: { "seeded:ASM-1:/ws/ASM-1.code-workspace": true },
-    });
+    const { context } = fakeContext({ globalState: { [guardKey(createdAt)]: true } });
 
     await maybeSeedAgent(context, () => {});
     expect(commands.executeCommand).not.toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+  });
+
+  // Nothing ever clears a `seeded:` key, and the shared-window filename is deterministic
+  // — so a key-and-window-only guard made re-launching the same selection open a window
+  // with correct folders and briefs and zero Claude sessions, while the toast still
+  // claimed a session per task.
+  it("seeds a re-launch of the same task into the same window", async () => {
+    withWorkspaceFile();
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext(); // one window's globalState across both passes
+
+    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readFileSync.mockReturnValue(
+      planJson({
+        createdAt: Date.now() - 60_000,
+        matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first take" }],
+      }),
+    );
+    await maybeSeedAgent(context, () => {});
+
+    // Re-taking the same key writes a NEW plan naming the same deterministic window.
+    readdirSync.mockReturnValue(["ASM-1-2.json"] as never);
+    readFileSync.mockReturnValue(
+      planJson({ matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second take" }] }),
+    );
+    await maybeSeedAgent(context, () => {});
+
+    const seeds = commands.executeCommand.mock.calls.filter((c) => String(c[0]).startsWith("claude-vscode."));
+    expect(seeds.map((c) => c[2])).toEqual(["first take", "second take"]);
   });
 
   it("seeds every plan matching this window, in (createdAt, seq) order", async () => {
@@ -350,16 +386,15 @@ describe("maybeSeedAgent", () => {
     vi.useFakeTimers();
     try {
       withWorkspaceFile();
+      const createdAt = Date.now();
       readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
       readFileSync.mockImplementation((p) =>
         String(p).includes("ASM-1")
-          ? planJson({ key: "ASM-1", seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
-          : planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
+          ? planJson({ key: "ASM-1", createdAt, seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
+          : planJson({ key: "ASM-2", createdAt, seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
       );
       commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
-      const { context } = fakeContext({
-        globalState: { "seeded:ASM-1:/ws/ASM-1.code-workspace": true },
-      });
+      const { context } = fakeContext({ globalState: { [guardKey(createdAt)]: true } });
 
       const pending = maybeSeedAgent(context, () => {});
       await vi.runAllTimersAsync();
@@ -399,11 +434,14 @@ describe("maybeSeedAgent", () => {
     vi.useFakeTimers();
     try {
       withWorkspaceFile();
+      // Both passes read the same two plan FILES, and a plan file is written once — so
+      // pin createdAt instead of letting the fixture re-stamp it on the second read.
+      const createdAt = Date.now();
       readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
       readFileSync.mockImplementation((p) =>
         String(p).includes("ASM-1")
-          ? planJson({ key: "ASM-1", seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
-          : planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
+          ? planJson({ key: "ASM-1", createdAt, seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
+          : planJson({ key: "ASM-2", createdAt, seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
       );
       commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
       const { context } = fakeContext();
