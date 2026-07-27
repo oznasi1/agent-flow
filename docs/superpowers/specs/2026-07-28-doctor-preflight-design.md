@@ -1,6 +1,6 @@
 # Design: Agent Flow Doctor — preflight diagnostics
 
-**Date:** 2026-07-27
+**Date:** 2026-07-28
 **Status:** Approved, ready to plan
 
 ## Summary
@@ -53,6 +53,7 @@ which checks config, data dir, daemon state, `git` and `tmux` in one command.
 | | Project configured | `fail` when `jira.project` is empty |
 | | Credentials stored | `fail` when SecretStorage holds no email/token |
 | | **Credentials valid** | live `getMyself()`: 200 → `ok` (shows display name); 401/403 → `fail`; network error → `warn` |
+| | **Project resolves** | live project lookup: found → `ok` (shows its name); 404 → `fail` ("not found, or not visible to you"). `skip` when credentials are absent or invalid — the answer would be meaningless, and it saves a call that cannot succeed |
 | **Local** | `git` on PATH | `fail` when not found |
 | | Repos root | missing path → `fail`; exists with zero repos → `warn`; else `ok` with "N repos, M git" |
 | | Workspace dir | `fail` when missing or not writable |
@@ -78,10 +79,31 @@ which checks config, data dir, daemon state, `git` and `tmux` in one command.
   searches beyond `PATH`. That last part is the single most valuable thing Doctor
   can surface: a Homebrew `gh` invisible to the extension host's bare launchd
   `PATH` reads to a signed-in user as the Deck being broken.
-- `JiraClient.getMyself()` already exists — the live probe needs no new client
-  method.
 - `discoverRepos()`, `getConfig()`, `defaultRunsDir()`/`readRuns()` all exist.
-- Only `vscode.extensions.getExtension` is new, and it is one line.
+- `vscode.extensions.getExtension` is new, and it is one line.
+
+### The Jira client needs two small additions
+
+`getMyself()` **cannot** be reused for the live probe. It wraps its request in
+`catch { return null }`, so a 401, a timeout and an unreachable host are
+indistinguishable — every failure is `null`. A check that must report
+`fail` for rejected credentials but `warn` for an unreachable site cannot be built
+on it.
+
+So `JiraClient` gains two methods, both thin wrappers over the existing private
+`request`:
+
+- **an auth probe** that does *not* swallow — it lets `JiraAuthError` and the
+  network `Error` propagate to Doctor
+- **`getProject(key)`** — there is no project endpoint in the client today
+
+**The existing `request()` already phrases these well**, which is why the seam
+below is nearly free. It throws `JiraAuthError("Jira auth failed (401). Sign in
+again.")`, `Error("Jira didn't respond within Ns (url). Check
+agentFlow.jira.baseUrl and your network/VPN.")` on timeout, and
+`Error("Couldn't reach Jira at {url}: …")` when the host is unreachable. Doctor
+classifies on `instanceof JiraAuthError` and otherwise surfaces `e.message`
+verbatim — it invents no wording of its own.
 
 ## Ordering and vocabulary
 
@@ -95,7 +117,7 @@ title carries the summary, e.g. *"2 problems · 1 warning"*.
 | Check | Action |
 |-------|--------|
 | Credentials missing or invalid | `agentFlow.signIn` |
-| Site or project unconfigured | `agentFlow.setup` |
+| Site unconfigured, or project unconfigured or unresolvable | `agentFlow.setup` |
 | Repos root / workspace dir | open Settings filtered to that key |
 | Claude Code missing or old | reveal it in the Extensions view |
 | `gh` missing or signed out | open `cli.github.com` externally |
@@ -106,10 +128,16 @@ title carries the summary, e.g. *"2 problems · 1 warning"*.
 - **`src/engine/doctor.ts`** — pure. Takes a `DoctorInputs` bag the caller
   gathers, returns `Check[]`; plus `formatReport(checks)`. No `vscode` import, so
   it is table-testable with no mocking.
+- **`src/jira/client.ts`** — the two additions described above: a non-swallowing
+  auth probe, and `getProject(key)`.
 - **`src/doctorView.ts`** — builds the QuickPick and dispatches actions.
 - **`src/extension.ts`**, **`package.json`** — one new command, `agentFlow.doctor`.
-- **`src/tasksView.ts`** — the existing `JiraAuthError` surface gains a **Run
-  Doctor** action.
+- **`src/tasksView.ts`** — the **panel gate** gains a **Run Doctor** action. Not
+  the `JiraAuthError` catch: the transition-required-fields design restructures
+  that path, and it keeps the gate precisely for "unreachable site, bad project
+  key, auth loss" — which is Doctor's exact remit. Its sticky error toast also
+  takes an optional action button, so a **Run Doctor** button on a Jira failure
+  toast is cheap and idiomatic once that lands.
 - **`src/deckView.ts`** — the `GH_NOTES` strings gain "— run Agent Flow: Doctor".
   No new message type.
 - **`README.md`** — the privacy section should say Doctor *probes* rather than
@@ -121,6 +149,9 @@ title carries the summary, e.g. *"2 problems · 1 warning"*.
   the sort order; the summary counts; `formatReport`'s output.
 - **`doctorView.test.ts`** — QuickPick items built from checks; selecting a
   failing item dispatches its action; Copy writes to the clipboard.
+- **`jira/client.test.ts`** — the auth probe propagates `JiraAuthError` on 401/403
+  and a network `Error` on an unreachable host, rather than collapsing both to
+  `null` the way `getMyself` does; `getProject` maps 200 and 404.
 
 ## Scope
 
@@ -128,9 +159,33 @@ title carries the summary, e.g. *"2 problems · 1 warning"*.
 a new webview; checks on anything Agent Flow does not own; and any write to Jira,
 GitHub or the filesystem — Doctor is read-only apart from the clipboard.
 
-## Open coordination point
+## Reconciled with the readable-Jira-errors design
 
-`main` carries an in-flight design, *"transition required fields and readable
-Jira errors"* (`38d94ca`), which overlaps Doctor's Jira checks. Reconcile before
-implementation: if that work lands a richer Jira error classification, Doctor's
-credentials-valid check should consume it rather than re-deriving one.
+`main` carries an approved-but-unbuilt design,
+[*transition required fields & readable Jira errors*](2026-07-28-transition-required-fields-design.md)
+(`38d94ca`). It was read and reconciled against this one; three amendments above
+came out of it, and one seam remains.
+
+**What it will provide.** A new `src/jira/errors.ts` with `JiraApiError` (carrying
+`status`, `fieldErrors`, `messages`) and `describeJiraError()`, which renders a
+Jira failure as a readable sentence. That is exactly what this design's
+*credentials valid* and *project resolves* checks want for their detail text.
+
+**The seam, which is smaller than it first looked.** `src/jira/errors.ts` does not
+exist yet, and Doctor is not blocked on it — because `request()` already phrases
+the three cases Doctor cares about (see above). Doctor's stand-in is therefore
+one small function that classifies on `instanceof JiraAuthError` and otherwise
+passes `e.message` through. It must be marked in code as the stand-in for
+`describeJiraError` and confined to a single call site, so the swap is a one-line
+change. It must **not** grow into a second error parser: if it starts wanting to
+read `fieldErrors` or re-parse a response body, stop and take the dependency
+instead.
+
+**Why not the alternatives.** Waiting would block a small, self-contained feature
+on a larger one that also touches Change Status and the task-list gate. Having
+Doctor introduce `errors.ts` itself would mean two approved specs defining one
+module, which is how contracts drift.
+
+**Agreement worth noting.** That design names its fatal states as *"unreachable
+site, bad project key, auth loss"* — the same three this one treats as `fail`.
+The two agree on what is broken enough to matter, independently.
