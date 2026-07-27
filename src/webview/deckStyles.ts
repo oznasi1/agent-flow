@@ -96,6 +96,10 @@ export const DECK_CSS = `
     padding: 0; border: 0; background: none; color: var(--vscode-descriptionForeground); cursor: pointer;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .key:hover { color: var(--vscode-textLink-foreground, var(--vscode-foreground)); }
+  /* Inherits .key's layout so the chip sits at the same x as every other card's
+     key; drops the affordances, because there is nothing to click through to. */
+  .key.untracked { cursor: default; opacity: .75; }
+  .key.untracked:hover { color: var(--vscode-descriptionForeground); }
   .sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-descriptionForeground); flex: none; }
   .sdot.tone-working { background: var(--c-done); }
   .sdot.tone-idle    { background: var(--c-idle); }
@@ -103,6 +107,9 @@ export const DECK_CSS = `
   .sdot.tone-parked, .sdot.tone-merged { background: transparent; border: 1.5px solid var(--vscode-descriptionForeground); }
   .sdot.pulse { animation: pulse 1.7s ease-out infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--c-done); } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+  .spin { display: inline-block; font-size: 12px; }
+  .spin.on { animation: spin .9s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   /* Clamped so long summaries can't stretch one card out of the column's rhythm; the full
      text stays available on hover. */

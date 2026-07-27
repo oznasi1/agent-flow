@@ -66,6 +66,15 @@ export interface Run {
   briefPaths: string[];
 }
 
+/** Is this run attached to a Jira ticket? An Explore session is launched with a
+ * synthetic `explore-<slug>` key, no ticket url, and no branch Agent Flow named:
+ * there is no Jira issue to poll, and `gh pr list --head <default-branch>` can
+ * only return a pull request belonging to somebody else. Tolerates an older or
+ * hand-edited run record with no url field at all. */
+export function isTicketRun(run: Run): boolean {
+  return typeof run.url === "string" && run.url.trim().length > 0;
+}
+
 /** Per-repo git state — the reliable backbone of a run's status. */
 export interface RepoGit {
   name: string;

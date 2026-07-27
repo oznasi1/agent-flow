@@ -170,12 +170,88 @@ describe("DeckApp", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "ASM-1" });
   });
 
+  it("removes a forgotten card immediately, without waiting for the host", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
+    fireEvent.click(screen.getAllByTitle(/more actions/i)[0]);
+    fireEvent.click(screen.getByText(/^Forget$/));
+    // No deck:runs has arrived; the card is gone regardless.
+    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "ASM-1" });
+  });
+
+  it("restores an optimistically removed card if the host still reports it", () => {
+    // The host post is authoritative — a delete that failed must not vanish the run.
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByTitle(/more actions/i));
+    fireEvent.click(screen.getByText(/^Forget$/));
+    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    host(runsMsg([mkStatus()]));
+    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+  });
+
+  it("shows a syncing indicator while the host is refreshing", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(screen.getByText(/synced/i)).toBeInTheDocument();
+    host({ type: "deck:loading", loading: true });
+    expect(screen.getByText(/syncing/i)).toBeInTheDocument();
+    host({ type: "deck:loading", loading: false });
+    expect(screen.getByText(/synced/i)).toBeInTheDocument();
+  });
+
   it("opens the ticket in Jira from the overflow menu", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     fireEvent.click(screen.getByTitle(/more actions/i));
     fireEvent.click(screen.getByText(/Open in Jira/i));
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+  });
+
+  const untracked = (over: Partial<RunStatus> = {}): RunStatus => {
+    const base = mkStatus();
+    return {
+      ...base,
+      run: { ...base.run, key: "explore-retry-logic", summary: "how the aggregator retries", url: "" },
+      jiraStatus: null,
+      jiraCategory: null,
+      ...over,
+    };
+  };
+
+  it("labels a ticketless run 'explore' rather than showing its synthetic key", () => {
+    render(<DeckApp />);
+    host(runsMsg([untracked()]));
+    expect(screen.getByText("explore")).toBeInTheDocument();
+    expect(screen.queryByText("explore-retry-logic")).not.toBeInTheDocument();
+    // The full key stays reachable on hover — it names the run in ~/.agentflow/runs.
+    expect(screen.getByTitle("explore-retry-logic")).toBeInTheDocument();
+  });
+
+  it("does not offer to open a ticketless run in Jira", () => {
+    render(<DeckApp />);
+    host(runsMsg([untracked()]));
+    fireEvent.click(screen.getByTitle(/more actions/i));
+    expect(screen.queryByText(/Open in Jira/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^Forget$/)).toBeInTheDocument();
+  });
+
+  it("keeps the Jira link on a tracked run", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByTitle(/Open ASM-1 in Jira/i));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+  });
+
+  it("keeps the key on an untracked run that is not an Explore session", () => {
+    // isTicketRun only checks the url, so a record with a real key and no url must
+    // not be relabelled "explore" — it keeps its identity, minus the dead Jira link.
+    render(<DeckApp />);
+    host(runsMsg([untracked({ run: { ...mkStatus().run, key: "ASM-9", url: "" } })]));
+    expect(screen.getByText("ASM-9")).toBeInTheDocument();
+    expect(screen.queryByText("explore")).not.toBeInTheDocument();
   });
 
   it("shows a toast message from the host", () => {

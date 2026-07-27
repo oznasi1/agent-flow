@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import * as os from "os";
 import * as path from "path";
-import { execFileSync } from "child_process";
 import { getConfig } from "./config";
 import { JiraAuth } from "./jira/auth";
 import { JiraClient, JiraAuthError } from "./jira/client";
@@ -9,10 +8,11 @@ import { readRuns, defaultRunsDir, removeRun } from "./engine/runs";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { openInEditor } from "./engine/workspace";
+import { taskDiff } from "./engine/git";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
-import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, Run, RunStatus } from "./types";
+import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, Run, RunStatus, isTicketRun } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
@@ -44,6 +44,15 @@ export class DeckPanel {
   /** Bumped when a run is forgotten, so a fetch still in flight for the old
    * incarnation cannot recreate the cache file we just deleted. */
   private readonly prEpoch = new Map<string, number>();
+  /** Bumped when a refresh starts, so an older pass that finishes after a newer one
+   * began does not post. Its snapshot predates whatever the newer pass read: a poll
+   * that listed the runs directory before `deck:forget` removed a file would
+   * otherwise put the forgotten card straight back on the board. */
+  private refreshSeq = 0;
+  /** How many refreshes are in flight. Only the last one out clears the webview's
+   * busy indicator — an inner `finally` must not stop the spinner while an
+   * overlapping refresh is still working. */
+  private busyDepth = 0;
 
   static show(context: vscode.ExtensionContext, auth: JiraAuth, log: (m: string) => void): void {
     if (DeckPanel.current) {
@@ -177,10 +186,24 @@ export class DeckPanel {
     const authed = await this.auth.isAuthenticated();
     const ghReady = this.ghReady();
     const openIdentities = new Set(readLiveWindows(defaultWindowsDir()).map((w) => w.identity));
+    // One round trip per run, all at once. Serially this was the bulk of a cold
+    // refresh, and back then every Forget waited on the whole pass before its card
+    // left the board — the webview now drops that card optimistically, but the pass
+    // is still what the board's next authoritative state waits on. jiraStatus owns
+    // its own errors, so this can never reject; run keys are unique, so concurrent
+    // calls never duplicate a cache miss.
+    const jiras = await Promise.all(
+      runs.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(run.key) : null)),
+    );
     const out: RunStatus[] = [];
-    for (const run of runs) {
-      const jira = authed ? await this.jiraStatus(run.key) : null;
-      const stored = this.prFacts ? readPrEntries(defaultPrFactsDir(), run.key) : {};
+    for (const [i, run] of runs.entries()) {
+      // A session with no ticket has nothing to look up. Its key is synthetic, so
+      // every Jira call 404s; and it has no branch we named, so `gh pr list
+      // --head <default-branch>` matches whatever PR was last opened *from* that
+      // branch — somebody else's, rendered on this card as if it were the task's.
+      const tracked = isTicketRun(run);
+      const jira = jiras[i];
+      const stored = this.prFacts && tracked ? readPrEntries(defaultPrFactsDir(), run.key) : {};
       // Drop entries for repos that have left the run — re-taking a task with a
       // different repo selection can leave one behind. It is never re-staled
       // (only repos in run.repos are checked below), yet an orphan would still
@@ -189,7 +212,7 @@ export class DeckPanel {
       const prs: PrEntryMap = Object.fromEntries(
         run.repos.filter((r) => stored[r.name]).map((r) => [r.name, stored[r.name]]),
       );
-      if (ghReady) {
+      if (ghReady && tracked) {
         const ttlMs = getConfig().prFactsTtlSeconds * 1000;
         for (const repo of run.repos) {
           // A non-git service (worktree.ts can hand one through unchanged) has no
@@ -206,8 +229,10 @@ export class DeckPanel {
   }
 
   private async refresh(): Promise<void> {
+    const seq = ++this.refreshSeq;
     try {
       const runs = await this.buildAll();
+      if (seq !== this.refreshSeq) return; // a newer pass owns the board
       this.post({
         type: "deck:runs",
         runs,
@@ -220,17 +245,28 @@ export class DeckPanel {
     }
   }
 
+  /** Refresh with the webview's busy indicator on. Every inbound message that
+   * awaits a refresh goes through here: Forget in particular waits on a full
+   * rebuild, and used to do it with nothing on screen to say so. `finally` so a
+   * refresh that ever does throw cannot strand the spinner. */
+  private async refreshBusy(): Promise<void> {
+    if (this.busyDepth++ === 0) this.post({ type: "deck:loading", loading: true });
+    try {
+      await this.refresh();
+    } finally {
+      if (--this.busyDepth === 0) this.post({ type: "deck:loading", loading: false });
+    }
+  }
+
   private async onMessage(m: InboundMessage): Promise<void> {
     switch (m.type) {
       case "deck:ready":
       case "deck:refresh":
-        this.post({ type: "deck:loading", loading: true });
-        await this.refresh();
-        this.post({ type: "deck:loading", loading: false });
+        await this.refreshBusy();
         break;
       case "deck:setLive":
         this.liveSignal = m.on;
-        await this.refresh();
+        await this.refreshBusy();
         break;
       case "deck:setPrFacts":
         this.prFacts = m.on;
@@ -239,7 +275,7 @@ export class DeckPanel {
           this.ghGap = undefined;
           this.ghProbe = null;
         }
-        await this.refresh();
+        await this.refreshBusy();
         break;
       case "deck:inspect":
         await this.inspect(m.key, m.action, m.repo);
@@ -250,7 +286,7 @@ export class DeckPanel {
         // Any fetch already in flight for this key belongs to the incarnation we
         // just deleted — bump the epoch so its write is a no-op if it lands late.
         this.prEpoch.set(m.key, (this.prEpoch.get(m.key) ?? 0) + 1);
-        await this.refresh();
+        await this.refreshBusy();
         break;
       case "openExternal": {
         const u = vscode.Uri.parse(m.url);
@@ -286,27 +322,20 @@ export class DeckPanel {
       if (!ok) this.toast("error", `Couldn't open ${key}.`);
       return;
     }
-    // diff — show the working-tree changes vs HEAD as a read-only diff document.
+    // diff — everything this task changed, committed work included, as a read-only
+    // diff document.
     const repos = repoName ? run.repos.filter((r) => r.name === repoName) : run.repos;
     const chunks: string[] = [];
     for (const r of repos) {
-      const d = this.gitDiff(r.path);
+      const d = taskDiff(r.path);
       if (d.trim()) chunks.push(run.repos.length > 1 ? `# ${r.name}\n${d}` : d);
     }
     if (chunks.length === 0) {
-      this.toast("info", `No uncommitted changes for ${key}.`);
+      this.toast("info", `No changes to show for ${key}.`);
       return;
     }
     const doc = await vscode.workspace.openTextDocument({ content: chunks.join("\n\n"), language: "diff" });
     await vscode.window.showTextDocument(doc, { preview: true });
-  }
-
-  private gitDiff(repoPath: string): string {
-    try {
-      return execFileSync("git", ["-C", repoPath, "diff", "HEAD"], { stdio: ["ignore", "pipe", "ignore"] }).toString();
-    } catch {
-      return "";
-    }
   }
 
   private dispose(): void {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { window, ViewColumn, env } from "../_mocks/vscode";
+import { window, ViewColumn, env, workspace } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
 import type { PrFacts, Run, RunStatus } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
@@ -9,6 +9,7 @@ import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 const h = vi.hoisted(() => ({
   runs: [] as Run[],
   openInEditor: vi.fn(async (_t: string) => true),
+  taskDiff: vi.fn((_p: string) => ""),
   buildRunStatus: vi.fn(),
   removeRun: vi.fn(),
   getStatus: vi.fn(async (_k: string) => ({ status: "In Review", category: "indeterminate" })),
@@ -33,6 +34,7 @@ vi.mock("../../src/engine/runs", () => ({
 }));
 vi.mock("../../src/engine/status", () => ({ buildRunStatus: h.buildRunStatus }));
 vi.mock("../../src/engine/workspace", () => ({ openInEditor: h.openInEditor }));
+vi.mock("../../src/engine/git", () => ({ taskDiff: h.taskDiff }));
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: () => [],
   defaultWindowsDir: () => "/windows",
@@ -72,10 +74,12 @@ const statusFor = (run: Run): RunStatus => ({
 const lastPanel = () => window.createWebviewPanel.mock.results.at(-1)!.value as ReturnType<typeof import("../_mocks/vscode").makeWebviewPanel>;
 const posts = (p: ReturnType<typeof lastPanel>) => p.webview.postMessage.mock.calls.map((c) => c[0] as any);
 const show = (authed = false) => DeckPanel.show(fakeContext().context as any, fakeAuth({ authed }), () => {});
+const settled = () => new Promise<void>((r) => setTimeout(r, 0));
 
 beforeEach(() => {
   h.runs = [mkRun()];
   h.openInEditor.mockClear().mockResolvedValue(true);
+  h.taskDiff.mockClear().mockReturnValue("");
   h.buildRunStatus.mockReset().mockImplementation((run: Run) => statusFor(run));
   h.removeRun.mockClear();
   h.getStatus.mockClear().mockResolvedValue({ status: "In Review", category: "indeterminate" });
@@ -166,7 +170,34 @@ describe("DeckPanel", () => {
     const p = lastPanel();
     await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
     const toast = posts(p).find((m) => m.type === "toast");
-    expect(toast.message).toMatch(/No uncommitted changes/i);
+    expect(toast.message).toMatch(/No changes to show/i);
+    expect(workspace.openTextDocument).not.toHaveBeenCalled();
+  });
+
+  it("inspect diff opens the task's whole diff as a read-only diff document", async () => {
+    // Not `git diff HEAD`: committed work counts, or a run with a PR shows nothing.
+    h.taskDiff.mockReturnValue("diff --git a/a.txt b/a.txt\n+committed\n");
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    expect(h.taskDiff).toHaveBeenCalledWith("/r/svc");
+    expect(workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("+committed"), language: "diff" }),
+    );
+  });
+
+  it("labels each repo's chunk when a run spans more than one", async () => {
+    h.runs = [mkRun({ repos: [
+      { name: "svc", path: "/r/svc", isGit: true, branch: "b" },
+      { name: "web", path: "/r/web", isGit: true, branch: "b" },
+    ] })];
+    h.taskDiff.mockReturnValue("diff --git a/a.txt b/a.txt\n+x\n");
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    const arg = workspace.openTextDocument.mock.calls.at(-1)![0] as { content: string };
+    expect(arg.content).toContain("# svc");
+    expect(arg.content).toContain("# web");
   });
 
   it("toasts an error when inspecting an unknown run", async () => {
@@ -185,6 +216,39 @@ describe("DeckPanel", () => {
     await p._fire({ type: "deck:forget", key: "ASM-1" });
     expect(h.removeRun).toHaveBeenCalledWith("/runs", "ASM-1");
     expect(posts(p).some((m) => m.type === "deck:runs")).toBe(true);
+  });
+
+  it("does not look up Jira for a run with no ticket", async () => {
+    h.runs = [mkRun({ key: "explore-retry-logic", url: "" })];
+    show(true);
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    // The key is synthetic — every lookup 404s, logs, and returns null anyway.
+    expect(h.getStatus).not.toHaveBeenCalled();
+  });
+
+  it("still looks up Jira for a tracked run sharing the board with an untracked one", async () => {
+    h.runs = [mkRun(), mkRun({ key: "explore-retry-logic", url: "" })];
+    show(true);
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    // Asserted by argument, not by count: the constructor's unawaited first refresh
+    // races this one, and whether the second finds a warm jiraCache depends on
+    // microtask ordering. Which keys are looked up at all is the actual contract.
+    expect(h.getStatus).toHaveBeenCalledWith("ASM-1");
+    expect(h.getStatus).not.toHaveBeenCalledWith("explore-retry-logic");
+  });
+
+  it("hands an untracked run an empty PR map even when the store has entries for its key", async () => {
+    // A stale prfacts file left by an earlier version must not render: the PR it
+    // names was matched off the repo's default branch and belongs to another task.
+    h.prEntries = { svc: { facts: null, fetchedAt: Date.now() } };
+    h.runs = [mkRun({ key: "explore-retry-logic", url: "" })];
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    const prs = h.buildRunStatus.mock.calls.at(-1)![6];
+    expect(prs).toEqual({});
   });
 
   it("opens an external url via the host (Open in Jira)", async () => {
@@ -261,11 +325,93 @@ describe("DeckPanel", () => {
     p.visible = true;
     expect(() => p._fireViewState()).not.toThrow();
   });
+
+  it("brackets a forget with the busy indicator", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:forget", key: "ASM-1" });
+    const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
+    expect(loads).toContain(true);
+    expect(loads.at(-1)).toBe(false);
+  });
+
+  it("brackets a prFacts toggle with the busy indicator", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:setPrFacts", on: false });
+    const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
+    expect(loads).toContain(true);
+    expect(loads.at(-1)).toBe(false);
+  });
+
+  it("issues every run's Jira lookup at once rather than one at a time", async () => {
+    // Serially, a cold board of six runs costs six round trips before anything
+    // paints — and Forget waits on that whole pass.
+    h.runs = [mkRun(), mkRun({ key: "ASM-2", url: "https://jira/ASM-2" }), mkRun({ key: "ASM-3", url: "https://jira/ASM-3" })];
+    let inFlight = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.getStatus.mockImplementation(async () => {
+      inFlight++;
+      await gate;
+      return { status: "In Review", category: "indeterminate" };
+    });
+    // show() alone: the constructor starts polling with an unawaited refresh, which
+    // is the pass under test. Firing a second deck:refresh on top would put six
+    // lookups in flight (nothing has resolved, so nothing is cached yet) and the
+    // count below would not distinguish serial from parallel.
+    show(true);
+    await new Promise<void>((r) => setTimeout(r, 0));
+    expect(inFlight).toBe(3); // all three started before any resolved
+    release();
+    // Let the released pass finish here rather than leaking pending Jira work into
+    // whichever test runs next.
+    await new Promise<void>((r) => setTimeout(r, 0));
+  });
+
+  it("does not post a board an overtaken refresh built", async () => {
+    // The snapshot of an older pass predates whatever the newer one read: a poll that
+    // listed the runs directory before a Forget deleted from it would otherwise put
+    // the forgotten card straight back on the board.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.getStatus.mockImplementationOnce(async () => {
+      await gate;
+      return { status: "In Review", category: "indeterminate" };
+    });
+    // The constructor's unawaited refresh hangs on the gate, so the explicit refresh
+    // below overtakes it. Nothing is cached while the first pass is stuck, so the
+    // second makes its own getStatus call and runs to completion.
+    show(true);
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    release();
+    await settled();
+    expect(posts(p).filter((m) => m.type === "deck:runs")).toHaveLength(1);
+  });
+
+  it("posts one busy pair for overlapping refreshes, not one per refresh", async () => {
+    // Two busy-triggering messages in quick succession: the earlier one's `finally`
+    // must not stop the spinner while the later refresh is still working.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.getStatus.mockImplementation(async () => {
+      await gate;
+      return { status: "In Review", category: "indeterminate" };
+    });
+    show(true);
+    const p = lastPanel();
+    const first = p._fire({ type: "deck:refresh" });
+    const second = p._fire({ type: "deck:refresh" });
+    await settled(); // both refreshes are now in flight, both stuck on the gate
+    release();
+    await Promise.all([first, second]);
+    const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
+    expect(loads).toEqual([true, false]);
+  });
 });
 
 describe("DeckPanel PR facts", () => {
-  const settled = () => new Promise<void>((r) => setTimeout(r, 0));
-
   /** The gh probe is kicked off inside the very tick that reads it, so it can
    * never be resolved by the time that same tick's `ghReady()` call returns —
    * a promise can't settle synchronously with the statement that created it.
@@ -374,6 +520,19 @@ describe("DeckPanel PR facts", () => {
     h.runs = [mkRun({ repos: [{ name: "svc", path: "/r/svc", isGit: false, branch: "b" }] })];
     await showAndWarm();
     expect(h.prFetch).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch a PR for a run with no ticket", async () => {
+    h.runs = [mkRun({ key: "explore-retry-logic", url: "" })];
+    await showAndWarm();
+    expect(h.prFetch).not.toHaveBeenCalled();
+  });
+
+  it("fetches the tracked run's PR and skips the untracked one on the same board", async () => {
+    h.runs = [mkRun(), mkRun({ key: "explore-retry-logic", url: "", repos: [{ name: "other", path: "/r/other", isGit: true, branch: "master" }] })];
+    await showAndWarm();
+    expect(h.prFetch).toHaveBeenCalledTimes(1);
+    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "ASM-1");
   });
 
   it("does not let an in-flight fetch resurrect a forgotten run's cache file", async () => {

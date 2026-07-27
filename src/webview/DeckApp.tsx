@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, RunStatus } from "../types";
+import { DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, RunStatus, isTicketRun } from "../types";
 
 let toastSeq = 0;
 
@@ -104,10 +104,17 @@ function RepoChip({ g }: { g: RepoGit }): JSX.Element {
   );
 }
 
-function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
+function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (key: string) => void }): JSX.Element {
   const col = COLUMNS.find((c) => c.id === r.column)!;
   const accent = `var(${col.varName})`;
   const sv = stateView(r, live);
+  // A ticketless run has no Jira issue behind it: the key is a local slug, and
+  // openExternal("") is a button that does nothing.
+  const tracked = isTicketRun(r.run);
+  // The short label is only honest for a real Explore session. isTicketRun keys off
+  // an empty url and never inspects the key, so anything else untracked keeps its
+  // key on the chip rather than being relabelled as something it is not.
+  const explore = r.run.key.startsWith("explore-");
   const [menuOpen, setMenuOpen] = React.useState(false);
   React.useEffect(() => {
     if (!menuOpen) return;
@@ -127,9 +134,13 @@ function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
           <span className={`sdot tone-${sv.tone} ${sv.tone === "working" ? "pulse" : ""}`} />
           {sv.text}
         </span>
-        <button className="key" title={`Open ${r.run.key} in Jira`} onClick={() => send({ type: "openExternal", url: r.run.url })}>
-          {r.run.key}
-        </button>
+        {tracked ? (
+          <button className="key" title={`Open ${r.run.key} in Jira`} onClick={() => send({ type: "openExternal", url: r.run.url })}>
+            {r.run.key}
+          </button>
+        ) : (
+          <span className="key untracked" title={r.run.key}>{explore ? "explore" : r.run.key}</span>
+        )}
       </div>
       <div className="c-title" title={r.run.summary}>{r.run.summary}</div>
 
@@ -160,8 +171,10 @@ function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
             <button className="more" title="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>⋯</button>
             {menuOpen && (
               <div className="menu" onClick={(e) => e.stopPropagation()}>
-                <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "openExternal", url: r.run.url }); }}>Open in Jira</button>
-                <button className="mi danger" onClick={() => { setMenuOpen(false); send({ type: "deck:forget", key: r.run.key }); }}>Forget</button>
+                {tracked && (
+                  <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "openExternal", url: r.run.url }); }}>Open in Jira</button>
+                )}
+                <button className="mi danger" onClick={() => { setMenuOpen(false); onForget(r.run.key); }}>Forget</button>
               </div>
             )}
           </span>
@@ -179,6 +192,7 @@ export function DeckApp(): JSX.Element {
   const [syncedAt, setSyncedAt] = React.useState<number | null>(null);
   const [, forceTick] = React.useState(0);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string }[]>([]);
+  const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
     const handler = (ev: MessageEvent<OutboundMessage>) => {
@@ -193,6 +207,8 @@ export function DeckApp(): JSX.Element {
         const id = ++toastSeq;
         setToasts((t) => [...t.slice(-2), { id, level: m.level, message: m.message }]);
         setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2600);
+      } else if (m.type === "deck:loading") {
+        setBusy(m.loading);
       }
     };
     window.addEventListener("message", handler);
@@ -212,6 +228,14 @@ export function DeckApp(): JSX.Element {
     send({ type: "deck:setLive", on: next });
   };
 
+  const forget = React.useCallback((key: string) => {
+    // Optimistic: the card leaves now rather than after a full refresh (a Jira
+    // round trip per run, plus git per repo). The next deck:runs post is
+    // authoritative, so a delete that somehow failed brings the card straight back.
+    setRuns((rs) => rs.filter((r) => r.run.key !== key));
+    send({ type: "deck:forget", key });
+  }, []);
+
   return (
     <>
       <div className="hd">
@@ -230,7 +254,8 @@ export function DeckApp(): JSX.Element {
           <span className="switch" />PR facts
         </div>
         <div className="ctl" onClick={() => send({ type: "deck:refresh" })}>
-          ⟳ <span className="synced">{syncedAt ? `synced ${timeAgo(syncedAt)}` : "refresh"}</span>
+          <span className={`spin ${busy ? "on" : ""}`}>⟳</span>
+          <span className="synced">{busy ? "syncing…" : syncedAt ? `synced ${timeAgo(syncedAt)}` : "refresh"}</span>
         </div>
       </div>
 
@@ -254,7 +279,7 @@ export function DeckApp(): JSX.Element {
                   <span className="rule" />
                 </div>
                 <div className="col-body">
-                  {list.map((r) => <Card key={r.run.key} r={r} live={live} />)}
+                  {list.map((r) => <Card key={r.run.key} r={r} live={live} onForget={forget} />)}
                 </div>
               </section>
             );

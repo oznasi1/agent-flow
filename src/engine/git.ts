@@ -7,6 +7,10 @@ function git(repoPath: string, args: string[]): string {
   try {
     return execFileSync("git", ["-C", repoPath, ...args], {
       stdio: ["ignore", "pipe", "ignore"],
+      // A task diff is the one output here big enough to matter. Node's 1 MB
+      // default throws ENOBUFS, which the catch below would turn into "", and a
+      // caller cannot tell that apart from "this task changed nothing".
+      maxBuffer: 32 * 1024 * 1024,
     })
       .toString()
       .trim();
@@ -40,4 +44,36 @@ export function gitState(name: string, repoPath: string): RepoGit {
   }
 
   return { name, path: repoPath, branch, dirty, ahead, added, removed, files };
+}
+
+/** The remote default branch a task is measured against: whatever origin/HEAD
+ * points at, else origin/main, else origin/master. "" when the repo has no origin
+ * to compare with — a local-only checkout, or a fresh init. */
+function defaultRemoteRef(repoPath: string): string {
+  const head = git(repoPath, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+  // origin/HEAD is only written by `git clone` and goes stale after a default-branch
+  // rename, so a working clone very often has no such ref — or keeps one naming the
+  // retired branch that the next `fetch --prune` deleted. Hence the verify before
+  // trusting it and the fallback below: an unresolvable base is worse than no base,
+  // because merge-base then fails, git() hands back "", and taskDiff degrades to
+  // `diff HEAD` — silently reinstating the "committed work reads as no work" defect
+  // this function exists to fix.
+  if (head && git(repoPath, ["rev-parse", "--verify", "--quiet", head])) return head;
+  for (const ref of ["origin/main", "origin/master"]) {
+    if (git(repoPath, ["rev-parse", "--verify", "--quiet", ref])) return ref;
+  }
+  return "";
+}
+
+/** Everything a task changed in this repo: the diff from where its branch left the
+ * default branch through to the current working tree, so committed work counts.
+ * The moment an agent commits, a plain `diff HEAD` goes blank and reads as "no work
+ * done" — which is what the Deck's Diff button used to report for every run that
+ * got as far as opening a PR. Degrades to the uncommitted diff when there is no
+ * base to find, and on a run still sitting on the default branch merge-base *is*
+ * HEAD, so the two are the same command. */
+export function taskDiff(repoPath: string): string {
+  const base = defaultRemoteRef(repoPath);
+  const from = base ? git(repoPath, ["merge-base", "HEAD", base]) : "";
+  return git(repoPath, ["diff", from || "HEAD"]);
 }
