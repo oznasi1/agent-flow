@@ -3,9 +3,17 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { execFileSync } from "child_process";
-import { deriveBucket, mostActive, buildRunStatus } from "../../../src/engine/status";
+import { deriveBucket, mostActive, buildRunStatus, prSignals } from "../../../src/engine/status";
 import { encodeProjectDir } from "../../../src/engine/transcript";
-import { AgentActivity, Run } from "../../../src/types";
+import { AgentActivity, Run, PrEntryMap, PrFacts } from "../../../src/types";
+
+const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
+  number: 1, url: "https://github.com/o/r/pull/1", title: "t", state: "OPEN", isDraft: false,
+  ci: { passing: 2, pending: 0, failing: [] }, review: "none", unresolved: null,
+  mergeable: "clean", ciAdvisory: false, ...over,
+});
+const entries = (...facts: (PrFacts | null)[]): PrEntryMap =>
+  Object.fromEntries(facts.map((f, i) => [`repo${i}`, { facts: f, fetchedAt: 0 }]));
 
 describe("deriveBucket", () => {
   it("puts a Jira-done ticket in Done even if the agent is working", () => {
@@ -41,6 +49,24 @@ describe("deriveBucket", () => {
   });
 });
 
+describe("deriveBucket with PR signals", () => {
+  it("promotes a blocked PR into Needs you even while the agent is working", () => {
+    expect(deriveBucket({ agentState: "working", prBlocked: true })).toBe("needs");
+  });
+
+  it("puts a merged PR in Done even when Jira has not caught up", () => {
+    expect(deriveBucket({ jiraCategory: "indeterminate", prMerged: true })).toBe("done");
+  });
+
+  it("lets Done outrank a blocked PR", () => {
+    expect(deriveBucket({ prMerged: true, prBlocked: true })).toBe("done");
+  });
+
+  it("still treats an idle agent with an open, unblocked PR as In review", () => {
+    expect(deriveBucket({ agentState: "idle", prOpen: true })).toBe("review");
+  });
+});
+
 describe("mostActive", () => {
   const act = (state: AgentActivity["state"], lastActivityMs: number | null = null): AgentActivity => ({ state, lastActivityMs, slug: null });
 
@@ -58,6 +84,61 @@ describe("mostActive", () => {
 
   it("breaks ties by most-recent activity", () => {
     expect(mostActive([act("idle", 100), act("idle", 200)]).lastActivityMs).toBe(200);
+  });
+});
+
+describe("prSignals", () => {
+  it("is all false for no entries", () => {
+    expect(prSignals({})).toEqual({ open: false, blocked: false, merged: false });
+  });
+
+  it("is all false when every entry resolved to no PR", () => {
+    expect(prSignals(entries(null, null))).toEqual({ open: false, blocked: false, merged: false });
+  });
+
+  it("reports open for an open non-draft PR", () => {
+    expect(prSignals(entries(prFacts())).open).toBe(true);
+  });
+
+  it("does not report open for a draft PR", () => {
+    expect(prSignals(entries(prFacts({ isDraft: true }))).open).toBe(false);
+  });
+
+  it("does not report open for a closed or merged PR", () => {
+    expect(prSignals(entries(prFacts({ state: "CLOSED" }))).open).toBe(false);
+    expect(prSignals(entries(prFacts({ state: "MERGED" }))).open).toBe(false);
+  });
+
+  it("blocks on a failing check", () => {
+    expect(prSignals(entries(prFacts({ ci: { passing: 0, pending: 0, failing: [{ name: "build", url: "" }] } }))).blocked).toBe(true);
+  });
+
+  it("does not block on a failing check that is only advisory (UNSTABLE)", () => {
+    const f = prFacts({ ci: { passing: 0, pending: 0, failing: [{ name: "flaky-e2e", url: "" }] }, ciAdvisory: true });
+    expect(prSignals(entries(f)).blocked).toBe(false);
+  });
+
+  it("blocks on requested changes and on a conflict", () => {
+    expect(prSignals(entries(prFacts({ review: "changes_requested" }))).blocked).toBe(true);
+    expect(prSignals(entries(prFacts({ mergeable: "conflicting" }))).blocked).toBe(true);
+  });
+
+  it("does not block on a closed PR's stale failures", () => {
+    const f = prFacts({ state: "CLOSED", ci: { passing: 0, pending: 0, failing: [{ name: "build", url: "" }] } });
+    expect(prSignals(entries(f)).blocked).toBe(false);
+  });
+
+  it("blocks the whole run when any one repo is blocked", () => {
+    expect(prSignals(entries(prFacts(), prFacts({ mergeable: "conflicting" }))).blocked).toBe(true);
+  });
+
+  it("reports merged only when every PR-bearing repo has merged", () => {
+    expect(prSignals(entries(prFacts({ state: "MERGED" }))).merged).toBe(true);
+    expect(prSignals(entries(prFacts({ state: "MERGED" }), prFacts({ state: "OPEN" }))).merged).toBe(false);
+  });
+
+  it("ignores PR-less repos when deciding merged", () => {
+    expect(prSignals(entries(prFacts({ state: "MERGED" }), null)).merged).toBe(true);
   });
 });
 
@@ -134,5 +215,26 @@ describe("buildRunStatus", () => {
 
   it("defaults windowOpen to false when no identities are passed", () => {
     expect(buildRunStatus(run, null, projRoot, NOW, true).windowOpen).toBe(false);
+  });
+
+  it("defaults prs to an empty map when none are passed", () => {
+    expect(buildRunStatus(run, null, projRoot, NOW, true).prs).toEqual({});
+  });
+
+  it("threads PR entries through onto the status", () => {
+    const prs = entries(prFacts());
+    const s = buildRunStatus(run, null, projRoot, NOW, true, new Set(), prs);
+    expect(s.prs).toBe(prs);
+  });
+
+  it("promotes a run with a conflicting PR into Needs you despite a working agent", () => {
+    const s = buildRunStatus(run, { status: "In Progress", category: "indeterminate" }, projRoot, NOW, true, new Set(), entries(prFacts({ mergeable: "conflicting" })));
+    expect(s.agent.state).toBe("working");
+    expect(s.column).toBe("needs");
+  });
+
+  it("puts a run whose PR merged into Done even when Jira says in progress", () => {
+    const s = buildRunStatus(run, { status: "In Progress", category: "indeterminate" }, projRoot, NOW, true, new Set(), entries(prFacts({ state: "MERGED" })));
+    expect(s.column).toBe("done");
   });
 });
