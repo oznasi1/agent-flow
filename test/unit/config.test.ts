@@ -142,6 +142,12 @@ describe("getConfig — promptModes validation", () => {
     expect(getConfig().promptModes).toEqual(custom);
   });
 
+  it("keeps an optional detail on a custom mode", () => {
+    const custom = [{ id: "debug", label: "Debug", detail: "Reproduce it first", prompt: "reproduce {key}" }];
+    setConfig({ promptModes: custom });
+    expect(getConfig().promptModes).toEqual(custom);
+  });
+
   it("filters out entries missing id/label/prompt", () => {
     setConfig({
       promptModes: [

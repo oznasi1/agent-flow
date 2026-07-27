@@ -678,7 +678,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const p = await vscode.window.showQuickPick(
       modes.map((mm) => ({
         label: mm.label,
-        detail: mm.prompt.replace(/\{[a-z]+\}/g, "").replace(/\s+/g, " ").trim().slice(0, 80),
+        detail: mm.detail,
         mode: mm,
       })),
       { title, ignoreFocusOut: true },
