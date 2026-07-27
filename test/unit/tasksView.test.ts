@@ -86,6 +86,7 @@ function makeClient() {
     })),
     getTransitions: vi.fn(async () => [] as unknown[]),
     transition: vi.fn(async () => undefined),
+    listResolutions: vi.fn(async () => [] as unknown[]),
     addLabel: vi.fn(async () => undefined),
     getActiveSprintId: vi.fn(async () => 42),
     addIssueToSprint: vi.fn(async () => undefined),
@@ -288,7 +289,7 @@ describe("changeStatus", () => {
     } as never);
     const { provider, posted } = setup();
     await provider.changeStatus("ASM-1");
-    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "41");
+    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "41", {});
     expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
     expect(posted()).toContainEqual({
       type: "statusChanged",
@@ -324,6 +325,93 @@ describe("changeStatus", () => {
     await provider.changeStatus("ASM-1");
     expect(posted()).toContainEqual(expect.objectContaining({ type: "statusChanged", key: "ASM-1" }));
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success" }));
+  });
+
+  const DONE_WITH_RESOLUTION = {
+    id: "41",
+    name: "Resolve",
+    toName: "Done",
+    toCategory: "done",
+    fields: {
+      resolution: {
+        required: true,
+        name: "Resolution",
+        schema: { type: "resolution", system: "resolution" },
+        allowedValues: [{ id: "10000", name: "Done" }, { id: "10001", name: "Won't Do" }],
+      },
+    },
+  };
+
+  /** The status QuickPick answers first, then one answer per field prompt. */
+  const answerPicks = (...answers: unknown[]) => {
+    const pick = vi.mocked(window.showQuickPick);
+    pick.mockReset();
+    for (const a of answers) pick.mockResolvedValueOnce(a as never);
+    pick.mockResolvedValue(undefined as never);
+  };
+
+  it("prompts for a required resolution and sends it with the transition", async () => {
+    clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
+    answerPicks({ t: DONE_WITH_RESOLUTION }, { label: "Won't Do" });
+    const { provider } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "41", { resolution: { id: "10001" } });
+  });
+
+  it("writes nothing when the field prompt is cancelled", async () => {
+    clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
+    answerPicks({ t: DONE_WITH_RESOLUTION }, undefined);
+    const { provider, posted } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.transition).not.toHaveBeenCalled();
+    expect(posted().filter((p) => p.type === "toast")).toEqual([]);
+  });
+
+  it("prompts a required text field through an input box", async () => {
+    const t = {
+      id: "51",
+      name: "Close",
+      toName: "Closed",
+      toCategory: "done",
+      fields: { customfield_1: { required: true, name: "Reason", schema: { type: "string" } } },
+    };
+    clientStub.getTransitions.mockResolvedValue([t]);
+    answerPicks({ t });
+    vi.mocked(window.showInputBox).mockResolvedValue("shipped in 0.1.36" as never);
+    const { provider } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "51", { customfield_1: "shipped in 0.1.36" });
+  });
+
+  it("skips unfillable required fields and attempts the write anyway", async () => {
+    const t = {
+      id: "61",
+      name: "Close",
+      toName: "Closed",
+      toCategory: "done",
+      fields: { assignee: { required: true, name: "Assignee", schema: { type: "user", system: "assignee" } } },
+    };
+    clientStub.getTransitions.mockResolvedValue([t]);
+    answerPicks({ t });
+    const { provider } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "61", {});
+  });
+
+  it("does not prompt for optional screen fields", async () => {
+    const t = {
+      id: "71",
+      name: "Start",
+      toName: "In Progress",
+      toCategory: "indeterminate",
+      fields: { comment: { required: false, name: "Comment", schema: { type: "string" } } },
+    };
+    clientStub.getTransitions.mockResolvedValue([t]);
+    answerPicks({ t });
+    const { provider } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(window.showInputBox).not.toHaveBeenCalled();
+    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "71", {});
   });
 });
 

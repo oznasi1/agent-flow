@@ -3,7 +3,13 @@ import * as fs from "fs";
 import * as path from "path";
 import { getConfig, AgentFlowConfig, ExploreAction, PR_REVIEW_AUTOFIX_CLAUSE } from "./config";
 import { JiraAuth } from "./jira/auth";
-import { JiraClient, JiraAuthError, JiraDetail } from "./jira/client";
+import { JiraClient, JiraAuthError, JiraDetail, TransitionOption } from "./jira/client";
+import {
+  promptableFields,
+  toJiraValue,
+  validateFieldInput,
+  type FieldPrompt,
+} from "./jira/transitionFields";
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { injectSlackDm, insertBeforeFiles } from "./engine/prompt";
@@ -256,9 +262,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     );
     this.log(`changeStatus ${key}: picked ${pick ? pick.t.toName : "(cancelled)"}`);
     if (!pick) return;
+    const target: TransitionOption = pick.t;
 
-    await client.transition(key, pick.t.id);
-    this.log(`changeStatus ${key}: transition POST ok → ${pick.t.toName}`);
+    // `fields` is absent on anything that didn't come from an expanded
+    // getTransitions — the metadata is Jira's JSON, not a guarantee.
+    const { prompts, skipped } = promptableFields(target.fields ?? {});
+    if (skipped.length) {
+      this.log(`changeStatus ${key}: can't fill ${skipped.join(", ")} here — letting Jira decide`);
+    }
+    const fields = await this.collectFields(key, target.toName, prompts);
+    if (fields === undefined) {
+      this.log(`changeStatus ${key}: cancelled at a field prompt`);
+      return;
+    }
+
+    await client.transition(key, target.id, fields);
+    this.log(`changeStatus ${key}: transition POST ok → ${target.toName}`);
     if (cfg.stampLabelOnWrite) {
       try {
         await client.addLabel(key, cfg.provenanceLabel);
@@ -266,9 +285,51 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         this.log(`label stamp failed for ${key}: ${e}`);
       }
     }
-    const removed = pick.t.toCategory === "done";
-    this.post({ type: "statusChanged", key, status: pick.t.toName, category: pick.t.toCategory, removed });
-    this.toast("success", `${key} → ${pick.t.toName}`);
+    const removed = target.toCategory === "done";
+    this.post({ type: "statusChanged", key, status: target.toName, category: target.toCategory, removed });
+    this.toast("success", `${key} → ${target.toName}`);
+  }
+
+  /** Run one prompt per field, in order. Returns the collected `fields` payload,
+   *  or undefined when the user escaped — a half-filled transition is never worth
+   *  writing, so cancelling any prompt cancels the whole thing. */
+  private async collectFields(
+    key: string,
+    toName: string,
+    prompts: FieldPrompt[],
+  ): Promise<Record<string, unknown> | undefined> {
+    const out: Record<string, unknown> = {};
+    for (const p of prompts) {
+      const title = `${key} → ${toName}`;
+      // The two QuickPick calls are kept separate on purpose: `canPickMany` only
+      // selects the array-returning overload when it's the literal `true`.
+      if (p.kind === "multipick") {
+        const picked = await vscode.window.showQuickPick(
+          p.choices.map((c) => ({ label: c.name })),
+          { title, placeHolder: `Pick ${p.name}`, canPickMany: true, ignoreFocusOut: true },
+        );
+        if (!picked || picked.length === 0) return undefined;
+        out[p.id] = toJiraValue(p, picked.map((i) => i.label));
+      } else if (p.kind === "pick") {
+        const picked = await vscode.window.showQuickPick(
+          p.choices.map((c) => ({ label: c.name })),
+          { title, placeHolder: `Pick ${p.name}`, ignoreFocusOut: true },
+        );
+        if (!picked) return undefined;
+        out[p.id] = toJiraValue(p, picked.label);
+      } else {
+        const raw = await vscode.window.showInputBox({
+          title,
+          prompt: p.name,
+          placeHolder: p.kind === "date" || p.kind === "datetime" ? "YYYY-MM-DD" : undefined,
+          ignoreFocusOut: true,
+          validateInput: (v: string) => validateFieldInput(p, v),
+        });
+        if (raw === undefined) return undefined;
+        out[p.id] = toJiraValue(p, raw);
+      }
+    }
+    return out;
   }
 
   /** Add a ticket to the active sprint and assign it to the current user — the two
