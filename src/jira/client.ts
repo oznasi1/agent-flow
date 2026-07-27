@@ -1,8 +1,15 @@
 import { JiraAuth } from "./auth";
 import { buildJql, stripSprint } from "./jql";
+import { parseJiraError } from "./errors";
+import { TransitionFieldMeta } from "./transitionFields";
 import { Filter, JiraTask, Size } from "../types";
 
 export class JiraAuthError extends Error {}
+
+// One import site for Jira failures: callers catching a rejected write need both
+// this and JiraAuthError, and they mean different things — auth re-gates the panel,
+// an API error is reported in place.
+export { JiraApiError } from "./errors";
 
 /** How long a single Jira request may run before we give up. Without this a wrong
  * base URL or an unreachable site (VPN off, DNS, firewall) hangs `fetch` forever,
@@ -14,6 +21,16 @@ let cachedSprintFieldId: string | null | undefined;
 
 const LIST_FIELDS =["summary", "status", "priority", "assignee", "labels", "components", "updated", "timeoriginalestimate"];
 const DETAIL_FIELDS = ["summary", "description", "labels", "components", "priority", "status", "assignee"];
+
+/** A workflow transition plus the fields its screen declares — the metadata that
+ *  tells us what to prompt for before attempting the write. */
+export interface TransitionOption {
+  id: string;
+  name: string;
+  toName: string;
+  toCategory: string;
+  fields: Record<string, TransitionFieldMeta>;
+}
 
 export interface JiraDetail {
   key: string;
@@ -69,7 +86,7 @@ export class JiraClient {
     }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      throw new Error(`Jira ${res.status}: ${body.slice(0, 300)}`);
+      throw parseJiraError(res.status, body);
     }
     const text = await res.text();
     return text ? JSON.parse(text) : null; // transitions/edits return 204 No Content
@@ -172,22 +189,38 @@ export class JiraClient {
     return { status: s?.name ?? null, category: s?.statusCategory?.key ?? null };
   }
 
-  /** Valid workflow transitions for an issue (Jira only allows configured next states). */
-  async getTransitions(key: string): Promise<{ id: string; name: string; toName: string; toCategory: string }[]> {
-    const data = await this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/transitions`);
+  /** Valid workflow transitions for an issue (Jira only allows configured next
+   *  states). Expanded with each transition's screen fields — same round-trip,
+   *  and it's the only way to know what the write will demand. */
+  async getTransitions(key: string): Promise<TransitionOption[]> {
+    const data = await this.request(
+      `/rest/api/3/issue/${encodeURIComponent(key)}/transitions?expand=transitions.fields`,
+    );
     return (data?.transitions ?? []).map((t: any) => ({
       id: t.id,
       name: t.name,
       toName: t.to?.name ?? t.name,
       toCategory: t.to?.statusCategory?.key ?? "",
+      fields: t.fields ?? {},
     }));
   }
 
-  async transition(key: string, transitionId: string): Promise<void> {
+  async transition(key: string, transitionId: string, fields: Record<string, unknown> = {}): Promise<void> {
+    const body: Record<string, unknown> = { transition: { id: transitionId } };
+    if (Object.keys(fields).length) body.fields = fields;
     await this.request(`/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, {
       method: "POST",
-      body: JSON.stringify({ transition: { id: transitionId } }),
+      body: JSON.stringify(body),
     });
+  }
+
+  /** The site's resolution list. Only used when a workflow validator demands a
+   *  Resolution that never appeared on the transition screen. */
+  async listResolutions(): Promise<{ id?: string; name: string }[]> {
+    const data = await this.request("/rest/api/3/resolution");
+    return (Array.isArray(data) ? data : [])
+      .map((r: any) => ({ id: r?.id, name: r?.name ?? "" }))
+      .filter((r: { name: string }) => !!r.name);
   }
 
   /** Add a label without touching others (used to stamp provenance on writes). */
