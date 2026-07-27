@@ -74,6 +74,7 @@ const statusFor = (run: Run): RunStatus => ({
 const lastPanel = () => window.createWebviewPanel.mock.results.at(-1)!.value as ReturnType<typeof import("../_mocks/vscode").makeWebviewPanel>;
 const posts = (p: ReturnType<typeof lastPanel>) => p.webview.postMessage.mock.calls.map((c) => c[0] as any);
 const show = (authed = false) => DeckPanel.show(fakeContext().context as any, fakeAuth({ authed }), () => {});
+const settled = () => new Promise<void>((r) => setTimeout(r, 0));
 
 beforeEach(() => {
   h.runs = [mkRun()];
@@ -367,11 +368,50 @@ describe("DeckPanel", () => {
     // whichever test runs next.
     await new Promise<void>((r) => setTimeout(r, 0));
   });
+
+  it("does not post a board an overtaken refresh built", async () => {
+    // The snapshot of an older pass predates whatever the newer one read: a poll that
+    // listed the runs directory before a Forget deleted from it would otherwise put
+    // the forgotten card straight back on the board.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.getStatus.mockImplementationOnce(async () => {
+      await gate;
+      return { status: "In Review", category: "indeterminate" };
+    });
+    // The constructor's unawaited refresh hangs on the gate, so the explicit refresh
+    // below overtakes it. Nothing is cached while the first pass is stuck, so the
+    // second makes its own getStatus call and runs to completion.
+    show(true);
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    release();
+    await settled();
+    expect(posts(p).filter((m) => m.type === "deck:runs")).toHaveLength(1);
+  });
+
+  it("posts one busy pair for overlapping refreshes, not one per refresh", async () => {
+    // Two busy-triggering messages in quick succession: the earlier one's `finally`
+    // must not stop the spinner while the later refresh is still working.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.getStatus.mockImplementation(async () => {
+      await gate;
+      return { status: "In Review", category: "indeterminate" };
+    });
+    show(true);
+    const p = lastPanel();
+    const first = p._fire({ type: "deck:refresh" });
+    const second = p._fire({ type: "deck:refresh" });
+    await settled(); // both refreshes are now in flight, both stuck on the gate
+    release();
+    await Promise.all([first, second]);
+    const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
+    expect(loads).toEqual([true, false]);
+  });
 });
 
 describe("DeckPanel PR facts", () => {
-  const settled = () => new Promise<void>((r) => setTimeout(r, 0));
-
   /** The gh probe is kicked off inside the very tick that reads it, so it can
    * never be resolved by the time that same tick's `ghReady()` call returns —
    * a promise can't settle synchronously with the statement that created it.

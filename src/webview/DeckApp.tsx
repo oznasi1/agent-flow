@@ -253,7 +253,7 @@ export function DeckApp(): JSX.Element {
         <div className={`ctl ${prFacts ? "on" : ""}`} onClick={() => { const next = !prFacts; setPrFacts(next); send({ type: "deck:setPrFacts", on: next }); }} title="Read each task's PR state from GitHub with the gh CLI. Off → git + Jira only.">
           <span className="switch" />PR facts
         </div>
-        <div className={`ctl ${busy ? "busy" : ""}`} onClick={() => send({ type: "deck:refresh" })}>
+        <div className="ctl" onClick={() => send({ type: "deck:refresh" })}>
           <span className={`spin ${busy ? "on" : ""}`}>⟳</span>
           <span className="synced">{busy ? "syncing…" : syncedAt ? `synced ${timeAgo(syncedAt)}` : "refresh"}</span>
         </div>

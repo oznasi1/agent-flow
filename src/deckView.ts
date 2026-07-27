@@ -44,6 +44,15 @@ export class DeckPanel {
   /** Bumped when a run is forgotten, so a fetch still in flight for the old
    * incarnation cannot recreate the cache file we just deleted. */
   private readonly prEpoch = new Map<string, number>();
+  /** Bumped when a refresh starts, so an older pass that finishes after a newer one
+   * began does not post. Its snapshot predates whatever the newer pass read: a poll
+   * that listed the runs directory before `deck:forget` removed a file would
+   * otherwise put the forgotten card straight back on the board. */
+  private refreshSeq = 0;
+  /** How many refreshes are in flight. Only the last one out clears the webview's
+   * busy indicator — an inner `finally` must not stop the spinner while an
+   * overlapping refresh is still working. */
+  private busyDepth = 0;
 
   static show(context: vscode.ExtensionContext, auth: JiraAuth, log: (m: string) => void): void {
     if (DeckPanel.current) {
@@ -178,9 +187,11 @@ export class DeckPanel {
     const ghReady = this.ghReady();
     const openIdentities = new Set(readLiveWindows(defaultWindowsDir()).map((w) => w.identity));
     // One round trip per run, all at once. Serially this was the bulk of a cold
-    // refresh, and every Forget waits on the whole pass before its card leaves the
-    // board. jiraStatus owns its own errors, so this can never reject; run keys are
-    // unique, so concurrent calls never duplicate a cache miss.
+    // refresh, and back then every Forget waited on the whole pass before its card
+    // left the board — the webview now drops that card optimistically, but the pass
+    // is still what the board's next authoritative state waits on. jiraStatus owns
+    // its own errors, so this can never reject; run keys are unique, so concurrent
+    // calls never duplicate a cache miss.
     const jiras = await Promise.all(
       runs.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(run.key) : null)),
     );
@@ -218,8 +229,10 @@ export class DeckPanel {
   }
 
   private async refresh(): Promise<void> {
+    const seq = ++this.refreshSeq;
     try {
       const runs = await this.buildAll();
+      if (seq !== this.refreshSeq) return; // a newer pass owns the board
       this.post({
         type: "deck:runs",
         runs,
@@ -237,11 +250,11 @@ export class DeckPanel {
    * rebuild, and used to do it with nothing on screen to say so. `finally` so a
    * refresh that ever does throw cannot strand the spinner. */
   private async refreshBusy(): Promise<void> {
-    this.post({ type: "deck:loading", loading: true });
+    if (this.busyDepth++ === 0) this.post({ type: "deck:loading", loading: true });
     try {
       await this.refresh();
     } finally {
-      this.post({ type: "deck:loading", loading: false });
+      if (--this.busyDepth === 0) this.post({ type: "deck:loading", loading: false });
     }
   }
 
