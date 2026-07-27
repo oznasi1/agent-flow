@@ -38,10 +38,13 @@ export interface ServiceRef {
 export type WorkspaceMode = "multiroot" | "per-window";
 
 /** A selectable "how should the agent start" mode with a prompt template.
- * Template placeholders: {key} {summary} {url} {brief} {files}. */
+ * Template placeholders: {key} {summary} {url} {brief} {files}.
+ * `detail` is the line shown under the label in the picker — written for the
+ * user, not derived from the prompt. Modes without one render label-only. */
 export interface PromptMode {
   id: string;
   label: string;
+  detail?: string;
   prompt: string;
 }
 

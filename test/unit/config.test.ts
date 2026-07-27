@@ -142,6 +142,12 @@ describe("getConfig — promptModes validation", () => {
     expect(getConfig().promptModes).toEqual(custom);
   });
 
+  it("keeps an optional detail on a custom mode", () => {
+    const custom = [{ id: "debug", label: "Debug", detail: "Reproduce it first", prompt: "reproduce {key}" }];
+    setConfig({ promptModes: custom });
+    expect(getConfig().promptModes).toEqual(custom);
+  });
+
   it("filters out entries missing id/label/prompt", () => {
     setConfig({
       promptModes: [
@@ -161,6 +167,32 @@ describe("getConfig — promptModes validation", () => {
   it("falls back to defaults for a non-array value", () => {
     setConfig({ promptModes: "nonsense" });
     expect(getConfig().promptModes).toEqual(DEFAULT_PROMPT_MODES);
+  });
+});
+
+describe("DEFAULT_PROMPT_MODES", () => {
+  it("ships six modes in picker order, each with a written detail", () => {
+    expect(DEFAULT_PROMPT_MODES.map((m) => m.id)).toEqual([
+      "plan",
+      "implementation",
+      "tdd",
+      "investigate",
+      "orchestrator",
+      "refine",
+    ]);
+    for (const m of DEFAULT_PROMPT_MODES) {
+      expect(m.label.trim().length).toBeGreaterThan(0);
+      expect(m.detail?.trim().length ?? 0).toBeGreaterThan(0);
+    }
+  });
+
+  it("gives every mode the full placeholder set, ending in {files}", () => {
+    for (const m of DEFAULT_PROMPT_MODES) {
+      for (const ph of ["{key}", "{summary}", "{brief}", "{url}"]) {
+        expect(m.prompt).toContain(ph);
+      }
+      expect(m.prompt.endsWith("{files}")).toBe(true);
+    }
   });
 });
 
@@ -296,6 +328,18 @@ describe("package.json ⇄ config constants", () => {
     expect(props["agentFlow.explorePrompts.knowledge"].default).toBe(DEFAULT_EXPLORE_PROMPT);
     expect(props["agentFlow.explorePrompts.debug"].default).toBe(DEFAULT_EXPLORE_DEBUG_PROMPT);
     expect(props["agentFlow.explorePrompts.general"].default).toBe(DEFAULT_EXPLORE_GENERAL_PROMPT);
+  });
+
+  it("keeps the promptModes schema default byte-identical to DEFAULT_PROMPT_MODES", () => {
+    // This is the one users actually get: an untouched setting resolves to the
+    // manifest default, so the code constant alone being right reaches nobody.
+    expect(props["agentFlow.promptModes"].default).toEqual(DEFAULT_PROMPT_MODES);
+  });
+
+  it("leaves detail out of the promptModes required fields", () => {
+    const p = props["agentFlow.promptModes"] as { items?: { required?: string[]; properties?: Record<string, unknown> } };
+    expect(p.items?.required).toEqual(["id", "label", "prompt"]);
+    expect(Object.keys(p.items?.properties ?? {})).toContain("detail");
   });
 
   it("keeps the deprecated explorePrompt default equal to the knowledge default (migration target)", () => {

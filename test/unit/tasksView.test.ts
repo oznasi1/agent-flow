@@ -551,6 +551,34 @@ describe("takeTask", () => {
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ promptTemplate: "P {key}" }));
   });
 
+  it("shows each mode's hand-written detail, and no line at all without one", async () => {
+    const modes = [
+      { id: "plan", label: "Plan", detail: "Propose a plan and wait", prompt: 'Jira {key}: "{summary}" at {brief}' },
+      { id: "raw", label: "Raw", prompt: 'Jira {key}: "{summary}" at {brief}' },
+    ];
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask", promptModes: modes });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: modes[0] } as never);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+
+    const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string; detail?: string }[];
+    expect(items.map((i) => ({ label: i.label, detail: i.detail }))).toEqual([
+      { label: "Plan", detail: "Propose a plan and wait" },
+      { label: "Raw", detail: undefined },
+    ]);
+  });
+
+  it("never derives the picker line from the prompt template", async () => {
+    const modes = [{ id: "plan", label: "Plan", prompt: 'Jira {key}: "{summary}". Read the task brief at {brief}.' }];
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask", promptModes: modes });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: modes[0] } as never);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", ["account-service"]);
+
+    const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { detail?: string }[];
+    expect(items[0].detail).toBeUndefined();
+  });
+
   it("asks the prompt mode first — a cancel there aborts before the ticket is read", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel the prompt-mode pick
