@@ -10,12 +10,20 @@ import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { openInEditor } from "./engine/workspace";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
-import { FetchResult, GhProvider, PrProvider, ghAvailable } from "./engine/pr/provider";
+import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
 import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, Run, RunStatus } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
+
+/** The footer note per reason PR facts are off. Naming the actual gap matters:
+ * `gh` living somewhere the extension host's PATH cannot see it is by far the
+ * likeliest cause, and reads to a signed-in user as the Deck being broken. */
+const GH_NOTES: Record<GhGap["kind"], string> = {
+  missing: "gh CLI not found — PR facts off",
+  "signed-out": "gh is not signed in — PR facts off",
+};
 
 /** The Deck: a full-window board of every task launched via Agent Flow, opened as a
  * singleton editor-area panel. Reuses the Jira client, runs store, and status engine. */
@@ -29,9 +37,10 @@ export class DeckPanel {
   private prFacts: boolean; // seeded from config in the constructor; the only writer after that is deck:setPrFacts
   private readonly prQueue = new RefreshQueue();
   private readonly pr: PrProvider = new GhProvider();
-  private ghProbe: Promise<boolean> | null = null;
-  /** null until the probe resolves; false disables PR facts with a footer note. */
-  private ghOk: boolean | null = null;
+  private ghProbe: Promise<GhGap | null> | null = null;
+  /** undefined until the probe resolves; null means gh is usable, and a gap
+   * disables PR facts with a footer note. */
+  private ghGap: GhGap | null | undefined;
   /** Bumped when a run is forgotten, so a fetch still in flight for the old
    * incarnation cannot recreate the cache file we just deleted. */
   private readonly prEpoch = new Map<string, number>();
@@ -103,16 +112,21 @@ export class DeckPanel {
   private ghReady(): boolean {
     if (!this.prFacts) return false;
     if (this.ghProbe === null) {
-      const p = (this.ghProbe = ghAvailable());
-      void p.then((ok) => {
+      const p = (this.ghProbe = probeGh());
+      void p.then((gap) => {
         // A probe orphaned by a toggle (deck:setPrFacts resets ghProbe and starts
         // a fresh one) must not win if it resolves after the fresh probe already
-        // has — that would let a stale `false` clobber a fresh `true` right after
-        // the user ran `gh auth login`, defeating the whole point of re-probing.
-        if (this.ghProbe === p) this.ghOk = ok;
+        // has — that would let a stale gap clobber a fresh pass right after the
+        // user ran `gh auth login`, defeating the whole point of re-probing.
+        if (this.ghProbe !== p) return;
+        this.ghGap = gap;
+        // The note names the kind; only the log can say which gh we tried and
+        // what it said, which is the difference between a diagnosable report and
+        // "PR facts just don't work here".
+        if (gap) this.log(`deck: gh unusable (${gap.kind}): ${gap.detail}`);
       });
     }
-    return this.ghOk === true;
+    return this.ghGap === null;
   }
 
   /** Queue a stale repo's refresh. Deliberately not awaited by the caller: a
@@ -199,7 +213,7 @@ export class DeckPanel {
         runs,
         liveSignal: this.liveSignal,
         prFacts: this.prFacts,
-        ghNote: this.prFacts && this.ghOk === false ? "gh not found or not signed in — PR facts off" : null,
+        ghNote: this.prFacts && this.ghGap ? GH_NOTES[this.ghGap.kind] : null,
       });
     } catch (e) {
       this.log(`deck: refresh failed: ${e}`);
@@ -222,7 +236,7 @@ export class DeckPanel {
         this.prFacts = m.on;
         if (m.on) {
           // Re-probe: the user may have run `gh auth login` since the last check.
-          this.ghOk = null;
+          this.ghGap = undefined;
           this.ghProbe = null;
         }
         await this.refresh();

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { window, ViewColumn, env } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
 import type { PrFacts, Run, RunStatus } from "../../src/types";
-import type { FetchResult } from "../../src/engine/pr/provider";
+import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
 // builder, and a stubbed workspace opener.
@@ -20,7 +20,9 @@ const h = vi.hoisted(() => ({
   // type error — a narrower type would make "facts is written through" and
   // "facts is hardcoded null" indistinguishable.
   prFetch: vi.fn(async (_p: string, _b: string | null, _k: string): Promise<FetchResult> => ({ ok: true, facts: null })),
-  ghAvailable: vi.fn(async () => true),
+  // Typed as the real union so a test can resolve a gap as well as the null that
+  // means "gh is usable".
+  probeGh: vi.fn(async (): Promise<GhGap | null> => null),
   prFacts: true as boolean,
   ttlSeconds: 120,
 }));
@@ -44,7 +46,7 @@ vi.mock("../../src/engine/pr/store", () => ({
   isStale: (e: { fetchedAt: number } | undefined, ttl: number, now: number) => !e || now - e.fetchedAt >= ttl,
 }));
 vi.mock("../../src/engine/pr/provider", () => ({
-  ghAvailable: h.ghAvailable,
+  probeGh: h.probeGh,
   GhProvider: class { fetch = h.prFetch; },
 }));
 vi.mock("../../src/config", () => ({
@@ -83,7 +85,7 @@ beforeEach(() => {
   h.writePrEntry.mockClear();
   h.removePrEntries.mockClear();
   h.prFetch.mockClear().mockResolvedValue({ ok: true, facts: null });
-  h.ghAvailable.mockClear().mockResolvedValue(true);
+  h.probeGh.mockClear().mockResolvedValue(null);
 });
 
 afterEach(() => {
@@ -393,7 +395,7 @@ describe("DeckPanel PR facts", () => {
     show();
     await settled();
     expect(h.prFetch).not.toHaveBeenCalled();
-    expect(h.ghAvailable).not.toHaveBeenCalled();
+    expect(h.probeGh).not.toHaveBeenCalled();
     expect(h.buildRunStatus).toHaveBeenCalledWith(
       // `show()` defaults to unauthenticated, so jira is null here (see the
       // "passes cached PR entries" test above for why `expect.anything()`
@@ -404,12 +406,33 @@ describe("DeckPanel PR facts", () => {
     expect(posts(lastPanel()).find((m) => m.type === "deck:runs")).toMatchObject({ prFacts: false });
   });
 
-  it("fetches nothing and notes why when gh is unavailable", async () => {
-    h.ghAvailable.mockResolvedValue(false);
+  it("fetches nothing and notes a missing gh", async () => {
+    h.probeGh.mockResolvedValue({ kind: "missing", detail: "gh auth status: spawn gh ENOENT" });
     const p = await showAndWarm();
     expect(h.prFetch).not.toHaveBeenCalled();
     const note = posts(p).filter((m) => m.type === "deck:runs").at(-1)?.ghNote;
-    expect(note).toMatch(/gh/i);
+    expect(note).toMatch(/not found/i);
+  });
+
+  it("notes a signed-out gh differently from a missing one", async () => {
+    // A signed-in user whose extension host cannot see their gh was told "not
+    // found or not signed in" and could only conclude the Deck was broken. The
+    // note has to name the gap the probe actually found.
+    h.probeGh.mockResolvedValue({ kind: "signed-out", detail: "/opt/homebrew/bin/gh auth status: exit 1" });
+    const p = await showAndWarm();
+    const note = posts(p).filter((m) => m.type === "deck:runs").at(-1)?.ghNote;
+    expect(note).toMatch(/not signed in/i);
+    expect(note).not.toMatch(/not found/i);
+  });
+
+  it("logs which gh it tried and what that gh said", async () => {
+    // The note names only the kind, so without this line a gap is undiagnosable:
+    // nothing else records the path probed or the underlying spawn error.
+    const log = vi.fn();
+    h.probeGh.mockResolvedValue({ kind: "missing", detail: "gh auth status: spawn gh ENOENT" });
+    DeckPanel.show(fakeContext().context as any, fakeAuth({ authed: false }), log);
+    await settled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("spawn gh ENOENT"));
   });
 
   it("re-probes gh when prFacts is toggled back on", async () => {
@@ -419,9 +442,9 @@ describe("DeckPanel PR facts", () => {
     await settled();
     const p = lastPanel();
     await p._fire({ type: "deck:setPrFacts", on: false });
-    h.ghAvailable.mockClear();
+    h.probeGh.mockClear();
     await p._fire({ type: "deck:setPrFacts", on: true });
-    expect(h.ghAvailable).toHaveBeenCalled();
+    expect(h.probeGh).toHaveBeenCalled();
   });
 
   it("toggles prFacts from the webview", async () => {
@@ -497,9 +520,9 @@ describe("DeckPanel PR facts", () => {
   it("does not let a probe orphaned by a toggle overwrite a fresher one (F6)", async () => {
     // Two probes end up in flight: the one this test lets resolve late must not
     // win over the one started by the re-probe on `deck:setPrFacts on: true`.
-    let resolveFirst!: (v: boolean) => void;
-    let resolveSecond!: (v: boolean) => void;
-    h.ghAvailable
+    let resolveFirst!: (v: GhGap | null) => void;
+    let resolveSecond!: (v: GhGap | null) => void;
+    h.probeGh
       .mockImplementationOnce(() => new Promise((res) => { resolveFirst = res; }))
       .mockImplementationOnce(() => new Promise((res) => { resolveSecond = res; }));
     show();
@@ -509,9 +532,9 @@ describe("DeckPanel PR facts", () => {
     await p._fire({ type: "deck:setPrFacts", on: true }); // resets ghProbe, starts a second probe
     await settled();
 
-    resolveSecond(true); // the fresh probe: the user just ran `gh auth login`
+    resolveSecond(null); // the fresh probe: the user just ran `gh auth login`
     await settled();
-    resolveFirst(false); // the orphaned probe, resolving late
+    resolveFirst({ kind: "signed-out", detail: "stale" }); // the orphaned probe, resolving late
     await settled();
 
     await p._fire({ type: "deck:refresh" });
