@@ -187,6 +187,39 @@ describe("DeckPanel", () => {
     expect(posts(p).some((m) => m.type === "deck:runs")).toBe(true);
   });
 
+  it("does not look up Jira for a run with no ticket", async () => {
+    h.runs = [mkRun({ key: "explore-retry-logic", url: "" })];
+    show(true);
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    // The key is synthetic — every lookup 404s, logs, and returns null anyway.
+    expect(h.getStatus).not.toHaveBeenCalled();
+  });
+
+  it("still looks up Jira for a tracked run sharing the board with an untracked one", async () => {
+    h.runs = [mkRun(), mkRun({ key: "explore-retry-logic", url: "" })];
+    show(true);
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    // Asserted by argument, not by count: the constructor's unawaited first refresh
+    // races this one, and whether the second finds a warm jiraCache depends on
+    // microtask ordering. Which keys are looked up at all is the actual contract.
+    expect(h.getStatus).toHaveBeenCalledWith("ASM-1");
+    expect(h.getStatus).not.toHaveBeenCalledWith("explore-retry-logic");
+  });
+
+  it("hands an untracked run an empty PR map even when the store has entries for its key", async () => {
+    // A stale prfacts file left by an earlier version must not render: the PR it
+    // names was matched off the repo's default branch and belongs to another task.
+    h.prEntries = { svc: { facts: null, fetchedAt: Date.now() } };
+    h.runs = [mkRun({ key: "explore-retry-logic", url: "" })];
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    const prs = h.buildRunStatus.mock.calls.at(-1)![6];
+    expect(prs).toEqual({});
+  });
+
   it("opens an external url via the host (Open in Jira)", async () => {
     show();
     await lastPanel()._fire({ type: "openExternal", url: "https://jira/ASM-1" });
@@ -374,6 +407,19 @@ describe("DeckPanel PR facts", () => {
     h.runs = [mkRun({ repos: [{ name: "svc", path: "/r/svc", isGit: false, branch: "b" }] })];
     await showAndWarm();
     expect(h.prFetch).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch a PR for a run with no ticket", async () => {
+    h.runs = [mkRun({ key: "explore-retry-logic", url: "" })];
+    await showAndWarm();
+    expect(h.prFetch).not.toHaveBeenCalled();
+  });
+
+  it("fetches the tracked run's PR and skips the untracked one on the same board", async () => {
+    h.runs = [mkRun(), mkRun({ key: "explore-retry-logic", url: "", repos: [{ name: "other", path: "/r/other", isGit: true, branch: "master" }] })];
+    await showAndWarm();
+    expect(h.prFetch).toHaveBeenCalledTimes(1);
+    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "ASM-1");
   });
 
   it("does not let an in-flight fetch resurrect a forgotten run's cache file", async () => {

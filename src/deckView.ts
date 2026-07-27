@@ -12,7 +12,7 @@ import { openInEditor } from "./engine/workspace";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
-import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, Run, RunStatus } from "./types";
+import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, Run, RunStatus, isTicketRun } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
@@ -179,8 +179,13 @@ export class DeckPanel {
     const openIdentities = new Set(readLiveWindows(defaultWindowsDir()).map((w) => w.identity));
     const out: RunStatus[] = [];
     for (const run of runs) {
-      const jira = authed ? await this.jiraStatus(run.key) : null;
-      const stored = this.prFacts ? readPrEntries(defaultPrFactsDir(), run.key) : {};
+      // A session with no ticket has nothing to look up. Its key is synthetic, so
+      // every Jira call 404s; and it has no branch we named, so `gh pr list
+      // --head <default-branch>` matches whatever PR was last opened *from* that
+      // branch — somebody else's, rendered on this card as if it were the task's.
+      const tracked = isTicketRun(run);
+      const jira = authed && tracked ? await this.jiraStatus(run.key) : null;
+      const stored = this.prFacts && tracked ? readPrEntries(defaultPrFactsDir(), run.key) : {};
       // Drop entries for repos that have left the run — re-taking a task with a
       // different repo selection can leave one behind. It is never re-staled
       // (only repos in run.repos are checked below), yet an orphan would still
@@ -189,7 +194,7 @@ export class DeckPanel {
       const prs: PrEntryMap = Object.fromEntries(
         run.repos.filter((r) => stored[r.name]).map((r) => [r.name, stored[r.name]]),
       );
-      if (ghReady) {
+      if (ghReady && tracked) {
         const ttlMs = getConfig().prFactsTtlSeconds * 1000;
         for (const repo of run.repos) {
           // A non-git service (worktree.ts can hand one through unchanged) has no
