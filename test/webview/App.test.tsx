@@ -553,6 +553,33 @@ describe("toasts", () => {
     act(() => vi.advanceTimersByTime(4300));
     expect(screen.queryByText("Saved!")).not.toBeInTheDocument();
   });
+
+  it("keeps an error toast up past the auto-dismiss window", () => {
+    render(<App />);
+    host({ type: "toast", level: "error", message: "Couldn't update ASM-1. Resolution is required." });
+    act(() => vi.advanceTimersByTime(30000));
+    expect(screen.getByText("Couldn't update ASM-1. Resolution is required.")).toBeInTheDocument();
+  });
+
+  it("dismisses an error toast on click", () => {
+    render(<App />);
+    host({ type: "toast", level: "error", message: "Nope." });
+    fireEvent.click(screen.getByText("Nope."));
+    expect(screen.queryByText("Nope.")).not.toBeInTheDocument();
+  });
+
+  it("opens the ticket from the toast action without dismissing it", () => {
+    render(<App />);
+    host({
+      type: "toast",
+      level: "error",
+      message: "Couldn't update ASM-1.",
+      action: { label: "Open in Jira", url: "https://jira/browse/ASM-1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open in Jira" }));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/browse/ASM-1" });
+    expect(screen.getByText("Couldn't update ASM-1.")).toBeInTheDocument();
+  });
 });
 
 describe("task card actions", () => {

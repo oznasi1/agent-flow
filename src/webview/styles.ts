@@ -269,6 +269,12 @@ export const CSS = `
   .toast--error .toast-ico   { color: var(--vscode-errorForeground, #f85149); }
   .toast--info .toast-ico    { color: var(--vscode-focusBorder, #4daafc); }
   .toast-msg { flex: 1; }
+  .toast-action { flex: none; align-self: flex-start; cursor: pointer; font-size: 11px;
+    padding: 2px 8px; border-radius: 4px; white-space: nowrap;
+    background: var(--vscode-button-secondaryBackground, transparent);
+    color: var(--vscode-button-secondaryForeground, var(--vscode-textLink-foreground));
+    border: 1px solid var(--vscode-button-border, var(--vscode-panel-border)); }
+  .toast-action:hover { background: var(--vscode-button-secondaryHoverBackground, var(--vscode-list-hoverBackground)); }
 
   .card-check { flex: 0 0 auto; margin: 0 6px 0 0; cursor: pointer;
     accent-color: var(--vscode-button-background); }
