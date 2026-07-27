@@ -177,14 +177,21 @@ export class DeckPanel {
     const authed = await this.auth.isAuthenticated();
     const ghReady = this.ghReady();
     const openIdentities = new Set(readLiveWindows(defaultWindowsDir()).map((w) => w.identity));
+    // One round trip per run, all at once. Serially this was the bulk of a cold
+    // refresh, and every Forget waits on the whole pass before its card leaves the
+    // board. jiraStatus owns its own errors, so this can never reject; run keys are
+    // unique, so concurrent calls never duplicate a cache miss.
+    const jiras = await Promise.all(
+      runs.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(run.key) : null)),
+    );
     const out: RunStatus[] = [];
-    for (const run of runs) {
+    for (const [i, run] of runs.entries()) {
       // A session with no ticket has nothing to look up. Its key is synthetic, so
       // every Jira call 404s; and it has no branch we named, so `gh pr list
       // --head <default-branch>` matches whatever PR was last opened *from* that
       // branch — somebody else's, rendered on this card as if it were the task's.
       const tracked = isTicketRun(run);
-      const jira = authed && tracked ? await this.jiraStatus(run.key) : null;
+      const jira = jiras[i];
       const stored = this.prFacts && tracked ? readPrEntries(defaultPrFactsDir(), run.key) : {};
       // Drop entries for repos that have left the run — re-taking a task with a
       // different repo selection can leave one behind. It is never re-staled
@@ -225,17 +232,28 @@ export class DeckPanel {
     }
   }
 
+  /** Refresh with the webview's busy indicator on. Every inbound message that
+   * awaits a refresh goes through here: Forget in particular waits on a full
+   * rebuild, and used to do it with nothing on screen to say so. `finally` so a
+   * refresh that ever does throw cannot strand the spinner. */
+  private async refreshBusy(): Promise<void> {
+    this.post({ type: "deck:loading", loading: true });
+    try {
+      await this.refresh();
+    } finally {
+      this.post({ type: "deck:loading", loading: false });
+    }
+  }
+
   private async onMessage(m: InboundMessage): Promise<void> {
     switch (m.type) {
       case "deck:ready":
       case "deck:refresh":
-        this.post({ type: "deck:loading", loading: true });
-        await this.refresh();
-        this.post({ type: "deck:loading", loading: false });
+        await this.refreshBusy();
         break;
       case "deck:setLive":
         this.liveSignal = m.on;
-        await this.refresh();
+        await this.refreshBusy();
         break;
       case "deck:setPrFacts":
         this.prFacts = m.on;
@@ -244,7 +262,7 @@ export class DeckPanel {
           this.ghGap = undefined;
           this.ghProbe = null;
         }
-        await this.refresh();
+        await this.refreshBusy();
         break;
       case "deck:inspect":
         await this.inspect(m.key, m.action, m.repo);
@@ -255,7 +273,7 @@ export class DeckPanel {
         // Any fetch already in flight for this key belongs to the incarnation we
         // just deleted — bump the epoch so its write is a no-op if it lands late.
         this.prEpoch.set(m.key, (this.prEpoch.get(m.key) ?? 0) + 1);
-        await this.refresh();
+        await this.refreshBusy();
         break;
       case "openExternal": {
         const u = vscode.Uri.parse(m.url);

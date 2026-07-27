@@ -324,6 +324,49 @@ describe("DeckPanel", () => {
     p.visible = true;
     expect(() => p._fireViewState()).not.toThrow();
   });
+
+  it("brackets a forget with the busy indicator", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:forget", key: "ASM-1" });
+    const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
+    expect(loads).toContain(true);
+    expect(loads.at(-1)).toBe(false);
+  });
+
+  it("brackets a prFacts toggle with the busy indicator", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:setPrFacts", on: false });
+    const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
+    expect(loads).toContain(true);
+    expect(loads.at(-1)).toBe(false);
+  });
+
+  it("issues every run's Jira lookup at once rather than one at a time", async () => {
+    // Serially, a cold board of six runs costs six round trips before anything
+    // paints — and Forget waits on that whole pass.
+    h.runs = [mkRun(), mkRun({ key: "ASM-2", url: "https://jira/ASM-2" }), mkRun({ key: "ASM-3", url: "https://jira/ASM-3" })];
+    let inFlight = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    h.getStatus.mockImplementation(async () => {
+      inFlight++;
+      await gate;
+      return { status: "In Review", category: "indeterminate" };
+    });
+    // show() alone: the constructor starts polling with an unawaited refresh, which
+    // is the pass under test. Firing a second deck:refresh on top would put six
+    // lookups in flight (nothing has resolved, so nothing is cached yet) and the
+    // count below would not distinguish serial from parallel.
+    show(true);
+    await new Promise<void>((r) => setTimeout(r, 0));
+    expect(inFlight).toBe(3); // all three started before any resolved
+    release();
+    // Let the released pass finish here rather than leaking pending Jira work into
+    // whichever test runs next.
+    await new Promise<void>((r) => setTimeout(r, 0));
+  });
 });
 
 describe("DeckPanel PR facts", () => {
