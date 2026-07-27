@@ -25,13 +25,23 @@ export function readPrEntries(dir: string, key: string): PrEntryMap {
 }
 
 /** Merge one repo's entry into the run's file. Best-effort — a cache write must
- * never fail a refresh. */
+ * never fail a refresh. Uses atomic write (temp + rename) so a failed write
+ * never truncates or evicts unrelated repos' entries. */
 export function writePrEntry(dir: string, key: string, repo: string, entry: PrEntry): void {
   try {
     const all = readPrEntries(dir, key);
     all[repo] = entry;
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(fileFor(dir, key), JSON.stringify(all, null, 2) + "\n");
+    // Write to a temp file first, then atomically rename. On POSIX and
+    // same-volume on Windows, rename is atomic: a failed write leaves the
+    // previous file completely untouched.
+    const target = fileFor(dir, key);
+    const tempFile = path.join(
+      dir,
+      `.${key}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+    );
+    fs.writeFileSync(tempFile, JSON.stringify(all, null, 2) + "\n");
+    fs.renameSync(tempFile, target);
   } catch {
     /* the cache is a convenience — never fail a caller over it */
   }

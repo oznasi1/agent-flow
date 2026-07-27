@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -68,6 +68,34 @@ describe("readPrEntries / writePrEntry", () => {
     const nested = path.join(dir, "deep", "deeper");
     writePrEntry(nested, "ASM-1", "api", { facts: null, fetchedAt: 1 });
     expect(readPrEntries(nested, "ASM-1").api.fetchedAt).toBe(1);
+  });
+
+  it("uses atomic write (temp + rename) so successful writes clean up temp files", () => {
+    // Pre-populate with two repos
+    writePrEntry(dir, "ASM-1", "api", { facts: null, fetchedAt: 1000 });
+    writePrEntry(dir, "ASM-1", "web", { facts: null, fetchedAt: 2000 });
+
+    // Verify both are cached
+    let entries = readPrEntries(dir, "ASM-1");
+    expect(Object.keys(entries).sort()).toEqual(["api", "web"]);
+
+    // After successful writes, no temp files should be left in the directory.
+    // Temp files match the pattern `.{key}.*.tmp` — if they exist, it indicates
+    // either a failed rename or that the atomic write pattern isn't used.
+    const files = fs.readdirSync(dir);
+    const tempFiles = files.filter((f) => f.startsWith(".ASM-1.") && f.endsWith(".tmp"));
+    expect(tempFiles).toEqual([]);
+
+    // Update a repo and verify temp files are still cleaned up
+    writePrEntry(dir, "ASM-1", "api", { facts: null, fetchedAt: 5000 });
+    const filesAfter = fs.readdirSync(dir);
+    const tempFilesAfter = filesAfter.filter((f) => f.startsWith(".ASM-1.") && f.endsWith(".tmp"));
+    expect(tempFilesAfter).toEqual([]);
+
+    // Verify the write succeeded
+    entries = readPrEntries(dir, "ASM-1");
+    expect(entries.api.fetchedAt).toBe(5000);
+    expect(entries.web.fetchedAt).toBe(2000);
   });
 });
 
