@@ -157,7 +157,11 @@ marketplaces show up here on the next scan.
 - An **Atlassian API token** for your Jira Cloud account
   ([create one](https://id.atlassian.com/manage-profile/security/api-tokens)).
 - The **`gh` CLI**, signed in (`gh auth login`) — for the Deck's PR/CI state
-  (optional; without it the Deck falls back to git + Jira).
+  (optional; without it the Deck falls back to git + Jira). Found on your `PATH`
+  or in the usual install dirs (`/opt/homebrew/bin`, `/usr/local/bin`,
+  `/opt/local/bin`, `~/.local/bin`, `~/bin`) — the editor does not always hand
+  extensions your shell's `PATH`. If the Deck still says gh is missing, the
+  **Agent Flow** output channel logs the binary it tried and what it said.
 
 ## Data & privacy
 

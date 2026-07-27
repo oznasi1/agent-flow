@@ -313,7 +313,7 @@ describe("DeckApp PR-facts chrome", () => {
 
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, ghNote: "gh not found or not signed in — PR facts off" });
-    expect(screen.getByText(/gh not found/)).toBeTruthy();
+    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, ghNote: "gh CLI not found — PR facts off" });
+    expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 });
