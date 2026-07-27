@@ -11,6 +11,18 @@ const h = vi.hoisted(() => ({
   buildRunStatus: vi.fn(),
   removeRun: vi.fn(),
   getStatus: vi.fn(async (_k: string) => ({ status: "In Review", category: "indeterminate" })),
+  prEntries: {} as Record<string, unknown>,
+  writePrEntry: vi.fn(),
+  removePrEntries: vi.fn(),
+  // Typed as the FetchResult union (not narrowed to `{ ok: true }` via inference)
+  // so later tests can `mockResolvedValue({ ok: false })` without a type error.
+  prFetch: vi.fn(
+    async (_p: string, _b: string | null, _k: string): Promise<{ ok: true; facts: null } | { ok: false }> =>
+      ({ ok: true, facts: null }),
+  ),
+  ghAvailable: vi.fn(async () => true),
+  prFacts: true as boolean,
+  ttlSeconds: 120,
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -23,7 +35,21 @@ vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: () => [],
   defaultWindowsDir: () => "/windows",
 }));
-vi.mock("../../src/config", () => ({ getConfig: () => ({ baseUrl: "https://jira", project: "ASM" }) }));
+vi.mock("../../src/engine/pr/store", () => ({
+  defaultPrFactsDir: () => "/prfacts",
+  readPrEntries: () => h.prEntries,
+  writePrEntry: h.writePrEntry,
+  removePrEntries: h.removePrEntries,
+  // Exercise the real staleness rule rather than restating it here.
+  isStale: (e: { fetchedAt: number } | undefined, ttl: number, now: number) => !e || now - e.fetchedAt >= ttl,
+}));
+vi.mock("../../src/engine/pr/provider", () => ({
+  ghAvailable: h.ghAvailable,
+  GhProvider: class { fetch = h.prFetch; },
+}));
+vi.mock("../../src/config", () => ({
+  getConfig: () => ({ baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds }),
+}));
 vi.mock("../../src/jira/client", () => ({
   JiraAuthError: class JiraAuthError extends Error {},
   JiraClient: class { getStatus = h.getStatus; },
@@ -51,6 +77,13 @@ beforeEach(() => {
   h.buildRunStatus.mockReset().mockImplementation((run: Run) => statusFor(run));
   h.removeRun.mockClear();
   h.getStatus.mockClear().mockResolvedValue({ status: "In Review", category: "indeterminate" });
+  h.prEntries = {};
+  h.prFacts = true;
+  h.ttlSeconds = 120;
+  h.writePrEntry.mockClear();
+  h.removePrEntries.mockClear();
+  h.prFetch.mockClear().mockResolvedValue({ ok: true, facts: null });
+  h.ghAvailable.mockClear().mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -92,7 +125,7 @@ describe("DeckPanel", () => {
     await p._fire({ type: "deck:setLive", on: false });
     const runsPost = posts(p).reverse().find((m) => m.type === "deck:runs");
     expect(runsPost.liveSignal).toBe(false);
-    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.anything(), null, expect.any(String), expect.any(Number), false, expect.any(Set));
+    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.anything(), null, expect.any(String), expect.any(Number), false, expect.any(Set), expect.anything());
   });
 
   it("inspect open re-opens the repo path via the editor", async () => {
@@ -183,7 +216,7 @@ describe("DeckPanel", () => {
     expect(h.getStatus).toHaveBeenCalledWith("ASM-1");
     expect(h.buildRunStatus).toHaveBeenCalledWith(
       expect.anything(), { status: "In Review", category: "indeterminate" },
-      expect.any(String), expect.any(Number), true, expect.any(Set),
+      expect.any(String), expect.any(Number), true, expect.any(Set), expect.anything(),
     );
   });
 
@@ -192,7 +225,7 @@ describe("DeckPanel", () => {
     show(true);
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });
-    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.anything(), null, expect.any(String), expect.any(Number), true, expect.any(Set));
+    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.anything(), null, expect.any(String), expect.any(Number), true, expect.any(Set), expect.anything());
   });
 
   it("keeps rendering when a Jira lookup fails for another reason", async () => {
@@ -210,5 +243,98 @@ describe("DeckPanel", () => {
     expect(() => p._fireViewState()).not.toThrow();
     p.visible = true;
     expect(() => p._fireViewState()).not.toThrow();
+  });
+});
+
+describe("DeckPanel PR facts", () => {
+  const settled = () => new Promise<void>((r) => setTimeout(r, 0));
+
+  it("passes cached PR entries to the status builder", async () => {
+    h.prEntries = { svc: { facts: null, fetchedAt: Date.now() } };
+    show();
+    await settled();
+    expect(h.buildRunStatus).toHaveBeenCalledWith(
+      // `show()` defaults to unauthenticated, so jira is null here — `expect.anything()`
+      // excludes null/undefined, so this position must match the literal value.
+      expect.anything(), null, expect.any(String), expect.any(Number),
+      expect.any(Boolean), expect.any(Set), h.prEntries,
+    );
+  });
+
+  it("does not await the fetch — a tick posts runs before gh returns", async () => {
+    let release!: () => void;
+    h.prFetch.mockImplementation(() => new Promise((res) => { release = () => res({ ok: true, facts: null }); }));
+    show();
+    await settled();
+    expect(posts(lastPanel()).some((m) => m.type === "deck:runs")).toBe(true);
+    release();
+  });
+
+  it("fetches a repo with no cached entry", async () => {
+    show();
+    await settled();
+    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "ASM-1");
+    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "ASM-1", "svc", expect.objectContaining({ facts: null, fetchedAt: expect.any(Number) }));
+  });
+
+  it("does not refetch an entry inside its TTL", async () => {
+    h.prEntries = { svc: { facts: null, fetchedAt: Date.now() } };
+    show();
+    await settled();
+    expect(h.prFetch).not.toHaveBeenCalled();
+  });
+
+  it("refetches an entry past its TTL", async () => {
+    h.prEntries = { svc: { facts: null, fetchedAt: Date.now() - 200_000 } };
+    show();
+    await settled();
+    expect(h.prFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the previous facts and flags an error when a fetch fails", async () => {
+    const stale = { number: 5, url: "u", title: "t", state: "OPEN", isDraft: false, ci: { passing: 0, pending: 0, failing: [] }, review: "none", unresolved: null, mergeable: "clean", ciAdvisory: false };
+    h.prEntries = { svc: { facts: stale, fetchedAt: Date.now() - 200_000 } };
+    h.prFetch.mockResolvedValue({ ok: false });
+    show();
+    await settled();
+    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "ASM-1", "svc", expect.objectContaining({ facts: stale, error: true }));
+  });
+
+  it("fetches nothing when prFacts is off, and reports it to the webview", async () => {
+    h.prFacts = false;
+    show();
+    await settled();
+    expect(h.prFetch).not.toHaveBeenCalled();
+    expect(posts(lastPanel()).find((m) => m.type === "deck:runs")).toMatchObject({ prFacts: false });
+  });
+
+  it("fetches nothing and notes why when gh is unavailable", async () => {
+    h.ghAvailable.mockResolvedValue(false);
+    show();
+    await settled();
+    expect(h.prFetch).not.toHaveBeenCalled();
+    expect(posts(lastPanel()).find((m) => m.type === "deck:runs")!.ghNote).toMatch(/gh/i);
+  });
+
+  it("toggles prFacts from the webview", async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    await p._fire({ type: "deck:setPrFacts", on: false });
+    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)).toMatchObject({ prFacts: false });
+  });
+
+  it("forgets a run's PR facts alongside its run record", async () => {
+    show();
+    await settled();
+    await lastPanel()._fire({ type: "deck:forget", key: "ASM-1" });
+    expect(h.removePrEntries).toHaveBeenCalledWith("/prfacts", "ASM-1");
+  });
+
+  it("skips repos with no branch and no key match rather than throwing", async () => {
+    h.runs = [mkRun({ repos: [{ name: "svc", path: "/r/svc", isGit: true }] })];
+    show();
+    await settled();
+    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", null, "ASM-1");
   });
 });

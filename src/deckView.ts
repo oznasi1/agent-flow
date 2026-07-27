@@ -9,7 +9,10 @@ import { readRuns, defaultRunsDir, removeRun } from "./engine/runs";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { openInEditor } from "./engine/workspace";
-import { InboundMessage, OutboundMessage, Run, RunStatus } from "./types";
+import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
+import { GhProvider, PrProvider, ghAvailable } from "./engine/pr/provider";
+import { RefreshQueue } from "./engine/pr/queue";
+import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, Run, RunStatus } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
@@ -23,6 +26,11 @@ export class DeckPanel {
   private timer: ReturnType<typeof setInterval> | undefined;
   private liveSignal = true;
   private readonly jiraCache = new Map<string, { at: number; status: string | null; category: string | null }>();
+  private prFacts = true;
+  private readonly prQueue = new RefreshQueue();
+  private readonly pr: PrProvider = new GhProvider();
+  /** null until probed; false disables PR facts with a footer note. */
+  private ghOk: boolean | null = null;
 
   static show(context: vscode.ExtensionContext, auth: JiraAuth, log: (m: string) => void): void {
     if (DeckPanel.current) {
@@ -45,6 +53,10 @@ export class DeckPanel {
     private readonly log: (m: string) => void,
   ) {
     this.panel = panel;
+    // Seed from the persisted setting; after this, only the webview's
+    // deck:setPrFacts toggle changes it — a later refresh must not stomp the
+    // user's in-session toggle by re-reading config on every tick.
+    this.prFacts = getConfig().prFacts;
     this.panel.webview.html = this.html(this.panel.webview);
     this.panel.webview.onDidReceiveMessage((m: InboundMessage) => this.onMessage(m), null, this.disposables);
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
@@ -78,6 +90,27 @@ export class DeckPanel {
   private stopPolling(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    this.prQueue.clear();
+  }
+
+  /** Probe `gh` once per panel: PR facts are worthless without it, and a missing
+   * binary is a config fact, not a per-tick failure. */
+  private async ghReady(): Promise<boolean> {
+    if (!this.prFacts) return false;
+    if (this.ghOk === null) this.ghOk = await ghAvailable();
+    return this.ghOk;
+  }
+
+  /** Queue a stale repo's refresh. Deliberately not awaited by the caller: a
+   * hanging `gh` must never stall the git and transcript reads. */
+  private enqueuePr(key: string, repo: { name: string; path: string }, branch: string | null, previous?: PrEntry): void {
+    this.prQueue.push(repo.path, async () => {
+      const res = await this.pr.fetch(repo.path, branch, key);
+      const entry: PrEntry = res.ok
+        ? { facts: res.facts, fetchedAt: Date.now() }
+        : { facts: previous?.facts ?? null, fetchedAt: Date.now(), error: true };
+      writePrEntry(defaultPrFactsDir(), key, repo.name, entry);
+    });
   }
 
   private async jiraStatus(key: string): Promise<{ status: string | null; category: string | null } | null> {
@@ -99,11 +132,21 @@ export class DeckPanel {
     const projectsRoot = path.join(os.homedir(), ".claude", "projects");
     const now = Date.now();
     const authed = await this.auth.isAuthenticated();
+    const ghReady = await this.ghReady();
     const openIdentities = new Set(readLiveWindows(defaultWindowsDir()).map((w) => w.identity));
     const out: RunStatus[] = [];
     for (const run of runs) {
       const jira = authed ? await this.jiraStatus(run.key) : null;
-      out.push(buildRunStatus(run, jira, projectsRoot, now, this.liveSignal, openIdentities));
+      const prs: PrEntryMap = this.prFacts ? readPrEntries(defaultPrFactsDir(), run.key) : {};
+      if (ghReady) {
+        const ttlMs = getConfig().prFactsTtlSeconds * 1000;
+        for (const repo of run.repos) {
+          if (isStale(prs[repo.name], ttlMs, now)) {
+            this.enqueuePr(run.key, repo, repo.branch ?? null, prs[repo.name]);
+          }
+        }
+      }
+      out.push(buildRunStatus(run, jira, projectsRoot, now, this.liveSignal, openIdentities, prs));
     }
     return out;
   }
@@ -111,7 +154,13 @@ export class DeckPanel {
   private async refresh(): Promise<void> {
     try {
       const runs = await this.buildAll();
-      this.post({ type: "deck:runs", runs, liveSignal: this.liveSignal });
+      this.post({
+        type: "deck:runs",
+        runs,
+        liveSignal: this.liveSignal,
+        prFacts: this.prFacts,
+        ghNote: this.prFacts && this.ghOk === false ? "gh not found or not signed in — PR facts off" : null,
+      });
     } catch (e) {
       this.log(`deck: refresh failed: ${e}`);
     }
@@ -129,11 +178,17 @@ export class DeckPanel {
         this.liveSignal = m.on;
         await this.refresh();
         break;
+      case "deck:setPrFacts":
+        this.prFacts = m.on;
+        if (m.on) this.ghOk = null; // re-probe: the user may have run `gh auth login`
+        await this.refresh();
+        break;
       case "deck:inspect":
         await this.inspect(m.key, m.action, m.repo);
         break;
       case "deck:forget":
         removeRun(defaultRunsDir(), m.key);
+        removePrEntries(defaultPrFactsDir(), m.key);
         await this.refresh();
         break;
       case "openExternal":

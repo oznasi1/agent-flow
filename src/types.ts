@@ -209,6 +209,7 @@ export type InboundMessage =
   | { type: "deck:ready" }
   | { type: "deck:refresh" }
   | { type: "deck:setLive"; on: boolean }
+  | { type: "deck:setPrFacts"; on: boolean }
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
   | { type: "deck:forget"; key: string }
   // The Marketplace (separate webview panel)
@@ -235,7 +236,7 @@ export type OutboundMessage =
   | { type: "error"; message: string; canRetry: boolean }
   | { type: "loading"; loading: boolean }
   // The Deck
-  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean }
+  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; ghNote: string | null }
   | { type: "deck:loading"; loading: boolean }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
