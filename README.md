@@ -63,6 +63,16 @@ to git + Jira only. **Open** focuses the window if it's already open (never a du
 opens it fresh otherwise; **Diff** shows the working diff; **⋯** offers *Open in Jira* and
 *Forget*.
 
+Each card also carries the **PR state** of every repo it touches, read from GitHub
+with the `gh` CLI: the PR number, CI (failing check names link to their runs, or a
+passing count), the review decision with any unresolved-thread count, and
+mergeability. A PR that needs a human decision — failing required checks,
+requested changes, or a conflict — pulls its card into **Needs you**, even while
+the agent is still working, because an agent can't know CI broke until you tell
+it. A merged PR moves the card to **Done** and is the only thing that makes a card
+say *merged*. Turn it off with the **PR facts** toggle or `agentFlow.prFacts`, and
+cards fall back to the git + Jira backbone.
+
 ### The Marketplace — browse your skills, commands & agents
 
 The **Marketplace** (open it with the puzzle-piece (`$(extensions)`) button beside the
@@ -134,11 +144,17 @@ The panel is **read-only and offline** — it never writes to `~/.claude`, never
   the task brief is the guaranteed fallback).
 - An **Atlassian API token** for your Jira Cloud account
   ([create one](https://id.atlassian.com/manage-profile/security/api-tokens)).
+- The **`gh` CLI**, signed in (`gh auth login`) — for the Deck's PR/CI state
+  (optional; without it the Deck falls back to git + Jira).
 
 ## Data & privacy
 
-Agent Flow talks to **your** Jira Cloud site and reads your **local** repo checkouts —
-nothing is sent to any third-party service. Your Jira credentials are stored in VS Code
+Agent Flow talks to **your** Jira Cloud site, reads your **local** repo checkouts,
+and — when `agentFlow.prFacts` is on — reads your **own** GitHub through your
+existing `gh` login. Nothing is sent to any service that isn't already yours, and
+Agent Flow stores no GitHub credentials of its own: PR reads go through `gh`, so
+they inherit whatever host, SSO and token your CLI already has. All GitHub access
+is **read-only** — Agent Flow never merges, comments, or pushes. Your Jira credentials are stored in VS Code
 **SecretStorage** (encrypted), never in `settings.json`. Reads are the default; the only
 Jira **writes** are the optional status changes you trigger from a card (which stamp the
 provenance label). Task briefs are written to a git-excluded `.pick-task/` directory in
@@ -159,6 +175,8 @@ each repo, so they never get committed.
 | `agentFlow.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
 | `agentFlow.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
+| `agentFlow.prFacts` | `true` | Read each in-flight task's PR state from GitHub via the `gh` CLI and show it on the Deck's cards. |
+| `agentFlow.prFactsTtlSeconds` | `120` | How stale a cached PR fact may be before the Deck re-fetches it (minimum 30). Only fetched while the Deck is open. |
 | `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on a card. |
 | `agentFlow.prReviewAutoFix` | `true` | After the PR-review agent assesses the PR, let it implement the requested changes (off = assess only). |
 | `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
