@@ -513,7 +513,7 @@ export function App(): JSX.Element {
           <button className="batch-clear" onClick={clearBatch}>Clear selection</button>
           <button
             className="batch-launch"
-            title={`Open ${selectedVisible.length} task(s) across ${batchRepos.join(", ")}, each with its own Claude Code session`}
+            title={`Open ${selectedVisible.length} ${selectedVisible.length === 1 ? "task" : "tasks"} across ${batchRepos.join(", ")}, each in its own worktree with its own Claude Code session`}
             onClick={() => send({ type: "takeBatch", keys: selectedVisible.map((t) => t.key), repos: batchRepos })}
           >
             <PlayIcon /> Launch in parallel

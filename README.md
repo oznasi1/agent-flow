@@ -42,11 +42,16 @@ orchestrate, not ready to set up.
   the task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
   for your fixes — then, by default, starts implementing the requested changes (toggle with
   `agentFlow.prReviewAutoFix`).
-- **Launch in parallel** — narrow the repo filter to a single repo and a checkbox
-  appears on each task. Tick several, then **Launch in parallel**: each task opens
-  in its own git worktree (its own branch) in its own window, with its own Claude
-  Code session pre-seeded — several agents working the same repo at once. Batches
-  larger than `agentFlow.batchLaunchConfirmThreshold` (default 6) ask first.
+- **Launch in parallel** — filter the repo lens to one repo **or several** and a checkbox
+  appears on each task. Tick a few, then **Launch in parallel**: each task gets its own git
+  worktree (its own branch) in whichever of the filtered repos it's inferred to touch — or
+  in all of them, when the ticket names none, so no task launches with no repo. You're
+  asked once where the batch goes (the same destinations a single **Take** offers), and for
+  a new window, how to lay it out: **separate windows**, one per task, or **one shared
+  window** holding every task's worktrees with a Claude Code session seeded per task,
+  stacked as tabs in one Claude group in the order you picked them. Every other destination
+  *is* a single window, so it goes straight to the shared layout. Batches larger than
+  `agentFlow.batchLaunchConfirmThreshold` (default 6) ask first.
 
 ### The Deck — your in-flight board
 
@@ -174,9 +179,12 @@ panel is pre-filled with `/remote-control <KEY>` instead of the task prompt, and
 prompt goes to your clipboard: press Enter to connect the session, then paste and press
 Enter to start the task. The Jira key names the remote session, so several are tellable
 apart on claude.ai. It takes two steps because Claude Code can't run a slash command and a
-prompt in one submission. Launches that open more than one window — a parallel batch, or a
-per-window Take across several repos — keep the normal single-Enter seeding and say so,
-since one clipboard can't carry a different prompt for each window.
+prompt in one submission. It applies only where a single clipboard can carry the prompt: a
+per-window Take across several repos keeps the normal single-Enter seeding, since one
+clipboard can't hold a different prompt for each window — and so does any launch into a
+**shared window**, batch or single task, because each session there is seeded from its own
+plan file with no clipboard paste to attach to. Either way the toast says Remote Control
+was skipped, so you're never left waiting for a `/remote-control` prompt.
 
 ### Where a task opens
 

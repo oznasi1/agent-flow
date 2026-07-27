@@ -395,6 +395,18 @@ describe("multi-select & parallel launch", () => {
     expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["ASM-1"], repos: ["api"] });
   });
 
+  it("titles the launch button with a properly pluralised task count", () => {
+    render(<App />);
+    authed();
+    apiPool();
+    selectRepo("api");
+    fireEvent.click(checks()[0]);
+    const launch = () => screen.getByRole("button", { name: /Launch in parallel/i });
+    expect(launch().title).toContain("Open 1 task across api");
+    fireEvent.click(checks()[1]);
+    expect(launch().title).toContain("Open 2 tasks across api");
+  });
+
   it("sends every selected repo when two are filtered", () => {
     render(<App />);
     authed();
