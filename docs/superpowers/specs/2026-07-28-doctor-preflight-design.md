@@ -72,7 +72,7 @@ which checks config, data dir, daemon state, `git` and `tmux` in one command.
 - **`gh` is `skip`, not `fail`, when `prFacts` is off.** Reporting a problem the
   user has deliberately turned off is noise.
 
-## Almost all of it already exists
+## What already exists, and what's new
 
 - `probeGh()` in [`engine/pr/provider.ts`](../../../src/engine/pr/provider.ts)
   returns `GhGap | null` with kinds `missing` / `signed-out`, and `locateGh`
