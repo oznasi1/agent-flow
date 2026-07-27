@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.33] — 2026-07-27
+
+### Fixed
+
+- **The Deck said `gh` was missing when it wasn't.** PR facts stayed off with a
+  "gh not found or not signed in" note on windows where the editor had failed to
+  resolve your shell environment — the extension then only sees
+  `/usr/bin:/bin:/usr/sbin:/sbin`, which holds `git` but no Homebrew `gh`. The
+  Deck now looks for `gh` on `PATH` and in the usual install dirs, says which of
+  the two things is actually wrong, and logs the binary it tried with what that
+  binary said.
+
 ## [0.1.32] — 2026-07-27
 
 ### Added
