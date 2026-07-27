@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, RunStatus } from "../types";
+import { DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, RunStatus, isTicketRun } from "../types";
 
 let toastSeq = 0;
 
@@ -108,6 +108,13 @@ function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
   const col = COLUMNS.find((c) => c.id === r.column)!;
   const accent = `var(${col.varName})`;
   const sv = stateView(r, live);
+  // A ticketless run has no Jira issue behind it: the key is a local slug, and
+  // openExternal("") is a button that does nothing.
+  const tracked = isTicketRun(r.run);
+  // The short label is only honest for a real Explore session. isTicketRun keys off
+  // an empty url and never inspects the key, so anything else untracked keeps its
+  // key on the chip rather than being relabelled as something it is not.
+  const explore = r.run.key.startsWith("explore-");
   const [menuOpen, setMenuOpen] = React.useState(false);
   React.useEffect(() => {
     if (!menuOpen) return;
@@ -127,9 +134,13 @@ function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
           <span className={`sdot tone-${sv.tone} ${sv.tone === "working" ? "pulse" : ""}`} />
           {sv.text}
         </span>
-        <button className="key" title={`Open ${r.run.key} in Jira`} onClick={() => send({ type: "openExternal", url: r.run.url })}>
-          {r.run.key}
-        </button>
+        {tracked ? (
+          <button className="key" title={`Open ${r.run.key} in Jira`} onClick={() => send({ type: "openExternal", url: r.run.url })}>
+            {r.run.key}
+          </button>
+        ) : (
+          <span className="key untracked" title={r.run.key}>{explore ? "explore" : r.run.key}</span>
+        )}
       </div>
       <div className="c-title" title={r.run.summary}>{r.run.summary}</div>
 
@@ -160,7 +171,9 @@ function Card({ r, live }: { r: RunStatus; live: boolean }): JSX.Element {
             <button className="more" title="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>⋯</button>
             {menuOpen && (
               <div className="menu" onClick={(e) => e.stopPropagation()}>
-                <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "openExternal", url: r.run.url }); }}>Open in Jira</button>
+                {tracked && (
+                  <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "openExternal", url: r.run.url }); }}>Open in Jira</button>
+                )}
                 <button className="mi danger" onClick={() => { setMenuOpen(false); send({ type: "deck:forget", key: r.run.key }); }}>Forget</button>
               </div>
             )}

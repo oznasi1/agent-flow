@@ -178,6 +178,50 @@ describe("DeckApp", () => {
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
   });
 
+  const untracked = (over: Partial<RunStatus> = {}): RunStatus => {
+    const base = mkStatus();
+    return {
+      ...base,
+      run: { ...base.run, key: "explore-retry-logic", summary: "how the aggregator retries", url: "" },
+      jiraStatus: null,
+      jiraCategory: null,
+      ...over,
+    };
+  };
+
+  it("labels a ticketless run 'explore' rather than showing its synthetic key", () => {
+    render(<DeckApp />);
+    host(runsMsg([untracked()]));
+    expect(screen.getByText("explore")).toBeInTheDocument();
+    expect(screen.queryByText("explore-retry-logic")).not.toBeInTheDocument();
+    // The full key stays reachable on hover — it names the run in ~/.agentflow/runs.
+    expect(screen.getByTitle("explore-retry-logic")).toBeInTheDocument();
+  });
+
+  it("does not offer to open a ticketless run in Jira", () => {
+    render(<DeckApp />);
+    host(runsMsg([untracked()]));
+    fireEvent.click(screen.getByTitle(/more actions/i));
+    expect(screen.queryByText(/Open in Jira/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^Forget$/)).toBeInTheDocument();
+  });
+
+  it("keeps the Jira link on a tracked run", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByTitle(/Open ASM-1 in Jira/i));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+  });
+
+  it("keeps the key on an untracked run that is not an Explore session", () => {
+    // isTicketRun only checks the url, so a record with a real key and no url must
+    // not be relabelled "explore" — it keeps its identity, minus the dead Jira link.
+    render(<DeckApp />);
+    host(runsMsg([untracked({ run: { ...mkStatus().run, key: "ASM-9", url: "" } })]));
+    expect(screen.getByText("ASM-9")).toBeInTheDocument();
+    expect(screen.queryByText("explore")).not.toBeInTheDocument();
+  });
+
   it("shows a toast message from the host", () => {
     render(<DeckApp />);
     host({ type: "toast", level: "error", message: "Nothing to open for ASM-1." });
