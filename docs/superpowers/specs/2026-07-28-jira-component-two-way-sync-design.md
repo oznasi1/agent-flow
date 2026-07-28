@@ -166,16 +166,16 @@ Every write is optimistic. The chip changes at once and a toast confirms
 (`Added billing-service to ASM-1`, `Removed pricing-api from ASM-1`), naming the
 component's canonical spelling because that is what Jira received. On failure the
 chip snaps back per the `movedChip` table above and the error toast carries the
-existing "Open in Jira" action — when a write is refused for permissions, the ticket
-is the only place left to finish the job.
+existing "Open in Jira" action — when Jira rejects a component the panel believed in,
+the ticket is the only place left to resolve it.
 
 ## Error handling
 
 | failure | behavior |
 | --- | --- |
-| `JiraAuthError` on the write | existing path: re-gate the panel to sign-in |
-| `JiraApiError` on the write (403 no permission, 400 unknown component from a stale cache) | echo `ok: false` so the webview undoes the toggle, error toast with "Open in Jira" |
-| `listComponents` fetch fails | resolves `[]`; every chip is state C, no writes attempted, failure logged |
+| `JiraAuthError` on the write — which `JiraClient.request` raises for **every** 401 *and* 403, permission refusals included | echo `ok: false`, then the existing path: re-gate the panel to sign-in. Uniform with every other write in `tasksView.ts`; a refusal is indistinguishable from a dead token at this layer, and re-authenticating is the right first move either way |
+| `JiraApiError` on the write — a 400, e.g. an unknown component from a stale cache | echo `ok: false` so the webview undoes the toggle, error toast with "Open in Jira" |
+| `listComponents` fetch fails | resolves `[]`. An empty list is ambiguous — the project may define no components, or the read may have failed — so the failure must not be reported as "no component named X". Say the list couldn't be read instead |
 | provenance label stamp fails | logged, never surfaced — the component write already succeeded |
 
 ## Testing
