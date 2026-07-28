@@ -225,6 +225,18 @@ describe("ReviewStrip", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  // Requirement is "empty OR whitespace-only". Every test above uses `""` or a
+  // real word, so mutating the guard from `!body.trim()` to `!body` (whitespace
+  // is truthy) would pass all of them — this is the one that catches it.
+  it("disables comment and request-changes with a whitespace-only box", () => {
+    render(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true,
+      bodies: { "CyberJackGit/aws-ops#8491": "   " },
+    })} />);
+    expect((screen.getByText("Comment") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText("Request changes") as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("enables every verb once the box has text", () => {
     render(<ReviewStrip {...props({
       expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true,
@@ -261,6 +273,31 @@ describe("ReviewStrip", () => {
     expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByText("Comment") as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByText("Request changes") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("explains why comment is disabled with an empty box", () => {
+    render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true })} />);
+    expect((screen.getByText("Comment") as HTMLButtonElement).title).toMatch(/add a message/i);
+    expect((screen.getByText("Approve") as HTMLButtonElement).title).toBe("");
+  });
+
+  it("explains why every verb is disabled while a submit is in flight", () => {
+    render(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true,
+      bodies: { "CyberJackGit/aws-ops#8491": "lgtm" },
+      submitting: { "CyberJackGit/aws-ops#8491": true },
+    })} />);
+    expect((screen.getByText("Approve") as HTMLButtonElement).title).toMatch(/already in progress/i);
+    expect((screen.getByText("Comment") as HTMLButtonElement).title).toMatch(/already in progress/i);
+  });
+
+  it("gives approve no title once the box has text and nothing is in flight", () => {
+    render(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true,
+      bodies: { "CyberJackGit/aws-ops#8491": "lgtm" },
+    })} />);
+    expect((screen.getByText("Approve") as HTMLButtonElement).title).toBe("");
+    expect((screen.getByText("Comment") as HTMLButtonElement).title).toBe("");
   });
 
   // Keyed by id: a submit in flight for a DIFFERENT row must not disable this one —

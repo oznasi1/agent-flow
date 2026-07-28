@@ -232,6 +232,18 @@ export const DECK_CSS = `
     background: var(--c-done); }
   .card.attn .act.primary.live::before { background: currentColor; }
 
+  /* Disabled means two different things on the review strip's verbs (an empty
+     box, or a submit already in flight for the row) and previously looked
+     identical to enabled — every color/background/cursor above was a fixed
+     value, so the UA's own disabled rendering never had a chance to show
+     through. Each selector below matches one of the compound forms above
+     (plain, primary, primary-in-an-attn-card) so this wins regardless of the
+     theme or which card the button sits on. */
+  .act:disabled, .act:disabled:hover,
+  .act.primary:disabled, .act.primary:disabled:hover,
+  .card.attn .act.primary:disabled, .card.attn .act.primary:disabled:hover {
+    cursor: default; color: var(--dim); background: transparent; border-color: var(--hair); }
+
   .more-wrap { position: relative; display: inline-flex; }
   .more { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
     border: 0; background: none; border-radius: var(--r-ctl); color: var(--dim); cursor: pointer;

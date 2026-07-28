@@ -1175,12 +1175,35 @@ describe("DeckPanel review submit", () => {
     expect(h.reviewSubmit).not.toHaveBeenCalled();
   });
 
+  // The webview's disable-until-outcome relies on this exact message, at exactly
+  // these three exits — nothing else in the outbound protocol carries this id
+  // alongside a definite "it's over" signal (a toast doesn't carry an id at all,
+  // and deck:reviews posts on an unrelated 6s timer as well as on this outcome).
+  it("posts deck:reviewSubmitDone(cancelled) when the confirmation is declined", async () => {
+    h.reviewWrites = true;
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled",
+    });
+  });
+
   it("submits and toasts on success", async () => {
     h.reviewWrites = true;
     const p = await showAndWarm();
     await p._fire(submitMsg({ verb: "approve", body: "lgtm" }));
     expect(h.reviewSubmit).toHaveBeenCalledWith("CyberJackGit/aws-ops", 8491, "approve", "lgtm");
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(true);
+  });
+
+  it("posts deck:reviewSubmitDone(ok) on a successful submit", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve", body: "lgtm" }));
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "ok",
+    });
   });
 
   it("appends the provenance line to an agent-drafted body", async () => {
@@ -1217,6 +1240,16 @@ describe("DeckPanel review submit", () => {
     const toast = posts(p).find((m) => m.type === "toast" && m.level === "error");
     expect(toast.message).toContain("Can not approve your own pull request");
     expect(toast.action).toEqual({ label: "Open PR", url: "https://github.com/CyberJackGit/aws-ops/pull/8491" });
+  });
+
+  it("posts deck:reviewSubmitDone(failed) when the provider rejects the write", async () => {
+    h.reviewWrites = true;
+    h.reviewSubmit.mockResolvedValueOnce({ ok: false, message: "Can not approve your own pull request" });
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "failed",
+    });
   });
 
   // Beyond the brief's own list — the fourth of the gates now in submitReview

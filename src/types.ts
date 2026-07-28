@@ -326,6 +326,13 @@ export type OutboundMessage =
   // The agent's findings, read from the worktree on demand — not carried on
   // every deck:reviews post, since the strip re-posts on every poll tick.
   | { type: "deck:reviewDraft"; id: string; body: string }
+  // The explicit outcome of one deck:reviewSubmit, posted at all three exits of
+  // submitReview: a declined confirmation ("cancelled"), a provider rejection
+  // ("failed"), or a completed write ("ok"). Neither `toast` nor `deck:reviews`
+  // carries this id, and both can arrive for unrelated reasons while a submit is
+  // still in flight — this is the only message the webview can trust to release
+  // that row's disable, or to know a failure was *this* row's.
+  | { type: "deck:reviewSubmitDone"; id: string; outcome: "ok" | "failed" | "cancelled" }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
   | { type: "mkt:loading"; loading: boolean }

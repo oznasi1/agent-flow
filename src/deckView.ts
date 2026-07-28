@@ -384,7 +384,12 @@ export class DeckPanel {
         { modal: true },
         label,
       );
-      if (answer !== label) return;
+      if (answer !== label) {
+        // Distinct from a failure: nothing was attempted, so there is nothing to
+        // warn about — just release the row's disable.
+        this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+        return;
+      }
       const text = fromDraft && cfg.stampLabelOnWrite && body.trim()
         ? `${body.trim()}\n\n${REVIEW_PROVENANCE}`
         : body;
@@ -398,6 +403,7 @@ export class DeckPanel {
           message: `GitHub refused: ${res.message}`,
           action: { label: "Open PR", url: req.url },
         });
+        this.post({ type: "deck:reviewSubmitDone", id, outcome: "failed" });
         return;
       }
       this.toast("success", `${label} sent on ${req.repoName}#${req.number}.`);
@@ -416,6 +422,7 @@ export class DeckPanel {
         writeReviewCache(defaultReviewsFile(), this.reviewCache);
       }
       this.postReviews();
+      this.post({ type: "deck:reviewSubmitDone", id, outcome: "ok" });
     } finally {
       this.reviewSubmitsInFlight.delete(id);
     }

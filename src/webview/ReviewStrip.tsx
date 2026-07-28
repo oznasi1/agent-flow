@@ -133,13 +133,20 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
               <button type="button" className="act" onClick={() => onLoadDraft(r.id)}>Load agent's review</button>
             )}
             <button type="button" className="act" onClick={() => onOpen(r.url)}>Open PR</button>
-            {reviewWrites && (
-              <>
-                <button type="button" className="act" disabled={submitting} onClick={() => onSubmit(r.id, "approve")}>Approve</button>
-                <button type="button" className="act" disabled={submitting || !body.trim()} onClick={() => onSubmit(r.id, "comment")}>Comment</button>
-                <button type="button" className="act" disabled={submitting || !body.trim()} onClick={() => onSubmit(r.id, "request-changes")}>Request changes</button>
-              </>
-            )}
+            {reviewWrites && (() => {
+              // Disabled now looks disabled (see deckStyles.ts), but a dimmed
+              // button alone doesn't say *why* — the same reasoning "Review with
+              // agent" above already gives a title for its own disabled state.
+              const busyTitle = submitting ? "A submit for this PR is already in progress." : null;
+              const emptyTitle = !body.trim() ? "Add a message first." : null;
+              return (
+                <>
+                  <button type="button" className="act" disabled={submitting} title={busyTitle ?? undefined} onClick={() => onSubmit(r.id, "approve")}>Approve</button>
+                  <button type="button" className="act" disabled={submitting || !body.trim()} title={busyTitle ?? emptyTitle ?? undefined} onClick={() => onSubmit(r.id, "comment")}>Comment</button>
+                  <button type="button" className="act" disabled={submitting || !body.trim()} title={busyTitle ?? emptyTitle ?? undefined} onClick={() => onSubmit(r.id, "request-changes")}>Request changes</button>
+                </>
+              );
+            })()}
           </div>
           {/* GitHub does not dedupe reviews, and a submit killed by the host's 10s
               timeout may already have gone through — so a failure gets a line of its
