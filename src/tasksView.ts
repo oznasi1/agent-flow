@@ -500,13 +500,21 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     const client = this.client();
-    const name = resolveComponent(repo, await client.listComponents());
+    const components = await client.listComponents();
+    const name = resolveComponent(repo, components);
     if (!name) {
       // The webview only sends repos it believes are components, so this means the
-      // list moved under us (or never loaded). Nothing was written.
-      this.log(`setComponent ${key}: no ${cfg.project} component named ${repo}`);
+      // list moved under us — or never loaded. An empty list cannot tell those apart
+      // (listComponents swallows every failure, a rejected token included), so it
+      // must not be reported as "no such component". Nothing was written either way.
       echo(false);
-      this.toast("error", `${cfg.project} has no component named “${repo}”.`);
+      if (components.length === 0) {
+        this.log(`setComponent ${key}: ${cfg.project} component list unavailable`);
+        this.toast("error", `Couldn't read ${cfg.project}'s components from Jira. Check the connection and try again.`);
+      } else {
+        this.log(`setComponent ${key}: no ${cfg.project} component named ${repo}`);
+        this.toast("error", `${cfg.project} has no component named “${repo}”.`);
+      }
       return;
     }
     try {

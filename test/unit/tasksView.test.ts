@@ -657,8 +657,12 @@ describe("setComponent", () => {
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: true }));
   });
 
-  it("echoes ok: false with an actionable toast when the write is refused", async () => {
-    clientStub.updateComponents.mockRejectedValue(parseJiraError(403, JSON.stringify({ errorMessages: ["No permission"], errors: {} })));
+  // A 400, not a 403: `JiraClient.request` converts every 401 *and* 403 into
+  // JiraAuthError, so a permission refusal re-gates the panel and never reaches
+  // this branch. The reachable JiraApiError here is a rejected component name —
+  // e.g. one that vanished from the project since the cache was filled.
+  it("echoes ok: false with an actionable toast when Jira rejects the write", async () => {
+    clientStub.updateComponents.mockRejectedValue(parseJiraError(400, JSON.stringify({ errorMessages: ["Component name is not valid"], errors: {} })));
     const { send, posted } = setup();
     await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
     expect(posted()).toContainEqual({
@@ -670,12 +674,17 @@ describe("setComponent", () => {
     expect(clientStub.addLabel).not.toHaveBeenCalled();
   });
 
-  it("echoes ok: false and re-gates the panel on an auth failure, without a toast action", async () => {
+  // Covers a permission refusal too: request() converts every 401 and 403 into
+  // JiraAuthError, so this is the branch a refused write actually takes.
+  it("echoes ok: false and re-gates the panel on an auth failure, posting no toast", async () => {
     clientStub.updateComponents.mockRejectedValue(new JiraAuthError("token dead"));
     const { send, posted } = setup();
     await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
     expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
+    // Re-gating to the sign-in screen is itself the indication — a toast on top
+    // would be noise, and the panel is already replaced.
+    expect(posted().filter((p) => p.type === "toast")).toEqual([]);
   });
 
   it("writes nothing and echoes ok: false when the project has no such component", async () => {
@@ -684,7 +693,24 @@ describe("setComponent", () => {
     await send({ type: "setComponent", key: "ASM-1", repo: "scratch-tool", on: true, movedChip: true });
     expect(clientStub.updateComponents).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+    expect(posted()).toContainEqual(expect.objectContaining({
+      type: "toast", level: "error", message: "ASM has no component named “scratch-tool”.",
+    }));
+  });
+
+  // An unreadable list is not the same claim as "no such component" — listComponents
+  // swallows a rejected token and returns [], and blaming the repo name for that
+  // sends the user looking in the wrong place.
+  it("blames the connection, not the repo, when the component list came back empty", async () => {
+    clientStub.listComponents.mockResolvedValue([]);
+    const { send, posted } = setup();
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    expect(clientStub.updateComponents).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
+    expect(posted()).toContainEqual(expect.objectContaining({
+      type: "toast", level: "error",
+      message: "Couldn't read ASM's components from Jira. Check the connection and try again.",
+    }));
   });
 
   it("echoes ok: false and re-gates when not signed in, without touching Jira", async () => {
