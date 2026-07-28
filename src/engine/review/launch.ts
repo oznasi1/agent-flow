@@ -48,7 +48,13 @@ export async function launchReview(
   const key = reviewRunKey(req.repoName, req.number);
   const summary = `Review ${req.repoName}#${req.number}: ${req.title}`;
   const base: ServiceRef = { name: req.repoName, path: req.localPath, isGit: true };
-  const services = deps.createWorktrees([base], key, summary, deps.log);
+  // createWorktrees slugs its own third argument onto `key` for the branch name
+  // (branchName(key, summary) = `${key}-${slug(summary)}`). `summary` above
+  // already starts with "Review <repoName>#<number>: …", which itself slugifies
+  // to start with `key` — passing it here doubled the key into every branch
+  // name (`review-aws-ops-8491-review-aws-ops-8491-…`). The PR title alone is
+  // what should seed the slug.
+  const services = deps.createWorktrees([base], key, req.title, deps.log);
   // createWorktrees falls back to the main checkout when it cannot create a worktree.
   // For an ordinary task that is merely inconvenient; here the seeded prompt scripts a
   // real `gh pr checkout`, so proceeding would switch the user's OWN checkout to a

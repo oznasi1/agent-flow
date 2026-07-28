@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { reviewRunKey, renderReviewTemplate, launchReview } from "../../../../src/engine/review/launch";
+import { branchName } from "../../../../src/engine/worktree";
 import type { ReviewRequest } from "../../../../src/types";
 import type { OpenRequest, OpenResult } from "../../../../src/engine/workspace";
 
@@ -66,10 +67,15 @@ describe("launchReview", () => {
   it("creates a worktree keyed to the PR", async () => {
     const d = deps();
     await launchReview({ req, template: "t", workspaceDir: "/ws", seedAgent: true }, d);
+    // The third argument seeds createWorktrees's own branch-name slug
+    // (`${key}-${slug(summary)}`) — passing the full "Review aws-ops#8491: …"
+    // summary here would double the key into the branch name, since that
+    // summary itself starts with a slugified copy of `key`. The PR title alone
+    // is what must reach it.
     expect(d.createWorktrees).toHaveBeenCalledWith(
       [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }],
       "review-aws-ops-8491",
-      "Review aws-ops#8491: isolate renew queue",
+      "isolate renew queue",
       d.log,
     );
   });
@@ -92,6 +98,19 @@ describe("launchReview", () => {
     expect(arg.services).toEqual([
       { name: "aws-ops", path: "/repos/aws-ops/.claude/worktrees/review-aws-ops-8491", isGit: true },
     ]);
+  });
+
+  it("does not double the review key into the worktree branch name", async () => {
+    // Regression: createWorktrees derives its own branch name as
+    // `${key}-${slug(thirdArg)}`. The old third argument — the full "Review
+    // <repoName>#<number>: <title>" summary — itself slugifies to start with
+    // `key`, doubling it into every branch. Runs the *real* branchName (not a
+    // restated formula) against whatever launchReview actually passed, so a
+    // future change to either function still catches a reintroduced doubling.
+    const d = deps();
+    await launchReview({ req, template: "t", workspaceDir: "/ws", seedAgent: true }, d);
+    const [, key, slugSource] = d.createWorktrees.mock.calls[0] as unknown as [unknown, string, string, unknown];
+    expect(branchName(key, slugSource)).toBe("review-aws-ops-8491-isolate-renew-queue");
   });
 
   it("forwards seedAgent rather than assuming it", async () => {

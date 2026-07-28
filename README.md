@@ -89,7 +89,8 @@ queue is still a scroll, not a count. Each row carries the repo, PR number, titl
 author, age, and its size both as `+409 −50 · 8 files` and as an S/M/L bucket;
 sort by **oldest** (what you owe most) or **smallest** (what you can clear before
 standup). Expanding a row fetches which checks failed and how many review threads
-are still open. **Review with agent** checks the PR out into a worktree and seeds
+are still open, alongside the review decision and mergeability. **Review with agent**
+checks the PR out into a worktree and seeds
 Claude Code to review the diff and write its findings to
 `.pick-task/REVIEW-<number>.md`, which the row can then load into the review box.
 Turn the strip off with `agentFlow.reviewRequests`; it shares the **PR facts**

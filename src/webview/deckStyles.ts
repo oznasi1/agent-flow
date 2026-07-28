@@ -365,10 +365,9 @@ export const DECK_CSS = `
      strands a lone Open PR button ~700px away at the far right of an empty line,
      attached to nothing. Verified in the preview harness. When the box arrives it
      takes \`flex: 1\` on this same line and pushes the actions right on its own. */
-  .rv-actions { margin-left: 0; }
+  .rv-actions { margin-left: 0; flex: none; display: flex; align-items: center; gap: 5px; }
   .rv-facts.dim { font-style: italic; }
   .rv-sep { color: var(--dim); }
-  .rv-actions { flex: none; display: flex; align-items: center; gap: 5px; }
   /* .act dims to .7 unless it sits in a hovered .card. A row is not a card, so the
      rule never re-brightens and every button here would render permanently faded. */
   .rv-actions .act { opacity: 1; }
