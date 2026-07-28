@@ -535,9 +535,18 @@ describe("listComponents", () => {
     expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/project/ASM/components`);
   });
 
-  it("drops entries with no usable name and tolerates a non-array body", async () => {
+  // Two separate cases on purpose. The cache is module-level and keyed by project,
+  // so a second listComponents() in the same test would be served from the first
+  // one's result — asserting both in one `it` would force the cache to be scoped
+  // per client instance, and `tasksView.client()` builds a new client per call, so
+  // that scope would never hit in production. The file's beforeEach resets modules,
+  // which gives each `it` a clean cache.
+  it("drops entries with no usable name", async () => {
     installFetch([jsonResponse([{ id: "1" }, { id: "2", name: "" }, { id: "3", name: "Infra" }])]);
     await expect(client().listComponents()).resolves.toEqual(["Infra"]);
+  });
+
+  it("tolerates a non-array body", async () => {
     installFetch([jsonResponse({ not: "an array" })]);
     await expect(client().listComponents()).resolves.toEqual([]);
   });

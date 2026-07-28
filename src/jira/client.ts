@@ -23,6 +23,7 @@ let cachedSprintFieldId: string | null | undefined;
  * a component created in Jira should become syncable without a window reload, and
  * the payload is a handful of names. */
 const COMPONENTS_TTL_MS = 5 * 60_000;
+const cachedComponents = new Map<string, { names: string[]; at: number }>();
 
 const LIST_FIELDS =["summary", "status", "priority", "assignee", "labels", "components", "updated", "timeoriginalestimate"];
 const DETAIL_FIELDS = ["summary", "description", "labels", "components", "priority", "status", "assignee"];
@@ -49,8 +50,6 @@ export interface JiraDetail {
 }
 
 export class JiraClient {
-  private cachedComponents = new Map<string, { names: string[]; at: number }>();
-
   constructor(
     private readonly baseUrl: string,
     private readonly project: string,
@@ -262,7 +261,7 @@ export class JiraClient {
    *  also break expanding a card. Callers that need auth failures reported must
    *  read the issue *before* calling this. */
   async listComponents(): Promise<string[]> {
-    const hit = this.cachedComponents.get(this.project);
+    const hit = cachedComponents.get(this.project);
     if (hit && Date.now() - hit.at < COMPONENTS_TTL_MS) return hit.names;
     let names: string[];
     try {
@@ -273,7 +272,7 @@ export class JiraClient {
     } catch {
       return [];
     }
-    this.cachedComponents.set(this.project, { names, at: Date.now() });
+    cachedComponents.set(this.project, { names, at: Date.now() });
     return names;
   }
 
