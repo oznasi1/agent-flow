@@ -214,6 +214,7 @@ export type InboundMessage =
   | { type: "signIn" }
   | { type: "runSetup" }
   | { type: "retry" }
+  | { type: "runDoctor" }
   | { type: "reorder"; order: string[] }
   | { type: "resetOrder"; size: Size }
   | { type: "removeFromSprint"; key: string; size: Size }
@@ -247,7 +248,10 @@ export type OutboundMessage =
   // straight to the ticket, which is the only place left to resolve it.
   | { type: "toast"; level: "success" | "error" | "info"; message: string; action?: { label: string; url: string } }
   // A persistent, actionable failure banner (unlike a toast, it stays until resolved).
-  | { type: "error"; message: string; canRetry: boolean }
+  // `canRunDoctor` offers the diagnostic on exactly the failures Doctor covers —
+  // unreachable site, bad project key, auth loss — instead of hoping the user knows
+  // the command exists.
+  | { type: "error"; message: string; canRetry: boolean; canRunDoctor?: boolean }
   | { type: "loading"; loading: boolean }
   // The Deck
   | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; ghNote: string | null }

@@ -97,7 +97,7 @@ const CompassIcon = () => (
 export function App(): JSX.Element {
   const [authed, setAuthed] = React.useState<boolean | null>(null);
   const [configured, setConfigured] = React.useState(true); // assume yes until told otherwise (no setup-flash)
-  const [error, setError] = React.useState<{ message: string; canRetry: boolean } | null>(null);
+  const [error, setError] = React.useState<{ message: string; canRetry: boolean; canRunDoctor?: boolean } | null>(null);
   const [project, setProject] = React.useState("");
   const [me, setMe] = React.useState<string | null>(null);
   // The task status that reveals the "Address PR" card action (configurable; from the host).
@@ -188,7 +188,7 @@ export function App(): JSX.Element {
           break;
         case "error":
           setLoading(false);
-          setError({ message: m.message, canRetry: m.canRetry });
+          setError({ message: m.message, canRetry: m.canRetry, canRunDoctor: m.canRunDoctor });
           break;
         case "tasks":
           setError(null);
@@ -337,6 +337,11 @@ export function App(): JSX.Element {
       <div className="gate">
         <div className="gate-error">⚠ {error.message}</div>
         {error.canRetry && <button className="btn" onClick={retry}>Retry</button>}
+        {error.canRunDoctor && (
+          <button className="btn" onClick={() => send({ type: "runDoctor" })}>
+            Run Doctor
+          </button>
+        )}
       </div>,
     );
   }

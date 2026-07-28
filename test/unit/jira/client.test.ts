@@ -475,3 +475,55 @@ describe("listResolutions", () => {
     await expect(client().listResolutions()).resolves.toEqual([]);
   });
 });
+
+describe("probeMyself — the non-swallowing credential probe", () => {
+  it("returns the account when Jira accepts the token", async () => {
+    installFetch([jsonResponse({ accountId: "a1", displayName: "Jane Doe" })]);
+    await expect(client().probeMyself()).resolves.toEqual({ accountId: "a1", displayName: "Jane Doe" });
+  });
+
+  it("falls back to the email when Jira sends no display name", async () => {
+    installFetch([jsonResponse({ accountId: "a1", emailAddress: "jane@test" })]);
+    await expect(client().probeMyself()).resolves.toEqual({ accountId: "a1", displayName: "jane@test" });
+  });
+
+  // The whole reason Doctor can't reuse getMyself: it collapses a rejected token, a
+  // timeout and an unreachable host into the same `null`.
+  it("propagates JiraAuthError on 401 where getMyself returns null", async () => {
+    installFetch([textResponse("", 401)]);
+    await expect(client().probeMyself()).rejects.toBeInstanceOf(mod.JiraAuthError);
+    installFetch([textResponse("", 401)]);
+    await expect(client().getMyself()).resolves.toBeNull();
+  });
+
+  it("propagates JiraAuthError on 403", async () => {
+    installFetch([textResponse("", 403)]);
+    await expect(client().probeMyself()).rejects.toBeInstanceOf(mod.JiraAuthError);
+  });
+
+  it("propagates the reachability error rather than reporting bad credentials", async () => {
+    installFetch([]);
+    await expect(client().probeMyself()).rejects.toThrow(/Couldn't reach Jira at/);
+  });
+});
+
+describe("getProject", () => {
+  it("maps a resolved project to key and name", async () => {
+    const fetchMock = installFetch([jsonResponse({ id: "10001", key: "ASM", name: "Assembly" })]);
+    await expect(client().getProject("ASM")).resolves.toEqual({ id: "10001", key: "ASM", name: "Assembly" });
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/project/ASM`);
+  });
+
+  it("throws a 404 JiraApiError for a key Jira can't see", async () => {
+    installFetch([textResponse(JSON.stringify({ errorMessages: ["No project could be found"], errors: {} }), 404)]);
+    const err = await client().getProject("NOPE").catch((e) => e);
+    expect(err).toBeInstanceOf(mod.JiraApiError);
+    expect(err.status).toBe(404);
+  });
+
+  it("encodes the key it was given", async () => {
+    const fetchMock = installFetch([jsonResponse({ id: "1", key: "A B", name: "Spaced" })]);
+    await client().getProject("A B");
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/project/A%20B`);
+  });
+});

@@ -89,6 +89,12 @@ export const commands = {
   registerCommand: vi.fn((_id: string, _cb: (...a: any[]) => any) => ({ dispose: vi.fn() })),
 };
 
+// Doctor asks whether Claude Code is installed and which version — the one thing
+// nothing in the extension checked before.
+export const extensions = {
+  getExtension: vi.fn((_id: string): { packageJSON?: { version?: string } } | undefined => undefined),
+};
+
 export const env = {
   appName: "Cursor",
   uriScheme: "cursor",
@@ -134,6 +140,8 @@ export function resetVscodeMocks(): void {
   commands.executeCommand.mockReset().mockResolvedValue(undefined);
   commands.getCommands.mockReset().mockResolvedValue([]);
   commands.registerCommand.mockReset().mockImplementation(() => ({ dispose: vi.fn() }));
+
+  extensions.getExtension.mockReset().mockReturnValue(undefined);
 
   env.appName = "Cursor";
   env.uriScheme = "cursor";

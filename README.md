@@ -170,7 +170,11 @@ and — when `agentFlow.prFacts` is on — reads your **own** GitHub through you
 existing `gh` login. Nothing is sent to any service that isn't already yours, and
 Agent Flow stores no GitHub credentials of its own: PR reads go through `gh`, so
 they inherit whatever host, SSO and token your CLI already has. All GitHub access
-is **read-only** — Agent Flow never merges, comments, or pushes. Your Jira credentials are stored in VS Code
+is **read-only** — Agent Flow never merges, comments, or pushes. **Agent Flow: Doctor**
+probes rather than only reading config: it makes two authenticated GETs to your own
+Jira site and runs `gh auth status`, which is what catches a revoked token instead of
+reporting it as a network problem. It writes nothing anywhere except your clipboard,
+and only when you ask it to copy the report. Your Jira credentials are stored in VS Code
 **SecretStorage** (encrypted), never in `settings.json`. Reads are the default; the only
 Jira **writes** are the optional status changes you trigger from a card (which stamp the
 provenance label). Task briefs are written to a git-excluded `.pick-task/` directory in
