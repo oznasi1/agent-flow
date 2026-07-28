@@ -1,5 +1,5 @@
 import * as os from "os";
-import { ReviewDetail, ReviewRequest } from "../../types";
+import { ReviewDetail, ReviewRequest, ReviewVerb } from "../../types";
 import { countUnresolved, mapRollup } from "../pr/facts";
 import { execRunner, GH_TIMEOUT_MS, Locate, Runner, THREADS_QUERY } from "../pr/provider";
 import { resolveBin } from "../pr/which";
@@ -7,9 +7,16 @@ import { REVIEW_SEARCH_LIMIT, REVIEW_SEARCH_Q, REVIEW_SEARCH_QUERY, parseSearch 
 
 const locateGh: Locate = () => resolveBin("gh");
 
+const VERB_FLAG: Record<ReviewVerb, string> = {
+  approve: "--approve",
+  comment: "--comment",
+  "request-changes": "--request-changes",
+};
+
 export interface ReviewProvider {
   search(): Promise<{ issueCount: number; requests: ReviewRequest[] } | null>;
   detail(repo: string, number: number): Promise<ReviewDetail | null>;
+  submit(repo: string, number: number, verb: ReviewVerb, body: string): Promise<{ ok: true } | { ok: false; message: string }>;
 }
 
 /** Every call here is repo-independent: a PR requesting your review may live in a
@@ -71,5 +78,23 @@ export class GhReviewProvider implements ReviewProvider {
       }
     }
     return { failing, unresolved };
+  }
+
+  /** The only command in Agent Flow that writes to GitHub. The caller confirms
+   * first; this only refuses what GitHub would refuse anyway, and reports the
+   * rejection verbatim — GitHub's own wording is more useful than ours. */
+  async submit(repo: string, number: number, verb: ReviewVerb, body: string): Promise<{ ok: true } | { ok: false; message: string }> {
+    const text = body.trim();
+    if (verb !== "approve" && !text) {
+      return { ok: false, message: "GitHub requires a message for this kind of review." };
+    }
+    const args = ["pr", "review", String(number), "--repo", repo, VERB_FLAG[verb]];
+    if (text) args.push("--body", text);
+    try {
+      await this.exec(args);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+    }
   }
 }

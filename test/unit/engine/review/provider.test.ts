@@ -141,3 +141,55 @@ describe("GhReviewProvider.detail", () => {
     expect(run).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("GhReviewProvider.submit", () => {
+  it("approves with no body", async () => {
+    const run = runner(async () => "");
+    const out = await new GhReviewProvider(run, locate).submit("o/r", 7, "approve", "");
+    expect(out).toEqual({ ok: true });
+    expect((run as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual([
+      "pr", "review", "7", "--repo", "o/r", "--approve",
+    ]);
+  });
+
+  it("approves with a body when one is given", async () => {
+    const run = runner(async () => "");
+    await new GhReviewProvider(run, locate).submit("o/r", 7, "approve", "nice");
+    expect((run as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual([
+      "pr", "review", "7", "--repo", "o/r", "--approve", "--body", "nice",
+    ]);
+  });
+
+  it("requests changes with a body", async () => {
+    const run = runner(async () => "");
+    await new GhReviewProvider(run, locate).submit("o/r", 7, "request-changes", "retry budget");
+    expect((run as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual([
+      "pr", "review", "7", "--repo", "o/r", "--request-changes", "--body", "retry budget",
+    ]);
+  });
+
+  it("comments with a body", async () => {
+    const run = runner(async () => "");
+    await new GhReviewProvider(run, locate).submit("o/r", 7, "comment", "a thought");
+    // Full argv, not just toContain("--comment") — pinning every verb flag exactly
+    // means a swap (e.g. --comment for --request-changes) cannot slip through,
+    // which matters most here since the wrong verb posts the wrong review type
+    // on someone else's pull request.
+    expect((run as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual([
+      "pr", "review", "7", "--repo", "o/r", "--comment", "--body", "a thought",
+    ]);
+  });
+
+  it.each(["comment", "request-changes"] as const)("refuses %s with an empty body, before spawning", async (verb) => {
+    const run = runner(async () => "");
+    const out = await new GhReviewProvider(run, locate).submit("o/r", 7, verb, "   ");
+    expect(out).toEqual({ ok: false, message: "GitHub requires a message for this kind of review." });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("returns GitHub's own message on rejection", async () => {
+    const run = runner(async () => { throw new Error("GraphQL: Can not approve your own pull request"); });
+    const out = await new GhReviewProvider(run, locate).submit("o/r", 7, "approve", "");
+    expect(out).toEqual({ ok: false, message: "GraphQL: Can not approve your own pull request" });
+  });
+});
