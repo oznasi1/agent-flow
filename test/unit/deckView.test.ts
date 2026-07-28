@@ -994,6 +994,20 @@ describe("DeckPanel review launch", () => {
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(true);
   });
 
+  it("refreshes after a successful launch, so the row picks up its new run", async () => {
+    // The busy-indicator pair is this file's existing signal for "a refresh ran"
+    // (see "brackets a forget/prFacts toggle with the busy indicator" above) — reused
+    // here rather than invented fresh, so this matches local convention. showAndWarm's
+    // own explicit deck:refresh already posts one true/false pair before the launch;
+    // a real post-launch refresh must add another, on top of that baseline.
+    const p = await showAndWarm();
+    const before = posts(p).filter((m) => m.type === "deck:loading").length;
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    const loads = posts(p).filter((m) => m.type === "deck:loading");
+    expect(loads.length).toBeGreaterThan(before);
+    expect(loads.at(-1)?.loading).toBe(false);
+  });
+
   it("toasts the reason when a launch is refused, verbatim", async () => {
     // An exact match, not merely a truthy error toast: a broken implementation
     // that toasts a canned "couldn't launch" string regardless of what
@@ -1024,6 +1038,28 @@ describe("DeckPanel review launch", () => {
     const row = posts(p).find((m) => m.type === "deck:reviews").requests[0];
     expect(row.runKey).toBe("review-aws-ops-8491");
     expect(row.draftPath).toBe("/repos/aws-ops/.claude/worktrees/review-aws-ops-8491/.pick-task/REVIEW-8491.md");
+  });
+
+  it("does not leak a review run's runKey/draftPath onto another row in the same queue", async () => {
+    // Two queued PRs, a review run for only one of them. reviewRunKey keys the
+    // match per-row, so this is unlikely to leak by accident — but every other
+    // test above only ever queues one row, so nothing actually proved isolation
+    // until now.
+    const other = { ...reviewFixture(), id: "CyberJackGit/other-repo#123", repo: "CyberJackGit/other-repo", repoName: "other-repo", number: 123 };
+    h.reviewSearch.mockResolvedValue({ issueCount: 2, requests: [reviewFixture(), other] });
+    h.runs = [{
+      key: "review-aws-ops-8491", summary: "Review", url: "https://gh/pr/8491", createdAt: 1, kind: "review",
+      mode: "per-window", repos: [{ name: "aws-ops", path: "/repos/aws-ops/.claude/worktrees/review-aws-ops-8491", isGit: true }],
+      briefPaths: [],
+    }];
+    h.existsSync.mockReturnValue(true);
+    const p = await showAndWarm();
+    const rows = posts(p).find((m) => m.type === "deck:reviews").requests;
+    const aws = rows.find((r: ReviewRequest) => r.id === "CyberJackGit/aws-ops#8491");
+    const untouched = rows.find((r: ReviewRequest) => r.id === "CyberJackGit/other-repo#123");
+    expect(aws.runKey).toBe("review-aws-ops-8491");
+    expect(untouched.runKey).toBeNull();
+    expect(untouched.draftPath).toBeNull();
   });
 
   it("leaves draftPath null when the agent hasn't written a file yet", async () => {
