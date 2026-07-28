@@ -713,7 +713,7 @@ git commit -m "feat(tasks): write one component per chip toggle, echoing a verdi
 
 ### Task 5: Render the three chip states
 
-Presentation only — no messages are sent yet, so this task is reviewable on its own: the chips must classify and label correctly before anything writes. The dashed border carries the meaning ("not on the ticket") with no hint line and no red, per the panel's conventions.
+Presentation only — no messages are sent and no `↑` exists yet. This task's whole deliverable is that a chip **says** whether it's on the ticket: the dashed border carries that with no hint line and no red, per the panel's conventions. The push affordance and every write belong to Task 6, so nothing here is inert.
 
 **Files:**
 - Modify: `src/webview/App.tsx` — `DetailState` (24-29), the `detail` case (208-213), `TaskCard`'s collapsed chips (715-717) and its `CardDetail` call (722), and `CardDetail` itself (727-752)
@@ -725,9 +725,9 @@ Presentation only — no messages are sent yet, so this task is reviewable on it
 - Consumes: the `detail` message fields from Task 3.
 - Produces:
   - `DetailState` with `jira?: string[]` and `mappable?: Record<string, string>`
-  - `CardDetail` props `{ taskKey: string; project: string; detail?: DetailState; onSelect: (s: string[]) => void; onPush: (repo: string) => void }`
-  - `TaskCard` props gain `project: string` and `onPush: (repo: string) => void`
-  - CSS class `chip off-ticket` and the `.chip .up` affordance
+  - `CardDetail` props `{ taskKey: string; project: string; detail?: DetailState; onSelect: (s: string[]) => void }` — Task 6 adds `onPush`
+  - `TaskCard` props gain `project: string` — Task 6 adds `onPush`
+  - CSS class `chip off-ticket`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -763,12 +763,13 @@ Add to `test/webview/App.test.tsx`, inside the same `describe` that holds `withT
     expect(within(chip).queryByText("↑")).not.toBeInTheDocument();
   });
 
-  it("renders a mappable chip that is not on the ticket as dashed, with a push", () => {
+  it("renders a mappable chip that is not on the ticket as dashed", () => {
     withChips();
     const chip = chipFor("pricing-api");
     expect(chip.className).toContain("off-ticket");
-    expect(chip).toHaveAttribute("title", "Not on ASM-1 in Jira — ↑ adds it");
-    expect(within(chip).getByTitle("Add Pricing-Api to ASM-1")).toBeInTheDocument();
+    expect(chip).toHaveAttribute("title", "Not on ASM-1 in Jira");
+    // The × is local-only here: there is no component on the ticket to remove.
+    expect(within(chip).getByTitle("Remove")).toBeInTheDocument();
   });
 
   it("renders an unmappable chip as dashed with no push, and says why", () => {
@@ -791,7 +792,7 @@ Add to `test/webview/App.test.tsx`, inside the same `describe` that holds `withT
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `npx vitest run test/webview/App.test.tsx -t "chip"`
-Expected: FAIL — no `off-ticket` class, no `↑`, and no per-state titles.
+Expected: FAIL — no `off-ticket` class and no per-state titles.
 
 - [ ] **Step 3: Extend `DetailState` and the `detail` reducer**
 
@@ -826,23 +827,15 @@ Replace the `case "detail":` block (208-213):
           break;
 ```
 
-- [ ] **Step 4: Pass `project` and an `onPush` stub through `TaskCard`**
+- [ ] **Step 4: Pass `project` through `TaskCard`**
 
-In the `TaskCard` render site (487-511), add two props after `detail={details[t.key]}`:
+In the `TaskCard` render site (487-511), add one prop after `detail={details[t.key]}`:
 
 ```tsx
             project={project}
-            onPush={(repo) => pushComponent(t.key, repo)}
 ```
 
-Add `pushComponent` beside `setSelected` (line 283) — a no-op body for now; Task 6 fills it in:
-
-```tsx
-  // Push a chip's component onto the ticket. Wired to Jira in the next change.
-  const pushComponent = (_key: string, _repo: string) => {};
-```
-
-In `TaskCard`'s props type (573-584) add `project: string;` and `onPush: (repo: string) => void;`, and destructure them in the body (585).
+In `TaskCard`'s props type (573-584) add `project: string;`, and destructure it in the body (585).
 
 Replace the collapsed service chips (715-717) so they follow the edited list:
 
@@ -857,7 +850,7 @@ Replace the collapsed service chips (715-717) so they follow the edited list:
 Replace the `CardDetail` call (722):
 
 ```tsx
-      {open && <CardDetail taskKey={task.key} project={project} detail={detail} onSelect={onSelect} onPush={onPush} />}
+      {open && <CardDetail taskKey={task.key} project={project} detail={detail} onSelect={onSelect} />}
 ```
 
 - [ ] **Step 5: Classify the chips in `CardDetail`**
@@ -870,9 +863,8 @@ function CardDetail(props: {
   project: string;
   detail?: DetailState;
   onSelect: (s: string[]) => void;
-  onPush: (repo: string) => void;
 }): JSX.Element {
-  const { taskKey, project, detail, onSelect, onPush } = props;
+  const { taskKey, project, detail, onSelect } = props;
   if (!detail || detail.loading) return <div className="detail"><div className="detail-loading">Loading ticket…</div></div>;
 
   const selected = detail.selected ?? [];
@@ -890,7 +882,8 @@ function CardDetail(props: {
         {selected.length === 0 && <span className="chip-none">none selected</span>}
         {selected.map((s) => {
           // Three states: on the ticket (solid), a component the ticket lacks
-          // (dashed, pushable), or no component at all (dashed, local-only).
+          // (dashed — Task 6 gives it a push), or no component at all (dashed,
+          // local-only). Only the first can be removed from Jira.
           const component = mappable[s];
           const onTicket = !!component && jira.includes(component);
           return (
@@ -901,14 +894,11 @@ function CardDetail(props: {
                 onTicket
                   ? undefined
                   : component
-                    ? `Not on ${taskKey} in Jira — ↑ adds it`
+                    ? `Not on ${taskKey} in Jira`
                     : `No ${project} component named “${s}” — this selection stays local`
               }
             >
               {s}
-              {!onTicket && component && (
-                <span className="up" title={`Add ${component} to ${taskKey}`} onClick={() => onPush(s)}>↑</span>
-              )}
               <span
                 className="x"
                 title={onTicket ? `Remove ${component} from ${taskKey}` : "Remove"}
@@ -934,8 +924,6 @@ In `src/webview/styles.ts`, after the `.chip .x:hover` rule (196):
      absorb the border so chips don't change size between states. */
   .chip.off-ticket { background: transparent; padding: 1px 4px 1px 7px;
     border: 1px dashed var(--vscode-badge-background); color: var(--vscode-descriptionForeground); }
-  .chip .up { cursor: pointer; opacity: .65; font-size: 11px; line-height: 1; }
-  .chip .up:hover { opacity: 1; }
 ```
 
 - [ ] **Step 7: Run the tests to verify they pass**
@@ -958,13 +946,16 @@ The webview is the only place that knows a chip's state, so it decides what is w
 
 **Files:**
 - Modify: `src/webview/helpers.ts` — add `addOnce`
-- Modify: `src/webview/App.tsx` — `setSelected` (283-284), `pushComponent` (the Task 5 stub), and a `componentsChanged` case in the message reducer (after `removedFromSprint`, 228-230)
+- Modify: `src/webview/App.tsx` — `setSelected` (283-284), a new `pushComponent` beside it, the `↑` in `CardDetail` plus its `onPush` threading through `TaskCard`, and a `componentsChanged` case in the message reducer (after `removedFromSprint`, 228-230)
+- Modify: `src/webview/styles.ts` — the `.chip .up` rules, after the `.chip.off-ticket` rule Task 5 added
 - Test: `test/webview/helpers.test.ts`
-- Test: `test/webview/App.test.tsx`
+- Test: `test/webview/App.test.tsx` — new cases, plus the state-B title assertion Task 5 wrote
 
 **Interfaces:**
-- Consumes: `DetailState`, `withChips` / `chipFor` test helpers, and the CSS from Task 5; the `componentsChanged` message from Task 4.
-- Produces: `addOnce(xs: string[], x: string): string[]` from `src/webview/helpers.ts`.
+- Consumes: `DetailState`, `withChips` / `chipFor` test helpers, and the `off-ticket` CSS from Task 5; the `componentsChanged` message from Task 4.
+- Produces:
+  - `addOnce(xs: string[], x: string): string[]` from `src/webview/helpers.ts`
+  - `CardDetail` and `TaskCard` props gain `onPush: (repo: string) => void`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1130,9 +1121,9 @@ Replace `setSelected` (283-284) in `src/webview/App.tsx`:
   };
 ```
 
-- [ ] **Step 5: Implement `pushComponent`**
+- [ ] **Step 5: Add `pushComponent`**
 
-Replace the Task 5 stub:
+Beside `setSelected`:
 
 ```tsx
   /** `↑` on a chip whose component the ticket lacks: write it, and show it as
@@ -1148,7 +1139,51 @@ Replace the Task 5 stub:
   };
 ```
 
-- [ ] **Step 6: Handle the verdict**
+- [ ] **Step 6: Add the `↑` affordance**
+
+Task 5 left a state-B chip dashed but with nothing to click. Thread the handler down and render it.
+
+At the `TaskCard` render site, beside the `project={project}` prop Task 5 added:
+
+```tsx
+            onPush={(repo) => pushComponent(t.key, repo)}
+```
+
+In `TaskCard`'s props type add `onPush: (repo: string) => void;`, destructure it, and pass it on:
+
+```tsx
+      {open && <CardDetail taskKey={task.key} project={project} detail={detail} onSelect={onSelect} onPush={onPush} />}
+```
+
+In `CardDetail`, add `onPush: (repo: string) => void;` to the props type and `onPush` to the destructure, then render the `↑` between the chip's name and its `×`:
+
+```tsx
+              {s}
+              {!onTicket && component && (
+                <span className="up" title={`Add ${component} to ${taskKey}`} onClick={() => onPush(s)}>↑</span>
+              )}
+```
+
+Extend the state-B title now that the affordance exists — `` `Not on ${taskKey} in Jira` `` becomes:
+
+```tsx
+                    ? `Not on ${taskKey} in Jira — ↑ adds it`
+```
+
+Update the Task 5 test that asserted the old wording:
+
+```ts
+    expect(chip).toHaveAttribute("title", "Not on ASM-1 in Jira — ↑ adds it");
+```
+
+And add the affordance's CSS to `src/webview/styles.ts`, after the `.chip.off-ticket` rule:
+
+```
+  .chip .up { cursor: pointer; opacity: .65; font-size: 11px; line-height: 1; }
+  .chip .up:hover { opacity: 1; }
+```
+
+- [ ] **Step 7: Handle the verdict**
 
 In `src/webview/App.tsx`, after the `case "removedFromSprint":` block (228-230):
 
@@ -1180,15 +1215,15 @@ In `src/webview/App.tsx`, after the `case "removedFromSprint":` block (228-230):
           break;
 ```
 
-- [ ] **Step 7: Run the full suite and typecheck**
+- [ ] **Step 8: Run the full suite and typecheck**
 
 Run: `npx vitest run && npm run typecheck`
 Expected: PASS, both.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/webview/App.tsx src/webview/helpers.ts test/webview/App.test.tsx test/webview/helpers.test.ts
+git add src/webview/App.tsx src/webview/helpers.ts src/webview/styles.ts test/webview/App.test.tsx test/webview/helpers.test.ts
 git commit -m "feat(tasks): push repo-chip edits to the ticket's components"
 ```
 
@@ -1235,7 +1270,7 @@ State plainly which of the five held and which did not. A failure here is a real
 
 ## Self-Review
 
-**Spec coverage.** Every section maps to a task: the sync contract and its A/B/C states → Tasks 1, 5, 6; `listComponents` / `updateComponents` incl. the TTL and the `[]` degradation → Task 2; `src/engine/components.ts` → Task 1; the `detail` additions → Task 3; `setComponent` / `componentsChanged` and the `movedChip` undo table → Tasks 4 and 6; the collapsed-chip agreement → Task 5 Step 4; the UI states, titles and dashed treatment → Task 5; the error-handling table → Task 4 (all four rows have a test); the testing section → Tasks 1-6, with Task 7 for the coverage bar and the live check. Out-of-scope items (creating components, labels, the Deck) appear in no task.
+**Spec coverage.** Every section maps to a task: the sync contract and its A/B/C states → Tasks 1, 5, 6; `listComponents` / `updateComponents` incl. the TTL and the `[]` degradation → Task 2; `src/engine/components.ts` → Task 1; the `detail` additions → Task 3; `setComponent` / `componentsChanged` and the `movedChip` undo table → Tasks 4 and 6; the collapsed-chip agreement → Task 5 Step 4; the UI states, titles and dashed treatment → Task 5, with the `↑` affordance in Task 6 (Task 5 deliberately ships no inert button); the error-handling table → Task 4 (all four rows have a test); the testing section → Tasks 1-6, with Task 7 for the coverage bar and the live check. Out-of-scope items (creating components, labels, the Deck) appear in no task.
 
 **Type consistency.** `resolveComponent` and `mapRepoComponents` keep the same signatures in Tasks 1, 3 and 4. `setComponent` / `componentsChanged` carry the same four fields (`key`, `repo`, `on`, `movedChip`) everywhere they appear, in Tasks 4 and 6. `DetailState.jira` and `.mappable` are introduced in Task 5 and consumed under those names in Task 6. `addOnce` has one signature, used in three places.
 
