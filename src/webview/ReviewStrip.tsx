@@ -28,14 +28,18 @@ export interface ReviewStripProps {
   onExpand: (id: string) => void;
   onSort: (sort: ReviewSort) => void;
   onOpen: (url: string) => void;
+  onLaunch: (id: string) => void;
+  onLoadDraft: (id: string) => void;
 }
 
-function Row({ r, expanded, detail, onExpand, onOpen }: {
+function Row({ r, expanded, detail, onExpand, onOpen, onLaunch, onLoadDraft }: {
   r: ReviewRequest;
   expanded: boolean;
   detail: ReviewDetail | undefined;
   onExpand: (id: string) => void;
   onOpen: (url: string) => void;
+  onLaunch: (id: string) => void;
+  onLoadDraft: (id: string) => void;
 }): JSX.Element {
   const ci = CI_GLYPH[r.ci];
   return (
@@ -45,6 +49,7 @@ function Row({ r, expanded, detail, onExpand, onOpen }: {
         <span className="rv-repo">{r.repoName}</span>
         <span className="rv-num">#{r.number}</span>
         <span className="rv-title" title={r.title}>{r.title}</span>
+        {r.runKey && <span className="rv-running">reviewing</span>}
         {r.isDraft && <span className="rv-draft">draft</span>}
         <span className={`rv-size s-${sizeBucket(linesChanged(r))}`}>{sizeBucket(linesChanged(r))}</span>
         {/* Three separate text nodes, not one interpolated string: each is then a
@@ -86,6 +91,18 @@ function Row({ r, expanded, detail, onExpand, onOpen }: {
             <div className="rv-facts dim">loading…</div>
           )}
           <div className="rv-actions">
+            <button
+              type="button"
+              className="act primary"
+              disabled={!r.localPath}
+              title={r.localPath ? `Review in a worktree of ${r.repoName}` : `${r.repoName} is not checked out locally`}
+              onClick={() => onLaunch(r.id)}
+            >
+              ▶ Review with agent
+            </button>
+            {r.draftPath && (
+              <button type="button" className="act" onClick={() => onLoadDraft(r.id)}>Load agent's review</button>
+            )}
             <button type="button" className="act" onClick={() => onOpen(r.url)}>Open PR</button>
           </div>
         </div>
@@ -120,7 +137,7 @@ export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
         <div className="rv-rows">
           {p.requests.map((r) => (
             <Row key={r.id} r={r} expanded={p.expanded === r.id} detail={p.details[r.id]}
-                 onExpand={p.onExpand} onOpen={p.onOpen} />
+                 onExpand={p.onExpand} onOpen={p.onOpen} onLaunch={p.onLaunch} onLoadDraft={p.onLoadDraft} />
           ))}
         </div>
       )}

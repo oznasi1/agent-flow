@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { getConfig } from "./config";
@@ -7,12 +8,14 @@ import { JiraClient, JiraAuthError } from "./jira/client";
 import { readRuns, defaultRunsDir, removeRun } from "./engine/runs";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
-import { openInEditor } from "./engine/workspace";
+import { openInEditor, openWorkspace, BRIEF_DIR } from "./engine/workspace";
+import { createWorktrees } from "./engine/worktree";
 import { taskDiff } from "./engine/git";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
 import { discoverRepos } from "./engine/repos";
+import { launchReview, reviewRunKey } from "./engine/review/launch";
 import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
@@ -242,13 +245,28 @@ export class DeckPanel {
   }
 
   /** Decorate the cached queue with what only this machine can know. Recomputed
-   * every post: a checkout can appear, and a worktree can be forgotten. */
+   * every post: a checkout can appear, a review run can start or finish, and a
+   * worktree can be forgotten — a cached path to any of those would render an
+   * action that cannot work. */
   private decorateReviews(requests: ReviewRequest[]): ReviewRequest[] {
     const cfg = getConfig();
     const byName = new Map(discoverRepos(cfg.reposRoot, cfg.repoBlocklist).map((r) => [r.name, r]));
+    const reviewRuns = new Map(
+      readRuns(defaultRunsDir()).filter((r) => runKind(r) === "review").map((r) => [r.key, r]),
+    );
     return requests.map((r) => {
       const local = byName.get(r.repoName);
-      return { ...r, localPath: local?.isGit ? local.path : null };
+      const run = reviewRuns.get(reviewRunKey(r.repoName, r.number));
+      // The draft lives in the worktree the agent was launched into, not the main
+      // checkout — that is the only place the agent could have written it.
+      const wt = run?.repos[0]?.path;
+      const draft = wt ? path.join(wt, BRIEF_DIR, `REVIEW-${r.number}.md`) : null;
+      return {
+        ...r,
+        localPath: local?.isGit ? local.path : null,
+        runKey: run?.key ?? null,
+        draftPath: draft && fs.existsSync(draft) ? draft : null,
+      };
     });
   }
 
@@ -275,6 +293,46 @@ export class DeckPanel {
       return;
     }
     this.post({ type: "deck:reviewDetail", id, detail });
+  }
+
+  /** The decorated view of one queued PR — recomputed, never cached, for the same
+   * reason decorateReviews itself is: `localPath`, `runKey` and `draftPath` must
+   * reflect what is true on disk right now, not at the last search. */
+  private reviewById(id: string): ReviewRequest | undefined {
+    return this.decorateReviews(this.reviewCache?.requests ?? []).find((r) => r.id === id);
+  }
+
+  private async launchReviewFor(id: string): Promise<void> {
+    const req = this.reviewById(id);
+    if (!req) return; // the queue moved on before the click landed
+    const cfg = getConfig();
+    const res = await launchReview(
+      { req, template: cfg.reviewRequestPrompt, workspaceDir: cfg.workspaceDir, seedAgent: cfg.seedAgent },
+      { createWorktrees, openWorkspace, log: this.log },
+    );
+    if (!res.ok) {
+      this.toast("error", res.message);
+      return;
+    }
+    this.toast(
+      "success",
+      `Reviewing ${req.repoName}#${req.number} in a worktree.${cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : ""}`,
+    );
+    await this.refreshBusy(); // picks up the new run so the row shows "reviewing"
+  }
+
+  /** Hand the agent's findings to the review box. Read on demand rather than
+   * carried on every deck:reviews post — the file is a whole review, and the
+   * strip re-posts on every poll tick. */
+  private loadReviewDraft(id: string): void {
+    const req = this.reviewById(id);
+    if (!req?.draftPath) return;
+    try {
+      this.post({ type: "deck:reviewDraft", id, body: fs.readFileSync(req.draftPath, "utf8").trim() });
+    } catch (e) {
+      this.log(`deck: review draft ${id} unreadable: ${e}`);
+      this.toast("error", `Couldn't read the agent's review for ${req.repoName}#${req.number}.`);
+    }
   }
 
   private async jiraStatus(key: string): Promise<{ status: string | null; category: string | null } | null> {
@@ -401,6 +459,12 @@ export class DeckPanel {
         break;
       case "deck:reviewExpand":
         await this.reviewDetail(m.id);
+        break;
+      case "deck:reviewLaunch":
+        await this.launchReviewFor(m.id);
+        break;
+      case "deck:reviewLoadDraft":
+        this.loadReviewDraft(m.id);
         break;
       case "deck:forget":
         removeRun(defaultRunsDir(), m.key);

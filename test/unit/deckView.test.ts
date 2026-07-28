@@ -38,6 +38,19 @@ const h = vi.hoisted(() => ({
   reviewDetail: vi.fn(async (_repo: string, _number: number): Promise<ReviewDetail | null> => ({ failing: [], unresolved: null })),
   repos: [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }] as ServiceRef[],
   reviewRequests: true as boolean,
+  // Review launch + draft handoff (Task 12): the worktree launcher and the two
+  // fs primitives decorateReviews/loadReviewDraft need — kept in the hoisted
+  // block like every other side effect this suite stubs out.
+  // Typed as the real union (not narrowed via inference) so a test can resolve
+  // `{ ok: false, message }` as well as the success shape without a type error.
+  // Rest-params rather than the real (req, deps) signature: the mock never
+  // inspects its arguments, only the launch/launch.ts wrapper below forwards them.
+  launchReview: vi.fn(async (..._args: unknown[]): Promise<{ ok: true; runKey: string } | { ok: false; message: string }> => ({
+    ok: true,
+    runKey: "review-aws-ops-8491",
+  })),
+  existsSync: vi.fn((_p: string) => false),
+  readFileSync: vi.fn((_p: string, _e?: string) => ""),
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -45,7 +58,15 @@ vi.mock("../../src/engine/runs", () => ({
   removeRun: h.removeRun,
 }));
 vi.mock("../../src/engine/status", () => ({ buildRunStatus: h.buildRunStatus }));
-vi.mock("../../src/engine/workspace", () => ({ openInEditor: h.openInEditor }));
+vi.mock("../../src/engine/workspace", () => ({
+  openInEditor: h.openInEditor,
+  // Never actually invoked in this suite — launchReview itself is mocked below,
+  // so it never calls through to its own deps. Present only so deckView's
+  // import of BRIEF_DIR and openWorkspace resolves to something.
+  openWorkspace: vi.fn(),
+  BRIEF_DIR: ".pick-task",
+}));
+vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn() }));
 vi.mock("../../src/engine/git", () => ({ taskDiff: h.taskDiff }));
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: () => [],
@@ -77,6 +98,21 @@ vi.mock("../../src/engine/review/store", () => ({
   isReviewCacheStale: (c: { fetchedAt: number } | null, ttl: number, now: number) => !c || now - c.fetchedAt >= ttl,
 }));
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: () => h.repos }));
+// Partial mock: deckView.ts and everything it pulls in (engine/worktree,
+// engine/gitExclude, jsonc-parser's consumers, etc.) use far more of `fs` than
+// the two functions this suite stubs — a bare vi.mock("fs") would blank the
+// rest and break every real (unmocked) module transitively imported here.
+vi.mock("fs", async (importActual) => {
+  const actual = await importActual<typeof import("fs")>();
+  return { ...actual, existsSync: (p: string) => h.existsSync(p), readFileSync: (p: string, e: string) => h.readFileSync(p, e) };
+});
+// Partial mock: reviewRunKey is real (its slugging is exactly what decorateReviews
+// relies on to match a run to a queued PR); only launchReview — the side-effecting
+// half — is replaced.
+vi.mock("../../src/engine/review/launch", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/engine/review/launch")>();
+  return { ...actual, launchReview: (...args: Parameters<typeof actual.launchReview>) => h.launchReview(...args) };
+});
 vi.mock("../../src/config", () => ({
   getConfig: () => ({
     baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds,
@@ -149,6 +185,9 @@ beforeEach(() => {
   h.reviewDetail.mockClear().mockResolvedValue({ failing: [], unresolved: null });
   h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }];
   h.reviewRequests = true;
+  h.launchReview.mockClear().mockResolvedValue({ ok: true, runKey: "review-aws-ops-8491" });
+  h.existsSync.mockClear().mockReturnValue(false);
+  h.readFileSync.mockClear().mockReturnValue("");
 });
 
 afterEach(() => {
@@ -944,5 +983,100 @@ describe("DeckPanel review detail", () => {
     expect(posts(p).filter((m) => m.type === "deck:reviewDetail")).toHaveLength(0);
     expect(posts(p).length).toBe(before);
     expect(log).toHaveBeenCalledWith(expect.stringContaining("CyberJackGit/aws-ops#8491"));
+  });
+});
+
+describe("DeckPanel review launch", () => {
+  it("launches a review and toasts", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(h.launchReview).toHaveBeenCalled();
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(true);
+  });
+
+  it("toasts the reason when a launch is refused, verbatim", async () => {
+    // An exact match, not merely a truthy error toast: a broken implementation
+    // that toasts a canned "couldn't launch" string regardless of what
+    // launchReview actually said would still pass a looser assertion.
+    h.launchReview.mockResolvedValueOnce({ ok: false, message: "no checkout" });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "error" && m.message === "no checkout")).toBe(true);
+  });
+
+  it("ignores a launch for an id that is not in the queue", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "who/what#1" });
+    // Pinning that launchReview itself was never reached, not merely that
+    // nothing got posted — a guard that looked the id up, found nothing, but
+    // still called through with an undefined req would pass a posts()-only check.
+    expect(h.launchReview).not.toHaveBeenCalled();
+  });
+
+  it("reports a review run and its draft file on the row", async () => {
+    h.runs = [{
+      key: "review-aws-ops-8491", summary: "Review", url: "https://gh/pr/8491", createdAt: 1, kind: "review",
+      mode: "per-window", repos: [{ name: "aws-ops", path: "/repos/aws-ops/.claude/worktrees/review-aws-ops-8491", isGit: true }],
+      briefPaths: [],
+    }];
+    h.existsSync.mockReturnValue(true);
+    const p = await showAndWarm();
+    const row = posts(p).find((m) => m.type === "deck:reviews").requests[0];
+    expect(row.runKey).toBe("review-aws-ops-8491");
+    expect(row.draftPath).toBe("/repos/aws-ops/.claude/worktrees/review-aws-ops-8491/.pick-task/REVIEW-8491.md");
+  });
+
+  it("leaves draftPath null when the agent hasn't written a file yet", async () => {
+    // Same review run as above, but existsSync says the file isn't there —
+    // an implementation that ignores existsSync (always offering the computed
+    // path) would pass every other test here yet render a Load button pointing
+    // at nothing.
+    h.runs = [{
+      key: "review-aws-ops-8491", summary: "Review", url: "https://gh/pr/8491", createdAt: 1, kind: "review",
+      mode: "per-window", repos: [{ name: "aws-ops", path: "/repos/aws-ops/.claude/worktrees/review-aws-ops-8491", isGit: true }],
+      briefPaths: [],
+    }];
+    h.existsSync.mockReturnValue(false);
+    const p = await showAndWarm();
+    const row = posts(p).find((m) => m.type === "deck:reviews").requests[0];
+    expect(row.runKey).toBe("review-aws-ops-8491");
+    expect(row.draftPath).toBeNull();
+  });
+
+  it("posts the draft body when asked to load it", async () => {
+    h.runs = [{
+      key: "review-aws-ops-8491", summary: "Review", url: "https://gh/pr/8491", createdAt: 1, kind: "review",
+      mode: "per-window", repos: [{ name: "aws-ops", path: "/wt", isGit: true }], briefPaths: [],
+    }];
+    h.existsSync.mockReturnValue(true);
+    h.readFileSync.mockReturnValue("1. The retry budget is unbounded.");
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLoadDraft", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p).at(-1)).toMatchObject({
+      type: "deck:reviewDraft",
+      id: "CyberJackGit/aws-ops#8491",
+      body: "1. The retry budget is unbounded.",
+    });
+  });
+
+  it("ignores a load-draft request for an id that is not in the queue", async () => {
+    const p = await showAndWarm();
+    const before = posts(p).length;
+    await p._fire({ type: "deck:reviewLoadDraft", id: "who/what#1" });
+    expect(posts(p)).toHaveLength(before);
+    expect(h.readFileSync).not.toHaveBeenCalled();
+  });
+
+  it("toasts when the draft file can't be read", async () => {
+    h.runs = [{
+      key: "review-aws-ops-8491", summary: "Review", url: "https://gh/pr/8491", createdAt: 1, kind: "review",
+      mode: "per-window", repos: [{ name: "aws-ops", path: "/wt", isGit: true }], briefPaths: [],
+    }];
+    h.existsSync.mockReturnValue(true);
+    h.readFileSync.mockImplementation(() => { throw new Error("EACCES"); });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLoadDraft", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p).some((m) => m.type === "deck:reviewDraft")).toBe(false);
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "error")).toBe(true);
   });
 });

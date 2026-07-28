@@ -280,6 +280,8 @@ export type InboundMessage =
   | { type: "deck:forget"; key: string }
   | { type: "deck:setReviewSort"; sort: ReviewSort }
   | { type: "deck:reviewExpand"; id: string }
+  | { type: "deck:reviewLaunch"; id: string }
+  | { type: "deck:reviewLoadDraft"; id: string }
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }
@@ -319,6 +321,9 @@ export type OutboundMessage =
       stale: boolean; // the last fetch failed; these are the previous results
     }
   | { type: "deck:reviewDetail"; id: string; detail: ReviewDetail }
+  // The agent's findings, read from the worktree on demand — not carried on
+  // every deck:reviews post, since the strip re-posts on every poll tick.
+  | { type: "deck:reviewDraft"; id: string; body: string }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
   | { type: "mkt:loading"; loading: boolean }

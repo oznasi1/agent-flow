@@ -18,7 +18,7 @@ const mk = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
 const props = (over: Partial<React.ComponentProps<typeof ReviewStrip>> = {}) => ({
   requests: [mk()], issueCount: 1, sort: "oldest" as const, stale: false,
   expanded: null, details: {}, onExpand: vi.fn(), onSort: vi.fn(), onOpen: vi.fn(),
-  collapsed: false, onCollapse: vi.fn(),
+  collapsed: false, onCollapse: vi.fn(), onLaunch: vi.fn(), onLoadDraft: vi.fn(),
   ...over,
 });
 
@@ -134,5 +134,52 @@ describe("ReviewStrip", () => {
     render(<ReviewStrip {...props({ collapsed: true, onCollapse })} />);
     fireEvent.click(screen.getByText(/waiting on your review/i));
     expect(onCollapse).toHaveBeenCalledWith(false);
+  });
+
+  it("offers Review with agent when the repo is checked out", () => {
+    const onLaunch = vi.fn();
+    render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", onLaunch })} />);
+    fireEvent.click(screen.getByText(/Review with agent/i));
+    expect(onLaunch).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
+  });
+
+  it("disables the agent action with a reason when the repo is not checked out", () => {
+    const onLaunch = vi.fn();
+    render(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491",
+      onLaunch,
+      requests: [mk({ localPath: null })],
+    })} />);
+    const btn = screen.getByText(/Review with agent/i) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.title).toMatch(/not checked out/i);
+    // A disabled button whose onClick is still wired would pass a check on
+    // `disabled` alone — jsdom (like a real browser) suppresses the click on a
+    // disabled element, so this only holds if `disabled` is a real DOM attribute,
+    // not just a class name or a visual-only style.
+    fireEvent.click(btn);
+    expect(onLaunch).not.toHaveBeenCalled();
+  });
+
+  it("says a review is already running", () => {
+    render(<ReviewStrip {...props({ requests: [mk({ runKey: "review-aws-ops-8491" })] })} />);
+    expect(screen.getByText(/reviewing/i)).toBeInTheDocument();
+  });
+
+  it("does not say a review is running when no run is in flight", () => {
+    render(<ReviewStrip {...props({ requests: [mk({ runKey: null })] })} />);
+    expect(screen.queryByText(/reviewing/i)).not.toBeInTheDocument();
+  });
+
+  it("offers to load the agent's draft only once the file exists", () => {
+    const onLoadDraft = vi.fn();
+    const { rerender } = render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", onLoadDraft })} />);
+    expect(screen.queryByText(/Load agent's review/i)).not.toBeInTheDocument();
+    rerender(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491", onLoadDraft,
+      requests: [mk({ draftPath: "/wt/.pick-task/REVIEW-8491.md" })],
+    })} />);
+    fireEvent.click(screen.getByText(/Load agent's review/i));
+    expect(onLoadDraft).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
   });
 });

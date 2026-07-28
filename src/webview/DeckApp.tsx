@@ -253,6 +253,7 @@ export function DeckApp(): JSX.Element {
       } else if (m.type === "deck:reviewDetail") {
         setDetails((d) => ({ ...d, [m.id]: m.detail }));
       }
+      // deck:reviewDraft is handled once the review box exists to show it (Slice 3).
     };
     window.addEventListener("message", handler);
     send({ type: "deck:ready" });
@@ -327,6 +328,8 @@ export function DeckApp(): JSX.Element {
           if (!details[id]) send({ type: "deck:reviewExpand", id });
         }}
         onOpen={(url) => send({ type: "openExternal", url })}
+        onLaunch={(id) => send({ type: "deck:reviewLaunch", id })}
+        onLoadDraft={(id) => send({ type: "deck:reviewLoadDraft", id })}
       />
 
       {runs.length === 0 ? (
