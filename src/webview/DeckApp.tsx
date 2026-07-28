@@ -1,6 +1,7 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, RunStatus, isTicketRun } from "../types";
+import { DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun } from "../types";
+import { ReviewStrip } from "./ReviewStrip";
 
 let toastSeq = 0;
 
@@ -214,6 +215,20 @@ export function DeckApp(): JSX.Element {
   const [, forceTick] = React.useState(0);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string }[]>([]);
   const [busy, setBusy] = React.useState(false);
+  const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean }>(
+    { requests: [], issueCount: 0, sort: "oldest", stale: false },
+  );
+  const [reviewsCollapsed, setReviewsCollapsed] = React.useState(false);
+  const [expanded, setExpanded] = React.useState<string | null>(null);
+  const [details, setDetails] = React.useState<Record<string, ReviewDetail>>({});
+  /** Has a queue ever arrived? Gates the one-time collapse. */
+  const seededCollapse = React.useRef(false);
+  /** Has the host ever posted a queue? That is the webview's only signal that the
+   * feature is on: `postReviews` stays silent when the setting is off or `gh` is
+   * unusable, but posts `requests: []` when it is on and you owe nobody a review.
+   * The stat needs the difference — "0 To review" is information, a missing tile is
+   * not — while the strip itself only appears once there is a row to show. */
+  const [reviewsSeen, setReviewsSeen] = React.useState(false);
 
   React.useEffect(() => {
     const handler = (ev: MessageEvent<OutboundMessage>) => {
@@ -230,6 +245,18 @@ export function DeckApp(): JSX.Element {
         setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2600);
       } else if (m.type === "deck:loading") {
         setBusy(m.loading);
+      } else if (m.type === "deck:reviews") {
+        // Collapse a long queue on arrival, once: nine rows would push the board
+        // off-screen, and the user's later choice must survive every refresh after.
+        // A ref rather than reading state: this fires inside a message handler
+        // registered once, and a setState called from inside another setState's
+        // updater runs twice under StrictMode.
+        setReviewsSeen(true);
+        if (!seededCollapse.current && m.requests.length > 0) {
+          seededCollapse.current = true;
+          if (m.requests.length > 5) setReviewsCollapsed(true);
+        }
+        setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale });
       }
     };
     window.addEventListener("message", handler);
@@ -265,6 +292,9 @@ export function DeckApp(): JSX.Element {
           <div className="stat"><span className="n">{runs.filter((r) => r.column === "progress").length}</span><span className="l">In progress</span></div>
           <div className={`stat ${needs > 0 ? "attn" : ""}`}><span className="n">{needs}</span><span className="l">Action required</span></div>
           <div className="stat"><span className="n">{runs.filter((r) => r.column === "review").length}</span><span className="l">In review</span></div>
+          {reviewsSeen && (
+            <div className="stat"><span className="n">{reviews.issueCount}</span><span className="l">To review</span></div>
+          )}
           <div className="stat"><span className="n">{runs.length}</span><span className="l">Total</span></div>
         </div>
         <div className="sp" />
@@ -284,6 +314,20 @@ export function DeckApp(): JSX.Element {
           <span className="synced">{busy ? "syncing…" : syncedAt ? `synced ${timeAgo(syncedAt)}` : "refresh"}</span>
         </button>
       </div>
+
+      <ReviewStrip
+        requests={reviews.requests}
+        issueCount={reviews.issueCount}
+        sort={reviews.sort}
+        stale={reviews.stale}
+        collapsed={reviewsCollapsed}
+        expanded={expanded}
+        details={details}
+        onCollapse={setReviewsCollapsed}
+        onSort={(sort) => { setReviews((r) => ({ ...r, sort })); send({ type: "deck:setReviewSort", sort }); }}
+        onExpand={(id) => setExpanded((cur) => (cur === id ? null : id))}
+        onOpen={(url) => send({ type: "openExternal", url })}
+      />
 
       {runs.length === 0 ? (
         <div className="empty">

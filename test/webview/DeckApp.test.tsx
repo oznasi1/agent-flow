@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as React from "react";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
 import { DeckApp } from "../../src/webview/DeckApp";
 import { send } from "../../src/webview/vscodeApi";
-import type { OutboundMessage, PrFacts, RunStatus } from "../../src/types";
+import type { OutboundMessage, PrFacts, ReviewRequest, RunStatus } from "../../src/types";
 
 const sent = vi.mocked(send);
 
@@ -418,5 +418,59 @@ describe("DeckApp PR-facts chrome", () => {
     render(<DeckApp />);
     host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, ghNote: "gh CLI not found — PR facts off" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
+  });
+});
+
+const reviewsMsg = (requests: ReviewRequest[], issueCount = requests.length): OutboundMessage =>
+  ({ type: "deck:reviews", requests, issueCount, sort: "oldest", stale: false });
+
+const mkReview = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
+  id: "o/r#1", repo: "o/r", repoName: "r", number: 1, title: "a small fix", url: "https://gh/o/r/pull/1",
+  author: "dana", isDraft: false, createdAt: Date.now() - 3_600_000, updatedAt: Date.now(),
+  additions: 10, deletions: 2, changedFiles: 1,
+  ci: "passing", review: "review_required", mergeable: "clean",
+  localPath: null, runKey: null, draftPath: null, ...over,
+});
+
+describe("DeckApp review strip", () => {
+  it("shows no To review stat until the host posts a queue", () => {
+    render(<DeckApp />);
+    expect(screen.queryByText("To review")).not.toBeInTheDocument();
+    host(reviewsMsg([mkReview()]));
+    expect(screen.getByText("To review")).toBeInTheDocument();
+  });
+
+  // The strip and the stat part company here, deliberately: an empty rail above the
+  // board is noise, but a "0" tile is the only thing telling you the feature is alive.
+  // Scoped to the "To review" stat itself: with no runs, every other stat tile (In
+  // progress, Action required, In review, Total) also reads "0", so a bare
+  // screen.getByText("0") matches five elements and throws rather than asserting
+  // anything.
+  it("keeps the To review stat at zero, while the strip itself disappears", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([], 0));
+    const stat = screen.getByText("To review").closest<HTMLElement>(".stat")!;
+    expect(within(stat).getByText("0")).toBeInTheDocument();
+    expect(screen.queryByText(/waiting on your review/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the strip above the board", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()]));
+    expect(screen.getByText("a small fix")).toBeInTheDocument();
+  });
+
+  it("sends the new sort to the host", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()]));
+    fireEvent.click(screen.getByText("smallest"));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:setReviewSort", sort: "smallest" });
+  });
+
+  it("starts a queue of more than five collapsed", () => {
+    render(<DeckApp />);
+    host(reviewsMsg(Array.from({ length: 6 }, (_, i) => mkReview({ id: `o/r#${i}`, number: i, title: `pr ${i}` }))));
+    expect(screen.queryByText("pr 0")).not.toBeInTheDocument();
+    expect(screen.getByText(/6 PRs waiting on your review/i)).toBeInTheDocument();
   });
 });

@@ -279,4 +279,59 @@ export const DECK_CSS = `
   .pr-bad .pr-link { color: inherit; }
   .pr-wait { color: var(--dim); }
   .pr-draft { color: var(--dim); }
+
+  /* The review queue: what other people are waiting on you for, above the board of
+     what you are waiting on yourself. Inside the board's own 20px gutter, and
+     flex: none so it never steals height from .board, which is the scrollport. */
+  .rv-strip { flex: none; margin: 0 20px 10px; border: 1px solid var(--hair);
+    border-radius: var(--r-card); overflow: hidden; }
+  .rv-hd { display: flex; align-items: center; gap: 10px; padding: 7px 12px;
+    font-size: var(--t-body); color: var(--dim); }
+  .rv-toggle { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none;
+    padding: 0; cursor: pointer; font-size: var(--t-body); font-weight: 550;
+    color: var(--vscode-foreground); }
+  .rv-hd .sp { flex: 1; }
+  .rv-sort { display: inline-flex; align-items: center; gap: 5px; }
+  .rv-sort button { border: 0; background: none; padding: 0; cursor: pointer;
+    font-size: var(--t-body); color: var(--dim); }
+  .rv-sort button.on { color: var(--vscode-foreground); text-decoration: underline; text-underline-offset: 2px; }
+  /* A queue we could not refresh is stale, not broken — attn, never danger. */
+  .rv-note.warn { color: var(--c-attn); }
+
+  .rv-rows { border-top: 1px solid var(--hair); }
+  .rv-row + .rv-row { border-top: 1px solid var(--hair); }
+  .rv-line { display: flex; align-items: baseline; gap: 8px; padding: 6px 12px; cursor: pointer;
+    font-size: var(--t-body); font-variant-numeric: tabular-nums; }
+  .rv-line:hover { background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)); }
+  .rv-caret { flex: none; width: 9px; color: var(--dim); }
+  /* Identifiers and counts — the only mono on the row. The title and the handle
+     beside them are English, and stay in the UI font. */
+  .rv-repo, .rv-num, .rv-size, .rv-line .add, .rv-line .del {
+    font-family: var(--mono); font-size: var(--t-data); }
+  .rv-repo, .rv-num { color: var(--dim); }
+  .rv-size { font-weight: 600; color: var(--dim); }
+  .rv-line .add { color: var(--c-done); }
+  .rv-line .del { color: var(--c-danger); }
+  .rv-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--vscode-foreground); }
+  .rv-draft { flex: none; font-size: var(--t-micro); color: var(--dim);
+    border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0 4px; }
+  .rv-files, .rv-author, .rv-age { flex: none; color: var(--dim); }
+  .rv-running { flex: none; color: var(--c-progress); }
+
+  .rv-detail { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px;
+    padding: 2px 12px 9px 29px; font-size: var(--t-body); }
+  .rv-facts { flex-basis: 100%; display: flex; align-items: baseline; gap: 6px; color: var(--dim); }
+  .rv-facts.dim { font-style: italic; }
+  .rv-sep { color: var(--dim); opacity: .5; }
+  .rv-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 5px; }
+  /* .act dims to .7 unless it sits in a hovered .card. A row is not a card, so the
+     rule never re-brightens and every button here would render permanently faded. */
+  .rv-actions .act { opacity: 1; }
+
+  .rv-box { flex: 1; min-width: 0; }
+  .rv-box textarea { width: 100%; min-height: 46px; resize: vertical; font: inherit;
+    font-size: var(--t-body); color: var(--vscode-input-foreground);
+    background: var(--vscode-input-background); border: 1px solid var(--edge);
+    border-radius: var(--r-ctl); padding: 5px 7px; }
 `;
