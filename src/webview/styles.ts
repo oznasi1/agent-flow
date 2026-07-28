@@ -194,6 +194,11 @@ export const CSS = `
     background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
   .chip .x { cursor: pointer; opacity: .65; font-size: 12px; line-height: 1; }
   .chip .x:hover { opacity: 1; }
+  /* Off the ticket — inferred but never recorded on the issue, or no component at
+     all. The dashed outline carries that on its own; the padding drops 1px to
+     absorb the border so chips don't change size between states. */
+  .chip.off-ticket { background: transparent; padding: 1px 4px 1px 7px;
+    border: 1px dashed var(--vscode-badge-background); color: var(--vscode-descriptionForeground); }
   .chip-none { font-size: 10px; color: var(--vscode-descriptionForeground); font-style: italic; }
 
   /* Repo picker — inline command-palette style */

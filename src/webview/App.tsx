@@ -26,6 +26,8 @@ interface DetailState {
   descriptionText?: string;
   repos?: string[];
   selected?: string[];
+  jira?: string[]; // components on the ticket, spelled as Jira spells them
+  mappable?: Record<string, string>; // repo name → canonical component name
 }
 
 interface CardDnd {
@@ -208,7 +210,14 @@ export function App(): JSX.Element {
         case "detail":
           setDetails((prev) => ({
             ...prev,
-            [m.key]: { loading: false, descriptionText: m.descriptionText, repos: m.repos, selected: m.inferred },
+            [m.key]: {
+              loading: false,
+              descriptionText: m.descriptionText,
+              repos: m.repos,
+              selected: m.inferred,
+              jira: m.jiraComponents,
+              mappable: m.mappable,
+            },
           }));
           break;
         case "statusChanged":
@@ -492,6 +501,7 @@ export function App(): JSX.Element {
             prReviewStatus={prReviewStatus}
             open={expanded.has(t.key)}
             detail={details[t.key]}
+            project={project}
             onToggle={() => toggleExpand(t.key)}
             onSelect={(sel) => setSelected(t.key, sel)}
             batch={batchMode ? { checked: batchSelected.has(t.key), onToggle: () => toggleBatch(t.key) } : undefined}
@@ -576,13 +586,14 @@ function TaskCard(props: {
   prReviewStatus: string;
   open: boolean;
   detail?: DetailState;
+  project: string;
   onToggle: () => void;
   onSelect: (selected: string[]) => void;
   batch?: { checked: boolean; onToggle: () => void };
   dnd?: CardDnd;
   onRemoveFromSprint?: () => void;
 }): JSX.Element {
-  const { task, me, prReviewStatus, open, detail, onToggle, onSelect, batch, dnd, onRemoveFromSprint } = props;
+  const { task, me, prReviewStatus, open, detail, project, onToggle, onSelect, batch, dnd, onRemoveFromSprint } = props;
   const unassigned = !task.assignee || task.assignee.toLowerCase() === "unassigned";
   const isMe = !!me && task.assignee === me;
   // Offer "add to my sprint" when it isn't already there: unassigned tasks, or tasks
@@ -712,23 +723,32 @@ function TaskCard(props: {
             {task.estimateSeconds != null && (
               <span className="est" title="Original estimate">⏱ {fmtEst(task.estimateSeconds)}</span>
             )}
-            {(task.services ?? []).map((s) => (
+            {/* The edited list once the card has been opened — the collapsed and
+                expanded views must not disagree about what Take will open. */}
+            {(detail?.selected ?? task.services ?? []).map((s) => (
               <span key={s} className="svc guess">{s}</span>
             ))}
           </div>
         )}
       </div>
 
-      {open && <CardDetail detail={detail} onSelect={onSelect} />}
+      {open && <CardDetail taskKey={task.key} project={project} detail={detail} onSelect={onSelect} />}
     </div>
   );
 }
 
-function CardDetail(props: { detail?: DetailState; onSelect: (s: string[]) => void }): JSX.Element {
-  const { detail, onSelect } = props;
+function CardDetail(props: {
+  taskKey: string;
+  project: string;
+  detail?: DetailState;
+  onSelect: (s: string[]) => void;
+}): JSX.Element {
+  const { taskKey, project, detail, onSelect } = props;
   if (!detail || detail.loading) return <div className="detail"><div className="detail-loading">Loading ticket…</div></div>;
 
   const selected = detail.selected ?? [];
+  const jira = detail.jira ?? [];
+  const mappable = detail.mappable ?? {};
   const available = (detail.repos ?? []).filter((r) => !selected.includes(r));
   const remove = (name: string) => onSelect(selected.filter((s) => s !== name));
   const add = (name: string) => { if (name) onSelect([...selected, name]); };
@@ -739,12 +759,33 @@ function CardDetail(props: { detail?: DetailState; onSelect: (s: string[]) => vo
       <div className="sel-label">Repos this task touches</div>
       <div className="chips">
         {selected.length === 0 && <span className="chip-none">none selected</span>}
-        {selected.map((s) => (
-          <span key={s} className="chip">
-            {s}
-            <span className="x" title="Remove" onClick={() => remove(s)}>×</span>
-          </span>
-        ))}
+        {selected.map((s) => {
+          // Three states: on the ticket (solid), a component the ticket lacks
+          // (dashed — Task 6 gives it a push), or no component at all (dashed,
+          // local-only). Only the first can be removed from Jira.
+          const component = mappable[s];
+          const onTicket = !!component && jira.includes(component);
+          return (
+            <span
+              key={s}
+              className={`chip${onTicket ? "" : " off-ticket"}`}
+              title={
+                onTicket
+                  ? undefined
+                  : component
+                    ? `Not on ${taskKey} in Jira`
+                    : `No ${project} component named “${s}” — this selection stays local`
+              }
+            >
+              {s}
+              <span
+                className="x"
+                title={onTicket ? `Remove ${component} from ${taskKey}` : "Remove"}
+                onClick={() => remove(s)}
+              >×</span>
+            </span>
+          );
+        })}
       </div>
       <RepoPicker available={available} onAdd={add} />
     </div>

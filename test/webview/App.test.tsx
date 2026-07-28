@@ -707,6 +707,60 @@ describe("task card actions", () => {
     host({ type: "detail", key: "ASM-1", descriptionText: "The full description", inferred: [], repos: ["centaur"], jiraComponents: [], mappable: {} });
     expect(screen.getByText("The full description")).toBeInTheDocument();
   });
+
+  /** Expand ASM-1 and deliver a detail. `jiraComponents` / `mappable` decide the
+   *  chip states: account-service is on the ticket (A), pricing-api maps but is not
+   *  on it (B), scratch-tool maps to nothing (C). */
+  const withChips = (over: Partial<{ inferred: string[]; jiraComponents: string[]; mappable: Record<string, string> }> = {}) => {
+    withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
+    fireEvent.click(screen.getByText("Fix bug"));
+    host({
+      type: "detail",
+      key: "ASM-1",
+      descriptionText: "desc",
+      repos: ["account-service", "pricing-api", "scratch-tool", "centaur"],
+      inferred: over.inferred ?? ["account-service", "pricing-api", "scratch-tool"],
+      jiraComponents: over.jiraComponents ?? ["Account-Service"],
+      mappable: over.mappable ?? { "account-service": "Account-Service", "pricing-api": "Pricing-Api", centaur: "Centaur" },
+    });
+  };
+
+  const chipFor = (name: string): HTMLElement =>
+    [...document.querySelectorAll(".chips .chip")].find((c) => c.textContent?.startsWith(name)) as HTMLElement;
+
+  it("renders a chip that is on the ticket as solid, with a Jira-removing × ", () => {
+    withChips();
+    const chip = chipFor("account-service");
+    expect(chip.className).not.toContain("off-ticket");
+    expect(chip).not.toHaveAttribute("title");
+    expect(within(chip).getByTitle("Remove Account-Service from ASM-1")).toBeInTheDocument();
+    expect(within(chip).queryByText("↑")).not.toBeInTheDocument();
+  });
+
+  it("renders a mappable chip that is not on the ticket as dashed", () => {
+    withChips();
+    const chip = chipFor("pricing-api");
+    expect(chip.className).toContain("off-ticket");
+    expect(chip).toHaveAttribute("title", "Not on ASM-1 in Jira");
+    // The × is local-only here: there is no component on the ticket to remove.
+    expect(within(chip).getByTitle("Remove")).toBeInTheDocument();
+  });
+
+  it("renders an unmappable chip as dashed with no push, and says why", () => {
+    withChips();
+    const chip = chipFor("scratch-tool");
+    expect(chip.className).toContain("off-ticket");
+    expect(chip).toHaveAttribute("title", "No ASM component named “scratch-tool” — this selection stays local");
+    expect(within(chip).queryByText("↑")).not.toBeInTheDocument();
+    expect(within(chip).getByTitle("Remove")).toBeInTheDocument();
+  });
+
+  it("collapsed service chips follow the edited list, not the original guess", () => {
+    withChips({ inferred: ["pricing-api"] });
+    fireEvent.click(screen.getByText("Fix bug")); // collapse
+    const meta = document.querySelector(".meta") as HTMLElement;
+    expect(within(meta).getByText("pricing-api")).toBeInTheDocument();
+  });
 });
 
 describe("drag-and-drop reorder", () => {
