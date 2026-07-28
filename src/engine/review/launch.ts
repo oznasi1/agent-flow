@@ -17,9 +17,9 @@ export function renderReviewTemplate(
   v: { repo: string; number: number; author: string },
 ): string {
   return template
-    .replace(/\{repo\}/g, v.repo)
-    .replace(/\{number\}/g, String(v.number))
-    .replace(/\{author\}/g, v.author);
+    .replace(/\{repo\}/g, () => v.repo)
+    .replace(/\{number\}/g, () => String(v.number))
+    .replace(/\{author\}/g, () => v.author);
 }
 
 export interface LaunchReviewRequest {
@@ -49,6 +49,14 @@ export async function launchReview(
   const summary = `Review ${req.repoName}#${req.number}: ${req.title}`;
   const base: ServiceRef = { name: req.repoName, path: req.localPath, isGit: true };
   const services = deps.createWorktrees([base], key, summary, deps.log);
+  // createWorktrees falls back to the main checkout when it cannot create a worktree.
+  // For an ordinary task that is merely inconvenient; here the seeded prompt scripts a
+  // real `gh pr checkout`, so proceeding would switch the user's OWN checkout to a
+  // teammate's branch. Refuse: an un-launched review costs a click, a hijacked checkout
+  // can cost work in progress.
+  if (services.some((s) => s.path === base.path)) {
+    return { ok: false, message: `Couldn't create a git worktree in ${req.repoName} — not reviewing ${req.repoName}#${req.number} in your main checkout. The Agent Flow output channel has the reason.` };
+  }
   try {
     await deps.openWorkspace({
       ticket: { key, summary, url: req.url },
