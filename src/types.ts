@@ -264,6 +264,7 @@ export type InboundMessage =
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
   | { type: "deck:forget"; key: string }
   | { type: "deck:setReviewSort"; sort: ReviewSort }
+  | { type: "deck:reviewExpand"; id: string }
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }
@@ -302,6 +303,7 @@ export type OutboundMessage =
       sort: ReviewSort;
       stale: boolean; // the last fetch failed; these are the previous results
     }
+  | { type: "deck:reviewDetail"; id: string; detail: ReviewDetail }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
   | { type: "mkt:loading"; loading: boolean }

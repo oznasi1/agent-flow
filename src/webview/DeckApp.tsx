@@ -257,6 +257,8 @@ export function DeckApp(): JSX.Element {
           if (m.requests.length > 5) setReviewsCollapsed(true);
         }
         setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale });
+      } else if (m.type === "deck:reviewDetail") {
+        setDetails((d) => ({ ...d, [m.id]: m.detail }));
       }
     };
     window.addEventListener("message", handler);
@@ -325,7 +327,12 @@ export function DeckApp(): JSX.Element {
         details={details}
         onCollapse={setReviewsCollapsed}
         onSort={(sort) => { setReviews((r) => ({ ...r, sort })); send({ type: "deck:setReviewSort", sort }); }}
-        onExpand={(id) => setExpanded((cur) => (cur === id ? null : id))}
+        onExpand={(id) => {
+          setExpanded((cur) => (cur === id ? null : id));
+          // Once per session per row: the strip re-renders constantly (the 1s
+          // clock tick), and a fetch on every render would spawn a gh call a second.
+          if (!details[id]) send({ type: "deck:reviewExpand", id });
+        }}
         onOpen={(url) => send({ type: "openExternal", url })}
       />
 

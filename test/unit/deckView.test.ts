@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { window, ViewColumn, env, workspace } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
-import type { PrFacts, ReviewRequest, Run, RunStatus, ServiceRef } from "../../src/types";
+import type { PrFacts, ReviewDetail, ReviewRequest, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
@@ -34,6 +34,8 @@ const h = vi.hoisted(() => ({
   })),
   reviewCache: null as { fetchedAt: number; issueCount: number; requests: ReviewRequest[] } | null,
   writeReviewCache: vi.fn(),
+  // Row expansion (Task 9): the two facts the search cannot return.
+  reviewDetail: vi.fn(async (_repo: string, _number: number): Promise<ReviewDetail | null> => ({ failing: [], unresolved: null })),
   repos: [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }] as ServiceRef[],
   reviewRequests: true as boolean,
 }));
@@ -64,7 +66,7 @@ vi.mock("../../src/engine/pr/provider", () => ({
 vi.mock("../../src/engine/review/provider", () => ({
   GhReviewProvider: class {
     search = h.reviewSearch;
-    detail = vi.fn(async () => null);
+    detail = h.reviewDetail;
   },
 }));
 vi.mock("../../src/engine/review/store", () => ({
@@ -144,6 +146,7 @@ beforeEach(() => {
   h.reviewSearch.mockClear().mockResolvedValue({ issueCount: 1, requests: [reviewFixture()] });
   h.reviewCache = null;
   h.writeReviewCache.mockClear();
+  h.reviewDetail.mockClear().mockResolvedValue({ failing: [], unresolved: null });
   h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }];
   h.reviewRequests = true;
 });
@@ -877,5 +880,37 @@ describe("DeckPanel review strip", () => {
     expect(bySmallest).toMatchObject({ type: "deck:reviews", sort: "smallest" });
     expect(bySmallest.requests.map((r: ReviewRequest) => r.number)).toEqual([9000, 8491]);
     expect(h.reviewSearch).not.toHaveBeenCalled();
+  });
+});
+
+describe("DeckPanel review detail", () => {
+  it("fetches a row's detail and posts it", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p).at(-1)).toMatchObject({
+      type: "deck:reviewDetail",
+      id: "CyberJackGit/aws-ops#8491",
+      detail: { failing: [], unresolved: null },
+    });
+  });
+
+  it("ignores an id that is not in the queue", async () => {
+    const p = await showAndWarm();
+    const before = posts(p).length;
+    await p._fire({ type: "deck:reviewExpand", id: "who/what#1" });
+    expect(posts(p)).toHaveLength(before);
+    // A guard that merely happened not to post (rather than never looking the id
+    // up at all) would still pass an assertion on posts() alone — pin that the
+    // provider itself was never reached for an id outside the current queue.
+    expect(h.reviewDetail).not.toHaveBeenCalled();
+  });
+
+  it("posts nothing when the detail fetch fails", async () => {
+    h.reviewDetail.mockResolvedValueOnce(null);
+    const p = await showAndWarm();
+    const before = posts(p).length;
+    await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p).filter((m) => m.type === "deck:reviewDetail")).toHaveLength(0);
+    expect(posts(p).length).toBe(before);
   });
 });

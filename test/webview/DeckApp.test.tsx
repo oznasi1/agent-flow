@@ -487,4 +487,24 @@ describe("DeckApp review strip", () => {
     host(reviewsMsg(six));
     expect(screen.getByText("pr 0")).toBeInTheDocument();
   });
+
+  it("asks the host for a row's detail on expand, and renders it", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()]));
+    fireEvent.click(screen.getByText("a small fix"));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:reviewExpand", id: "o/r#1" });
+    host({ type: "deck:reviewDetail", id: "o/r#1", detail: { failing: [{ name: "e2e", url: "" }], unresolved: 0 } });
+    expect(screen.getByText("e2e")).toBeInTheDocument();
+  });
+
+  it("does not re-ask for a detail it already has", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()]));
+    fireEvent.click(screen.getByText("a small fix"));
+    host({ type: "deck:reviewDetail", id: "o/r#1", detail: { failing: [], unresolved: null } });
+    fireEvent.click(screen.getByText("a small fix")); // collapse
+    sent.mockClear();
+    fireEvent.click(screen.getByText("a small fix")); // expand again
+    expect(sent).not.toHaveBeenCalledWith({ type: "deck:reviewExpand", id: "o/r#1" });
+  });
 });

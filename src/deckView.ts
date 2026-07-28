@@ -263,6 +263,20 @@ export class DeckPanel {
     });
   }
 
+  /** Fetch the two facts the search cannot return. Silent on failure: the row
+   * keeps its search-level detail, which is still useful, and a toast per
+   * expanded row would be worse than the gap. */
+  private async reviewDetail(id: string): Promise<void> {
+    const req = this.reviewCache?.requests.find((r) => r.id === id);
+    if (!req) return;
+    const detail = await this.reviewProvider.detail(req.repo, req.number);
+    if (!detail) {
+      this.log(`deck: review detail ${id} failed`);
+      return;
+    }
+    this.post({ type: "deck:reviewDetail", id, detail });
+  }
+
   private async jiraStatus(key: string): Promise<{ status: string | null; category: string | null } | null> {
     const hit = this.jiraCache.get(key);
     if (hit && Date.now() - hit.at < JIRA_TTL_MS) return { status: hit.status, category: hit.category };
@@ -382,6 +396,9 @@ export class DeckPanel {
       case "deck:setReviewSort":
         this.reviewSort = m.sort;
         this.postReviews();
+        break;
+      case "deck:reviewExpand":
+        await this.reviewDetail(m.id);
         break;
       case "deck:forget":
         removeRun(defaultRunsDir(), m.key);
