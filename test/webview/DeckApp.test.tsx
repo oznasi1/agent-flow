@@ -473,4 +473,18 @@ describe("DeckApp review strip", () => {
     expect(screen.queryByText("pr 0")).not.toBeInTheDocument();
     expect(screen.getByText(/6 PRs waiting on your review/i)).toBeInTheDocument();
   });
+
+  // The one-time auto-collapse is seeded by a ref, not a state read inside another
+  // setState's updater — this is the test that would catch a regression back to the
+  // latter (which passes under a naive read but re-fires on every later message).
+  it("does not re-collapse a strip the user re-opened, on a later refresh", () => {
+    render(<DeckApp />);
+    const six = Array.from({ length: 6 }, (_, i) => mkReview({ id: `o/r#${i}`, number: i, title: `pr ${i}` }));
+    host(reviewsMsg(six));
+    expect(screen.queryByText("pr 0")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText(/waiting on your review/i));
+    expect(screen.getByText("pr 0")).toBeInTheDocument();
+    host(reviewsMsg(six));
+    expect(screen.getByText("pr 0")).toBeInTheDocument();
+  });
 });

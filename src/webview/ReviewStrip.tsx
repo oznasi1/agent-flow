@@ -40,7 +40,7 @@ function Row({ r, expanded, detail, onExpand, onOpen }: {
   const ci = CI_GLYPH[r.ci];
   return (
     <div className={`rv-row ${expanded ? "open" : ""}`}>
-      <div className="rv-line" onClick={() => onExpand(r.id)}>
+      <button type="button" className="rv-line" onClick={() => onExpand(r.id)}>
         <span className="rv-caret">{expanded ? "▾" : "▸"}</span>
         <span className="rv-repo">{r.repoName}</span>
         <span className="rv-num">#{r.number}</span>
@@ -55,7 +55,7 @@ function Row({ r, expanded, detail, onExpand, onOpen }: {
         <span className={`rv-ci ${ci.cls}`}>{ci.text}</span>
         <span className="rv-author">@{r.author}</span>
         <span className="rv-age">{age(r.createdAt)}</span>
-      </div>
+      </button>
       {expanded && (
         <div className="rv-detail">
           {detail ? (
@@ -65,7 +65,7 @@ function Row({ r, expanded, detail, onExpand, onOpen }: {
                   <React.Fragment key={c.name}>
                     {i > 0 && ", "}
                     {c.url
-                      ? <button className="pr-link" title={c.url} onClick={() => onOpen(c.url)}>{c.name}</button>
+                      ? <button type="button" className="pr-link" title={c.url} onClick={() => onOpen(c.url)}>{c.name}</button>
                       : <span>{c.name}</span>}
                   </React.Fragment>
                 ))}</span>

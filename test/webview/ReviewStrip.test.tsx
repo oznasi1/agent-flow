@@ -82,6 +82,18 @@ describe("ReviewStrip", () => {
     expect(screen.getByText(/2 open/)).toBeInTheDocument();
   });
 
+  it("opens a failing check's own URL, not the PR's", () => {
+    const onOpen = vi.fn();
+    render(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491",
+      details: { "CyberJackGit/aws-ops#8491": { failing: [{ name: "e2e", url: "https://ci/e2e" }], unresolved: null } },
+      onOpen,
+    })} />);
+    fireEvent.click(screen.getByText("e2e"));
+    expect(onOpen).toHaveBeenCalledWith("https://ci/e2e");
+    expect(onOpen).not.toHaveBeenCalledWith("https://github.com/CyberJackGit/aws-ops/pull/8491");
+  });
+
   it("says it is loading the detail before it arrives", () => {
     render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", details: {} })} />);
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
@@ -105,5 +117,22 @@ describe("ReviewStrip", () => {
     render(<ReviewStrip {...props({ collapsed: true })} />);
     expect(screen.getByText(/1 PR waiting on your review/i)).toBeInTheDocument();
     expect(screen.queryByText("isolate renew queue")).not.toBeInTheDocument();
+  });
+
+  // A handler bug like onCollapse(p.collapsed) — passing the current value straight
+  // through instead of flipping it — would make every prior assertion here pass
+  // regardless, since none of them ever click the toggle itself.
+  it("asks to collapse when the header toggle is clicked while open", () => {
+    const onCollapse = vi.fn();
+    render(<ReviewStrip {...props({ collapsed: false, onCollapse })} />);
+    fireEvent.click(screen.getByText(/waiting on your review/i));
+    expect(onCollapse).toHaveBeenCalledWith(true);
+  });
+
+  it("asks to expand when the header toggle is clicked while collapsed", () => {
+    const onCollapse = vi.fn();
+    render(<ReviewStrip {...props({ collapsed: true, onCollapse })} />);
+    fireEvent.click(screen.getByText(/waiting on your review/i));
+    expect(onCollapse).toHaveBeenCalledWith(false);
   });
 });
