@@ -136,7 +136,12 @@ export function countUnresolved(json: unknown): number | null {
     data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: unknown } } } };
   } | null)?.data?.repository?.pullRequest?.reviewThreads?.nodes;
   if (!Array.isArray(nodes)) return null;
+  // A null or non-object entry means this is not a thread list we understand.
+  // The pre-extraction code reached the same verdict by throwing into the
+  // caller's catch; saying so outright removes the dependence on an exception
+  // and keeps the answer honest — a wrong count reads as fact, `null` does not.
+  if (nodes.some((n) => !n || typeof n !== "object")) return null;
   return (nodes as { isResolved?: boolean; isOutdated?: boolean }[]).filter(
-    (n) => !n?.isResolved && !n?.isOutdated,
+    (n) => !n.isResolved && !n.isOutdated,
   ).length;
 }

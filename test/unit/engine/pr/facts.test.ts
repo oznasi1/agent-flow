@@ -190,4 +190,17 @@ describe("countUnresolved", () => {
     expect(countUnresolved({})).toBeNull();
     expect(countUnresolved(null)).toBeNull();
   });
+
+  it("returns null when a null entry sits alongside a valid thread", () => {
+    expect(countUnresolved(wrap([null, { isResolved: false, isOutdated: false }]))).toBeNull();
+  });
+
+  it("returns null when a non-object entry sits alongside a valid thread", () => {
+    expect(countUnresolved(wrap(["nope", { isResolved: false, isOutdated: false }]))).toBeNull();
+    expect(countUnresolved(wrap([7, { isResolved: false, isOutdated: false }]))).toBeNull();
+  });
+
+  it("counts a thread missing both fields as unresolved, matching the old behaviour", () => {
+    expect(countUnresolved(wrap([{}]))).toBe(1);
+  });
 });
