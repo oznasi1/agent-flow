@@ -19,7 +19,7 @@ import { launchReview, reviewRunKey } from "./engine/review/launch";
 import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
-import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "./types";
+import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
@@ -30,6 +30,17 @@ const JIRA_TTL_MS = 30_000;
 const GH_NOTES: Record<GhGap["kind"], string> = {
   missing: "gh CLI not found — PR facts off. Run Agent Flow: Doctor",
   "signed-out": "gh is not signed in — PR facts off. Run Agent Flow: Doctor",
+};
+
+/** Appended to a review body the agent drafted, when provenance stamping is on.
+ * Posting an agent's words as unmarked human review is the kind of thing worth
+ * being straight about with teammates. */
+export const REVIEW_PROVENANCE = "_Drafted with Claude Code via Agent Flow._";
+
+const VERB_LABEL: Record<ReviewVerb, string> = {
+  approve: "Approve",
+  comment: "Comment",
+  "request-changes": "Request changes",
 };
 
 /** The Deck: a full-window board of every task launched via Agent Flow, opened as a
@@ -335,6 +346,44 @@ export class DeckPanel {
     }
   }
 
+  /** The one write path. Three gates before anything reaches GitHub: the setting,
+   * the row still being in the queue, and a modal the user has to accept. */
+  private async submitReview(id: string, verb: ReviewVerb, body: string, fromDraft: boolean): Promise<void> {
+    const cfg = getConfig();
+    if (!cfg.reviewWrites) return;
+    const req = this.reviewById(id);
+    if (!req) return;
+    const label = VERB_LABEL[verb];
+    const answer = await vscode.window.showWarningMessage(
+      `${label} on ${req.repo}#${req.number}?`,
+      { modal: true },
+      label,
+    );
+    if (answer !== label) return;
+    const text = fromDraft && cfg.stampLabelOnWrite && body.trim()
+      ? `${body.trim()}\n\n${REVIEW_PROVENANCE}`
+      : body;
+    this.log(`deck: submitting ${verb} on ${req.repo}#${req.number}`);
+    const res = await this.reviewProvider.submit(req.repo, req.number, verb, text);
+    if (!res.ok) {
+      this.log(`deck: review submit failed: ${res.message}`);
+      this.post({
+        type: "toast",
+        level: "error",
+        message: `GitHub refused: ${res.message}`,
+        action: { label: "Open PR", url: req.url },
+      });
+      return;
+    }
+    this.toast("success", `${label} sent on ${req.repoName}#${req.number}.`);
+    // Approving clears the request server-side; drop it now rather than after a
+    // TTL, and let the next search be authoritative.
+    if (this.reviewCache) {
+      this.reviewCache = { ...this.reviewCache, requests: this.reviewCache.requests.filter((r) => r.id !== id) };
+    }
+    this.postReviews();
+  }
+
   private async jiraStatus(key: string): Promise<{ status: string | null; category: string | null } | null> {
     const hit = this.jiraCache.get(key);
     if (hit && Date.now() - hit.at < JIRA_TTL_MS) return { status: hit.status, category: hit.category };
@@ -465,6 +514,9 @@ export class DeckPanel {
         break;
       case "deck:reviewLoadDraft":
         this.loadReviewDraft(m.id);
+        break;
+      case "deck:reviewSubmit":
+        await this.submitReview(m.id, m.verb, m.body, m.fromDraft);
         break;
       case "deck:forget":
         removeRun(defaultRunsDir(), m.key);

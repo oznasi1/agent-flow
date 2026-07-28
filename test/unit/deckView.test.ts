@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { window, ViewColumn, env, workspace } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
-import type { PrFacts, ReviewDetail, ReviewRequest, Run, RunStatus, ServiceRef } from "../../src/types";
+import type { PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
@@ -36,6 +36,11 @@ const h = vi.hoisted(() => ({
   writeReviewCache: vi.fn(),
   // Row expansion (Task 9): the two facts the search cannot return.
   reviewDetail: vi.fn(async (_repo: string, _number: number): Promise<ReviewDetail | null> => ({ failing: [], unresolved: null })),
+  // The write path (Task 14): the only setting that lets the Deck post to GitHub,
+  // the Jira-provenance toggle reused for a review body, and the submit call itself.
+  reviewWrites: false as boolean,
+  stampLabelOnWrite: true as boolean,
+  reviewSubmit: vi.fn(async (_repo: string, _number: number, _verb: ReviewVerb, _body: string): Promise<{ ok: true } | { ok: false; message: string }> => ({ ok: true })),
   repos: [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }] as ServiceRef[],
   reviewRequests: true as boolean,
   // Review launch + draft handoff (Task 12): the worktree launcher and the two
@@ -88,6 +93,7 @@ vi.mock("../../src/engine/review/provider", () => ({
   GhReviewProvider: class {
     search = h.reviewSearch;
     detail = h.reviewDetail;
+    submit = h.reviewSubmit;
   },
 }));
 vi.mock("../../src/engine/review/store", () => ({
@@ -117,6 +123,7 @@ vi.mock("../../src/config", () => ({
   getConfig: () => ({
     baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds,
     reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: [],
+    reviewWrites: h.reviewWrites, stampLabelOnWrite: h.stampLabelOnWrite,
   }),
 }));
 vi.mock("../../src/jira/client", () => ({
@@ -188,6 +195,15 @@ beforeEach(() => {
   h.launchReview.mockClear().mockResolvedValue({ ok: true, runKey: "review-aws-ops-8491" });
   h.existsSync.mockClear().mockReturnValue(false);
   h.readFileSync.mockClear().mockReturnValue("");
+  h.reviewWrites = false;
+  h.stampLabelOnWrite = true;
+  h.reviewSubmit.mockClear().mockResolvedValue({ ok: true });
+  // Confirm by default: resolve the label passed as the modal's sole action item,
+  // rather than vscode's own mock default of `undefined` (which reads as "declined"
+  // for every other suite in this file). Individual tests override this per case.
+  (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
+    async (_message: string, _options: unknown, ...items: string[]) => items[0],
+  );
 });
 
 afterEach(() => {
@@ -1114,5 +1130,105 @@ describe("DeckPanel review launch", () => {
     await p._fire({ type: "deck:reviewLoadDraft", id: "CyberJackGit/aws-ops#8491" });
     expect(posts(p).some((m) => m.type === "deck:reviewDraft")).toBe(false);
     expect(posts(p).some((m) => m.type === "toast" && m.level === "error")).toBe(true);
+  });
+});
+
+describe("DeckPanel review submit", () => {
+  const submitMsg = (over: Partial<{ id: string; verb: ReviewVerb; body: string; fromDraft: boolean }> = {}) =>
+    ({ type: "deck:reviewSubmit" as const, id: "CyberJackGit/aws-ops#8491", verb: "approve" as ReviewVerb, body: "", fromDraft: false, ...over });
+
+  it("refuses to submit while reviewWrites is off, without asking or spawning", async () => {
+    h.reviewWrites = false;
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.reviewSubmit).not.toHaveBeenCalled();
+  });
+
+  it("asks for confirmation naming the verb, repo and number", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "request-changes" }));
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      "Request changes on CyberJackGit/aws-ops#8491?",
+      { modal: true },
+      "Request changes",
+    );
+  });
+
+  it("spawns nothing when the confirmation is declined", async () => {
+    h.reviewWrites = true;
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    expect(h.reviewSubmit).not.toHaveBeenCalled();
+  });
+
+  it("submits and toasts on success", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve", body: "lgtm" }));
+    expect(h.reviewSubmit).toHaveBeenCalledWith("CyberJackGit/aws-ops", 8491, "approve", "lgtm");
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(true);
+  });
+
+  it("appends the provenance line to an agent-drafted body", async () => {
+    h.reviewWrites = true;
+    h.stampLabelOnWrite = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "comment", body: "the retry budget is unbounded", fromDraft: true }));
+    expect(h.reviewSubmit.mock.calls[0][3]).toBe(
+      "the retry budget is unbounded\n\n_Drafted with Claude Code via Agent Flow._",
+    );
+  });
+
+  it("leaves a hand-typed body alone", async () => {
+    h.reviewWrites = true;
+    h.stampLabelOnWrite = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "comment", body: "mine, all mine", fromDraft: false }));
+    expect(h.reviewSubmit.mock.calls[0][3]).toBe("mine, all mine");
+  });
+
+  it("omits provenance when stamping is off", async () => {
+    h.reviewWrites = true;
+    h.stampLabelOnWrite = false;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "comment", body: "b", fromDraft: true }));
+    expect(h.reviewSubmit.mock.calls[0][3]).toBe("b");
+  });
+
+  it("toasts GitHub's message with an Open PR action on rejection", async () => {
+    h.reviewWrites = true;
+    h.reviewSubmit.mockResolvedValueOnce({ ok: false, message: "Can not approve your own pull request" });
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    const toast = posts(p).find((m) => m.type === "toast" && m.level === "error");
+    expect(toast.message).toContain("Can not approve your own pull request");
+    expect(toast.action).toEqual({ label: "Open PR", url: "https://github.com/CyberJackGit/aws-ops/pull/8491" });
+  });
+
+  // Beyond the brief's own list — the second of the three gates the brief calls out
+  // ("the row must still be in the queue") has no case above; every other write-ish
+  // message in this file (reviewExpand, reviewLaunch, reviewLoadDraft) pins this
+  // symmetrically, and the confirm gate is the one place a stale id must never even
+  // reach a dialog, let alone the provider.
+  it("ignores a submit for an id that is not in the queue", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ id: "who/what#1" }));
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.reviewSubmit).not.toHaveBeenCalled();
+  });
+
+  // Beyond the brief's own list — pins the queue-eviction side effect the brief's
+  // Step 4 code carries out on a successful submit ("drop it now rather than after
+  // a TTL"), which none of the seven transcribed cases above ever observes.
+  it("drops the row from the queue and re-posts the strip after a successful submit", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    const last = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
+    expect(last.requests).toHaveLength(0);
   });
 });
