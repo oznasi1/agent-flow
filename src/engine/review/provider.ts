@@ -13,6 +13,20 @@ const VERB_FLAG: Record<ReviewVerb, string> = {
   "request-changes": "--request-changes",
 };
 
+/** Node's execFile error `.message` is always `Command failed: <file> <full
+ * argv joined>`, optionally followed by a `\n` and stderr's own text — for a
+ * review submission, that first line embeds the entire `--body <review
+ * text>` verbatim. This is the last line of defense against ever returning
+ * that: used only when a rejection carries no `stderr` of its own (a killed
+ * process, or a `gh` failure that wrote nothing to stderr), it keeps
+ * whatever follows the first newline and falls back to a fixed, argv-free
+ * string when there is nothing there — never the reconstructed command. */
+function stripCommandLine(message: string): string {
+  const nl = message.indexOf("\n");
+  const rest = nl === -1 ? "" : message.slice(nl + 1).trim();
+  return rest || "gh failed without further detail — check the PR directly.";
+}
+
 export interface ReviewProvider {
   search(): Promise<{ issueCount: number; requests: ReviewRequest[] } | null>;
   detail(repo: string, number: number): Promise<ReviewDetail | null>;
@@ -119,12 +133,13 @@ export class GhReviewProvider implements ReviewProvider {
           message: `Timed out after ${GH_TIMEOUT_MS / 1000}s — the review may already have gone through. Open the PR to check.`,
         };
       }
-      // Node's execFile builds `error.message` as `Command failed: <file> <argv
-      // joined>\n<stderr>` — which reconstructs the full argv, `--body` and the
-      // entire review text included. `stderr` alone is GitHub's own complaint,
-      // with none of that; prefer it, and only fall back to `.message` (still
-      // better than nothing) when a rejection carries no `stderr` at all.
-      const msg = err.stderr?.trim() || (e instanceof Error ? e.message : String(e));
+      // `stderr` — gh's own complaint, attached by execRunner separately from
+      // `.message` — is GitHub's actual wording, with none of the reconstructed
+      // argv `.message` carries. Prefer it; a killed process (or any other
+      // shape) may carry none, so the fallback strips `.message`'s own
+      // "Command failed: …" line rather than ever returning it whole — this
+      // catch must never return the body, stderr present or not.
+      const msg = err.stderr?.trim() || (e instanceof Error ? stripCommandLine(e.message) : String(e));
       return { ok: false, message: msg };
     }
   }

@@ -29,9 +29,20 @@ export type Runner = (
 
 export const execRunner: Runner = (file, args, opts) =>
   new Promise((resolve, reject) => {
-    execFile(file, args, { cwd: opts.cwd, timeout: opts.timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) =>
-      err ? reject(err) : resolve(stdout.toString()),
-    );
+    execFile(file, args, { cwd: opts.cwd, timeout: opts.timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        // execFile's own error carries only code/killed/signal/cmd, and its
+        // message is `Command failed: <file> <full argv joined>` — which for
+        // `gh pr review` embeds the reviewer's entire --body text verbatim.
+        // Attach stderr (gh's own complaint, never a reconstructed argv) so
+        // callers — review/provider.ts's submit() in particular — can prefer
+        // it over that message instead of the leak that shipped without this.
+        (err as NodeJS.ErrnoException & { stderr?: string }).stderr = stderr?.toString();
+        reject(err);
+        return;
+      }
+      resolve(stdout.toString());
+    });
   });
 
 export interface PrProvider {

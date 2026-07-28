@@ -457,13 +457,14 @@ export class DeckPanel {
       const res = await this.reviewProvider.submit(req.repo, req.number, verb, text);
       if (!res.ok) {
         this.log(`deck: review submit failed: ${res.message}`);
-        // Not "GitHub refused:" — a timeout's own message says the write may
-        // already have gone through, and prefixing that with a claim that
-        // GitHub answered at all would flatly contradict it.
+        // Neutral prefix, on purpose: neither "GitHub refused:" nor "Review not
+        // sent:" holds up in front of the timeout wording, which says the write
+        // may already have gone through — either prefix would assert an outcome
+        // the message itself refuses to commit to.
         this.post({
           type: "toast",
           level: "error",
-          message: `Review not sent: ${res.message}`,
+          message: `Review submit: ${res.message}`,
           action: { label: "Open PR", url: req.url },
         });
         this.post({ type: "deck:reviewSubmitDone", id, outcome: "failed" });

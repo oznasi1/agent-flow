@@ -233,29 +233,74 @@ describe("GhReviewProvider.submit", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("returns GitHub's own message on rejection, falling back to .message when the rejection carries no stderr", async () => {
-    const run = runner(async () => { throw new Error("GraphQL: Can not approve your own pull request"); });
-    const out = await new GhReviewProvider(run, locate).submit("o/r", 7, "approve", "");
-    expect(out).toEqual({ ok: false, message: "GraphQL: Can not approve your own pull request" });
-  });
+  // These two fixtures are shaped exactly the way `execFile` (and this repo's
+  // own `execRunner`) really produces a rejection — verified empirically
+  // against a live `execFile` call, not assumed:
+  //   - `.message` is ALWAYS `Command failed: <file> <full argv joined>`,
+  //     optionally followed by `\n` + stderr's own text.
+  //   - `.stderr` is a property `execRunner` attaches itself (Node's own
+  //     error carries only `code`/`killed`/`signal`/`cmd` — never `.stderr`
+  //     or `.stdout`); it is present whenever `execRunner` ran, empty or not.
+  // A hand-built `Object.assign(new Error("some message"), { stderr: "..." })`
+  // with no "Command failed: …" prefix at all is not a shape a real rejection
+  // can have, and a test built on one can pass over a genuinely inert fix.
 
-  it("prefers stderr over the reconstructed command line, so the review body never leaks into the failure message", async () => {
-    // Node's execFile builds `.message` as `Command failed: <file> <argv joined>` —
-    // which includes `--body <the whole review text>` verbatim. A rejection that
-    // also carries `.stderr` (what gh actually printed) must report *that*, not
-    // the reconstructed command line.
+  it("prefers stderr — attached by execRunner — over the reconstructed command line", async () => {
     const secretBody = "the retry budget is unbounded and nobody noticed";
     const err = Object.assign(
-      new Error(`Command failed: gh pr review 7 --repo o/r --approve --body ${secretBody}\nHTTP 422: Validation Failed`),
-      { stderr: "HTTP 422: Validation Failed (https://api.github.com/repos/o/r/pulls/7/reviews)" },
+      new Error(
+        `Command failed: gh pr review 7 --repo o/r --approve --body ${secretBody}\nHTTP 422: Validation Failed`,
+      ),
+      { stderr: "HTTP 422: Validation Failed" },
     );
+    const run = runner(async () => { throw err; });
+    const out = await new GhReviewProvider(run, locate).submit("o/r", 7, "approve", secretBody);
+    expect(out).toEqual({ ok: false, message: "HTTP 422: Validation Failed" });
+    if (!out.ok) {
+      expect(out.message).not.toContain("--body");
+      expect(out.message).not.toContain(secretBody);
+    }
+  });
+
+  // The critical case: no `.stderr` at all — a killed process typically has
+  // none, and this is also exactly the shape a rejection had *before*
+  // execRunner was fixed to attach it. Pins that the fallback strips
+  // `.message`'s own reconstructed line rather than ever returning it —
+  // reverting either half of the fix (execRunner no longer attaching
+  // `stderr`, or this catch trusting `.message` verbatim again) reproduces
+  // the exact leak the final review caught: the returned message containing
+  // `--body` and the secret review text.
+  it("never leaks --body or the review text when the rejection carries no stderr at all", async () => {
+    const secretBody = "mine, all mine — nobody else gets a vote";
+    const err = new Error(`Command failed: gh pr review 7 --repo o/r --approve --body ${secretBody}\n`);
     const run = runner(async () => { throw err; });
     const out = await new GhReviewProvider(run, locate).submit("o/r", 7, "approve", secretBody);
     expect(out).toEqual({
       ok: false,
-      message: "HTTP 422: Validation Failed (https://api.github.com/repos/o/r/pulls/7/reviews)",
+      message: "gh failed without further detail — check the PR directly.",
     });
-    if (!out.ok) expect(out.message).not.toContain("--body");
+    if (!out.ok) {
+      expect(out.message).not.toContain("--body");
+      expect(out.message).not.toContain(secretBody);
+    }
+  });
+
+  // A rejection with no stderr but with genuine stderr *text* baked into
+  // .message (Node appends "\n" + stderr there too) and, for whatever reason,
+  // no .stderr property of its own — still must not fall through to the raw
+  // "Command failed: …" line; it keeps just what follows that line.
+  it("keeps only what follows the reconstructed command line when stderr text is in .message but no .stderr property exists", async () => {
+    const secretBody = "the retry budget is unbounded";
+    const err = new Error(
+      `Command failed: gh pr review 7 --repo o/r --approve --body ${secretBody}\nHTTP 422: Validation Failed`,
+    );
+    const run = runner(async () => { throw err; });
+    const out = await new GhReviewProvider(run, locate).submit("o/r", 7, "approve", secretBody);
+    expect(out).toEqual({ ok: false, message: "HTTP 422: Validation Failed" });
+    if (!out.ok) {
+      expect(out.message).not.toContain("--body");
+      expect(out.message).not.toContain(secretBody);
+    }
   });
 
   it.each([
