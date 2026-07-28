@@ -82,9 +82,23 @@ export class GhReviewProvider implements ReviewProvider {
 
   /** The only command in Agent Flow that writes to GitHub. The caller confirms
    * first; this only refuses what GitHub would refuse anyway, and reports the
-   * rejection verbatim — GitHub's own wording is more useful than ours. */
+   * rejection verbatim — GitHub's own wording is more useful than ours.
+   *
+   * `body` arrives from a webview message, untyped at runtime regardless of what
+   * the TypeScript signature claims — `String(body ?? "")` before `.trim()`
+   * keeps a stray `undefined`/`null` from throwing instead of returning the
+   * discriminated result this function promises never to skip.
+   *
+   * `verb` is likewise not to be trusted just because the type says `ReviewVerb`:
+   * `Object.hasOwn` (not `!VERB_FLAG[verb]`, which a prototype key like
+   * `"constructor"` would sail through as truthy) fails closed on anything
+   * outside the union before a single argv is built — the one command that
+   * writes to someone else's pull request does not get to guess. */
   async submit(repo: string, number: number, verb: ReviewVerb, body: string): Promise<{ ok: true } | { ok: false; message: string }> {
-    const text = body.trim();
+    if (!Object.hasOwn(VERB_FLAG, verb)) {
+      return { ok: false, message: `Unknown review verb: ${String(verb)}` };
+    }
+    const text = String(body ?? "").trim();
     if (verb !== "approve" && !text) {
       return { ok: false, message: "GitHub requires a message for this kind of review." };
     }

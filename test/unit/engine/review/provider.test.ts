@@ -3,6 +3,7 @@ import { GhReviewProvider } from "../../../../src/engine/review/provider";
 import { THREADS_QUERY } from "../../../../src/engine/pr/provider";
 import type { Runner } from "../../../../src/engine/pr/provider";
 import { REVIEW_SEARCH_Q, REVIEW_SEARCH_QUERY } from "../../../../src/engine/review/search";
+import type { ReviewVerb } from "../../../../src/types";
 
 const searchPayload = JSON.stringify({
   data: {
@@ -147,9 +148,12 @@ describe("GhReviewProvider.submit", () => {
     const run = runner(async () => "");
     const out = await new GhReviewProvider(run, locate).submit("o/r", 7, "approve", "");
     expect(out).toEqual({ ok: true });
-    expect((run as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual([
-      "pr", "review", "7", "--repo", "o/r", "--approve",
-    ]);
+    const [, args, opts] = (run as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(args).toEqual(["pr", "review", "7", "--repo", "o/r", "--approve"]);
+    // No cwd inside a checkout, same as search/detail: the PR's repo may not be
+    // cloned at all. A `this.exec(args)` swapped for an inline call using
+    // `process.cwd()` would abandon that and still pass every other assertion.
+    expect(opts.cwd).toBe(require("os").homedir());
   });
 
   it("approves with a body when one is given", async () => {
@@ -180,10 +184,52 @@ describe("GhReviewProvider.submit", () => {
     ]);
   });
 
+  it("trims surrounding whitespace before it reaches argv", async () => {
+    const run = runner(async () => "");
+    await new GhReviewProvider(run, locate).submit("o/r", 7, "comment", "  looks good  ");
+    // A fixture with no surrounding whitespace can't tell `text` (trimmed) apart
+    // from a raw `body` pushed straight into argv — this one can.
+    expect((run as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual([
+      "pr", "review", "7", "--repo", "o/r", "--comment", "--body", "looks good",
+    ]);
+  });
+
+  it("threads the given repo and number, not a hardcoded one", async () => {
+    const run = runner(async () => "");
+    await new GhReviewProvider(run, locate).submit("CyberJackGit/aws-ops", 8491, "approve", "");
+    // Every other test in this block uses ("o/r", 7); a distinct pair here is
+    // the only thing that can catch an implementation that hardcodes those two
+    // values instead of threading the parameters through — every other test
+    // would still pass against that bug.
+    expect((run as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual([
+      "pr", "review", "8491", "--repo", "CyberJackGit/aws-ops", "--approve",
+    ]);
+  });
+
   it.each(["comment", "request-changes"] as const)("refuses %s with an empty body, before spawning", async (verb) => {
     const run = runner(async () => "");
     const out = await new GhReviewProvider(run, locate).submit("o/r", 7, verb, "   ");
     expect(out).toEqual({ ok: false, message: "GitHub requires a message for this kind of review." });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("normalises a non-string body instead of throwing", async () => {
+    const run = runner(async () => "");
+    // A webview message is untyped at runtime no matter what the TS signature
+    // claims. `body.trim()` on `undefined` would reject with a TypeError; this
+    // asserts a resolved, discriminated result instead.
+    const out = await new GhReviewProvider(run, locate).submit("o/r", 7, "approve", undefined as unknown as string);
+    expect(out).toEqual({ ok: true });
+  });
+
+  it.each(["Approve", "constructor"] as const)("refuses an out-of-union verb (%s) before spawning", async (verb) => {
+    const run = runner(async () => "");
+    // "Approve" (wrong casing) is simply not a ReviewVerb. "constructor" is the
+    // adversarial case: `!VERB_FLAG[verb]` would see `VERB_FLAG.constructor`
+    // (inherited from Object.prototype) as truthy and sail through; only
+    // `Object.hasOwn` correctly refuses it.
+    const out = await new GhReviewProvider(run, locate).submit("o/r", 7, verb as unknown as ReviewVerb, "body text");
+    expect(out).toEqual({ ok: false, message: `Unknown review verb: ${verb}` });
     expect(run).not.toHaveBeenCalled();
   });
 
