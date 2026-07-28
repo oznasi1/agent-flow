@@ -786,8 +786,8 @@ function TaskCard(props: {
             {task.estimateSeconds != null && (
               <span className="est" title="Original estimate">⏱ {fmtEst(task.estimateSeconds)}</span>
             )}
-            {/* The edited list once the card has been opened — the collapsed and
-                expanded views must not disagree about what Take will open. */}
+            {/* The edited list once a detail has loaded for this card, falling back
+                to the inferred guess until then. */}
             {(detail?.selected ?? task.services ?? []).map((s) => (
               <span key={s} className="svc guess">{s}</span>
             ))}

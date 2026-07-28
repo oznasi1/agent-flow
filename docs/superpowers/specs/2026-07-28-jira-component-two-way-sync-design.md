@@ -156,7 +156,8 @@ which reads as "not on the ticket" without a word of explanation, plus a `title`
 that says which it is:
 
 - **B** — "not on `ASM-1` in Jira — `↑` adds it". The `↑` sits left of the `×`, its
-  own title reading "Add `pricing-api` to `ASM-1`".
+  own title reading "Add `Pricing-Api` to `ASM-1`" — the component's spelling, not
+  the repo's, since that's what Jira actually receives.
 - **C** — "no `ASM` component named `scratch-tool` — this selection stays local".
 
 No hint line and no red: red is reserved for real failures, and cards carry no
