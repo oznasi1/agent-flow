@@ -256,11 +256,13 @@ export class JiraClient {
   }
 
   /** The component names this project defines — the only names a component write
-   *  may use. Cached for `COMPONENTS_TTL_MS`. A failure resolves to `[]` and is not
-   *  cached: without the list, component writes are simply off, and that must not
-   *  also break expanding a card. Callers that need auth failures reported must
+   *  may use, and `[]` when it defines none. `null` means the read itself failed:
+   *  callers must not report that as "no such component", because it is equally
+   *  likely to be a dead token or an unreachable site. Cached for
+   *  `COMPONENTS_TTL_MS`; a failure is never cached, so the next call retries.
+   *  Failures are swallowed here, so callers that need auth errors reported must
    *  read the issue *before* calling this. */
-  async listComponents(): Promise<string[]> {
+  async listComponents(): Promise<string[] | null> {
     const hit = cachedComponents.get(this.project);
     if (hit && Date.now() - hit.at < COMPONENTS_TTL_MS) return hit.names;
     let names: string[];
@@ -270,7 +272,7 @@ export class JiraClient {
       );
       names = (Array.isArray(data) ? data : []).map((c: any) => c?.name ?? "").filter((n: string) => !!n);
     } catch {
-      return [];
+      return null;
     }
     cachedComponents.set(this.project, { names, at: Date.now() });
     return names;

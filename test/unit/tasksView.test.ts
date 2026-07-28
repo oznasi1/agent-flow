@@ -599,11 +599,20 @@ describe("detail", () => {
     expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
   });
 
-  it("still reports the detail when the component list is unavailable — every chip is local-only", async () => {
+  it("reports every chip as local-only when the project defines no components", async () => {
     clientStub.listComponents.mockResolvedValue([]);
     const { send, posted } = setup();
     await send({ type: "detail", key: "ASM-1" });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "detail", key: "ASM-1", mappable: {} }));
+  });
+
+  // null is a distinct answer from "[]" — the read failed, not "this project has no
+  // components" — so the webview must not claim any chip is local-only from it.
+  it("reports mappable: null (not {}) when the component list could not be read", async () => {
+    clientStub.listComponents.mockResolvedValue(null);
+    const { send, posted } = setup();
+    await send({ type: "detail", key: "ASM-1" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "detail", key: "ASM-1", mappable: null }));
   });
 });
 
@@ -698,11 +707,24 @@ describe("setComponent", () => {
     }));
   });
 
-  // An unreadable list is not the same claim as "no such component" — listComponents
-  // swallows a rejected token and returns [], and blaming the repo name for that
-  // sends the user looking in the wrong place.
-  it("blames the connection, not the repo, when the component list came back empty", async () => {
+  // An empty list is a real answer under the new contract — the project genuinely
+  // defines no components — so an unmapped repo gets the ordinary "no such
+  // component" message, same as any other repo the project doesn't recognize.
+  it("blames the repo, not the connection, when the project defines no components", async () => {
     clientStub.listComponents.mockResolvedValue([]);
+    const { send, posted } = setup();
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    expect(clientStub.updateComponents).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
+    expect(posted()).toContainEqual(expect.objectContaining({
+      type: "toast", level: "error", message: "ASM has no component named “account-service”.",
+    }));
+  });
+
+  // A `null` list is the failed read — not the same claim as "no such component",
+  // and blaming the repo name for it would send the user looking in the wrong place.
+  it("blames the connection, not the repo, when the component list could not be read", async () => {
+    clientStub.listComponents.mockResolvedValue(null);
     const { send, posted } = setup();
     await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
     expect(clientStub.updateComponents).not.toHaveBeenCalled();
@@ -719,6 +741,28 @@ describe("setComponent", () => {
     expect(clientStub.updateComponents).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
     expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
+  });
+
+  // The invariant the whole optimistic-edit design rests on: a SecretStorage
+  // rejection reading the stored credential must still resolve the webview's
+  // held edit, not strand it for the life of the window.
+  it("posts exactly one ok:false componentsChanged when auth itself rejects", async () => {
+    const { send, posted, auth } = setup();
+    vi.mocked(auth.isAuthenticated).mockRejectedValue(new Error("keychain locked"));
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    expect(clientStub.updateComponents).not.toHaveBeenCalled();
+    expect(posted().filter((p) => p.type === "componentsChanged")).toEqual([
+      { type: "componentsChanged", key: "ASM-1", repo: "account-service", on: true, movedChip: true, ok: false },
+    ]);
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error", message: "keychain locked" }));
+  });
+
+  // Pins the idempotent echo guard: a normal successful call must post the verdict
+  // exactly once, not merely at least once.
+  it("posts exactly one componentsChanged on an ordinary successful call", async () => {
+    const { send, posted } = setup();
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    expect(posted().filter((p) => p.type === "componentsChanged")).toHaveLength(1);
   });
 });
 

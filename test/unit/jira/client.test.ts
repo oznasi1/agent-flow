@@ -576,17 +576,17 @@ describe("listComponents", () => {
     }
   });
 
-  it("resolves to [] on failure rather than throwing, and does not cache the failure", async () => {
+  it("resolves to null on failure rather than throwing, and does not cache the failure", async () => {
     const fetchMock = installFetch([textResponse("boom", 500), jsonResponse([{ name: "Infra" }])]);
     const c = client();
-    await expect(c.listComponents()).resolves.toEqual([]);
+    await expect(c.listComponents()).resolves.toBeNull();
     await expect(c.listComponents()).resolves.toEqual(["Infra"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("swallows an auth failure too — the caller reads the issue first, which reports it", async () => {
     installFetch([textResponse("", 401)]);
-    await expect(client().listComponents()).resolves.toEqual([]);
+    await expect(client().listComponents()).resolves.toBeNull();
   });
 });
 

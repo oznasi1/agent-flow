@@ -27,7 +27,10 @@ interface DetailState {
   repos?: string[];
   selected?: string[];
   jira?: string[]; // components on the ticket, spelled as Jira spells them
-  mappable?: Record<string, string>; // repo name → canonical component name
+  // repo name → canonical component name; `null` means the project's component
+  // list couldn't be read, so no chip's state (on-ticket, pushable, local-only)
+  // can be claimed.
+  mappable?: Record<string, string> | null;
 }
 
 interface CardDnd {
@@ -812,7 +815,8 @@ function CardDetail(props: {
 
   const selected = detail.selected ?? [];
   const jira = detail.jira ?? [];
-  const mappable = detail.mappable ?? {};
+  const mappable = detail.mappable;
+  const unknown = mappable == null; // the project's component list couldn't be read
   const available = (detail.repos ?? []).filter((r) => !selected.includes(r));
   const remove = (name: string) => onSelect(selected.filter((s) => s !== name));
   const add = (name: string) => { if (name) onSelect([...selected, name]); };
@@ -824,25 +828,29 @@ function CardDetail(props: {
       <div className="chips">
         {selected.length === 0 && <span className="chip-none">none selected</span>}
         {selected.map((s) => {
-          // Three states: on the ticket (solid), a component the ticket lacks
-          // (dashed — Task 6 gives it a push), or no component at all (dashed,
-          // local-only). Only the first can be removed from Jira.
-          const component = mappable[s];
+          // Three states when the component list is known: on the ticket (solid),
+          // a component the ticket lacks (dashed, with a push affordance), or no
+          // component at all (dashed, local-only). Only the first can be removed
+          // from Jira. When the list itself is unknown, none of the three can be
+          // claimed, so the chip renders plain with no dash and no push.
+          const component = unknown ? undefined : mappable![s];
           const onTicket = !!component && jira.includes(component);
           return (
             <span
               key={s}
-              className={`chip${onTicket ? "" : " off-ticket"}`}
+              className={`chip${unknown || onTicket ? "" : " off-ticket"}`}
               title={
-                onTicket
-                  ? undefined
-                  : component
-                    ? `Not on ${taskKey} in Jira — ↑ adds it`
-                    : `No ${project} component named “${s}” — this selection stays local`
+                unknown
+                  ? `Couldn't read ${project}'s components — can't tell which are on ${taskKey}`
+                  : onTicket
+                    ? undefined
+                    : component
+                      ? `Not on ${taskKey} in Jira — ↑ adds it`
+                      : `No ${project} component named “${s}” — this selection stays local`
               }
             >
               {s}
-              {!onTicket && component && (
+              {!unknown && !onTicket && component && (
                 <span className="up" title={`Add ${component} to ${taskKey}`} onClick={() => onPush(s)}>↑</span>
               )}
               <span

@@ -710,8 +710,10 @@ describe("task card actions", () => {
 
   /** Expand ASM-1 and deliver a detail. `jiraComponents` / `mappable` decide the
    *  chip states: account-service is on the ticket (A), pricing-api maps but is not
-   *  on it (B), scratch-tool maps to nothing (C). */
-  const withChips = (over: Partial<{ inferred: string[]; jiraComponents: string[]; mappable: Record<string, string> }> = {}) => {
+   *  on it (B), scratch-tool maps to nothing (C). `mappable` is checked for
+   *  presence, not just truthiness — an explicit `null` (the unreadable-list case)
+   *  must not fall back to the default map the way an omitted override would. */
+  const withChips = (over: Partial<{ inferred: string[]; jiraComponents: string[]; mappable: Record<string, string> | null }> = {}) => {
     withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
     fireEvent.click(screen.getByText("Fix bug"));
     host({
@@ -721,7 +723,10 @@ describe("task card actions", () => {
       repos: ["account-service", "pricing-api", "scratch-tool", "centaur"],
       inferred: over.inferred ?? ["account-service", "pricing-api", "scratch-tool"],
       jiraComponents: over.jiraComponents ?? ["Account-Service"],
-      mappable: over.mappable ?? { "account-service": "Account-Service", "pricing-api": "Pricing-Api", centaur: "Centaur" },
+      mappable:
+        "mappable" in over
+          ? over.mappable ?? null
+          : { "account-service": "Account-Service", "pricing-api": "Pricing-Api", centaur: "Centaur" },
     });
   };
 
@@ -753,6 +758,22 @@ describe("task card actions", () => {
     expect(chip).toHaveAttribute("title", "No ASM component named “scratch-tool” — this selection stays local");
     expect(within(chip).queryByText("↑")).not.toBeInTheDocument();
     expect(within(chip).getByTitle("Remove")).toBeInTheDocument();
+  });
+
+  // mappable: null means the project's component list couldn't be read — no chip
+  // state (on-ticket, pushable, local-only) can be claimed, so every chip must fall
+  // back to its plain, neutral appearance rather than asserting any of the three.
+  it("renders every chip plain (no off-ticket, no ↑) when the component list couldn't be read", () => {
+    withChips({ mappable: null });
+    for (const name of ["account-service", "pricing-api", "scratch-tool"]) {
+      const chip = chipFor(name);
+      expect(chip.className).not.toContain("off-ticket");
+      expect(chip).toHaveAttribute("title", "Couldn't read ASM's components — can't tell which are on ASM-1");
+      expect(within(chip).queryByText("↑")).not.toBeInTheDocument();
+    }
+    sent.mockClear();
+    fireEvent.click(within(chipFor("account-service")).getByTitle("Remove"));
+    expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "setComponent" }));
   });
 
   it("collapsed service chips follow the edited list, not the original guess", () => {

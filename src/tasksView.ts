@@ -188,6 +188,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           // failure including a 401, so the detail read is what lets a dead token
           // reach the catch below and re-gate the panel.
           const projectComponents = await client.listComponents();
+          if (projectComponents === null) {
+            // Not toasted: a card expand happening to land while Jira's endpoint is
+            // down would toast on every expand. The chips render "unknown" instead;
+            // this line is only for tracing it after the fact.
+            this.log(`detail ${m.key}: ${cfg.project} component list unavailable`);
+          }
           const names = repos.map((r) => r.name);
           this.post({
             type: "detail",
@@ -196,7 +202,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             inferred,
             repos: names,
             jiraComponents: detail.components,
-            mappable: mapRepoComponents(names, projectComponents),
+            mappable: projectComponents === null ? null : mapRepoComponents(names, projectComponents),
           });
           break;
         }
@@ -493,53 +499,71 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * webview's cue to keep or undo its optimistic update. */
   public async setComponent(key: string, repo: string, on: boolean, movedChip: boolean): Promise<void> {
     const cfg = getConfig();
-    const echo = (ok: boolean) => this.post({ type: "componentsChanged", key, repo, on, movedChip, ok });
-    if (!(await this.auth.isAuthenticated())) {
-      this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
-      echo(false);
-      return;
-    }
-    const client = this.client();
-    const components = await client.listComponents();
-    const name = resolveComponent(repo, components);
-    if (!name) {
-      // The webview only sends repos it believes are components, so this means the
-      // list moved under us — or never loaded. An empty list cannot tell those apart
-      // (listComponents swallows every failure, a rejected token included), so it
-      // must not be reported as "no such component". Nothing was written either way.
-      echo(false);
-      if (components.length === 0) {
-        this.log(`setComponent ${key}: ${cfg.project} component list unavailable`);
-        this.toast("error", `Couldn't read ${cfg.project}'s components from Jira. Check the connection and try again.`);
-      } else {
-        this.log(`setComponent ${key}: no ${cfg.project} component named ${repo}`);
-        this.toast("error", `${cfg.project} has no component named “${repo}”.`);
-      }
-      return;
-    }
+    // Exactly one verdict per call, structurally: the webview holds an optimistic
+    // edit until it hears back, so zero echoes strand it wrong for the life of the
+    // window, and two would double-apply the undo.
+    let echoed = false;
+    const echo = (ok: boolean) => {
+      if (echoed) return;
+      echoed = true;
+      this.post({ type: "componentsChanged", key, repo, on, movedChip, ok });
+    };
     try {
-      await client.updateComponents(key, on ? { add: [name] } : { remove: [name] });
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      this.log(`setComponent ${key}: ${on ? "add" : "remove"} ${name} failed — ${msg}`);
-      echo(false);
-      if (e instanceof JiraAuthError) {
+      if (!(await this.auth.isAuthenticated())) {
         this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
+        echo(false);
         return;
       }
-      this.toast("error", msg, { label: "Open in Jira", url: `${cfg.baseUrl}/browse/${key}` });
-      return;
-    }
-    this.log(`setComponent ${key}: ${on ? "add" : "remove"} ${name} ok`);
-    if (cfg.stampLabelOnWrite) {
-      try {
-        await client.addLabel(key, cfg.provenanceLabel);
-      } catch (e) {
-        this.log(`label stamp failed for ${key}: ${e}`);
+      const client = this.client();
+      const projectComponents = await client.listComponents();
+      if (projectComponents === null) {
+        // The read failed — that is not the same claim as "no such component", and
+        // blaming the repo name would send the user looking in the wrong place.
+        this.log(`setComponent ${key}: ${cfg.project} component list unavailable`);
+        echo(false);
+        this.toast("error", `Couldn't read ${cfg.project}'s components from Jira. Check the connection and try again.`);
+        return;
       }
+      const name = resolveComponent(repo, projectComponents);
+      if (!name) {
+        // The webview only sends repos it believes are components, so the list moved
+        // under us. Nothing was written.
+        this.log(`setComponent ${key}: no ${cfg.project} component named ${repo}`);
+        echo(false);
+        this.toast("error", `${cfg.project} has no component named “${repo}”.`);
+        return;
+      }
+      try {
+        await client.updateComponents(key, on ? { add: [name] } : { remove: [name] });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.log(`setComponent ${key}: ${on ? "add" : "remove"} ${name} failed — ${msg}`);
+        echo(false);
+        if (e instanceof JiraAuthError) {
+          this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
+          return;
+        }
+        this.toast("error", msg, { label: "Open in Jira", url: `${cfg.baseUrl}/browse/${key}` });
+        return;
+      }
+      this.log(`setComponent ${key}: ${on ? "add" : "remove"} ${name} ok`);
+      if (cfg.stampLabelOnWrite) {
+        try {
+          await client.addLabel(key, cfg.provenanceLabel);
+        } catch (e) {
+          this.log(`label stamp failed for ${key}: ${e}`);
+        }
+      }
+      echo(true);
+      this.toast("success", on ? `Added ${name} to ${key}` : `Removed ${name} from ${key}`);
+    } catch (e) {
+      // Nothing above is expected to throw — this is the backstop that guarantees
+      // the verdict, e.g. if reading the stored credential itself rejects.
+      const msg = e instanceof Error ? e.message : String(e);
+      this.log(`setComponent ${key}: unexpected failure — ${msg}`);
+      echo(false);
+      this.toast("error", msg);
     }
-    echo(true);
-    this.toast("success", on ? `Added ${name} to ${key}` : `Removed ${name} from ${key}`);
   }
 
   /** Pick which Explore action to run. Uses cfg.exploreMode directly when it names a

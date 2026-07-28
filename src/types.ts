@@ -246,8 +246,10 @@ export type OutboundMessage =
   | { type: "detail"; key: string; descriptionText: string; inferred: string[]; repos: string[];
       // The components actually on the issue, spelled as Jira spells them, and the
       // repo → component map for every discovered repo. Together with `inferred`
-      // these classify each chip: on the issue, pushable, or local-only.
-      jiraComponents: string[]; mappable: Record<string, string> }
+      // these classify each chip: on the issue, pushable, or local-only. `mappable`
+      // is `null` when the project's component list itself couldn't be read — a
+      // distinct case from "maps to nothing", and one no chip state can be claimed for.
+      jiraComponents: string[]; mappable: Record<string, string> | null }
   | { type: "statusChanged"; key: string; status: string; category: string; removed: boolean }
   | { type: "movedToSprint"; key: string; assignee: string; removed: boolean }
   | { type: "removedFromSprint"; key: string }
