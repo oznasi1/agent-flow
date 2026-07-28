@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.38] — 2026-07-28
+
+### Added
+
+- **`Agent Flow: Doctor` — one command that checks everything Agent Flow depends
+  on and offers the fix.** It probes your Jira site and project, your stored
+  credentials, `git`, your repos root and workspace directory, `gh`, the Claude Code
+  extension and its version, and the runs store — then lists what's broken, worst
+  first, with the action that fixes each one a click away. There's a **Copy
+  diagnostic report** row for pasting into a ticket. Nothing is repaired
+  automatically, and nothing is written anywhere but your clipboard.
+
+  Three things that used to fail without telling you:
+
+  - **A revoked or expired Jira token read as signed-in.** Agent Flow only checked
+    that an email and token were *stored*, so an invalid one looked fine and every
+    later fetch failed in a way indistinguishable from a network problem. Doctor
+    actually calls Jira, and tells the two apart: bad credentials are a problem,
+    an unreachable site is a warning.
+  - **A `gh` your editor can't see looked like a broken Deck.** Doctor names the
+    exact binary it found, and distinguishes "not installed" from "installed but
+    signed out".
+  - **A mistyped repos root and an empty one looked identical** — both rendered an
+    empty pool. A missing path is now a problem; an empty one is only a warning,
+    since that's normal on a fresh machine.
+
+  It also reports whether Claude Code is installed at all, which nothing checked
+  before, and warns when it's below **2.1.220** — the version shared-window batch
+  launches need.
+
+- Doctor is offered where things actually break, rather than waiting to be
+  remembered: the task panel's error banner gains a **Run Doctor** button, and the
+  Deck's `gh` notes point at the command.
+
 ## [0.1.37] — 2026-07-28
 
 ### Added
