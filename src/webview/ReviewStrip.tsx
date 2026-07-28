@@ -26,10 +26,12 @@ export interface ReviewStripProps {
   details: Record<string, ReviewDetail>;
   reviewWrites: boolean;
   bodies: Record<string, string>;
-  /** Mid-flight for this id: a submit has been posted and no toast or fresh
-   * `deck:reviews` has come back yet. UX only — the host's own per-id guard is
-   * what actually stops a duplicate write; this just keeps a double-click from
-   * ever reaching two confirmation dialogs. */
+  /** Mid-flight for this id: a submit has been posted and no
+   * `deck:reviewSubmitDone` has come back for it yet — the only message that
+   * releases this, since neither a toast nor a routine `deck:reviews` poll
+   * carries this id or means "this row's submit is over". UX only — the
+   * host's own per-id guard is what actually stops a duplicate write; this
+   * just keeps a double-click from ever reaching two confirmation dialogs. */
   submitting: Record<string, boolean>;
   /** The last submit for this id came back as a failure. Shown as an inline
    * line rather than folded into the failure toast, because a submit killed by

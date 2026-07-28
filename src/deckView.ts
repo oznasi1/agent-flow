@@ -360,7 +360,17 @@ export class DeckPanel {
    * queue, and a modal the user has to accept. */
   private async submitReview(id: string, verb: ReviewVerb, body: string, fromDraft: boolean): Promise<void> {
     const cfg = getConfig();
-    if (!cfg.reviewWrites) return;
+    // Every gate below that refuses *this* id's own attempt releases the
+    // webview's disable the same way a completed submit does — nothing was
+    // written, so "cancelled" (not "failed") is the honest outcome, and without
+    // it the row would stay disabled until the panel is reloaded (these two
+    // races are pre-existing and tested: reviewWrites flipped off after the
+    // panel opened, and the row evicted from the queue between the click and
+    // this call).
+    if (!cfg.reviewWrites) {
+      this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      return;
+    }
     // `verb` arrives from a webview message, untyped at runtime no matter what
     // `ReviewVerb` claims at compile time. `Object.hasOwn` (not `!VERB_LABEL[verb]`,
     // which a prototype key like "constructor" would sail through as truthy) fails
@@ -372,10 +382,22 @@ export class DeckPanel {
     // `provider.ts` still refuses the write, but the log would claim a submit the
     // user never confirmed, and the user would be told "GitHub refused" about a
     // call that never reached GitHub.
-    if (!Object.hasOwn(VERB_LABEL, verb)) return;
+    if (!Object.hasOwn(VERB_LABEL, verb)) {
+      this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      return;
+    }
+    // Deliberately silent: this gate is only reachable while a genuine call for
+    // this same id is still in flight, and that call — not this rejected
+    // duplicate — owns posting the eventual outcome. Posting "cancelled" here
+    // would release the webview's disable while the real submit is still
+    // running, re-enabling the buttons mid-flight — the opposite of what the
+    // guard exists for.
     if (this.reviewSubmitsInFlight.has(id)) return;
     const req = this.reviewById(id);
-    if (!req) return;
+    if (!req) {
+      this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      return;
+    }
     this.reviewSubmitsInFlight.add(id);
     try {
       const label = VERB_LABEL[verb];

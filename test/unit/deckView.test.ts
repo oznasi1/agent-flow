@@ -1156,6 +1156,20 @@ describe("DeckPanel review submit", () => {
     expect(h.reviewSubmit).not.toHaveBeenCalled();
   });
 
+  // Fix round 2: this gate (and the invalid-verb and row-missing gates below) used
+  // to return silently, which left the webview's row disabled forever — nothing else
+  // was ever going to arrive to release it (the toast/deck:reviews release the
+  // coordinator's round-1 fix removed on purpose). "cancelled" is honest here: no
+  // write was ever attempted, so there is nothing to warn about, only a disable to lift.
+  it("posts deck:reviewSubmitDone(cancelled) when reviewWrites is off", async () => {
+    h.reviewWrites = false;
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled",
+    });
+  });
+
   it("asks for confirmation naming the verb, repo and number", async () => {
     h.reviewWrites = true;
     const p = await showAndWarm();
@@ -1265,6 +1279,18 @@ describe("DeckPanel review submit", () => {
     expect(h.reviewSubmit).not.toHaveBeenCalled();
   });
 
+  // Fix round 2: the row can be evicted (another submit's success, or a fresh
+  // search) between the click landing in the webview and this call running —
+  // without this post, that row's buttons stay disabled until the panel reloads.
+  it("posts deck:reviewSubmitDone(cancelled) for an id that is not in the queue", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ id: "who/what#1" }));
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "who/what#1", outcome: "cancelled",
+    });
+  });
+
   // --- Fix round 1: gate 0 — a verb outside the ReviewVerb union must fail closed
   // before any dialog, mirroring provider.ts's own Object.hasOwn guard on the same
   // value. "constructor" specifically exercises the prototype-pollution case a
@@ -1290,6 +1316,18 @@ describe("DeckPanel review submit", () => {
     },
   );
 
+  // Fix round 2: same reasoning as the reviewWrites-off and row-missing gates above —
+  // an out-of-union verb (a malformed webview message) must still release the row
+  // it named, not strand it.
+  it("posts deck:reviewSubmitDone(cancelled) for an out-of-union verb", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "merge" as unknown as ReviewVerb }));
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled",
+    });
+  });
+
   // --- Fix round 1: a double click (or any second deck:reviewSubmit for the same
   // id while the first is still awaiting confirmation/gh) must not reach the
   // provider twice — GitHub does not deduplicate reviews. Two `_fire` calls with
@@ -1305,6 +1343,23 @@ describe("DeckPanel review submit", () => {
     await Promise.all([first, second]);
     expect(window.showWarningMessage).toHaveBeenCalledTimes(1);
     expect(h.reviewSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  // Fix round 2: unlike the three gates above, the already-in-flight gate must
+  // stay silent. The genuine call for this id is still running and will post
+  // its own outcome; a "cancelled" from the rejected duplicate would release the
+  // webview's disable while that real submit is still in the air — re-enabling
+  // the buttons mid-write, the opposite of what the guard is for. Exactly one
+  // deck:reviewSubmitDone must land, and it must be the real call's.
+  it("posts no deck:reviewSubmitDone from a rejected duplicate — only the real submit's own outcome lands", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    const first = p._fire(submitMsg());
+    const second = p._fire(submitMsg());
+    await Promise.all([first, second]);
+    const dones = posts(p).filter((m) => m.type === "deck:reviewSubmitDone");
+    expect(dones).toHaveLength(1);
+    expect(dones[0]).toEqual({ type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "ok" });
   });
 
   it("allows submitting the same id again once the previous submit has finished", async () => {

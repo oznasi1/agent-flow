@@ -373,7 +373,14 @@ export const DECK_CSS = `
      rule never re-brightens and every button here would render permanently faded. */
   .rv-actions .act { opacity: 1; }
 
-  .rv-box { flex: 1; min-width: 0; }
+  /* .rv-actions is flex:none (never shrinks), so .rv-box was the row's only
+     shrinkable item and absorbed the entire squeeze in a narrow panel — the
+     field you type the review into became the smallest thing on the row,
+     three-line-wrapping its own placeholder before the buttons gave up an inch.
+     A basis plus a floor makes the row wrap (rv-detail is already flex-wrap)
+     instead: min() keeps the floor from overflowing a container narrower than
+     260px, rather than only ever protecting against the row's own siblings. */
+  .rv-box { flex: 1 1 260px; min-width: min(260px, 100%); }
   .rv-box textarea { width: 100%; min-height: 46px; resize: vertical; font: inherit;
     font-size: var(--t-body); color: var(--vscode-input-foreground);
     background: var(--vscode-input-background); border: 1px solid var(--edge);
