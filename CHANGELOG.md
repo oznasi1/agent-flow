@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The Deck's review queue.** A strip above the columns listing every open PR
+  that asks for your review, with size (S/M/L and `+/−`), CI, review state and
+  age; sortable by oldest or smallest. Every row stays visible in a
+  height-capped, independently scrollable list rather than collapsing away.
+  Expanding a row shows which checks failed and how many threads are open.
+- **Review with agent** — checks a teammate's PR out into a worktree and seeds
+  Claude Code to review it, writing findings to `.pick-task/REVIEW-<n>.md` that
+  the row can load into the review box.
+- **Opt-in review submission** (`agentFlow.reviewWrites`, default off): approve,
+  comment or request changes from the Deck, each behind a confirmation dialog
+  naming the verb, repo and PR number. This is the first thing in Agent Flow
+  that writes to GitHub.
+- Settings: `agentFlow.reviewRequests`, `agentFlow.reviewRequestsTtlSeconds`,
+  `agentFlow.reviewWrites`, `agentFlow.reviewRequestPrompt`.
+
 ## [0.1.39] — 2026-07-28
 
 ### Changed

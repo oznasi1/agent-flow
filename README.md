@@ -78,6 +78,26 @@ it. A merged PR moves the card to **Done** and is the only thing that makes a ca
 say *merged*. Turn it off with the **PR facts** toggle or `agentFlow.prFacts`, and
 cards fall back to the git + Jira backbone.
 
+Above the columns sits your **review queue** — every open PR that asks for your
+review, found with one `gh` search. Every row is visible in a height-capped,
+independently scrollable list rather than being collapsed away, so a nine-request
+queue is still a scroll, not a count. Each row carries the repo, PR number, title,
+author, age, and its size both as `+409 −50 · 8 files` and as an S/M/L bucket;
+sort by **oldest** (what you owe most) or **smallest** (what you can clear before
+standup). Expanding a row fetches which checks failed and how many review threads
+are still open. **Review with agent** checks the PR out into a worktree and seeds
+Claude Code to review the diff and write its findings to
+`.pick-task/REVIEW-<number>.md`, which the row can then load into the review box.
+Turn the strip off with `agentFlow.reviewRequests`; it shares the **PR facts**
+toggle and the same `gh` dependency.
+
+With `agentFlow.reviewWrites` on (**off by default**), the expanded row also
+submits: **Approve**, **Comment**, or **Request changes** — each disabled while a
+submit for that row is already in flight, and each behind a confirmation dialog
+that names the verb, the repo and the PR number before anything is sent. A body
+loaded from the agent's draft is marked as agent-drafted when it goes out, unless
+you turn `agentFlow.stampLabelOnWrite` off.
+
 ### The Marketplace — browse your skills, commands & agents
 
 The **Marketplace** (open it with the puzzle-piece (`$(extensions)`) button beside the
@@ -156,8 +176,9 @@ marketplaces show up here on the next scan.
   the task brief is the guaranteed fallback).
 - An **Atlassian API token** for your Jira Cloud account
   ([create one](https://id.atlassian.com/manage-profile/security/api-tokens)).
-- The **`gh` CLI**, signed in (`gh auth login`) — for the Deck's PR/CI state
-  (optional; without it the Deck falls back to git + Jira). Found on your `PATH`
+- The **`gh` CLI**, signed in (`gh auth login`) — for the Deck's PR/CI state and
+  its review-requests strip (optional; without it the Deck falls back to git +
+  Jira). Found on your `PATH`
   or in the usual install dirs (`/opt/homebrew/bin`, `/usr/local/bin`,
   `/opt/local/bin`, `~/.local/bin`, `~/bin`) — the editor does not always hand
   extensions your shell's `PATH`. If the Deck still says gh is missing, the
@@ -166,19 +187,34 @@ marketplaces show up here on the next scan.
 ## Data & privacy
 
 Agent Flow talks to **your** Jira Cloud site, reads your **local** repo checkouts,
-and — when `agentFlow.prFacts` is on — reads your **own** GitHub through your
-existing `gh` login. Nothing is sent to any service that isn't already yours, and
-Agent Flow stores no GitHub credentials of its own: PR reads go through `gh`, so
-they inherit whatever host, SSO and token your CLI already has. All GitHub access
-is **read-only** — Agent Flow never merges, comments, or pushes. **Agent Flow: Doctor**
-probes rather than only reading config: it makes two authenticated GETs to your own
-Jira site and runs `gh auth status`, which is what catches a revoked token instead of
-reporting it as a network problem. It writes nothing anywhere except your clipboard,
-and only when you ask it to copy the report. Your Jira credentials are stored in VS Code
-**SecretStorage** (encrypted), never in `settings.json`. Reads are the default; the only
-Jira **writes** are the optional status changes you trigger from a card (which stamp the
-provenance label). Task briefs are written to a git-excluded `.pick-task/` directory in
-each repo, so they never get committed.
+and — when `agentFlow.prFacts` or `agentFlow.reviewRequests` is on — reads your
+**own** GitHub through your existing `gh` login. Nothing is sent to any service
+that isn't already yours, and Agent Flow stores no GitHub credentials of its own:
+every GitHub call goes through `gh`, so it inherits whatever host, SSO and token
+your CLI already has.
+
+GitHub access is **read-only by default** — Agent Flow never merges or pushes.
+The one exception is opt-in: with `agentFlow.reviewWrites` on (it ships **off**),
+the Deck's review strip can submit a review — approve, comment, or request
+changes — on a PR that asked for yours. Every submit shows a modal confirmation
+naming the verb, the repo and the PR number before anything reaches GitHub, and
+every submit attempt — success or failure — is logged to the **Agent Flow**
+output channel. A review body loaded from the agent's draft is marked as
+agent-drafted when it goes out (a fixed line, not the configurable
+`agentFlow.provenanceLabel`), unless `agentFlow.stampLabelOnWrite` is off.
+Nothing else about the feature writes anywhere: the review agent itself is told,
+in its seeded prompt, not to post anything to GitHub — the human submits the
+review.
+
+**Agent Flow: Doctor** probes rather than only reading config: it makes two
+authenticated GETs to your own Jira site and runs `gh auth status`, which is what
+catches a revoked token instead of reporting it as a network problem. It writes
+nothing anywhere except your clipboard, and only when you ask it to copy the
+report. Your Jira credentials are stored in VS Code **SecretStorage** (encrypted),
+never in `settings.json`. Reads are the default; the only Jira **writes** are the
+optional status changes you trigger from a card (which stamp the provenance
+label). Task briefs are written to a git-excluded `.pick-task/` directory in each
+repo, so they never get committed.
 
 ## Settings
 
@@ -191,7 +227,7 @@ each repo, so they never get committed.
 | `agentFlow.repoBlocklist` | `[]` | Directory names under `reposRoot` to exclude from discovery. |
 | `agentFlow.githubOrg` | `""` | Reserved (clone support not yet implemented). |
 | `agentFlow.provenanceLabel` | `claude-code` | Label stamped on Jira writes when enabled. |
-| `agentFlow.stampLabelOnWrite` | `true` | Whether to stamp the provenance label. |
+| `agentFlow.stampLabelOnWrite` | `true` | Whether to stamp the provenance label on a Jira write, and whether a review body submitted from the Deck is marked as agent-drafted (a fixed line, distinct from `agentFlow.provenanceLabel`). |
 | `agentFlow.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
 | `agentFlow.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
@@ -199,6 +235,10 @@ each repo, so they never get committed.
 | `agentFlow.prFactsTtlSeconds` | `120` | How stale a cached PR fact may be before the Deck re-fetches it (minimum 30). Only fetched while the Deck is open. |
 | `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on a card. |
 | `agentFlow.prReviewAutoFix` | `true` | After the PR-review agent assesses the PR, let it implement the requested changes (off = assess only). |
+| `agentFlow.reviewRequests` | `true` | Show the Deck's review-requests strip: open GitHub PRs that ask for your review. |
+| `agentFlow.reviewRequestsTtlSeconds` | `300` | How stale the cached review queue may be before a refetch (minimum 60). |
+| `agentFlow.reviewWrites` | `false` | Allow submitting approve / comment / request changes to GitHub from the Deck. |
+| `agentFlow.reviewRequestPrompt` | *(built-in)* | Prompt seeded by **Review with agent**. |
 | `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
