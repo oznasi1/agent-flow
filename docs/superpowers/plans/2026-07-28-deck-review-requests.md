@@ -1846,6 +1846,7 @@ Handle the message in the existing `handler`:
         // A ref rather than reading state: this fires inside a message handler
         // registered once, and a setState called from inside another setState's
         // updater runs twice under StrictMode.
+        setReviewsSeen(true);
         if (!seededCollapse.current && m.requests.length > 0) {
           seededCollapse.current = true;
           if (m.requests.length > 5) setReviewsCollapsed(true);
@@ -1859,12 +1860,18 @@ The ref sits with the other state declarations:
 ```tsx
   /** Has a queue ever arrived? Gates the one-time collapse. */
   const seededCollapse = React.useRef(false);
+  /** Has the host ever posted a queue? That is the webview's only signal that the
+   * feature is on: `postReviews` stays silent when the setting is off or `gh` is
+   * unusable, but posts `requests: []` when it is on and you owe nobody a review.
+   * The stat needs the difference — "0 To review" is information, a missing tile is
+   * not — while the strip itself only appears once there is a row to show. */
+  const [reviewsSeen, setReviewsSeen] = React.useState(false);
 ```
 
-Add the stat, after the "In review" stat:
+Add the stat, after the "In review" stat. It keys off `reviewsSeen`, **not** the count — a zero here means "you owe nobody a review", which is worth stating; a missing tile would instead read as "this feature isn't running":
 
 ```tsx
-          {reviews.issueCount > 0 && (
+          {reviewsSeen && (
             <div className="stat"><span className="n">{reviews.issueCount}</span><span className="l">To review</span></div>
           )}
 ```
@@ -1906,11 +1913,21 @@ const mkReview = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
 });
 
 describe("DeckApp review strip", () => {
-  it("shows the To review stat only once something is waiting", () => {
+  it("shows no To review stat until the host posts a queue", () => {
     render(<DeckApp />);
     expect(screen.queryByText("To review")).not.toBeInTheDocument();
     host(reviewsMsg([mkReview()]));
     expect(screen.getByText("To review")).toBeInTheDocument();
+  });
+
+  // The strip and the stat part company here, deliberately: an empty rail above the
+  // board is noise, but a "0" tile is the only thing telling you the feature is alive.
+  it("keeps the To review stat at zero, while the strip itself disappears", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([], 0));
+    expect(screen.getByText("To review")).toBeInTheDocument();
+    expect(screen.getByText("0")).toBeInTheDocument();
+    expect(screen.queryByText(/waiting on your review/i)).not.toBeInTheDocument();
   });
 
   it("renders the strip above the board", () => {
