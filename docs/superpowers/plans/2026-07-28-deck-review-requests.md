@@ -564,6 +564,21 @@ describe("countUnresolved", () => {
     expect(countUnresolved({})).toBeNull();
     expect(countUnresolved(null)).toBeNull();
   });
+
+  // The three cases that separate a preserved refactor from a broken one. The
+  // container-shape cases above pass against either version.
+  it("returns null for a null entry inside an otherwise valid list", () => {
+    expect(countUnresolved(wrap([null, { isResolved: false, isOutdated: false }]))).toBeNull();
+  });
+
+  it("returns null for a non-object entry", () => {
+    expect(countUnresolved(wrap(["nope", { isResolved: false, isOutdated: false }]))).toBeNull();
+    expect(countUnresolved(wrap([7]))).toBeNull();
+  });
+
+  it("counts a thread with neither flag set — absent means unresolved", () => {
+    expect(countUnresolved(wrap([{}]))).toBe(1);
+  });
 });
 ```
 
@@ -585,11 +600,18 @@ export function countUnresolved(json: unknown): number | null {
     data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: unknown } } } };
   } | null)?.data?.repository?.pullRequest?.reviewThreads?.nodes;
   if (!Array.isArray(nodes)) return null;
+  // A null or non-object entry means this is not a thread list we understand.
+  // The pre-extraction code reached the same verdict by throwing into the
+  // caller's catch; saying so outright removes the dependence on an exception
+  // and keeps the answer honest — a wrong count reads as fact, `null` does not.
+  if (nodes.some((n) => !n || typeof n !== "object")) return null;
   return (nodes as { isResolved?: boolean; isOutdated?: boolean }[]).filter(
-    (n) => !n?.isResolved && !n?.isOutdated,
+    (n) => !n.isResolved && !n.isOutdated,
   ).length;
 }
 ```
+
+**Why the guard, and not `n?.isResolved`:** an earlier draft of this task used optional chaining on `n` instead. That silently *counts* a null entry as an open thread (`!undefined` is `true`), where the code being replaced threw a `TypeError` that the caller's `try/catch` turned into `null`. A refactor that turns "we could not find out" into a confidently wrong number is not behaviour-preserving. Three tests below pin it.
 
 - [ ] **Step 4: Use it in the PR provider**
 
