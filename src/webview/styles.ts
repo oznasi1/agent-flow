@@ -199,6 +199,8 @@ export const CSS = `
      absorb the border so chips don't change size between states. */
   .chip.off-ticket { background: transparent; padding: 1px 4px 1px 7px;
     border: 1px dashed var(--vscode-badge-background); color: var(--vscode-descriptionForeground); }
+  .chip .up { cursor: pointer; opacity: .65; font-size: 11px; line-height: 1; }
+  .chip .up:hover { opacity: 1; }
   .chip-none { font-size: 10px; color: var(--vscode-descriptionForeground); font-style: italic; }
 
   /* Repo picker — inline command-palette style */

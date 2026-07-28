@@ -741,7 +741,7 @@ describe("task card actions", () => {
     withChips();
     const chip = chipFor("pricing-api");
     expect(chip.className).toContain("off-ticket");
-    expect(chip).toHaveAttribute("title", "Not on ASM-1 in Jira");
+    expect(chip).toHaveAttribute("title", "Not on ASM-1 in Jira — ↑ adds it");
     // The × is local-only here: there is no component on the ticket to remove.
     expect(within(chip).getByTitle("Remove")).toBeInTheDocument();
   });
@@ -760,6 +760,95 @@ describe("task card actions", () => {
     fireEvent.click(screen.getByText("Fix bug")); // collapse
     const meta = document.querySelector(".meta") as HTMLElement;
     expect(within(meta).getByText("pricing-api")).toBeInTheDocument();
+  });
+
+  /** Add a repo the way a user does: open the RepoPicker, filter to one match,
+   *  press Enter. Its rows commit on mouseDown rather than click, so filtering and
+   *  Enter is both simpler and closer to real use. */
+  const pick = (repo: string) => {
+    fireEvent.click(screen.getByText(/add repo/i));
+    const input = screen.getByPlaceholderText(/Filter repos/i);
+    fireEvent.change(input, { target: { value: repo } });
+    fireEvent.keyDown(input, { key: "Enter" });
+  };
+
+  it("writes an add when a mappable repo is picked, moving the chip too", () => {
+    withChips();
+    sent.mockClear();
+    pick("centaur");
+    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "ASM-1", repo: "centaur", on: true, movedChip: true });
+    // Optimistic: the new chip is already solid, before any verdict.
+    expect(chipFor("centaur").className).not.toContain("off-ticket");
+  });
+
+  it("sends nothing when an unmappable repo is picked, and marks it local-only", () => {
+    withChips({ inferred: [], mappable: { centaur: "Centaur" } });
+    sent.mockClear();
+    pick("scratch-tool");
+    expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "setComponent" }));
+    expect(chipFor("scratch-tool").className).toContain("off-ticket");
+  });
+
+  it("pushes a state-B chip without moving it, and shows it solid at once", () => {
+    withChips();
+    sent.mockClear();
+    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to ASM-1"));
+    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "ASM-1", repo: "pricing-api", on: true, movedChip: false });
+    expect(chipFor("pricing-api").className).not.toContain("off-ticket");
+  });
+
+  it("writes a remove when a state-A chip is dismissed", () => {
+    withChips();
+    sent.mockClear();
+    fireEvent.click(within(chipFor("account-service")).getByTitle("Remove Account-Service from ASM-1"));
+    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "ASM-1", repo: "account-service", on: false, movedChip: true });
+    expect(chipFor("account-service")).toBeUndefined();
+  });
+
+  it("sends nothing when a state-B or state-C chip is dismissed", () => {
+    withChips();
+    sent.mockClear();
+    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Remove"));
+    fireEvent.click(within(chipFor("scratch-tool")).getByTitle("Remove"));
+    expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "setComponent" }));
+    expect(chipFor("pricing-api")).toBeUndefined();
+    expect(chipFor("scratch-tool")).toBeUndefined();
+  });
+
+  it("keeps the optimistic state when the host reports ok", () => {
+    withChips();
+    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to ASM-1"));
+    host({ type: "componentsChanged", key: "ASM-1", repo: "pricing-api", on: true, movedChip: false, ok: true });
+    expect(chipFor("pricing-api").className).not.toContain("off-ticket");
+  });
+
+  it("undoes a rejected push — the chip goes dashed again but stays in the list", () => {
+    withChips();
+    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to ASM-1"));
+    host({ type: "componentsChanged", key: "ASM-1", repo: "pricing-api", on: true, movedChip: false, ok: false });
+    expect(chipFor("pricing-api").className).toContain("off-ticket");
+  });
+
+  it("undoes a rejected picker add — the chip disappears again", () => {
+    withChips();
+    pick("centaur");
+    host({ type: "componentsChanged", key: "ASM-1", repo: "centaur", on: true, movedChip: true, ok: false });
+    expect(chipFor("centaur")).toBeUndefined();
+  });
+
+  it("undoes a rejected remove — the chip comes back solid", () => {
+    withChips();
+    fireEvent.click(within(chipFor("account-service")).getByTitle("Remove Account-Service from ASM-1"));
+    host({ type: "componentsChanged", key: "ASM-1", repo: "account-service", on: false, movedChip: true, ok: false });
+    expect(chipFor("account-service")).toBeDefined();
+    expect(chipFor("account-service").className).not.toContain("off-ticket");
+  });
+
+  it("ignores a verdict for a ticket with no loaded detail", () => {
+    withChips();
+    expect(() =>
+      host({ type: "componentsChanged", key: "ASM-99", repo: "centaur", on: true, movedChip: true, ok: false }),
+    ).not.toThrow();
   });
 });
 

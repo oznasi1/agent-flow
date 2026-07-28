@@ -55,3 +55,9 @@ export function prioClass(p: string): string {
   if (s === "medium") return "p-med";
   return "p-low";
 }
+
+/** Append `x` unless it's already there, returning the original array when it is —
+ *  so an unchanged list keeps its reference and React skips the re-render. */
+export function addOnce(xs: string[], x: string): string[] {
+  return xs.includes(x) ? xs : [...xs, x];
+}

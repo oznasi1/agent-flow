@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveStatuses, fmtEst, isPrReviewStatus, matchesStatus, moveKey, prioClass } from "../../src/webview/helpers";
+import { addOnce, deriveStatuses, fmtEst, isPrReviewStatus, matchesStatus, moveKey, prioClass } from "../../src/webview/helpers";
 import { mkTask } from "../_helpers/factories";
 
 const tasks = (...keys: string[]) => keys.map((k) => mkTask({ key: k }));
@@ -135,5 +135,16 @@ describe("moveKey", () => {
     const snapshot = keys(list);
     moveKey(list, "C", "A", "before");
     expect(keys(list)).toEqual(snapshot);
+  });
+});
+
+describe("addOnce", () => {
+  it("appends a value that is absent", () => {
+    expect(addOnce(["a"], "b")).toEqual(["a", "b"]);
+  });
+
+  it("returns the same array reference when the value is already present", () => {
+    const xs = ["a", "b"];
+    expect(addOnce(xs, "a")).toBe(xs);
   });
 });

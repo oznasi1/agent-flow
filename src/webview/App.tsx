@@ -1,7 +1,7 @@
 import * as React from "react";
 import Fuse from "fuse.js";
 import { send } from "./vscodeApi";
-import { deriveStatuses, fmtEst, isPrReviewStatus, matchesStatus, moveKey, prioClass } from "./helpers";
+import { addOnce, deriveStatuses, fmtEst, isPrReviewStatus, matchesStatus, moveKey, prioClass } from "./helpers";
 import { Filter, FilterVisibility, JiraTask, OutboundMessage, Size } from "../types";
 
 let toastSeq = 0;
@@ -237,6 +237,31 @@ export function App(): JSX.Element {
         case "removedFromSprint":
           setTasks((prev) => prev.filter((t) => t.key !== m.key));
           break;
+        case "componentsChanged":
+          // On success the optimistic update already stands. On failure, undo
+          // exactly what was applied: `on` says which direction, `movedChip`
+          // whether the chip's own presence changed with it.
+          if (m.ok) break;
+          setDetails((prev) => {
+            const d = prev[m.key];
+            if (!d) return prev;
+            const component = d.mappable?.[m.repo] ?? m.repo;
+            const jira = d.jira ?? [];
+            const selected = d.selected ?? [];
+            return {
+              ...prev,
+              [m.key]: {
+                ...d,
+                jira: m.on ? jira.filter((c) => c !== component) : addOnce(jira, component),
+                selected: !m.movedChip
+                  ? selected
+                  : m.on
+                    ? selected.filter((s) => s !== m.repo)
+                    : addOnce(selected, m.repo),
+              },
+            };
+          });
+          break;
         case "loading":
           setLoading(m.loading);
           break;
@@ -289,8 +314,44 @@ export function App(): JSX.Element {
     });
   };
 
-  const setSelected = (key: string, selected: string[]) =>
-    setDetails((prev) => ({ ...prev, [key]: { ...prev[key], selected } }));
+  /** Apply a chip-list edit, writing whatever part of it Jira can accept. Adding a
+   * repo the project has a component for pushes it; removing a chip only writes when
+   * that component is actually on the ticket — a chip inferred from a label or a text
+   * mention has nothing to remove. Both changes are optimistic; `componentsChanged`
+   * with `ok: false` undoes them. */
+  const setSelected = (key: string, selected: string[]) => {
+    const d = details[key];
+    const mappable = d?.mappable ?? {};
+    const before = d?.selected ?? [];
+    const added = selected.filter((s) => !before.includes(s));
+    const removed = before.filter((s) => !selected.includes(s));
+    let jira = d?.jira ?? [];
+    for (const repo of added) {
+      const component = mappable[repo];
+      if (!component) continue;
+      send({ type: "setComponent", key, repo, on: true, movedChip: true });
+      jira = addOnce(jira, component);
+    }
+    for (const repo of removed) {
+      const component = mappable[repo];
+      if (!component || !jira.includes(component)) continue;
+      send({ type: "setComponent", key, repo, on: false, movedChip: true });
+      jira = jira.filter((c) => c !== component);
+    }
+    setDetails((prev) => ({ ...prev, [key]: { ...prev[key], selected, jira } }));
+  };
+
+  /** `↑` on a chip whose component the ticket lacks: write it, and show it as
+   * on-ticket at once. The chip itself doesn't move, hence `movedChip: false`. */
+  const pushComponent = (key: string, repo: string) => {
+    const component = details[key]?.mappable?.[repo];
+    if (!component) return;
+    send({ type: "setComponent", key, repo, on: true, movedChip: false });
+    setDetails((prev) => ({
+      ...prev,
+      [key]: { ...prev[key], jira: addOnce(prev[key]?.jira ?? [], component) },
+    }));
+  };
 
   // Status lens chips, derived from the loaded pool (adapts to the project's workflow).
   const availableStatuses = React.useMemo(() => deriveStatuses(tasks), [tasks]);
@@ -504,6 +565,7 @@ export function App(): JSX.Element {
             project={project}
             onToggle={() => toggleExpand(t.key)}
             onSelect={(sel) => setSelected(t.key, sel)}
+            onPush={(repo) => pushComponent(t.key, repo)}
             batch={batchMode ? { checked: batchSelected.has(t.key), onToggle: () => toggleBatch(t.key) } : undefined}
             dnd={
               canReorder
@@ -589,11 +651,12 @@ function TaskCard(props: {
   project: string;
   onToggle: () => void;
   onSelect: (selected: string[]) => void;
+  onPush: (repo: string) => void;
   batch?: { checked: boolean; onToggle: () => void };
   dnd?: CardDnd;
   onRemoveFromSprint?: () => void;
 }): JSX.Element {
-  const { task, me, prReviewStatus, open, detail, project, onToggle, onSelect, batch, dnd, onRemoveFromSprint } = props;
+  const { task, me, prReviewStatus, open, detail, project, onToggle, onSelect, onPush, batch, dnd, onRemoveFromSprint } = props;
   const unassigned = !task.assignee || task.assignee.toLowerCase() === "unassigned";
   const isMe = !!me && task.assignee === me;
   // Offer "add to my sprint" when it isn't already there: unassigned tasks, or tasks
@@ -732,7 +795,7 @@ function TaskCard(props: {
         )}
       </div>
 
-      {open && <CardDetail taskKey={task.key} project={project} detail={detail} onSelect={onSelect} />}
+      {open && <CardDetail taskKey={task.key} project={project} detail={detail} onSelect={onSelect} onPush={onPush} />}
     </div>
   );
 }
@@ -742,8 +805,9 @@ function CardDetail(props: {
   project: string;
   detail?: DetailState;
   onSelect: (s: string[]) => void;
+  onPush: (repo: string) => void;
 }): JSX.Element {
-  const { taskKey, project, detail, onSelect } = props;
+  const { taskKey, project, detail, onSelect, onPush } = props;
   if (!detail || detail.loading) return <div className="detail"><div className="detail-loading">Loading ticket…</div></div>;
 
   const selected = detail.selected ?? [];
@@ -773,11 +837,14 @@ function CardDetail(props: {
                 onTicket
                   ? undefined
                   : component
-                    ? `Not on ${taskKey} in Jira`
+                    ? `Not on ${taskKey} in Jira — ↑ adds it`
                     : `No ${project} component named “${s}” — this selection stays local`
               }
             >
               {s}
+              {!onTicket && component && (
+                <span className="up" title={`Add ${component} to ${taskKey}`} onClick={() => onPush(s)}>↑</span>
+              )}
               <span
                 className="x"
                 title={onTicket ? `Remove ${component} from ${taskKey}` : "Remove"}
