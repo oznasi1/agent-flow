@@ -7,6 +7,7 @@ import { maybeSeedAgent, watchPlansAndSeed } from "./engine/workspace";
 import { windowIdentity, writePresence, removePresence, defaultWindowsDir } from "./engine/presence";
 import { getConfig } from "./config";
 import { maybeRunSetup, runSetup } from "./setup";
+import { showDoctor, defaultDeps } from "./doctorView";
 
 export function activate(context: vscode.ExtensionContext): void {
   const auth = new ApiTokenAuth(context.secrets);
@@ -52,6 +53,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("agentFlow.setup", () =>
       runSetup(context, auth, log, () => provider.refresh()),
     ),
+
+    vscode.commands.registerCommand("agentFlow.doctor", () => showDoctor(defaultDeps(auth, log))),
   );
 
   // Best-effort niceties, all of them optional. A failure here must NEVER propagate out

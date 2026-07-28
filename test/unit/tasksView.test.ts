@@ -534,11 +534,25 @@ describe("changeStatus", () => {
 });
 
 describe("failure routing", () => {
-  it("gates the panel when the task fetch fails", async () => {
+  it("gates the panel when the task fetch fails, and offers Doctor", async () => {
     clientStub.fetchTasks.mockRejectedValue(new Error("Couldn't reach Jira"));
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mysprint", size: "any" });
-    expect(posted()).toContainEqual({ type: "error", message: "Couldn't reach Jira", canRetry: true });
+    // The gate's remit — unreachable site, bad project key, auth loss — is exactly
+    // what Doctor diagnoses, so the banner offers it rather than hoping the user
+    // knows the command exists.
+    expect(posted()).toContainEqual({
+      type: "error",
+      message: "Couldn't reach Jira",
+      canRetry: true,
+      canRunDoctor: true,
+    });
+  });
+
+  it("runs the Doctor command when the banner's button asks for it", async () => {
+    const { send } = setup();
+    await send({ type: "runDoctor" });
+    expect(commands.executeCommand).toHaveBeenCalledWith("agentFlow.doctor");
   });
 
   it("leaves the list up when a write fails — toast only", async () => {

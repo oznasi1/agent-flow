@@ -79,6 +79,19 @@ describe("problem indication", () => {
     host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS });
     expect(screen.queryByText(/boom/)).not.toBeInTheDocument();
   });
+
+  it("offers Run Doctor on a gated failure and asks the host for it", () => {
+    render(<App />);
+    host({ type: "error", message: "Couldn't reach Jira", canRetry: true, canRunDoctor: true });
+    fireEvent.click(screen.getByRole("button", { name: /Run Doctor/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "runDoctor" });
+  });
+
+  it("shows no Doctor button on a failure it can't diagnose", () => {
+    render(<App />);
+    host({ type: "error", message: "Agent Flow isn't responding.", canRetry: true });
+    expect(screen.queryByRole("button", { name: /Run Doctor/i })).not.toBeInTheDocument();
+  });
 });
 
 describe("filter + size lenses", () => {

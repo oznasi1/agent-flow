@@ -136,6 +136,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           await this.postInitialState();
           break;
         }
+        case "runDoctor": {
+          await vscode.commands.executeCommand("agentFlow.doctor");
+          break;
+        }
         case "signIn": {
           await vscode.commands.executeCommand("agentFlow.signIn");
           break;
@@ -239,7 +243,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         // Only the messages that populate the panel may replace it: if the list
         // never loaded there is nothing to preserve. A failed write keeps its
         // list on screen and settles for a toast.
-        this.post({ type: "error", message: msg, canRetry: true });
+        // The gate covers exactly Doctor's remit — unreachable site, bad project
+        // key, auth loss — so it is the right place to offer the diagnostic.
+        this.post({ type: "error", message: msg, canRetry: true, canRunDoctor: true });
       }
       this.toast("error", msg);
     }

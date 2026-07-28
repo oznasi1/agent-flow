@@ -64,6 +64,10 @@
         "title": "Agent Flow: Run Setup…"
       },
       {
+        "command": "agentFlow.doctor",
+        "title": "Agent Flow: Doctor"
+      },
+      {
         "command": "agentFlow.signIn",
         "title": "Agent Flow: Sign in to Jira"
       },
