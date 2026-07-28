@@ -1208,7 +1208,7 @@ describe("DeckPanel review submit", () => {
     expect(toast.action).toEqual({ label: "Open PR", url: "https://github.com/CyberJackGit/aws-ops/pull/8491" });
   });
 
-  // Beyond the brief's own list — the second of the gates the brief calls out
+  // Beyond the brief's own list — the fourth of the gates now in submitReview
   // ("the row must still be in the queue") has no case above; every other write-ish
   // message in this file (reviewExpand, reviewLaunch, reviewLoadDraft) pins this
   // symmetrically, and the confirm gate is the one place a stale id must never even
@@ -1225,14 +1225,24 @@ describe("DeckPanel review submit", () => {
   // before any dialog, mirroring provider.ts's own Object.hasOwn guard on the same
   // value. "constructor" specifically exercises the prototype-pollution case a
   // plain `!VERB_LABEL[verb]` check would let through as truthy.
+  //
+  // --- Fix round 2: the invalid verb must not have marked the id as in flight.
+  // The code is correct today only because the verb gate runs *before*
+  // `reviewSubmitsInFlight.add(id)` — a refactor that moved the `add` above the
+  // verb check would permanently lock this id out of every future submit for the
+  // rest of the session, and every other test in this file would stay green.
+  // Firing a valid `comment` for the same id right after and asserting the
+  // provider *is* reached this time is what pins the ordering.
   it.each(["merge", "constructor"])(
-    "refuses an out-of-union verb (%s) before any dialog or provider call",
+    "refuses an out-of-union verb (%s) before any dialog or provider call, and does not lock the id out of a later valid submit",
     async (verb) => {
       h.reviewWrites = true;
       const p = await showAndWarm();
       await p._fire(submitMsg({ verb: verb as unknown as ReviewVerb }));
       expect(window.showWarningMessage).not.toHaveBeenCalled();
       expect(h.reviewSubmit).not.toHaveBeenCalled();
+      await p._fire(submitMsg({ verb: "comment", body: "now a real one" }));
+      expect(h.reviewSubmit).toHaveBeenCalledWith("CyberJackGit/aws-ops", 8491, "comment", "now a real one");
     },
   );
 

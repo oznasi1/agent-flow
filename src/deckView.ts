@@ -400,13 +400,12 @@ export class DeckPanel {
         return;
       }
       this.toast("success", `${label} sent on ${req.repoName}#${req.number}.`);
-      // Approving or requesting changes clears the request server-side; a comment
-      // does not — you stay in the PR's requested_reviewers either way — so only
-      // those two verbs evict the row here rather than leaving it to be posted as
-      // a comment-you-still-owe until the next search. issueCount is decremented
-      // alongside the eviction, and the trimmed cache is written to disk
-      // immediately: memory-only would let closing and reopening the Deck re-read
-      // the untouched file and resurrect the row before the next search runs.
+      // Approving or requesting changes clears the review request server-side; a
+      // comment does not — after a comment you are still in requested_reviewers,
+      // so the row must stay until the next search proves otherwise. issueCount is
+      // decremented alongside the eviction, and the trimmed cache is written to
+      // disk immediately: memory-only would let closing and reopening the Deck
+      // re-read the untouched file and resurrect the row before the next search runs.
       if ((verb === "approve" || verb === "request-changes") && this.reviewCache) {
         this.reviewCache = {
           ...this.reviewCache,
