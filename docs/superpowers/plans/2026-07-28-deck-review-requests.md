@@ -1781,12 +1781,23 @@ Handle the message in the existing `handler`:
 ```tsx
       } else if (m.type === "deck:reviews") {
         // Collapse a long queue on arrival, once: nine rows would push the board
-        // off-screen, and the user's later choice must survive the next refresh.
-        setReviews((prev) => {
-          if (prev.requests.length === 0 && m.requests.length > 5) setReviewsCollapsed(true);
-          return { requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale };
-        });
+        // off-screen, and the user's later choice must survive every refresh after.
+        // A ref rather than reading state: this fires inside a message handler
+        // registered once, and a setState called from inside another setState's
+        // updater runs twice under StrictMode.
+        if (!seededCollapse.current && m.requests.length > 0) {
+          seededCollapse.current = true;
+          if (m.requests.length > 5) setReviewsCollapsed(true);
+        }
+        setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale });
       }
+```
+
+The ref sits with the other state declarations:
+
+```tsx
+  /** Has a queue ever arrived? Gates the one-time collapse. */
+  const seededCollapse = React.useRef(false);
 ```
 
 Add the stat, after the "In review" stat:
@@ -3092,17 +3103,19 @@ Thread `reviewWrites`, `body`, `onBody` and `onSubmit` from `ReviewStrip` into `
         bodies={bodies}
         onBody={(id, body) => {
           setBodies((b) => ({ ...b, [id]: body }));
-          // Editing makes it yours: the provenance line is about who wrote the
-          // words, and past this point that is no longer only the agent.
-          setFromDraft((f) => (f[id] ? { ...f, [id]: false } : f));
+          // Editing a loaded draft does NOT clear the flag: the line tells a
+          // teammate an agent read their code, which stays true however much you
+          // reword it. Only emptying the box does — at that point nothing of the
+          // agent's text is left to disclose.
+          if (!body.trim()) setFromDraft((f) => (f[id] ? { ...f, [id]: false } : f));
         }}
         onSubmit={(id, verb) => send({ type: "deck:reviewSubmit", id, verb, body: bodies[id] ?? "", fromDraft: !!fromDraft[id] })}
 ```
 
-Three places need `reviewWrites` in `DeckApp`, and missing any one leaves the verbs permanently hidden: the state's type, its initial value (`false`), and the `deck:reviews` handler, whose returned object becomes
+Three places need `reviewWrites` in `DeckApp`, and missing any one leaves the verbs permanently hidden: the state's type, its initial value (`false`), and the `deck:reviews` handler, whose `setReviews` call becomes
 
 ```tsx
-          return { requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale, reviewWrites: m.reviewWrites };
+        setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale, reviewWrites: m.reviewWrites });
 ```
 
 - [ ] **Step 6: Style the box**
@@ -3124,7 +3137,37 @@ git add src/types.ts src/deckView.ts src/webview/ReviewStrip.tsx src/webview/Dec
 git commit -m "feat(review): the review box and its three verbs, behind reviewWrites"
 ```
 
-**Note on `fromDraft`:** the flag flips to `false` the moment the user edits a loaded draft. That is a deliberate choice, and the DeckApp test above asserts the unedited path only. If the maintainer would rather keep the provenance line on an *edited* agent draft, that is a one-line change in `onBody` — raise it in review rather than deciding it silently.
+Add one more DeckApp test, because this is the decided behaviour and nothing else pins it:
+
+```tsx
+  it("keeps fromDraft set when a loaded draft is edited", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText(/Load agent's review/i));
+    host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "1. the retry budget is unbounded" } });
+    fireEvent.click(screen.getByText("Comment"));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:reviewSubmit", id: "o/r#1", verb: "comment",
+      body: "1. the retry budget is unbounded", fromDraft: true,
+    });
+  });
+
+  it("clears fromDraft when the box is emptied", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText(/Load agent's review/i));
+    host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "all mine now" } });
+    fireEvent.click(screen.getByText("Comment"));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:reviewSubmit", id: "o/r#1", verb: "comment", body: "all mine now", fromDraft: false,
+    });
+  });
+```
 
 ---
 
@@ -3238,7 +3281,9 @@ Report anything that differs rather than fixing it silently — steps 6 and 7 ar
 
 **Spec coverage:** discovery (Tasks 2, 4), locality (Task 7), enrichment (Tasks 4, 9), the modules table (Tasks 1–5, 8, 11), types (Task 1), messages (Tasks 7, 9, 12, 14, 15), the strip and its rules (Task 8), the three render conditions (Tasks 7, 8), sort and size (Tasks 1, 8), collapse-above-five (Task 8), the Review agent and prompt (Tasks 6, 11, 12), `Run.kind` (Task 10), not-cloned repos (Tasks 11, 12), the write path (Tasks 13, 14, 15), provenance (Task 14), settings (Task 6), failure modes (Tasks 4, 5, 7, 9, 11, 14), tests (throughout), README/CHANGELOG (Task 16), build order (the three slices).
 
-**Two spec items deliberately not implemented as written, both flagged in place:**
+**Decisions taken before execution, recorded so no task relitigates them:**
 
-- *"Collapse state and sort choice persist in `workspaceState`."* The plan keeps both in React state for the session only. Persisting them needs a host round-trip (`context.workspaceState`) plus two more messages, which is a fair amount of machinery for remembering a toggle. **Decide before Task 8:** accept session-only, or add a follow-up task.
-- *"`> 50` requests: showing 50 of N."* Implemented, but `REVIEW_SEARCH_LIMIT` is a module constant rather than a setting. That matches the spec; noting it so nobody adds a setting for it unasked.
+- *"Collapse state and sort choice persist in `workspaceState`"* (spec) → **session only**. Sort is a mode picked for a moment, not a durable preference, and collapse already adapts to queue size. Adding persistence later is additive and touches nothing else. The spec's line is superseded by this ruling.
+- **Provenance survives editing.** `fromDraft` is set when a draft loads and cleared only when the box is emptied — not on edit. The line discloses that an agent read the teammate's code, which stays true however much the wording changes; dropping it after a one-word tweak would strip the disclosure in exactly the case that wants it. Two tests in Task 15 pin both directions.
+- *"`> 50` requests: showing 50 of N."* Implemented, with `REVIEW_SEARCH_LIMIT` as a module constant rather than a setting. That matches the spec; noted so nobody adds a setting for it unasked.
+- **Collapse-on-arrival uses a ref, not a `setState` inside another `setState`'s updater** — the original phrasing would have fired twice under StrictMode.
