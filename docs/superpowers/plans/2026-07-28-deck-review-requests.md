@@ -1785,7 +1785,14 @@ Append to `src/webview/deckStyles.ts`, inside the exported `DECK_CSS` string, af
   /* A queue we could not refresh is stale, not broken — attn, never danger. */
   .rv-note.warn { color: var(--c-attn); }
 
-  .rv-rows { border-top: 1px solid var(--hair); }
+  /* Bounded, not hidden. Auto-collapsing a long queue met the "don't push the board
+     off-screen" goal by defeating the feature's entire purpose — nine pending reviews
+     opened as a bare count. A capped, scrolling list keeps the board's share of the
+     window while every row stays one flick away. ~6 rows before it scrolls; the strip
+     is the one place on this panel that owns a nested scroller, which is why the rule
+     lives here rather than on .rv-strip. */
+  .rv-rows { border-top: 1px solid var(--hair); max-height: 168px; overflow-y: auto;
+    overscroll-behavior: contain; }
   .rv-row + .rv-row { border-top: 1px solid var(--hair); }
   /* A button, so reset the button chrome and let it fill the row. outline-offset is
      negative because .rv-strip clips overflow — a ring drawn outside would vanish. */
@@ -1857,16 +1864,11 @@ Handle the message in the existing `handler`:
 
 ```tsx
       } else if (m.type === "deck:reviews") {
-        // Collapse a long queue on arrival, once: nine rows would push the board
-        // off-screen, and the user's later choice must survive every refresh after.
-        // A ref rather than reading state: this fires inside a message handler
-        // registered once, and a setState called from inside another setState's
-        // updater runs twice under StrictMode.
+        // No auto-collapse. A long queue is bounded by .rv-rows' capped height and its
+        // own scroller, so the board keeps its share of the window without the queue
+        // ever being hidden — which also means the collapse state is purely the user's,
+        // with no seeded-once ref and no setState nested inside another's updater.
         setReviewsSeen(true);
-        if (!seededCollapse.current && m.requests.length > 0) {
-          seededCollapse.current = true;
-          if (m.requests.length > 5) setReviewsCollapsed(true);
-        }
         setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale });
       }
 ```
@@ -1874,8 +1876,6 @@ Handle the message in the existing `handler`:
 The ref sits with the other state declarations:
 
 ```tsx
-  /** Has a queue ever arrived? Gates the one-time collapse. */
-  const seededCollapse = React.useRef(false);
   /** Has the host ever posted a queue? That is the webview's only signal that the
    * feature is on: `postReviews` stays silent when the setting is off or `gh` is
    * unusable, but posts `requests: []` when it is on and you owe nobody a review.
@@ -1959,11 +1959,24 @@ describe("DeckApp review strip", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:setReviewSort", sort: "smallest" });
   });
 
-  it("starts a queue of more than five collapsed", () => {
+  // A long queue must arrive VISIBLE. Height is bounded by the rows container's own
+  // scroller, so the board is protected without hiding the thing the strip exists for.
+  it("shows every row of a long queue rather than collapsing it", () => {
     render(<DeckApp />);
-    host(reviewsMsg(Array.from({ length: 6 }, (_, i) => mkReview({ id: `o/r#${i}`, number: i, title: `pr ${i}` }))));
+    host(reviewsMsg(Array.from({ length: 9 }, (_, i) => mkReview({ id: `o/r#${i}`, number: i, title: `pr ${i}` }))));
+    expect(screen.getByText(/9 PRs waiting on your review/i)).toBeInTheDocument();
+    expect(screen.getByText("pr 0")).toBeInTheDocument();
+    expect(screen.getByText("pr 8")).toBeInTheDocument();
+  });
+
+  it("stays collapsed across a refresh once the user collapses it", () => {
+    render(<DeckApp />);
+    const six = Array.from({ length: 6 }, (_, i) => mkReview({ id: `o/r#${i}`, number: i, title: `pr ${i}` }));
+    host(reviewsMsg(six));
+    fireEvent.click(screen.getByText(/waiting on your review/i)); // the user hides it
     expect(screen.queryByText("pr 0")).not.toBeInTheDocument();
-    expect(screen.getByText(/6 PRs waiting on your review/i)).toBeInTheDocument();
+    host(reviewsMsg(six)); // a later poll must not re-open what the user closed
+    expect(screen.queryByText("pr 0")).not.toBeInTheDocument();
   });
 });
 ```
@@ -3373,11 +3386,11 @@ Report anything that differs rather than fixing it silently — steps 6 and 7 ar
 
 ## Plan Self-Review
 
-**Spec coverage:** discovery (Tasks 2, 4), locality (Task 7), enrichment (Tasks 4, 9), the modules table (Tasks 1–5, 8, 11), types (Task 1), messages (Tasks 7, 9, 12, 14, 15), the strip and its rules (Task 8), the three render conditions (Tasks 7, 8), sort and size (Tasks 1, 8), collapse-above-five (Task 8), the Review agent and prompt (Tasks 6, 11, 12), `Run.kind` (Task 10), not-cloned repos (Tasks 11, 12), the write path (Tasks 13, 14, 15), provenance (Task 14), settings (Task 6), failure modes (Tasks 4, 5, 7, 9, 11, 14), tests (throughout), README/CHANGELOG (Task 16), build order (the three slices).
+**Spec coverage:** discovery (Tasks 2, 4), locality (Task 7), enrichment (Tasks 4, 9), the modules table (Tasks 1–5, 8, 11), types (Task 1), messages (Tasks 7, 9, 12, 14, 15), the strip and its rules (Task 8), the three render conditions (Tasks 7, 8), sort and size (Tasks 1, 8), a bounded-height queue (Task 8), the Review agent and prompt (Tasks 6, 11, 12), `Run.kind` (Task 10), not-cloned repos (Tasks 11, 12), the write path (Tasks 13, 14, 15), provenance (Task 14), settings (Task 6), failure modes (Tasks 4, 5, 7, 9, 11, 14), tests (throughout), README/CHANGELOG (Task 16), build order (the three slices).
 
 **Decisions taken before execution, recorded so no task relitigates them:**
 
-- *"Collapse state and sort choice persist in `workspaceState`"* (spec) → **session only**. Sort is a mode picked for a moment, not a durable preference, and collapse already adapts to queue size. Adding persistence later is additive and touches nothing else. The spec's line is superseded by this ruling.
+- *"Collapse state and sort choice persist in `workspaceState`"* (spec) → **session only**. Sort is a mode picked for a moment, not a durable preference. Adding persistence later is additive and touches nothing else. The spec's line is superseded by this ruling.
 - **Provenance survives editing.** `fromDraft` is set when a draft loads and cleared only when the box is emptied — not on edit. The line discloses that an agent read the teammate's code, which stays true however much the wording changes; dropping it after a one-word tweak would strip the disclosure in exactly the case that wants it. Two tests in Task 15 pin both directions.
 - *"`> 50` requests: showing 50 of N."* Implemented, with `REVIEW_SEARCH_LIMIT` as a module constant rather than a setting. That matches the spec; noted so nobody adds a setting for it unasked.
 - **Collapse-on-arrival uses a ref, not a `setState` inside another `setState`'s updater** — the original phrasing would have fired twice under StrictMode.

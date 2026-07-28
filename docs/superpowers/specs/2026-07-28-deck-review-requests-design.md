@@ -215,9 +215,12 @@ Expanded:
   accepted inaccuracy; correcting it costs a call per PR.
 - **Drafts** stay listed with a badge. If a teammate requested you on a draft,
   they meant to.
-- **Collapse state and sort choice** persist in `workspaceState`, and the strip
-  starts collapsed above five rows so a long queue cannot push the board
-  off-screen.
+- **Collapse state and sort choice** are per-session, and the strip arrives open
+  however long the queue is: its rows container is height-capped with its own
+  scroller, so the board keeps its share of the window without the queue being
+  hidden. An earlier draft auto-collapsed above five rows — rendering it showed
+  that a realistic nine-request queue then opened as a bare count, defeating the
+  point of the feature.
 
 ### What has to be true for the strip to render
 
@@ -385,6 +388,6 @@ repositories, and it is last on purpose: if it slips, 1 and 2 still ship.
   being genuinely modal, which the tests must assert.
 - **`review-requested:@me` may include more than you expect** (team requests).
   That is the intended superset, but a user on many teams could see a long strip
-  on first open. The 50-cap and the collapse-above-five default absorb it.
+  on first open. The 50-cap and the rows container's capped height absorb it.
 - **One more `gh` call per Deck session** on a 5-minute TTL, off the paint path.
   The measured 3.3s is well inside the existing 10s `GH_TIMEOUT_MS`.
