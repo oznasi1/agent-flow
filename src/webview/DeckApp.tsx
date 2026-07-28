@@ -221,8 +221,6 @@ export function DeckApp(): JSX.Element {
   const [reviewsCollapsed, setReviewsCollapsed] = React.useState(false);
   const [expanded, setExpanded] = React.useState<string | null>(null);
   const [details, setDetails] = React.useState<Record<string, ReviewDetail>>({});
-  /** Has a queue ever arrived? Gates the one-time collapse. */
-  const seededCollapse = React.useRef(false);
   /** Has the host ever posted a queue? That is the webview's only signal that the
    * feature is on: `postReviews` stays silent when the setting is off or `gh` is
    * unusable, but posts `requests: []` when it is on and you owe nobody a review.
@@ -246,16 +244,11 @@ export function DeckApp(): JSX.Element {
       } else if (m.type === "deck:loading") {
         setBusy(m.loading);
       } else if (m.type === "deck:reviews") {
-        // Collapse a long queue on arrival, once: nine rows would push the board
-        // off-screen, and the user's later choice must survive every refresh after.
-        // A ref rather than reading state: this fires inside a message handler
-        // registered once, and a setState called from inside another setState's
-        // updater runs twice under StrictMode.
+        // No auto-collapse. A long queue is bounded by .rv-rows' capped height and its
+        // own scroller, so the board keeps its share of the window without the queue
+        // ever being hidden — which also means the collapse state is purely the user's,
+        // with no seeded-once ref and no setState nested inside another's updater.
         setReviewsSeen(true);
-        if (!seededCollapse.current && m.requests.length > 0) {
-          seededCollapse.current = true;
-          if (m.requests.length > 5) setReviewsCollapsed(true);
-        }
         setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale });
       } else if (m.type === "deck:reviewDetail") {
         setDetails((d) => ({ ...d, [m.id]: m.detail }));

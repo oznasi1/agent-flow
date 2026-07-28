@@ -467,25 +467,24 @@ describe("DeckApp review strip", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:setReviewSort", sort: "smallest" });
   });
 
-  it("starts a queue of more than five collapsed", () => {
+  // A long queue must arrive VISIBLE. Height is bounded by the rows container's own
+  // scroller, so the board is protected without hiding the thing the strip exists for.
+  it("shows every row of a long queue rather than collapsing it", () => {
     render(<DeckApp />);
-    host(reviewsMsg(Array.from({ length: 6 }, (_, i) => mkReview({ id: `o/r#${i}`, number: i, title: `pr ${i}` }))));
-    expect(screen.queryByText("pr 0")).not.toBeInTheDocument();
-    expect(screen.getByText(/6 PRs waiting on your review/i)).toBeInTheDocument();
+    host(reviewsMsg(Array.from({ length: 9 }, (_, i) => mkReview({ id: `o/r#${i}`, number: i, title: `pr ${i}` }))));
+    expect(screen.getByText(/9 PRs waiting on your review/i)).toBeInTheDocument();
+    expect(screen.getByText("pr 0")).toBeInTheDocument();
+    expect(screen.getByText("pr 8")).toBeInTheDocument();
   });
 
-  // The one-time auto-collapse is seeded by a ref, not a state read inside another
-  // setState's updater — this is the test that would catch a regression back to the
-  // latter (which passes under a naive read but re-fires on every later message).
-  it("does not re-collapse a strip the user re-opened, on a later refresh", () => {
+  it("stays collapsed across a refresh once the user collapses it", () => {
     render(<DeckApp />);
     const six = Array.from({ length: 6 }, (_, i) => mkReview({ id: `o/r#${i}`, number: i, title: `pr ${i}` }));
     host(reviewsMsg(six));
+    fireEvent.click(screen.getByText(/waiting on your review/i)); // the user hides it
     expect(screen.queryByText("pr 0")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText(/waiting on your review/i));
-    expect(screen.getByText("pr 0")).toBeInTheDocument();
-    host(reviewsMsg(six));
-    expect(screen.getByText("pr 0")).toBeInTheDocument();
+    host(reviewsMsg(six)); // a later poll must not re-open what the user closed
+    expect(screen.queryByText("pr 0")).not.toBeInTheDocument();
   });
 
   it("asks the host for a row's detail on expand, and renders it", () => {

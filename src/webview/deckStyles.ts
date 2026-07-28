@@ -298,23 +298,27 @@ export const DECK_CSS = `
   /* A queue we could not refresh is stale, not broken — attn, never danger. */
   .rv-note.warn { color: var(--c-attn); }
 
-  .rv-rows { border-top: 1px solid var(--hair); }
+  /* Bounded, not hidden. Auto-collapsing a long queue met the "don't push the board
+     off-screen" goal by defeating the feature's entire purpose — nine pending reviews
+     opened as a bare count. A capped, scrolling list keeps the board's share of the
+     window while every row stays one flick away. ~6 rows before it scrolls; the strip
+     is the one place on this panel that owns a nested scroller, which is why the rule
+     lives here rather than on .rv-strip. */
+  .rv-rows { border-top: 1px solid var(--hair); max-height: 168px; overflow-y: auto;
+    overscroll-behavior: contain; }
   .rv-row + .rv-row { border-top: 1px solid var(--hair); }
-  /* A real button, not a div: this is the primary interaction of the whole feature,
-     and "Open PR" plus every failing-check link only render once a row is expanded —
-     a keyboard-only user with no way to reach this would be locked out of all of it.
-     Reset to look identical to a plain row; outline-offset is negative because
-     .rv-strip clips with overflow: hidden and an outward ring on the first/last row
-     would be cut off by that boundary. */
+  /* A button, so reset the button chrome and let it fill the row. outline-offset is
+     negative because .rv-strip clips overflow — a ring drawn outside would vanish. */
   .rv-line { display: flex; align-items: baseline; gap: 8px; padding: 6px 12px; cursor: pointer;
-    width: 100%; text-align: left; background: none; border: 0; color: inherit; font: inherit;
-    font-size: var(--t-body); font-variant-numeric: tabular-nums; outline-offset: -2px; }
+    font-size: var(--t-body); font-variant-numeric: tabular-nums;
+    width: 100%; text-align: left; background: none; border: 0; color: inherit; font-family: inherit;
+    outline-offset: -2px; }
   .rv-line:hover { background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)); }
   .rv-caret { flex: none; width: 9px; color: var(--dim); }
   /* Identifiers and counts — the only mono on the row. The title and the handle
-     beside them are English, and stay in the UI font. flex: none plus nowrap so a
-     long PR title absorbs the squeeze through its own ellipsis instead of these
-     badges wrapping to a second line in a narrow panel. */
+     beside them are English, and stay in the UI font. */
+  /* flex: none + nowrap so a long title absorbs the squeeze through its own ellipsis
+     rather than these badges wrapping to a second line in a narrow panel. */
   .rv-repo, .rv-num, .rv-size, .rv-line .add, .rv-line .del {
     font-family: var(--mono); font-size: var(--t-data); flex: none; white-space: nowrap; }
   .rv-repo, .rv-num { color: var(--dim); }
@@ -328,12 +332,18 @@ export const DECK_CSS = `
   .rv-files, .rv-author, .rv-age { flex: none; color: var(--dim); }
   .rv-running { flex: none; color: var(--c-progress); }
 
-  .rv-detail { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px;
+  .rv-detail { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px;
     padding: 2px 12px 9px 29px; font-size: var(--t-body); }
   .rv-facts { flex-basis: 100%; display: flex; align-items: baseline; gap: 6px; color: var(--dim); }
+  /* Actions flow left, directly under the facts they belong to. \`margin-left: auto\`
+     here reads as a bug in the common case: with no review box on the row yet, it
+     strands a lone Open PR button ~700px away at the far right of an empty line,
+     attached to nothing. Verified in the preview harness. When the box arrives it
+     takes \`flex: 1\` on this same line and pushes the actions right on its own. */
+  .rv-actions { margin-left: 0; }
   .rv-facts.dim { font-style: italic; }
   .rv-sep { color: var(--dim); }
-  .rv-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 5px; }
+  .rv-actions { flex: none; display: flex; align-items: center; gap: 5px; }
   /* .act dims to .7 unless it sits in a hovered .card. A row is not a card, so the
      rule never re-brightens and every button here would render permanently faded. */
   .rv-actions .act { opacity: 1; }
