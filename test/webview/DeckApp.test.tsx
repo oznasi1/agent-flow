@@ -470,11 +470,14 @@ describe("DeckApp review strip", () => {
   // A long queue must arrive VISIBLE. Height is bounded by the rows container's own
   // scroller, so the board is protected without hiding the thing the strip exists for.
   it("shows every row of a long queue rather than collapsing it", () => {
-    render(<DeckApp />);
+    const { container } = render(<DeckApp />);
     host(reviewsMsg(Array.from({ length: 9 }, (_, i) => mkReview({ id: `o/r#${i}`, number: i, title: `pr ${i}` }))));
     expect(screen.getByText(/9 PRs waiting on your review/i)).toBeInTheDocument();
     expect(screen.getByText("pr 0")).toBeInTheDocument();
     expect(screen.getByText("pr 8")).toBeInTheDocument();
+    // The header count and the two end titles alone would still pass a "render only
+    // the first and last row" bug — count the actual rows rendered.
+    expect(container.querySelectorAll(".rv-line").length).toBe(9);
   });
 
   it("stays collapsed across a refresh once the user collapses it", () => {

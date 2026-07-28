@@ -58,6 +58,12 @@ export const DECK_CSS = `
     --r-card: 10px;
     --r-ctl: 6px;
     --r-chip: 5px;
+
+    /* Six rows, plus a deliberate half-row peek: a clean cut at a row boundary reads as
+       "the list ends here", where a sliced row reads as "there is more" — and that is the
+       only scroll hint this container gets. Derived, so the intent survives a row-height
+       change: --t-body plus .rv-line's 6px padding top and bottom is ~26px. */
+    --rv-row-h: 26px;
   }
 
   .hd { flex: none; display: flex; align-items: center; gap: 14px;
@@ -304,8 +310,8 @@ export const DECK_CSS = `
      window while every row stays one flick away. ~6 rows before it scrolls; the strip
      is the one place on this panel that owns a nested scroller, which is why the rule
      lives here rather than on .rv-strip. */
-  .rv-rows { border-top: 1px solid var(--hair); max-height: 168px; overflow-y: auto;
-    overscroll-behavior: contain; }
+  .rv-rows { border-top: 1px solid var(--hair); max-height: calc(var(--rv-row-h) * 6.5);
+    overflow-y: auto; overscroll-behavior: contain; }
   .rv-row + .rv-row { border-top: 1px solid var(--hair); }
   /* A button, so reset the button chrome and let it fill the row. outline-offset is
      negative because .rv-strip clips overflow — a ring drawn outside would vanish. */
