@@ -941,11 +941,39 @@ describe("readReviewCache / writeReviewCache", () => {
     expect(readReviewCache(file)).toBeNull();
   });
 
-  it("leaves the previous cache intact when a write fails", () => {
+  // The failing write must target the SAME file being asserted on, and the failure
+  // must be forced rather than coaxed out of platform errno behaviour. An earlier
+  // draft pointed the failing write at a different path, so it asserted only that an
+  // untouched file was untouched — a naive `writeFileSync(file, json)` with no temp
+  // file passed it unchanged.
+  it("leaves the previous cache intact when the rename fails", () => {
     writeReviewCache(file, { fetchedAt: 1, issueCount: 1, requests: [req] });
-    // A directory where the temp file wants to go: the rename can never land.
-    writeReviewCache(path.join(dir), { fetchedAt: 2, issueCount: 0, requests: [] });
-    expect(readReviewCache(file)!.fetchedAt).toBe(1);
+    const spy = vi.spyOn(fs, "renameSync").mockImplementation(() => {
+      throw new Error("EXDEV: cross-device link not permitted");
+    });
+    try {
+      writeReviewCache(file, { fetchedAt: 2, issueCount: 0, requests: [] });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(readReviewCache(file)).toEqual({ fetchedAt: 1, issueCount: 1, requests: [req] });
+    // …and the temp file was cleaned up rather than left as litter.
+    expect(fs.readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("round-trips a present-but-empty queue as a real object, not null", () => {
+    writeReviewCache(file, { fetchedAt: 5, issueCount: 0, requests: [] });
+    expect(readReviewCache(file)).toEqual({ fetchedAt: 5, issueCount: 0, requests: [] });
+  });
+
+  it("drops a malformed request but keeps the rest", () => {
+    fs.writeFileSync(file, JSON.stringify({ fetchedAt: 1, issueCount: 2, requests: [null, req] }));
+    expect(readReviewCache(file)!.requests).toEqual([req]);
+  });
+
+  it("keeps a readable file whose rows are all unusable, as an empty queue", () => {
+    fs.writeFileSync(file, JSON.stringify({ fetchedAt: 1, requests: ["garbage"] }));
+    expect(readReviewCache(file)).toEqual({ fetchedAt: 1, issueCount: 0, requests: [] });
   });
 });
 
@@ -999,10 +1027,21 @@ export function readReviewCache(file: string): ReviewCache | null {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<ReviewCache> | null;
     if (!parsed || typeof parsed !== "object") return null;
     if (typeof parsed.fetchedAt !== "number" || !Array.isArray(parsed.requests)) return null;
+    // Filter to values that actually look like a request. The Deck maps over these and
+    // reads .repoName/.number off each one, so a null or string element would throw out
+    // of the refresh and freeze the board — the same failure pr/store.ts guards against.
+    // Filtered, not rejected: one bad row must not cost the user the whole queue.
+    const requests = (parsed.requests as unknown[]).filter(
+      (r): r is ReviewRequest =>
+        !!r &&
+        typeof r === "object" &&
+        typeof (r as ReviewRequest).id === "string" &&
+        typeof (r as ReviewRequest).number === "number",
+    );
     return {
       fetchedAt: parsed.fetchedAt,
-      issueCount: typeof parsed.issueCount === "number" ? parsed.issueCount : parsed.requests.length,
-      requests: parsed.requests,
+      issueCount: typeof parsed.issueCount === "number" ? parsed.issueCount : requests.length,
+      requests,
     };
   } catch {
     return null;
