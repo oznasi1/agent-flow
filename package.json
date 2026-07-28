@@ -445,6 +445,28 @@
           "minimum": 30,
           "markdownDescription": "How stale a cached pull-request fact may be before the Deck re-reads it from GitHub. Only ever fetched while the Deck is open. Lower values cost more GitHub API calls; the floor is 30 seconds."
         },
+        "agentFlow.reviewRequests": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Deck's review-requests strip: open GitHub PRs that ask for your review, read with the gh CLI."
+        },
+        "agentFlow.reviewRequestsTtlSeconds": {
+          "type": "number",
+          "default": 300,
+          "minimum": 60,
+          "description": "How stale the cached review queue may be before the Deck re-fetches it (minimum 60). Only fetched while the Deck is open."
+        },
+        "agentFlow.reviewWrites": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Allow submitting **approve / comment / request changes** to GitHub from the Deck's review strip. Off by default — this is the only setting that lets Agent Flow write to GitHub. Every submit still asks for confirmation."
+        },
+        "agentFlow.reviewRequestPrompt": {
+          "type": "string",
+          "editPresentation": "multilineText",
+          "default": "",
+          "markdownDescription": "Prompt seeded when you launch **Review with agent** on a review request. Empty uses the built-in default. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`."
+        },
         "agentFlow.stampLabelOnWrite": {
           "type": "boolean",
           "default": true,
