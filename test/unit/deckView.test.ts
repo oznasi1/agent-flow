@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { window, ViewColumn, env, workspace } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
-import type { PrFacts, Run, RunStatus } from "../../src/types";
+import type { PrFacts, ReviewRequest, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
@@ -26,6 +26,16 @@ const h = vi.hoisted(() => ({
   probeGh: vi.fn(async (): Promise<GhGap | null> => null),
   prFacts: true as boolean,
   ttlSeconds: 120,
+  // Review-requests strip (Task 7): a gh-backed search, an on-disk cache, and the
+  // repos discoverable on this machine — independent of the PR-facts fixtures above.
+  reviewSearch: vi.fn(async (): Promise<{ issueCount: number; requests: ReviewRequest[] } | null> => ({
+    issueCount: 1,
+    requests: [reviewFixture()],
+  })),
+  reviewCache: null as { fetchedAt: number; issueCount: number; requests: ReviewRequest[] } | null,
+  writeReviewCache: vi.fn(),
+  repos: [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }] as ServiceRef[],
+  reviewRequests: true as boolean,
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -51,8 +61,25 @@ vi.mock("../../src/engine/pr/provider", () => ({
   probeGh: h.probeGh,
   GhProvider: class { fetch = h.prFetch; },
 }));
+vi.mock("../../src/engine/review/provider", () => ({
+  GhReviewProvider: class {
+    search = h.reviewSearch;
+    detail = vi.fn(async () => null);
+  },
+}));
+vi.mock("../../src/engine/review/store", () => ({
+  defaultReviewsFile: () => "/reviews.json",
+  readReviewCache: () => h.reviewCache,
+  writeReviewCache: h.writeReviewCache,
+  // Exercise the real staleness rule rather than restating it here.
+  isReviewCacheStale: (c: { fetchedAt: number } | null, ttl: number, now: number) => !c || now - c.fetchedAt >= ttl,
+}));
+vi.mock("../../src/engine/repos", () => ({ discoverRepos: () => h.repos }));
 vi.mock("../../src/config", () => ({
-  getConfig: () => ({ baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds }),
+  getConfig: () => ({
+    baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds,
+    reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: [],
+  }),
 }));
 vi.mock("../../src/jira/client", () => ({
   JiraAuthError: class JiraAuthError extends Error {},
@@ -70,11 +97,35 @@ const statusFor = (run: Run): RunStatus => ({
   run, column: "progress", jiraStatus: null, jiraCategory: null, repos: [],
   agent: { state: "unknown", lastActivityMs: null, slug: null }, windowOpen: false, prs: {},
 });
+const reviewFixture = (): ReviewRequest => ({
+  id: "CyberJackGit/aws-ops#8491", repo: "CyberJackGit/aws-ops", repoName: "aws-ops",
+  number: 8491, title: "isolate renew queue", url: "https://github.com/CyberJackGit/aws-ops/pull/8491",
+  author: "einavsaad", isDraft: false, createdAt: 1, updatedAt: 2,
+  additions: 350, deletions: 4, changedFiles: 7,
+  ci: "passing" as const, review: "review_required" as const, mergeable: "clean" as const,
+  localPath: null, runKey: null, draftPath: null,
+});
 
 const lastPanel = () => window.createWebviewPanel.mock.results.at(-1)!.value as ReturnType<typeof import("../_mocks/vscode").makeWebviewPanel>;
 const posts = (p: ReturnType<typeof lastPanel>) => p.webview.postMessage.mock.calls.map((c) => c[0] as any);
 const show = (authed = false) => DeckPanel.show(fakeContext().context as any, fakeAuth({ authed }), () => {});
 const settled = () => new Promise<void>((r) => setTimeout(r, 0));
+
+/** The gh probe is kicked off inside the very tick that reads it, so it can
+ * never be resolved by the time that same tick's `ghReady()` call returns —
+ * a promise can't settle synchronously with the statement that created it.
+ * Every assertion about fetch- or search-triggering behavior therefore needs a
+ * second, "warmed" tick: one to start (and let resolve) the one-time probe, and
+ * an explicit `deck:refresh` after it to actually observe the resolved value.
+ * Shared by the PR-facts and review-strip suites — both gate on `ghReady()`. */
+const showAndWarm = async (authed = false): Promise<ReturnType<typeof lastPanel>> => {
+  show(authed);
+  await settled();
+  const p = lastPanel();
+  await p._fire({ type: "deck:refresh" });
+  await settled();
+  return p;
+};
 
 beforeEach(() => {
   h.runs = [mkRun()];
@@ -90,6 +141,11 @@ beforeEach(() => {
   h.removePrEntries.mockClear();
   h.prFetch.mockClear().mockResolvedValue({ ok: true, facts: null });
   h.probeGh.mockClear().mockResolvedValue(null);
+  h.reviewSearch.mockClear().mockResolvedValue({ issueCount: 1, requests: [reviewFixture()] });
+  h.reviewCache = null;
+  h.writeReviewCache.mockClear();
+  h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }];
+  h.reviewRequests = true;
 });
 
 afterEach(() => {
@@ -412,21 +468,6 @@ describe("DeckPanel", () => {
 });
 
 describe("DeckPanel PR facts", () => {
-  /** The gh probe is kicked off inside the very tick that reads it, so it can
-   * never be resolved by the time that same tick's `ghReady()` call returns —
-   * a promise can't settle synchronously with the statement that created it.
-   * Every assertion about fetch-triggering behavior therefore needs a second,
-   * "warmed" tick: one to start (and let resolve) the one-time probe, and an
-   * explicit `deck:refresh` after it to actually observe the resolved value. */
-  const showAndWarm = async (authed = false): Promise<ReturnType<typeof lastPanel>> => {
-    show(authed);
-    await settled();
-    const p = lastPanel();
-    await p._fire({ type: "deck:refresh" });
-    await settled();
-    return p;
-  };
-
   it("passes cached PR entries to the status builder", async () => {
     h.prEntries = { svc: { facts: null, fetchedAt: Date.now() } };
     show();
@@ -699,5 +740,87 @@ describe("DeckPanel PR facts", () => {
     await p._fire({ type: "deck:refresh" });
     const note = posts(p).filter((m) => m.type === "deck:runs").at(-1)?.ghNote;
     expect(note).toBeNull();
+  });
+});
+
+describe("DeckPanel review strip", () => {
+  it("posts the review queue after a search", async () => {
+    const p = await showAndWarm();
+    const msg = posts(p).find((m) => m.type === "deck:reviews");
+    expect(msg).toMatchObject({ issueCount: 1, sort: "oldest", stale: false });
+    expect(msg.requests).toHaveLength(1);
+    expect(msg.requests[0].id).toBe("CyberJackGit/aws-ops#8491");
+  });
+
+  it("resolves a local checkout for a repo under reposRoot", async () => {
+    const p = await showAndWarm();
+    const msg = posts(p).find((m) => m.type === "deck:reviews");
+    expect(msg.requests[0].localPath).toBe("/repos/aws-ops");
+  });
+
+  it("leaves localPath null for a repo that is not checked out", async () => {
+    h.repos = [];
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:reviews").requests[0].localPath).toBeNull();
+  });
+
+  it("keeps the cached queue and flags it stale when the search fails", async () => {
+    // A broken implementation that empties the queue (or drops the cache) on a
+    // failed search instead of preserving it would still satisfy an assertion
+    // that only checks `stale` — pin the previous issueCount *and* the previous
+    // requests array too, and confirm the bad result is never persisted to disk.
+    h.reviewCache = { fetchedAt: 0, issueCount: 4, requests: [reviewFixture()] };
+    // Persistent (not `Once`): whether one or two refresh passes end up racing to
+    // search — the queue dedupes concurrent attempts for the same key, but not
+    // necessarily sequential ones — every attempt in this test must fail, so the
+    // cache is never overwritten with a spurious success.
+    h.reviewSearch.mockResolvedValue(null);
+    const p = await showAndWarm();
+    const msg = posts(p).find((m) => m.type === "deck:reviews");
+    expect(msg.stale).toBe(true);
+    expect(msg.issueCount).toBe(4);
+    expect(msg.requests).toHaveLength(1);
+    expect(msg.requests[0].id).toBe("CyberJackGit/aws-ops#8491");
+    expect(h.writeReviewCache).not.toHaveBeenCalled();
+  });
+
+  it("does not search while the review strip is disabled", async () => {
+    h.reviewRequests = false;
+    show();
+    await settled();
+    expect(h.reviewSearch).not.toHaveBeenCalled();
+    expect(posts(lastPanel()).some((m) => m.type === "deck:reviews")).toBe(false);
+  });
+
+  it("does not search while PR facts are off", async () => {
+    h.prFacts = false;
+    show();
+    await settled();
+    expect(h.reviewSearch).not.toHaveBeenCalled();
+  });
+
+  it("does not search while gh is unusable", async () => {
+    h.probeGh.mockResolvedValue({ kind: "missing", detail: "no gh" });
+    await showAndWarm();
+    expect(h.reviewSearch).not.toHaveBeenCalled();
+  });
+
+  it("re-sorts without re-searching when the sort changes", async () => {
+    // Two requests whose size-order differs from their age-order, so switching
+    // sorts is only observable as a genuine reorder of the request list — not
+    // just an echoed `sort` field a stub could satisfy without truly re-sorting.
+    const older = reviewFixture(); // createdAt 1, 354 lines changed
+    const newerButSmaller = { ...reviewFixture(), id: "CyberJackGit/aws-ops#9000", number: 9000, createdAt: 10, additions: 10, deletions: 0 };
+    h.reviewSearch.mockResolvedValue({ issueCount: 2, requests: [older, newerButSmaller] });
+    const p = await showAndWarm();
+    const byOldest = posts(p).find((m) => m.type === "deck:reviews");
+    expect(byOldest.requests.map((r: ReviewRequest) => r.number)).toEqual([8491, 9000]);
+
+    h.reviewSearch.mockClear();
+    await p._fire({ type: "deck:setReviewSort", sort: "smallest" });
+    const bySmallest = posts(p).at(-1);
+    expect(bySmallest).toMatchObject({ type: "deck:reviews", sort: "smallest" });
+    expect(bySmallest.requests.map((r: ReviewRequest) => r.number)).toEqual([9000, 8491]);
+    expect(h.reviewSearch).not.toHaveBeenCalled();
   });
 });

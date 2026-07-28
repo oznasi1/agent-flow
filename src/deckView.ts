@@ -12,7 +12,11 @@ import { taskDiff } from "./engine/git";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
-import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, Run, RunStatus, isTicketRun } from "./types";
+import { discoverRepos } from "./engine/repos";
+import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
+import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
+import { sortRequests } from "./engine/review/sort";
+import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
@@ -37,6 +41,12 @@ export class DeckPanel {
   private prFacts: boolean; // seeded from config in the constructor; the only writer after that is deck:setPrFacts
   private readonly prQueue = new RefreshQueue();
   private readonly pr: PrProvider = new GhProvider();
+  private readonly reviewProvider: ReviewProvider = new GhReviewProvider();
+  private reviewSort: ReviewSort = "oldest";
+  /** Last successful search. Held in memory as well as on disk so a failed fetch
+   * can keep rendering it with a stale marker instead of emptying the strip. */
+  private reviewCache: ReviewCache | null = null;
+  private reviewStale = false;
   private ghProbe: Promise<GhGap | null> | null = null;
   /** undefined until the probe resolves; null means gh is usable, and a gap
    * disables PR facts with a footer note. */
@@ -165,6 +175,66 @@ export class DeckPanel {
     });
   }
 
+  /** Is the review strip live? Three independent conditions: the persistent
+   * setting, the session PR-facts toggle (same gh dependency, so the same
+   * switch), and a usable gh. */
+  private reviewsEnabled(): boolean {
+    return getConfig().reviewRequests && this.ghReady();
+  }
+
+  /** Queue a search when the cache has aged out. Never awaited — a hanging `gh`
+   * must not stall the board's git and transcript reads. The post that reflects
+   * the outcome is fired from here rather than unconditionally from `refresh()`:
+   * with a search in flight, an immediate post would either find `reviewCache`
+   * still null (nothing to show yet) or show the old entry with `stale` not yet
+   * flipped — a premature message a later, correct one would just have to
+   * override. Posting once, when the picture is actually settled, is simpler
+   * and is what `deck:setReviewSort` also relies on for its own direct post. */
+  private enqueueReviews(nowMs: number): void {
+    const ttlMs = getConfig().reviewRequestsTtlSeconds * 1000;
+    if (this.reviewCache === null) this.reviewCache = readReviewCache(defaultReviewsFile());
+    if (!isReviewCacheStale(this.reviewCache, ttlMs, nowMs)) {
+      this.postReviews(); // already fresh — nothing to wait on
+      return;
+    }
+    this.prQueue.push("reviews", async () => {
+      const res = await this.reviewProvider.search();
+      if (res === null) {
+        // Keep whatever we had: an empty strip would read as "you owe nobody a
+        // review", which is the opposite of what a failed fetch means.
+        this.reviewStale = true;
+        this.log("deck: review search failed");
+      } else {
+        this.reviewStale = false;
+        this.reviewCache = { fetchedAt: Date.now(), issueCount: res.issueCount, requests: res.requests };
+        writeReviewCache(defaultReviewsFile(), this.reviewCache);
+      }
+      this.postReviews();
+    });
+  }
+
+  /** Decorate the cached queue with what only this machine can know. Recomputed
+   * every post: a checkout can appear, and a worktree can be forgotten. */
+  private decorateReviews(requests: ReviewRequest[]): ReviewRequest[] {
+    const cfg = getConfig();
+    const byName = new Map(discoverRepos(cfg.reposRoot, cfg.repoBlocklist).map((r) => [r.name, r]));
+    return requests.map((r) => {
+      const local = byName.get(r.repoName);
+      return { ...r, localPath: local?.isGit ? local.path : null };
+    });
+  }
+
+  private postReviews(): void {
+    if (!this.reviewsEnabled() || !this.reviewCache) return;
+    this.post({
+      type: "deck:reviews",
+      requests: sortRequests(this.decorateReviews(this.reviewCache.requests), this.reviewSort),
+      issueCount: this.reviewCache.issueCount,
+      sort: this.reviewSort,
+      stale: this.reviewStale,
+    });
+  }
+
   private async jiraStatus(key: string): Promise<{ status: string | null; category: string | null } | null> {
     const hit = this.jiraCache.get(key);
     if (hit && Date.now() - hit.at < JIRA_TTL_MS) return { status: hit.status, category: hit.category };
@@ -240,6 +310,7 @@ export class DeckPanel {
         prFacts: this.prFacts,
         ghNote: this.prFacts && this.ghGap ? GH_NOTES[this.ghGap.kind] : null,
       });
+      if (this.reviewsEnabled()) this.enqueueReviews(Date.now());
     } catch (e) {
       this.log(`deck: refresh failed: ${e}`);
     }
@@ -279,6 +350,10 @@ export class DeckPanel {
         break;
       case "deck:inspect":
         await this.inspect(m.key, m.action, m.repo);
+        break;
+      case "deck:setReviewSort":
+        this.reviewSort = m.sort;
+        this.postReviews();
         break;
       case "deck:forget":
         removeRun(defaultRunsDir(), m.key);

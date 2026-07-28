@@ -263,6 +263,7 @@ export type InboundMessage =
   | { type: "deck:setPrFacts"; on: boolean }
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
   | { type: "deck:forget"; key: string }
+  | { type: "deck:setReviewSort"; sort: ReviewSort }
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }
@@ -294,6 +295,13 @@ export type OutboundMessage =
   // The Deck
   | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; ghNote: string | null }
   | { type: "deck:loading"; loading: boolean }
+  | {
+      type: "deck:reviews";
+      requests: ReviewRequest[];
+      issueCount: number;
+      sort: ReviewSort;
+      stale: boolean; // the last fetch failed; these are the previous results
+    }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
   | { type: "mkt:loading"; loading: boolean }
