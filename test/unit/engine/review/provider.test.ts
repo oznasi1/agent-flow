@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { GhReviewProvider } from "../../../../src/engine/review/provider";
+import { THREADS_QUERY } from "../../../../src/engine/pr/provider";
 import type { Runner } from "../../../../src/engine/pr/provider";
+import { REVIEW_SEARCH_Q, REVIEW_SEARCH_QUERY } from "../../../../src/engine/review/search";
 
 const searchPayload = JSON.stringify({
   data: {
@@ -30,10 +32,16 @@ describe("GhReviewProvider.search", () => {
     expect(out!.requests[0].id).toBe("CyberJackGit/centaur#850");
     const [file, args, opts] = (run as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(file).toBe("/opt/homebrew/bin/gh");
-    expect(args[0]).toBe("api");
-    expect(args[1]).toBe("graphql");
-    expect(args).toContain("q=is:pr is:open review-requested:@me");
-    expect(args).toContain("n=50");
+    // Pins both the flag order and, crucially, which flag carries the query
+    // string: `-f` (string) vs `-F` (typed) send gh a differently-typed value,
+    // so a swap here would silently break the live call while a loose
+    // `toContain` check stayed green.
+    expect(args).toEqual([
+      "api", "graphql",
+      "-f", `query=${REVIEW_SEARCH_QUERY}`,
+      "-f", `q=${REVIEW_SEARCH_Q}`,
+      "-F", "n=50",
+    ]);
     // No cwd inside a checkout: the repos may not be cloned at all.
     expect(opts.cwd).toBe(require("os").homedir());
   });
@@ -89,15 +97,23 @@ describe("GhReviewProvider.detail", () => {
     const run = runner(async (_f, args) => (args[0] === "pr" ? rollup : threads));
     const out = await new GhReviewProvider(run, locate).detail("CyberJackGit/aws-ops", 8491);
     expect(out).toEqual({ failing: [{ name: "e2e", url: "https://ci/e2e" }], unresolved: 1 });
+    // Pins the second call's full argv, including the owner/repo/number
+    // variables threaded through THREADS_QUERY — previously unasserted.
+    expect((run as ReturnType<typeof vi.fn>).mock.calls[1][1]).toEqual([
+      "api", "graphql", "-f", `query=${THREADS_QUERY}`,
+      "-F", "o=CyberJackGit", "-F", "r=aws-ops", "-F", "n=8491",
+    ]);
   });
 
   it("targets the repo by name, not by working directory", async () => {
     const run = runner(async (_f, args) => (args[0] === "pr" ? rollup : threads));
     await new GhReviewProvider(run, locate).detail("CyberJackGit/aws-ops", 8491);
-    const [, args] = (run as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [, args, opts] = (run as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(args).toEqual([
       "pr", "view", "8491", "--repo", "CyberJackGit/aws-ops", "--json", "statusCheckRollup",
     ]);
+    // The title's claim, made good: no repo checkout is involved anywhere here.
+    expect(opts.cwd).toBe(require("os").homedir());
   });
 
   it("keeps the checks when the thread call fails", async () => {
@@ -112,5 +128,16 @@ describe("GhReviewProvider.detail", () => {
   it("returns null when the checks call fails", async () => {
     const run = runner(async () => { throw new Error("nope"); });
     expect(await new GhReviewProvider(run, locate).detail("o/r", 1)).toBeNull();
+  });
+
+  it("degrades to null unresolved, without a second call, on a repo with no owner/name split", async () => {
+    // "notarepo" has no "/" — owner and name both come back empty from split("/").
+    // The guard must skip the GraphQL call entirely rather than fire it with an
+    // empty owner; a deleted guard would still resolve (gh would just error on a
+    // bogus query) and callCount would climb to 2.
+    const run = runner(async () => rollup);
+    const out = await new GhReviewProvider(run, locate).detail("notarepo", 1);
+    expect(out).toEqual({ failing: [{ name: "e2e", url: "https://ci/e2e" }], unresolved: null });
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });
