@@ -764,6 +764,48 @@ describe("DeckPanel review strip", () => {
     expect(posts(p).find((m) => m.type === "deck:reviews").requests[0].localPath).toBeNull();
   });
 
+  it("does not treat a non-git directory sharing the repo's name as a checkout", async () => {
+    // `local?.isGit ? local.path : null` vs. `local ? local.path : null`: only a
+    // fixture with `isGit: false` tells these apart. A plain directory here would
+    // otherwise be offered as a checkout, and "review with agent" would later
+    // land in something that isn't a repo at all.
+    h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: false }];
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:reviews").requests[0].localPath).toBeNull();
+  });
+
+  it("persists the search result as returned, not the machine-decorated copy", async () => {
+    // decorateReviews recomputes `localPath` on every post and deliberately never
+    // persists it (a checkout can appear or vanish between refreshes). Writing
+    // `decorateReviews(res.requests)` instead of `res.requests` would still pass
+    // every other test here, but would bake this machine's `localPath` into
+    // ~/.agentflow/reviews.json — exactly what that non-persistence guarantee
+    // forbids.
+    await showAndWarm();
+    expect(h.writeReviewCache).toHaveBeenCalledWith("/reviews.json", {
+      fetchedAt: expect.any(Number),
+      issueCount: 1,
+      requests: [expect.objectContaining({ id: "CyberJackGit/aws-ops#8491", localPath: null })],
+    });
+  });
+
+  it("re-posts on every refresh once the cache is fresh, without re-searching", async () => {
+    // Nothing in the tests above ever observes the "already fresh" branch of
+    // enqueueReviews — every one of them only sees the post that comes from the
+    // settled search job. Deleting that branch's `postReviews()` call leaves all
+    // of them green, but the strip would then never pick up a newly appeared
+    // checkout's `localPath` (or anything else decorateReviews recomputes) until
+    // the cache aged out again, up to reviewRequestsTtlSeconds later.
+    const p = await showAndWarm();
+    const before = posts(p).filter((m) => m.type === "deck:reviews").length;
+    expect(before).toBeGreaterThan(0);
+    h.reviewSearch.mockClear();
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    expect(posts(p).filter((m) => m.type === "deck:reviews").length).toBeGreaterThan(before);
+    expect(h.reviewSearch).not.toHaveBeenCalled();
+  });
+
   it("keeps the cached queue and flags it stale when the search fails", async () => {
     // A broken implementation that empties the queue (or drops the cache) on a
     // failed search instead of preserving it would still satisfy an assertion
@@ -782,6 +824,19 @@ describe("DeckPanel review strip", () => {
     expect(msg.requests).toHaveLength(1);
     expect(msg.requests[0].id).toBe("CyberJackGit/aws-ops#8491");
     expect(h.writeReviewCache).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a failing search on every poll tick within the TTL", async () => {
+    // A failed search deliberately leaves `reviewCache.fetchedAt` untouched (the
+    // stale marker depends on it), so `isReviewCacheStale` alone would re-arm on
+    // every 6s poll forever once `gh` starts failing — hammering `gh api graphql`
+    // and holding a queue slot for up to GH_TIMEOUT_MS on each attempt.
+    h.reviewSearch.mockResolvedValue(null);
+    const p = await showAndWarm(); // one attempt: fails
+    expect(h.reviewSearch).toHaveBeenCalledTimes(1);
+    await p._fire({ type: "deck:refresh" }); // a second poll, well inside the 300s TTL
+    await settled();
+    expect(h.reviewSearch).toHaveBeenCalledTimes(1);
   });
 
   it("does not search while the review strip is disabled", async () => {

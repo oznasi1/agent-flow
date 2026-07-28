@@ -47,6 +47,13 @@ export class DeckPanel {
    * can keep rendering it with a stale marker instead of emptying the strip. */
   private reviewCache: ReviewCache | null = null;
   private reviewStale = false;
+  /** When the last search attempt was *made*, success or failure — distinct from
+   * `reviewCache.fetchedAt`, which is when one last *succeeded*. A failed search
+   * deliberately leaves `fetchedAt` alone (the strip's staleness display depends
+   * on it), which on its own would make `isReviewCacheStale` re-arm every poll
+   * tick forever once `gh` starts failing. This is in-memory only, on purpose: a
+   * failed attempt should not survive a window reload and force one more wait. */
+  private reviewLastAttemptAt: number | null = null;
   private ghProbe: Promise<GhGap | null> | null = null;
   /** undefined until the probe resolves; null means gh is usable, and a gap
    * disables PR facts with a footer note. */
@@ -189,7 +196,10 @@ export class DeckPanel {
    * still null (nothing to show yet) or show the old entry with `stale` not yet
    * flipped — a premature message a later, correct one would just have to
    * override. Posting once, when the picture is actually settled, is simpler
-   * and is what `deck:setReviewSort` also relies on for its own direct post. */
+   * and is what `deck:setReviewSort` also relies on for its own direct post.
+   * (When `RefreshQueue.push` dedupes because a search is already in flight for
+   * this key, this call posts nothing at all — the in-flight job's own post,
+   * from an earlier tick, is what will land.) */
   private enqueueReviews(nowMs: number): void {
     const ttlMs = getConfig().reviewRequestsTtlSeconds * 1000;
     if (this.reviewCache === null) this.reviewCache = readReviewCache(defaultReviewsFile());
@@ -197,8 +207,26 @@ export class DeckPanel {
       this.postReviews(); // already fresh — nothing to wait on
       return;
     }
+    // Gate on the data clock (above) *and* the attempt clock: a failing search
+    // never advances `fetchedAt`, so the data clock alone would re-queue `gh api
+    // graphql` on every 6s poll tick forever once `gh` starts failing — rate
+    // limited, network down, SSO expired. This clock tracks "how recently did we
+    // try", independently of "how old is the data we are showing".
+    if (this.reviewLastAttemptAt !== null && nowMs - this.reviewLastAttemptAt < ttlMs) return;
     this.prQueue.push("reviews", async () => {
-      const res = await this.reviewProvider.search();
+      this.reviewLastAttemptAt = Date.now();
+      let res: { issueCount: number; requests: ReviewRequest[] } | null;
+      try {
+        res = await this.reviewProvider.search();
+      } catch {
+        // A provider must never throw, but if one does, this must still not
+        // leave it unhandled: RefreshQueue swallows a rejected job (the queue
+        // owns the slot, not the error), so without this catch the failure would
+        // never set `reviewStale` and never post — the strip would just silently
+        // stop updating, with nothing in the log to say why. Mirrors `enqueuePr`'s
+        // identical guard for the identical failure mode.
+        res = null;
+      }
       if (res === null) {
         // Keep whatever we had: an empty strip would read as "you owe nobody a
         // review", which is the opposite of what a failed fetch means.
