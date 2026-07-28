@@ -57,9 +57,9 @@ orchestrate, not ready to set up.
 
 Once you've taken tasks, the **Deck** (open it with **"Agent Flow: Open the Deck
 (in-flight)"**) is the board of everything you've launched, in a classic pipeline —
-**In progress · Needs you · In review · Done**.
+**In progress · Action required · In review · Done**.
 
-<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Needs you, In review, Done). Each card shows its branch, per-repo diff stats and dirty/ahead markers, a best-effort live agent status (working, idle, ended turn, parked, or merged), the Jira status, and Open / Diff actions; a summary strip counts each column and a Live-signal toggle is on." />
+<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Done). Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a best-effort live agent status (working, idle, ended turn, parked, or merged), the PR and CI state, the Jira status, and Open / Diff actions. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button; a summary strip counts each column and the Live-signal and PR-facts toggles are on." />
 
 The columns are a neutral git + Jira backbone; each **card** carries the true live state.
 A best-effort **Live signal** (read from your local Claude Code transcripts) tells `working ·
@@ -72,7 +72,7 @@ Each card also carries the **PR state** of every repo it touches, read from GitH
 with the `gh` CLI: the PR number, CI (failing check names link to their runs, or a
 passing count), the review decision with any unresolved-thread count, and
 mergeability. A PR that needs a human decision — failing required checks,
-requested changes, or a conflict — pulls its card into **Needs you**, even while
+requested changes, or a conflict — pulls its card into **Action required**, even while
 the agent is still working, because an agent can't know CI broke until you tell
 it. A merged PR moves the card to **Done** and is the only thing that makes a card
 say *merged*. Turn it off with the **PR facts** toggle or `agentFlow.prFacts`, and

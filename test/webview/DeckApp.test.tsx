@@ -61,7 +61,23 @@ describe("DeckApp", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" }, column: "needs", agent: { state: "needs-you", lastActivityMs: 1, slug: null } })]));
     expect(screen.getByText("ASM-2")).toBeInTheDocument();
-    expect(screen.getByText(/need you/i)).toBeInTheDocument(); // summary strip: "Need you"
+    // "Action required" names the same thing in the summary tile, the column header and
+    // the legend — one name for one thing, so all three match.
+    expect(screen.getAllByText(/action required/i).length).toBeGreaterThan(0);
+  });
+
+  it("labels the attention column and its summary tile identically", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "needs" })]));
+    expect(screen.getAllByText("Action required")).toHaveLength(3); // tile, column header, legend
+    expect(screen.queryByText(/needs you/i)).not.toBeInTheDocument();
+  });
+
+  it("marks the attention card and its summary tile with the attn class, not a danger one", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "needs" })]));
+    expect(container.querySelector(".card.attn")).not.toBeNull();
+    expect(container.querySelector(".stat.attn")).not.toBeNull();
   });
 
   it("shows the In progress column label", () => {
@@ -150,16 +166,27 @@ describe("DeckApp", () => {
     expect(screen.getByTitle(/more actions/i).tagName).toBe("BUTTON");
   });
 
-  it("hints that Open will focus an already-open window", () => {
-    render(<DeckApp />);
+  // The hint is the Open button's tooltip plus a marker on the button, not a line of
+  // body text on every such card — so it costs nothing until the pointer asks for it.
+  it("hints on the Open button's tooltip that it will focus an already-open window", () => {
+    const { container } = render(<DeckApp />);
     host(runsMsg([mkStatus({ windowOpen: true })]));
-    expect(screen.getByText(/open now/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/open now/i).textContent).toBe("Open");
+    expect(container.querySelector(".act.primary.live")).not.toBeNull();
   });
 
-  it("shows no open-now hint when the window is not open", () => {
+  it("never renders the open-now hint as visible text", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ windowOpen: false })]));
+    host(runsMsg([mkStatus({ windowOpen: true })]));
     expect(screen.queryByText(/open now/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/will focus this window/i)).not.toBeInTheDocument();
+  });
+
+  it("shows no open-now hint or marker when the window is not open", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({ windowOpen: false })]));
+    expect(screen.queryByTitle(/open now/i)).not.toBeInTheDocument();
+    expect(container.querySelector(".act.primary.live")).toBeNull();
   });
 
   it("forgets a run from the overflow menu", () => {
