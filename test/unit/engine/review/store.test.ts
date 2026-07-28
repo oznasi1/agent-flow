@@ -84,6 +84,24 @@ describe("readReviewCache / writeReviewCache", () => {
     expect(readReviewCache(file)).toEqual({ fetchedAt: 5, issueCount: 1, requests: [] });
   });
 
+  // `repo` feeds straight into `gh`'s `--repo` flag on a submit — the one write
+  // path in the extension — and `repoName` is what decorateReviews matches
+  // against local checkouts to decide whether "Review with agent" even offers a
+  // worktree. Neither was checked before, even though `id`/`number` already were.
+  it("filters out a request with a missing or empty repo", () => {
+    const missing = { ...req, repo: undefined };
+    const empty = { ...req, repo: "" };
+    fs.writeFileSync(file, JSON.stringify({ fetchedAt: 5, issueCount: 3, requests: [req, missing, empty] }));
+    expect(readReviewCache(file)).toEqual({ fetchedAt: 5, issueCount: 3, requests: [req] });
+  });
+
+  it("filters out a request with a missing or empty repoName", () => {
+    const missing = { ...req, repoName: undefined };
+    const empty = { ...req, repoName: "" };
+    fs.writeFileSync(file, JSON.stringify({ fetchedAt: 5, issueCount: 3, requests: [req, missing, empty] }));
+    expect(readReviewCache(file)).toEqual({ fetchedAt: 5, issueCount: 3, requests: [req] });
+  });
+
   it("returns an empty list as a valid readable cache, not null", () => {
     writeReviewCache(file, { fetchedAt: 5, issueCount: 0, requests: [] });
     expect(readReviewCache(file)).toEqual({ fetchedAt: 5, issueCount: 0, requests: [] });

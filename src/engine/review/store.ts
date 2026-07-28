@@ -26,11 +26,17 @@ export function readReviewCache(file: string): ReviewCache | null {
     // Filter to values that actually look like a request. The Deck maps over these
     // and reads .repoName/.number off each one; a null or string element would throw
     // out of the refresh and freeze the board, the same failure pr/store.ts guards.
+    // `repo` and `repoName` get the same scrutiny as `id`/`number`: this cache is
+    // the one file the write path trusts across restarts — `repo` goes straight
+    // into `gh`'s `--repo` flag, and `repoName` is matched against local checkouts
+    // to decide whether "Review with agent" even offers a worktree.
     const requests = (parsed.requests as unknown[]).filter(
       (r): r is ReviewRequest =>
         !!r && typeof r === "object" &&
         typeof (r as ReviewRequest).id === "string" &&
-        typeof (r as ReviewRequest).number === "number",
+        typeof (r as ReviewRequest).number === "number" &&
+        typeof (r as ReviewRequest).repo === "string" && !!(r as ReviewRequest).repo &&
+        typeof (r as ReviewRequest).repoName === "string" && !!(r as ReviewRequest).repoName,
     );
     return {
       fetchedAt: parsed.fetchedAt,

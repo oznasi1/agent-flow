@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapRollupState, mapGraphMergeable, parseSearch, REVIEW_SEARCH_Q } from "../../../../src/engine/review/search";
+import { mapRollupState, mapGraphMergeable, parseSearch, REVIEW_SEARCH_Q, REVIEW_SEARCH_QUERY } from "../../../../src/engine/review/search";
 
 const node = (over: Record<string, unknown> = {}) => ({
   number: 8491,
@@ -23,6 +23,35 @@ const payload = (nodes: unknown[], issueCount = nodes.length) => ({ data: { sear
 describe("REVIEW_SEARCH_Q", () => {
   it("is the exact qualifier set, including team requests", () => {
     expect(REVIEW_SEARCH_Q).toBe("is:pr is:open review-requested:@me");
+  });
+});
+
+describe("REVIEW_SEARCH_QUERY", () => {
+  // toRequest (and parseSearch's own errors-payload check) tolerate every one of
+  // these fields being missing *by design* — a truncated response degrades to
+  // "unknown"/"none"/0 rather than throwing. That is exactly what makes a field
+  // silently dropped from this document (a typo'd rename, a refactor that trims
+  // the selection set) invisible to the rest of this suite: every existing test
+  // here only ever calls `toRequest`/`parseSearch` directly against a hand-built
+  // fixture, never against the query string the two are supposed to agree on.
+  // This is the one test that would fail if they drifted apart.
+  it("requests every field the mapper reads, so a dropped field fails loudly instead of degrading to a silently empty strip", () => {
+    const fields = [
+      "number", "title", "url", "isDraft", "createdAt", "updatedAt",
+      "additions", "deletions", "changedFiles",
+      "author{login}", "repository{nameWithOwner}",
+      "reviewDecision", "mergeable",
+      "commits(last:1){nodes{commit{statusCheckRollup{state}}}}",
+    ];
+    for (const field of fields) {
+      expect(REVIEW_SEARCH_QUERY).toContain(field);
+    }
+  });
+
+  it("selects on the PullRequest fragment, under a paginated ISSUE search", () => {
+    expect(REVIEW_SEARCH_QUERY).toContain("type:ISSUE");
+    expect(REVIEW_SEARCH_QUERY).toContain("... on PullRequest{");
+    expect(REVIEW_SEARCH_QUERY).toContain("issueCount");
   });
 });
 
