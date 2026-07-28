@@ -68,6 +68,13 @@ export class DeckPanel {
    * tick forever once `gh` starts failing. This is in-memory only, on purpose: a
    * failed attempt should not survive a window reload and force one more wait. */
   private reviewLastAttemptAt: number | null = null;
+  /** Ids with a `submitReview` in flight. `onMessage` dispatches fire-and-forget,
+   * and the row is only evicted from `reviewCache` *after* a successful submit —
+   * so without this, a second `deck:reviewSubmit` for the same id (a double
+   * click; VS Code queues modals rather than dropping one) would clear every
+   * gate during the up-to-10s `gh` call and could post the same review twice.
+   * GitHub does not deduplicate reviews. */
+  private readonly reviewSubmitsInFlight = new Set<string>();
   private ghProbe: Promise<GhGap | null> | null = null;
   /** undefined until the probe resolves; null means gh is usable, and a gap
    * disables PR facts with a footer note. */
@@ -346,42 +353,72 @@ export class DeckPanel {
     }
   }
 
-  /** The one write path. Three gates before anything reaches GitHub: the setting,
-   * the row still being in the queue, and a modal the user has to accept. */
+  /** The one write path. Gates before anything reaches GitHub, in order: the
+   * setting, a `verb` that is actually one of the three GitHub understands, no
+   * other submit already in flight for this id, the row still being in the
+   * queue, and a modal the user has to accept. */
   private async submitReview(id: string, verb: ReviewVerb, body: string, fromDraft: boolean): Promise<void> {
     const cfg = getConfig();
     if (!cfg.reviewWrites) return;
+    // `verb` arrives from a webview message, untyped at runtime no matter what
+    // `ReviewVerb` claims at compile time. `Object.hasOwn` (not `!VERB_LABEL[verb]`,
+    // which a prototype key like "constructor" would sail through as truthy) fails
+    // closed before any dialog is shown — the same guard `provider.ts`'s `submit`
+    // already applies to the identical value, for the identical reason. Without
+    // this, an out-of-union verb reads `label` as `undefined`: the dialog shows
+    // "undefined on owner/repo#123?", and `undefined !== undefined` is *false*, so
+    // the decline branch below is skipped regardless of what the user answers —
+    // `provider.ts` still refuses the write, but the log would claim a submit the
+    // user never confirmed, and the user would be told "GitHub refused" about a
+    // call that never reached GitHub.
+    if (!Object.hasOwn(VERB_LABEL, verb)) return;
+    if (this.reviewSubmitsInFlight.has(id)) return;
     const req = this.reviewById(id);
     if (!req) return;
-    const label = VERB_LABEL[verb];
-    const answer = await vscode.window.showWarningMessage(
-      `${label} on ${req.repo}#${req.number}?`,
-      { modal: true },
-      label,
-    );
-    if (answer !== label) return;
-    const text = fromDraft && cfg.stampLabelOnWrite && body.trim()
-      ? `${body.trim()}\n\n${REVIEW_PROVENANCE}`
-      : body;
-    this.log(`deck: submitting ${verb} on ${req.repo}#${req.number}`);
-    const res = await this.reviewProvider.submit(req.repo, req.number, verb, text);
-    if (!res.ok) {
-      this.log(`deck: review submit failed: ${res.message}`);
-      this.post({
-        type: "toast",
-        level: "error",
-        message: `GitHub refused: ${res.message}`,
-        action: { label: "Open PR", url: req.url },
-      });
-      return;
+    this.reviewSubmitsInFlight.add(id);
+    try {
+      const label = VERB_LABEL[verb];
+      const answer = await vscode.window.showWarningMessage(
+        `${label} on ${req.repo}#${req.number}?`,
+        { modal: true },
+        label,
+      );
+      if (answer !== label) return;
+      const text = fromDraft && cfg.stampLabelOnWrite && body.trim()
+        ? `${body.trim()}\n\n${REVIEW_PROVENANCE}`
+        : body;
+      this.log(`deck: submitting ${verb} on ${req.repo}#${req.number}`);
+      const res = await this.reviewProvider.submit(req.repo, req.number, verb, text);
+      if (!res.ok) {
+        this.log(`deck: review submit failed: ${res.message}`);
+        this.post({
+          type: "toast",
+          level: "error",
+          message: `GitHub refused: ${res.message}`,
+          action: { label: "Open PR", url: req.url },
+        });
+        return;
+      }
+      this.toast("success", `${label} sent on ${req.repoName}#${req.number}.`);
+      // Approving or requesting changes clears the request server-side; a comment
+      // does not — you stay in the PR's requested_reviewers either way — so only
+      // those two verbs evict the row here rather than leaving it to be posted as
+      // a comment-you-still-owe until the next search. issueCount is decremented
+      // alongside the eviction, and the trimmed cache is written to disk
+      // immediately: memory-only would let closing and reopening the Deck re-read
+      // the untouched file and resurrect the row before the next search runs.
+      if ((verb === "approve" || verb === "request-changes") && this.reviewCache) {
+        this.reviewCache = {
+          ...this.reviewCache,
+          issueCount: Math.max(0, this.reviewCache.issueCount - 1),
+          requests: this.reviewCache.requests.filter((r) => r.id !== id),
+        };
+        writeReviewCache(defaultReviewsFile(), this.reviewCache);
+      }
+      this.postReviews();
+    } finally {
+      this.reviewSubmitsInFlight.delete(id);
     }
-    this.toast("success", `${label} sent on ${req.repoName}#${req.number}.`);
-    // Approving clears the request server-side; drop it now rather than after a
-    // TTL, and let the next search be authoritative.
-    if (this.reviewCache) {
-      this.reviewCache = { ...this.reviewCache, requests: this.reviewCache.requests.filter((r) => r.id !== id) };
-    }
-    this.postReviews();
   }
 
   private async jiraStatus(key: string): Promise<{ status: string | null; category: string | null } | null> {

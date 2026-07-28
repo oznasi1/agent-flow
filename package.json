@@ -470,7 +470,7 @@
         "agentFlow.stampLabelOnWrite": {
           "type": "boolean",
           "default": true,
-          "description": "Add the provenance label (see agentFlow.provenanceLabel) whenever this extension updates a Jira item (e.g. a status change), to mark automated changes."
+          "description": "Add the provenance label (see agentFlow.provenanceLabel) whenever this extension updates a Jira item (e.g. a status change), to mark automated changes. Also controls whether a review body drafted by the agent is marked as such when you submit it to GitHub from the Deck — turning this off hides that an agent, not you, wrote the words. That GitHub marker is a fixed line, not agentFlow.provenanceLabel."
         },
         "agentFlow.provenanceLabel": {
           "type": "string",

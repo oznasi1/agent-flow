@@ -1208,7 +1208,7 @@ describe("DeckPanel review submit", () => {
     expect(toast.action).toEqual({ label: "Open PR", url: "https://github.com/CyberJackGit/aws-ops/pull/8491" });
   });
 
-  // Beyond the brief's own list — the second of the three gates the brief calls out
+  // Beyond the brief's own list — the second of the gates the brief calls out
   // ("the row must still be in the queue") has no case above; every other write-ish
   // message in this file (reviewExpand, reviewLaunch, reviewLoadDraft) pins this
   // symmetrically, and the confirm gate is the one place a stale id must never even
@@ -1221,14 +1221,160 @@ describe("DeckPanel review submit", () => {
     expect(h.reviewSubmit).not.toHaveBeenCalled();
   });
 
-  // Beyond the brief's own list — pins the queue-eviction side effect the brief's
-  // Step 4 code carries out on a successful submit ("drop it now rather than after
-  // a TTL"), which none of the seven transcribed cases above ever observes.
-  it("drops the row from the queue and re-posts the strip after a successful submit", async () => {
+  // --- Fix round 1: gate 0 — a verb outside the ReviewVerb union must fail closed
+  // before any dialog, mirroring provider.ts's own Object.hasOwn guard on the same
+  // value. "constructor" specifically exercises the prototype-pollution case a
+  // plain `!VERB_LABEL[verb]` check would let through as truthy.
+  it.each(["merge", "constructor"])(
+    "refuses an out-of-union verb (%s) before any dialog or provider call",
+    async (verb) => {
+      h.reviewWrites = true;
+      const p = await showAndWarm();
+      await p._fire(submitMsg({ verb: verb as unknown as ReviewVerb }));
+      expect(window.showWarningMessage).not.toHaveBeenCalled();
+      expect(h.reviewSubmit).not.toHaveBeenCalled();
+    },
+  );
+
+  // --- Fix round 1: a double click (or any second deck:reviewSubmit for the same
+  // id while the first is still awaiting confirmation/gh) must not reach the
+  // provider twice — GitHub does not deduplicate reviews. Two `_fire` calls with
+  // neither awaited yet is this file's established pattern for overlapping async
+  // work (see "posts one busy pair for overlapping refreshes" above): the first
+  // call's synchronous prefix — every gate up through marking the id in flight —
+  // completes before the second call is even made, so the second sees the flag set.
+  it("refuses a second submit for the same id while the first is still in flight", async () => {
     h.reviewWrites = true;
     const p = await showAndWarm();
+    const first = p._fire(submitMsg());
+    const second = p._fire(submitMsg());
+    await Promise.all([first, second]);
+    expect(window.showWarningMessage).toHaveBeenCalledTimes(1);
+    expect(h.reviewSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows submitting the same id again once the previous submit has finished", async () => {
+    // Verb "comment", deliberately: approve/request-changes evict the row on
+    // success, and a second submit for an evicted id would legitimately stop at
+    // gate 2 (not in the queue) regardless of the in-flight flag — that would
+    // confound this test with eviction behaviour rather than isolating whether
+    // the flag itself is cleared in the `finally`.
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "comment", body: "first" }));
+    await p._fire(submitMsg({ verb: "comment", body: "second" }));
+    expect(h.reviewSubmit).toHaveBeenCalledTimes(2);
+  });
+
+  // --- Fix round 1: reviewWrites must be read fresh on every submit, not cached at
+  // construction the way `this.prFacts` is (the single most plausible copy-paste
+  // mistake in this file, per the coordinator). Both directions: flipping the
+  // setting after the panel is already open and warmed must take effect on the
+  // very next submit.
+  it("reads reviewWrites fresh at submit time — turning it on after the panel opened still lets a submit through", async () => {
+    h.reviewWrites = false;
+    const p = await showAndWarm();
+    h.reviewWrites = true;
     await p._fire(submitMsg());
+    expect(h.reviewSubmit).toHaveBeenCalledWith("CyberJackGit/aws-ops", 8491, "approve", "");
+  });
+
+  it("reads reviewWrites fresh at submit time — turning it off after the panel opened still refuses", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    h.reviewWrites = false;
+    await p._fire(submitMsg());
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.reviewSubmit).not.toHaveBeenCalled();
+  });
+
+  // --- Fix round 1: the eviction-on-success side effect, split per verb. A comment
+  // does not clear GitHub's requested_reviewers, so — unlike approve and
+  // request-changes — it must not make a PR you still owe vanish from the strip.
+  it("evicts the row and decrements issueCount after a successful approve", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve" }));
     const last = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
     expect(last.requests).toHaveLength(0);
+    expect(last.issueCount).toBe(0);
+  });
+
+  it("evicts the row and decrements issueCount after a successful request-changes", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "request-changes", body: "please address the retry budget" }));
+    const last = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
+    expect(last.requests).toHaveLength(0);
+    expect(last.issueCount).toBe(0);
+  });
+
+  it("keeps the row and issueCount after a successful comment — a comment does not clear requested_reviewers", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "comment", body: "nice work" }));
+    const last = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
+    expect(last.requests).toHaveLength(1);
+    expect(last.requests[0].id).toBe("CyberJackGit/aws-ops#8491");
+    expect(last.issueCount).toBe(1);
+  });
+
+  it("persists the evicted cache to disk, so a reopened Deck can't resurrect the row from a stale file", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve" }));
+    const lastWrite = h.writeReviewCache.mock.calls.at(-1)?.[1] as { requests: unknown[]; issueCount: number };
+    expect(lastWrite.requests).toHaveLength(0);
+    expect(lastWrite.issueCount).toBe(0);
+  });
+
+  // --- Fix round 1: four assertions for behaviour that was already correct but
+  // unpinned — each survives its own mutation today.
+  it("declines when the dialog resolves a truthy value that is not the expected label", async () => {
+    // Pins comparison against the exact label (`answer !== label`), not mere
+    // truthiness (`!answer`) — a wrong-but-truthy answer must still decline.
+    h.reviewWrites = true;
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce("Comment");
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve" }));
+    expect(h.reviewSubmit).not.toHaveBeenCalled();
+  });
+
+  it("does not stamp a whitespace-only approve body — the guard checks body.trim(), not body's own truthiness", async () => {
+    // A non-empty-but-all-whitespace body is truthy on its own; only `.trim()`
+    // reveals it is empty. Pins that the provenance line is never appended to
+    // nothing, and that the untrimmed body passes through unchanged on this branch.
+    h.reviewWrites = true;
+    h.stampLabelOnWrite = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve", body: "   ", fromDraft: true }));
+    expect(h.reviewSubmit.mock.calls[0][3]).toBe("   ");
+  });
+
+  it("logs the write attempt before it reaches the provider — the audit trail", async () => {
+    // Mirrors this file's existing log-spy precedent ("logs which gh it tried...",
+    // "posts nothing and logs when the detail fetch fails"): a custom log passed
+    // straight into DeckPanel.show, rather than the show() helper's () => {}.
+    h.reviewWrites = true;
+    const log = vi.fn();
+    DeckPanel.show(fakeContext().context as any, fakeAuth({ authed: false }), log);
+    await settled();
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    await p._fire(submitMsg({ verb: "approve" }));
+    expect(log).toHaveBeenCalledWith("deck: submitting approve on CyberJackGit/aws-ops#8491");
+  });
+
+  it("keeps the row in the queue after a failed submit, so the user can still act on it", async () => {
+    h.reviewWrites = true;
+    h.reviewSubmit.mockResolvedValueOnce({ ok: false, message: "Can not approve your own pull request" });
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    // If a failed submit had evicted the row anyway, reviewById would find nothing
+    // and reviewDetail would never reach the provider — this is the same "still
+    // resolvable" check the DeckPanel review detail suite uses elsewhere.
+    await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    expect(h.reviewDetail).toHaveBeenCalledWith("CyberJackGit/aws-ops", 8491);
   });
 });
