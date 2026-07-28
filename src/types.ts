@@ -144,6 +144,44 @@ export interface PrEntry {
 /** Repo name → its PR entry, as stored per run and rendered per card. */
 export type PrEntryMap = Record<string, PrEntry>;
 
+// ── Review requests: PRs waiting on you ─────────────────────────────────────
+
+export type ReviewSize = "S" | "M" | "L";
+export type ReviewSort = "oldest" | "smallest";
+export type ReviewVerb = "approve" | "comment" | "request-changes";
+
+/** One PR asking for your review — everything the strip renders unexpanded.
+ * `localPath`, `runKey` and `draftPath` are observed locally on every refresh and
+ * never persisted: a cached path to a worktree since forgotten would render an
+ * action that cannot work. */
+export interface ReviewRequest {
+  id: string; // "owner/repo#number" — stable across refreshes
+  repo: string; // nameWithOwner
+  repoName: string; // short name, for matching a local checkout
+  number: number;
+  title: string;
+  url: string;
+  author: string;
+  isDraft: boolean;
+  createdAt: number; // epoch ms
+  updatedAt: number; // epoch ms
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  ci: "passing" | "failing" | "pending" | "none";
+  review: PrFacts["review"];
+  mergeable: PrFacts["mergeable"];
+  localPath: string | null; // matched checkout; null disables the agent action
+  runKey: string | null; // a review run in flight for this PR
+  draftPath: string | null; // .pick-task/REVIEW-<n>.md, once the agent writes it
+}
+
+/** What expanding a row adds — the two things the search cannot return. */
+export interface ReviewDetail {
+  failing: PrCheck[];
+  unresolved: number | null;
+}
+
 // ── The Marketplace: local asset browser ────────────────────────────────────
 
 export type AssetType = "skill" | "command" | "agent" | "hook";
