@@ -414,4 +414,24 @@ describe("package.json ⇄ config constants", () => {
     expect(ttl.default).toBe(120);
     expect(ttl.minimum).toBe(30);
   });
+
+  // getConfig()'s own `?? false` / `?? true` fallbacks only exercise the vscode
+  // mock's "unset key" behavior (undefined), never the manifest default a real
+  // VS Code install actually serves an untouched setting from. Without this, a
+  // "default": true typo on agentFlow.reviewWrites in package.json — shipping
+  // the one GitHub write path in this extension on by default — would leave
+  // every one of getConfig()'s own tests green.
+  it("declares reviewWrites defaulting to false — the only setting that writes to GitHub", () => {
+    expect(props["agentFlow.reviewWrites"].default).toBe(false);
+  });
+
+  it("declares reviewRequests defaulting to true — the review strip is on unless turned off", () => {
+    expect(props["agentFlow.reviewRequests"].default).toBe(true);
+  });
+
+  it("declares reviewRequestsTtlSeconds defaulting to 300 with a floor of 60", () => {
+    const ttl = props["agentFlow.reviewRequestsTtlSeconds"] as { default?: unknown; minimum?: unknown };
+    expect(ttl.default).toBe(300);
+    expect(ttl.minimum).toBe(60);
+  });
 });
