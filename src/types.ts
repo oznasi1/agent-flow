@@ -218,6 +218,9 @@ export type InboundMessage =
   | { type: "reorder"; order: string[] }
   | { type: "resetOrder"; size: Size }
   | { type: "removeFromSprint"; key: string; size: Size }
+  // One chip on one ticket. `movedChip` says whether the chip's presence in the
+  // list changed too — which is what makes a rejected write exactly undoable.
+  | { type: "setComponent"; key: string; repo: string; on: boolean; movedChip: boolean }
   // The Deck (separate webview panel)
   | { type: "deck:ready" }
   | { type: "deck:refresh" }
@@ -248,6 +251,9 @@ export type OutboundMessage =
   | { type: "statusChanged"; key: string; status: string; category: string; removed: boolean }
   | { type: "movedToSprint"; key: string; assignee: string; removed: boolean }
   | { type: "removedFromSprint"; key: string }
+  // The verdict on one `setComponent`: the request echoed back, plus whether it
+  // landed. On `ok: false` the webview undoes exactly what it applied optimistically.
+  | { type: "componentsChanged"; key: string; repo: string; on: boolean; movedChip: boolean; ok: boolean }
   // `action` renders a button beside the message — a refused write can hand the user
   // straight to the ticket, which is the only place left to resolve it.
   | { type: "toast"; level: "success" | "error" | "info"; message: string; action?: { label: string; url: string } }

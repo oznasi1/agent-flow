@@ -607,6 +607,95 @@ describe("detail", () => {
   });
 });
 
+describe("setComponent", () => {
+  it("adds the component under the project's spelling and echoes ok", async () => {
+    clientStub.listComponents.mockResolvedValue(["Account-Service"]);
+    const { send, posted } = setup();
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    expect(clientStub.updateComponents).toHaveBeenCalledWith("ASM-1", { add: ["Account-Service"] });
+    expect(posted()).toContainEqual({
+      type: "componentsChanged", key: "ASM-1", repo: "account-service", on: true, movedChip: true, ok: true,
+    });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success", message: "Added Account-Service to ASM-1" }));
+  });
+
+  it("removes the component and echoes ok", async () => {
+    const { send, posted } = setup();
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: false, movedChip: true });
+    expect(clientStub.updateComponents).toHaveBeenCalledWith("ASM-1", { remove: ["account-service"] });
+    expect(posted()).toContainEqual({
+      type: "componentsChanged", key: "ASM-1", repo: "account-service", on: false, movedChip: true, ok: true,
+    });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success", message: "Removed account-service from ASM-1" }));
+  });
+
+  it("echoes movedChip: false back unchanged (a push leaves the chip where it is)", async () => {
+    const { send, posted } = setup();
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: false });
+    expect(posted()).toContainEqual({
+      type: "componentsChanged", key: "ASM-1", repo: "account-service", on: true, movedChip: false, ok: true,
+    });
+  });
+
+  it("stamps the provenance label", async () => {
+    const { send } = setup();
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
+  });
+
+  it("skips the label stamp when stampLabelOnWrite is off", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, stampLabelOnWrite: false });
+    const { send } = setup();
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    expect(clientStub.addLabel).not.toHaveBeenCalled();
+  });
+
+  it("still succeeds when the label stamp fails", async () => {
+    clientStub.addLabel.mockRejectedValue(new Error("label 500"));
+    const { send, posted } = setup();
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: true }));
+  });
+
+  it("echoes ok: false with an actionable toast when the write is refused", async () => {
+    clientStub.updateComponents.mockRejectedValue(parseJiraError(403, JSON.stringify({ errorMessages: ["No permission"], errors: {} })));
+    const { send, posted } = setup();
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    expect(posted()).toContainEqual({
+      type: "componentsChanged", key: "ASM-1", repo: "account-service", on: true, movedChip: true, ok: false,
+    });
+    expect(posted()).toContainEqual(expect.objectContaining({
+      type: "toast", level: "error", action: { label: "Open in Jira", url: "https://jira/browse/ASM-1" },
+    }));
+    expect(clientStub.addLabel).not.toHaveBeenCalled();
+  });
+
+  it("echoes ok: false and re-gates the panel on an auth failure, without a toast action", async () => {
+    clientStub.updateComponents.mockRejectedValue(new JiraAuthError("token dead"));
+    const { send, posted } = setup();
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
+  });
+
+  it("writes nothing and echoes ok: false when the project has no such component", async () => {
+    clientStub.listComponents.mockResolvedValue(["Infra"]);
+    const { send, posted } = setup();
+    await send({ type: "setComponent", key: "ASM-1", repo: "scratch-tool", on: true, movedChip: true });
+    expect(clientStub.updateComponents).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+  });
+
+  it("echoes ok: false and re-gates when not signed in, without touching Jira", async () => {
+    const { send, posted } = setup({ authed: false });
+    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    expect(clientStub.updateComponents).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
+  });
+});
+
 describe("addToMySprint", () => {
   it("errors when the account cannot be resolved", async () => {
     clientStub.getMyself.mockResolvedValue(null);

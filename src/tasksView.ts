@@ -16,7 +16,7 @@ import {
 } from "./jira/transitionFields";
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
-import { mapRepoComponents } from "./engine/components";
+import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { injectSlackDm, insertBeforeFiles } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths } from "./engine/workspace";
 import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
@@ -222,6 +222,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
         case "removeFromSprint": {
           await this.removeFromSprint(m.key, m.size);
+          break;
+        }
+        case "setComponent": {
+          await this.setComponent(m.key, m.repo, m.on, m.movedChip);
           break;
         }
         case "explore": {
@@ -481,6 +485,53 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     await client.addIssueToSprint(sprintId, key);
     this.log(`removeFromSprint ${key}: undo → sprint ${sprintId}`);
     await this.onMessage({ type: "fetch", filter: "mysprint", size });
+  }
+
+  /** Add or remove one component on a ticket, mirroring one chip in the card (a Jira
+   * WRITE). Reports its own failures and never throws, so `onMessage`'s catch cannot
+   * double-toast; every call posts exactly one `componentsChanged`, which is the
+   * webview's cue to keep or undo its optimistic update. */
+  public async setComponent(key: string, repo: string, on: boolean, movedChip: boolean): Promise<void> {
+    const cfg = getConfig();
+    const echo = (ok: boolean) => this.post({ type: "componentsChanged", key, repo, on, movedChip, ok });
+    if (!(await this.auth.isAuthenticated())) {
+      this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
+      echo(false);
+      return;
+    }
+    const client = this.client();
+    const name = resolveComponent(repo, await client.listComponents());
+    if (!name) {
+      // The webview only sends repos it believes are components, so this means the
+      // list moved under us (or never loaded). Nothing was written.
+      this.log(`setComponent ${key}: no ${cfg.project} component named ${repo}`);
+      echo(false);
+      this.toast("error", `${cfg.project} has no component named “${repo}”.`);
+      return;
+    }
+    try {
+      await client.updateComponents(key, on ? { add: [name] } : { remove: [name] });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.log(`setComponent ${key}: ${on ? "add" : "remove"} ${name} failed — ${msg}`);
+      echo(false);
+      if (e instanceof JiraAuthError) {
+        this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
+        return;
+      }
+      this.toast("error", msg, { label: "Open in Jira", url: `${cfg.baseUrl}/browse/${key}` });
+      return;
+    }
+    this.log(`setComponent ${key}: ${on ? "add" : "remove"} ${name} ok`);
+    if (cfg.stampLabelOnWrite) {
+      try {
+        await client.addLabel(key, cfg.provenanceLabel);
+      } catch (e) {
+        this.log(`label stamp failed for ${key}: ${e}`);
+      }
+    }
+    echo(true);
+    this.toast("success", on ? `Added ${name} to ${key}` : `Removed ${name} from ${key}`);
   }
 
   /** Pick which Explore action to run. Uses cfg.exploreMode directly when it names a
