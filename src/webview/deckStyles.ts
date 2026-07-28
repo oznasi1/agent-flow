@@ -1,5 +1,16 @@
 // Injected into the Deck panel <head>. Uses VS Code theme variables so the board
 // matches the editor theme (light or dark), with a few semantic status accents.
+//
+// Two rules hold the look together, and both are easy to break by accident:
+//
+// 1. Monospace is for identifiers and counts only — issue keys, branches, repo
+//    names, diff numbers, PR fields. Anything that reads as English ("ended turn ·
+//    4m ago", "launched 22m ago", "In Progress") is set in the UI font. Setting
+//    prose in mono is what made this board read as a log dump.
+// 2. Saturated color is spent on attention debt. A card that needs nothing from you
+//    is monochrome until you point at it; the one asking for you carries the orange.
+//    That is why the primary button is a quiet surface everywhere except in Action
+//    required — six identical bright slabs signal nothing.
 export const DECK_CSS = `
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -17,39 +28,75 @@ export const DECK_CSS = `
   }
 
   :root {
+    /* Column accents. */
     --c-progress: var(--vscode-charts-blue, #4aa3df);
-    --c-idle:    var(--vscode-charts-yellow, #d7a531);
-    --c-needs:   var(--vscode-charts-red, #e5534b);
+    --c-attn:    var(--vscode-charts-orange, #e0913a);
     --c-review:  var(--vscode-charts-purple, #b083f0);
     --c-done:    var(--vscode-charts-green, #4ac26b);
+    /* Warm but passive: an idle agent or an uncommitted file is worth noticing, not
+       worth acting on. Deliberately paler than --c-attn, which is the call to act. */
+    --c-idle:    var(--vscode-charts-yellow, #d7a531);
+    /* Something is actually broken or destructive: failing checks, deletions, Forget. */
+    --c-danger:  var(--vscode-charts-red, #e5534b);
+
     --hair: var(--vscode-panel-border);
+    /* Controls need an edge that survives sitting on a card, which is already 4%
+       lighter than the editor background — panelBorder disappears against it, which is
+       what made Diff look like a bare label next to Open. */
+    --edge: color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
     --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
+    --dim: var(--vscode-descriptionForeground);
+
+    /* Type scale. Four steps plus the two header sizes — every font-size below is
+       one of these, so a new element can't quietly invent a seventh. */
+    --t-micro: 10px;   /* stat labels, branch */
+    --t-data: 10.5px;  /* mono identifiers, PR table */
+    --t-body: 11px;    /* status, meta, controls, legend */
+    --t-title: 13px;   /* card summary */
+
+    /* One radius per role. */
+    --r-card: 10px;
+    --r-ctl: 6px;
+    --r-chip: 5px;
   }
 
   .hd { flex: none; display: flex; align-items: center; gap: 14px;
-    padding: 14px 20px; border-bottom: 1px solid var(--hair); }
-  .hd .title { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
-  .hd .title .sub { color: var(--vscode-descriptionForeground); font-weight: 400; margin-left: 6px; font-size: 12px; }
-  .stats { display: flex; align-items: stretch; gap: 8px; }
-  .stat { display: flex; flex-direction: column; gap: 2px; padding: 4px 12px 5px; border-radius: 8px;
-    border: 1px solid var(--hair); background: var(--vscode-editorWidget-background, transparent); min-width: 62px; }
-  .stat .n { font-size: 16px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1; }
-  .stat .l { font-size: 10px; color: var(--vscode-descriptionForeground); text-transform: uppercase; letter-spacing: .05em; }
-  .stat.alert { border-color: var(--c-needs); }
-  .stat.alert .n { color: var(--c-needs); }
+    padding: 13px 20px; border-bottom: 1px solid var(--hair); }
+  .hd .title { font-size: 15px; font-weight: 600; letter-spacing: -.012em; white-space: nowrap; }
+  .hd .title .sub { color: var(--dim); font-weight: 400; margin-left: 7px; font-size: 12px; letter-spacing: 0; }
+  .stats { display: flex; align-items: stretch; gap: 6px; }
+  /* Sentence case, matching the column headers: these four tiles and those four
+     headers name the same four things, and used to do it in two different cases. */
+  .stat { display: flex; flex-direction: column; gap: 2px; padding: 4px 11px 5px; border-radius: 8px;
+    border: 1px solid var(--edge); background: var(--vscode-editorWidget-background, transparent); }
+  .stat .n { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.05;
+    letter-spacing: -.02em; }
+  .stat .l { font-size: var(--t-micro); color: var(--dim); letter-spacing: .01em; white-space: nowrap; }
+  .stat.attn { border-color: color-mix(in srgb, var(--c-attn) 55%, var(--hair)); }
+  .stat.attn .n { color: var(--c-attn); }
+  .stat.attn .l { color: color-mix(in srgb, var(--c-attn) 70%, var(--dim)); }
   .hd .sp { flex: 1; }
 
-  .ctl { display: inline-flex; align-items: center; gap: 7px; cursor: pointer; user-select: none;
-    font-size: 12px; padding: 5px 10px; border-radius: 6px;
-    border: 1px solid var(--hair); background: transparent; color: var(--vscode-foreground); }
-  .ctl:hover { background: var(--vscode-toolbar-hoverBackground); }
-  .switch { width: 26px; height: 15px; border-radius: 10px; background: var(--vscode-input-background);
-    border: 1px solid var(--hair); position: relative; transition: background .15s; }
-  .switch::after { content: ""; position: absolute; top: 1px; left: 1px; width: 11px; height: 11px;
-    border-radius: 50%; background: var(--vscode-descriptionForeground); transition: transform .15s, background .15s; }
-  .ctl.on .switch { background: var(--vscode-button-background); }
-  .ctl.on .switch::after { transform: translateX(11px); background: var(--vscode-button-foreground); }
-  .synced { font-size: 11px; color: var(--vscode-descriptionForeground); font-family: var(--mono); }
+  /* Two toggles that answer the same question — how much should the board trust? —
+     read as one object rather than three separate pills next to the refresh control. */
+  .ctls { display: inline-flex; flex: none; border: 1px solid var(--edge); border-radius: var(--r-ctl); overflow: hidden; }
+  .ctls .ctl { border: 0; border-radius: 0; }
+  .ctls .ctl + .ctl { box-shadow: inset 1px 0 0 var(--edge); }
+  .ctl { display: inline-flex; align-items: center; gap: 7px; height: 26px; cursor: pointer; user-select: none;
+    font-size: var(--t-body); padding: 0 10px; border-radius: var(--r-ctl); white-space: nowrap;
+    border: 1px solid var(--edge); background: transparent; color: var(--dim);
+    transition: color .12s ease, background-color .12s ease; }
+  .ctl:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+  .ctl.on { color: var(--vscode-foreground); }
+  .switch { width: 24px; height: 14px; border-radius: 10px; background: var(--vscode-input-background);
+    border: 1px solid var(--hair); position: relative; flex: none; transition: background .15s; }
+  .switch::after { content: ""; position: absolute; top: 1px; left: 1px; width: 10px; height: 10px;
+    border-radius: 50%; background: var(--dim); transition: transform .15s, background .15s; }
+  .ctl.on .switch { background: var(--vscode-button-background); border-color: var(--vscode-button-background); }
+  .ctl.on .switch::after { transform: translateX(10px); background: var(--vscode-button-foreground); }
+  /* tabular-nums, not mono: "synced 4s ago" is a sentence, but its number ticks every
+     second and must not reflow the control while it does. */
+  .synced { font-size: var(--t-body); font-variant-numeric: tabular-nums; }
 
   /* The board is the one scrollport for both axes: y scrolls the whole deck rather than each
      column on its own, so a card's vertical position is comparable across columns. align-items
@@ -66,45 +113,54 @@ export const DECK_CSS = `
      cards pass underneath it. */
   .col-hd { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px;
     padding: 16px 2px 10px; flex: none; background: var(--vscode-editor-background); }
-  .col-hd .dot { width: 9px; height: 9px; border-radius: 50%; }
-  .col-hd .nm { font-size: 12px; font-weight: 600; }
-  .col-hd .ct { font-family: var(--mono); font-size: 11px; color: var(--vscode-descriptionForeground);
-    border: 1px solid var(--hair); border-radius: 20px; padding: 0 7px; }
+  .col-hd .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .col-hd .nm { font-size: 12px; font-weight: 600; letter-spacing: -.005em; white-space: nowrap; }
+  .col-hd .ct { font-size: var(--t-micro); font-variant-numeric: tabular-nums; color: var(--dim);
+    border: 1px solid var(--hair); border-radius: 20px; padding: 1px 7px; line-height: 1.3; }
   .col-hd .rule { flex: 1; height: 1px; background: var(--hair); }
   .col-body { display: flex; flex-direction: column; gap: 10px; padding: 1px 3px 3px; }
 
   /* \`flex: none\` is load-bearing: .card sets overflow:hidden to clip the accent rail, which
      zeroes its automatic minimum size — without it the flex column squeezes every card and
      clips its content instead of growing the column. */
-  .card { position: relative; flex: none; border: 1px solid var(--hair); border-radius: 10px;
+  .card { position: relative; flex: none; border: 1px solid var(--hair); border-radius: var(--r-card);
     background: color-mix(in srgb, var(--vscode-foreground) 4%, var(--vscode-editor-background));
     padding: 10px 12px 9px 14px; overflow: hidden;
     transition: border-color .12s ease, background-color .12s ease; }
-  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .32; }
-  .card.needs::before { opacity: 1; }
-  .card.needs { background: color-mix(in srgb, var(--c-needs) 7%, var(--vscode-editor-background)); }
+  /* The rail is the column's accent restated on the card, quiet enough to be structure
+     rather than decoration — but not so quiet that a light theme's darker chart colors
+     fade it out at 30%. */
+  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: .42; }
+  /* The one card asking for you: full-strength rail, a warm wash, and a tinted border.
+     Three quiet reinforcements of one signal rather than a single loud one. */
+  .card.attn::before { width: 3px; opacity: 1; }
+  .card.attn { background: color-mix(in srgb, var(--c-attn) 4%, var(--vscode-editor-background));
+    border-color: color-mix(in srgb, var(--c-attn) 34%, var(--hair)); }
   .card:hover { border-color: color-mix(in srgb, var(--vscode-foreground) 25%, transparent); }
+  .card.attn:hover { border-color: color-mix(in srgb, var(--c-attn) 55%, var(--hair)); }
   .card:focus-within { border-color: var(--vscode-focusBorder); }
 
   /* State leads every card from the same x, so a column scans as one strip of status. */
   .c-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto;
-    font-family: var(--mono); font-size: 10.5px; color: var(--vscode-descriptionForeground);
+    font-size: var(--t-body); color: var(--dim); font-variant-numeric: tabular-nums;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .status.tone-needs { color: var(--c-needs); }
-  .key { margin-left: auto; flex: 0 1 auto; min-width: 0; max-width: 46%; font-family: var(--mono); font-size: 10.5px;
-    padding: 0; border: 0; background: none; color: var(--vscode-descriptionForeground); cursor: pointer;
+  /* Weight, not just hue — the one status the board wants you to read. */
+  .status.tone-attn { color: var(--c-attn); font-weight: 600; }
+  /* An identifier: mono, and the only thing on this row that is. */
+  .key { margin-left: auto; flex: 0 1 auto; min-width: 0; max-width: 46%; font-family: var(--mono); font-size: var(--t-data);
+    padding: 0; border: 0; background: none; color: var(--dim); cursor: pointer;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .key:hover { color: var(--vscode-textLink-foreground, var(--vscode-foreground)); }
   /* Inherits .key's layout so the chip sits at the same x as every other card's
      key; drops the affordances, because there is nothing to click through to. */
   .key.untracked { cursor: default; opacity: .75; }
-  .key.untracked:hover { color: var(--vscode-descriptionForeground); }
-  .sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--vscode-descriptionForeground); flex: none; }
+  .key.untracked:hover { color: var(--dim); }
+  .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
   .sdot.tone-working { background: var(--c-done); }
   .sdot.tone-idle    { background: var(--c-idle); }
-  .sdot.tone-needs   { background: var(--c-needs); }
-  .sdot.tone-parked, .sdot.tone-merged { background: transparent; border: 1.5px solid var(--vscode-descriptionForeground); }
+  .sdot.tone-attn    { background: var(--c-attn); }
+  .sdot.tone-parked, .sdot.tone-merged { background: transparent; border: 1.5px solid var(--dim); }
   .sdot.pulse { animation: pulse 1.7s ease-out infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--c-done); } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
   .spin { display: inline-block; font-size: 12px; }
@@ -113,85 +169,114 @@ export const DECK_CSS = `
 
   /* Clamped so long summaries can't stretch one card out of the column's rhythm; the full
      text stays available on hover. */
-  .c-title { margin-top: 6px; font-size: 13px; font-weight: 500; line-height: 1.42; letter-spacing: -.005em;
+  .c-title { margin-top: 5px; font-size: var(--t-title); font-weight: 550; line-height: 1.42; letter-spacing: -.008em;
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 
-  .c-branch { margin-top: 6px; font-family: var(--mono); font-size: 10px; color: var(--vscode-descriptionForeground);
+  .c-branch { margin-top: 7px; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .c-branch .bn { font-family: var(--mono); font-size: var(--t-data); color: var(--dim);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .c-openhint { margin-top: 9px; font-size: 10px; font-family: var(--mono); color: var(--c-done);
-    display: inline-flex; align-items: center; gap: 5px; }
-  .c-openhint::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--c-done); flex: none; }
-  .elapsed { flex: none; font-size: 10px; color: var(--vscode-descriptionForeground); font-family: var(--mono); }
+  /* "launched 22m ago" is English; only its number needs to hold its width. */
+  .elapsed { margin-left: auto; flex: none; font-size: var(--t-body); color: var(--dim);
+    font-variant-numeric: tabular-nums; }
 
-  .c-repos { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 6px; margin-top: 7px; }
-  .repo { font-family: var(--mono); font-size: 10px; border: 1px solid var(--hair); border-radius: 5px;
-    padding: 1px 6px; color: var(--vscode-descriptionForeground); }
-  .repo .add { color: var(--c-done); } .repo .del { color: var(--c-needs); margin-left: 4px; }
-  .repo .dirty { color: var(--c-idle); margin-left: 5px; }
+  .c-repos { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 7px; margin-top: 7px; }
+  .repo { display: inline-flex; align-items: baseline; gap: 5px; font-family: var(--mono); font-size: var(--t-data);
+    border: 1px solid var(--hair); border-radius: var(--r-chip);
+    padding: 1px 6px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .repo .add { color: var(--c-done); } .repo .del { color: var(--c-danger); }
+  .repo .dirty { color: var(--c-idle); }
 
-  .c-foot { display: flex; align-items: center; gap: 8px; margin-top: 9px; min-width: 0; }
-  .pill { flex: 0 1 auto; min-width: 0; font-family: var(--mono); font-size: 10px;
-    border: 1px solid var(--hair); border-radius: 20px; padding: 1px 8px;
-    color: var(--vscode-descriptionForeground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  /* Secondary controls stay legible at rest and come up to full contrast on the card you're
-     pointing at. The dimming lives on the buttons, not on .actions: opacity on the container
-     would composite the whole subtree and make the overflow menu see-through. */
-  .actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 4px; }
-  .act:not(.primary), .more { opacity: .72; transition: opacity .12s ease; }
+  .c-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; min-width: 0; }
+  .pill { flex: 0 1 auto; min-width: 0; font-size: var(--t-body);
+    border: 1px solid var(--hair); border-radius: 20px; padding: 1px 9px;
+    color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* One button language, three weights of the same 26px shape. The primary is a quiet
+     raised surface at rest and only takes the theme's button color under the pointer:
+     an Open slab on every card is ambient noise, not emphasis. The dimming lives on
+     the buttons, not on .actions — opacity on the container would composite the whole
+     subtree and make the overflow menu see-through. */
+  .actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 5px; }
+  .act:not(.primary), .more { opacity: .7; transition: opacity .12s ease; }
   .card:hover .act, .card:focus-within .act,
   .card:hover .more, .card:focus-within .more { opacity: 1; }
-  .act { font-size: 11px; height: 24px; padding: 0 10px; border-radius: 6px; cursor: pointer; white-space: nowrap;
-    border: 1px solid var(--hair); background: transparent; color: var(--vscode-foreground); }
-  .act:hover { background: var(--vscode-toolbar-hoverBackground); border-color: var(--vscode-focusBorder); }
-  .act.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); border-color: var(--vscode-button-background); }
-  .act.primary:hover { background: var(--vscode-button-hoverBackground); }
+  .act { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-body); font-weight: 500;
+    height: 26px; padding: 0 11px; border-radius: var(--r-ctl); cursor: pointer; white-space: nowrap;
+    border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
+    transition: background-color .12s ease, border-color .12s ease, color .12s ease; }
+  .act:hover { background: var(--vscode-toolbar-hoverBackground); border-color: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); }
+  .act.primary { font-weight: 600;
+    background: color-mix(in srgb, var(--vscode-foreground) 14%, var(--vscode-editor-background));
+    border-color: color-mix(in srgb, var(--vscode-foreground) 28%, transparent); }
+  .act.primary:hover { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+    border-color: var(--vscode-button-background); }
+  /* The board's only colored call to action, on the only card that is asking for one.
+     Outlined rather than filled on purpose: a theme owns charts.orange, and it ranges
+     from pale amber to burnt sienna, so no fixed ink is legible on all of them. Mixing
+     the label toward the theme's own foreground self-corrects — it darkens the orange on
+     a light theme and lightens it on a dark one, clearing 5:1 either way. Hover is
+     deliberately not overridden: every primary on the board fills with the theme's
+     button colors, so the attn card differs only at rest. */
+  .card.attn .act.primary { background: color-mix(in srgb, var(--c-attn) 12%, transparent);
+    border-color: color-mix(in srgb, var(--c-attn) 60%, transparent);
+    color: color-mix(in srgb, var(--c-attn) 78%, var(--vscode-foreground)); }
+  /* This task already has a window open, so Open focuses it instead of opening another.
+     A 5px marker plus the button's tooltip, where a whole line of green text used to be. */
+  .act.live::before { content: ""; width: 5px; height: 5px; border-radius: 50%; flex: none;
+    background: var(--c-done); }
+  .card.attn .act.primary.live::before { background: currentColor; }
 
   .more-wrap { position: relative; display: inline-flex; }
-  .more { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center;
-    border: 0; background: none; border-radius: 6px; color: var(--vscode-descriptionForeground); cursor: pointer; }
+  .more { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+    border: 0; background: none; border-radius: var(--r-ctl); color: var(--dim); cursor: pointer;
+    font-size: 13px; line-height: 1; }
   .more:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
-  .menu { position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 20; min-width: 130px;
+  .menu { position: absolute; right: 0; bottom: calc(100% + 5px); z-index: 20; min-width: 132px;
     border: 1px solid var(--hair); border-radius: 8px; padding: 4px;
     background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
     box-shadow: 0 8px 24px -10px rgba(0,0,0,.6); }
   .mi { display: block; width: 100%; text-align: left; font-size: 12px; padding: 6px 9px; border: 0;
-    border-radius: 5px; cursor: pointer; background: none; color: var(--vscode-foreground); white-space: nowrap; }
+    border-radius: var(--r-chip); cursor: pointer; background: none; color: var(--vscode-foreground); white-space: nowrap; }
   .mi:hover { background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)); }
-  .mi.danger { color: var(--c-needs); }
+  .mi.danger { color: var(--c-danger); }
 
   .empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 8px; color: var(--vscode-descriptionForeground); text-align: center; padding: 40px; }
-  .empty .big { font-size: 15px; color: var(--vscode-foreground); }
+    gap: 8px; color: var(--dim); text-align: center; padding: 40px; }
+  .empty .big { font-size: 15px; font-weight: 550; letter-spacing: -.012em; color: var(--vscode-foreground); }
 
   .legend { flex: none; display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-    padding: 8px 20px; border-top: 1px solid var(--hair); font-size: 11px; color: var(--vscode-descriptionForeground); }
+    padding: 8px 20px; border-top: 1px solid var(--hair); font-size: var(--t-body); color: var(--dim); }
   .legend .lg { display: flex; align-items: center; gap: 6px; }
-  .legend .lg .dot { width: 8px; height: 8px; border-radius: 50%; }
-  .legend .note { margin-left: auto; font-family: var(--mono); }
+  .legend .lg .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .legend .note { margin-left: auto; }
+  /* A path, so mono; the prose around it is not. */
+  .legend .note .path { font-family: var(--mono); font-size: var(--t-data); }
+  .legend .note.warn { color: var(--c-attn); margin-left: 0; }
 
   .toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; z-index: 50; }
-  .toast { font-family: var(--mono); font-size: 12px; padding: 8px 14px; border-radius: 7px;
+  .toast { font-size: 12px; padding: 8px 14px; border-radius: 7px;
     border: 1px solid var(--hair); background: var(--vscode-notifications-background, var(--vscode-editorWidget-background));
     color: var(--vscode-foreground); box-shadow: 0 6px 20px -8px rgba(0,0,0,.5); }
-  .toast.error { border-color: var(--c-needs); }
+  .toast.error { border-color: var(--c-danger); }
   .toast.success { border-color: var(--c-done); }
 
   .board::-webkit-scrollbar { width: 9px; height: 9px; }
   .board::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 8px; }
   .board::-webkit-scrollbar-corner { background: transparent; }
 
-  .pr-block { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--hair);
-    font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; }
-  .pr-repo { color: var(--vscode-descriptionForeground); margin-bottom: 2px; }
-  .pr-line { display: flex; align-items: baseline; gap: 6px; line-height: 1.5; }
-  .pr-lbl { width: 42px; flex: none; color: var(--vscode-descriptionForeground); }
-  .pr-link { background: none; border: 0; padding: 0; cursor: pointer;
+  /* The one place mono earns its keep on a card: four labelled rows whose values line
+     up under each other, read as a table rather than as sentences. */
+  .pr-block { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--hair);
+    font-family: var(--mono); font-size: var(--t-data); font-variant-numeric: tabular-nums; }
+  .pr-repo { color: var(--dim); margin-bottom: 2px; }
+  .pr-line { display: flex; align-items: baseline; gap: 7px; line-height: 1.55; }
+  .pr-lbl { width: 40px; flex: none; color: var(--dim); }
+  .pr-link { background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
     text-decoration: underline; text-decoration-style: dotted; text-underline-offset: 2px; }
   .pr-ok { color: var(--c-done); }
-  .pr-warn { color: var(--c-idle); }
-  .pr-bad { color: var(--c-needs); }
+  .pr-warn { color: var(--c-attn); }
+  .pr-bad { color: var(--c-danger); }
   .pr-bad .pr-link { color: inherit; }
-  .pr-wait { color: var(--vscode-descriptionForeground); }
-  .pr-draft { color: var(--vscode-descriptionForeground); }
-  .legend .note.warn { color: var(--c-idle); }
+  .pr-wait { color: var(--dim); }
+  .pr-draft { color: var(--dim); }
 `;

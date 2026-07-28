@@ -4,9 +4,12 @@ import { DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, RunStatus, i
 
 let toastSeq = 0;
 
+// `needs` stays the column id — it is the engine's vocabulary (DeckColumn, deriveBucket)
+// and never reaches a user. "Action required" is what the board says, in the summary
+// tile, the column header and the legend alike: one name for one thing.
 const COLUMNS: { id: DeckColumn; label: string; varName: string }[] = [
   { id: "progress", label: "In progress", varName: "--c-progress" },
-  { id: "needs", label: "Needs you", varName: "--c-needs" },
+  { id: "needs", label: "Action required", varName: "--c-attn" },
   { id: "review", label: "In review", varName: "--c-review" },
   { id: "done", label: "Done", varName: "--c-done" },
 ];
@@ -20,7 +23,7 @@ function timeAgo(ms: number | null): string {
   return `${Math.round(s / 86400)}d ago`;
 }
 
-type Tone = "working" | "idle" | "needs" | "parked" | "merged";
+type Tone = "working" | "idle" | "attn" | "parked" | "merged";
 
 /** Did every PR this run has actually land? Mirrors prSignals' `merged` rule in
  * status.ts — a run whose backend merged and whose frontend has not is not merged. */
@@ -34,7 +37,7 @@ function stateView(r: RunStatus, live: boolean): { text: string; tone: Tone } {
   if (!live || r.agent.state === "unknown") return { text: "parked · git + Jira only", tone: "parked" };
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
-    case "needs-you": return { text: `ended turn · ${timeAgo(r.agent.lastActivityMs)}`, tone: "needs" };
+    case "needs-you": return { text: `ended turn · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
     case "idle": return { text: `idle · ${timeAgo(r.agent.lastActivityMs)}`, tone: "idle" };
     default: return { text: "parked · git + Jira only", tone: "parked" };
   }
@@ -91,14 +94,17 @@ function PrBlock({ repo, f, showRepo }: { repo: string; f: PrFacts; showRepo: bo
 }
 
 // No ⎇ here: that glyph means "branch" on this card, and a repo chip is a repo.
+// Every part is its own element so the chip's flex `gap` sets the spacing — literal
+// spaces and "·" separators between them would each become an anonymous flex item
+// and get gapped on both sides.
 function RepoChip({ g }: { g: RepoGit }): JSX.Element {
   return (
     <span className="repo" title={g.path}>
-      {g.name}
+      <span>{g.name}</span>
       {g.files > 0 && (
-        <> <span className="add">+{g.added}</span><span className="del">−{g.removed}</span></>
+        <><span className="add">+{g.added}</span><span className="del">−{g.removed}</span></>
       )}
-      {g.ahead > 0 && <> · ↑{g.ahead}</>}
+      {g.ahead > 0 && <span>↑{g.ahead}</span>}
       {g.dirty && <span className="dirty" title="uncommitted changes">●</span>}
     </span>
   );
@@ -126,7 +132,7 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
   }, [menuOpen]);
 
   return (
-    <div className={`card ${r.column === "needs" ? "needs" : ""}`} style={{ ["--accent" as any]: accent }}>
+    <div className={`card ${r.column === "needs" ? "attn" : ""}`} style={{ ["--accent" as any]: accent }}>
       {/* State leads, identity trails: the dot sits at the same x on every card, so a column
           scans top-to-bottom as one strip of "who needs me". */}
       <div className="c-top">
@@ -144,14 +150,21 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
       </div>
       <div className="c-title" title={r.run.summary}>{r.run.summary}</div>
 
-      {r.run.repos[0]?.branch && (
-        <div className="c-branch" title={r.run.repos[0].branch}>⎇ {r.run.repos[0].branch}</div>
-      )}
-
-      <div className="c-repos">
-        {r.repos.map((g) => <RepoChip key={g.name} g={g} />)}
+      {/* Where the work lives and when it started, on one line: this used to be a
+          half-empty branch row followed by "launched …" trailing the repo chips, where
+          it read as one more chip that had lost its border. */}
+      <div className="c-branch">
+        {r.run.repos[0]?.branch && (
+          <span className="bn" title={r.run.repos[0].branch}>⎇ {r.run.repos[0].branch}</span>
+        )}
         <span className="elapsed">launched {timeAgo(r.run.createdAt)}</span>
       </div>
+
+      {r.repos.length > 0 && (
+        <div className="c-repos">
+          {r.repos.map((g) => <RepoChip key={g.name} g={g} />)}
+        </div>
+      )}
 
       {(() => {
         const withPr = Object.entries(r.prs).filter(([, e]) => e.facts !== null) as [string, { facts: PrFacts }][];
@@ -160,13 +173,21 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
         ));
       })()}
 
-      {r.windowOpen && <div className="c-openhint">open now — Open will focus this window</div>}
-
       <div className="c-foot">
         {r.jiraStatus && <span className="pill" title={`Jira status: ${r.jiraStatus}`}>{r.jiraStatus}</span>}
         <div className="actions">
-          <button className="act primary" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open" })}>Open</button>
-          <button className="act" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff" })}>Diff</button>
+          {/* An already-open window used to say so in a line of its own on every such
+              card. The button that behaves differently is the right place to explain
+              it: a 5px marker carries "there is something to focus", the tooltip
+              carries what Open will actually do. */}
+          <button
+            className={`act primary ${r.windowOpen ? "live" : ""}`}
+            title={r.windowOpen ? "Open now — Open focuses the window already running this task" : "Open this task's workspace"}
+            onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open" })}
+          >
+            Open
+          </button>
+          <button className="act" title="Show everything this task changed, as a diff" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff" })}>Diff</button>
           <span className="more-wrap">
             <button className="more" title="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>⋯</button>
             {menuOpen && (
@@ -242,21 +263,26 @@ export function DeckApp(): JSX.Element {
         <div className="title">In-flight<span className="sub">everything you've launched</span></div>
         <div className="stats">
           <div className="stat"><span className="n">{runs.filter((r) => r.column === "progress").length}</span><span className="l">In progress</span></div>
-          <div className={`stat ${needs > 0 ? "alert" : ""}`}><span className="n">{needs}</span><span className="l">Need you</span></div>
+          <div className={`stat ${needs > 0 ? "attn" : ""}`}><span className="n">{needs}</span><span className="l">Action required</span></div>
           <div className="stat"><span className="n">{runs.filter((r) => r.column === "review").length}</span><span className="l">In review</span></div>
           <div className="stat"><span className="n">{runs.length}</span><span className="l">Total</span></div>
         </div>
         <div className="sp" />
-        <div className={`ctl ${live ? "on" : ""}`} onClick={toggleLive} title="Best-effort live signal from Claude Code transcripts. Off → git + Jira only.">
-          <span className="switch" />Live signal
+        {/* Both toggles answer the same question — how much should the board trust? —
+            so they read as one segmented control rather than two loose pills. Buttons,
+            not divs: these are controls, and :focus-visible only reaches them here. */}
+        <div className="ctls">
+          <button type="button" className={`ctl ${live ? "on" : ""}`} onClick={toggleLive} title="Best-effort live signal from Claude Code transcripts. Off → git + Jira only.">
+            <span className="switch" />Live signal
+          </button>
+          <button type="button" className={`ctl ${prFacts ? "on" : ""}`} onClick={() => { const next = !prFacts; setPrFacts(next); send({ type: "deck:setPrFacts", on: next }); }} title="Read each task's PR state from GitHub with the gh CLI. Off → git + Jira only.">
+            <span className="switch" />PR facts
+          </button>
         </div>
-        <div className={`ctl ${prFacts ? "on" : ""}`} onClick={() => { const next = !prFacts; setPrFacts(next); send({ type: "deck:setPrFacts", on: next }); }} title="Read each task's PR state from GitHub with the gh CLI. Off → git + Jira only.">
-          <span className="switch" />PR facts
-        </div>
-        <div className="ctl" onClick={() => send({ type: "deck:refresh" })}>
+        <button type="button" className="ctl" title="Re-read git, Jira and PR state now" onClick={() => send({ type: "deck:refresh" })}>
           <span className={`spin ${busy ? "on" : ""}`}>⟳</span>
           <span className="synced">{busy ? "syncing…" : syncedAt ? `synced ${timeAgo(syncedAt)}` : "refresh"}</span>
-        </div>
+        </button>
       </div>
 
       {runs.length === 0 ? (
@@ -292,7 +318,7 @@ export function DeckApp(): JSX.Element {
           <span className="lg" key={c.id}><span className="dot" style={{ background: `var(${c.varName})` }} />{c.label}</span>
         ))}
         {ghNote && <span className="note warn">{ghNote}</span>}
-        <span className="note">git + Jira backbone · best-effort live from ~/.claude/projects</span>
+        <span className="note">git + Jira backbone · best-effort live from <span className="path">~/.claude/projects</span></span>
       </div>
 
       <div className="toasts">

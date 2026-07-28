@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **"Needs you" is now "Action required", in orange rather than red.** Red is the
+  colour of something broken, and the column was reading as an error when all it
+  means is that it's your turn. The column, its summary tile and the legend now all
+  say **Action required** — they previously disagreed ("Needs you" on the column,
+  "Need you" on the tile) — and the attention accent has split away from the danger
+  accent: orange is your turn, red stays for failing checks, deletions and *Forget*.
+
+- **In-flight typography.** Monospace is now reserved for identifiers and counts —
+  ticket keys, branches, repo names, diff stats, the PR block. Everything that reads
+  as English (`ended turn · 4m ago`, `launched 22m ago`, the Jira status, the footer,
+  toasts) is set in the editor's UI font, where it used to be mono and made the board
+  look like a log dump. Font sizes now come from a four-step scale instead of six
+  ad-hoc values, and every ticking relative time is tabular so it can't reflow the row
+  it sits in.
+
+- **Card buttons are one language.** **Open**, **Diff** and **⋯** now share a height,
+  radius and border, and **Diff**'s outline is visible against the card surface instead
+  of vanishing into it. **Open** is a quiet raised surface at rest and only takes the
+  theme's button colour under the pointer: a bright blue slab on every card was ambient
+  noise, not emphasis. The single card in **Action required** carries the board's only
+  coloured call to action.
+
+- **The branch and launch time share a row.** The branch line was half empty while
+  `launched 22m ago` trailed the repo chips, reading as one more chip that had lost its
+  border.
+
+- **The Live signal and PR facts toggles are one segmented control**, and both are real
+  buttons — they were `div`s, so neither could be reached from the keyboard.
+
+### Removed
+
+- **The `open now — Open will focus this window` line.** It occupied a line on every
+  card with a live window. **Open** now carries it as a tooltip, with a small marker on
+  the button so the state is still visible at a glance.
+
 ## [0.1.38] — 2026-07-28
 
 ### Added
