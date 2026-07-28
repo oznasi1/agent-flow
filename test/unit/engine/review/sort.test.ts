@@ -32,9 +32,14 @@ describe("sortRequests", () => {
   });
 
   it("orders smallest first by lines changed, not files", () => {
-    const big = mk({ id: "big", additions: 3923, deletions: 1998, changedFiles: 50 });
-    const small = mk({ id: "small", additions: 106, deletions: 0, changedFiles: 1 });
-    expect(sortRequests([big, small], "smallest").map((r) => r.id)).toEqual(["small", "big"]);
+    // More files but fewer lines changed — sorting by changedFiles instead of
+    // lines would order these two the wrong way round.
+    const manyFilesFewLines = mk({ id: "manyFilesFewLines", additions: 60, deletions: 0, changedFiles: 20 });
+    const fewFilesManyLines = mk({ id: "fewFilesManyLines", additions: 3000, deletions: 0, changedFiles: 3 });
+    expect(sortRequests([fewFilesManyLines, manyFilesFewLines], "smallest").map((r) => r.id)).toEqual([
+      "manyFilesFewLines",
+      "fewFilesManyLines",
+    ]);
   });
 
   it("breaks a size tie on age", () => {
