@@ -93,6 +93,8 @@ function makeClient() {
     transition: vi.fn(async () => undefined),
     listResolutions: vi.fn(async () => [] as unknown[]),
     addLabel: vi.fn(async () => undefined),
+    listComponents: vi.fn(async () => ["account-service", "Infra"]),
+    updateComponents: vi.fn(async () => undefined),
     getActiveSprintId: vi.fn(async () => 42),
     addIssueToSprint: vi.fn(async () => undefined),
     removeIssueFromSprint: vi.fn(async () => undefined),
@@ -561,6 +563,47 @@ describe("failure routing", () => {
     await send({ type: "changeStatus", key: "ASM-1" });
     expect(posted().some((p) => p.type === "error")).toBe(false);
     expect(posted()).toContainEqual({ type: "toast", level: "error", message: "Couldn't reach Jira" });
+  });
+});
+
+describe("detail", () => {
+  it("reports the issue's components and the repo → component map for every repo", async () => {
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "Do the thing",
+      descriptionText: "desc",
+      labels: ["centaur"],
+      components: ["account-service"],
+      url: "https://jira/browse/ASM-1",
+    });
+    const { send, posted } = setup();
+    await send({ type: "detail", key: "ASM-1" });
+    expect(posted()).toContainEqual({
+      type: "detail",
+      key: "ASM-1",
+      descriptionText: "desc",
+      // account-service from the component, centaur from the label
+      inferred: ["account-service", "centaur"],
+      repos: ["account-service", "centaur"],
+      jiraComponents: ["account-service"],
+      // "centaur" is a discovered repo but not a component of ASM → absent
+      mappable: { "account-service": "account-service" },
+    });
+  });
+
+  it("reads the issue before the component list, so a dead token still re-gates the panel", async () => {
+    clientStub.getDetail.mockRejectedValue(new JiraAuthError("nope"));
+    const { send, posted } = setup();
+    await send({ type: "detail", key: "ASM-1" });
+    expect(clientStub.listComponents).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
+  });
+
+  it("still reports the detail when the component list is unavailable — every chip is local-only", async () => {
+    clientStub.listComponents.mockResolvedValue([]);
+    const { send, posted } = setup();
+    await send({ type: "detail", key: "ASM-1" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "detail", key: "ASM-1", mappable: {} }));
   });
 });
 

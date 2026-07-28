@@ -704,7 +704,7 @@ describe("task card actions", () => {
   it("shows ticket detail once it arrives", () => {
     withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
     fireEvent.click(screen.getByText("Fix bug"));
-    host({ type: "detail", key: "ASM-1", descriptionText: "The full description", inferred: [], repos: ["centaur"] });
+    host({ type: "detail", key: "ASM-1", descriptionText: "The full description", inferred: [], repos: ["centaur"], jiraComponents: [], mappable: {} });
     expect(screen.getByText("The full description")).toBeInTheDocument();
   });
 });

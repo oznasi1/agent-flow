@@ -16,6 +16,7 @@ import {
 } from "./jira/transitionFields";
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
+import { mapRepoComponents } from "./engine/components";
 import { injectSlackDm, insertBeforeFiles } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths } from "./engine/workspace";
 import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
@@ -176,18 +177,26 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
         case "detail": {
           if (!(await this.auth.isAuthenticated())) return;
-          const detail = await this.client().getDetail(m.key);
+          const client = this.client();
+          const detail = await client.getDetail(m.key);
           const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
           const inferred = inferServices(
             { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
             repos,
           ).map((r) => r.service.name);
+          // After the issue read, never before: listComponents swallows every
+          // failure including a 401, so the detail read is what lets a dead token
+          // reach the catch below and re-gate the panel.
+          const projectComponents = await client.listComponents();
+          const names = repos.map((r) => r.name);
           this.post({
             type: "detail",
             key: m.key,
             descriptionText: detail.descriptionText,
             inferred,
-            repos: repos.map((r) => r.name),
+            repos: names,
+            jiraComponents: detail.components,
+            mappable: mapRepoComponents(names, projectComponents),
           });
           break;
         }

@@ -240,7 +240,11 @@ export type OutboundMessage =
   // blank/loading panel.
   | { type: "state"; authed: boolean; configured: boolean; project: string; me: string | null; prReviewStatus: string; filters: FilterVisibility }
   | { type: "tasks"; filter: Filter; tasks: JiraTask[] }
-  | { type: "detail"; key: string; descriptionText: string; inferred: string[]; repos: string[] }
+  | { type: "detail"; key: string; descriptionText: string; inferred: string[]; repos: string[];
+      // The components actually on the issue, spelled as Jira spells them, and the
+      // repo → component map for every discovered repo. Together with `inferred`
+      // these classify each chip: on the issue, pushable, or local-only.
+      jiraComponents: string[]; mappable: Record<string, string> }
   | { type: "statusChanged"; key: string; status: string; category: string; removed: boolean }
   | { type: "movedToSprint"; key: string; assignee: string; removed: boolean }
   | { type: "removedFromSprint"; key: string }
