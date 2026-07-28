@@ -72,13 +72,20 @@ Rules that follow:
 
 Two additions, both mirroring existing members.
 
-`listComponents(): Promise<string[]>` — `GET /rest/api/3/project/{key}/components`,
+`listComponents(): Promise<string[] | null>` — `GET /rest/api/3/project/{key}/components`,
 returning component names. Cached at module level keyed by project key with a
 5-minute TTL. The TTL is the one deviation from the `cachedSprintFieldId` pattern:
 components are created far more often than a site's sprint field id changes, and a
-component added in Jira should not require a window reload to become syncable. A
-fetch failure resolves to `[]` rather than throwing — that degrades the feature to
-today's local-only behavior instead of breaking card expansion.
+component added in Jira should not require a window reload to become syncable.
+
+A fetch failure resolves to `null` rather than throwing, which degrades the feature
+to today's local-only behavior instead of breaking card expansion. **`null` and `[]`
+are different answers and the distinction is load-bearing**: `[]` means the project
+defines no components, `null` means we do not know. Collapsing them — as an earlier
+draft of this spec did — makes both the host's toast and the chip's own title assert
+"no component named X" when the truth is a dead token or an unreachable site, which
+sends the user to fix a name that was never the problem. A failure is never cached,
+so the next call retries.
 
 `updateComponents(key, {add?: string[], remove?: string[]})` —
 `PUT /rest/api/3/issue/{key}` with body
@@ -117,10 +124,12 @@ worth a message; the host trusts what it is sent and never re-derives the state.
 ```
 host → webview   detail            + jiraComponents: string[]
                                      // canonical component names on the issue
-                                   + mappable: Record<string, string>
+                                   + mappable: Record<string, string> | null
                                      // repo name → canonical component name, for
                                      // every repo in `repos` (not just the chipped
-                                     // ones) — the user can add any of them
+                                     // ones) — the user can add any of them.
+                                     // null = the project's component list could
+                                     // not be read, so no chip state is knowable
 
 webview → host   setComponent      { key, repo, on, movedChip }
 
@@ -159,6 +168,14 @@ that says which it is:
   own title reading "Add `Pricing-Api` to `ASM-1`" — the component's spelling, not
   the repo's, since that's what Jira actually receives.
 - **C** — "no `ASM` component named `scratch-tool` — this selection stays local".
+
+When `mappable` is `null` — the project's component list could not be read — there is
+a fourth rendering, and it is the *absence* of a claim. Every chip takes the plain
+solid form with no `↑` and a generic `Remove`, titled "couldn't read `ASM`'s
+components — can't tell which are on `ASM-1`". The dashed border is what asserts "not
+on the ticket", so applying it here would state something unknown as fact; the solid
+form is the neutral one because it is what the chips looked like before this feature
+existed. No write is attempted, since no canonical name is available to send.
 
 No hint line and no red: red is reserved for real failures, and cards carry no
 persistent hint lines.
