@@ -19,6 +19,11 @@ const REQUEST_TIMEOUT_MS = 15_000;
 // The Sprint field is a custom (greenhopper) field; its id is stable per Jira site.
 let cachedSprintFieldId: string | null | undefined;
 
+/** The project's component list, cached per project key. Short-lived on purpose:
+ * a component created in Jira should become syncable without a window reload, and
+ * the payload is a handful of names. */
+const COMPONENTS_TTL_MS = 5 * 60_000;
+
 const LIST_FIELDS =["summary", "status", "priority", "assignee", "labels", "components", "updated", "timeoriginalestimate"];
 const DETAIL_FIELDS = ["summary", "description", "labels", "components", "priority", "status", "assignee"];
 
@@ -44,6 +49,8 @@ export interface JiraDetail {
 }
 
 export class JiraClient {
+  private cachedComponents = new Map<string, { names: string[]; at: number }>();
+
   constructor(
     private readonly baseUrl: string,
     private readonly project: string,
@@ -246,6 +253,42 @@ export class JiraClient {
     await this.request(`/rest/api/3/issue/${encodeURIComponent(key)}`, {
       method: "PUT",
       body: JSON.stringify({ update: { labels: [{ add: label }] } }),
+    });
+  }
+
+  /** The component names this project defines — the only names a component write
+   *  may use. Cached for `COMPONENTS_TTL_MS`. A failure resolves to `[]` and is not
+   *  cached: without the list, component writes are simply off, and that must not
+   *  also break expanding a card. Callers that need auth failures reported must
+   *  read the issue *before* calling this. */
+  async listComponents(): Promise<string[]> {
+    const hit = this.cachedComponents.get(this.project);
+    if (hit && Date.now() - hit.at < COMPONENTS_TTL_MS) return hit.names;
+    let names: string[];
+    try {
+      const data = await this.request(
+        `/rest/api/3/project/${encodeURIComponent(this.project)}/components`,
+      );
+      names = (Array.isArray(data) ? data : []).map((c: any) => c?.name ?? "").filter((n: string) => !!n);
+    } catch {
+      return [];
+    }
+    this.cachedComponents.set(this.project, { names, at: Date.now() });
+    return names;
+  }
+
+  /** Add and/or remove components on an issue, leaving every other component in
+   *  place (Jira WRITE). Additive verbs only — a `set` would delete the components
+   *  that have no local checkout. Names must be spelled as the project spells them. */
+  async updateComponents(key: string, delta: { add?: string[]; remove?: string[] }): Promise<void> {
+    const ops = [
+      ...(delta.add ?? []).map((name) => ({ add: { name } })),
+      ...(delta.remove ?? []).map((name) => ({ remove: { name } })),
+    ];
+    if (ops.length === 0) return;
+    await this.request(`/rest/api/3/issue/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ update: { components: ops } }),
     });
   }
 

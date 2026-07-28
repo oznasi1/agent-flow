@@ -527,3 +527,94 @@ describe("getProject", () => {
     expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/project/A%20B`);
   });
 });
+
+describe("listComponents", () => {
+  it("GETs the project's components and returns their names", async () => {
+    const fetchMock = installFetch([jsonResponse([{ id: "1", name: "billing-service" }, { id: "2", name: "Infra" }])]);
+    await expect(client().listComponents()).resolves.toEqual(["billing-service", "Infra"]);
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/project/ASM/components`);
+  });
+
+  it("drops entries with no usable name and tolerates a non-array body", async () => {
+    installFetch([jsonResponse([{ id: "1" }, { id: "2", name: "" }, { id: "3", name: "Infra" }])]);
+    await expect(client().listComponents()).resolves.toEqual(["Infra"]);
+    installFetch([jsonResponse({ not: "an array" })]);
+    await expect(client().listComponents()).resolves.toEqual([]);
+  });
+
+  it("caches the list — a second call inside the TTL does not fetch again", async () => {
+    const fetchMock = installFetch([jsonResponse([{ name: "billing-service" }])]);
+    const c = client();
+    await c.listComponents();
+    await expect(c.listComponents()).resolves.toEqual(["billing-service"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refetches once the 5-minute TTL has passed", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchMock = installFetch([
+        jsonResponse([{ name: "billing-service" }]),
+        jsonResponse([{ name: "billing-service" }, { name: "pricing-api" }]),
+      ]);
+      const c = client();
+      await c.listComponents();
+      vi.advanceTimersByTime(5 * 60_000 + 1);
+      await expect(c.listComponents()).resolves.toEqual(["billing-service", "pricing-api"]);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("resolves to [] on failure rather than throwing, and does not cache the failure", async () => {
+    const fetchMock = installFetch([textResponse("boom", 500), jsonResponse([{ name: "Infra" }])]);
+    const c = client();
+    await expect(c.listComponents()).resolves.toEqual([]);
+    await expect(c.listComponents()).resolves.toEqual(["Infra"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("swallows an auth failure too — the caller reads the issue first, which reports it", async () => {
+    installFetch([textResponse("", 401)]);
+    await expect(client().listComponents()).resolves.toEqual([]);
+  });
+});
+
+describe("updateComponents", () => {
+  it("PUTs an additive add", async () => {
+    const fetchMock = installFetch([emptyResponse()]);
+    await client().updateComponents("ASM-1", { add: ["billing-service"] });
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/ASM-1`);
+    expect(fetchMock.mock.calls[0][1].method).toBe("PUT");
+    expect(bodyOf(fetchMock, 0)).toEqual({ update: { components: [{ add: { name: "billing-service" } }] } });
+  });
+
+  it("PUTs a remove", async () => {
+    const fetchMock = installFetch([emptyResponse()]);
+    await client().updateComponents("ASM-1", { remove: ["pricing-api"] });
+    expect(bodyOf(fetchMock, 0)).toEqual({ update: { components: [{ remove: { name: "pricing-api" } }] } });
+  });
+
+  it("PUTs adds before removes in one call", async () => {
+    const fetchMock = installFetch([emptyResponse()]);
+    await client().updateComponents("ASM-1", { add: ["a"], remove: ["b"] });
+    expect(bodyOf(fetchMock, 0)).toEqual({
+      update: { components: [{ add: { name: "a" } }, { remove: { name: "b" } }] },
+    });
+  });
+
+  it("never uses the destructive set verb (which would drop components with no local repo)", async () => {
+    const fetchMock = installFetch([emptyResponse()]);
+    await client().updateComponents("ASM-1", { add: ["a"] });
+    expect(JSON.stringify(bodyOf(fetchMock, 0))).not.toContain("set");
+    expect(bodyOf(fetchMock, 0)).not.toHaveProperty("fields");
+  });
+
+  it("makes no request at all when there is nothing to change", async () => {
+    const fetchMock = installFetch([]);
+    await client().updateComponents("ASM-1", {});
+    await client().updateComponents("ASM-1", { add: [], remove: [] });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
