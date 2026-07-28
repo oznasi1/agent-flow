@@ -172,6 +172,8 @@ git commit -m "feat(jira): resolve local repo names against project components"
 
 The read is cached per project with a 5-minute TTL — components get created far more often than the sprint field id changes, so the module-level forever-cache used for `cachedSprintFieldId` would make a new component un-syncable until a window reload. A failed read resolves to `[]` rather than throwing: not knowing the list disables component writes, and that must not also break expanding a card.
 
+**The cache must be module-level, not a field on `JiraClient`.** `tasksView.client()` returns `new JiraClient(...)` on every call (`src/tasksView.ts:82-85`), so an instance field is discarded after a single use and the cache would never hit — every card expand and every chip toggle would refetch. This is why the existing `cachedSprintFieldId` lives at module scope too.
+
 **Files:**
 - Modify: `src/jira/client.ts` — add the TTL constant and cache near `cachedSprintFieldId` (line 20), and the two methods after `addLabel` (ends line 250)
 - Test: `test/unit/jira/client.test.ts`
@@ -194,9 +196,18 @@ describe("listComponents", () => {
     expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/project/ASM/components`);
   });
 
-  it("drops entries with no usable name and tolerates a non-array body", async () => {
+  // Two separate cases on purpose. The cache is module-level and keyed by project,
+  // so a second listComponents() in the same test would be served from the first
+  // one's result — asserting both in one `it` would force the cache to be scoped
+  // per client instance, and `tasksView.client()` builds a new client per call, so
+  // that scope would never hit in production. The file's beforeEach resets modules,
+  // which gives each `it` a clean cache.
+  it("drops entries with no usable name", async () => {
     installFetch([jsonResponse([{ id: "1" }, { id: "2", name: "" }, { id: "3", name: "Infra" }])]);
     await expect(client().listComponents()).resolves.toEqual(["Infra"]);
+  });
+
+  it("tolerates a non-array body", async () => {
     installFetch([jsonResponse({ not: "an array" })]);
     await expect(client().listComponents()).resolves.toEqual([]);
   });
