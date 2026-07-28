@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapRollup, mapMergeable, mapReview, toPrFacts, pickPr, parseRepoFromUrl } from "../../../../src/engine/pr/facts";
+import { mapRollup, mapMergeable, mapReview, toPrFacts, pickPr, parseRepoFromUrl, countUnresolved } from "../../../../src/engine/pr/facts";
 import type { GhCheck, GhPr } from "../../../../src/engine/pr/facts";
 
 const checkRun = (over: Partial<GhCheck> = {}): GhCheck => ({
@@ -164,5 +164,30 @@ describe("parseRepoFromUrl", () => {
   it("returns null for a url with too few segments or a non-url", () => {
     expect(parseRepoFromUrl("https://github.com/acme")).toBeNull();
     expect(parseRepoFromUrl("not a url")).toBeNull();
+  });
+});
+
+describe("countUnresolved", () => {
+  const wrap = (nodes: unknown) => ({
+    data: { repository: { pullRequest: { reviewThreads: { nodes } } } },
+  });
+
+  it("counts threads that are neither resolved nor outdated", () => {
+    expect(countUnresolved(wrap([
+      { isResolved: false, isOutdated: false },
+      { isResolved: true, isOutdated: false },
+      { isResolved: false, isOutdated: true },
+      { isResolved: false, isOutdated: false },
+    ]))).toBe(2);
+  });
+
+  it("counts zero for an empty thread list", () => {
+    expect(countUnresolved(wrap([]))).toBe(0);
+  });
+
+  it("returns null when the shape is not a thread list", () => {
+    expect(countUnresolved(wrap("nope"))).toBeNull();
+    expect(countUnresolved({})).toBeNull();
+    expect(countUnresolved(null)).toBeNull();
   });
 });

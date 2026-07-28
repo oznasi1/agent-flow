@@ -1,6 +1,6 @@
 import { execFile } from "child_process";
 import { PrFacts } from "../../types";
-import { GhPr, parseRepoFromUrl, pickPr, toPrFacts } from "./facts";
+import { countUnresolved, GhPr, parseRepoFromUrl, pickPr, toPrFacts } from "./facts";
 import { resolveBin } from "./which";
 
 /** Every field we need, in one call. Verified against gh 2.89.0 — `pr list --json`
@@ -10,7 +10,7 @@ export const PR_JSON_FIELDS =
 
 export const GH_TIMEOUT_MS = 10_000;
 
-const THREADS_QUERY =
+export const THREADS_QUERY =
   "query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){" +
   "reviewThreads(first:100){nodes{isResolved isOutdated}}}}}";
 
@@ -114,11 +114,7 @@ export class GhProvider implements PrProvider {
         ["api", "graphql", "-f", `query=${THREADS_QUERY}`, "-F", `o=${loc.owner}`, "-F", `r=${loc.repo}`, "-F", `n=${pr.number}`],
         { cwd: repoPath, timeoutMs: GH_TIMEOUT_MS },
       );
-      const nodes = (JSON.parse(out) as {
-        data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: { isResolved?: boolean; isOutdated?: boolean }[] } } } };
-      }).data?.repository?.pullRequest?.reviewThreads?.nodes;
-      if (!Array.isArray(nodes)) return null;
-      return nodes.filter((n) => !n.isResolved && !n.isOutdated).length;
+      return countUnresolved(JSON.parse(out));
     } catch {
       return null;
     }

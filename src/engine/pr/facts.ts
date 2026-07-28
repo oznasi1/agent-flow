@@ -127,3 +127,16 @@ export function parseRepoFromUrl(url: string): { owner: string; repo: string } |
   if (parts.length < 2) return null;
   return { owner: parts[0], repo: parts[1] };
 }
+
+/** Unresolved review threads in a `reviewThreads` GraphQL response. Null means the
+ * shape was not one we recognise — a caller must not render that as "0 open".
+ * An outdated thread is not counted: it refers to code the PR has since replaced. */
+export function countUnresolved(json: unknown): number | null {
+  const nodes = (json as {
+    data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: unknown } } } };
+  } | null)?.data?.repository?.pullRequest?.reviewThreads?.nodes;
+  if (!Array.isArray(nodes)) return null;
+  return (nodes as { isResolved?: boolean; isOutdated?: boolean }[]).filter(
+    (n) => !n?.isResolved && !n?.isOutdated,
+  ).length;
+}
