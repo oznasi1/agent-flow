@@ -79,6 +79,11 @@ describe("readReviewCache / writeReviewCache", () => {
     expect(readReviewCache(file)).toEqual({ fetchedAt: 5, issueCount: 1, requests: [req] });
   });
 
+  it("keeps a readable file whose rows are all unusable, as an empty queue", () => {
+    fs.writeFileSync(file, JSON.stringify({ fetchedAt: 5, issueCount: 1, requests: ["garbage"] }));
+    expect(readReviewCache(file)).toEqual({ fetchedAt: 5, issueCount: 1, requests: [] });
+  });
+
   it("returns an empty list as a valid readable cache, not null", () => {
     writeReviewCache(file, { fetchedAt: 5, issueCount: 0, requests: [] });
     expect(readReviewCache(file)).toEqual({ fetchedAt: 5, issueCount: 0, requests: [] });
