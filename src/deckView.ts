@@ -296,6 +296,7 @@ export class DeckPanel {
       issueCount: this.reviewCache.issueCount,
       sort: this.reviewSort,
       stale: this.reviewStale,
+      reviewWrites: getConfig().reviewWrites,
     });
   }
 

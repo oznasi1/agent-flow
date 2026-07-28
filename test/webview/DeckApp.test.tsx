@@ -422,7 +422,7 @@ describe("DeckApp PR-facts chrome", () => {
 });
 
 const reviewsMsg = (requests: ReviewRequest[], issueCount = requests.length): OutboundMessage =>
-  ({ type: "deck:reviews", requests, issueCount, sort: "oldest", stale: false });
+  ({ type: "deck:reviews", requests, issueCount, sort: "oldest", stale: false, reviewWrites: false });
 
 const mkReview = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
   id: "o/r#1", repo: "o/r", repoName: "r", number: 1, title: "a small fix", url: "https://gh/o/r/pull/1",
@@ -534,5 +534,136 @@ describe("DeckApp review strip", () => {
 
     expect(screen.queryByText("check-a")).not.toBeInTheDocument();
     expect(screen.getByText("check-b")).toBeInTheDocument();
+  });
+});
+
+describe("DeckApp review writes", () => {
+  // Three places carry reviewWrites in DeckApp: the reviews state's type, its
+  // initial value, and the deck:reviews handler's assignment — missing any one
+  // leaves the verbs permanently hidden (safe) or permanently shown (not).
+  // reviewsMsg's own default omits the field (false), so this pins the "off by
+  // default, before any message says otherwise" half; the brief's own tests
+  // below pin the "on once told so" half.
+  it("keeps the box and verbs hidden until a deck:reviews message turns writes on", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()]));
+    fireEvent.click(screen.getByText("a small fix"));
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approve")).not.toBeInTheDocument();
+  });
+
+  it("submits with fromDraft true only after loading the agent's draft", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText(/Load agent's review/i));
+    host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
+    fireEvent.click(screen.getByText("Comment"));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:reviewSubmit", id: "o/r#1", verb: "comment", body: "1. unbounded retry", fromDraft: true,
+    });
+  });
+
+  it("submits with fromDraft false for a hand-typed body", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "mine" } });
+    fireEvent.click(screen.getByText("Comment"));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:reviewSubmit", id: "o/r#1", verb: "comment", body: "mine", fromDraft: false,
+    });
+  });
+
+  it("keeps fromDraft set when a loaded draft is edited", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText(/Load agent's review/i));
+    host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "1. the retry budget is unbounded" } });
+    fireEvent.click(screen.getByText("Comment"));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:reviewSubmit", id: "o/r#1", verb: "comment",
+      body: "1. the retry budget is unbounded", fromDraft: true,
+    });
+  });
+
+  it("clears fromDraft when the box is emptied", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText(/Load agent's review/i));
+    host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "all mine now" } });
+    fireEvent.click(screen.getByText("Comment"));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:reviewSubmit", id: "o/r#1", verb: "comment", body: "all mine now", fromDraft: false,
+    });
+  });
+
+  it("disables Approve for a row once its submit is posted, until an outcome toast arrives", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText("Approve"));
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(true);
+    host({ type: "toast", level: "success", message: "Approve sent on r#1." });
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("also releases the in-flight disable when a fresh reviews post arrives, not only a toast", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText("Approve"));
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(true);
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage);
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // Keyed by id in DeckApp's own state, not just in ReviewStrip's props — a single
+  // shared boolean ("something, somewhere, is submitting") would also pass every
+  // test above but would wrongly freeze every other row's buttons too.
+  it("leaves a different row's verbs enabled while one row's submit is in flight", () => {
+    render(<DeckApp />);
+    const a = mkReview({ id: "o/r#1", number: 1, title: "a small fix" });
+    const b = mkReview({ id: "o/r#2", number: 2, title: "a bigger fix" });
+    host({ ...reviewsMsg([a, b]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText("Approve"));
+    fireEvent.click(screen.getByText("a small fix")); // collapse row 1, still mid-submit
+    fireEvent.click(screen.getByText("a bigger fix")); // expand row 2
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("shows the failed-submit warning after an error toast, and clears it after a later success", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "lgtm" } });
+    fireEvent.click(screen.getByText("Comment"));
+    host({ type: "toast", level: "error", message: "GitHub refused: nope", action: { label: "Open PR", url: "https://gh/o/r/pull/1" } });
+    expect(screen.getByText(/check the pr before trying again/i)).toBeInTheDocument();
+    // Re-enabled, not locked out: a repeat is meant to be an informed click, not a
+    // blocked one.
+    expect((screen.getByText("Comment") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByText("Comment"));
+    host({ type: "toast", level: "success", message: "Comment sent on r#1." });
+    expect(screen.queryByText(/check the pr before trying again/i)).not.toBeInTheDocument();
+  });
+
+  it("renders a toast's Open PR action and opens it externally", () => {
+    render(<DeckApp />);
+    host({ type: "toast", level: "error", message: "GitHub refused: nope", action: { label: "Open PR", url: "https://gh/o/r/pull/1" } });
+    fireEvent.click(screen.getByText("Open PR"));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://gh/o/r/pull/1" });
+  });
+
+  it("renders no action button for a toast that carries none", () => {
+    render(<DeckApp />);
+    host({ type: "toast", level: "info", message: "just fyi" });
+    expect(screen.queryByRole("button", { name: /open pr/i })).not.toBeInTheDocument();
   });
 });

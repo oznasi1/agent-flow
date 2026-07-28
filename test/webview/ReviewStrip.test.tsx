@@ -19,6 +19,8 @@ const props = (over: Partial<React.ComponentProps<typeof ReviewStrip>> = {}) => 
   requests: [mk()], issueCount: 1, sort: "oldest" as const, stale: false,
   expanded: null, details: {}, onExpand: vi.fn(), onSort: vi.fn(), onOpen: vi.fn(),
   collapsed: false, onCollapse: vi.fn(), onLaunch: vi.fn(), onLoadDraft: vi.fn(),
+  reviewWrites: false, bodies: {}, onBody: vi.fn(), onSubmit: vi.fn(),
+  submitting: {}, submitFailed: {},
   ...over,
 });
 
@@ -181,5 +183,117 @@ describe("ReviewStrip", () => {
     })} />);
     fireEvent.click(screen.getByText(/Load agent's review/i));
     expect(onLoadDraft).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
+  });
+
+  it("renders no box and no verbs while writes are off", () => {
+    const { container } = render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", reviewWrites: false })} />);
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approve")).not.toBeInTheDocument();
+    // getByRole("textbox") alone would still pass a version that renders the box
+    // but hides it with CSS (e.g. display:none) — Testing Library's role query
+    // excludes inaccessible elements by default, so it can't tell "absent" from
+    // "hidden". A raw DOM query has no such filter and catches that regression.
+    expect(container.querySelector(".rv-box")).toBeNull();
+    expect(container.querySelector("textarea")).toBeNull();
+  });
+
+  it("renders the box and three verbs when writes are on", () => {
+    render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true })} />);
+    expect(screen.getByRole("textbox")).toBeInTheDocument();
+    expect(screen.getByText("Approve")).toBeInTheDocument();
+    expect(screen.getByText("Comment")).toBeInTheDocument();
+    expect(screen.getByText("Request changes")).toBeInTheDocument();
+  });
+
+  it("disables comment and request-changes with an empty box, but not approve", () => {
+    render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true })} />);
+    expect((screen.getByText("Comment") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText("Request changes") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // The `.disabled` checks above would also pass a button styled to *look*
+  // disabled (e.g. aria-disabled plus a dimming class) while its onClick still
+  // fires — jsdom, like a real browser, only suppresses the click when
+  // `disabled` is a genuine DOM property. Only firing the click and checking the
+  // handler proves the binding actually blocks it.
+  it("does not call onSubmit when a disabled verb is clicked", () => {
+    const onSubmit = vi.fn();
+    render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true, onSubmit })} />);
+    fireEvent.click(screen.getByText("Comment"));
+    fireEvent.click(screen.getByText("Request changes"));
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("enables every verb once the box has text", () => {
+    render(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true,
+      bodies: { "CyberJackGit/aws-ops#8491": "the retry budget" },
+    })} />);
+    expect((screen.getByText("Request changes") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("reports typing and submitting", () => {
+    const onBody = vi.fn();
+    const onSubmit = vi.fn();
+    render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true, onBody, onSubmit })} />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "lgtm" } });
+    expect(onBody).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491", "lgtm");
+    fireEvent.click(screen.getByText("Approve"));
+    expect(onSubmit).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491", "approve");
+  });
+
+  // Approve does not gate on body text (GitHub allows a bodiless approval) — only
+  // `submitting` should touch it. Without this test, a broken `disabled={!body.trim()}`
+  // left on Approve (copy-pasted from Comment/Request changes) would pass every test
+  // above, since none of them submit Approve with an empty box.
+  it("keeps approve enabled with an empty box", () => {
+    render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true, bodies: {} })} />);
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("disables all three verbs while a submit is in flight for the row", () => {
+    render(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true,
+      bodies: { "CyberJackGit/aws-ops#8491": "lgtm" },
+      submitting: { "CyberJackGit/aws-ops#8491": true },
+    })} />);
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText("Comment") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText("Request changes") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  // Keyed by id: a submit in flight for a DIFFERENT row must not disable this one —
+  // otherwise a single global "something is submitting" flag would pass the test
+  // above just as well, and freeze every other row's buttons while one PR submits.
+  it("does not disable a row's verbs for another row's in-flight submit", () => {
+    render(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true,
+      bodies: { "CyberJackGit/aws-ops#8491": "lgtm" },
+      submitting: { "someone/else#1": true },
+    })} />);
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("shows an inline warning after a failed submit, without the toast's own wording", () => {
+    render(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true,
+      submitFailed: { "CyberJackGit/aws-ops#8491": true },
+    })} />);
+    expect(screen.getByText(/check the pr before trying again/i)).toBeInTheDocument();
+    expect(screen.queryByText(/GitHub refused/i)).not.toBeInTheDocument();
+  });
+
+  it("shows no warning for a row that has not failed", () => {
+    render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", reviewWrites: true })} />);
+    expect(screen.queryByText(/check the pr before trying again/i)).not.toBeInTheDocument();
+  });
+
+  it("hides the failure warning entirely while writes are off", () => {
+    render(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491", reviewWrites: false,
+      submitFailed: { "CyberJackGit/aws-ops#8491": true },
+    })} />);
+    expect(screen.queryByText(/check the pr before trying again/i)).not.toBeInTheDocument();
   });
 });

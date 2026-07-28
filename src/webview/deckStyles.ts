@@ -260,11 +260,18 @@ export const DECK_CSS = `
   .legend .note.warn { color: var(--c-attn); margin-left: 0; }
 
   .toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; z-index: 50; }
-  .toast { font-size: 12px; padding: 8px 14px; border-radius: 7px;
+  .toast { display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 8px 14px; border-radius: 7px;
     border: 1px solid var(--hair); background: var(--vscode-notifications-background, var(--vscode-editorWidget-background));
     color: var(--vscode-foreground); box-shadow: 0 6px 20px -8px rgba(0,0,0,.5); }
   .toast.error { border-color: var(--c-danger); }
   .toast.success { border-color: var(--c-done); }
+  .toast-msg { flex: 1; }
+  /* A real button, not the toast's own onClick — Open PR must not be swallowed by a
+     dismiss handler the toast doesn't even have here (unlike the sidebar's toast
+     stack, this one only ever times out). */
+  .toast-action { flex: none; font-size: var(--t-body); padding: 2px 9px; border-radius: var(--r-chip);
+    cursor: pointer; background: transparent; color: var(--vscode-foreground); border: 1px solid var(--edge); }
+  .toast-action:hover { background: var(--vscode-toolbar-hoverBackground); }
 
   .board::-webkit-scrollbar { width: 9px; height: 9px; }
   .board::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 8px; }
@@ -359,4 +366,10 @@ export const DECK_CSS = `
     font-size: var(--t-body); color: var(--vscode-input-foreground);
     background: var(--vscode-input-background); border: 1px solid var(--edge);
     border-radius: var(--r-ctl); padding: 5px 7px; }
+
+  /* A failed submit's own line, full-width below the box and its verbs (flex-basis:
+     100% wraps it under them, the same trick .rv-facts uses above). --c-attn, not
+     --c-danger: nothing here is broken — GitHub may well have taken the review —
+     this is "go check", the same register as the stale-queue note above. */
+  .rv-fail { flex-basis: 100%; font-size: var(--t-body); color: var(--c-attn); }
 `;

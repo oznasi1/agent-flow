@@ -826,6 +826,17 @@ describe("DeckPanel review strip", () => {
     expect(msg.requests[0].id).toBe("CyberJackGit/aws-ops#8491");
   });
 
+  it("carries reviewWrites off by default", async () => {
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:reviews").reviewWrites).toBe(false);
+  });
+
+  it("carries reviewWrites on when the setting is on", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:reviews").reviewWrites).toBe(true);
+  });
+
   it("resolves a local checkout for a repo under reposRoot", async () => {
     const p = await showAndWarm();
     const msg = posts(p).find((m) => m.type === "deck:reviews");

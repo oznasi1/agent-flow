@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ReviewDetail, ReviewRequest, ReviewSort } from "../types";
+import { ReviewDetail, ReviewRequest, ReviewSort, ReviewVerb } from "../types";
 import { linesChanged, sizeBucket } from "../engine/review/sort";
 
 function age(ms: number): string {
@@ -24,22 +24,42 @@ export interface ReviewStripProps {
   collapsed: boolean;
   expanded: string | null;
   details: Record<string, ReviewDetail>;
+  reviewWrites: boolean;
+  bodies: Record<string, string>;
+  /** Mid-flight for this id: a submit has been posted and no toast or fresh
+   * `deck:reviews` has come back yet. UX only — the host's own per-id guard is
+   * what actually stops a duplicate write; this just keeps a double-click from
+   * ever reaching two confirmation dialogs. */
+  submitting: Record<string, boolean>;
+  /** The last submit for this id came back as a failure. Shown as an inline
+   * line rather than folded into the failure toast, because a submit killed by
+   * the host's 10s timeout may already have landed on GitHub — the point is to
+   * make a repeat an informed click, not to block it. */
+  submitFailed: Record<string, boolean>;
   onCollapse: (next: boolean) => void;
   onExpand: (id: string) => void;
   onSort: (sort: ReviewSort) => void;
   onOpen: (url: string) => void;
   onLaunch: (id: string) => void;
   onLoadDraft: (id: string) => void;
+  onBody: (id: string, body: string) => void;
+  onSubmit: (id: string, verb: ReviewVerb) => void;
 }
 
-function Row({ r, expanded, detail, onExpand, onOpen, onLaunch, onLoadDraft }: {
+function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed, onExpand, onOpen, onLaunch, onLoadDraft, onBody, onSubmit }: {
   r: ReviewRequest;
   expanded: boolean;
   detail: ReviewDetail | undefined;
+  reviewWrites: boolean;
+  body: string;
+  submitting: boolean;
+  submitFailed: boolean;
   onExpand: (id: string) => void;
   onOpen: (url: string) => void;
   onLaunch: (id: string) => void;
   onLoadDraft: (id: string) => void;
+  onBody: (id: string, body: string) => void;
+  onSubmit: (id: string, verb: ReviewVerb) => void;
 }): JSX.Element {
   const ci = CI_GLYPH[r.ci];
   return (
@@ -90,6 +110,15 @@ function Row({ r, expanded, detail, onExpand, onOpen, onLaunch, onLoadDraft }: {
           ) : (
             <div className="rv-facts dim">loading…</div>
           )}
+          {reviewWrites && (
+            <div className="rv-box">
+              <textarea
+                value={body}
+                placeholder="Leave a message… (required for Comment and Request changes)"
+                onChange={(e) => onBody(r.id, e.target.value)}
+              />
+            </div>
+          )}
           <div className="rv-actions">
             <button
               type="button"
@@ -104,7 +133,21 @@ function Row({ r, expanded, detail, onExpand, onOpen, onLaunch, onLoadDraft }: {
               <button type="button" className="act" onClick={() => onLoadDraft(r.id)}>Load agent's review</button>
             )}
             <button type="button" className="act" onClick={() => onOpen(r.url)}>Open PR</button>
+            {reviewWrites && (
+              <>
+                <button type="button" className="act" disabled={submitting} onClick={() => onSubmit(r.id, "approve")}>Approve</button>
+                <button type="button" className="act" disabled={submitting || !body.trim()} onClick={() => onSubmit(r.id, "comment")}>Comment</button>
+                <button type="button" className="act" disabled={submitting || !body.trim()} onClick={() => onSubmit(r.id, "request-changes")}>Request changes</button>
+              </>
+            )}
           </div>
+          {/* GitHub does not dedupe reviews, and a submit killed by the host's 10s
+              timeout may already have gone through — so a failure gets a line of its
+              own rather than just an enabled retry button. Complements the failure
+              toast's own "Open PR" action rather than repeating its wording. */}
+          {reviewWrites && submitFailed && (
+            <div className="rv-fail">This may already have gone through — check the PR before trying again.</div>
+          )}
         </div>
       )}
     </div>
@@ -137,7 +180,10 @@ export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
         <div className="rv-rows">
           {p.requests.map((r) => (
             <Row key={r.id} r={r} expanded={p.expanded === r.id} detail={p.details[r.id]}
-                 onExpand={p.onExpand} onOpen={p.onOpen} onLaunch={p.onLaunch} onLoadDraft={p.onLoadDraft} />
+                 reviewWrites={p.reviewWrites} body={p.bodies[r.id] ?? ""}
+                 submitting={!!p.submitting[r.id]} submitFailed={!!p.submitFailed[r.id]}
+                 onExpand={p.onExpand} onOpen={p.onOpen} onLaunch={p.onLaunch} onLoadDraft={p.onLoadDraft}
+                 onBody={p.onBody} onSubmit={p.onSubmit} />
           ))}
         </div>
       )}

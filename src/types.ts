@@ -320,6 +320,7 @@ export type OutboundMessage =
       issueCount: number;
       sort: ReviewSort;
       stale: boolean; // the last fetch failed; these are the previous results
+      reviewWrites: boolean; // agentFlow.reviewWrites — the strip's box and verbs render only when true
     }
   | { type: "deck:reviewDetail"; id: string; detail: ReviewDetail }
   // The agent's findings, read from the worktree on demand — not carried on

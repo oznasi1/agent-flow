@@ -213,14 +213,32 @@ export function DeckApp(): JSX.Element {
   const [ghNote, setGhNote] = React.useState<string | null>(null);
   const [syncedAt, setSyncedAt] = React.useState<number | null>(null);
   const [, forceTick] = React.useState(0);
-  const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string }[]>([]);
+  const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string; action?: { label: string; url: string } }[]>([]);
   const [busy, setBusy] = React.useState(false);
-  const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean }>(
-    { requests: [], issueCount: 0, sort: "oldest", stale: false },
+  const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean; reviewWrites: boolean }>(
+    { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false },
   );
   const [reviewsCollapsed, setReviewsCollapsed] = React.useState(false);
   const [expanded, setExpanded] = React.useState<string | null>(null);
   const [details, setDetails] = React.useState<Record<string, ReviewDetail>>({});
+  const [bodies, setBodies] = React.useState<Record<string, string>>({});
+  /** Set when a row's box is filled by "Load agent's review" and stays set
+   * through any amount of editing — the disclosure it drives ("an agent read
+   * a teammate's code") stays true however much the wording changes. It clears
+   * only when the box goes back to empty, since at that point nothing of the
+   * agent's text is left to disclose. */
+  const [fromDraft, setFromDraft] = React.useState<Record<string, boolean>>({});
+  const [submitting, setSubmitting] = React.useState<Record<string, boolean>>({});
+  /** The last submit for this id failed. Drives the strip's inline "check the
+   * PR before trying again" line — see the message handler below for why this
+   * is keyed off any toast/reviews arrival rather than the specific id. */
+  const [submitFailed, setSubmitFailed] = React.useState<Record<string, boolean>>({});
+  /** Mirrors `submitting`, updated at the same call sites. The message handler
+   * below is registered once (empty-deps effect), so it can only ever read
+   * React state that was current at mount — a toast or a deck:reviews post
+   * carries no id of its own, so this ref is how that handler learns which
+   * id(s) were mid-submit when the outcome landed. */
+  const submittingRef = React.useRef<Record<string, boolean>>({});
   /** Has the host ever posted a queue? That is the webview's only signal that the
    * feature is on: `postReviews` stays silent when the setting is off or `gh` is
    * unusable, but posts `requests: []` when it is on and you owe nobody a review.
@@ -229,6 +247,23 @@ export function DeckApp(): JSX.Element {
   const [reviewsSeen, setReviewsSeen] = React.useState(false);
 
   React.useEffect(() => {
+    // Clears every row's in-flight flag at once and, only for the id(s) that were
+    // actually mid-submit, records whether that outcome was a failure. See the two
+    // call sites below for why this can't be scoped to a single id.
+    const releaseSubmitting = (failed: boolean) => {
+      const wasSubmitting = submittingRef.current;
+      submittingRef.current = {};
+      setSubmitting({});
+      if (Object.keys(wasSubmitting).length === 0) return;
+      setSubmitFailed((f) => {
+        const next = { ...f };
+        for (const id of Object.keys(wasSubmitting)) {
+          if (failed) next[id] = true;
+          else delete next[id];
+        }
+        return next;
+      });
+    };
     const handler = (ev: MessageEvent<OutboundMessage>) => {
       const m = ev.data;
       if (m.type === "deck:runs") {
@@ -239,8 +274,17 @@ export function DeckApp(): JSX.Element {
         setSyncedAt(Date.now());
       } else if (m.type === "toast") {
         const id = ++toastSeq;
-        setToasts((t) => [...t.slice(-2), { id, level: m.level, message: m.message }]);
+        setToasts((t) => [...t.slice(-2), { id, level: m.level, message: m.message, action: m.action }]);
         setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2600);
+        // submitReview posts exactly one toast per submit, success or failure — so
+        // this is the signal that releases every row's in-flight disable. Neither a
+        // toast nor a deck:reviews post carries an id, so there is no way to scope
+        // this to just the row that finished; an unrelated toast (say, a failed
+        // Forget) would release a genuinely still-running submit's disable early
+        // too. That is an acceptable, cosmetic gap — the host's own
+        // reviewSubmitsInFlight guard is what actually prevents a duplicate write,
+        // not this UI.
+        releaseSubmitting(m.level === "error");
       } else if (m.type === "deck:loading") {
         setBusy(m.loading);
       } else if (m.type === "deck:reviews") {
@@ -249,11 +293,17 @@ export function DeckApp(): JSX.Element {
         // ever being hidden — which also means the collapse state is purely the user's,
         // with no seeded-once ref and no setState nested inside another's updater.
         setReviewsSeen(true);
-        setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale });
+        setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale, reviewWrites: m.reviewWrites });
+        // A successful approve/request-changes evicts the row and re-posts here — the
+        // second of the two outcome signals a submit can arrive as (see the toast
+        // branch above for why this can't be scoped to just the finished row).
+        releaseSubmitting(false);
       } else if (m.type === "deck:reviewDetail") {
         setDetails((d) => ({ ...d, [m.id]: m.detail }));
+      } else if (m.type === "deck:reviewDraft") {
+        setBodies((b) => ({ ...b, [m.id]: m.body }));
+        setFromDraft((f) => ({ ...f, [m.id]: true }));
       }
-      // deck:reviewDraft is handled once the review box exists to show it (Slice 3).
     };
     window.addEventListener("message", handler);
     send({ type: "deck:ready" });
@@ -319,6 +369,10 @@ export function DeckApp(): JSX.Element {
         collapsed={reviewsCollapsed}
         expanded={expanded}
         details={details}
+        reviewWrites={reviews.reviewWrites}
+        bodies={bodies}
+        submitting={submitting}
+        submitFailed={submitFailed}
         onCollapse={setReviewsCollapsed}
         onSort={(sort) => { setReviews((r) => ({ ...r, sort })); send({ type: "deck:setReviewSort", sort }); }}
         onExpand={(id) => {
@@ -330,6 +384,19 @@ export function DeckApp(): JSX.Element {
         onOpen={(url) => send({ type: "openExternal", url })}
         onLaunch={(id) => send({ type: "deck:reviewLaunch", id })}
         onLoadDraft={(id) => send({ type: "deck:reviewLoadDraft", id })}
+        onBody={(id, body) => {
+          setBodies((b) => ({ ...b, [id]: body }));
+          // Editing a loaded draft does NOT clear the flag: the line tells a
+          // teammate an agent read their code, which stays true however much you
+          // reword it. Only emptying the box does — at that point nothing of the
+          // agent's text is left to disclose.
+          if (!body.trim()) setFromDraft((f) => (f[id] ? { ...f, [id]: false } : f));
+        }}
+        onSubmit={(id, verb) => {
+          setSubmitting((s) => ({ ...s, [id]: true }));
+          submittingRef.current = { ...submittingRef.current, [id]: true };
+          send({ type: "deck:reviewSubmit", id, verb, body: bodies[id] ?? "", fromDraft: !!fromDraft[id] });
+        }}
       />
 
       {runs.length === 0 ? (
@@ -369,7 +436,20 @@ export function DeckApp(): JSX.Element {
       </div>
 
       <div className="toasts">
-        {toasts.map((t) => <div key={t.id} className={`toast ${t.level}`}>{t.message}</div>)}
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.level}`}>
+            <span className="toast-msg">{t.message}</span>
+            {t.action && (
+              <button
+                type="button"
+                className="toast-action"
+                onClick={() => send({ type: "openExternal", url: t.action!.url })}
+              >
+                {t.action.label}
+              </button>
+            )}
+          </div>
+        ))}
       </div>
     </>
   );
