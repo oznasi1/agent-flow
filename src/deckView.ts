@@ -129,7 +129,16 @@ export class DeckPanel {
   }
 
   private post(msg: OutboundMessage): void {
-    void this.panel.webview.postMessage(msg);
+    try {
+      void this.panel.webview.postMessage(msg);
+    } catch {
+      // A disposed panel's `postMessage` throws synchronously — a normal race
+      // (the user closed the Deck while an async post-write step, a queued
+      // fetch, or anything else here was still in flight), not a bug worth
+      // logging. Letting it escape used to strand whatever ran after this call
+      // in the caller — e.g. submitReview's own cache eviction, which sits right
+      // after the success toast this throw could come from.
+    }
   }
 
   private toast(level: "success" | "error" | "info", message: string): void {
@@ -203,9 +212,10 @@ export class DeckPanel {
     });
   }
 
-  /** Is the review strip live? Three independent conditions: the persistent
-   * setting, the session PR-facts toggle (same gh dependency, so the same
-   * switch), and a usable gh. */
+  /** Is the review strip live? Two gates, not three: the persistent
+   * `reviewRequests` setting, and `ghReady()` — which already folds the session
+   * PR-facts toggle and a usable gh together, so there is no condition here
+   * that varies independently of PR facts. */
   private reviewsEnabled(): boolean {
     return getConfig().reviewRequests && this.ghReady();
   }
@@ -289,7 +299,21 @@ export class DeckPanel {
   }
 
   private postReviews(): void {
-    if (!this.reviewsEnabled() || !this.reviewCache) return;
+    if (!this.reviewsEnabled()) {
+      // The strip just went off (reviewRequests, PR facts, or gh going
+      // unusable) — actively say so, rather than merely staying silent. Silence
+      // here used to leave the webview's last posted rows on screen exactly as
+      // they were: frozen, but with their write buttons still live, so a click
+      // could still reach the provider from a strip the user believed they had
+      // just switched off. `enabled: false` also lets the webview drop the "To
+      // review" stat tile instead of showing a hollow "0 To review".
+      this.post({
+        type: "deck:reviews", requests: [], issueCount: 0, sort: this.reviewSort,
+        stale: false, reviewWrites: getConfig().reviewWrites, enabled: false,
+      });
+      return;
+    }
+    if (!this.reviewCache) return;
     this.post({
       type: "deck:reviews",
       requests: sortRequests(this.decorateReviews(this.reviewCache.requests), this.reviewSort),
@@ -297,18 +321,22 @@ export class DeckPanel {
       sort: this.reviewSort,
       stale: this.reviewStale,
       reviewWrites: getConfig().reviewWrites,
+      enabled: true,
     });
   }
 
-  /** Fetch the two facts the search cannot return. Silent on failure: the row
-   * keeps its search-level detail, which is still useful, and a toast per
-   * expanded row would be worse than the gap. */
+  /** Fetch the two facts the search cannot return. A failure still posts —
+   * `detail: null` — rather than staying silent: the row's search-level facts
+   * (review decision, mergeability) are still useful and worth showing, but
+   * nothing else was ever going to tell the webview to stop rendering
+   * "loading…" forever on a fetch that already gave up. */
   private async reviewDetail(id: string): Promise<void> {
     const req = this.reviewCache?.requests.find((r) => r.id === id);
     if (!req) return;
     const detail = await this.reviewProvider.detail(req.repo, req.number);
     if (!detail) {
       this.log(`deck: review detail ${id} failed`);
+      this.post({ type: "deck:reviewDetail", id, detail: null });
       return;
     }
     this.post({ type: "deck:reviewDetail", id, detail });
@@ -355,9 +383,9 @@ export class DeckPanel {
   }
 
   /** The one write path. Gates before anything reaches GitHub, in order: the
-   * setting, a `verb` that is actually one of the three GitHub understands, no
-   * other submit already in flight for this id, the row still being in the
-   * queue, and a modal the user has to accept. */
+   * setting, the strip actually being on, a `verb` that is actually one of the
+   * three GitHub understands, no other submit already in flight for this id,
+   * the row still being in the queue, and a modal the user has to accept. */
   private async submitReview(id: string, verb: ReviewVerb, body: string, fromDraft: boolean): Promise<void> {
     const cfg = getConfig();
     // Every gate below that refuses *this* id's own attempt releases the
@@ -368,6 +396,16 @@ export class DeckPanel {
     // panel opened, and the row evicted from the queue between the click and
     // this call).
     if (!cfg.reviewWrites) {
+      this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      return;
+    }
+    // The strip itself can go dark (PR facts toggled off, reviewRequests
+    // flipped, gh going unusable) without the row's own message queue draining
+    // instantly — `reviewById` below still resolves from `reviewCache`, which
+    // `postReviews`'s "cleared" post never touches. Without this, a submit that
+    // was already in the webview's outbox before the toggle could still reach
+    // GitHub from a strip the user just switched off.
+    if (!this.reviewsEnabled()) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
       return;
     }
@@ -419,10 +457,13 @@ export class DeckPanel {
       const res = await this.reviewProvider.submit(req.repo, req.number, verb, text);
       if (!res.ok) {
         this.log(`deck: review submit failed: ${res.message}`);
+        // Not "GitHub refused:" — a timeout's own message says the write may
+        // already have gone through, and prefixing that with a claim that
+        // GitHub answered at all would flatly contradict it.
         this.post({
           type: "toast",
           level: "error",
-          message: `GitHub refused: ${res.message}`,
+          message: `Review not sent: ${res.message}`,
           action: { label: "Open PR", url: req.url },
         });
         this.post({ type: "deck:reviewSubmitDone", id, outcome: "failed" });
@@ -445,6 +486,17 @@ export class DeckPanel {
       }
       this.postReviews();
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "ok" });
+    } catch (e) {
+      // Anything unexpected here (writeReviewCache, decorateReviews's fs calls,
+      // `post` itself before its own guard was added — a disposed panel used to
+      // throw mid-write, landing between the success toast and the cache
+      // eviction below it) must still tell the webview this row is no longer
+      // waiting on an outcome. Without this, nothing else was ever going to post
+      // a deck:reviewSubmitDone for this id, and the row's buttons would stay
+      // disabled until the panel reloads — even though the write itself may well
+      // have already gone through.
+      this.log(`deck: review submit ${id} threw after starting: ${e}`);
+      this.post({ type: "deck:reviewSubmitDone", id, outcome: "failed" });
     } finally {
       this.reviewSubmitsInFlight.delete(id);
     }
@@ -527,7 +579,11 @@ export class DeckPanel {
         prFacts: this.prFacts,
         ghNote: this.prFacts && this.ghGap ? GH_NOTES[this.ghGap.kind] : null,
       });
+      // The disabled branch posts its own "cleared" state directly — enqueueReviews
+      // only ever posts once a search settles or is already fresh, neither of
+      // which happens while the strip is off.
       if (this.reviewsEnabled()) this.enqueueReviews(Date.now());
+      else this.postReviews();
     } catch (e) {
       this.log(`deck: refresh failed: ${e}`);
     }
@@ -573,7 +629,11 @@ export class DeckPanel {
         this.postReviews();
         break;
       case "deck:reviewExpand":
-        await this.reviewDetail(m.id);
+        // Routed through the same queue every other `gh` call uses (concurrency
+        // capped at 4, deduped by key) — awaited directly here, expanding rows in
+        // quick succession could fork an unbounded number of `gh` processes, one
+        // per row, with nothing capping how many run at once.
+        this.prQueue.push(`detail:${m.id}`, () => this.reviewDetail(m.id));
         break;
       case "deck:reviewLaunch":
         await this.launchReviewFor(m.id);

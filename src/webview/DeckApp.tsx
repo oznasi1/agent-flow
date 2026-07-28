@@ -227,7 +227,10 @@ export function DeckApp(): JSX.Element {
   );
   const [reviewsCollapsed, setReviewsCollapsed] = React.useState(false);
   const [expanded, setExpanded] = React.useState<string | null>(null);
-  const [details, setDetails] = React.useState<Record<string, ReviewDetail>>({});
+  // `null` means the host tried this id's per-PR detail call and it failed —
+  // distinct from absent (never asked yet), which is what lets the row show
+  // "couldn't load checks" instead of "loading…" forever.
+  const [details, setDetails] = React.useState<Record<string, ReviewDetail | null>>({});
   const [bodies, setBodies] = React.useState<Record<string, string>>({});
   /** Set when a row's box is filled by "Load agent's review" and stays set
    * through any amount of editing — the disclosure it drives ("an agent read
@@ -245,11 +248,12 @@ export function DeckApp(): JSX.Element {
    * inline "check the PR before trying again" line; cleared on `"ok"`, left
    * alone on `"cancelled"` (nothing was attempted, so nothing to warn about). */
   const [submitFailed, setSubmitFailed] = React.useState<Record<string, boolean>>({});
-  /** Has the host ever posted a queue? That is the webview's only signal that the
-   * feature is on: `postReviews` stays silent when the setting is off or `gh` is
-   * unusable, but posts `requests: []` when it is on and you owe nobody a review.
-   * The stat needs the difference — "0 To review" is information, a missing tile is
-   * not — while the strip itself only appears once there is a row to show. */
+  /** Mirrors the host's own `enabled` flag on `deck:reviews`: true once a post
+   * with the feature on has landed, false again the moment it posts `enabled:
+   * false` (the setting turned off, PR facts turned off, or gh going unusable).
+   * The stat tile needs this, not just `issueCount === 0` — "0 To review" is
+   * information about an enabled, empty queue; a switched-off strip should show
+   * no tile at all, the same way the strip itself renders nothing below. */
   const [reviewsSeen, setReviewsSeen] = React.useState(false);
 
   React.useEffect(() => {
@@ -272,7 +276,7 @@ export function DeckApp(): JSX.Element {
         // own scroller, so the board keeps its share of the window without the queue
         // ever being hidden — which also means the collapse state is purely the user's,
         // with no seeded-once ref and no setState nested inside another's updater.
-        setReviewsSeen(true);
+        setReviewsSeen(m.enabled);
         setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale, reviewWrites: m.reviewWrites });
       } else if (m.type === "deck:reviewDetail") {
         setDetails((d) => ({ ...d, [m.id]: m.detail }));

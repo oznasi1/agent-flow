@@ -82,7 +82,7 @@ export class GhReviewProvider implements ReviewProvider {
 
   /** The only command in Agent Flow that writes to GitHub. The caller confirms
    * first; this only refuses what GitHub would refuse anyway, and reports the
-   * rejection verbatim — GitHub's own wording is more useful than ours.
+   * rejection — GitHub's own wording is more useful than ours.
    *
    * `body` arrives from a webview message, untyped at runtime regardless of what
    * the TypeScript signature claims — `String(body ?? "")` before `.trim()`
@@ -108,7 +108,24 @@ export class GhReviewProvider implements ReviewProvider {
       await this.exec(args);
       return { ok: true };
     } catch (e) {
-      return { ok: false, message: e instanceof Error ? e.message : String(e) };
+      // A killed-by-timeout rejection has the exact same shape as any other
+      // execFile failure, but means something different: `gh` may well have
+      // reached GitHub before the 10s clock ran out, so "GitHub refused" would
+      // be a flat lie about a write that could have succeeded server-side.
+      const err = e as { killed?: boolean; code?: unknown; stderr?: string };
+      if (err.killed || err.code === "ETIMEDOUT") {
+        return {
+          ok: false,
+          message: `Timed out after ${GH_TIMEOUT_MS / 1000}s — the review may already have gone through. Open the PR to check.`,
+        };
+      }
+      // Node's execFile builds `error.message` as `Command failed: <file> <argv
+      // joined>\n<stderr>` — which reconstructs the full argv, `--body` and the
+      // entire review text included. `stderr` alone is GitHub's own complaint,
+      // with none of that; prefer it, and only fall back to `.message` (still
+      // better than nothing) when a rejection carries no `stderr` at all.
+      const msg = err.stderr?.trim() || (e instanceof Error ? e.message : String(e));
+      return { ok: false, message: msg };
     }
   }
 }

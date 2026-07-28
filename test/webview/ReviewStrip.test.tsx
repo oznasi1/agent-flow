@@ -101,6 +101,23 @@ describe("ReviewStrip", () => {
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
   });
 
+  // Regression: a failed detail fetch used to post nothing at all, so
+  // `details[id]` stayed `undefined` forever and the row showed "loading…" for
+  // the rest of the session. `detail: null` is the host's explicit "I tried and
+  // it failed" marker — distinct from "never asked" (undefined/absent).
+  it("shows a quiet note instead of loading forever when the detail fetch failed, but keeps the row's own facts", () => {
+    render(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491",
+      details: { "CyberJackGit/aws-ops#8491": null },
+    })} />);
+    expect(screen.getByText(/couldn't load checks/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^loading/i)).not.toBeInTheDocument();
+    // review_required + clean (this row's search-level facts) still render —
+    // only the checks line depends on the failed detail call.
+    expect(screen.getByText("review required")).toBeInTheDocument();
+    expect(screen.getByText("clean")).toBeInTheDocument();
+  });
+
   it("switches sort", () => {
     const onSort = vi.fn();
     render(<ReviewStrip {...props({ onSort })} />);

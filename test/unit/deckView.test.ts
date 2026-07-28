@@ -924,12 +924,17 @@ describe("DeckPanel review strip", () => {
     expect(h.reviewSearch).toHaveBeenCalledTimes(1);
   });
 
-  it("does not search while the review strip is disabled", async () => {
+  it("does not search while the review strip is disabled, but actively clears it instead of staying silent", async () => {
     h.reviewRequests = false;
     show();
     await settled();
     expect(h.reviewSearch).not.toHaveBeenCalled();
-    expect(posts(lastPanel()).some((m) => m.type === "deck:reviews")).toBe(false);
+    // Task 2: silence here used to mean "the webview keeps whatever it last had"
+    // — a stale queue with its write buttons still live. Disabled must still
+    // post, with an empty queue and `enabled: false`.
+    expect(posts(lastPanel()).find((m) => m.type === "deck:reviews")).toMatchObject({
+      requests: [], issueCount: 0, enabled: false,
+    });
   });
 
   it("does not search while PR facts are off", async () => {
@@ -943,6 +948,36 @@ describe("DeckPanel review strip", () => {
     h.probeGh.mockResolvedValue({ kind: "missing", detail: "no gh" });
     await showAndWarm();
     expect(h.reviewSearch).not.toHaveBeenCalled();
+  });
+
+  it("carries enabled: true while the strip is on", async () => {
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:reviews")).toMatchObject({ enabled: true });
+  });
+
+  // Task 2 (blocking): toggling PR facts off while the Deck is open used to
+  // leave the webview's last-posted rows exactly as they were — frozen, but
+  // with Approve/Comment/Request changes still clickable, since nothing ever
+  // told the webview the strip had gone off. Also pins the submitReview-level
+  // gate: a submit for a row from that same, now-disabled strip must not reach
+  // the provider even though the row is technically still sitting in memory.
+  it("clears the strip and refuses a queued row's submit once PR facts (and therefore the strip) go off", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:reviews").requests).toHaveLength(1);
+
+    await p._fire({ type: "deck:setPrFacts", on: false });
+    const cleared = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
+    expect(cleared).toMatchObject({ requests: [], issueCount: 0, enabled: false });
+
+    await p._fire({
+      type: "deck:reviewSubmit", id: "CyberJackGit/aws-ops#8491", verb: "approve", body: "", fromDraft: false,
+    });
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.reviewSubmit).not.toHaveBeenCalled();
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled",
+    });
   });
 
   it("re-sorts without re-searching when the sort changes", async () => {
@@ -969,6 +1004,10 @@ describe("DeckPanel review detail", () => {
   it("fetches a row's detail and posts it", async () => {
     const p = await showAndWarm();
     await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    // Routed through prQueue (see the "shared refresh queue" test below): onMessage
+    // no longer awaits the fetch itself, only enqueues it — a settled() tick is
+    // needed for the queued job to actually run and post.
+    await settled();
     // The mock resolves the same canned value regardless of its arguments, so
     // without this the row's own repo/number could be swapped or dropped
     // entirely (e.g. calling detail(id, 0)) and every other assertion here
@@ -985,6 +1024,7 @@ describe("DeckPanel review detail", () => {
     const p = await showAndWarm();
     const before = posts(p).length;
     await p._fire({ type: "deck:reviewExpand", id: "who/what#1" });
+    await settled();
     expect(posts(p)).toHaveLength(before);
     // A guard that merely happened not to post (rather than never looking the id
     // up at all) would still pass an assertion on posts() alone — pin that the
@@ -992,12 +1032,12 @@ describe("DeckPanel review detail", () => {
     expect(h.reviewDetail).not.toHaveBeenCalled();
   });
 
-  it("posts nothing and logs when the detail fetch fails", async () => {
+  it("posts a null detail and logs when the detail fetch fails, instead of leaving the row loading forever", async () => {
     // Mirrors "logs which gh it tried and what that gh said" above: a custom
     // log spy passed straight into DeckPanel.show, so both halves of the
-    // requirement — no post, and a trace of the failed id — are pinned in one
-    // test. Silently dropping the log is the only trace a user has when a row
-    // never fills in, so "posts nothing" alone is not enough.
+    // requirement — the failure marker, and a trace of the failed id — are
+    // pinned in one test. A row with nothing ever posted for it renders
+    // "loading…" forever; `detail: null` is what tells the webview to stop.
     h.reviewDetail.mockResolvedValueOnce(null);
     const log = vi.fn();
     DeckPanel.show(fakeContext().context as any, fakeAuth({ authed: false }), log);
@@ -1005,11 +1045,35 @@ describe("DeckPanel review detail", () => {
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });
     await settled();
-    const before = posts(p).length;
     await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
-    expect(posts(p).filter((m) => m.type === "deck:reviewDetail")).toHaveLength(0);
-    expect(posts(p).length).toBe(before);
+    await settled();
+    expect(posts(p).at(-1)).toMatchObject({
+      type: "deck:reviewDetail", id: "CyberJackGit/aws-ops#8491", detail: null,
+    });
     expect(log).toHaveBeenCalledWith(expect.stringContaining("CyberJackGit/aws-ops#8491"));
+  });
+
+  // Task 5: every other `gh` invocation on this panel goes through prQueue,
+  // capped at 4 concurrent — row expansion used to be awaited directly in
+  // onMessage, bypassing that cap entirely. Five simultaneous expansions
+  // against the cap of 4: a reverted fix would call the provider all five
+  // times at once.
+  it("routes row expansion through the shared refresh queue instead of forking unboundedly", async () => {
+    const ids = Array.from({ length: 5 }, (_, i) => `o/r#${i}`);
+    const requests = ids.map((id, i) => ({ ...reviewFixture(), id, repo: "o/r", number: i }));
+    h.reviewSearch.mockResolvedValue({ issueCount: ids.length, requests });
+    const releases: (() => void)[] = [];
+    h.reviewDetail.mockImplementation(
+      () => new Promise((res) => releases.push(() => res({ failing: [], unresolved: null }))),
+    );
+    const p = await showAndWarm();
+    for (const id of ids) await p._fire({ type: "deck:reviewExpand", id });
+    await settled();
+    expect(h.reviewDetail).toHaveBeenCalledTimes(4);
+
+    releases.forEach((r) => r());
+    await settled();
+    expect(h.reviewDetail).toHaveBeenCalledTimes(5);
   });
 });
 
@@ -1484,6 +1548,50 @@ describe("DeckPanel review submit", () => {
     // and reviewDetail would never reach the provider — this is the same "still
     // resolvable" check the DeckPanel review detail suite uses elsewhere.
     await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    await settled(); // row expansion is queued (Task 5), not awaited directly
     expect(h.reviewDetail).toHaveBeenCalledWith("CyberJackGit/aws-ops", 8491);
+  });
+
+  // Task 3 (blocking): `post()` used to call `postMessage` with no guard, and the
+  // real VS Code webview API throws synchronously once the panel is disposed.
+  // Closing the Deck mid-submit used to let that throw land right between the
+  // success toast and the cache eviction below it — so a write that actually
+  // succeeded never evicted its row, and reopening the Deck showed the just-
+  // approved PR as still owed.
+  it("still evicts and persists a successful submit's row even if the panel is disposed and postMessage throws", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    p.webview.postMessage.mockImplementation(() => { throw new Error("Webview is disposed"); });
+    await p._fire(submitMsg({ verb: "approve" }));
+    const lastWrite = h.writeReviewCache.mock.calls.at(-1)?.[1] as { requests: unknown[]; issueCount: number };
+    expect(lastWrite.requests).toHaveLength(0);
+    expect(lastWrite.issueCount).toBe(0);
+  });
+
+  // Task 3 (blocking), second fix: even with `post()` itself guarded, anything
+  // else that throws after the in-flight guard was set (writeReviewCache here)
+  // must not strand the row — nothing else was ever going to post a
+  // deck:reviewSubmitDone to release the webview's disable.
+  it("posts a failed outcome and releases the in-flight guard when something throws after the write succeeded", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    // showAndWarm's own search success already calls writeReviewCache once —
+    // clear that call first so `mockImplementationOnce` below throws on the
+    // submit's own eviction write, not on that unrelated earlier one.
+    h.writeReviewCache.mockClear();
+    h.writeReviewCache.mockImplementationOnce(() => { throw new Error("disk full"); });
+    await p._fire(submitMsg({ verb: "approve" }));
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "failed",
+    });
+    // The `finally` still ran despite the throw: a second submit for the same id
+    // reaches the "no longer in the queue" gate (the row really was evicted in
+    // memory before the write threw) rather than being silently swallowed by a
+    // guard that never released.
+    const before = posts(p).filter((m) => m.type === "deck:reviewSubmitDone").length;
+    await p._fire(submitMsg({ verb: "comment", body: "x" }));
+    const dones = posts(p).filter((m) => m.type === "deck:reviewSubmitDone");
+    expect(dones.length).toBe(before + 1);
+    expect(dones.at(-1)).toEqual({ type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled" });
   });
 });

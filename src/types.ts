@@ -321,8 +321,18 @@ export type OutboundMessage =
       sort: ReviewSort;
       stale: boolean; // the last fetch failed; these are the previous results
       reviewWrites: boolean; // agentFlow.reviewWrites — the strip's box and verbs render only when true
+      // false when the strip has been switched off (reviewRequests, PR facts, or
+      // gh going unusable) — distinct from a genuine empty queue. Lets the webview
+      // drop the "To review" stat tile entirely rather than showing "0 To review",
+      // and actively clears any rows it was rendering rather than leaving them
+      // frozen (and their write buttons clickable) with nothing ever told to stop.
+      enabled: boolean;
     }
-  | { type: "deck:reviewDetail"; id: string; detail: ReviewDetail }
+  // `detail: null` means the per-PR detail call itself failed (not "no failing
+  // checks and unknown thread count", which is what an empty-but-successful
+  // result looks like) — the webview tells the two apart to stop showing
+  // "loading…" forever on a row whose fetch already gave up.
+  | { type: "deck:reviewDetail"; id: string; detail: ReviewDetail | null }
   // The agent's findings, read from the worktree on demand — not carried on
   // every deck:reviews post, since the strip re-posts on every poll tick.
   | { type: "deck:reviewDraft"; id: string; body: string }

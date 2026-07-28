@@ -23,7 +23,11 @@ export interface ReviewStripProps {
   stale: boolean;
   collapsed: boolean;
   expanded: string | null;
-  details: Record<string, ReviewDetail>;
+  // Absent: never fetched (or not yet expanded). `null`: the host tried and the
+  // per-PR detail call failed. A real ReviewDetail: it succeeded. The row needs
+  // all three — collapsing failure into "still loading" is what left a failed
+  // fetch showing "loading…" forever.
+  details: Record<string, ReviewDetail | null>;
   reviewWrites: boolean;
   bodies: Record<string, string>;
   /** Mid-flight for this id: a submit has been posted and no
@@ -51,7 +55,7 @@ export interface ReviewStripProps {
 function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed, onExpand, onOpen, onLaunch, onLoadDraft, onBody, onSubmit }: {
   r: ReviewRequest;
   expanded: boolean;
-  detail: ReviewDetail | undefined;
+  detail: ReviewDetail | null | undefined;
   reviewWrites: boolean;
   body: string;
   submitting: boolean;
@@ -85,33 +89,39 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
       </button>
       {expanded && (
         <div className="rv-detail">
-          {detail ? (
-            <div className="rv-facts">
-              {detail.failing.length > 0 ? (
-                <span className="pr-bad">✗ {detail.failing.map((c, i) => (
-                  <React.Fragment key={c.name}>
-                    {i > 0 && ", "}
-                    {c.url
-                      ? <button type="button" className="pr-link" title={c.url} onClick={() => onOpen(c.url)}>{c.name}</button>
-                      : <span>{c.name}</span>}
-                  </React.Fragment>
-                ))}</span>
-              ) : (
-                <span className="pr-ok">✓ checks passing</span>
-              )}
-              <span className="rv-sep">·</span>
-              <span>{r.review === "changes_requested" ? "changes requested" : r.review === "approved" ? "approved" : "review required"}</span>
-              {detail.unresolved !== null && detail.unresolved > 0 && (
-                <><span className="rv-sep">·</span><span>{detail.unresolved} open</span></>
-              )}
-              <span className="rv-sep">·</span>
-              <span className={r.mergeable === "conflicting" ? "pr-warn" : ""}>
-                {r.mergeable === "conflicting" ? "conflicts" : r.mergeable}
-              </span>
-            </div>
-          ) : (
-            <div className="rv-facts dim">loading…</div>
-          )}
+          {/* The review decision and mergeability come from the row's own
+              search-level facts (`r`), not from `detail` — they render whether
+              the per-PR detail call is still pending, has failed, or has
+              succeeded. Only the checks line itself depends on `detail`: three
+              states, not two, so a failed fetch reads as "couldn't load
+              checks" rather than "loading…" forever. */}
+          <div className={`rv-facts${detail === undefined ? " dim" : ""}`}>
+            {detail === undefined ? (
+              <span>loading…</span>
+            ) : detail === null ? (
+              <span>couldn't load checks</span>
+            ) : detail.failing.length > 0 ? (
+              <span className="pr-bad">✗ {detail.failing.map((c, i) => (
+                <React.Fragment key={c.name}>
+                  {i > 0 && ", "}
+                  {c.url
+                    ? <button type="button" className="pr-link" title={c.url} onClick={() => onOpen(c.url)}>{c.name}</button>
+                    : <span>{c.name}</span>}
+                </React.Fragment>
+              ))}</span>
+            ) : (
+              <span className="pr-ok">✓ checks passing</span>
+            )}
+            <span className="rv-sep">·</span>
+            <span>{r.review === "changes_requested" ? "changes requested" : r.review === "approved" ? "approved" : "review required"}</span>
+            {detail && detail.unresolved !== null && detail.unresolved > 0 && (
+              <><span className="rv-sep">·</span><span>{detail.unresolved} open</span></>
+            )}
+            <span className="rv-sep">·</span>
+            <span className={r.mergeable === "conflicting" ? "pr-warn" : ""}>
+              {r.mergeable === "conflicting" ? "conflicts" : r.mergeable}
+            </span>
+          </div>
           {reviewWrites && (
             <div className="rv-box">
               <textarea

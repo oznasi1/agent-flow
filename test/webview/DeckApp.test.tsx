@@ -422,7 +422,7 @@ describe("DeckApp PR-facts chrome", () => {
 });
 
 const reviewsMsg = (requests: ReviewRequest[], issueCount = requests.length): OutboundMessage =>
-  ({ type: "deck:reviews", requests, issueCount, sort: "oldest", stale: false, reviewWrites: false });
+  ({ type: "deck:reviews", requests, issueCount, sort: "oldest", stale: false, reviewWrites: false, enabled: true });
 
 const mkReview = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
   id: "o/r#1", repo: "o/r", repoName: "r", number: 1, title: "a small fix", url: "https://gh/o/r/pull/1",
@@ -438,6 +438,20 @@ describe("DeckApp review strip", () => {
     expect(screen.queryByText("To review")).not.toBeInTheDocument();
     host(reviewsMsg([mkReview()]));
     expect(screen.getByText("To review")).toBeInTheDocument();
+  });
+
+  // The strip going off (reviewRequests toggled, PR facts toggled off, gh going
+  // unusable) posts `enabled: false` with an emptied queue. This must drop the
+  // stat tile entirely, not merely zero it — a "0 To review" tile reads as "the
+  // feature is on and you owe nobody a review", which is a different claim than
+  // "this feature is off".
+  it("drops the To review stat entirely once the host reports the strip disabled", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()]));
+    expect(screen.getByText("To review")).toBeInTheDocument();
+    host({ ...reviewsMsg([], 0), enabled: false } as OutboundMessage);
+    expect(screen.queryByText("To review")).not.toBeInTheDocument();
+    expect(screen.queryByText(/waiting on your review/i)).not.toBeInTheDocument();
   });
 
   // The strip and the stat part company here, deliberately: an empty rail above the

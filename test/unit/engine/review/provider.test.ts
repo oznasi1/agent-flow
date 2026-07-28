@@ -233,9 +233,49 @@ describe("GhReviewProvider.submit", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("returns GitHub's own message on rejection", async () => {
+  it("returns GitHub's own message on rejection, falling back to .message when the rejection carries no stderr", async () => {
     const run = runner(async () => { throw new Error("GraphQL: Can not approve your own pull request"); });
     const out = await new GhReviewProvider(run, locate).submit("o/r", 7, "approve", "");
     expect(out).toEqual({ ok: false, message: "GraphQL: Can not approve your own pull request" });
+  });
+
+  it("prefers stderr over the reconstructed command line, so the review body never leaks into the failure message", async () => {
+    // Node's execFile builds `.message` as `Command failed: <file> <argv joined>` —
+    // which includes `--body <the whole review text>` verbatim. A rejection that
+    // also carries `.stderr` (what gh actually printed) must report *that*, not
+    // the reconstructed command line.
+    const secretBody = "the retry budget is unbounded and nobody noticed";
+    const err = Object.assign(
+      new Error(`Command failed: gh pr review 7 --repo o/r --approve --body ${secretBody}\nHTTP 422: Validation Failed`),
+      { stderr: "HTTP 422: Validation Failed (https://api.github.com/repos/o/r/pulls/7/reviews)" },
+    );
+    const run = runner(async () => { throw err; });
+    const out = await new GhReviewProvider(run, locate).submit("o/r", 7, "approve", secretBody);
+    expect(out).toEqual({
+      ok: false,
+      message: "HTTP 422: Validation Failed (https://api.github.com/repos/o/r/pulls/7/reviews)",
+    });
+    if (!out.ok) expect(out.message).not.toContain("--body");
+  });
+
+  it.each([
+    ["killed", { killed: true }],
+    ["code ETIMEDOUT", { code: "ETIMEDOUT" }],
+  ])("returns timeout wording that does not claim GitHub answered, on a %s rejection", async (_label, shape) => {
+    const secretBody = "mine, all mine";
+    const err = Object.assign(
+      new Error(`Command failed: gh pr review 7 --repo o/r --approve --body ${secretBody}`),
+      shape,
+    );
+    const run = runner(async () => { throw err; });
+    const out = await new GhReviewProvider(run, locate).submit("o/r", 7, "approve", secretBody);
+    expect(out).toEqual({
+      ok: false,
+      message: "Timed out after 10s — the review may already have gone through. Open the PR to check.",
+    });
+    if (!out.ok) {
+      expect(out.message).not.toMatch(/refused/i);
+      expect(out.message).not.toContain("--body");
+    }
   });
 });
