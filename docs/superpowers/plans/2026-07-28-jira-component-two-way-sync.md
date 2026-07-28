@@ -1116,8 +1116,10 @@ In `test/webview/App.test.tsx`, add to the describe holding `withChips`:
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx vitest run test/webview -t "setComponent"`
-Expected: FAIL — nothing is sent, and `addOnce` does not exist.
+Run: `npx vitest run test/webview/App.test.tsx test/webview/helpers.test.ts`
+Expected: FAIL — nothing is sent, and `addOnce` does not exist. (Filtering with
+`-t "setComponent"` would match nothing: no test *title* contains that string,
+and vitest reports "no tests found" rather than a failure, which proves nothing.)
 
 - [ ] **Step 3: Add `addOnce`**
 
