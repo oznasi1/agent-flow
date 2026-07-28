@@ -113,4 +113,15 @@ describe("parseSearch", () => {
     expect(parseSearch(null)).toBeNull();
     expect(parseSearch({ data: { search: { nodes: "nope" } } })).toBeNull();
   });
+
+  it("returns a non-null successful result for an empty nodes array", () => {
+    const out = parseSearch(payload([]));
+    expect(out).not.toBeNull();
+    expect(out).toEqual({ issueCount: 0, requests: [] });
+  });
+
+  it("drops a node with no repository or empty nameWithOwner, and keeps the rest", () => {
+    const out = parseSearch(payload([node({ repository: null }), node({ repository: {} }), node({ number: 12 })]));
+    expect(out!.requests.map((r) => r.number)).toEqual([12]);
+  });
 });
