@@ -42,6 +42,10 @@ orchestrate, not ready to set up.
   the task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
   for your fixes — then, by default, starts implementing the requested changes (toggle with
   `agentFlow.prReviewAutoFix`).
+- **Review queue** — a strip on the Deck lists every open PR that asks for *your* review,
+  sortable by oldest or smallest, with per-row size, CI and age. **Review with agent** checks
+  one out into a worktree and seeds an agent to review it; submitting the review itself from
+  the Deck is opt-in and ships **off** (`agentFlow.reviewWrites`).
 - **Launch in parallel** — filter the repo lens to one repo **or several** and a checkbox
   appears on each task. Tick a few, then **Launch in parallel**: each task gets its own git
   worktree (its own branch) in whichever of the filtered repos it's inferred to touch — or
@@ -176,9 +180,11 @@ marketplaces show up here on the next scan.
   the task brief is the guaranteed fallback).
 - An **Atlassian API token** for your Jira Cloud account
   ([create one](https://id.atlassian.com/manage-profile/security/api-tokens)).
-- The **`gh` CLI**, signed in (`gh auth login`) — for the Deck's PR/CI state and
-  its review-requests strip (optional; without it the Deck falls back to git +
-  Jira). Found on your `PATH`
+- The **`gh` CLI**, signed in (`gh auth login`) — for the Deck's PR/CI state
+  (optional; without it the Deck falls back to git + Jira) and its
+  review-requests strip (optional; without it the strip simply has no data and
+  doesn't render — there's no git or Jira equivalent for "who's asking for my
+  review"). Found on your `PATH`
   or in the usual install dirs (`/opt/homebrew/bin`, `/usr/local/bin`,
   `/opt/local/bin`, `~/.local/bin`, `~/bin`) — the editor does not always hand
   extensions your shell's `PATH`. If the Deck still says gh is missing, the
@@ -187,11 +193,14 @@ marketplaces show up here on the next scan.
 ## Data & privacy
 
 Agent Flow talks to **your** Jira Cloud site, reads your **local** repo checkouts,
-and — when `agentFlow.prFacts` or `agentFlow.reviewRequests` is on — reads your
-**own** GitHub through your existing `gh` login. Nothing is sent to any service
-that isn't already yours, and Agent Flow stores no GitHub credentials of its own:
-every GitHub call goes through `gh`, so it inherits whatever host, SSO and token
-your CLI already has.
+and — when `agentFlow.prFacts` is on — reads your **own** GitHub through your
+existing `gh` login. The review-requests strip shares that same gate rather than
+adding a new one: `agentFlow.reviewRequests` only produces a GitHub read while
+`agentFlow.prFacts` is also on, so turning PR facts off silences the strip too,
+regardless of its own setting. Nothing is sent to any service that isn't already
+yours, and Agent Flow stores no GitHub credentials of its own: every GitHub call
+goes through `gh`, so it inherits whatever host, SSO and token your CLI already
+has.
 
 GitHub access is **read-only by default** — Agent Flow never merges or pushes.
 The one exception is opt-in: with `agentFlow.reviewWrites` on (it ships **off**),

@@ -10,10 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **The Deck's review queue.** A strip above the columns listing every open PR
-  that asks for your review, with size (S/M/L and `+/−`), CI, review state and
-  age; sortable by oldest or smallest. Every row stays visible in a
-  height-capped, independently scrollable list rather than collapsing away.
-  Expanding a row shows which checks failed and how many threads are open.
+  that asks for your review, with size (S/M/L and `+/−`), CI and age; sortable
+  by oldest or smallest. Every row stays visible in a height-capped,
+  independently scrollable list rather than collapsing away. Expanding a row
+  shows the review state, which checks failed, and how many threads are open.
 - **Review with agent** — checks a teammate's PR out into a worktree and seeds
   Claude Code to review it, writing findings to `.pick-task/REVIEW-<n>.md` that
   the row can load into the review box.
