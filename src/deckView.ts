@@ -16,7 +16,7 @@ import { discoverRepos } from "./engine/repos";
 import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
-import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun } from "./types";
+import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
@@ -292,7 +292,9 @@ export class DeckPanel {
   }
 
   private async buildAll(): Promise<RunStatus[]> {
-    const runs = readRuns(defaultRunsDir());
+    // Review runs are work in flight, but not *your ticket's* work: they surface
+    // on their strip row, not as a fifth kind of card in In progress.
+    const runs = readRuns(defaultRunsDir()).filter((r) => runKind(r) !== "review");
     const projectsRoot = path.join(os.homedir(), ".claude", "projects");
     const now = Date.now();
     const authed = await this.auth.isAuthenticated();

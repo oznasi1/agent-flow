@@ -184,6 +184,22 @@ describe("DeckPanel", () => {
     expect(runsPost.liveSignal).toBe(true);
   });
 
+  it("keeps review runs off the board — only the ticket run reaches it", async () => {
+    h.runs = [
+      mkRun(),
+      mkRun({ key: "review-aws-ops-8491", summary: "review", url: "https://gh/pr/8491", createdAt: 2, kind: "review" }),
+    ];
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    const msg = posts(p).find((m) => m.type === "deck:runs");
+    // Asserting the count, not merely that ASM-1 is present, is what actually
+    // catches the filter being removed — buildRunStatus is a pass-through stub
+    // that would happily produce a card for the review run too.
+    expect(msg.runs).toHaveLength(1);
+    expect(msg.runs[0].run.key).toBe("ASM-1");
+  });
+
   it("re-posts with liveSignal off when toggled", async () => {
     show();
     const p = lastPanel();

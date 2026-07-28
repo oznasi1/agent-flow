@@ -63,18 +63,33 @@ export interface Run {
   summary: string;
   url: string;
   createdAt: number; // epoch ms
+  /** What launched this run. Absent means "task" — every record written before
+   * review runs existed. Review runs carry a PR url rather than a Jira one, so
+   * this, not the url, is what keeps them out of Jira polling and the columns. */
+  kind?: "task" | "explore" | "review";
   mode: WorkspaceMode;
   workspaceFile?: string; // multi-root .code-workspace, when mode === "multiroot"
   repos: { name: string; path: string; isGit: boolean; branch?: string }[];
   briefPaths: string[];
 }
 
+const RUN_KINDS = new Set(["task", "explore", "review"]);
+
+/** A run's kind, tolerant of an old record with no field and of a hand-edited
+ * one with a value we don't know. */
+export function runKind(run: Run): "task" | "explore" | "review" {
+  return RUN_KINDS.has(run.kind as string) ? (run.kind as "task" | "explore" | "review") : "task";
+}
+
 /** Is this run attached to a Jira ticket? An Explore session is launched with a
- * synthetic `explore-<slug>` key, no ticket url, and no branch Agent Flow named:
- * there is no Jira issue to poll, and `gh pr list --head <default-branch>` can
- * only return a pull request belonging to somebody else. Tolerates an older or
- * hand-edited run record with no url field at all. */
+ * synthetic `explore-<slug>` key and no ticket url: there is no Jira issue to
+ * poll, and `gh pr list --head <default-branch>` can only return a pull request
+ * belonging to somebody else. A **review** run is excluded for the opposite
+ * reason — it has a url, but it is a PR's, and polling Jira for
+ * `review-centaur-850` would 404 every 30 seconds forever. Tolerates an older or
+ * hand-edited record with no url field at all. */
 export function isTicketRun(run: Run): boolean {
+  if (runKind(run) === "review") return false;
   return typeof run.url === "string" && run.url.trim().length > 0;
 }
 
