@@ -23,10 +23,19 @@ export function readReviewCache(file: string): ReviewCache | null {
     const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<ReviewCache> | null;
     if (!parsed || typeof parsed !== "object") return null;
     if (typeof parsed.fetchedAt !== "number" || !Array.isArray(parsed.requests)) return null;
+    // Filter to values that actually look like a request. The Deck maps over these
+    // and reads .repoName/.number off each one; a null or string element would throw
+    // out of the refresh and freeze the board, the same failure pr/store.ts guards.
+    const requests = (parsed.requests as unknown[]).filter(
+      (r): r is ReviewRequest =>
+        !!r && typeof r === "object" &&
+        typeof (r as ReviewRequest).id === "string" &&
+        typeof (r as ReviewRequest).number === "number",
+    );
     return {
       fetchedAt: parsed.fetchedAt,
-      issueCount: typeof parsed.issueCount === "number" ? parsed.issueCount : parsed.requests.length,
-      requests: parsed.requests,
+      issueCount: typeof parsed.issueCount === "number" ? parsed.issueCount : requests.length,
+      requests,
     };
   } catch {
     return null;

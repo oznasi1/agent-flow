@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -6,6 +6,18 @@ import {
   defaultReviewsFile, readReviewCache, writeReviewCache, isReviewCacheStale,
 } from "../../../../src/engine/review/store";
 import type { ReviewRequest } from "../../../../src/types";
+
+let renameFails = false;
+vi.mock("fs", async (importActual) => {
+  const actual = await importActual<typeof import("fs")>();
+  return {
+    ...actual,
+    renameSync: (...args: Parameters<typeof actual.renameSync>) => {
+      if (renameFails) throw new Error("EXDEV: cross-device link not permitted");
+      return actual.renameSync(...args);
+    },
+  };
+});
 
 const req: ReviewRequest = {
   id: "o/r#1", repo: "o/r", repoName: "r", number: 1, title: "t", url: "https://gh/o/r/pull/1",
@@ -60,11 +72,30 @@ describe("readReviewCache / writeReviewCache", () => {
     expect(readReviewCache(file)).toBeNull();
   });
 
-  it("leaves the previous cache intact when a write fails", () => {
+  it("filters out null and malformed requests, keeping only valid ones", () => {
+    fs.writeFileSync(file, JSON.stringify({
+      fetchedAt: 5, issueCount: 1, requests: [null, req, "garbage", { id: "bad" }],
+    }));
+    expect(readReviewCache(file)).toEqual({ fetchedAt: 5, issueCount: 1, requests: [req] });
+  });
+
+  it("returns an empty list as a valid readable cache, not null", () => {
+    writeReviewCache(file, { fetchedAt: 5, issueCount: 0, requests: [] });
+    expect(readReviewCache(file)).toEqual({ fetchedAt: 5, issueCount: 0, requests: [] });
+  });
+
+  it("leaves the previous cache intact when the rename fails", () => {
     writeReviewCache(file, { fetchedAt: 1, issueCount: 1, requests: [req] });
-    // A directory where the temp file wants to go: the rename can never land.
-    writeReviewCache(path.join(dir), { fetchedAt: 2, issueCount: 0, requests: [] });
-    expect(readReviewCache(file)!.fetchedAt).toBe(1);
+    renameFails = true;
+    try {
+      writeReviewCache(file, { fetchedAt: 2, issueCount: 0, requests: [] });
+    } finally {
+      renameFails = false;
+    }
+    // The old content survived a write that got as far as the rename.
+    expect(readReviewCache(file)).toEqual({ fetchedAt: 1, issueCount: 1, requests: [req] });
+    // And the temp file was cleaned up rather than left as litter.
+    expect(fs.readdirSync(dir).filter((f) => f.endsWith(".tmp"))).toEqual([]);
   });
 });
 
