@@ -22,6 +22,20 @@
 - **Size buckets:** `S` ≤ 100 lines changed, `M` ≤ 500, `L` > 500. Lines changed = `additions + deletions`.
 - **Commit style:** conventional commits (`feat:`, `test:`, `docs:`, `refactor:`), matching `git log`.
 
+### Webview design system — read `src/webview/deckStyles.ts`'s header before writing any CSS
+
+The Deck was restyled in `9775224` (one commit before this branch). Every rule below is enforced there and is easy to break by accident:
+
+- **Mono is for identifiers and counts only** — repo names, PR numbers, diff counts, sizes. Anything that reads as English (a PR title, "3 PRs waiting on your review", an author handle) uses the UI font. Prose in mono is what made the board read as a log dump.
+- **Every `font-size` is one of four tokens:** `--t-micro` (10px), `--t-data` (10.5px, mono identifiers), `--t-body` (11px, status/meta/controls), `--t-title` (13px). Do not introduce a fifth value.
+- **Borders:** `--hair` for structural rules between things; `--edge` for a control's own outline (`--hair` is invisible against a card surface).
+- **Radii:** `--r-card`, `--r-ctl`, `--r-chip`. **Dimmed text:** `color: var(--dim)`, not `opacity`.
+- **Colour is spent on attention debt.** `--c-attn` (orange) means "your turn"; `--c-danger` (red) is only for something broken or destructive — failing checks, deletions, Forget. A review request waiting on you is *not* red.
+- **Ticking numbers get `font-variant-numeric: tabular-nums`** so a re-render cannot reflow the row.
+- **Every clickable is a real `<button type="button">`.** The toggles were divs; that commit fixed it, and no keyboard user should lose ground here.
+- **`.act` dims to 70% unless it is inside a hovered `.card`.** The strip is not a card, so any `.act` reused there must have its opacity restored explicitly, or the buttons render permanently faded.
+- The board's column formerly labelled "Needs you" is now **"Action required"** (`--c-attn`, tone `attn`). The `needs` column *id* is unchanged — it is engine vocabulary and never reaches a user.
+
 ## File Structure
 
 **Created:**
@@ -1640,7 +1654,7 @@ function Row({ r, expanded, detail, onExpand, onOpen }: {
             <div className="rv-facts dim">loading…</div>
           )}
           <div className="rv-actions">
-            <button className="act" onClick={() => onOpen(r.url)}>Open PR</button>
+            <button type="button" className="act" onClick={() => onOpen(r.url)}>Open PR</button>
           </div>
         </div>
       )}
@@ -1657,7 +1671,7 @@ export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
   return (
     <div className="rv-strip">
       <div className="rv-hd">
-        <button className="rv-toggle" onClick={() => p.onCollapse(!p.collapsed)}>
+        <button type="button" className="rv-toggle" onClick={() => p.onCollapse(!p.collapsed)}>
           {p.collapsed ? "▸" : "▾"} {p.issueCount} {p.issueCount === 1 ? "PR" : "PRs"} waiting on your review
         </button>
         {p.issueCount > shown && <span className="rv-note">showing {shown} of {p.issueCount}</span>}
@@ -1665,9 +1679,9 @@ export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
         <span className="sp" />
         <span className="rv-sort">
           sort:{" "}
-          <button className={p.sort === "oldest" ? "on" : ""} onClick={() => p.onSort("oldest")}>oldest</button>
+          <button type="button" className={p.sort === "oldest" ? "on" : ""} onClick={() => p.onSort("oldest")}>oldest</button>
           <span className="rv-sep">·</span>
-          <button className={p.sort === "smallest" ? "on" : ""} onClick={() => p.onSort("smallest")}>smallest</button>
+          <button type="button" className={p.sort === "smallest" ? "on" : ""} onClick={() => p.onSort("smallest")}>smallest</button>
         </span>
       </div>
       {!p.collapsed && (
@@ -1685,28 +1699,63 @@ export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
 
 - [ ] **Step 4: Add the styles**
 
-Append to `src/webview/deckStyles.ts`, inside the exported style string, following the file's existing conventions:
+Append to `src/webview/deckStyles.ts`, inside the exported `DECK_CSS` string, after the `.pr-*` block. Every value below comes from the token set — re-read the Global Constraints' design-system rules before changing any of it.
 
 ```css
-.rv-strip { border: 1px solid var(--vscode-panel-border); border-radius: 6px; margin: 0 12px 10px; }
-.rv-hd { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; }
-.rv-toggle, .rv-sort button { background: none; border: 0; color: inherit; cursor: pointer; font: inherit; padding: 0; }
-.rv-sort button.on { text-decoration: underline; }
-.rv-note { opacity: .7; }
-.rv-note.warn { color: var(--vscode-editorWarning-foreground); }
-.rv-rows { border-top: 1px solid var(--vscode-panel-border); }
-.rv-line { display: flex; align-items: center; gap: 8px; padding: 5px 10px; cursor: pointer; font-size: 12px; }
-.rv-line:hover { background: var(--vscode-list-hoverBackground); }
-.rv-repo { font-family: var(--vscode-editor-font-family); opacity: .85; }
-.rv-num { font-family: var(--vscode-editor-font-family); opacity: .7; }
-.rv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rv-draft { font-size: 10px; text-transform: uppercase; opacity: .7; border: 1px solid currentColor; border-radius: 3px; padding: 0 3px; }
-.rv-size { font-weight: 600; opacity: .8; }
-.rv-stat, .rv-author, .rv-age { opacity: .7; white-space: nowrap; }
-.rv-detail { display: flex; align-items: center; gap: 10px; padding: 4px 10px 8px 26px; font-size: 12px; }
-.rv-facts.dim { opacity: .6; }
-.rv-actions { margin-left: auto; display: flex; gap: 6px; }
-.rv-sep { opacity: .4; }
+  /* The review queue: what other people are waiting on you for, above the board of
+     what you are waiting on yourself. Inside the board's own 20px gutter, and
+     flex: none so it never steals height from .board, which is the scrollport. */
+  .rv-strip { flex: none; margin: 0 20px 10px; border: 1px solid var(--hair);
+    border-radius: var(--r-card); overflow: hidden; }
+  .rv-hd { display: flex; align-items: center; gap: 10px; padding: 7px 12px;
+    font-size: var(--t-body); color: var(--dim); }
+  .rv-toggle { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none;
+    padding: 0; cursor: pointer; font-size: var(--t-body); font-weight: 550;
+    color: var(--vscode-foreground); }
+  .rv-hd .sp { flex: 1; }
+  .rv-sort { display: inline-flex; align-items: center; gap: 5px; }
+  .rv-sort button { border: 0; background: none; padding: 0; cursor: pointer;
+    font-size: var(--t-body); color: var(--dim); }
+  .rv-sort button.on { color: var(--vscode-foreground); text-decoration: underline; text-underline-offset: 2px; }
+  /* A queue we could not refresh is stale, not broken — attn, never danger. */
+  .rv-note.warn { color: var(--c-attn); }
+
+  .rv-rows { border-top: 1px solid var(--hair); }
+  .rv-row + .rv-row { border-top: 1px solid var(--hair); }
+  .rv-line { display: flex; align-items: baseline; gap: 8px; padding: 6px 12px; cursor: pointer;
+    font-size: var(--t-body); font-variant-numeric: tabular-nums; }
+  .rv-line:hover { background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)); }
+  .rv-caret { flex: none; width: 9px; color: var(--dim); }
+  /* Identifiers and counts — the only mono on the row. The title and the handle
+     beside them are English, and stay in the UI font. */
+  .rv-repo, .rv-num, .rv-size, .rv-line .add, .rv-line .del {
+    font-family: var(--mono); font-size: var(--t-data); }
+  .rv-repo, .rv-num { color: var(--dim); }
+  .rv-size { font-weight: 600; color: var(--dim); }
+  .rv-line .add { color: var(--c-done); }
+  .rv-line .del { color: var(--c-danger); }
+  .rv-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--vscode-foreground); }
+  .rv-draft { flex: none; font-size: var(--t-micro); color: var(--dim);
+    border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0 4px; }
+  .rv-files, .rv-author, .rv-age { flex: none; color: var(--dim); }
+  .rv-running { flex: none; color: var(--c-progress); }
+
+  .rv-detail { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px;
+    padding: 2px 12px 9px 29px; font-size: var(--t-body); }
+  .rv-facts { flex-basis: 100%; display: flex; align-items: baseline; gap: 6px; color: var(--dim); }
+  .rv-facts.dim { font-style: italic; }
+  .rv-sep { color: var(--dim); opacity: .5; }
+  .rv-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 5px; }
+  /* .act dims to .7 unless it sits in a hovered .card. A row is not a card, so the
+     rule never re-brightens and every button here would render permanently faded. */
+  .rv-actions .act { opacity: 1; }
+
+  .rv-box { flex: 1; min-width: 0; }
+  .rv-box textarea { width: 100%; min-height: 46px; resize: vertical; font: inherit;
+    font-size: var(--t-body); color: var(--vscode-input-foreground);
+    background: var(--vscode-input-background); border: 1px solid var(--edge);
+    border-radius: var(--r-ctl); padding: 5px 7px; }
 ```
 
 - [ ] **Step 5: Run the strip tests**
@@ -2561,6 +2610,7 @@ and put the actions in `.rv-actions`, before **Open PR**:
 
 ```tsx
             <button
+              type="button"
               className="act primary"
               disabled={!r.localPath}
               title={r.localPath ? `Review in a worktree of ${r.repoName}` : `${r.repoName} is not checked out locally`}
@@ -2569,7 +2619,7 @@ and put the actions in `.rv-actions`, before **Open PR**:
               ▶ Review with agent
             </button>
             {r.draftPath && (
-              <button className="act" onClick={() => onLoadDraft(r.id)}>Load agent's review</button>
+              <button type="button" className="act" onClick={() => onLoadDraft(r.id)}>Load agent's review</button>
             )}
 ```
 
@@ -3014,9 +3064,9 @@ and in `.rv-actions`, after **Open PR**:
 ```tsx
             {reviewWrites && (
               <>
-                <button className="act" onClick={() => onSubmit(r.id, "approve")}>Approve</button>
-                <button className="act" disabled={!body.trim()} onClick={() => onSubmit(r.id, "comment")}>Comment</button>
-                <button className="act" disabled={!body.trim()} onClick={() => onSubmit(r.id, "request-changes")}>Request changes</button>
+                <button type="button" className="act" onClick={() => onSubmit(r.id, "approve")}>Approve</button>
+                <button type="button" className="act" disabled={!body.trim()} onClick={() => onSubmit(r.id, "comment")}>Comment</button>
+                <button type="button" className="act" disabled={!body.trim()} onClick={() => onSubmit(r.id, "request-changes")}>Request changes</button>
               </>
             )}
 ```

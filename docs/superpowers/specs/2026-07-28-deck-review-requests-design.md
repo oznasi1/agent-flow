@@ -189,7 +189,7 @@ the board is noise.
 │   notif-svc   #375  bulk notification rework  L +3923 −1998 50f ✗ @dean   9d│
 │   account-svc #404  E2E harness         draft M  +494 −0    4f  ✓ @einav  6d│
 ├──────────────────┬─────────────────┬────────────────┬────────────────────┤
-│ In progress 3    │ Needs you 1     │ In review 2    │ Done 4             │
+│ In progress 3    │ Action required 1│ In review 2   │ Done 4             │
 ```
 
 Expanded:
