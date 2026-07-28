@@ -497,7 +497,7 @@ describe("DeckApp review strip", () => {
     expect(screen.getByText("e2e")).toBeInTheDocument();
   });
 
-  it("does not re-ask for a detail it already has", () => {
+  it("does not re-ask for a detail it already has, and still renders it once re-expanded", () => {
     render(<DeckApp />);
     host(reviewsMsg([mkReview()]));
     fireEvent.click(screen.getByText("a small fix"));
@@ -506,5 +506,31 @@ describe("DeckApp review strip", () => {
     sent.mockClear();
     fireEvent.click(screen.getByText("a small fix")); // expand again
     expect(sent).not.toHaveBeenCalledWith({ type: "deck:reviewExpand", id: "o/r#1" });
+    // The held detail must still render, not just "no re-fetch" — a guard that
+    // skipped the fetch but also dropped the stored detail on collapse would
+    // pass the assertion above while leaving the row stuck on "loading…".
+    expect(screen.getByText("✓ checks passing")).toBeInTheDocument();
+  });
+
+  // No test anywhere in the repo had ever expanded two different rows before —
+  // `setExpanded((cur) => (cur === id ? null : id))` reads correctly, but a
+  // regression to "let both stay open" (e.g. a Set instead of a single id)
+  // would have passed the entire suite. The two rows' failing-check names are
+  // deliberately distinct so the assertion cannot pass by accident.
+  it("single-select: expanding a second row collapses the first", () => {
+    render(<DeckApp />);
+    const a = mkReview({ id: "o/r#1", number: 1, title: "a small fix" });
+    const b = mkReview({ id: "o/r#2", number: 2, title: "a bigger fix" });
+    host(reviewsMsg([a, b]));
+
+    fireEvent.click(screen.getByText("a small fix"));
+    host({ type: "deck:reviewDetail", id: "o/r#1", detail: { failing: [{ name: "check-a", url: "" }], unresolved: 0 } });
+    expect(screen.getByText("check-a")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("a bigger fix"));
+    host({ type: "deck:reviewDetail", id: "o/r#2", detail: { failing: [{ name: "check-b", url: "" }], unresolved: 0 } });
+
+    expect(screen.queryByText("check-a")).not.toBeInTheDocument();
+    expect(screen.getByText("check-b")).toBeInTheDocument();
   });
 });

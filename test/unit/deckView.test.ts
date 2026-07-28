@@ -887,6 +887,11 @@ describe("DeckPanel review detail", () => {
   it("fetches a row's detail and posts it", async () => {
     const p = await showAndWarm();
     await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    // The mock resolves the same canned value regardless of its arguments, so
+    // without this the row's own repo/number could be swapped or dropped
+    // entirely (e.g. calling detail(id, 0)) and every other assertion here
+    // would still pass. Only this pins "the right PR was fetched."
+    expect(h.reviewDetail).toHaveBeenCalledWith("CyberJackGit/aws-ops", 8491);
     expect(posts(p).at(-1)).toMatchObject({
       type: "deck:reviewDetail",
       id: "CyberJackGit/aws-ops#8491",
@@ -905,12 +910,23 @@ describe("DeckPanel review detail", () => {
     expect(h.reviewDetail).not.toHaveBeenCalled();
   });
 
-  it("posts nothing when the detail fetch fails", async () => {
+  it("posts nothing and logs when the detail fetch fails", async () => {
+    // Mirrors "logs which gh it tried and what that gh said" above: a custom
+    // log spy passed straight into DeckPanel.show, so both halves of the
+    // requirement — no post, and a trace of the failed id — are pinned in one
+    // test. Silently dropping the log is the only trace a user has when a row
+    // never fills in, so "posts nothing" alone is not enough.
     h.reviewDetail.mockResolvedValueOnce(null);
-    const p = await showAndWarm();
+    const log = vi.fn();
+    DeckPanel.show(fakeContext().context as any, fakeAuth({ authed: false }), log);
+    await settled();
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    await settled();
     const before = posts(p).length;
     await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
     expect(posts(p).filter((m) => m.type === "deck:reviewDetail")).toHaveLength(0);
     expect(posts(p).length).toBe(before);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("CyberJackGit/aws-ops#8491"));
   });
 });
