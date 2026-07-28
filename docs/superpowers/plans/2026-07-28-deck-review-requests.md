@@ -1812,12 +1812,18 @@ Append to `src/webview/deckStyles.ts`, inside the exported `DECK_CSS` string, af
   .rv-files, .rv-author, .rv-age { flex: none; color: var(--dim); }
   .rv-running { flex: none; color: var(--c-progress); }
 
-  .rv-detail { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px;
+  .rv-detail { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px;
     padding: 2px 12px 9px 29px; font-size: var(--t-body); }
   .rv-facts { flex-basis: 100%; display: flex; align-items: baseline; gap: 6px; color: var(--dim); }
+  /* Actions flow left, directly under the facts they belong to. `margin-left: auto`
+     here reads as a bug in the common case: with no review box on the row yet, it
+     strands a lone Open PR button ~700px away at the far right of an empty line,
+     attached to nothing. Verified in the preview harness. When the box arrives it
+     takes `flex: 1` on this same line and pushes the actions right on its own. */
+  .rv-actions { margin-left: 0; }
   .rv-facts.dim { font-style: italic; }
   .rv-sep { color: var(--dim); }
-  .rv-actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 5px; }
+  .rv-actions { flex: none; display: flex; align-items: center; gap: 5px; }
   /* .act dims to .7 unless it sits in a hovered .card. A row is not a card, so the
      rule never re-brightens and every button here would render permanently faded. */
   .rv-actions .act { opacity: 1; }
