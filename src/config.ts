@@ -121,6 +121,18 @@ export const PR_REVIEW_AUTOFIX_CLAUSE =
   "If it's ready, go ahead and implement the requested changes on this branch so it's ready for me to review — " +
   "do not push or merge without me.";
 
+/** Seed for reviewing a teammate's PR from the Deck's review strip. Distinct from
+ * DEFAULT_PR_REVIEW_PROMPT, which addresses feedback on *your own* PR. The agent
+ * writes its findings to a file; the human submits the review. Placeholders:
+ * {repo} {number} {author} are substituted at launch, then {key} {summary} {url}
+ * {brief} {files} by renderPrompt. */
+export const DEFAULT_REVIEW_REQUEST_PROMPT =
+  'Review pull request {url} — {repo}#{number}, "{summary}", by {author}. ' +
+  "Check it out with `gh pr checkout {number} --repo {repo}`, then read the full diff against its base branch. " +
+  "Assess correctness, edge cases, tests, and anything that would break in production. " +
+  "Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, " +
+  "each with the file and line it refers to. Do not post anything to GitHub; the human submits the review.{files}";
+
 export interface AgentFlowConfig {
   baseUrl: string;
   project: string;
@@ -150,6 +162,16 @@ export interface AgentFlowConfig {
   prFacts: boolean;
   // How stale a cached PR fact may be before the Deck re-fetches it. Floored at 30s.
   prFactsTtlSeconds: number;
+  // Show the Deck's review-requests strip: open PRs that ask for your review.
+  reviewRequests: boolean;
+  // How stale the cached review queue may be before a refetch. Floored at 60s —
+  // review requests move on a human timescale, not a CI one.
+  reviewRequestsTtlSeconds: number;
+  // Allow submitting approve / comment / request-changes from the Deck. The only
+  // setting in Agent Flow that lets it write to GitHub.
+  reviewWrites: boolean;
+  // Seeded prompt for Review-with-agent.
+  reviewRequestPrompt: string;
   stampLabelOnWrite: boolean;
   provenanceLabel: string;
   // Which secondary filter controls the task-pool sidebar shows. Each defaults to
@@ -224,6 +246,10 @@ export function getConfig(): AgentFlowConfig {
     trackOpenWindows: c.get<boolean>("trackOpenWindows") ?? true,
     prFacts: c.get<boolean>("prFacts") ?? true,
     prFactsTtlSeconds: Math.max(30, c.get<number>("prFactsTtlSeconds") ?? 120),
+    reviewRequests: c.get<boolean>("reviewRequests") ?? true,
+    reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
+    reviewWrites: c.get<boolean>("reviewWrites") ?? false,
+    reviewRequestPrompt: c.get<string>("reviewRequestPrompt") || DEFAULT_REVIEW_REQUEST_PROMPT,
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,
     provenanceLabel: c.get<string>("provenanceLabel") || "claude-code",
     filters: {

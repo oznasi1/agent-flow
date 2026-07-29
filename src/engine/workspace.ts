@@ -46,6 +46,7 @@ export interface OpenRequest {
   existingWorkspaceFile?: string; // when set: open the task into this .code-workspace
   existingFolder?: string; // when set: focus this already-open folder window + seed it
   remoteControl?: boolean; // offer Claude Code's Remote Control in the opened session
+  kind?: Run["kind"]; // what launched this run; omitted means a task
 }
 
 export interface OpenResult {
@@ -251,6 +252,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     summary: ticket.summary,
     url: ticket.url,
     createdAt: Date.now(),
+    kind: req.kind,
     mode: effMode,
     workspaceFile,
     repos: services.map((s) => ({

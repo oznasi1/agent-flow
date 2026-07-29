@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as React from "react";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
 import { DeckApp } from "../../src/webview/DeckApp";
 import { send } from "../../src/webview/vscodeApi";
-import type { OutboundMessage, PrFacts, RunStatus } from "../../src/types";
+import type { OutboundMessage, PrFacts, ReviewRequest, RunStatus } from "../../src/types";
 
 const sent = vi.mocked(send);
 
@@ -418,5 +418,362 @@ describe("DeckApp PR-facts chrome", () => {
     render(<DeckApp />);
     host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, ghNote: "gh CLI not found — PR facts off" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
+  });
+});
+
+const reviewsMsg = (requests: ReviewRequest[], issueCount = requests.length): OutboundMessage =>
+  ({ type: "deck:reviews", requests, issueCount, sort: "oldest", stale: false, reviewWrites: false, enabled: true });
+
+const mkReview = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
+  id: "o/r#1", repo: "o/r", repoName: "r", number: 1, title: "a small fix", url: "https://gh/o/r/pull/1",
+  author: "dana", isDraft: false, createdAt: Date.now() - 3_600_000, updatedAt: Date.now(),
+  additions: 10, deletions: 2, changedFiles: 1,
+  ci: "passing", review: "review_required", mergeable: "clean",
+  localPath: null, runKey: null, draftPath: null, ...over,
+});
+
+describe("DeckApp review strip", () => {
+  it("shows no To review stat until the host posts a queue", () => {
+    render(<DeckApp />);
+    expect(screen.queryByText("To review")).not.toBeInTheDocument();
+    host(reviewsMsg([mkReview()]));
+    expect(screen.getByText("To review")).toBeInTheDocument();
+  });
+
+  // The strip going off (reviewRequests toggled, PR facts toggled off, gh going
+  // unusable) posts `enabled: false` with an emptied queue. This must drop the
+  // stat tile entirely, not merely zero it — a "0 To review" tile reads as "the
+  // feature is on and you owe nobody a review", which is a different claim than
+  // "this feature is off".
+  it("drops the To review stat entirely once the host reports the strip disabled", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()]));
+    expect(screen.getByText("To review")).toBeInTheDocument();
+    host({ ...reviewsMsg([], 0), enabled: false } as OutboundMessage);
+    expect(screen.queryByText("To review")).not.toBeInTheDocument();
+    expect(screen.queryByText(/waiting on your review/i)).not.toBeInTheDocument();
+  });
+
+  // The strip and the stat part company here, deliberately: an empty rail above the
+  // board is noise, but a "0" tile is the only thing telling you the feature is alive.
+  // Scoped to the "To review" stat itself: with no runs, every other stat tile (In
+  // progress, Action required, In review, Total) also reads "0", so a bare
+  // screen.getByText("0") matches five elements and throws rather than asserting
+  // anything.
+  it("keeps the To review stat at zero, while the strip itself disappears", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([], 0));
+    const stat = screen.getByText("To review").closest<HTMLElement>(".stat")!;
+    expect(within(stat).getByText("0")).toBeInTheDocument();
+    expect(screen.queryByText(/waiting on your review/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the strip above the board", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()]));
+    expect(screen.getByText("a small fix")).toBeInTheDocument();
+  });
+
+  it("sends the new sort to the host", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()]));
+    fireEvent.click(screen.getByText("smallest"));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:setReviewSort", sort: "smallest" });
+  });
+
+  // A long queue must arrive VISIBLE. Height is bounded by the rows container's own
+  // scroller, so the board is protected without hiding the thing the strip exists for.
+  it("shows every row of a long queue rather than collapsing it", () => {
+    const { container } = render(<DeckApp />);
+    host(reviewsMsg(Array.from({ length: 9 }, (_, i) => mkReview({ id: `o/r#${i}`, number: i, title: `pr ${i}` }))));
+    expect(screen.getByText(/9 PRs waiting on your review/i)).toBeInTheDocument();
+    expect(screen.getByText("pr 0")).toBeInTheDocument();
+    expect(screen.getByText("pr 8")).toBeInTheDocument();
+    // The header count and the two end titles alone would still pass a "render only
+    // the first and last row" bug — count the actual rows rendered.
+    expect(container.querySelectorAll(".rv-line").length).toBe(9);
+  });
+
+  it("stays collapsed across a refresh once the user collapses it", () => {
+    render(<DeckApp />);
+    const six = Array.from({ length: 6 }, (_, i) => mkReview({ id: `o/r#${i}`, number: i, title: `pr ${i}` }));
+    host(reviewsMsg(six));
+    fireEvent.click(screen.getByText(/waiting on your review/i)); // the user hides it
+    expect(screen.queryByText("pr 0")).not.toBeInTheDocument();
+    host(reviewsMsg(six)); // a later poll must not re-open what the user closed
+    expect(screen.queryByText("pr 0")).not.toBeInTheDocument();
+  });
+
+  it("asks the host for a row's detail on expand, and renders it", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()]));
+    fireEvent.click(screen.getByText("a small fix"));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:reviewExpand", id: "o/r#1" });
+    host({ type: "deck:reviewDetail", id: "o/r#1", detail: { failing: [{ name: "e2e", url: "" }], unresolved: 0 } });
+    expect(screen.getByText("e2e")).toBeInTheDocument();
+  });
+
+  it("does not re-ask for a detail it already has, and still renders it once re-expanded", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()]));
+    fireEvent.click(screen.getByText("a small fix"));
+    host({ type: "deck:reviewDetail", id: "o/r#1", detail: { failing: [], unresolved: null } });
+    fireEvent.click(screen.getByText("a small fix")); // collapse
+    sent.mockClear();
+    fireEvent.click(screen.getByText("a small fix")); // expand again
+    expect(sent).not.toHaveBeenCalledWith({ type: "deck:reviewExpand", id: "o/r#1" });
+    // The held detail must still render, not just "no re-fetch" — a guard that
+    // skipped the fetch but also dropped the stored detail on collapse would
+    // pass the assertion above while leaving the row stuck on "loading…".
+    expect(screen.getByText("✓ checks passing")).toBeInTheDocument();
+  });
+
+  // No test anywhere in the repo had ever expanded two different rows before —
+  // `setExpanded((cur) => (cur === id ? null : id))` reads correctly, but a
+  // regression to "let both stay open" (e.g. a Set instead of a single id)
+  // would have passed the entire suite. The two rows' failing-check names are
+  // deliberately distinct so the assertion cannot pass by accident.
+  it("single-select: expanding a second row collapses the first", () => {
+    render(<DeckApp />);
+    const a = mkReview({ id: "o/r#1", number: 1, title: "a small fix" });
+    const b = mkReview({ id: "o/r#2", number: 2, title: "a bigger fix" });
+    host(reviewsMsg([a, b]));
+
+    fireEvent.click(screen.getByText("a small fix"));
+    host({ type: "deck:reviewDetail", id: "o/r#1", detail: { failing: [{ name: "check-a", url: "" }], unresolved: 0 } });
+    expect(screen.getByText("check-a")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("a bigger fix"));
+    host({ type: "deck:reviewDetail", id: "o/r#2", detail: { failing: [{ name: "check-b", url: "" }], unresolved: 0 } });
+
+    expect(screen.queryByText("check-a")).not.toBeInTheDocument();
+    expect(screen.getByText("check-b")).toBeInTheDocument();
+  });
+});
+
+describe("DeckApp review writes", () => {
+  // Three places carry reviewWrites in DeckApp: the reviews state's type, its
+  // initial value, and the deck:reviews handler's assignment — missing any one
+  // leaves the verbs permanently hidden (safe) or permanently shown (not).
+  // reviewsMsg's own default omits the field (false), so this pins the "off by
+  // default, before any message says otherwise" half; the brief's own tests
+  // below pin the "on once told so" half.
+  it("keeps the box and verbs hidden until a deck:reviews message turns writes on", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()]));
+    fireEvent.click(screen.getByText("a small fix"));
+    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approve")).not.toBeInTheDocument();
+  });
+
+  it("submits with fromDraft true only after loading the agent's draft", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText(/Load agent's review/i));
+    host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
+    fireEvent.click(screen.getByText("Comment"));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:reviewSubmit", id: "o/r#1", verb: "comment", body: "1. unbounded retry", fromDraft: true,
+    });
+  });
+
+  it("submits with fromDraft false for a hand-typed body", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "mine" } });
+    fireEvent.click(screen.getByText("Comment"));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:reviewSubmit", id: "o/r#1", verb: "comment", body: "mine", fromDraft: false,
+    });
+  });
+
+  it("keeps fromDraft set when a loaded draft is edited", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText(/Load agent's review/i));
+    host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "1. the retry budget is unbounded" } });
+    fireEvent.click(screen.getByText("Comment"));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:reviewSubmit", id: "o/r#1", verb: "comment",
+      body: "1. the retry budget is unbounded", fromDraft: true,
+    });
+  });
+
+  it("clears fromDraft when the box is emptied", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText(/Load agent's review/i));
+    host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "" } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "all mine now" } });
+    fireEvent.click(screen.getByText("Comment"));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:reviewSubmit", id: "o/r#1", verb: "comment", body: "all mine now", fromDraft: false,
+    });
+  });
+
+  // The old design cleared `submitting` on the next `toast` or `deck:reviews`
+  // post; the coordinator found that both arrive far more often, and for
+  // reasons unrelated to any one submit, than the real outcome does — a 6s
+  // poll tick or an unrelated toast would release (or wrongly fail) a row
+  // that was still genuinely waiting on `gh`. `deck:reviewSubmitDone` is the
+  // only thing that carries the id, so it is the only thing these tests (and
+  // the implementation) trust.
+  it("disables Approve for a row once its submit is posted, until deck:reviewSubmitDone arrives", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText("Approve"));
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(true);
+    host({ type: "deck:reviewSubmitDone", id: "o/r#1", outcome: "ok" });
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // The regression this pins: a routine poll tick (deck:reviews arrives roughly
+  // every 6s while the cache is fresh) must NOT release the disable — only
+  // `deck:reviewSubmitDone` may. Run against the pre-fix implementation (which
+  // released on every `deck:reviews`), this fails at the first assertion below.
+  it("does not release the in-flight disable on a routine reviews poll", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText("Approve"));
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(true);
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage); // a routine poll tick
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(true);
+    host({ type: "deck:reviewSubmitDone", id: "o/r#1", outcome: "ok" });
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("re-enables a row without marking it failed when the submit is cancelled (declined)", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText("Approve"));
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(true);
+    host({ type: "deck:reviewSubmitDone", id: "o/r#1", outcome: "cancelled" });
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText(/check the pr before trying again/i)).not.toBeInTheDocument();
+  });
+
+  // Keyed by id in DeckApp's own state, not just in ReviewStrip's props — a single
+  // shared boolean ("something, somewhere, is submitting") would also pass every
+  // test above but would wrongly freeze every other row's buttons too.
+  it("leaves a different row's verbs enabled while one row's submit is in flight", () => {
+    render(<DeckApp />);
+    const a = mkReview({ id: "o/r#1", number: 1, title: "a small fix" });
+    const b = mkReview({ id: "o/r#2", number: 2, title: "a bigger fix" });
+    host({ ...reviewsMsg([a, b]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText("Approve"));
+    fireEvent.click(screen.getByText("a small fix")); // collapse row 1, still mid-submit
+    fireEvent.click(screen.getByText("a bigger fix")); // expand row 2
+    expect((screen.getByText("Approve") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // The poll-interleave regression, for the failure warning specifically: a
+  // deck:reviews tick lands *between* the click and the outcome, and must
+  // change nothing. Against the pre-fix implementation this fails at the first
+  // assertion (the interleaved poll cleared `submitting` early, so the box was
+  // already re-enabled and unwarned well before the real outcome landed).
+  it("shows the failed-submit warning only once deck:reviewSubmitDone says failed, surviving an interleaved poll", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "lgtm" } });
+    fireEvent.click(screen.getByText("Comment"));
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage); // interleaved poll tick
+    expect((screen.getByText("Comment") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText(/check the pr before trying again/i)).not.toBeInTheDocument();
+    host({ type: "deck:reviewSubmitDone", id: "o/r#1", outcome: "failed" });
+    expect(screen.getByText(/check the pr before trying again/i)).toBeInTheDocument();
+    // Re-enabled, not locked out: a repeat is meant to be an informed click, not a
+    // blocked one.
+    expect((screen.getByText("Comment") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByText("Comment"));
+    host({ type: "deck:reviewSubmitDone", id: "o/r#1", outcome: "ok" });
+    expect(screen.queryByText(/check the pr before trying again/i)).not.toBeInTheDocument();
+  });
+
+  it("clears the row's box and fromDraft flag after a successful submit", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText(/Load agent's review/i));
+    host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
+    fireEvent.click(screen.getByText("Comment"));
+    host({ type: "deck:reviewSubmitDone", id: "o/r#1", outcome: "ok" });
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+    // Not just visually empty — fromDraft must have cleared too, or a fresh,
+    // hand-typed follow-up would wrongly submit as agent-drafted.
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "second look" } });
+    fireEvent.click(screen.getByText("Comment"));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:reviewSubmit", id: "o/r#1", verb: "comment", body: "second look", fromDraft: false,
+    });
+  });
+
+  it("leaves the box alone after a cancelled submit", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview()]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "lgtm" } });
+    fireEvent.click(screen.getByText("Comment"));
+    host({ type: "deck:reviewSubmitDone", id: "o/r#1", outcome: "cancelled" });
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("lgtm");
+  });
+
+  // Nothing anywhere pinned that `bodies` is truly per-id rather than, say, a
+  // single shared value — a mutation to `Object.values(p.bodies)[0]` would have
+  // passed every test above (all of them use exactly one row's box at a time).
+  it("keeps each row's typed body separate from every other row's", () => {
+    render(<DeckApp />);
+    const a = mkReview({ id: "o/r#1", number: 1, title: "a small fix" });
+    const b = mkReview({ id: "o/r#2", number: 2, title: "a bigger fix" });
+    host({ ...reviewsMsg([a, b]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "row one text" } });
+    fireEvent.click(screen.getByText("a small fix")); // collapse row 1
+    fireEvent.click(screen.getByText("a bigger fix")); // expand row 2
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "row two text" } });
+    fireEvent.click(screen.getByText("a bigger fix")); // collapse row 2
+    fireEvent.click(screen.getByText("a small fix")); // re-expand row 1
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("row one text");
+  });
+
+  // Requirement is "empty OR whitespace-only" — every other fromDraft test uses
+  // `""` or a real word, so mutating the `!body.trim()` guard to `!body` would
+  // pass all of them.
+  it("also clears fromDraft when the box is edited down to whitespace only", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText(/Load agent's review/i));
+    host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "   " } });
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "all mine now" } });
+    fireEvent.click(screen.getByText("Comment"));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:reviewSubmit", id: "o/r#1", verb: "comment", body: "all mine now", fromDraft: false,
+    });
+  });
+
+  it("renders a toast's Open PR action and opens it externally", () => {
+    render(<DeckApp />);
+    host({ type: "toast", level: "error", message: "GitHub refused: nope", action: { label: "Open PR", url: "https://gh/o/r/pull/1" } });
+    fireEvent.click(screen.getByText("Open PR"));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://gh/o/r/pull/1" });
+  });
+
+  it("renders no action button for a toast that carries none", () => {
+    render(<DeckApp />);
+    host({ type: "toast", level: "info", message: "just fyi" });
+    expect(screen.queryByRole("button", { name: /open pr/i })).not.toBeInTheDocument();
   });
 });

@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { getConfig } from "./config";
@@ -7,12 +8,18 @@ import { JiraClient, JiraAuthError } from "./jira/client";
 import { readRuns, defaultRunsDir, removeRun } from "./engine/runs";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
-import { openInEditor } from "./engine/workspace";
+import { openInEditor, openWorkspace, BRIEF_DIR } from "./engine/workspace";
+import { createWorktrees } from "./engine/worktree";
 import { taskDiff } from "./engine/git";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
-import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, Run, RunStatus, isTicketRun } from "./types";
+import { discoverRepos } from "./engine/repos";
+import { launchReview, reviewRunKey } from "./engine/review/launch";
+import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
+import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
+import { sortRequests } from "./engine/review/sort";
+import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
@@ -23,6 +30,17 @@ const JIRA_TTL_MS = 30_000;
 const GH_NOTES: Record<GhGap["kind"], string> = {
   missing: "gh CLI not found — PR facts off. Run Agent Flow: Doctor",
   "signed-out": "gh is not signed in — PR facts off. Run Agent Flow: Doctor",
+};
+
+/** Appended to a review body the agent drafted, when provenance stamping is on.
+ * Posting an agent's words as unmarked human review is the kind of thing worth
+ * being straight about with teammates. */
+export const REVIEW_PROVENANCE = "_Drafted with Claude Code via Agent Flow._";
+
+const VERB_LABEL: Record<ReviewVerb, string> = {
+  approve: "Approve",
+  comment: "Comment",
+  "request-changes": "Request changes",
 };
 
 /** The Deck: a full-window board of every task launched via Agent Flow, opened as a
@@ -37,6 +55,26 @@ export class DeckPanel {
   private prFacts: boolean; // seeded from config in the constructor; the only writer after that is deck:setPrFacts
   private readonly prQueue = new RefreshQueue();
   private readonly pr: PrProvider = new GhProvider();
+  private readonly reviewProvider: ReviewProvider = new GhReviewProvider();
+  private reviewSort: ReviewSort = "oldest";
+  /** Last successful search. Held in memory as well as on disk so a failed fetch
+   * can keep rendering it with a stale marker instead of emptying the strip. */
+  private reviewCache: ReviewCache | null = null;
+  private reviewStale = false;
+  /** When the last search attempt was *made*, success or failure — distinct from
+   * `reviewCache.fetchedAt`, which is when one last *succeeded*. A failed search
+   * deliberately leaves `fetchedAt` alone (the strip's staleness display depends
+   * on it), which on its own would make `isReviewCacheStale` re-arm every poll
+   * tick forever once `gh` starts failing. This is in-memory only, on purpose: a
+   * failed attempt should not survive a window reload and force one more wait. */
+  private reviewLastAttemptAt: number | null = null;
+  /** Ids with a `submitReview` in flight. `onMessage` dispatches fire-and-forget,
+   * and the row is only evicted from `reviewCache` *after* a successful submit —
+   * so without this, a second `deck:reviewSubmit` for the same id (a double
+   * click; VS Code queues modals rather than dropping one) would clear every
+   * gate during the up-to-10s `gh` call and could post the same review twice.
+   * GitHub does not deduplicate reviews. */
+  private readonly reviewSubmitsInFlight = new Set<string>();
   private ghProbe: Promise<GhGap | null> | null = null;
   /** undefined until the probe resolves; null means gh is usable, and a gap
    * disables PR facts with a footer note. */
@@ -91,7 +129,16 @@ export class DeckPanel {
   }
 
   private post(msg: OutboundMessage): void {
-    void this.panel.webview.postMessage(msg);
+    try {
+      void this.panel.webview.postMessage(msg);
+    } catch {
+      // A disposed panel's `postMessage` throws synchronously — a normal race
+      // (the user closed the Deck while an async post-write step, a queued
+      // fetch, or anything else here was still in flight), not a bug worth
+      // logging. Letting it escape used to strand whatever ran after this call
+      // in the caller — e.g. submitReview's own cache eviction, which sits right
+      // after the success toast this throw could come from.
+    }
   }
 
   private toast(level: "success" | "error" | "info", message: string): void {
@@ -165,6 +212,297 @@ export class DeckPanel {
     });
   }
 
+  /** Is the review strip live? Two gates, not three: the persistent
+   * `reviewRequests` setting, and `ghReady()` — which already folds the session
+   * PR-facts toggle and a usable gh together, so there is no condition here
+   * that varies independently of PR facts. */
+  private reviewsEnabled(): boolean {
+    return getConfig().reviewRequests && this.ghReady();
+  }
+
+  /** Queue a search when the cache has aged out. Never awaited — a hanging `gh`
+   * must not stall the board's git and transcript reads. The post that reflects
+   * the outcome is fired from here rather than unconditionally from `refresh()`:
+   * with a search in flight, an immediate post would either find `reviewCache`
+   * still null (nothing to show yet) or show the old entry with `stale` not yet
+   * flipped — a premature message a later, correct one would just have to
+   * override. Posting once, when the picture is actually settled, is simpler
+   * and is what `deck:setReviewSort` also relies on for its own direct post.
+   * (When `RefreshQueue.push` dedupes because a search is already in flight for
+   * this key, this call posts nothing at all — the in-flight job's own post,
+   * from an earlier tick, is what will land.) */
+  private enqueueReviews(nowMs: number): void {
+    const ttlMs = getConfig().reviewRequestsTtlSeconds * 1000;
+    if (this.reviewCache === null) this.reviewCache = readReviewCache(defaultReviewsFile());
+    if (!isReviewCacheStale(this.reviewCache, ttlMs, nowMs)) {
+      this.postReviews(); // already fresh — nothing to wait on
+      return;
+    }
+    // Gate on the data clock (above) *and* the attempt clock: a failing search
+    // never advances `fetchedAt`, so the data clock alone would re-queue `gh api
+    // graphql` on every 6s poll tick forever once `gh` starts failing — rate
+    // limited, network down, SSO expired. This clock tracks "how recently did we
+    // try", independently of "how old is the data we are showing".
+    if (this.reviewLastAttemptAt !== null && nowMs - this.reviewLastAttemptAt < ttlMs) return;
+    this.prQueue.push("reviews", async () => {
+      this.reviewLastAttemptAt = Date.now();
+      let res: { issueCount: number; requests: ReviewRequest[] } | null;
+      try {
+        res = await this.reviewProvider.search();
+      } catch {
+        // A provider must never throw, but if one does, this must still not
+        // leave it unhandled: RefreshQueue swallows a rejected job (the queue
+        // owns the slot, not the error), so without this catch the failure would
+        // never set `reviewStale` and never post — the strip would just silently
+        // stop updating, with nothing in the log to say why. Mirrors `enqueuePr`'s
+        // identical guard for the identical failure mode.
+        res = null;
+      }
+      if (res === null) {
+        // Keep whatever we had: an empty strip would read as "you owe nobody a
+        // review", which is the opposite of what a failed fetch means.
+        this.reviewStale = true;
+        this.log("deck: review search failed");
+      } else {
+        this.reviewStale = false;
+        this.reviewCache = { fetchedAt: Date.now(), issueCount: res.issueCount, requests: res.requests };
+        writeReviewCache(defaultReviewsFile(), this.reviewCache);
+      }
+      this.postReviews();
+    });
+  }
+
+  /** Decorate the cached queue with what only this machine can know. Recomputed
+   * every post: a checkout can appear, a review run can start or finish, and a
+   * worktree can be forgotten — a cached path to any of those would render an
+   * action that cannot work. */
+  private decorateReviews(requests: ReviewRequest[]): ReviewRequest[] {
+    const cfg = getConfig();
+    const byName = new Map(discoverRepos(cfg.reposRoot, cfg.repoBlocklist).map((r) => [r.name, r]));
+    const reviewRuns = new Map(
+      readRuns(defaultRunsDir()).filter((r) => runKind(r) === "review").map((r) => [r.key, r]),
+    );
+    return requests.map((r) => {
+      const local = byName.get(r.repoName);
+      const run = reviewRuns.get(reviewRunKey(r.repoName, r.number));
+      // The draft lives in the worktree the agent was launched into, not the main
+      // checkout — that is the only place the agent could have written it.
+      const wt = run?.repos[0]?.path;
+      const draft = wt ? path.join(wt, BRIEF_DIR, `REVIEW-${r.number}.md`) : null;
+      return {
+        ...r,
+        localPath: local?.isGit ? local.path : null,
+        runKey: run?.key ?? null,
+        draftPath: draft && fs.existsSync(draft) ? draft : null,
+      };
+    });
+  }
+
+  private postReviews(): void {
+    if (!this.reviewsEnabled()) {
+      // The strip just went off (reviewRequests, PR facts, or gh going
+      // unusable) — actively say so, rather than merely staying silent. Silence
+      // here used to leave the webview's last posted rows on screen exactly as
+      // they were: frozen, but with their write buttons still live, so a click
+      // could still reach the provider from a strip the user believed they had
+      // just switched off. `enabled: false` also lets the webview drop the "To
+      // review" stat tile instead of showing a hollow "0 To review".
+      this.post({
+        type: "deck:reviews", requests: [], issueCount: 0, sort: this.reviewSort,
+        stale: false, reviewWrites: getConfig().reviewWrites, enabled: false,
+      });
+      return;
+    }
+    if (!this.reviewCache) return;
+    this.post({
+      type: "deck:reviews",
+      requests: sortRequests(this.decorateReviews(this.reviewCache.requests), this.reviewSort),
+      issueCount: this.reviewCache.issueCount,
+      sort: this.reviewSort,
+      stale: this.reviewStale,
+      reviewWrites: getConfig().reviewWrites,
+      enabled: true,
+    });
+  }
+
+  /** Fetch the two facts the search cannot return. A failure still posts —
+   * `detail: null` — rather than staying silent: the row's search-level facts
+   * (review decision, mergeability) are still useful and worth showing, but
+   * nothing else was ever going to tell the webview to stop rendering
+   * "loading…" forever on a fetch that already gave up. */
+  private async reviewDetail(id: string): Promise<void> {
+    const req = this.reviewCache?.requests.find((r) => r.id === id);
+    if (!req) return;
+    const detail = await this.reviewProvider.detail(req.repo, req.number);
+    if (!detail) {
+      this.log(`deck: review detail ${id} failed`);
+      this.post({ type: "deck:reviewDetail", id, detail: null });
+      return;
+    }
+    this.post({ type: "deck:reviewDetail", id, detail });
+  }
+
+  /** The decorated view of one queued PR — recomputed, never cached, for the same
+   * reason decorateReviews itself is: `localPath`, `runKey` and `draftPath` must
+   * reflect what is true on disk right now, not at the last search. */
+  private reviewById(id: string): ReviewRequest | undefined {
+    return this.decorateReviews(this.reviewCache?.requests ?? []).find((r) => r.id === id);
+  }
+
+  private async launchReviewFor(id: string): Promise<void> {
+    const req = this.reviewById(id);
+    if (!req) return; // the queue moved on before the click landed
+    const cfg = getConfig();
+    const res = await launchReview(
+      { req, template: cfg.reviewRequestPrompt, workspaceDir: cfg.workspaceDir, seedAgent: cfg.seedAgent },
+      { createWorktrees, openWorkspace, log: this.log },
+    );
+    if (!res.ok) {
+      this.toast("error", res.message);
+      return;
+    }
+    this.toast(
+      "success",
+      `Reviewing ${req.repoName}#${req.number} in a worktree.${cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : ""}`,
+    );
+    await this.refreshBusy(); // picks up the new run so the row shows "reviewing"
+  }
+
+  /** Hand the agent's findings to the review box. Read on demand rather than
+   * carried on every deck:reviews post — the file is a whole review, and the
+   * strip re-posts on every poll tick. */
+  private loadReviewDraft(id: string): void {
+    const req = this.reviewById(id);
+    if (!req?.draftPath) return;
+    try {
+      this.post({ type: "deck:reviewDraft", id, body: fs.readFileSync(req.draftPath, "utf8").trim() });
+    } catch (e) {
+      this.log(`deck: review draft ${id} unreadable: ${e}`);
+      this.toast("error", `Couldn't read the agent's review for ${req.repoName}#${req.number}.`);
+    }
+  }
+
+  /** The one write path. Gates before anything reaches GitHub, in order: the
+   * setting, the strip actually being on, a `verb` that is actually one of the
+   * three GitHub understands, no other submit already in flight for this id,
+   * the row still being in the queue, and a modal the user has to accept. */
+  private async submitReview(id: string, verb: ReviewVerb, body: string, fromDraft: boolean): Promise<void> {
+    const cfg = getConfig();
+    // Every gate below that refuses *this* id's own attempt releases the
+    // webview's disable the same way a completed submit does — nothing was
+    // written, so "cancelled" (not "failed") is the honest outcome, and without
+    // it the row would stay disabled until the panel is reloaded (these two
+    // races are pre-existing and tested: reviewWrites flipped off after the
+    // panel opened, and the row evicted from the queue between the click and
+    // this call).
+    if (!cfg.reviewWrites) {
+      this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      return;
+    }
+    // The strip itself can go dark (PR facts toggled off, reviewRequests
+    // flipped, gh going unusable) without the row's own message queue draining
+    // instantly — `reviewById` below still resolves from `reviewCache`, which
+    // `postReviews`'s "cleared" post never touches. Without this, a submit that
+    // was already in the webview's outbox before the toggle could still reach
+    // GitHub from a strip the user just switched off.
+    if (!this.reviewsEnabled()) {
+      this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      return;
+    }
+    // `verb` arrives from a webview message, untyped at runtime no matter what
+    // `ReviewVerb` claims at compile time. `Object.hasOwn` (not `!VERB_LABEL[verb]`,
+    // which a prototype key like "constructor" would sail through as truthy) fails
+    // closed before any dialog is shown — the same guard `provider.ts`'s `submit`
+    // already applies to the identical value, for the identical reason. Without
+    // this, an out-of-union verb reads `label` as `undefined`: the dialog shows
+    // "undefined on owner/repo#123?", and `undefined !== undefined` is *false*, so
+    // the decline branch below is skipped regardless of what the user answers —
+    // `provider.ts` still refuses the write, but the log would claim a submit the
+    // user never confirmed, and the user would be told "GitHub refused" about a
+    // call that never reached GitHub.
+    if (!Object.hasOwn(VERB_LABEL, verb)) {
+      this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      return;
+    }
+    // Deliberately silent: this gate is only reachable while a genuine call for
+    // this same id is still in flight, and that call — not this rejected
+    // duplicate — owns posting the eventual outcome. Posting "cancelled" here
+    // would release the webview's disable while the real submit is still
+    // running, re-enabling the buttons mid-flight — the opposite of what the
+    // guard exists for.
+    if (this.reviewSubmitsInFlight.has(id)) return;
+    const req = this.reviewById(id);
+    if (!req) {
+      this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      return;
+    }
+    this.reviewSubmitsInFlight.add(id);
+    try {
+      const label = VERB_LABEL[verb];
+      const answer = await vscode.window.showWarningMessage(
+        `${label} on ${req.repo}#${req.number}?`,
+        { modal: true },
+        label,
+      );
+      if (answer !== label) {
+        // Distinct from a failure: nothing was attempted, so there is nothing to
+        // warn about — just release the row's disable.
+        this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+        return;
+      }
+      const text = fromDraft && cfg.stampLabelOnWrite && body.trim()
+        ? `${body.trim()}\n\n${REVIEW_PROVENANCE}`
+        : body;
+      this.log(`deck: submitting ${verb} on ${req.repo}#${req.number}`);
+      const res = await this.reviewProvider.submit(req.repo, req.number, verb, text);
+      if (!res.ok) {
+        this.log(`deck: review submit failed: ${res.message}`);
+        // Neutral prefix, on purpose: neither "GitHub refused:" nor "Review not
+        // sent:" holds up in front of the timeout wording, which says the write
+        // may already have gone through — either prefix would assert an outcome
+        // the message itself refuses to commit to.
+        this.post({
+          type: "toast",
+          level: "error",
+          message: `Review submit: ${res.message}`,
+          action: { label: "Open PR", url: req.url },
+        });
+        this.post({ type: "deck:reviewSubmitDone", id, outcome: "failed" });
+        return;
+      }
+      this.toast("success", `${label} sent on ${req.repoName}#${req.number}.`);
+      // Approving or requesting changes clears the review request server-side; a
+      // comment does not — after a comment you are still in requested_reviewers,
+      // so the row must stay until the next search proves otherwise. issueCount is
+      // decremented alongside the eviction, and the trimmed cache is written to
+      // disk immediately: memory-only would let closing and reopening the Deck
+      // re-read the untouched file and resurrect the row before the next search runs.
+      if ((verb === "approve" || verb === "request-changes") && this.reviewCache) {
+        this.reviewCache = {
+          ...this.reviewCache,
+          issueCount: Math.max(0, this.reviewCache.issueCount - 1),
+          requests: this.reviewCache.requests.filter((r) => r.id !== id),
+        };
+        writeReviewCache(defaultReviewsFile(), this.reviewCache);
+      }
+      this.postReviews();
+      this.post({ type: "deck:reviewSubmitDone", id, outcome: "ok" });
+    } catch (e) {
+      // Anything unexpected here (writeReviewCache, decorateReviews's fs calls,
+      // `post` itself before its own guard was added — a disposed panel used to
+      // throw mid-write, landing between the success toast and the cache
+      // eviction below it) must still tell the webview this row is no longer
+      // waiting on an outcome. Without this, nothing else was ever going to post
+      // a deck:reviewSubmitDone for this id, and the row's buttons would stay
+      // disabled until the panel reloads — even though the write itself may well
+      // have already gone through.
+      this.log(`deck: review submit ${id} threw after starting: ${e}`);
+      this.post({ type: "deck:reviewSubmitDone", id, outcome: "failed" });
+    } finally {
+      this.reviewSubmitsInFlight.delete(id);
+    }
+  }
+
   private async jiraStatus(key: string): Promise<{ status: string | null; category: string | null } | null> {
     const hit = this.jiraCache.get(key);
     if (hit && Date.now() - hit.at < JIRA_TTL_MS) return { status: hit.status, category: hit.category };
@@ -180,7 +518,9 @@ export class DeckPanel {
   }
 
   private async buildAll(): Promise<RunStatus[]> {
-    const runs = readRuns(defaultRunsDir());
+    // Review runs are work in flight, but not *your ticket's* work: they surface
+    // on their strip row, not as a fifth kind of card in In progress.
+    const runs = readRuns(defaultRunsDir()).filter((r) => runKind(r) !== "review");
     const projectsRoot = path.join(os.homedir(), ".claude", "projects");
     const now = Date.now();
     const authed = await this.auth.isAuthenticated();
@@ -240,6 +580,11 @@ export class DeckPanel {
         prFacts: this.prFacts,
         ghNote: this.prFacts && this.ghGap ? GH_NOTES[this.ghGap.kind] : null,
       });
+      // The disabled branch posts its own "cleared" state directly — enqueueReviews
+      // only ever posts once a search settles or is already fresh, neither of
+      // which happens while the strip is off.
+      if (this.reviewsEnabled()) this.enqueueReviews(Date.now());
+      else this.postReviews();
     } catch (e) {
       this.log(`deck: refresh failed: ${e}`);
     }
@@ -279,6 +624,26 @@ export class DeckPanel {
         break;
       case "deck:inspect":
         await this.inspect(m.key, m.action, m.repo);
+        break;
+      case "deck:setReviewSort":
+        this.reviewSort = m.sort;
+        this.postReviews();
+        break;
+      case "deck:reviewExpand":
+        // Routed through the same queue every other `gh` call uses (concurrency
+        // capped at 4, deduped by key) — awaited directly here, expanding rows in
+        // quick succession could fork an unbounded number of `gh` processes, one
+        // per row, with nothing capping how many run at once.
+        this.prQueue.push(`detail:${m.id}`, () => this.reviewDetail(m.id));
+        break;
+      case "deck:reviewLaunch":
+        await this.launchReviewFor(m.id);
+        break;
+      case "deck:reviewLoadDraft":
+        this.loadReviewDraft(m.id);
+        break;
+      case "deck:reviewSubmit":
+        await this.submitReview(m.id, m.verb, m.body, m.fromDraft);
         break;
       case "deck:forget":
         removeRun(defaultRunsDir(), m.key);

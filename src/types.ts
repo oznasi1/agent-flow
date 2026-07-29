@@ -63,18 +63,33 @@ export interface Run {
   summary: string;
   url: string;
   createdAt: number; // epoch ms
+  /** What launched this run. Absent means "task" — every record written before
+   * review runs existed. Review runs carry a PR url rather than a Jira one, so
+   * this, not the url, is what keeps them out of Jira polling and the columns. */
+  kind?: "task" | "explore" | "review";
   mode: WorkspaceMode;
   workspaceFile?: string; // multi-root .code-workspace, when mode === "multiroot"
   repos: { name: string; path: string; isGit: boolean; branch?: string }[];
   briefPaths: string[];
 }
 
+const RUN_KINDS = new Set(["task", "explore", "review"]);
+
+/** A run's kind, tolerant of an old record with no field and of a hand-edited
+ * one with a value we don't know. */
+export function runKind(run: Run): "task" | "explore" | "review" {
+  return RUN_KINDS.has(run.kind as string) ? (run.kind as "task" | "explore" | "review") : "task";
+}
+
 /** Is this run attached to a Jira ticket? An Explore session is launched with a
- * synthetic `explore-<slug>` key, no ticket url, and no branch Agent Flow named:
- * there is no Jira issue to poll, and `gh pr list --head <default-branch>` can
- * only return a pull request belonging to somebody else. Tolerates an older or
- * hand-edited run record with no url field at all. */
+ * synthetic `explore-<slug>` key and no ticket url: there is no Jira issue to
+ * poll, and `gh pr list --head <default-branch>` can only return a pull request
+ * belonging to somebody else. A **review** run is excluded for the opposite
+ * reason — it has a url, but it is a PR's, and polling Jira for
+ * `review-centaur-850` would 404 every 30 seconds forever. Tolerates an older or
+ * hand-edited record with no url field at all. */
 export function isTicketRun(run: Run): boolean {
+  if (runKind(run) === "review") return false;
   return typeof run.url === "string" && run.url.trim().length > 0;
 }
 
@@ -143,6 +158,44 @@ export interface PrEntry {
 
 /** Repo name → its PR entry, as stored per run and rendered per card. */
 export type PrEntryMap = Record<string, PrEntry>;
+
+// ── Review requests: PRs waiting on you ─────────────────────────────────────
+
+export type ReviewSize = "S" | "M" | "L";
+export type ReviewSort = "oldest" | "smallest";
+export type ReviewVerb = "approve" | "comment" | "request-changes";
+
+/** One PR asking for your review — everything the strip renders unexpanded.
+ * `localPath`, `runKey` and `draftPath` are observed locally on every refresh and
+ * never persisted: a cached path to a worktree since forgotten would render an
+ * action that cannot work. */
+export interface ReviewRequest {
+  id: string; // "owner/repo#number" — stable across refreshes
+  repo: string; // nameWithOwner
+  repoName: string; // short name, for matching a local checkout
+  number: number;
+  title: string;
+  url: string;
+  author: string;
+  isDraft: boolean;
+  createdAt: number; // epoch ms
+  updatedAt: number; // epoch ms
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  ci: "passing" | "failing" | "pending" | "none";
+  review: PrFacts["review"];
+  mergeable: PrFacts["mergeable"];
+  localPath: string | null; // matched checkout; null disables the agent action
+  runKey: string | null; // a review run in flight for this PR
+  draftPath: string | null; // .pick-task/REVIEW-<n>.md, once the agent writes it
+}
+
+/** What expanding a row adds — the two things the search cannot return. */
+export interface ReviewDetail {
+  failing: PrCheck[];
+  unresolved: number | null;
+}
 
 // ── The Marketplace: local asset browser ────────────────────────────────────
 
@@ -228,6 +281,11 @@ export type InboundMessage =
   | { type: "deck:setPrFacts"; on: boolean }
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
   | { type: "deck:forget"; key: string }
+  | { type: "deck:setReviewSort"; sort: ReviewSort }
+  | { type: "deck:reviewExpand"; id: string }
+  | { type: "deck:reviewLaunch"; id: string }
+  | { type: "deck:reviewLoadDraft"; id: string }
+  | { type: "deck:reviewSubmit"; id: string; verb: ReviewVerb; body: string; fromDraft: boolean }
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }
@@ -268,6 +326,35 @@ export type OutboundMessage =
   // The Deck
   | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; ghNote: string | null }
   | { type: "deck:loading"; loading: boolean }
+  | {
+      type: "deck:reviews";
+      requests: ReviewRequest[];
+      issueCount: number;
+      sort: ReviewSort;
+      stale: boolean; // the last fetch failed; these are the previous results
+      reviewWrites: boolean; // agentFlow.reviewWrites — the strip's box and verbs render only when true
+      // false when the strip has been switched off (reviewRequests, PR facts, or
+      // gh going unusable) — distinct from a genuine empty queue. Lets the webview
+      // drop the "To review" stat tile entirely rather than showing "0 To review",
+      // and actively clears any rows it was rendering rather than leaving them
+      // frozen (and their write buttons clickable) with nothing ever told to stop.
+      enabled: boolean;
+    }
+  // `detail: null` means the per-PR detail call itself failed (not "no failing
+  // checks and unknown thread count", which is what an empty-but-successful
+  // result looks like) — the webview tells the two apart to stop showing
+  // "loading…" forever on a row whose fetch already gave up.
+  | { type: "deck:reviewDetail"; id: string; detail: ReviewDetail | null }
+  // The agent's findings, read from the worktree on demand — not carried on
+  // every deck:reviews post, since the strip re-posts on every poll tick.
+  | { type: "deck:reviewDraft"; id: string; body: string }
+  // The explicit outcome of one deck:reviewSubmit, posted at all three exits of
+  // submitReview: a declined confirmation ("cancelled"), a provider rejection
+  // ("failed"), or a completed write ("ok"). Neither `toast` nor `deck:reviews`
+  // carries this id, and both can arrive for unrelated reasons while a submit is
+  // still in flight — this is the only message the webview can trust to release
+  // that row's disable, or to know a failure was *this* row's.
+  | { type: "deck:reviewSubmitDone"; id: string; outcome: "ok" | "failed" | "cancelled" }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
   | { type: "mkt:loading"; loading: boolean }

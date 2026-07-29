@@ -10,6 +10,7 @@ import {
   DEFAULT_EXPLORE_DEBUG_PROMPT,
   DEFAULT_EXPLORE_GENERAL_PROMPT,
   DEFAULT_PR_REVIEW_PROMPT,
+  DEFAULT_REVIEW_REQUEST_PROMPT,
 } from "../../src/config";
 import { setConfig } from "../_mocks/vscode";
 import pkg from "../../package.json";
@@ -320,6 +321,50 @@ describe("PR facts settings", () => {
   });
 });
 
+describe("review-request settings", () => {
+  it("defaults to the strip on, a 5-minute TTL, and writes off", () => {
+    const c = getConfig();
+    expect(c.reviewRequests).toBe(true);
+    expect(c.reviewRequestsTtlSeconds).toBe(300);
+    expect(c.reviewWrites).toBe(false);
+    // Both safety properties of the default prompt, not just a loose substring:
+    // where findings go, and that nothing gets posted to GitHub automatically.
+    expect(c.reviewRequestPrompt).toContain(".pick-task/REVIEW-{number}.md");
+    expect(c.reviewRequestPrompt).toMatch(/do not post/i);
+    expect(c.reviewRequestPrompt).toBe(DEFAULT_REVIEW_REQUEST_PROMPT);
+  });
+
+  it("honors reviewRequests set to false", () => {
+    setConfig({ reviewRequests: false });
+    expect(getConfig().reviewRequests).toBe(false);
+  });
+
+  it("honors an explicit reviewWrites override", () => {
+    setConfig({ reviewWrites: true });
+    expect(getConfig().reviewWrites).toBe(true);
+  });
+
+  it("floors the TTL at 60 seconds", () => {
+    setConfig({ reviewRequestsTtlSeconds: 5 });
+    expect(getConfig().reviewRequestsTtlSeconds).toBe(60);
+  });
+
+  it("honours an explicit TTL above the floor", () => {
+    setConfig({ reviewRequestsTtlSeconds: 900 });
+    expect(getConfig().reviewRequestsTtlSeconds).toBe(900);
+  });
+
+  it("honours an explicit prompt override", () => {
+    setConfig({ reviewRequestPrompt: "just look at it" });
+    expect(getConfig().reviewRequestPrompt).toBe("just look at it");
+  });
+
+  it("falls back to the default prompt for an empty override", () => {
+    setConfig({ reviewRequestPrompt: "" });
+    expect(getConfig().reviewRequestPrompt).toContain("REVIEW-{number}.md");
+  });
+});
+
 describe("package.json ⇄ config constants", () => {
   const props = (pkg.contributes.configuration.properties as Record<string, { default?: unknown }>);
 
@@ -368,5 +413,25 @@ describe("package.json ⇄ config constants", () => {
     const ttl = props["agentFlow.prFactsTtlSeconds"] as { default?: unknown; minimum?: unknown };
     expect(ttl.default).toBe(120);
     expect(ttl.minimum).toBe(30);
+  });
+
+  // getConfig()'s own `?? false` / `?? true` fallbacks only exercise the vscode
+  // mock's "unset key" behavior (undefined), never the manifest default a real
+  // VS Code install actually serves an untouched setting from. Without this, a
+  // "default": true typo on agentFlow.reviewWrites in package.json — shipping
+  // the one GitHub write path in this extension on by default — would leave
+  // every one of getConfig()'s own tests green.
+  it("declares reviewWrites defaulting to false — the only setting that writes to GitHub", () => {
+    expect(props["agentFlow.reviewWrites"].default).toBe(false);
+  });
+
+  it("declares reviewRequests defaulting to true — the review strip is on unless turned off", () => {
+    expect(props["agentFlow.reviewRequests"].default).toBe(true);
+  });
+
+  it("declares reviewRequestsTtlSeconds defaulting to 300 with a floor of 60", () => {
+    const ttl = props["agentFlow.reviewRequestsTtlSeconds"] as { default?: unknown; minimum?: unknown };
+    expect(ttl.default).toBe(300);
+    expect(ttl.minimum).toBe(60);
   });
 });

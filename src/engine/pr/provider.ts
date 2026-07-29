@@ -1,6 +1,6 @@
 import { execFile } from "child_process";
 import { PrFacts } from "../../types";
-import { GhPr, parseRepoFromUrl, pickPr, toPrFacts } from "./facts";
+import { countUnresolved, GhPr, parseRepoFromUrl, pickPr, toPrFacts } from "./facts";
 import { resolveBin } from "./which";
 
 /** Every field we need, in one call. Verified against gh 2.89.0 — `pr list --json`
@@ -10,7 +10,7 @@ export const PR_JSON_FIELDS =
 
 export const GH_TIMEOUT_MS = 10_000;
 
-const THREADS_QUERY =
+export const THREADS_QUERY =
   "query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){" +
   "reviewThreads(first:100){nodes{isResolved isOutdated}}}}}";
 
@@ -29,9 +29,20 @@ export type Runner = (
 
 export const execRunner: Runner = (file, args, opts) =>
   new Promise((resolve, reject) => {
-    execFile(file, args, { cwd: opts.cwd, timeout: opts.timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) =>
-      err ? reject(err) : resolve(stdout.toString()),
-    );
+    execFile(file, args, { cwd: opts.cwd, timeout: opts.timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) {
+        // execFile's own error carries only code/killed/signal/cmd, and its
+        // message is `Command failed: <file> <full argv joined>` — which for
+        // `gh pr review` embeds the reviewer's entire --body text verbatim.
+        // Attach stderr (gh's own complaint, never a reconstructed argv) so
+        // callers — review/provider.ts's submit() in particular — can prefer
+        // it over that message instead of the leak that shipped without this.
+        (err as NodeJS.ErrnoException & { stderr?: string }).stderr = stderr?.toString();
+        reject(err);
+        return;
+      }
+      resolve(stdout.toString());
+    });
   });
 
 export interface PrProvider {
@@ -114,11 +125,7 @@ export class GhProvider implements PrProvider {
         ["api", "graphql", "-f", `query=${THREADS_QUERY}`, "-F", `o=${loc.owner}`, "-F", `r=${loc.repo}`, "-F", `n=${pr.number}`],
         { cwd: repoPath, timeoutMs: GH_TIMEOUT_MS },
       );
-      const nodes = (JSON.parse(out) as {
-        data?: { repository?: { pullRequest?: { reviewThreads?: { nodes?: { isResolved?: boolean; isOutdated?: boolean }[] } } } };
-      }).data?.repository?.pullRequest?.reviewThreads?.nodes;
-      if (!Array.isArray(nodes)) return null;
-      return nodes.filter((n) => !n.isResolved && !n.isOutdated).length;
+      return countUnresolved(JSON.parse(out));
     } catch {
       return null;
     }

@@ -109,6 +109,28 @@ describe("openWorkspace — multiroot", () => {
   });
 });
 
+describe("openWorkspace — run kind", () => {
+  const runWriteOf = () => {
+    const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
+    expect(runWrite).toBeTruthy();
+    return JSON.parse(String(runWrite![1]));
+  };
+
+  it("stamps the run's kind when one is given", async () => {
+    await openWorkspace(baseReq({ kind: "review" }));
+    expect(runWriteOf().kind).toBe("review");
+  });
+
+  it("leaves the kind absent for a plain take — every pre-existing run record looks like this", async () => {
+    await openWorkspace(baseReq());
+    const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
+    expect(runWriteOf().kind).toBeUndefined();
+    // Not just "reads as undefined": the serialized record must not carry the key
+    // at all, matching every runs/*.json file written before `kind` existed.
+    expect(String(runWrite![1])).not.toContain("kind");
+  });
+});
+
 describe("openWorkspace — per-window", () => {
   it("opens one window per repo and records each path as a match", async () => {
     const result = await openWorkspace(baseReq({ mode: "per-window" }));

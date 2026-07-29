@@ -58,6 +58,12 @@ export const DECK_CSS = `
     --r-card: 10px;
     --r-ctl: 6px;
     --r-chip: 5px;
+
+    /* Six rows, plus a deliberate half-row peek: a clean cut at a row boundary reads as
+       "the list ends here", where a sliced row reads as "there is more" — and that is the
+       only scroll hint this container gets. Derived, so the intent survives a row-height
+       change: --t-body plus .rv-line's 6px padding top and bottom is ~26px. */
+    --rv-row-h: 26px;
   }
 
   .hd { flex: none; display: flex; align-items: center; gap: 14px;
@@ -226,6 +232,18 @@ export const DECK_CSS = `
     background: var(--c-done); }
   .card.attn .act.primary.live::before { background: currentColor; }
 
+  /* Disabled means two different things on the review strip's verbs (an empty
+     box, or a submit already in flight for the row) and previously looked
+     identical to enabled — every color/background/cursor above was a fixed
+     value, so the UA's own disabled rendering never had a chance to show
+     through. Each selector below matches one of the compound forms above
+     (plain, primary, primary-in-an-attn-card) so this wins regardless of the
+     theme or which card the button sits on. */
+  .act:disabled, .act:disabled:hover,
+  .act.primary:disabled, .act.primary:disabled:hover,
+  .card.attn .act.primary:disabled, .card.attn .act.primary:disabled:hover {
+    cursor: default; color: var(--dim); background: transparent; border-color: var(--hair); }
+
   .more-wrap { position: relative; display: inline-flex; }
   .more { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
     border: 0; background: none; border-radius: var(--r-ctl); color: var(--dim); cursor: pointer;
@@ -254,11 +272,18 @@ export const DECK_CSS = `
   .legend .note.warn { color: var(--c-attn); margin-left: 0; }
 
   .toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; z-index: 50; }
-  .toast { font-size: 12px; padding: 8px 14px; border-radius: 7px;
+  .toast { display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 8px 14px; border-radius: 7px;
     border: 1px solid var(--hair); background: var(--vscode-notifications-background, var(--vscode-editorWidget-background));
     color: var(--vscode-foreground); box-shadow: 0 6px 20px -8px rgba(0,0,0,.5); }
   .toast.error { border-color: var(--c-danger); }
   .toast.success { border-color: var(--c-done); }
+  .toast-msg { flex: 1; }
+  /* A real button, not the toast's own onClick — Open PR must not be swallowed by a
+     dismiss handler the toast doesn't even have here (unlike the sidebar's toast
+     stack, this one only ever times out). */
+  .toast-action { flex: none; font-size: var(--t-body); padding: 2px 9px; border-radius: var(--r-chip);
+    cursor: pointer; background: transparent; color: var(--vscode-foreground); border: 1px solid var(--edge); }
+  .toast-action:hover { background: var(--vscode-toolbar-hoverBackground); }
 
   .board::-webkit-scrollbar { width: 9px; height: 9px; }
   .board::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); border-radius: 8px; }
@@ -279,4 +304,90 @@ export const DECK_CSS = `
   .pr-bad .pr-link { color: inherit; }
   .pr-wait { color: var(--dim); }
   .pr-draft { color: var(--dim); }
+
+  /* The review queue: what other people are waiting on you for, above the board of
+     what you are waiting on yourself. Inside the board's own 20px gutter, and
+     flex: none so it never steals height from .board, which is the scrollport. */
+  .rv-strip { flex: none; margin: 0 20px 10px; border: 1px solid var(--hair);
+    border-radius: var(--r-card); overflow: hidden; }
+  .rv-hd { display: flex; align-items: center; gap: 10px; padding: 7px 12px;
+    font-size: var(--t-body); color: var(--dim); }
+  .rv-toggle { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none;
+    padding: 0; cursor: pointer; font-size: var(--t-body); font-weight: 550;
+    color: var(--vscode-foreground); }
+  .rv-hd .sp { flex: 1; }
+  .rv-sort { display: inline-flex; align-items: center; gap: 5px; }
+  .rv-sort button { border: 0; background: none; padding: 0; cursor: pointer;
+    font-size: var(--t-body); color: var(--dim); }
+  .rv-sort button.on { color: var(--vscode-foreground); text-decoration: underline; text-underline-offset: 2px; }
+  /* A queue we could not refresh is stale, not broken — attn, never danger. */
+  .rv-note.warn { color: var(--c-attn); }
+
+  /* Bounded, not hidden. Auto-collapsing a long queue met the "don't push the board
+     off-screen" goal by defeating the feature's entire purpose — nine pending reviews
+     opened as a bare count. A capped, scrolling list keeps the board's share of the
+     window while every row stays one flick away. ~6 rows before it scrolls; the strip
+     is the one place on this panel that owns a nested scroller, which is why the rule
+     lives here rather than on .rv-strip. */
+  .rv-rows { border-top: 1px solid var(--hair); max-height: calc(var(--rv-row-h) * 6.5);
+    overflow-y: auto; overscroll-behavior: contain; }
+  .rv-row + .rv-row { border-top: 1px solid var(--hair); }
+  /* A button, so reset the button chrome and let it fill the row. outline-offset is
+     negative because .rv-strip clips overflow — a ring drawn outside would vanish. */
+  .rv-line { display: flex; align-items: baseline; gap: 8px; padding: 6px 12px; cursor: pointer;
+    font-size: var(--t-body); font-variant-numeric: tabular-nums;
+    width: 100%; text-align: left; background: none; border: 0; color: inherit; font-family: inherit;
+    outline-offset: -2px; }
+  .rv-line:hover { background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)); }
+  .rv-caret { flex: none; width: 9px; color: var(--dim); }
+  /* Identifiers and counts — the only mono on the row. The title and the handle
+     beside them are English, and stay in the UI font. */
+  /* flex: none + nowrap so a long title absorbs the squeeze through its own ellipsis
+     rather than these badges wrapping to a second line in a narrow panel. */
+  .rv-repo, .rv-num, .rv-size, .rv-line .add, .rv-line .del {
+    font-family: var(--mono); font-size: var(--t-data); flex: none; white-space: nowrap; }
+  .rv-repo, .rv-num { color: var(--dim); }
+  .rv-size { font-weight: 600; color: var(--dim); }
+  .rv-line .add { color: var(--c-done); }
+  .rv-line .del { color: var(--c-danger); }
+  .rv-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--vscode-foreground); }
+  .rv-draft { flex: none; font-size: var(--t-micro); color: var(--dim);
+    border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0 4px; }
+  .rv-files, .rv-author, .rv-age { flex: none; color: var(--dim); }
+  .rv-running { flex: none; color: var(--c-progress); }
+
+  .rv-detail { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px;
+    padding: 2px 12px 9px 29px; font-size: var(--t-body); }
+  .rv-facts { flex-basis: 100%; display: flex; align-items: baseline; gap: 6px; color: var(--dim); }
+  /* Actions flow left, directly under the facts they belong to. \`margin-left: auto\`
+     here reads as a bug in the common case: with no review box on the row yet, it
+     strands a lone Open PR button ~700px away at the far right of an empty line,
+     attached to nothing. Verified in the preview harness. When the box arrives it
+     takes \`flex: 1\` on this same line and pushes the actions right on its own. */
+  .rv-actions { margin-left: 0; flex: none; display: flex; align-items: center; gap: 5px; }
+  .rv-facts.dim { font-style: italic; }
+  .rv-sep { color: var(--dim); }
+  /* .act dims to .7 unless it sits in a hovered .card. A row is not a card, so the
+     rule never re-brightens and every button here would render permanently faded. */
+  .rv-actions .act { opacity: 1; }
+
+  /* .rv-actions is flex:none (never shrinks), so .rv-box was the row's only
+     shrinkable item and absorbed the entire squeeze in a narrow panel — the
+     field you type the review into became the smallest thing on the row,
+     three-line-wrapping its own placeholder before the buttons gave up an inch.
+     A basis plus a floor makes the row wrap (rv-detail is already flex-wrap)
+     instead: min() keeps the floor from overflowing a container narrower than
+     260px, rather than only ever protecting against the row's own siblings. */
+  .rv-box { flex: 1 1 260px; min-width: min(260px, 100%); }
+  .rv-box textarea { width: 100%; min-height: 46px; resize: vertical; font: inherit;
+    font-size: var(--t-body); color: var(--vscode-input-foreground);
+    background: var(--vscode-input-background); border: 1px solid var(--edge);
+    border-radius: var(--r-ctl); padding: 5px 7px; }
+
+  /* A failed submit's own line, full-width below the box and its verbs (flex-basis:
+     100% wraps it under them, the same trick .rv-facts uses above). --c-attn, not
+     --c-danger: nothing here is broken — GitHub may well have taken the review —
+     this is "go check", the same register as the stale-queue note above. */
+  .rv-fail { flex-basis: 100%; font-size: var(--t-body); color: var(--c-attn); }
 `;

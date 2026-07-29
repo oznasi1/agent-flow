@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { window, ViewColumn, env, workspace } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
-import type { PrFacts, Run, RunStatus } from "../../src/types";
+import type { PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
@@ -26,6 +26,36 @@ const h = vi.hoisted(() => ({
   probeGh: vi.fn(async (): Promise<GhGap | null> => null),
   prFacts: true as boolean,
   ttlSeconds: 120,
+  // Review-requests strip (Task 7): a gh-backed search, an on-disk cache, and the
+  // repos discoverable on this machine — independent of the PR-facts fixtures above.
+  reviewSearch: vi.fn(async (): Promise<{ issueCount: number; requests: ReviewRequest[] } | null> => ({
+    issueCount: 1,
+    requests: [reviewFixture()],
+  })),
+  reviewCache: null as { fetchedAt: number; issueCount: number; requests: ReviewRequest[] } | null,
+  writeReviewCache: vi.fn(),
+  // Row expansion (Task 9): the two facts the search cannot return.
+  reviewDetail: vi.fn(async (_repo: string, _number: number): Promise<ReviewDetail | null> => ({ failing: [], unresolved: null })),
+  // The write path (Task 14): the only setting that lets the Deck post to GitHub,
+  // the Jira-provenance toggle reused for a review body, and the submit call itself.
+  reviewWrites: false as boolean,
+  stampLabelOnWrite: true as boolean,
+  reviewSubmit: vi.fn(async (_repo: string, _number: number, _verb: ReviewVerb, _body: string): Promise<{ ok: true } | { ok: false; message: string }> => ({ ok: true })),
+  repos: [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }] as ServiceRef[],
+  reviewRequests: true as boolean,
+  // Review launch + draft handoff (Task 12): the worktree launcher and the two
+  // fs primitives decorateReviews/loadReviewDraft need — kept in the hoisted
+  // block like every other side effect this suite stubs out.
+  // Typed as the real union (not narrowed via inference) so a test can resolve
+  // `{ ok: false, message }` as well as the success shape without a type error.
+  // Rest-params rather than the real (req, deps) signature: the mock never
+  // inspects its arguments, only the launch/launch.ts wrapper below forwards them.
+  launchReview: vi.fn(async (..._args: unknown[]): Promise<{ ok: true; runKey: string } | { ok: false; message: string }> => ({
+    ok: true,
+    runKey: "review-aws-ops-8491",
+  })),
+  existsSync: vi.fn((_p: string) => false),
+  readFileSync: vi.fn((_p: string, _e?: string) => ""),
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -33,7 +63,15 @@ vi.mock("../../src/engine/runs", () => ({
   removeRun: h.removeRun,
 }));
 vi.mock("../../src/engine/status", () => ({ buildRunStatus: h.buildRunStatus }));
-vi.mock("../../src/engine/workspace", () => ({ openInEditor: h.openInEditor }));
+vi.mock("../../src/engine/workspace", () => ({
+  openInEditor: h.openInEditor,
+  // Never actually invoked in this suite — launchReview itself is mocked below,
+  // so it never calls through to its own deps. Present only so deckView's
+  // import of BRIEF_DIR and openWorkspace resolves to something.
+  openWorkspace: vi.fn(),
+  BRIEF_DIR: ".pick-task",
+}));
+vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn() }));
 vi.mock("../../src/engine/git", () => ({ taskDiff: h.taskDiff }));
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: () => [],
@@ -51,8 +89,42 @@ vi.mock("../../src/engine/pr/provider", () => ({
   probeGh: h.probeGh,
   GhProvider: class { fetch = h.prFetch; },
 }));
+vi.mock("../../src/engine/review/provider", () => ({
+  GhReviewProvider: class {
+    search = h.reviewSearch;
+    detail = h.reviewDetail;
+    submit = h.reviewSubmit;
+  },
+}));
+vi.mock("../../src/engine/review/store", () => ({
+  defaultReviewsFile: () => "/reviews.json",
+  readReviewCache: () => h.reviewCache,
+  writeReviewCache: h.writeReviewCache,
+  // Exercise the real staleness rule rather than restating it here.
+  isReviewCacheStale: (c: { fetchedAt: number } | null, ttl: number, now: number) => !c || now - c.fetchedAt >= ttl,
+}));
+vi.mock("../../src/engine/repos", () => ({ discoverRepos: () => h.repos }));
+// Partial mock: deckView.ts and everything it pulls in (engine/worktree,
+// engine/gitExclude, jsonc-parser's consumers, etc.) use far more of `fs` than
+// the two functions this suite stubs — a bare vi.mock("fs") would blank the
+// rest and break every real (unmocked) module transitively imported here.
+vi.mock("fs", async (importActual) => {
+  const actual = await importActual<typeof import("fs")>();
+  return { ...actual, existsSync: (p: string) => h.existsSync(p), readFileSync: (p: string, e: string) => h.readFileSync(p, e) };
+});
+// Partial mock: reviewRunKey is real (its slugging is exactly what decorateReviews
+// relies on to match a run to a queued PR); only launchReview — the side-effecting
+// half — is replaced.
+vi.mock("../../src/engine/review/launch", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/engine/review/launch")>();
+  return { ...actual, launchReview: (...args: Parameters<typeof actual.launchReview>) => h.launchReview(...args) };
+});
 vi.mock("../../src/config", () => ({
-  getConfig: () => ({ baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds }),
+  getConfig: () => ({
+    baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds,
+    reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: [],
+    reviewWrites: h.reviewWrites, stampLabelOnWrite: h.stampLabelOnWrite,
+  }),
 }));
 vi.mock("../../src/jira/client", () => ({
   JiraAuthError: class JiraAuthError extends Error {},
@@ -70,11 +142,35 @@ const statusFor = (run: Run): RunStatus => ({
   run, column: "progress", jiraStatus: null, jiraCategory: null, repos: [],
   agent: { state: "unknown", lastActivityMs: null, slug: null }, windowOpen: false, prs: {},
 });
+const reviewFixture = (): ReviewRequest => ({
+  id: "CyberJackGit/aws-ops#8491", repo: "CyberJackGit/aws-ops", repoName: "aws-ops",
+  number: 8491, title: "isolate renew queue", url: "https://github.com/CyberJackGit/aws-ops/pull/8491",
+  author: "einavsaad", isDraft: false, createdAt: 1, updatedAt: 2,
+  additions: 350, deletions: 4, changedFiles: 7,
+  ci: "passing" as const, review: "review_required" as const, mergeable: "clean" as const,
+  localPath: null, runKey: null, draftPath: null,
+});
 
 const lastPanel = () => window.createWebviewPanel.mock.results.at(-1)!.value as ReturnType<typeof import("../_mocks/vscode").makeWebviewPanel>;
 const posts = (p: ReturnType<typeof lastPanel>) => p.webview.postMessage.mock.calls.map((c) => c[0] as any);
 const show = (authed = false) => DeckPanel.show(fakeContext().context as any, fakeAuth({ authed }), () => {});
 const settled = () => new Promise<void>((r) => setTimeout(r, 0));
+
+/** The gh probe is kicked off inside the very tick that reads it, so it can
+ * never be resolved by the time that same tick's `ghReady()` call returns —
+ * a promise can't settle synchronously with the statement that created it.
+ * Every assertion about fetch- or search-triggering behavior therefore needs a
+ * second, "warmed" tick: one to start (and let resolve) the one-time probe, and
+ * an explicit `deck:refresh` after it to actually observe the resolved value.
+ * Shared by the PR-facts and review-strip suites — both gate on `ghReady()`. */
+const showAndWarm = async (authed = false): Promise<ReturnType<typeof lastPanel>> => {
+  show(authed);
+  await settled();
+  const p = lastPanel();
+  await p._fire({ type: "deck:refresh" });
+  await settled();
+  return p;
+};
 
 beforeEach(() => {
   h.runs = [mkRun()];
@@ -90,6 +186,24 @@ beforeEach(() => {
   h.removePrEntries.mockClear();
   h.prFetch.mockClear().mockResolvedValue({ ok: true, facts: null });
   h.probeGh.mockClear().mockResolvedValue(null);
+  h.reviewSearch.mockClear().mockResolvedValue({ issueCount: 1, requests: [reviewFixture()] });
+  h.reviewCache = null;
+  h.writeReviewCache.mockClear();
+  h.reviewDetail.mockClear().mockResolvedValue({ failing: [], unresolved: null });
+  h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }];
+  h.reviewRequests = true;
+  h.launchReview.mockClear().mockResolvedValue({ ok: true, runKey: "review-aws-ops-8491" });
+  h.existsSync.mockClear().mockReturnValue(false);
+  h.readFileSync.mockClear().mockReturnValue("");
+  h.reviewWrites = false;
+  h.stampLabelOnWrite = true;
+  h.reviewSubmit.mockClear().mockResolvedValue({ ok: true });
+  // Confirm by default: resolve the label passed as the modal's sole action item,
+  // rather than vscode's own mock default of `undefined` (which reads as "declined"
+  // for every other suite in this file). Individual tests override this per case.
+  (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
+    async (_message: string, _options: unknown, ...items: string[]) => items[0],
+  );
 });
 
 afterEach(() => {
@@ -123,6 +237,22 @@ describe("DeckPanel", () => {
     expect(runsPost.runs).toHaveLength(1);
     expect(runsPost.runs[0].run.key).toBe("ASM-1");
     expect(runsPost.liveSignal).toBe(true);
+  });
+
+  it("keeps review runs off the board — only the ticket run reaches it", async () => {
+    h.runs = [
+      mkRun(),
+      mkRun({ key: "review-aws-ops-8491", summary: "review", url: "https://gh/pr/8491", createdAt: 2, kind: "review" }),
+    ];
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    const msg = posts(p).find((m) => m.type === "deck:runs");
+    // Asserting the count, not merely that ASM-1 is present, is what actually
+    // catches the filter being removed — buildRunStatus is a pass-through stub
+    // that would happily produce a card for the review run too.
+    expect(msg.runs).toHaveLength(1);
+    expect(msg.runs[0].run.key).toBe("ASM-1");
   });
 
   it("re-posts with liveSignal off when toggled", async () => {
@@ -412,21 +542,6 @@ describe("DeckPanel", () => {
 });
 
 describe("DeckPanel PR facts", () => {
-  /** The gh probe is kicked off inside the very tick that reads it, so it can
-   * never be resolved by the time that same tick's `ghReady()` call returns —
-   * a promise can't settle synchronously with the statement that created it.
-   * Every assertion about fetch-triggering behavior therefore needs a second,
-   * "warmed" tick: one to start (and let resolve) the one-time probe, and an
-   * explicit `deck:refresh` after it to actually observe the resolved value. */
-  const showAndWarm = async (authed = false): Promise<ReturnType<typeof lastPanel>> => {
-    show(authed);
-    await settled();
-    const p = lastPanel();
-    await p._fire({ type: "deck:refresh" });
-    await settled();
-    return p;
-  };
-
   it("passes cached PR entries to the status builder", async () => {
     h.prEntries = { svc: { facts: null, fetchedAt: Date.now() } };
     show();
@@ -699,5 +814,784 @@ describe("DeckPanel PR facts", () => {
     await p._fire({ type: "deck:refresh" });
     const note = posts(p).filter((m) => m.type === "deck:runs").at(-1)?.ghNote;
     expect(note).toBeNull();
+  });
+});
+
+describe("DeckPanel review strip", () => {
+  it("posts the review queue after a search", async () => {
+    const p = await showAndWarm();
+    const msg = posts(p).find((m) => m.type === "deck:reviews");
+    expect(msg).toMatchObject({ issueCount: 1, sort: "oldest", stale: false });
+    expect(msg.requests).toHaveLength(1);
+    expect(msg.requests[0].id).toBe("CyberJackGit/aws-ops#8491");
+  });
+
+  it("carries reviewWrites off by default", async () => {
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:reviews").reviewWrites).toBe(false);
+  });
+
+  it("carries reviewWrites on when the setting is on", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:reviews").reviewWrites).toBe(true);
+  });
+
+  it("resolves a local checkout for a repo under reposRoot", async () => {
+    const p = await showAndWarm();
+    const msg = posts(p).find((m) => m.type === "deck:reviews");
+    expect(msg.requests[0].localPath).toBe("/repos/aws-ops");
+  });
+
+  it("leaves localPath null for a repo that is not checked out", async () => {
+    h.repos = [];
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:reviews").requests[0].localPath).toBeNull();
+  });
+
+  it("does not treat a non-git directory sharing the repo's name as a checkout", async () => {
+    // `local?.isGit ? local.path : null` vs. `local ? local.path : null`: only a
+    // fixture with `isGit: false` tells these apart. A plain directory here would
+    // otherwise be offered as a checkout, and "review with agent" would later
+    // land in something that isn't a repo at all.
+    h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: false }];
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:reviews").requests[0].localPath).toBeNull();
+  });
+
+  it("persists the search result as returned, not the machine-decorated copy", async () => {
+    // decorateReviews recomputes `localPath` on every post and deliberately never
+    // persists it (a checkout can appear or vanish between refreshes). Writing
+    // `decorateReviews(res.requests)` instead of `res.requests` would still pass
+    // every other test here, but would bake this machine's `localPath` into
+    // ~/.agentflow/reviews.json — exactly what that non-persistence guarantee
+    // forbids.
+    await showAndWarm();
+    expect(h.writeReviewCache).toHaveBeenCalledWith("/reviews.json", {
+      fetchedAt: expect.any(Number),
+      issueCount: 1,
+      requests: [expect.objectContaining({ id: "CyberJackGit/aws-ops#8491", localPath: null })],
+    });
+  });
+
+  it("re-posts on every refresh once the cache is fresh, without re-searching", async () => {
+    // Nothing in the tests above ever observes the "already fresh" branch of
+    // enqueueReviews — every one of them only sees the post that comes from the
+    // settled search job. Deleting that branch's `postReviews()` call leaves all
+    // of them green, but the strip would then never pick up a newly appeared
+    // checkout's `localPath` (or anything else decorateReviews recomputes) until
+    // the cache aged out again, up to reviewRequestsTtlSeconds later.
+    const p = await showAndWarm();
+    const before = posts(p).filter((m) => m.type === "deck:reviews").length;
+    expect(before).toBeGreaterThan(0);
+    h.reviewSearch.mockClear();
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    expect(posts(p).filter((m) => m.type === "deck:reviews").length).toBeGreaterThan(before);
+    expect(h.reviewSearch).not.toHaveBeenCalled();
+  });
+
+  it("keeps the cached queue and flags it stale when the search fails", async () => {
+    // A broken implementation that empties the queue (or drops the cache) on a
+    // failed search instead of preserving it would still satisfy an assertion
+    // that only checks `stale` — pin the previous issueCount *and* the previous
+    // requests array too, and confirm the bad result is never persisted to disk.
+    h.reviewCache = { fetchedAt: 0, issueCount: 4, requests: [reviewFixture()] };
+    // Persistent (not `Once`): whether one or two refresh passes end up racing to
+    // search — the queue dedupes concurrent attempts for the same key, but not
+    // necessarily sequential ones — every attempt in this test must fail, so the
+    // cache is never overwritten with a spurious success.
+    h.reviewSearch.mockResolvedValue(null);
+    const p = await showAndWarm();
+    const msg = posts(p).find((m) => m.type === "deck:reviews");
+    expect(msg.stale).toBe(true);
+    expect(msg.issueCount).toBe(4);
+    expect(msg.requests).toHaveLength(1);
+    expect(msg.requests[0].id).toBe("CyberJackGit/aws-ops#8491");
+    expect(h.writeReviewCache).not.toHaveBeenCalled();
+  });
+
+  it("does not retry a failing search on every poll tick within the TTL", async () => {
+    // A failed search deliberately leaves `reviewCache.fetchedAt` untouched (the
+    // stale marker depends on it), so `isReviewCacheStale` alone would re-arm on
+    // every 6s poll forever once `gh` starts failing — hammering `gh api graphql`
+    // and holding a queue slot for up to GH_TIMEOUT_MS on each attempt.
+    h.reviewSearch.mockResolvedValue(null);
+    const p = await showAndWarm(); // one attempt: fails
+    expect(h.reviewSearch).toHaveBeenCalledTimes(1);
+    await p._fire({ type: "deck:refresh" }); // a second poll, well inside the 300s TTL
+    await settled();
+    expect(h.reviewSearch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not search while the review strip is disabled, but actively clears it instead of staying silent", async () => {
+    h.reviewRequests = false;
+    show();
+    await settled();
+    expect(h.reviewSearch).not.toHaveBeenCalled();
+    // Task 2: silence here used to mean "the webview keeps whatever it last had"
+    // — a stale queue with its write buttons still live. Disabled must still
+    // post, with an empty queue and `enabled: false`.
+    expect(posts(lastPanel()).find((m) => m.type === "deck:reviews")).toMatchObject({
+      requests: [], issueCount: 0, enabled: false,
+    });
+  });
+
+  it("does not search while PR facts are off", async () => {
+    h.prFacts = false;
+    show();
+    await settled();
+    expect(h.reviewSearch).not.toHaveBeenCalled();
+  });
+
+  it("does not search while gh is unusable", async () => {
+    h.probeGh.mockResolvedValue({ kind: "missing", detail: "no gh" });
+    await showAndWarm();
+    expect(h.reviewSearch).not.toHaveBeenCalled();
+  });
+
+  it("carries enabled: true while the strip is on", async () => {
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:reviews")).toMatchObject({ enabled: true });
+  });
+
+  // Task 2 (blocking): toggling PR facts off while the Deck is open used to
+  // leave the webview's last-posted rows exactly as they were — frozen, but
+  // with Approve/Comment/Request changes still clickable, since nothing ever
+  // told the webview the strip had gone off. Also pins the submitReview-level
+  // gate: a submit for a row from that same, now-disabled strip must not reach
+  // the provider even though the row is technically still sitting in memory.
+  it("clears the strip and refuses a queued row's submit once PR facts (and therefore the strip) go off", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:reviews").requests).toHaveLength(1);
+
+    await p._fire({ type: "deck:setPrFacts", on: false });
+    const cleared = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
+    expect(cleared).toMatchObject({ requests: [], issueCount: 0, enabled: false });
+
+    await p._fire({
+      type: "deck:reviewSubmit", id: "CyberJackGit/aws-ops#8491", verb: "approve", body: "", fromDraft: false,
+    });
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.reviewSubmit).not.toHaveBeenCalled();
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled",
+    });
+  });
+
+  it("re-sorts without re-searching when the sort changes", async () => {
+    // Two requests whose size-order differs from their age-order, so switching
+    // sorts is only observable as a genuine reorder of the request list — not
+    // just an echoed `sort` field a stub could satisfy without truly re-sorting.
+    const older = reviewFixture(); // createdAt 1, 354 lines changed
+    const newerButSmaller = { ...reviewFixture(), id: "CyberJackGit/aws-ops#9000", number: 9000, createdAt: 10, additions: 10, deletions: 0 };
+    h.reviewSearch.mockResolvedValue({ issueCount: 2, requests: [older, newerButSmaller] });
+    const p = await showAndWarm();
+    const byOldest = posts(p).find((m) => m.type === "deck:reviews");
+    expect(byOldest.requests.map((r: ReviewRequest) => r.number)).toEqual([8491, 9000]);
+
+    h.reviewSearch.mockClear();
+    await p._fire({ type: "deck:setReviewSort", sort: "smallest" });
+    const bySmallest = posts(p).at(-1);
+    expect(bySmallest).toMatchObject({ type: "deck:reviews", sort: "smallest" });
+    expect(bySmallest.requests.map((r: ReviewRequest) => r.number)).toEqual([9000, 8491]);
+    expect(h.reviewSearch).not.toHaveBeenCalled();
+  });
+});
+
+describe("DeckPanel review detail", () => {
+  it("fetches a row's detail and posts it", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    // Routed through prQueue (see the "shared refresh queue" test below): onMessage
+    // no longer awaits the fetch itself, only enqueues it — a settled() tick is
+    // needed for the queued job to actually run and post.
+    await settled();
+    // The mock resolves the same canned value regardless of its arguments, so
+    // without this the row's own repo/number could be swapped or dropped
+    // entirely (e.g. calling detail(id, 0)) and every other assertion here
+    // would still pass. Only this pins "the right PR was fetched."
+    expect(h.reviewDetail).toHaveBeenCalledWith("CyberJackGit/aws-ops", 8491);
+    expect(posts(p).at(-1)).toMatchObject({
+      type: "deck:reviewDetail",
+      id: "CyberJackGit/aws-ops#8491",
+      detail: { failing: [], unresolved: null },
+    });
+  });
+
+  it("ignores an id that is not in the queue", async () => {
+    const p = await showAndWarm();
+    const before = posts(p).length;
+    await p._fire({ type: "deck:reviewExpand", id: "who/what#1" });
+    await settled();
+    expect(posts(p)).toHaveLength(before);
+    // A guard that merely happened not to post (rather than never looking the id
+    // up at all) would still pass an assertion on posts() alone — pin that the
+    // provider itself was never reached for an id outside the current queue.
+    expect(h.reviewDetail).not.toHaveBeenCalled();
+  });
+
+  it("posts a null detail and logs when the detail fetch fails, instead of leaving the row loading forever", async () => {
+    // Mirrors "logs which gh it tried and what that gh said" above: a custom
+    // log spy passed straight into DeckPanel.show, so both halves of the
+    // requirement — the failure marker, and a trace of the failed id — are
+    // pinned in one test. A row with nothing ever posted for it renders
+    // "loading…" forever; `detail: null` is what tells the webview to stop.
+    h.reviewDetail.mockResolvedValueOnce(null);
+    const log = vi.fn();
+    DeckPanel.show(fakeContext().context as any, fakeAuth({ authed: false }), log);
+    await settled();
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    await settled();
+    expect(posts(p).at(-1)).toMatchObject({
+      type: "deck:reviewDetail", id: "CyberJackGit/aws-ops#8491", detail: null,
+    });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("CyberJackGit/aws-ops#8491"));
+  });
+
+  // Task 5: every other `gh` invocation on this panel goes through prQueue,
+  // capped at 4 concurrent — row expansion used to be awaited directly in
+  // onMessage, bypassing that cap entirely. Five simultaneous expansions
+  // against the cap of 4: a reverted fix would call the provider all five
+  // times at once.
+  it("routes row expansion through the shared refresh queue instead of forking unboundedly", async () => {
+    const ids = Array.from({ length: 5 }, (_, i) => `o/r#${i}`);
+    const requests = ids.map((id, i) => ({ ...reviewFixture(), id, repo: "o/r", number: i }));
+    h.reviewSearch.mockResolvedValue({ issueCount: ids.length, requests });
+    const releases: (() => void)[] = [];
+    h.reviewDetail.mockImplementation(
+      () => new Promise((res) => releases.push(() => res({ failing: [], unresolved: null }))),
+    );
+    const p = await showAndWarm();
+    for (const id of ids) await p._fire({ type: "deck:reviewExpand", id });
+    await settled();
+    expect(h.reviewDetail).toHaveBeenCalledTimes(4);
+
+    releases.forEach((r) => r());
+    await settled();
+    expect(h.reviewDetail).toHaveBeenCalledTimes(5);
+  });
+});
+
+describe("DeckPanel review launch", () => {
+  it("launches a review and toasts", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(h.launchReview).toHaveBeenCalled();
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(true);
+  });
+
+  it("refreshes after a successful launch, so the row picks up its new run", async () => {
+    // The busy-indicator pair is this file's existing signal for "a refresh ran"
+    // (see "brackets a forget/prFacts toggle with the busy indicator" above) — reused
+    // here rather than invented fresh, so this matches local convention. showAndWarm's
+    // own explicit deck:refresh already posts one true/false pair before the launch;
+    // a real post-launch refresh must add another, on top of that baseline.
+    const p = await showAndWarm();
+    const before = posts(p).filter((m) => m.type === "deck:loading").length;
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    const loads = posts(p).filter((m) => m.type === "deck:loading");
+    expect(loads.length).toBeGreaterThan(before);
+    expect(loads.at(-1)?.loading).toBe(false);
+  });
+
+  it("toasts the reason when a launch is refused, verbatim", async () => {
+    // An exact match, not merely a truthy error toast: a broken implementation
+    // that toasts a canned "couldn't launch" string regardless of what
+    // launchReview actually said would still pass a looser assertion.
+    h.launchReview.mockResolvedValueOnce({ ok: false, message: "no checkout" });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "error" && m.message === "no checkout")).toBe(true);
+  });
+
+  it("ignores a launch for an id that is not in the queue", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "who/what#1" });
+    // Pinning that launchReview itself was never reached, not merely that
+    // nothing got posted — a guard that looked the id up, found nothing, but
+    // still called through with an undefined req would pass a posts()-only check.
+    expect(h.launchReview).not.toHaveBeenCalled();
+  });
+
+  it("reports a review run and its draft file on the row", async () => {
+    h.runs = [{
+      key: "review-aws-ops-8491", summary: "Review", url: "https://gh/pr/8491", createdAt: 1, kind: "review",
+      mode: "per-window", repos: [{ name: "aws-ops", path: "/repos/aws-ops/.claude/worktrees/review-aws-ops-8491", isGit: true }],
+      briefPaths: [],
+    }];
+    h.existsSync.mockReturnValue(true);
+    const p = await showAndWarm();
+    const row = posts(p).find((m) => m.type === "deck:reviews").requests[0];
+    expect(row.runKey).toBe("review-aws-ops-8491");
+    expect(row.draftPath).toBe("/repos/aws-ops/.claude/worktrees/review-aws-ops-8491/.pick-task/REVIEW-8491.md");
+  });
+
+  it("does not leak a review run's runKey/draftPath onto another row in the same queue", async () => {
+    // Two queued PRs, a review run for only one of them. reviewRunKey keys the
+    // match per-row, so this is unlikely to leak by accident — but every other
+    // test above only ever queues one row, so nothing actually proved isolation
+    // until now.
+    const other = { ...reviewFixture(), id: "CyberJackGit/other-repo#123", repo: "CyberJackGit/other-repo", repoName: "other-repo", number: 123 };
+    h.reviewSearch.mockResolvedValue({ issueCount: 2, requests: [reviewFixture(), other] });
+    h.runs = [{
+      key: "review-aws-ops-8491", summary: "Review", url: "https://gh/pr/8491", createdAt: 1, kind: "review",
+      mode: "per-window", repos: [{ name: "aws-ops", path: "/repos/aws-ops/.claude/worktrees/review-aws-ops-8491", isGit: true }],
+      briefPaths: [],
+    }];
+    h.existsSync.mockReturnValue(true);
+    const p = await showAndWarm();
+    const rows = posts(p).find((m) => m.type === "deck:reviews").requests;
+    const aws = rows.find((r: ReviewRequest) => r.id === "CyberJackGit/aws-ops#8491");
+    const untouched = rows.find((r: ReviewRequest) => r.id === "CyberJackGit/other-repo#123");
+    expect(aws.runKey).toBe("review-aws-ops-8491");
+    expect(untouched.runKey).toBeNull();
+    expect(untouched.draftPath).toBeNull();
+  });
+
+  it("leaves draftPath null when the agent hasn't written a file yet", async () => {
+    // Same review run as above, but existsSync says the file isn't there —
+    // an implementation that ignores existsSync (always offering the computed
+    // path) would pass every other test here yet render a Load button pointing
+    // at nothing.
+    h.runs = [{
+      key: "review-aws-ops-8491", summary: "Review", url: "https://gh/pr/8491", createdAt: 1, kind: "review",
+      mode: "per-window", repos: [{ name: "aws-ops", path: "/repos/aws-ops/.claude/worktrees/review-aws-ops-8491", isGit: true }],
+      briefPaths: [],
+    }];
+    h.existsSync.mockReturnValue(false);
+    const p = await showAndWarm();
+    const row = posts(p).find((m) => m.type === "deck:reviews").requests[0];
+    expect(row.runKey).toBe("review-aws-ops-8491");
+    expect(row.draftPath).toBeNull();
+  });
+
+  it("posts the draft body when asked to load it", async () => {
+    h.runs = [{
+      key: "review-aws-ops-8491", summary: "Review", url: "https://gh/pr/8491", createdAt: 1, kind: "review",
+      mode: "per-window", repos: [{ name: "aws-ops", path: "/wt", isGit: true }], briefPaths: [],
+    }];
+    h.existsSync.mockReturnValue(true);
+    h.readFileSync.mockReturnValue("1. The retry budget is unbounded.");
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLoadDraft", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p).at(-1)).toMatchObject({
+      type: "deck:reviewDraft",
+      id: "CyberJackGit/aws-ops#8491",
+      body: "1. The retry budget is unbounded.",
+    });
+  });
+
+  it("ignores a load-draft request for an id that is not in the queue", async () => {
+    const p = await showAndWarm();
+    const before = posts(p).length;
+    await p._fire({ type: "deck:reviewLoadDraft", id: "who/what#1" });
+    expect(posts(p)).toHaveLength(before);
+    expect(h.readFileSync).not.toHaveBeenCalled();
+  });
+
+  it("toasts when the draft file can't be read", async () => {
+    h.runs = [{
+      key: "review-aws-ops-8491", summary: "Review", url: "https://gh/pr/8491", createdAt: 1, kind: "review",
+      mode: "per-window", repos: [{ name: "aws-ops", path: "/wt", isGit: true }], briefPaths: [],
+    }];
+    h.existsSync.mockReturnValue(true);
+    h.readFileSync.mockImplementation(() => { throw new Error("EACCES"); });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLoadDraft", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p).some((m) => m.type === "deck:reviewDraft")).toBe(false);
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "error")).toBe(true);
+  });
+});
+
+describe("DeckPanel review submit", () => {
+  const submitMsg = (over: Partial<{ id: string; verb: ReviewVerb; body: string; fromDraft: boolean }> = {}) =>
+    ({ type: "deck:reviewSubmit" as const, id: "CyberJackGit/aws-ops#8491", verb: "approve" as ReviewVerb, body: "", fromDraft: false, ...over });
+
+  it("refuses to submit while reviewWrites is off, without asking or spawning", async () => {
+    h.reviewWrites = false;
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.reviewSubmit).not.toHaveBeenCalled();
+  });
+
+  // Fix round 2: this gate (and the invalid-verb and row-missing gates below) used
+  // to return silently, which left the webview's row disabled forever — nothing else
+  // was ever going to arrive to release it (the toast/deck:reviews release the
+  // coordinator's round-1 fix removed on purpose). "cancelled" is honest here: no
+  // write was ever attempted, so there is nothing to warn about, only a disable to lift.
+  it("posts deck:reviewSubmitDone(cancelled) when reviewWrites is off", async () => {
+    h.reviewWrites = false;
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled",
+    });
+  });
+
+  it("asks for confirmation naming the verb, repo and number", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "request-changes" }));
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      "Request changes on CyberJackGit/aws-ops#8491?",
+      { modal: true },
+      "Request changes",
+    );
+  });
+
+  it("spawns nothing when the confirmation is declined", async () => {
+    h.reviewWrites = true;
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    expect(h.reviewSubmit).not.toHaveBeenCalled();
+  });
+
+  // The webview's disable-until-outcome relies on this exact message, at exactly
+  // these three exits — nothing else in the outbound protocol carries this id
+  // alongside a definite "it's over" signal (a toast doesn't carry an id at all,
+  // and deck:reviews posts on an unrelated 6s timer as well as on this outcome).
+  it("posts deck:reviewSubmitDone(cancelled) when the confirmation is declined", async () => {
+    h.reviewWrites = true;
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled",
+    });
+  });
+
+  it("submits and toasts on success", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve", body: "lgtm" }));
+    expect(h.reviewSubmit).toHaveBeenCalledWith("CyberJackGit/aws-ops", 8491, "approve", "lgtm");
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(true);
+  });
+
+  it("posts deck:reviewSubmitDone(ok) on a successful submit", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve", body: "lgtm" }));
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "ok",
+    });
+  });
+
+  it("appends the provenance line to an agent-drafted body", async () => {
+    h.reviewWrites = true;
+    h.stampLabelOnWrite = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "comment", body: "the retry budget is unbounded", fromDraft: true }));
+    expect(h.reviewSubmit.mock.calls[0][3]).toBe(
+      "the retry budget is unbounded\n\n_Drafted with Claude Code via Agent Flow._",
+    );
+  });
+
+  it("leaves a hand-typed body alone", async () => {
+    h.reviewWrites = true;
+    h.stampLabelOnWrite = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "comment", body: "mine, all mine", fromDraft: false }));
+    expect(h.reviewSubmit.mock.calls[0][3]).toBe("mine, all mine");
+  });
+
+  it("omits provenance when stamping is off", async () => {
+    h.reviewWrites = true;
+    h.stampLabelOnWrite = false;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "comment", body: "b", fromDraft: true }));
+    expect(h.reviewSubmit.mock.calls[0][3]).toBe("b");
+  });
+
+  it("toasts GitHub's message with an Open PR action on rejection", async () => {
+    h.reviewWrites = true;
+    h.reviewSubmit.mockResolvedValueOnce({ ok: false, message: "Can not approve your own pull request" });
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    const toast = posts(p).find((m) => m.type === "toast" && m.level === "error");
+    expect(toast.message).toContain("Can not approve your own pull request");
+    expect(toast.action).toEqual({ label: "Open PR", url: "https://github.com/CyberJackGit/aws-ops/pull/8491" });
+  });
+
+  it("posts deck:reviewSubmitDone(failed) when the provider rejects the write", async () => {
+    h.reviewWrites = true;
+    h.reviewSubmit.mockResolvedValueOnce({ ok: false, message: "Can not approve your own pull request" });
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "failed",
+    });
+  });
+
+  // Beyond the brief's own list — the fourth of the gates now in submitReview
+  // ("the row must still be in the queue") has no case above; every other write-ish
+  // message in this file (reviewExpand, reviewLaunch, reviewLoadDraft) pins this
+  // symmetrically, and the confirm gate is the one place a stale id must never even
+  // reach a dialog, let alone the provider.
+  it("ignores a submit for an id that is not in the queue", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ id: "who/what#1" }));
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.reviewSubmit).not.toHaveBeenCalled();
+  });
+
+  // Fix round 2: the row can be evicted (another submit's success, or a fresh
+  // search) between the click landing in the webview and this call running —
+  // without this post, that row's buttons stay disabled until the panel reloads.
+  it("posts deck:reviewSubmitDone(cancelled) for an id that is not in the queue", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ id: "who/what#1" }));
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "who/what#1", outcome: "cancelled",
+    });
+  });
+
+  // --- Fix round 1: gate 0 — a verb outside the ReviewVerb union must fail closed
+  // before any dialog, mirroring provider.ts's own Object.hasOwn guard on the same
+  // value. "constructor" specifically exercises the prototype-pollution case a
+  // plain `!VERB_LABEL[verb]` check would let through as truthy.
+  //
+  // --- Fix round 2: the invalid verb must not have marked the id as in flight.
+  // The code is correct today only because the verb gate runs *before*
+  // `reviewSubmitsInFlight.add(id)` — a refactor that moved the `add` above the
+  // verb check would permanently lock this id out of every future submit for the
+  // rest of the session, and every other test in this file would stay green.
+  // Firing a valid `comment` for the same id right after and asserting the
+  // provider *is* reached this time is what pins the ordering.
+  it.each(["merge", "constructor"])(
+    "refuses an out-of-union verb (%s) before any dialog or provider call, and does not lock the id out of a later valid submit",
+    async (verb) => {
+      h.reviewWrites = true;
+      const p = await showAndWarm();
+      await p._fire(submitMsg({ verb: verb as unknown as ReviewVerb }));
+      expect(window.showWarningMessage).not.toHaveBeenCalled();
+      expect(h.reviewSubmit).not.toHaveBeenCalled();
+      await p._fire(submitMsg({ verb: "comment", body: "now a real one" }));
+      expect(h.reviewSubmit).toHaveBeenCalledWith("CyberJackGit/aws-ops", 8491, "comment", "now a real one");
+    },
+  );
+
+  // Fix round 2: same reasoning as the reviewWrites-off and row-missing gates above —
+  // an out-of-union verb (a malformed webview message) must still release the row
+  // it named, not strand it.
+  it("posts deck:reviewSubmitDone(cancelled) for an out-of-union verb", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "merge" as unknown as ReviewVerb }));
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled",
+    });
+  });
+
+  // --- Fix round 1: a double click (or any second deck:reviewSubmit for the same
+  // id while the first is still awaiting confirmation/gh) must not reach the
+  // provider twice — GitHub does not deduplicate reviews. Two `_fire` calls with
+  // neither awaited yet is this file's established pattern for overlapping async
+  // work (see "posts one busy pair for overlapping refreshes" above): the first
+  // call's synchronous prefix — every gate up through marking the id in flight —
+  // completes before the second call is even made, so the second sees the flag set.
+  it("refuses a second submit for the same id while the first is still in flight", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    const first = p._fire(submitMsg());
+    const second = p._fire(submitMsg());
+    await Promise.all([first, second]);
+    expect(window.showWarningMessage).toHaveBeenCalledTimes(1);
+    expect(h.reviewSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  // Fix round 2: unlike the three gates above, the already-in-flight gate must
+  // stay silent. The genuine call for this id is still running and will post
+  // its own outcome; a "cancelled" from the rejected duplicate would release the
+  // webview's disable while that real submit is still in the air — re-enabling
+  // the buttons mid-write, the opposite of what the guard is for. Exactly one
+  // deck:reviewSubmitDone must land, and it must be the real call's.
+  it("posts no deck:reviewSubmitDone from a rejected duplicate — only the real submit's own outcome lands", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    const first = p._fire(submitMsg());
+    const second = p._fire(submitMsg());
+    await Promise.all([first, second]);
+    const dones = posts(p).filter((m) => m.type === "deck:reviewSubmitDone");
+    expect(dones).toHaveLength(1);
+    expect(dones[0]).toEqual({ type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "ok" });
+  });
+
+  it("allows submitting the same id again once the previous submit has finished", async () => {
+    // Verb "comment", deliberately: approve/request-changes evict the row on
+    // success, and a second submit for an evicted id would legitimately stop at
+    // gate 2 (not in the queue) regardless of the in-flight flag — that would
+    // confound this test with eviction behaviour rather than isolating whether
+    // the flag itself is cleared in the `finally`.
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "comment", body: "first" }));
+    await p._fire(submitMsg({ verb: "comment", body: "second" }));
+    expect(h.reviewSubmit).toHaveBeenCalledTimes(2);
+  });
+
+  // --- Fix round 1: reviewWrites must be read fresh on every submit, not cached at
+  // construction the way `this.prFacts` is (the single most plausible copy-paste
+  // mistake in this file, per the coordinator). Both directions: flipping the
+  // setting after the panel is already open and warmed must take effect on the
+  // very next submit.
+  it("reads reviewWrites fresh at submit time — turning it on after the panel opened still lets a submit through", async () => {
+    h.reviewWrites = false;
+    const p = await showAndWarm();
+    h.reviewWrites = true;
+    await p._fire(submitMsg());
+    expect(h.reviewSubmit).toHaveBeenCalledWith("CyberJackGit/aws-ops", 8491, "approve", "");
+  });
+
+  it("reads reviewWrites fresh at submit time — turning it off after the panel opened still refuses", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    h.reviewWrites = false;
+    await p._fire(submitMsg());
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.reviewSubmit).not.toHaveBeenCalled();
+  });
+
+  // --- Fix round 1: the eviction-on-success side effect, split per verb. A comment
+  // does not clear GitHub's requested_reviewers, so — unlike approve and
+  // request-changes — it must not make a PR you still owe vanish from the strip.
+  it("evicts the row and decrements issueCount after a successful approve", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve" }));
+    const last = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
+    expect(last.requests).toHaveLength(0);
+    expect(last.issueCount).toBe(0);
+  });
+
+  it("evicts the row and decrements issueCount after a successful request-changes", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "request-changes", body: "please address the retry budget" }));
+    const last = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
+    expect(last.requests).toHaveLength(0);
+    expect(last.issueCount).toBe(0);
+  });
+
+  it("keeps the row and issueCount after a successful comment — a comment does not clear requested_reviewers", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "comment", body: "nice work" }));
+    const last = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
+    expect(last.requests).toHaveLength(1);
+    expect(last.requests[0].id).toBe("CyberJackGit/aws-ops#8491");
+    expect(last.issueCount).toBe(1);
+  });
+
+  it("persists the evicted cache to disk, so a reopened Deck can't resurrect the row from a stale file", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve" }));
+    const lastWrite = h.writeReviewCache.mock.calls.at(-1)?.[1] as { requests: unknown[]; issueCount: number };
+    expect(lastWrite.requests).toHaveLength(0);
+    expect(lastWrite.issueCount).toBe(0);
+  });
+
+  // --- Fix round 1: four assertions for behaviour that was already correct but
+  // unpinned — each survives its own mutation today.
+  it("declines when the dialog resolves a truthy value that is not the expected label", async () => {
+    // Pins comparison against the exact label (`answer !== label`), not mere
+    // truthiness (`!answer`) — a wrong-but-truthy answer must still decline.
+    h.reviewWrites = true;
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce("Comment");
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve" }));
+    expect(h.reviewSubmit).not.toHaveBeenCalled();
+  });
+
+  it("does not stamp a whitespace-only approve body — the guard checks body.trim(), not body's own truthiness", async () => {
+    // A non-empty-but-all-whitespace body is truthy on its own; only `.trim()`
+    // reveals it is empty. Pins that the provenance line is never appended to
+    // nothing, and that the untrimmed body passes through unchanged on this branch.
+    h.reviewWrites = true;
+    h.stampLabelOnWrite = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve", body: "   ", fromDraft: true }));
+    expect(h.reviewSubmit.mock.calls[0][3]).toBe("   ");
+  });
+
+  it("logs the write attempt before it reaches the provider — the audit trail", async () => {
+    // Mirrors this file's existing log-spy precedent ("logs which gh it tried...",
+    // "posts nothing and logs when the detail fetch fails"): a custom log passed
+    // straight into DeckPanel.show, rather than the show() helper's () => {}.
+    h.reviewWrites = true;
+    const log = vi.fn();
+    DeckPanel.show(fakeContext().context as any, fakeAuth({ authed: false }), log);
+    await settled();
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    await p._fire(submitMsg({ verb: "approve" }));
+    expect(log).toHaveBeenCalledWith("deck: submitting approve on CyberJackGit/aws-ops#8491");
+  });
+
+  it("keeps the row in the queue after a failed submit, so the user can still act on it", async () => {
+    h.reviewWrites = true;
+    h.reviewSubmit.mockResolvedValueOnce({ ok: false, message: "Can not approve your own pull request" });
+    const p = await showAndWarm();
+    await p._fire(submitMsg());
+    // If a failed submit had evicted the row anyway, reviewById would find nothing
+    // and reviewDetail would never reach the provider — this is the same "still
+    // resolvable" check the DeckPanel review detail suite uses elsewhere.
+    await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    await settled(); // row expansion is queued (Task 5), not awaited directly
+    expect(h.reviewDetail).toHaveBeenCalledWith("CyberJackGit/aws-ops", 8491);
+  });
+
+  // Task 3 (blocking): `post()` used to call `postMessage` with no guard, and the
+  // real VS Code webview API throws synchronously once the panel is disposed.
+  // Closing the Deck mid-submit used to let that throw land right between the
+  // success toast and the cache eviction below it — so a write that actually
+  // succeeded never evicted its row, and reopening the Deck showed the just-
+  // approved PR as still owed.
+  it("still evicts and persists a successful submit's row even if the panel is disposed and postMessage throws", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    p.webview.postMessage.mockImplementation(() => { throw new Error("Webview is disposed"); });
+    await p._fire(submitMsg({ verb: "approve" }));
+    const lastWrite = h.writeReviewCache.mock.calls.at(-1)?.[1] as { requests: unknown[]; issueCount: number };
+    expect(lastWrite.requests).toHaveLength(0);
+    expect(lastWrite.issueCount).toBe(0);
+  });
+
+  // Task 3 (blocking), second fix: even with `post()` itself guarded, anything
+  // else that throws after the in-flight guard was set (writeReviewCache here)
+  // must not strand the row — nothing else was ever going to post a
+  // deck:reviewSubmitDone to release the webview's disable.
+  it("posts a failed outcome and releases the in-flight guard when something throws after the write succeeded", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    // showAndWarm's own search success already calls writeReviewCache once —
+    // clear that call first so `mockImplementationOnce` below throws on the
+    // submit's own eviction write, not on that unrelated earlier one.
+    h.writeReviewCache.mockClear();
+    h.writeReviewCache.mockImplementationOnce(() => { throw new Error("disk full"); });
+    await p._fire(submitMsg({ verb: "approve" }));
+    expect(posts(p)).toContainEqual({
+      type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "failed",
+    });
+    // The `finally` still ran despite the throw: a second submit for the same id
+    // reaches the "no longer in the queue" gate (the row really was evicted in
+    // memory before the write threw) rather than being silently swallowed by a
+    // guard that never released.
+    const before = posts(p).filter((m) => m.type === "deck:reviewSubmitDone").length;
+    await p._fire(submitMsg({ verb: "comment", body: "x" }));
+    const dones = posts(p).filter((m) => m.type === "deck:reviewSubmitDone");
+    expect(dones.length).toBe(before + 1);
+    expect(dones.at(-1)).toEqual({ type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled" });
   });
 });

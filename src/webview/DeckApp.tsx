@@ -1,6 +1,7 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, RunStatus, isTicketRun } from "../types";
+import { DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun } from "../types";
+import { ReviewStrip } from "./ReviewStrip";
 
 let toastSeq = 0;
 
@@ -21,6 +22,13 @@ function timeAgo(ms: number | null): string {
   if (s < 3600) return `${Math.round(s / 60)}m ago`;
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
+}
+
+/** A copy of `r` with `key` removed. Used to clear a per-row flag or body
+ * without leaving a stale `false`/`""` entry sitting in the map forever. */
+function drop<T>(r: Record<string, T>, key: string): Record<string, T> {
+  const { [key]: _omitted, ...rest } = r;
+  return rest;
 }
 
 type Tone = "working" | "idle" | "attn" | "parked" | "merged";
@@ -212,8 +220,41 @@ export function DeckApp(): JSX.Element {
   const [ghNote, setGhNote] = React.useState<string | null>(null);
   const [syncedAt, setSyncedAt] = React.useState<number | null>(null);
   const [, forceTick] = React.useState(0);
-  const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string }[]>([]);
+  const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string; action?: { label: string; url: string } }[]>([]);
   const [busy, setBusy] = React.useState(false);
+  const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean; reviewWrites: boolean }>(
+    { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false },
+  );
+  const [reviewsCollapsed, setReviewsCollapsed] = React.useState(false);
+  const [expanded, setExpanded] = React.useState<string | null>(null);
+  // `null` means the host tried this id's per-PR detail call and it failed —
+  // distinct from absent (never asked yet), which is what lets the row show
+  // "couldn't load checks" instead of "loading…" forever.
+  const [details, setDetails] = React.useState<Record<string, ReviewDetail | null>>({});
+  const [bodies, setBodies] = React.useState<Record<string, string>>({});
+  /** Set when a row's box is filled by "Load agent's review" and stays set
+   * through any amount of editing — the disclosure it drives ("an agent read
+   * a teammate's code") stays true however much the wording changes. It clears
+   * only when the box goes back to empty, since at that point nothing of the
+   * agent's text is left to disclose. */
+  const [fromDraft, setFromDraft] = React.useState<Record<string, boolean>>({});
+  /** Mid-flight for this id: a submit has been posted and no
+   * `deck:reviewSubmitDone` has come back for it yet. Cleared only by that
+   * explicit, id-carrying message — never by a `toast` or a `deck:reviews`
+   * post, both of which arrive constantly for reasons unrelated to any one
+   * row's submit and carry no id to match against. */
+  const [submitting, setSubmitting] = React.useState<Record<string, boolean>>({});
+  /** The last submit for this id came back `"failed"`. Drives the strip's
+   * inline "check the PR before trying again" line; cleared on `"ok"`, left
+   * alone on `"cancelled"` (nothing was attempted, so nothing to warn about). */
+  const [submitFailed, setSubmitFailed] = React.useState<Record<string, boolean>>({});
+  /** Mirrors the host's own `enabled` flag on `deck:reviews`: true once a post
+   * with the feature on has landed, false again the moment it posts `enabled:
+   * false` (the setting turned off, PR facts turned off, or gh going unusable).
+   * The stat tile needs this, not just `issueCount === 0` — "0 To review" is
+   * information about an enabled, empty queue; a switched-off strip should show
+   * no tile at all, the same way the strip itself renders nothing below. */
+  const [reviewsSeen, setReviewsSeen] = React.useState(false);
 
   React.useEffect(() => {
     const handler = (ev: MessageEvent<OutboundMessage>) => {
@@ -226,10 +267,41 @@ export function DeckApp(): JSX.Element {
         setSyncedAt(Date.now());
       } else if (m.type === "toast") {
         const id = ++toastSeq;
-        setToasts((t) => [...t.slice(-2), { id, level: m.level, message: m.message }]);
+        setToasts((t) => [...t.slice(-2), { id, level: m.level, message: m.message, action: m.action }]);
         setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2600);
       } else if (m.type === "deck:loading") {
         setBusy(m.loading);
+      } else if (m.type === "deck:reviews") {
+        // No auto-collapse. A long queue is bounded by .rv-rows' capped height and its
+        // own scroller, so the board keeps its share of the window without the queue
+        // ever being hidden — which also means the collapse state is purely the user's,
+        // with no seeded-once ref and no setState nested inside another's updater.
+        setReviewsSeen(m.enabled);
+        setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale, reviewWrites: m.reviewWrites });
+      } else if (m.type === "deck:reviewDetail") {
+        setDetails((d) => ({ ...d, [m.id]: m.detail }));
+      } else if (m.type === "deck:reviewDraft") {
+        setBodies((b) => ({ ...b, [m.id]: m.body }));
+        setFromDraft((f) => ({ ...f, [m.id]: true }));
+      } else if (m.type === "deck:reviewSubmitDone") {
+        // The one signal that releases a row's disable — see `submitting`'s own doc
+        // comment for why a toast or a routine deck:reviews poll (both far more
+        // frequent, and idless) must not be trusted to mean the same thing.
+        setSubmitting((s) => (m.id in s ? drop(s, m.id) : s));
+        if (m.outcome === "failed") {
+          setSubmitFailed((f) => ({ ...f, [m.id]: true }));
+        } else if (m.outcome === "ok") {
+          setSubmitFailed((f) => (m.id in f ? drop(f, m.id) : f));
+          // Nothing of this row's box survives a successful write: a comment does
+          // not evict the row, so a stale, re-enabled "lgtm" sitting in the
+          // textarea would make the next click a real second review, with only the
+          // confirmation modal in the way.
+          setBodies((b) => (m.id in b ? drop(b, m.id) : b));
+          setFromDraft((f) => (m.id in f ? drop(f, m.id) : f));
+        }
+        // "cancelled": nothing was attempted — only the disable above lifts. The
+        // body, any draft flag, and any earlier failure warning are left exactly
+        // as the user last saw them.
       }
     };
     window.addEventListener("message", handler);
@@ -265,6 +337,9 @@ export function DeckApp(): JSX.Element {
           <div className="stat"><span className="n">{runs.filter((r) => r.column === "progress").length}</span><span className="l">In progress</span></div>
           <div className={`stat ${needs > 0 ? "attn" : ""}`}><span className="n">{needs}</span><span className="l">Action required</span></div>
           <div className="stat"><span className="n">{runs.filter((r) => r.column === "review").length}</span><span className="l">In review</span></div>
+          {reviewsSeen && (
+            <div className="stat"><span className="n">{reviews.issueCount}</span><span className="l">To review</span></div>
+          )}
           <div className="stat"><span className="n">{runs.length}</span><span className="l">Total</span></div>
         </div>
         <div className="sp" />
@@ -284,6 +359,43 @@ export function DeckApp(): JSX.Element {
           <span className="synced">{busy ? "syncing…" : syncedAt ? `synced ${timeAgo(syncedAt)}` : "refresh"}</span>
         </button>
       </div>
+
+      <ReviewStrip
+        requests={reviews.requests}
+        issueCount={reviews.issueCount}
+        sort={reviews.sort}
+        stale={reviews.stale}
+        collapsed={reviewsCollapsed}
+        expanded={expanded}
+        details={details}
+        reviewWrites={reviews.reviewWrites}
+        bodies={bodies}
+        submitting={submitting}
+        submitFailed={submitFailed}
+        onCollapse={setReviewsCollapsed}
+        onSort={(sort) => { setReviews((r) => ({ ...r, sort })); send({ type: "deck:setReviewSort", sort }); }}
+        onExpand={(id) => {
+          setExpanded((cur) => (cur === id ? null : id));
+          // Once per session per row: the strip re-renders constantly (the 1s
+          // clock tick), and a fetch on every render would spawn a gh call a second.
+          if (!details[id]) send({ type: "deck:reviewExpand", id });
+        }}
+        onOpen={(url) => send({ type: "openExternal", url })}
+        onLaunch={(id) => send({ type: "deck:reviewLaunch", id })}
+        onLoadDraft={(id) => send({ type: "deck:reviewLoadDraft", id })}
+        onBody={(id, body) => {
+          setBodies((b) => ({ ...b, [id]: body }));
+          // Editing a loaded draft does NOT clear the flag: the line tells a
+          // teammate an agent read their code, which stays true however much you
+          // reword it. Only emptying the box does — at that point nothing of the
+          // agent's text is left to disclose.
+          if (!body.trim()) setFromDraft((f) => (f[id] ? { ...f, [id]: false } : f));
+        }}
+        onSubmit={(id, verb) => {
+          setSubmitting((s) => ({ ...s, [id]: true }));
+          send({ type: "deck:reviewSubmit", id, verb, body: bodies[id] ?? "", fromDraft: !!fromDraft[id] });
+        }}
+      />
 
       {runs.length === 0 ? (
         <div className="empty">
@@ -322,7 +434,20 @@ export function DeckApp(): JSX.Element {
       </div>
 
       <div className="toasts">
-        {toasts.map((t) => <div key={t.id} className={`toast ${t.level}`}>{t.message}</div>)}
+        {toasts.map((t) => (
+          <div key={t.id} className={`toast ${t.level}`}>
+            <span className="toast-msg">{t.message}</span>
+            {t.action && (
+              <button
+                type="button"
+                className="toast-action"
+                onClick={() => send({ type: "openExternal", url: t.action!.url })}
+              >
+                {t.action.label}
+              </button>
+            )}
+          </div>
+        ))}
       </div>
     </>
   );
