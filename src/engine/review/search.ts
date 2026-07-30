@@ -12,8 +12,18 @@ export const REVIEW_SEARCH_QUERY =
   "commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}}";
 
 /** `review-requested:` is the superset — it includes requests made to a team you
- * belong to, which `user-review-requested:` excludes. */
-export const REVIEW_SEARCH_Q = "is:pr is:open review-requested:@me";
+ * belong to, which `user-review-requested:` excludes.
+ *
+ * `archived:false` drops requests living in archived repositories. An archived
+ * repo is read-only, so GitHub refuses a review on one: those rows could only
+ * ever offer verbs that fail, and an agent review nobody can post. They also
+ * never age out of the queue, which is what made them the loudest rows in it.
+ *
+ * Filtered here rather than in `parseSearch` because `issueCount` comes back
+ * from this same search: excluding the rows server-side moves the count with
+ * them, where a client-side filter would leave a complete queue reading as
+ * "showing 9 of 10" — truncation that never happened. */
+export const REVIEW_SEARCH_Q = "is:pr is:open review-requested:@me archived:false";
 
 export const REVIEW_SEARCH_LIMIT = 50;
 

@@ -22,7 +22,17 @@ const payload = (nodes: unknown[], issueCount = nodes.length) => ({ data: { sear
 
 describe("REVIEW_SEARCH_Q", () => {
   it("is the exact qualifier set, including team requests", () => {
-    expect(REVIEW_SEARCH_Q).toBe("is:pr is:open review-requested:@me");
+    expect(REVIEW_SEARCH_Q).toBe("is:pr is:open review-requested:@me archived:false");
+  });
+
+  // Called out separately from the literal above so the reason survives a future
+  // edit to that string: an archived repo is read-only, so a request from one can
+  // never be reviewed — and because this filters server-side, `issueCount` drops
+  // with the rows rather than leaving the strip claiming it truncated a queue it
+  // showed in full. Dropping this one qualifier is a silent regression: the strip
+  // still renders, just with permanently unactionable rows in it.
+  it("excludes archived repositories, whose requests can never be acted on", () => {
+    expect(REVIEW_SEARCH_Q).toContain("archived:false");
   });
 });
 

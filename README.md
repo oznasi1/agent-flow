@@ -83,7 +83,9 @@ say *merged*. Turn it off with the **PR facts** toggle or `agentFlow.prFacts`, a
 cards fall back to the git + Jira backbone.
 
 Above the columns sits your **review queue** — every open PR that asks for your
-review, found with one `gh` search. Every row is visible in a height-capped,
+review, found with one `gh` search. PRs in archived repositories are left out:
+an archived repo is read-only, so GitHub refuses a review on one, and those
+requests otherwise sit in the queue forever. Every row is visible in a height-capped,
 independently scrollable list rather than being collapsed away, so a nine-request
 queue is still a scroll, not a count. Each row carries the repo, PR number, title,
 author, age, and its size both as `+409 −50 · 8 files` and as an S/M/L bucket;

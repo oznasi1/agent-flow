@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Deck's review queue now skips PRs in **archived repositories**. An archived
+  repo is read-only, so GitHub refuses a review on one — those rows could only
+  ever fail, and they never aged out of the queue. Filtered in the `gh` search
+  itself, so the strip's "showing N of M" count drops with them.
+
 ## [0.1.40] — 2026-07-29
 
 ### Added
