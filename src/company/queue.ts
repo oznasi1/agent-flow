@@ -1,4 +1,7 @@
-import { LandedRecord, QueueItem, RISKS, Risk } from "./types";
+import { LandedRecord, QueueItem, Quarantined, RISKS, Risk } from "./types";
+import * as fs from "fs";
+import * as path from "path";
+import { CompanyPaths } from "./paths";
 
 /**
  * An id is also a filename, so it is restricted to characters that cannot
@@ -66,4 +69,83 @@ export function validateLanded(raw: unknown): LandedValidation {
     return { ok: false, error: "sha must be 7–40 hex characters" };
   }
   return { ok: true, record: raw as unknown as LandedRecord };
+}
+
+export interface QueueRead {
+  items: QueueItem[];
+  quarantined: Quarantined[];
+}
+
+function listJson(dir: string): string[] {
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names.filter((n) => n.endsWith(".json")).sort();
+}
+
+export function readQueue(p: CompanyPaths): QueueRead {
+  const items: QueueItem[] = [];
+  const quarantined: Quarantined[] = [];
+
+  for (const file of listJson(p.queue)) {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(fs.readFileSync(path.join(p.queue, file), "utf8"));
+    } catch (e) {
+      quarantined.push({ file, error: `unreadable json: ${(e as Error).message}` });
+      continue;
+    }
+    const result = validateItem(raw);
+    if (!result.ok) {
+      quarantined.push({ file, error: result.error });
+      continue;
+    }
+    if (`${result.item.id}.json` !== file) {
+      quarantined.push({ file, error: `id "${result.item.id}" does not match its filename` });
+      continue;
+    }
+    items.push(result.item);
+  }
+
+  return { items, quarantined };
+}
+
+export function readLanded(p: CompanyPaths): LandedRecord[] {
+  const records: LandedRecord[] = [];
+  for (const file of listJson(p.landed)) {
+    try {
+      const result = validateLanded(JSON.parse(fs.readFileSync(path.join(p.landed, file), "utf8")));
+      if (result.ok) records.push(result.record);
+    } catch {
+      // A malformed landed record is informational only — skip it silently.
+    }
+  }
+  return records.sort((a, b) => b.landed_at.localeCompare(a.landed_at));
+}
+
+export function isPaused(p: CompanyPaths): boolean {
+  return fs.existsSync(p.paused);
+}
+
+export function setPaused(p: CompanyPaths, paused: boolean): boolean {
+  if (paused) {
+    fs.mkdirSync(p.root, { recursive: true });
+    fs.writeFileSync(p.paused, "Paused from the board.\n");
+  } else {
+    fs.rmSync(p.paused, { force: true });
+  }
+  return isPaused(p);
+}
+
+export function lastCycle(p: CompanyPaths): string | null {
+  let names: string[];
+  try {
+    names = fs.readdirSync(p.cycles).filter((n) => n.endsWith(".md")).sort();
+  } catch {
+    return null;
+  }
+  return names.length > 0 ? names[names.length - 1] : null;
 }
