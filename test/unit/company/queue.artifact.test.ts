@@ -178,4 +178,43 @@ describe("resolveArtifact", () => {
       }).not.toThrow();
     }
   });
+
+  it("keeps a U+FFFD the content is entitled to, rather than eating the prefix", () => {
+    // "ab�" is exactly 5 bytes, so the whole budget is spent on characters
+    // that survive intact. The old decode-and-guess back-off asked whether the
+    // candidate ended in U+FFFD — which this one does, legitimately — and so
+    // kept stepping back, all the way to an empty string.
+    const r = resolveArtifact(p, item({ type: "text", inline: "ab�xxxxxxxxxx" }), 5);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.artifact.content).toBe("ab�");
+      expect(r.artifact.truncated).toBe(true);
+    }
+  });
+
+  it("truncates U+FFFD-laden content correctly and in linear time", () => {
+    // Every character here is a 3-byte U+FFFD, so the old back-off never found
+    // a candidate that did not end in one: it walked the offset down to zero,
+    // decoding up to the whole buffer on each step. Measured on the previous
+    // implementation: 7.7s at this cap, and no result inside 120s at the real
+    // 262,144-byte default — with resolveArtifact running synchronously inside
+    // the request handler, so the entire board stalled behind it.
+    const cap = 65536;
+    const started = Date.now();
+    const r = resolveArtifact(p, item({ type: "text", inline: "�".repeat(cap) }), cap);
+    const elapsed = Date.now() - started;
+
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.artifact.truncated).toBe(true);
+      // 21,845 whole characters fill 65,535 of the 65,536 bytes; the 21,846th
+      // straddles the cap, so the prefix stops one byte short of it instead of
+      // splitting it.
+      expect(r.artifact.content).toBe("�".repeat(21845));
+      expect(Buffer.byteLength(r.artifact.content, "utf8")).toBe(65535);
+    }
+    // A deliberately generous bound: the walk is at most three steps now, so
+    // this lands in single-digit milliseconds. The old code could not.
+    expect(elapsed).toBeLessThan(1000);
+  });
 });

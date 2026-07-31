@@ -237,18 +237,20 @@ function truncateUtf8(str: string, maxBytes: number): { content: string; truncat
     return { content: str, truncated: false };
   }
 
-  // Back up from maxBytes to find a valid UTF-8 boundary
+  // Walk back over UTF-8 continuation bytes (0b10xxxxxx) to the start of the
+  // character straddling the cap — three steps at most, since no encoded
+  // character is longer than four bytes.
+  //
+  // The previous version decoded buffer.slice(0, i) on every step and stopped
+  // only once the result no longer ended in U+FFFD. Content that legitimately
+  // contains U+FFFD at the cut point never satisfied that test, so `i` walked
+  // all the way to 0, decoding up to 256KB on each of a quarter of a million
+  // iterations: a 64KB cap took 7.7s and the real 256KB default never
+  // finished. resolveArtifact runs inside the request handler, so any agent
+  // able to write mojibake into an artifact could stall the whole board.
   let i = Math.min(maxBytes, buffer.byteLength);
-  while (i > 0) {
-    const slice = buffer.slice(0, i);
-    const decoded = slice.toString("utf8");
-    // If the decoded string doesn't end with the replacement character, we found a boundary
-    if (!decoded.endsWith("�")) {
-      return { content: decoded, truncated: true };
-    }
-    i--;
-  }
-  return { content: "", truncated: true };
+  while (i > 0 && (buffer[i] & 0xc0) === 0x80) i--;
+  return { content: buffer.subarray(0, i).toString("utf8"), truncated: true };
 }
 
 export function resolveArtifact(
