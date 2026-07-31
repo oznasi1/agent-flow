@@ -31,10 +31,40 @@ describe("createIdentity", () => {
     expect(a).not.toBe(b);
   });
 
-  it("never returns the salt itself", () => {
+  it("never exposes the salt in the returned object's shape", () => {
     const mem = vscode.makeMemento();
     const id = createIdentity(mem as never);
     const salt = String(mem._store[SALT_KEY]);
-    expect(id.fingerprint("ABC-123")).not.toContain(salt.slice(0, 8));
+
+    // Check that enumerable keys only contain expected properties
+    const keys = Object.keys(id);
+    expect(keys.sort()).toEqual(["distinctId", "fingerprint", "sessionId"].sort());
+
+    // Verify salt doesn't appear in JSON serialization
+    const serialized = JSON.stringify(id);
+    expect(serialized).not.toContain(salt.slice(0, 8));
+
+    // Verify the salt value itself doesn't appear in the object
+    expect(id.distinctId).not.toContain(salt.slice(0, 8));
+    expect(id.sessionId).not.toContain(salt.slice(0, 8));
+    expect(id.fingerprint("test")).not.toContain(salt.slice(0, 8));
+  });
+
+  it("falls back to in-memory salt if state.update throws synchronously", () => {
+    const mem = vscode.makeMemento();
+    // Mock state.update to throw synchronously
+    (mem.update as any) = () => {
+      throw new Error("Store write failed");
+    };
+
+    // Should not throw, should return a valid Identity
+    const id = createIdentity(mem as never);
+    expect(id.distinctId).toBe("test-machine-id");
+    expect(id.sessionId).toBe("test-session-id");
+
+    // Fingerprint should still be valid 16-char hex
+    const fp = id.fingerprint("ABC-123");
+    expect(fp).toMatch(/^[0-9a-f]{16}$/);
+    expect(id.fingerprint("ABC-123")).toBe(fp);
   });
 });

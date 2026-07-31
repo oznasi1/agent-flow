@@ -15,13 +15,28 @@ export interface Identity {
 }
 
 export function createIdentity(state: vscode.Memento): Identity {
-  let salt = state.get<string>(SALT_KEY);
+  let salt: string | undefined;
+
+  // Guard against both synchronous throws and rejected promises. If persisting
+  // the salt fails for any reason, fall back to an in-memory session salt so
+  // createIdentity never throws into activate().
+  try {
+    salt = state.get<string>(SALT_KEY);
+  } catch {
+    // Ignore read errors; proceed with in-memory salt below.
+  }
+
   if (!salt) {
     salt = randomUUID();
-    // Fire-and-forget: a failed write only costs us fingerprint stability, and
-    // nothing here may throw into activate().
-    void Promise.resolve(state.update(SALT_KEY, salt)).then(undefined, () => undefined);
+    // Fire-and-forget: attempt to persist the salt, but swallow both rejected
+    // promises and any synchronous throws so nothing escapes to activate().
+    try {
+      void Promise.resolve(state.update(SALT_KEY, salt)).then(undefined, () => undefined);
+    } catch {
+      // Synchronous throw from state.update; salt stays in memory for this session.
+    }
   }
+
   const s = salt;
   return {
     distinctId: vscode.env.machineId,
