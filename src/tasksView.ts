@@ -24,10 +24,40 @@ import { createWorktrees } from "./engine/worktree";
 import { openSharedWorkspace, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
-import { track, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
-import { toPromptModeProp, classifyFailure, DestinationProp, PromptModeProp, RepoSource } from "./telemetry/events";
+import { track, trackError, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
+import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, PromptModeProp, RepoSource } from "./telemetry/events";
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
+
+/** Which engine operation a webview message represents, for operation_failed.
+ * Messages absent from this map report as "jira_fetch" only if they read Jira;
+ * anything genuinely unclassifiable is left out and reports nothing. */
+const MESSAGE_OPS: Partial<Record<InboundMessage["type"], Op>> = {
+  ready: "jira_fetch",
+  retry: "jira_fetch",
+  fetch: "jira_fetch",
+  detail: "jira_fetch",
+  take: "workspace_write",
+  takeBatch: "workspace_write",
+  addressPr: "pr_lookup",
+  changeStatus: "jira_write",
+  addToMySprint: "jira_write",
+  removeFromSprint: "jira_write",
+  setComponent: "jira_write",
+  explore: "workspace_write",
+  runDoctor: "jira_fetch",
+};
+
+/** Whether retrying the same operation, with nothing else changed, could plausibly
+ * succeed. Derived from `failure_class` — not a bespoke `instanceof` check — so it
+ * can never contradict the failure_class already on the same event. Auth needs
+ * re-authentication first; not_found and permission point at a state retrying
+ * alone won't change; parse means the response shape itself was unexpected, and
+ * retrying the identical request reproduces it deterministically. Network blips,
+ * timeouts, conflicts, and anything unclassified are presumed transient. */
+function isRetryable(failureClass: FailureClass): boolean {
+  return failureClass !== "auth" && failureClass !== "not_found" && failureClass !== "permission" && failureClass !== "parse";
+}
 
 /** Delay between opening successive batch windows — reduces focus-stealing and
  *  `open -a` thrash when several windows launch back-to-back. */
@@ -255,6 +285,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
       }
     } catch (e) {
+      const op = MESSAGE_OPS[m.type];
+      if (op) {
+        const failure_class = classifyFailure(e);
+        trackError({ name: "operation_failed", op, failure_class, retryable: isRetryable(failure_class) });
+      }
       this.post({ type: "loading", loading: false });
       const msg = e instanceof Error ? e.message : String(e);
       if (e instanceof JiraAuthError) {

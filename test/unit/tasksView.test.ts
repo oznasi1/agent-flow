@@ -17,9 +17,10 @@ vi.mock("../../src/engine/batchWorkspace", () => ({ openSharedWorkspace: vi.fn()
 // a real singleton — fingerprint() returns "" until initTelemetry() runs (see
 // telemetry.ts), which would make every task_fp assertion below meaningless.
 const trackSpy = vi.fn();
+const trackErrorSpy = vi.fn();
 vi.mock("../../src/telemetry/telemetry", () => ({
   track: (...a: unknown[]) => trackSpy(...a),
-  trackError: vi.fn(),
+  trackError: (...a: unknown[]) => trackErrorSpy(...a),
   startFlow: () => ({ id: "flow-1", elapsedMs: () => 42 }),
   fingerprint: () => "0123456789abcdef",
 }));
@@ -33,7 +34,16 @@ vi.mock("../../src/engine/presence", () => ({
 // the real parseJiraError produces instances the production code recognises.
 vi.mock("../../src/jira/client", async () => {
   const errors = await vi.importActual<typeof import("../../src/jira/errors")>("../../src/jira/errors");
-  class JiraAuthError extends Error {}
+  // Mirrors the real class's constructor (src/jira/client.ts): classifyFailure
+  // (telemetry/events.ts) checks `e.name === "JiraAuthError"`, and a bare
+  // `extends Error {}` here would leave `.name` as the inherited "Error",
+  // silently failing that check for every test in this file.
+  class JiraAuthError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "JiraAuthError";
+    }
+  }
   return { JiraAuthError, JiraApiError: errors.JiraApiError, JiraClient: vi.fn() };
 });
 
@@ -119,6 +129,7 @@ function makeClient() {
 
 beforeEach(() => {
   trackSpy.mockClear();
+  trackErrorSpy.mockClear();
   clientStub = makeClient();
   vi.mocked(getConfig).mockReturnValue({ ...CFG });
   vi.mocked(discoverRepos).mockReturnValue(mkRepos(["account-service", "centaur"]));
@@ -551,6 +562,16 @@ describe("changeStatus", () => {
   });
 });
 
+/** Forces the (mocked) Jira client to reject a `fetch` message so it reaches the
+ * dispatcher's catch, however the existing error tests in this file do it. The
+ * default rejection carries a ticket-key-shaped string so the leak test below
+ * has something concrete to prove never survives into the emitted event. */
+async function fireMessageThatThrows(m: InboundMessage, err: Error = new Error("Couldn't fetch BILL-1234")) {
+  clientStub.fetchTasks.mockRejectedValue(err);
+  const { send } = setup();
+  await send(m);
+}
+
 describe("failure routing", () => {
   it("gates the panel when the task fetch fails, and offers Doctor", async () => {
     clientStub.fetchTasks.mockRejectedValue(new Error("Couldn't reach Jira"));
@@ -579,6 +600,37 @@ describe("failure routing", () => {
     await send({ type: "changeStatus", key: "ASM-1" });
     expect(posted().some((p) => p.type === "error")).toBe(false);
     expect(posted()).toContainEqual({ type: "toast", level: "error", message: "Couldn't reach Jira" });
+  });
+
+  it("reports operation_failed when a webview message throws", async () => {
+    await fireMessageThatThrows({ type: "fetch", filter: "mysprint", size: "any" });
+    const ev = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(ev).toBeDefined();
+    expect(ev.op).toBe("jira_fetch");
+    expect(JSON.stringify(ev)).not.toContain("BILL");
+  });
+
+  it("classifies a JiraAuthError as auth, and marks it non-retryable", async () => {
+    await fireMessageThatThrows({ type: "fetch", filter: "mysprint", size: "any" }, new JiraAuthError("nope"));
+    const ev = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(ev.failure_class).toBe("auth");
+    expect(ev.retryable).toBe(false);
+  });
+
+  it("marks an unclassified failure as retryable", async () => {
+    await fireMessageThatThrows({ type: "fetch", filter: "mysprint", size: "any" }, new Error("Couldn't reach Jira"));
+    const ev = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(ev.failure_class).toBe("unknown");
+    expect(ev.retryable).toBe(true);
+  });
+
+  it("does not report operation_failed for a message absent from the op map", async () => {
+    // `openExternal` has no engine op (it's a bare env.openExternal call) —
+    // MESSAGE_OPS deliberately leaves it out, so its catch must report nothing.
+    vi.mocked(env.openExternal).mockRejectedValueOnce(new Error("no handler for this URL"));
+    const { send } = setup();
+    await send({ type: "openExternal", url: "https://example.com" });
+    expect(trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed")).toBeUndefined();
   });
 });
 
@@ -1382,6 +1434,18 @@ describe("Take funnel", () => {
     const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
     expect(done.outcome).toBe("failed");
     expect(done.failure_class).toBeDefined();
+  });
+
+  it("also reports operation_failed when a failing take reaches the dispatcher (both events fire, deliberately — see tasksView.ts:257)", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    vi.mocked(openWorkspace).mockRejectedValueOnce(new Error("disk full"));
+    const { send } = setup();
+    await send({ type: "take", key: "BILL-1234", services: ["acme-billing"] });
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done.outcome).toBe("failed");
+    const opFailed = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(opFailed).toBeDefined();
+    expect(opFailed.op).toBe("workspace_write");
   });
 
   it("reports cancelled (not launched) when the worktree picker inside launch() is cancelled — agentFlow.worktree's default ('ask')", async () => {
