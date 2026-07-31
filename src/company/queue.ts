@@ -230,6 +230,27 @@ export interface ResolvedArtifact {
 
 const DEFAULT_MAX_BYTES = 262144;
 
+/** Truncates a UTF-8 string to a byte limit without splitting multi-byte characters. */
+function truncateUtf8(str: string, maxBytes: number): { content: string; truncated: boolean } {
+  const buffer = Buffer.from(str, "utf8");
+  if (buffer.byteLength <= maxBytes) {
+    return { content: str, truncated: false };
+  }
+
+  // Back up from maxBytes to find a valid UTF-8 boundary
+  let i = Math.min(maxBytes, buffer.byteLength);
+  while (i > 0) {
+    const slice = buffer.slice(0, i);
+    const decoded = slice.toString("utf8");
+    // If the decoded string doesn't end with the replacement character, we found a boundary
+    if (!decoded.endsWith("�")) {
+      return { content: decoded, truncated: true };
+    }
+    i--;
+  }
+  return { content: "", truncated: true };
+}
+
 export function resolveArtifact(
   p: CompanyPaths,
   item: QueueItem,
@@ -238,9 +259,10 @@ export function resolveArtifact(
   const { type, path: rel, inline } = item.artifact;
 
   if (typeof inline === "string" && inline.length > 0) {
+    const { content, truncated } = truncateUtf8(inline, maxBytes);
     return {
       ok: true,
-      artifact: { type, content: inline.slice(0, maxBytes), truncated: inline.length > maxBytes },
+      artifact: { type, content, truncated },
     };
   }
 
@@ -261,9 +283,30 @@ export function resolveArtifact(
   }
   if (!stat.isFile()) return { ok: false, error: `artifact path is not a file: ${rel}` };
 
-  const text = fs.readFileSync(resolved, "utf8");
+  // Check the real path (resolves symlinks) to prevent symlink escapes
+  let realPath: string;
+  try {
+    realPath = fs.realpathSync(resolved);
+  } catch {
+    return { ok: false, error: `artifact file not found: ${rel}` };
+  }
+
+  // Verify the real path is still inside the repo (compare real paths to handle OS-specific symlinks)
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync(p.repoRoot);
+  } catch {
+    return { ok: false, error: `artifact path resolves outside the repository: ${rel}` };
+  }
+
+  if (!isInside(realRoot, realPath)) {
+    return { ok: false, error: `artifact path resolves outside the repository: ${rel}` };
+  }
+
+  const text = fs.readFileSync(realPath, "utf8");
+  const { content, truncated } = truncateUtf8(text, maxBytes);
   return {
     ok: true,
-    artifact: { type, content: text.slice(0, maxBytes), truncated: text.length > maxBytes },
+    artifact: { type, content, truncated },
   };
 }

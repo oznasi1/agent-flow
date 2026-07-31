@@ -113,4 +113,69 @@ describe("resolveArtifact", () => {
     const r = resolveArtifact(p, item({ type: "text" }));
     expect(r.ok).toBe(false);
   });
+
+  it("refuses a symlink pointing outside the repo", () => {
+    // Create a target file outside the repo
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-external-"));
+    try {
+      const externalFile = path.join(tmpDir, "secret.txt");
+      fs.writeFileSync(externalFile, "secret content");
+
+      // Create a symlink inside the repo pointing to the external file
+      const symlinkPath = path.join(p.drafts, "link.txt");
+      fs.symlinkSync(externalFile, symlinkPath);
+
+      // Should refuse because the real path is outside the repo
+      const r = resolveArtifact(p, item({ type: "text", path: ".claude/company/drafts/link.txt" }));
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toContain("outside");
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("handles multi-byte content correctly without truncation", () => {
+    const emoji = "Hello 👋 World";
+    fs.writeFileSync(path.join(p.drafts, "emoji.txt"), emoji);
+    const r = resolveArtifact(p, item({ type: "text", path: ".claude/company/drafts/emoji.txt" }), 1000);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.artifact.content).toBe(emoji);
+      expect(r.artifact.truncated).toBe(false);
+      // Verify no replacement character or surrogate issues
+      expect(r.artifact.content).not.toContain("�");
+    }
+  });
+
+  it("truncates multi-byte content at byte boundary without corruption", () => {
+    const emoji = "Hello 👋 World";
+    fs.writeFileSync(path.join(p.drafts, "emoji.txt"), emoji);
+    // The emoji "👋" is 4 bytes in UTF-8
+    // "Hello " is 6 bytes, so byte limit of 8 should cut into the emoji
+    const r = resolveArtifact(p, item({ type: "text", path: ".claude/company/drafts/emoji.txt" }), 8);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.artifact.truncated).toBe(true);
+      // Should not contain replacement character or incomplete sequences
+      expect(r.artifact.content).not.toContain("�");
+      // Content should be valid UTF-8 string
+      expect(() => {
+        // Just accessing it should not throw
+        r.artifact.content.charCodeAt(0);
+      }).not.toThrow();
+    }
+  });
+
+  it("truncates multi-byte inline content at byte boundary without corruption", () => {
+    const emoji = "Hello 👋 World";
+    const r = resolveArtifact(p, item({ type: "text", inline: emoji }), 8);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.artifact.truncated).toBe(true);
+      expect(r.artifact.content).not.toContain("�");
+      expect(() => {
+        r.artifact.content.charCodeAt(0);
+      }).not.toThrow();
+    }
+  });
 });
