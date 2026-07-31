@@ -273,8 +273,20 @@ truncated to 20 frames or 2 KB, and **never** `error.message`.
 
 ~27 properties, all enums, booleans or counts:
 
-- Six manifest enums, sent verbatim because every allowed value is fixed in `package.json`:
-  `workspaceMode`, `openIn`, `exploreMode`, `worktree`, `remoteControl`, `defaultFilter`.
+- Six manifest enums, **validated against the manifest's allowed values and collapsed to the
+  literal `"invalid"` when unrecognised** — never cast: `workspaceMode`, `openIn`,
+  `exploreMode`, `worktree`, `remoteControl`, `defaultFilter`.
+
+  > **Correction, made during implementation.** This section originally said these six were
+  > "sent verbatim because every allowed value is fixed in `package.json`". That was wrong on
+  > both counts. `defaultFilter` and `exploreMode` are typed as bare `string` in
+  > `AgentFlowConfig`, and VS Code's settings *UI* constrains a manifest `enum` while a
+  > hand-edited `settings.json` does not — so a blind cast would have transmitted arbitrary
+  > user-authored text. Each of the six is now membership-checked. A distinct `"invalid"`
+  > sentinel is used rather than falling back to the shipped default, because falling back
+  > would make garbage configuration indistinguishable from a genuine default choice and
+  > silently inflate the "default configuration" bucket in the very numbers this design
+  > exists to produce. Six manifest-parity tests guard the whitelists against drift.
 - One reduced enum: `taskMode` → ask · stock · custom. Its manifest type is a bare string
   holding either `"ask"` or a prompt-mode id, so the raw value can be user-authored.
 - Ten booleans: `seedAgent`, the four `filters.*`, `prReviewAutoFix`, `prFacts`, `reviewRequests`, `reviewWrites`, `stampLabelOnWrite`, `trackOpenWindows`.
