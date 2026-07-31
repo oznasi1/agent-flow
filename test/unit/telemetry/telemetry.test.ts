@@ -152,6 +152,43 @@ describe("resetTelemetryForTests / disposeTelemetry isolation", () => {
     expect(log).not.toHaveBeenCalled();
   });
 
+  it("never throws even when every disposal fails, and still clears state", () => {
+    const log = vi.fn();
+    initTelemetry(makeContext(), log);
+
+    // One of each kind of disposable this module owns, all rigged to throw.
+    const listenerDisposable = vscode.env.onDidChangeTelemetryEnabled.mock.results[0].value;
+    vi.spyOn(listenerDisposable, "dispose").mockImplementationOnce(() => {
+      throw new Error("listener dispose boom");
+    });
+    const configDisposable = vscode.workspace.onDidChangeConfiguration.mock.results[0].value;
+    vi.spyOn(configDisposable, "dispose").mockImplementationOnce(() => {
+      throw new Error("config listener dispose boom");
+    });
+    const logger = vscode.env.createTelemetryLogger.mock.results[0].value;
+    vi.spyOn(logger, "dispose").mockImplementationOnce(() => {
+      throw new Error("logger dispose boom");
+    });
+    const sender = currentSender();
+    vi.spyOn(sender, "dispose").mockImplementationOnce(() => {
+      throw new Error("sender dispose boom");
+    });
+
+    expect(() => disposeTelemetry()).not.toThrow();
+
+    // Every disposal was actually attempted, not skipped after the first threw.
+    expect(listenerDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(configDisposable.dispose).toHaveBeenCalledTimes(1);
+    expect(logger.dispose).toHaveBeenCalledTimes(1);
+    expect(sender.dispose).toHaveBeenCalledTimes(1);
+
+    // `state` was still cleared: initTelemetry()'s idempotent `if (state) return`
+    // guard did not short-circuit, proven by it actually building a new logger.
+    const createLoggerCallsBefore = vscode.env.createTelemetryLogger.mock.calls.length;
+    initTelemetry(makeContext(), vi.fn());
+    expect(vscode.env.createTelemetryLogger.mock.calls.length).toBe(createLoggerCallsBefore + 1);
+  });
+
   it("resetting between tests disposes the previous listeners instead of leaking them", () => {
     const staleLog = vi.fn();
     initTelemetry(makeContext(), staleLog);

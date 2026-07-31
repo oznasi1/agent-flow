@@ -131,10 +131,24 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export function deactivate(): void {
-  // Best-effort: drop this window's presence record (removePresence never throws).
-  removePresence(defaultWindowsDir(), process.pid);
-  // Best-effort flush. deactivate() is synchronous and will not await the POST, so
-  // tail events at window close are sometimes lost — by design, which is why
-  // retention rides on extension_activated rather than a session_ended event.
-  disposeTelemetry();
+  // Each teardown step is isolated so neither can prevent the other from running.
+  // removePresence never throws by its own contract and disposeTelemetry never
+  // throws by its own contract (see telemetry.ts) — the try/catches here are a
+  // second line of defense against a regression in either, not a substitute for
+  // those contracts.
+  try {
+    // Best-effort: drop this window's presence record.
+    removePresence(defaultWindowsDir(), process.pid);
+  } catch {
+    // No output channel handle survives past activate() to log to; nothing else
+    // to do at shutdown besides still attempting the flush below.
+  }
+  try {
+    // Best-effort flush. deactivate() is synchronous and will not await the POST,
+    // so tail events at window close are sometimes lost — by design, which is why
+    // retention rides on extension_activated rather than a session_ended event.
+    disposeTelemetry();
+  } catch {
+    // See comment above.
+  }
 }

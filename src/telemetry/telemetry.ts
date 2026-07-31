@@ -121,12 +121,34 @@ export function fingerprint(value: string): string {
   return state ? state.identity.fingerprint(value) : "";
 }
 
+/** Never throws: matches the no-throw contract every other exported function in
+ * this module already honours, and deactivate() relies on it (see extension.ts) —
+ * a real dispose failure must not stop window-close cleanup or skip the other
+ * disposals. Each disposal is independently guarded so one throwing doesn't skip
+ * the rest, and `state` is unconditionally cleared at the end even if every
+ * disposal failed — otherwise a stuck `state` would wedge track()/trackError()
+ * into believing telemetry is still live. */
 export function disposeTelemetry(): void {
   if (!state) return;
-  for (const d of state.disposables) d.dispose();
+  const { disposables, logger, sender, log } = state;
+  for (const d of disposables) {
+    try {
+      d.dispose();
+    } catch (e) {
+      log(`telemetry: dispose failed for a listener: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
   // Best-effort: deactivate() is synchronous and will not await this.
-  state.logger.dispose();
-  state.sender.dispose();
+  try {
+    logger.dispose();
+  } catch (e) {
+    log(`telemetry: logger dispose failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  try {
+    sender.dispose();
+  } catch (e) {
+    log(`telemetry: sender dispose failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
   state = undefined;
 }
 

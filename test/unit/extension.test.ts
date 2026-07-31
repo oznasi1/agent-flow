@@ -278,4 +278,20 @@ describe("deactivate", () => {
     deactivate();
     expect(disposeSpy).toHaveBeenCalled();
   });
+
+  it("still flushes telemetry when removePresence throws", () => {
+    vi.mocked(removePresence).mockImplementationOnce(() => {
+      throw new Error("EACCES: cannot remove presence file");
+    });
+    expect(() => deactivate()).not.toThrow();
+    expect(disposeSpy).toHaveBeenCalled();
+  });
+
+  it("still runs removePresence, and does not throw, when disposeTelemetry throws", () => {
+    disposeSpy.mockImplementationOnce(() => {
+      throw new Error("dispose boom");
+    });
+    expect(() => deactivate()).not.toThrow();
+    expect(removePresence).toHaveBeenCalled();
+  });
 });
