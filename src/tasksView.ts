@@ -48,6 +48,41 @@ const MESSAGE_OPS: Partial<Record<InboundMessage["type"], Op>> = {
   runDoctor: "jira_fetch",
 };
 
+/** Message types whose Jira interaction is itself a write — the rest that read
+ * Jira at all (including `take`/`takeBatch`/`addressPr`, whose primary MESSAGE_OPS
+ * entry is a non-Jira op) are reads. Used only by resolveOp() below. */
+const JIRA_WRITE_MESSAGES: ReadonlySet<InboundMessage["type"]> = new Set([
+  "changeStatus",
+  "addToMySprint",
+  "removeFromSprint",
+  "setComponent",
+]);
+
+/** MESSAGE_OPS attributes a failure to a message's own primary purpose — `take` is
+ * "workspace_write" because opening/seeding a workspace is what it mostly does.
+ * But `take`, `takeBatch`, and `addressPr` all read a ticket via resolveKickoff()
+ * before ever touching a workspace, and that Jira read has no try/catch of its
+ * own — it is the single most failure-prone step in the flow, and MESSAGE_OPS
+ * alone would mislabel its failure a workspace_write / pr_lookup. When the
+ * thrown error is identifiably from the Jira client (JiraAuthError or
+ * JiraApiError), that origin is trusted over the message-type default: jira_write
+ * for the message types whose own Jira interaction is a write, jira_fetch for
+ * everything else that reads Jira at all. A message absent from MESSAGE_OPS
+ * (e.g. openExternal, reorder) still reports nothing regardless of the error's
+ * origin — this override only ever narrows an op that MESSAGE_OPS already
+ * assigned, never invents one for a message MESSAGE_OPS left out. Stateless by
+ * design: a pure function of the one error and message already in hand, not a
+ * mutable "current op" field, which would be wrong the moment two messages are
+ * in flight concurrently. */
+function resolveOp(m: InboundMessage, e: unknown): Op | undefined {
+  const messageOp = MESSAGE_OPS[m.type];
+  if (!messageOp) return undefined;
+  if (e instanceof JiraAuthError || e instanceof JiraApiError) {
+    return JIRA_WRITE_MESSAGES.has(m.type) ? "jira_write" : "jira_fetch";
+  }
+  return messageOp;
+}
+
 /** Whether retrying the same operation, with nothing else changed, could plausibly
  * succeed. Derived from `failure_class` — not a bespoke `instanceof` check — so it
  * can never contradict the failure_class already on the same event. Auth needs
@@ -285,7 +320,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
       }
     } catch (e) {
-      const op = MESSAGE_OPS[m.type];
+      const op = resolveOp(m, e);
       if (op) {
         const failure_class = classifyFailure(e);
         trackError({ name: "operation_failed", op, failure_class, retryable: isRetryable(failure_class) });

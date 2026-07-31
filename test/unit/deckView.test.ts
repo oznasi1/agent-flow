@@ -127,7 +127,17 @@ vi.mock("../../src/config", () => ({
   }),
 }));
 vi.mock("../../src/jira/client", () => ({
-  JiraAuthError: class JiraAuthError extends Error {},
+  // Mirrors the real class's constructor (src/jira/client.ts), which sets
+  // `this.name` explicitly so classifyFailure's `e.name === "JiraAuthError"`
+  // check survives production minification. A bare `extends Error {}` here
+  // would leave `.name` as the inherited "Error", silently diverging from the
+  // real class for any test that asserts on it.
+  JiraAuthError: class JiraAuthError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "JiraAuthError";
+    }
+  },
   JiraClient: class { getStatus = h.getStatus; },
 }));
 

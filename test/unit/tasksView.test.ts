@@ -632,6 +632,15 @@ describe("failure routing", () => {
     await send({ type: "openExternal", url: "https://example.com" });
     expect(trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed")).toBeUndefined();
   });
+
+  it("reports jira_write when changeStatus fails with a real Jira error (resolveOp, not the plain MESSAGE_OPS lookup)", async () => {
+    clientStub.getTransitions.mockRejectedValueOnce(parseJiraError(500, JSON.stringify({ errorMessages: ["Jira exploded"] })));
+    const { send } = setup();
+    await send({ type: "changeStatus", key: "ASM-1" });
+    const ev = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(ev).toBeDefined();
+    expect(ev.op).toBe("jira_write");
+  });
 });
 
 describe("detail", () => {
@@ -1446,6 +1455,30 @@ describe("Take funnel", () => {
     const opFailed = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
     expect(opFailed).toBeDefined();
     expect(opFailed.op).toBe("workspace_write");
+  });
+
+  it("reports jira_fetch — not workspace_write — when the ticket read inside a take fails with a real Jira error", async () => {
+    // resolveKickoff()'s getDetail() call has no try/catch of its own; MESSAGE_OPS
+    // alone would label this "workspace_write" (take's own primary purpose).
+    // resolveOp() must recognize the Jira-origin error and override it.
+    clientStub.getDetail.mockRejectedValueOnce(parseJiraError(404, JSON.stringify({ errorMessages: ["Issue does not exist"] })));
+    const { send } = setup();
+    await send({ type: "take", key: "BILL-1234", services: ["acme-billing"] });
+    const opFailed = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(opFailed).toBeDefined();
+    expect(opFailed.op).toBe("jira_fetch");
+  });
+
+  it("still reports workspace_write when a take fails for a genuine non-Jira reason (launch() throwing an ENOENT)", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    const enoent = Object.assign(new Error("no such file or directory"), { code: "ENOENT" });
+    vi.mocked(openWorkspace).mockRejectedValueOnce(enoent);
+    const { send } = setup();
+    await send({ type: "take", key: "BILL-1234", services: ["acme-billing"] });
+    const opFailed = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(opFailed).toBeDefined();
+    expect(opFailed.op).toBe("workspace_write");
+    expect(opFailed.failure_class).toBe("not_found");
   });
 
   it("reports cancelled (not launched) when the worktree picker inside launch() is cancelled — agentFlow.worktree's default ('ask')", async () => {
