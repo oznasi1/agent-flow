@@ -8,6 +8,11 @@ import { windowIdentity, writePresence, removePresence, defaultWindowsDir } from
 import { getConfig } from "./config";
 import { maybeRunSetup, runSetup } from "./setup";
 import { showDoctor, defaultDeps } from "./doctorView";
+import { disposeTelemetry, initTelemetry, track } from "./telemetry/telemetry";
+import { settingsSnapshot } from "./telemetry/settingsSnapshot";
+import { maybeShowTelemetryNotice } from "./telemetry/notice";
+
+const INSTALLED_KEY = "agentFlow.telemetry.installReported";
 
 export function activate(context: vscode.ExtensionContext): void {
   const auth = new ApiTokenAuth(context.secrets);
@@ -15,6 +20,16 @@ export function activate(context: vscode.ExtensionContext): void {
   const log = (m: string) => output.appendLine(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
   const provider = new TasksViewProvider(context, auth, log);
   log("Agent Flow activated");
+
+  // Telemetry must come up before the commands below so `command_invoked` can
+  // use it. A throw here must NEVER escape activate() — see the comment on the
+  // best-effort block further down for why: an uncaught throw disposes every
+  // registration that follows it.
+  try {
+    initTelemetry(context, log);
+  } catch (e) {
+    log(`telemetry: init failed (extension still active): ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   context.subscriptions.push(
     output,
@@ -77,6 +92,39 @@ export function activate(context: vscode.ExtensionContext): void {
       stamp();
       context.subscriptions.push(vscode.window.onDidChangeWindowState(stamp));
     }
+
+    // Lifecycle analytics. `isFirstEver` is the install signal: globalState is empty
+    // on a fresh install and survives updates, so this fires exactly once per machine.
+    const isFirstEver = !context.globalState.get<boolean>(INSTALLED_KEY);
+    if (isFirstEver) {
+      // Guard the update's own rejection too (Thenable, not a real Promise, so no
+      // .catch()) — a storage write failure here must not become an unhandled
+      // rejection any more than a telemetry failure may break activation.
+      void context.globalState.update(INSTALLED_KEY, true).then(undefined, () => undefined);
+      track({ name: "extension_installed" });
+    }
+    // Fires after activate() has already returned — logUsage/getConfig/settingsSnapshot
+    // failures here can no longer be caught by the try above, so guard them locally.
+    // The rejection branch keeps a rejected isAuthenticated() from becoming an
+    // unhandled promise rejection.
+    void auth.isAuthenticated().then(
+      (authed) => {
+        try {
+          const cfg = getConfig();
+          track({
+            name: "extension_activated",
+            is_first_ever: isFirstEver,
+            has_jira_auth: authed,
+            is_configured: !!cfg.baseUrl && !!cfg.project,
+            ...settingsSnapshot(cfg),
+          });
+        } catch (e) {
+          log(`telemetry: extension_activated failed: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      },
+      () => undefined,
+    );
+    void maybeShowTelemetryNotice(context, { setupRunning: isFirstEver });
   } catch (e) {
     log(`activation: optional step failed (extension still active): ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -85,4 +133,8 @@ export function activate(context: vscode.ExtensionContext): void {
 export function deactivate(): void {
   // Best-effort: drop this window's presence record (removePresence never throws).
   removePresence(defaultWindowsDir(), process.pid);
+  // Best-effort flush. deactivate() is synchronous and will not await the POST, so
+  // tail events at window close are sometimes lost — by design, which is why
+  // retention rides on extension_activated rather than a session_ended event.
+  disposeTelemetry();
 }

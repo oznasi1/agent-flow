@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import type * as vscode from "vscode";
+import { ExtensionMode } from "../_mocks/vscode";
 import type { JiraTask, ServiceRef } from "../../src/types";
 import type { JiraAuth } from "../../src/jira/auth";
 
@@ -99,10 +100,16 @@ export function fakeSecrets(initial: Record<string, string> = {}): FakeSecrets {
 export function fakeContext(init: {
   workspaceState?: Record<string, unknown>;
   globalState?: Record<string, unknown>;
+  /** Reuse an already-built globalState Memento instead of seeding a fresh one —
+   *  e.g. a test simulating a second activation (a new window, an update) against
+   *  the SAME globalState that survives across them: `fakeContext({ sharedGlobalState:
+   *  ctx.globalState })`. Takes precedence over `globalState` when both are given. */
+  sharedGlobalState?: FakeMemento;
   secrets?: Record<string, string>;
+  extensionMode?: (typeof ExtensionMode)[keyof typeof ExtensionMode];
 } = {}) {
   const workspaceState = memento(init.workspaceState);
-  const globalState = memento(init.globalState);
+  const globalState = init.sharedGlobalState ?? memento(init.globalState);
   const secrets = fakeSecrets(init.secrets);
   const extensionUri = { fsPath: "/ext", scheme: "file", toString: () => "/ext" };
   const context = {
@@ -111,6 +118,7 @@ export function fakeContext(init: {
     globalState,
     secrets,
     extensionUri,
+    extensionMode: init.extensionMode ?? ExtensionMode.Test,
   } as unknown as vscode.ExtensionContext;
   return { context, workspaceState, globalState, secrets, extensionUri };
 }
