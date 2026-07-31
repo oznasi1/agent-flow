@@ -97,11 +97,22 @@ async function api(path, opts) {
   return { status: res.status, body: await res.json().catch(() => ({})) };
 }
 
-async function load() {
+async function load(opts) {
   const { body } = await api("/api/queue");
   state = body;
   if (sel >= state.pending.length) sel = Math.max(0, state.pending.length - 1);
-  render();
+  render(opts);
+}
+
+/**
+ * True while the reviewer is actively writing a revise note — open and either
+ * focused or already holding text. The background poll checks this so it never
+ * silently wipes out feedback someone is mid-way through typing.
+ */
+function noteInProgress() {
+  const note = document.getElementById("note");
+  return !!note && !note.classList.contains("hidden") &&
+    (document.activeElement === note || note.value.trim() !== "");
 }
 
 function renderDiff(text) {
@@ -193,6 +204,9 @@ async function renderDetail() {
   };
 
   const { status, body } = await api("/api/artifact?id=" + encodeURIComponent(it.id));
+  // The selection may have moved on while this was in flight — a stale artifact
+  // must never land under a different card's title and metadata.
+  if (!state.pending[sel] || state.pending[sel].id !== it.id) return;
   const art = document.getElementById("art");
   if (status !== 200) {
     art.innerHTML = '<div class="head quar">' + esc(body.error || "could not read the artifact") + "</div>";
@@ -222,18 +236,24 @@ async function decide(verdict) {
     body: JSON.stringify({ id: it.id, verdict, note }),
   });
   if (status !== 200) { alert(body.error || "could not record that"); return; }
+  // The decision is recorded — this note is spent, so it must not be mistaken
+  // for one still in progress the next time something re-renders.
+  if (noteEl) { noteEl.value = ""; noteEl.classList.add("hidden"); }
   load();
 }
 
-function render() {
+function render(opts) {
   document.getElementById("count").textContent = state.pending.length + " pending";
   document.getElementById("cycle").textContent = state.lastCycle || "no cycle yet";
   const pb = document.getElementById("pauseBtn");
   pb.textContent = state.paused ? "Paused — resume" : "Pause";
   pb.className = state.paused ? "primary" : "";
   document.getElementById("runBtn").disabled = state.paused;
+  // The list (counts, quarantine strip, landed strip) always reflects reality.
+  // The detail pane is the one exception: while the reviewer has a revise note
+  // open, a background poll must not tear it down and lose what they typed.
   renderList();
-  renderDetail();
+  if (!(opts && opts.preserveNote && noteInProgress())) renderDetail();
 }
 
 document.getElementById("pauseBtn").onclick = async () => {
@@ -259,7 +279,7 @@ document.addEventListener("keydown", e => {
 });
 
 load();
-setInterval(load, 30000);
+setInterval(() => load({ preserveNote: true }), 30000);
 </script>
 </body>
 </html>`;
