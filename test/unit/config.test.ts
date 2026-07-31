@@ -197,6 +197,17 @@ describe("DEFAULT_PROMPT_MODES", () => {
   });
 });
 
+describe("getConfig — telemetryEnabled", () => {
+  it("telemetryEnabled defaults to true", () => {
+    expect(getConfig().telemetryEnabled).toBe(true);
+  });
+
+  it("telemetryEnabled reflects the setting when disabled", () => {
+    setConfig({ "telemetry.enabled": false });
+    expect(getConfig().telemetryEnabled).toBe(false);
+  });
+});
+
 describe("getConfig — trackOpenWindows", () => {
   it("defaults trackOpenWindows to true and reads an override", () => {
     expect(getConfig().trackOpenWindows).toBe(true);

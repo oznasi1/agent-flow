@@ -66,6 +66,7 @@ const CFG = {
   remoteControl: "off" as const,
   batchLaunchConfirmThreshold: 6,
   trackOpenWindows: true,
+  telemetryEnabled: true,
   prFacts: true,
   prFactsTtlSeconds: 120,
   reviewRequests: true,

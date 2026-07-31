@@ -95,9 +95,62 @@ export const extensions = {
   getExtension: vi.fn((_id: string): { packageJSON?: { version?: string } } | undefined => undefined),
 };
 
+let telemetryEnabledCbs: ((e: boolean) => void)[] = [];
+/** Drive `env.onDidChangeTelemetryEnabled` from a test. */
+export function fireTelemetryEnabled(on: boolean): void {
+  env.isTelemetryEnabled = on;
+  for (const cb of telemetryEnabledCbs) cb(on);
+}
+
+export const UIKind = { Desktop: 1, Web: 2 } as const;
+export const ExtensionMode = { Production: 1, Development: 2, Test: 3 } as const;
+
+/** Minimal stand-in for VS Code's TelemetryLogger: gates on `env.isTelemetryEnabled`,
+ * mixes `additionalCommonProperties` into every payload, and forwards to the sender.
+ * `logError(Error)` goes to `sendErrorData`; `logError(string, data)` to `sendEventData`. */
+function makeTelemetryLogger(sender: any, opts?: any) {
+  const common = opts?.additionalCommonProperties ?? {};
+  return {
+    get isUsageEnabled() { return env.isTelemetryEnabled; },
+    get isErrorsEnabled() { return env.isTelemetryEnabled; },
+    onDidChangeEnableStates: vi.fn(() => ({ dispose: vi.fn() })),
+    logUsage: vi.fn((name: string, data?: Record<string, any>) => {
+      if (!env.isTelemetryEnabled) return;
+      sender.sendEventData(name, { ...common, ...data });
+    }),
+    logError: vi.fn((nameOrErr: string | Error, data?: Record<string, any>) => {
+      if (!env.isTelemetryEnabled) return;
+      if (typeof nameOrErr === "string") sender.sendEventData(nameOrErr, { ...common, ...data });
+      else sender.sendErrorData(nameOrErr, { ...common, ...data });
+    }),
+    dispose: vi.fn(() => { void sender.flush?.(); }),
+  };
+}
+
+/** An in-memory `vscode.Memento` for globalState in tests. */
+export function makeMemento() {
+  const store: Record<string, unknown> = {};
+  return {
+    _store: store,
+    keys: () => Object.keys(store),
+    get: vi.fn((k: string, def?: unknown) => (k in store ? store[k] : def)),
+    update: vi.fn(async (k: string, v: unknown) => { store[k] = v; }),
+  };
+}
+
 export const env = {
   appName: "Cursor",
   uriScheme: "cursor",
+  machineId: "test-machine-id",
+  sessionId: "test-session-id",
+  appHost: "desktop",
+  remoteName: undefined as string | undefined,
+  isTelemetryEnabled: true,
+  onDidChangeTelemetryEnabled: vi.fn((cb: (e: boolean) => void) => {
+    telemetryEnabledCbs.push(cb);
+    return { dispose: vi.fn() };
+  }),
+  createTelemetryLogger: vi.fn((sender: any, opts?: any) => makeTelemetryLogger(sender, opts)),
   openExternal: vi.fn(async (_uri: unknown): Promise<boolean> => true),
   clipboard: { writeText: vi.fn(async (_t: string): Promise<void> => undefined) },
 };
@@ -145,6 +198,14 @@ export function resetVscodeMocks(): void {
 
   env.appName = "Cursor";
   env.uriScheme = "cursor";
+  env.machineId = "test-machine-id";
+  env.sessionId = "test-session-id";
+  env.appHost = "desktop";
+  env.remoteName = undefined;
+  env.isTelemetryEnabled = true;
+  telemetryEnabledCbs = [];
+  env.onDidChangeTelemetryEnabled.mockClear();
+  env.createTelemetryLogger.mockClear().mockImplementation((sender: any, opts?: any) => makeTelemetryLogger(sender, opts));
   env.openExternal.mockReset().mockResolvedValue(true);
   env.clipboard.writeText.mockReset().mockResolvedValue(undefined);
 

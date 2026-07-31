@@ -158,6 +158,7 @@ export interface AgentFlowConfig {
   // Batch sizes strictly greater than this prompt a confirmation before parallel launch.
   batchLaunchConfirmThreshold: number;
   trackOpenWindows: boolean;
+  telemetryEnabled: boolean;
   // Read PR/CI state from GitHub via the `gh` CLI and show it on the Deck's cards.
   prFacts: boolean;
   // How stale a cached PR fact may be before the Deck re-fetches it. Floored at 30s.
@@ -244,6 +245,7 @@ export function getConfig(): AgentFlowConfig {
     })(),
     batchLaunchConfirmThreshold: Math.max(1, c.get<number>("batchLaunchConfirmThreshold") ?? 6),
     trackOpenWindows: c.get<boolean>("trackOpenWindows") ?? true,
+    telemetryEnabled: c.get<boolean>("telemetry.enabled") ?? true,
     prFacts: c.get<boolean>("prFacts") ?? true,
     prFactsTtlSeconds: Math.max(30, c.get<number>("prFactsTtlSeconds") ?? 120),
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,
