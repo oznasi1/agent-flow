@@ -1,4 +1,4 @@
-import { LandedRecord, QueueItem, Quarantined, RISKS, Risk } from "./types";
+import { LandedRecord, QueueItem, Quarantined, RISKS, Risk, Decision, VERDICTS, Verdict } from "./types";
 import * as fs from "fs";
 import * as path from "path";
 import { CompanyPaths } from "./paths";
@@ -148,4 +148,69 @@ export function lastCycle(p: CompanyPaths): string | null {
     return null;
   }
   return names.length > 0 ? names[names.length - 1] : null;
+}
+
+export type WriteResult = { ok: true } | { ok: false; error: string };
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+/**
+ * Appends the decision, then archives the item. Order matters: if the archive
+ * move fails, the item stays pending and can be decided again — a duplicate
+ * line in an append-only log is recoverable, a lost decision is not.
+ */
+export function recordVerdict(
+  p: CompanyPaths,
+  id: string,
+  verdict: string,
+  note: string,
+  now: () => string = nowIso,
+): WriteResult {
+  if (!ID_RE.test(id)) return { ok: false, error: "id must be lowercase letters, digits and dashes" };
+  if (!VERDICTS.includes(verdict as Verdict)) {
+    return { ok: false, error: `verdict must be one of ${VERDICTS.join(", ")}` };
+  }
+  if (verdict === "revise" && note.trim().length === 0) {
+    return { ok: false, error: "a revise needs a note — without one the role learns nothing" };
+  }
+
+  const pending = path.join(p.queue, `${id}.json`);
+  if (!fs.existsSync(pending)) return { ok: false, error: `no pending item "${id}"` };
+
+  const decision: Decision = { id, verdict: verdict as Verdict, note, at: now() };
+  fs.mkdirSync(p.root, { recursive: true });
+  fs.appendFileSync(p.decisions, `${JSON.stringify(decision)}\n`);
+
+  fs.mkdirSync(p.archive, { recursive: true });
+  fs.renameSync(pending, path.join(p.archive, `${id}.json`));
+  return { ok: true };
+}
+
+export function readDecisions(p: CompanyPaths): Decision[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(p.decisions, "utf8");
+  } catch {
+    return [];
+  }
+  const decisions: Decision[] = [];
+  for (const line of text.split("\n")) {
+    if (line.trim().length === 0) continue;
+    try {
+      decisions.push(JSON.parse(line) as Decision);
+    } catch {
+      // A hand-edited or truncated line must not break the board.
+    }
+  }
+  return decisions;
+}
+
+export function acknowledgeLanded(p: CompanyPaths, id: string): WriteResult {
+  if (!ID_RE.test(id)) return { ok: false, error: "id must be lowercase letters, digits and dashes" };
+  const file = path.join(p.landed, `${id}.json`);
+  if (!fs.existsSync(file)) return { ok: false, error: `no landed record "${id}"` };
+  fs.rmSync(file, { force: true });
+  return { ok: true };
 }
