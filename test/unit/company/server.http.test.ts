@@ -71,4 +71,36 @@ describe("createBoardServer", () => {
     const res = await fetch(`${base}/api/queue?key=${KEY}`);
     expect(res.headers.get("cache-control")).toContain("no-store");
   });
+
+  it("500s and stays alive when a handler rejects", async () => {
+    // Create a context where spawnCycle rejects, triggering an unhandled error
+    const errorCtx: BoardContext = {
+      paths: ctx.paths,
+      token: KEY,
+      spawnCycle: vi.fn(async () => {
+        throw new Error("synthetic handler failure");
+      }),
+      gitRevert: vi.fn(async () => ({ ok: true, detail: "reverted" })),
+    };
+    const errorServer = createBoardServer(errorCtx);
+    await new Promise<void>((resolve) => errorServer.listen(0, "127.0.0.1", resolve));
+    const errorBase = `http://127.0.0.1:${(errorServer.address() as AddressInfo).port}`;
+
+    try {
+      // Trigger the error by calling a handler that uses spawnCycle
+      const errRes = await fetch(`${errorBase}/api/cycle?key=${KEY}`, {
+        method: "POST",
+        body: JSON.stringify({ mode: "full" }),
+      });
+      expect(errRes.status).toBe(500);
+      expect(await errRes.json()).toEqual({ error: "internal server error" });
+
+      // Verify the server is still alive by making a successful request
+      const liveRes = await fetch(`${errorBase}/api/queue?key=${KEY}`);
+      expect(liveRes.status).toBe(200);
+      expect(await liveRes.json()).toMatchObject({ pending: [], paused: false });
+    } finally {
+      await new Promise<void>((resolve) => errorServer.close(() => resolve()));
+    }
+  });
 });
