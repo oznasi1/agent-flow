@@ -1,7 +1,11 @@
 /**
  * The board: a split master–detail page, served as one self-contained document.
- * Coverage-excluded like the other markup modules — its behaviour is verified by
- * the route tests and by manual review, not by asserting on strings.
+ *
+ * Coverage-excluded like the other markup modules, because v8 sees one function
+ * returning a string and would report 100% while measuring none of the script
+ * inside it. The script is covered instead by `test/unit/company/boardPage.test.ts`,
+ * which runs this exact page in jsdom and asserts on the DOM it builds and the
+ * requests it issues.
  */
 export function boardHtml(): string {
   return `<!doctype html>

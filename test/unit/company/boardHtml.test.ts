@@ -1,3 +1,7 @@
+// Shape checks on the document boardHtml() returns. What the page *does* — the
+// keyboard, the selection, the escaping, the sandbox — is tested by running it
+// in jsdom, in boardPage.test.ts; these assertions only pin the wrapper that
+// cannot be observed from inside the page.
 import { describe, it, expect } from "vitest";
 import { boardHtml } from "../../../src/company/boardHtml";
 
