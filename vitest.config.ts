@@ -34,6 +34,9 @@ export default defineConfig({
         "src/webview/marketplace.tsx",
         "src/webview/vscodeApi.ts",
         "src/types.ts",
+        "src/company/types.ts",
+        "src/company/boardHtml.ts",
+        "src/company/boardMain.ts",
       ],
       reporter: ["text", "html"],
       // Guardrails, set with headroom below the current ~95% lines / ~89% branches.

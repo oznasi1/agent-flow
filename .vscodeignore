@@ -18,3 +18,5 @@ vitest.config.ts
 *.vsix
 .gitignore
 CONTRIBUTING.md
+dist/company-board.js
+dist/company-board.js.map

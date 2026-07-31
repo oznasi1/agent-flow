@@ -488,6 +488,7 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
+    "board": "node dist/company-board.js",
     "vscode:prepublish": "npm run build -- --production",
     "package": "rm -f *.vsix && vsce package --no-dependencies"
   },
