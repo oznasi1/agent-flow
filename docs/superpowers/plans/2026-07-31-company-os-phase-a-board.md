@@ -1963,6 +1963,22 @@ git commit -m "feat(company): loopback http server with a body cap and a token g
 
 ### Task 9: The board page, the bundle, and end-to-end verification
 
+> **Amended after the whole-branch review.** Two changes to the page below, both
+> already landed in `src/company/boardHtml.ts`:
+> 1. The keyboard handler in Step 3 gained `if (e.metaKey || e.ctrlKey || e.altKey) return;`
+>    immediately after the textarea branch. The sample as originally written
+>    recorded a verdict on ⌘R / Ctrl+R (reject) and ⌘A (approve), because
+>    `KeyboardEvent.key` for a chord is the bare letter. Do not re-copy the
+>    unguarded version.
+> 2. An `html` artifact's `srcdoc` is prefixed with a
+>    `default-src 'none'; style-src 'unsafe-inline'; img-src data:` CSP meta tag
+>    before the artifact's own markup — `sandbox=""` stops scripts but not
+>    network egress, and an artifact that asked for `referrer: unsafe-url` could
+>    hand the board's `?key=` to an outside host.
+>
+> The committed page also carries the id-anchored selection and the note
+> preservation from the two follow-up commits, which the samples below predate.
+
 **Files:**
 - Modify: `src/company/boardHtml.ts` (replace the stub)
 - Create: `src/company/boardMain.ts`
@@ -2278,6 +2294,12 @@ document.addEventListener("keydown", e => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) decide("revise");
     return;
   }
+  // Added after the final review: KeyboardEvent.key for ⌘R is plain "r", so
+  // without this guard reloading the board recorded a silent reject on the
+  // selected item (⌘A an approve, Ctrl+R a reject) — into an append-only log,
+  // with no confirmation and no un-decide. Chords belong to the browser; this
+  // must stay below the textarea branch so ⌘/Ctrl+Enter still submits a revise.
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.key === "j" && sel < state.pending.length - 1) { sel++; render(); }
   else if (e.key === "k" && sel > 0) { sel--; render(); }
   else if (e.key === "a") decide("approve");

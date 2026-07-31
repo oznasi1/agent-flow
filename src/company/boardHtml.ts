@@ -308,6 +308,12 @@ document.addEventListener("keydown", e => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) decide("revise");
     return;
   }
+  // A chord belongs to the browser or the OS, never to us. \`key\` for ⌘R is
+  // plain "r", so without this guard a reviewer reloading the page recorded a
+  // silent reject on whatever was selected — appended to an append-only log,
+  // with the item archived and no way to take it back. ⌘A (select all) was an
+  // approve. Every single-letter shortcut below is unmodified by design.
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   const idx = selId === null ? -1 : state.pending.findIndex(i => i.id === selId);
   if (e.key === "j" && idx < state.pending.length - 1) { selId = state.pending[idx + 1].id; render(); }
   else if (e.key === "k" && idx > 0) { selId = state.pending[idx - 1].id; render(); }
