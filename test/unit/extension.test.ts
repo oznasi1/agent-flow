@@ -271,6 +271,20 @@ describe("activate", () => {
     // The commands must still be registered — a telemetry failure cannot dispose them.
     expect(commands.registerCommand).toHaveBeenCalled();
   });
+
+  it("reports command_invoked for every registered command", async () => {
+    const { context } = fakeContext();
+    activate(context);
+    const registered = commands.registerCommand.mock.calls.map(([id]) => id as string);
+    expect(registered).toHaveLength(8);
+
+    for (const [id, cb] of commands.registerCommand.mock.calls) {
+      trackSpy.mockClear();
+      await (cb as (...a: unknown[]) => unknown)();
+      const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
+      expect(names, `${id} should report command_invoked`).toContain("command_invoked");
+    }
+  });
 });
 
 describe("deactivate", () => {

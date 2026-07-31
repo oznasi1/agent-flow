@@ -11,8 +11,23 @@ import { showDoctor, defaultDeps } from "./doctorView";
 import { disposeTelemetry, initTelemetry, track } from "./telemetry/telemetry";
 import { settingsSnapshot } from "./telemetry/settingsSnapshot";
 import { maybeShowTelemetryNotice } from "./telemetry/notice";
+import { CommandId } from "./telemetry/events";
 
 const INSTALLED_KEY = "agentFlow.telemetry.installReported";
+
+/** Register a command and report its use. The id suffix after "agentFlow." is the
+ * CommandId enum member, so a new command is a compile error until it is added to
+ * the catalog — which is the point. */
+function registerTracked<T>(
+  id: `agentFlow.${CommandId}`,
+  handler: (...args: any[]) => T,
+): vscode.Disposable {
+  const command = id.slice("agentFlow.".length) as CommandId;
+  return vscode.commands.registerCommand(id, (...args: any[]) => {
+    track({ name: "command_invoked", command });
+    return handler(...args);
+  });
+}
 
 export function activate(context: vscode.ExtensionContext): void {
   const auth = new ApiTokenAuth(context.secrets);
@@ -35,9 +50,9 @@ export function activate(context: vscode.ExtensionContext): void {
     output,
     vscode.window.registerWebviewViewProvider(TasksViewProvider.viewType, provider),
 
-    vscode.commands.registerCommand("agentFlow.refresh", () => provider.refresh()),
+    registerTracked("agentFlow.refresh", () => provider.refresh()),
 
-    vscode.commands.registerCommand("agentFlow.signIn", async () => {
+    registerTracked("agentFlow.signIn", async () => {
       const ok = await auth.signIn();
       if (ok) {
         vscode.window.showInformationMessage("Agent Flow: signed in to Jira.");
@@ -46,12 +61,12 @@ export function activate(context: vscode.ExtensionContext): void {
       return ok;
     }),
 
-    vscode.commands.registerCommand("agentFlow.signOut", async () => {
+    registerTracked("agentFlow.signOut", async () => {
       await auth.signOut();
       vscode.window.showInformationMessage("Agent Flow: signed out of Jira.");
     }),
 
-    vscode.commands.registerCommand("agentFlow.takeTask", async () => {
+    registerTracked("agentFlow.takeTask", async () => {
       const exampleKey = `${getConfig().project || "ABC"}-1234`;
       const key = await vscode.window.showInputBox({
         title: "Take a Jira task",
@@ -61,15 +76,15 @@ export function activate(context: vscode.ExtensionContext): void {
       if (key) await provider.takeTask(key.trim().toUpperCase());
     }),
 
-    vscode.commands.registerCommand("agentFlow.openDeck", () => DeckPanel.show(context, auth, log)),
+    registerTracked("agentFlow.openDeck", () => DeckPanel.show(context, auth, log)),
 
-    vscode.commands.registerCommand("agentFlow.openMarketplace", () => MarketplacePanel.show(context, log)),
+    registerTracked("agentFlow.openMarketplace", () => MarketplacePanel.show(context, log)),
 
-    vscode.commands.registerCommand("agentFlow.setup", () =>
+    registerTracked("agentFlow.setup", () =>
       runSetup(context, auth, log, () => provider.refresh()),
     ),
 
-    vscode.commands.registerCommand("agentFlow.doctor", () => showDoctor(defaultDeps(auth, log))),
+    registerTracked("agentFlow.doctor", () => showDoctor(defaultDeps(auth, log))),
   );
 
   // Best-effort niceties, all of them optional. A failure here must NEVER propagate out
