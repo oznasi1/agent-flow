@@ -2467,8 +2467,11 @@ cat > .claude/company/landed/sample-landed.json <<JSON
  "landed_at":"2026-07-31T17:41:02Z"}
 JSON
 
-npm run build && npm run board
+npm run board
 ```
+
+(`board` builds first, after the review noted that running it against a missing
+bundle reported nothing but `MODULE_NOT_FOUND`.)
 
 Open the printed URL and confirm every one of these:
 
