@@ -45,6 +45,39 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 
+/**
+ * Every route on the board, its one allowed method, and a well-formed body for
+ * it. Table-driven so the token gate and the method guard are pinned across
+ * the whole surface at once, and so a future task adds coverage for a new
+ * route just by adding a row here. `assertUnaffected`, where given, proves a
+ * rejected request actually left the store alone rather than merely
+ * returning the right status by coincidence.
+ */
+interface RouteSpec {
+  path: string;
+  method: "GET" | "POST";
+  body: string | null;
+  assertUnaffected?: () => void;
+}
+
+const ROUTES: RouteSpec[] = [
+  { path: "/", method: "GET", body: null },
+  { path: "/api/queue", method: "GET", body: null },
+  { path: "/api/artifact", method: "GET", body: null },
+  {
+    path: "/api/decision",
+    method: "POST",
+    body: JSON.stringify({ id: "hero", verdict: "approve", note: "" }),
+    assertUnaffected: () => expect(readDecisions(ctx.paths)).toEqual([]),
+  },
+  {
+    path: "/api/pause",
+    method: "POST",
+    body: JSON.stringify({ paused: true }),
+    assertUnaffected: () => expect(isPaused(ctx.paths)).toBe(false),
+  },
+];
+
 describe("token gate", () => {
   it("refuses every request without the key", async () => {
     for (const [method, url] of [
@@ -179,5 +212,29 @@ describe("POST /api/pause", () => {
 describe("unknown routes", () => {
   it("404s", async () => {
     expect((await route("GET", "/api/nope", q(), null, ctx)).status).toBe(404);
+  });
+});
+
+describe("route table: token gate and method guard", () => {
+  // A pending "hero" item exists for every row so that, if the gate or guard
+  // were ever broken, the mutating routes (/api/decision, /api/pause) would
+  // actually be able to succeed rather than being incidentally blocked by
+  // some other validation (e.g. "no pending item").
+  beforeEach(() => writeItem("hero"));
+
+  it.each(ROUTES)("$method $path rejects a missing or wrong key with 401 and no side effect", async (spec) => {
+    const noKey = await route(spec.method, spec.path, q(null), spec.body, ctx);
+    expect(noKey.status).toBe(401);
+    spec.assertUnaffected?.();
+
+    const wrongKey = await route(spec.method, spec.path, q("wrong"), spec.body, ctx);
+    expect(wrongKey.status).toBe(401);
+    spec.assertUnaffected?.();
+  });
+
+  it.each(ROUTES)("$method $path rejects the opposite method with 405, not 404", async (spec) => {
+    const wrongMethod = spec.method === "GET" ? "POST" : "GET";
+    const r = await route(wrongMethod, spec.path, q(), spec.body, ctx);
+    expect(r.status).toBe(405);
   });
 });
