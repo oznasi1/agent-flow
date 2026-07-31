@@ -99,7 +99,8 @@ the published package.
   CHARTER.md          what Agent Flow is, who it is for, positioning, non-goals
   backlog.md          prioritized, owned by company-product
   metrics.md          installs, stars, npm downloads, issue count — refreshed per cycle
-  decisions.jsonl     append-only: every verdict and note you ever gave
+  decisions.jsonl     append-only: every verdict and note you ever gave, each
+                      line self-describing (see "Queue item format" below)
   queue/<id>.json     pending approval items, one file each
   archive/<id>.json   decided items, moved here on verdict
   landed/<id>.json    auto-landed items awaiting acknowledgement, with revert SHA
@@ -145,8 +146,36 @@ board.
 A verdict appends one line to `decisions.jsonl`:
 
 ```json
-{"id":"…","verdict":"approve|reject|revise","note":"…","at":"2026-07-31T18:02:11Z"}
+{"id":"…","verdict":"approve|reject|revise","note":"…","at":"2026-07-31T18:02:11Z",
+ "cycle":"2026-07-31T17:09","role":"company-growth","title":"Landing page hero: …",
+ "artifactSha256":"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"}
 ```
+
+**Widened after the phase A review.** The line originally carried only `id`,
+`verdict`, `note` and `at`, on the assumption that `archive/<id>.json` held the
+body and a join would recover the rest. Two things break that assumption. Ids are
+not unique across cycles — `ID_RE` constrains the characters, not the history —
+so a reused id produces two log lines nothing can tell apart. And the archive is
+a single file per id: the original `fs.renameSync` would have replaced an
+existing entry outright, destroying the only copy of what was decided. A record
+of human judgement has to be readable on its own, without a join to a file that
+can be lost or silently replaced.
+
+So a line now also carries the `cycle`, the `role` and the `title` it decided,
+plus `artifactSha256` — a sha256 of the resolved artifact content as the reviewer
+saw it, truncation included. The digest ties the verdict to the exact bytes that
+were on screen, which no path or filename can. It is absent when the artifact
+could not be resolved at all; that is a state the reviewer can legitimately
+decide on, so the verdict is still recorded.
+
+`recordVerdict` refuses outright when `archive/<id>.json` already exists: it
+returns an error naming the collision, and writes nothing — no log line, no
+rename, the pending item left in place to be re-filed under a fresh id. The
+check runs before the append, so a refused verdict leaves no trace.
+
+The four original fields stay required and the widened ones are optional, because
+the log is append-only: lines written before this change are history, and
+`readDecisions` keeps parsing them rather than rejecting them for what they lack.
 
 ## The cycle
 
@@ -258,7 +287,8 @@ surprise on a bill.
 
 Vitest, alongside the existing suite:
 
-- `queue.js`: schema validation, append-only verdict log, archive moves,
+- `queue.js`: schema validation, append-only verdict log, archive moves, refusal
+  to archive over an existing entry, tolerance of pre-widening log lines,
   quarantine of malformed files, rejection of artifact paths that escape the
   company directory.
 - `server.js` routes against a temp-directory fixture: decision writes land in

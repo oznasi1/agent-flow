@@ -1,4 +1,5 @@
 import { LandedRecord, QueueItem, Quarantined, RISKS, Risk, Decision, VERDICTS, Verdict } from "./types";
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { CompanyPaths } from "./paths";
@@ -157,9 +158,16 @@ function nowIso(): string {
 }
 
 /**
- * Appends the decision, then archives the item. Order matters: if the archive
- * move fails, the item stays pending and can be decided again — a duplicate
- * line in an append-only log is recoverable, a lost decision is not.
+ * Appends the decision, then archives the item. Order matters twice over:
+ *
+ * - The archive collision is checked before anything is written, so a refused
+ *   verdict leaves no trace at all. `ID_RE` does not make an id unique across
+ *   cycles, and `fs.renameSync` would silently replace an existing archive
+ *   entry: two indistinguishable log lines, one surviving body, one decision
+ *   effectively misattributed and the earlier content destroyed.
+ * - The decision is appended before the move. If the move then fails, the item
+ *   stays pending and can be decided again — a duplicate line in an append-only
+ *   log is recoverable, a lost decision is not.
  */
 export function recordVerdict(
   p: CompanyPaths,
@@ -179,12 +187,46 @@ export function recordVerdict(
   const pending = path.join(p.queue, `${id}.json`);
   if (!fs.existsSync(pending)) return { ok: false, error: `no pending item "${id}"` };
 
-  const decision: Decision = { id, verdict: verdict as Verdict, note, at: now() };
+  const archived = path.join(p.archive, `${id}.json`);
+  if (fs.existsSync(archived)) {
+    return {
+      ok: false,
+      error:
+        `id "${id}" was already decided — archive/${id}.json exists. Archiving over it ` +
+        "would destroy the decided content and leave two log lines nothing can tell apart. " +
+        "Give the new item a fresh id.",
+    };
+  }
+
+  let item: QueueItem;
+  try {
+    const parsed = validateItem(JSON.parse(fs.readFileSync(pending, "utf8")));
+    if (!parsed.ok) return { ok: false, error: `pending item "${id}" is malformed: ${parsed.error}` };
+    item = parsed.item;
+  } catch (e) {
+    return { ok: false, error: `pending item "${id}" could not be read: ${(e as Error).message}` };
+  }
+
+  // The digest covers what the reviewer was actually shown, truncation and all,
+  // so a decision can still be tied to its content when the archive cannot.
+  const resolved = resolveArtifact(p, item);
+  const decision: Decision = {
+    id,
+    verdict: verdict as Verdict,
+    note,
+    at: now(),
+    cycle: item.cycle,
+    role: item.role,
+    title: item.title,
+    ...(resolved.ok
+      ? { artifactSha256: crypto.createHash("sha256").update(resolved.artifact.content, "utf8").digest("hex") }
+      : {}),
+  };
   fs.mkdirSync(p.root, { recursive: true });
   fs.appendFileSync(p.decisions, `${JSON.stringify(decision)}\n`);
 
   fs.mkdirSync(p.archive, { recursive: true });
-  fs.renameSync(pending, path.join(p.archive, `${id}.json`));
+  fs.renameSync(pending, archived);
   return { ok: true };
 }
 
