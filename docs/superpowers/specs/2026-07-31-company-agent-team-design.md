@@ -45,7 +45,7 @@ Settled during brainstorming, recorded so the plan does not relitigate them:
 | What does the team optimize? | **Product and go-to-market as one loop.** Every cycle can produce both shipped product and outward motion. |
 | Build on an existing multi-agent framework? | **No.** Claude Code is the engine. CrewAI/AutoGen would need their own keys and could not use the worktree protocol, superpowers skills, or the MCP connections; MetaGPT/ChatDev generate greenfield projects, not incremental PRs on a shipping codebase. |
 | How is the team organized? | **A chief of staff dispatches, with a guaranteed floor.** Roles run when there is work for them; once a day every role gets one slot to raise a single thing regardless of the agenda. |
-| Where does the approval UI live? | **A local web app** at `company/board/`, loopback-bound, reading and writing a file-based queue. Not a view inside the shipped extension, not GitHub issues. |
+| Where does the approval UI live? | **A local web app** in `src/company/`, loopback-bound, reading and writing a file-based queue. Not a view inside the shipped extension, not GitHub issues. |
 | What layout? | **Split master–detail** — list of pending items on the left, the artifact rendered full-size on the right, verdict controls in a fixed position. |
 | How much autonomy? | **Mechanically-safe work auto-lands; everything irreversible is gated.** |
 | How many verdicts? | **Three: Approve, Reject, Revise-with-a-note.** The note returns to the owning role next cycle and persists in `decisions.jsonl`. |
@@ -201,17 +201,29 @@ change a user would notice.
 
 ## The board app
 
-`company/board/`, versioned in the public repo, added to `.vscodeignore` so it
-never ships inside the `.vsix`. No dependencies, no build step.
+`src/company/`, versioned in the public repo, bundled by the existing esbuild step
+to `dist/company-board.js` and excluded from the `.vsix`. Zero runtime
+dependencies — Node built-ins only — but it is TypeScript built by `npm run build`
+rather than hand-written JS. That is a deliberate change from the first draft of
+this design: `tsconfig.json` compiles `test/**` as CommonJS, so a TS test
+importing a plain `.js`/`.mjs` module breaks `npm run typecheck`. Following the
+repo's own idiom costs one esbuild entry point and buys full type checking and
+normal vitest coverage.
 
-- **`queue.js`** — the only module that touches company data: read and validate
+- **`queue.ts`** — the only module that touches company data: read and validate
   items, append verdicts, move decided items to `archive/`, quarantine malformed
-  files, resolve artifact paths under the company directory only.
-- **`server.js`** — plain Node `http` bound to `127.0.0.1` with a session token in
-  the URL, because this server can trigger merges and reverts. Routes:
-  `GET /api/queue`, `POST /api/decision`, `POST /api/pause`, `POST /api/cycle`,
-  `POST /api/undo`.
-- **`index.html`** — the split layout, vanilla JS, self-contained.
+  files, resolve artifact paths inside the repository only.
+- **`server.ts`** — `route()` holds every HTTP behaviour and is tested without
+  binding a port; `createBoardServer()` adapts it to `node:http` on `127.0.0.1`
+  with a session token in the URL, because this server can trigger merges and
+  reverts. Routes: `GET /api/queue`, `GET /api/artifact`, `POST /api/decision`,
+  `POST /api/pause`, `POST /api/cycle`, `POST /api/undo`.
+- **`boardHtml.ts`** — the split layout as one self-contained page, vanilla JS.
+- **`boardMain.ts`** — the entry point: token, real side-effect runners, listen.
+  Spawning a cycle and running `git revert` are injected here, which is the single
+  place Phase B has to touch.
+- **`gate.ts`** — the auto-land decision as a pure, unit-tested function, so
+  "fails closed" is enforced by code rather than by a prompt's good intentions.
 
 Artifacts render by type: unified diffs parsed and colored, markdown rendered,
 HTML mockups in a sandboxed iframe, drafted posts in a post-shaped frame so a
@@ -269,13 +281,21 @@ Vitest, alongside the existing suite:
 .claude/skills/company-cycle/SKILL.md         new, versioned — the cycle procedure
 .claude/commands/company.md                   new, versioned — thin /company entry
 .claude/company/**                            new, private (ignored)
-company/board/queue.js                        new, versioned, tested
-company/board/server.js                       new, versioned, tested
-company/board/index.html                      new, versioned
+src/company/types.ts                          new, versioned
+src/company/paths.ts                          new, versioned, tested
+src/company/queue.ts                          new, versioned, tested
+src/company/server.ts                         new, versioned, tested
+src/company/gate.ts                           new, versioned, tested
+src/company/boardHtml.ts                      new, versioned
+src/company/boardMain.ts                      new, versioned
 scripts/company-cycle.sh                      new, versioned
-test/company/*.test.ts                        new
+scripts/com.agentflow.company.plist           new, versioned
+test/unit/company/*.test.ts                   new
+esbuild.js                                    amended: one bundle for the board
+vitest.config.ts                              amended: three coverage exclusions
+package.json                                  amended: one script (`board`) — never `version`
 .gitignore                                    amended: un-ignore the three .claude dirs
-.vscodeignore                                 amended: exclude company/**
+.vscodeignore                                 amended: exclude dist/company-board.js
 ```
 
 ## Implementation order
