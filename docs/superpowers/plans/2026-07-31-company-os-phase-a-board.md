@@ -1155,6 +1155,18 @@ Expected: FAIL — `resolveArtifact` is not exported.
 
 - [ ] **Step 3: Write the implementation**
 
+> **Correction, found in review and applied in `66781ab`.** The sample below has
+> two defects; the shipped implementation fixes both and is the reference.
+> 1. **Symlink escape.** `isInside` is a lexical check, but `statSync` and
+>    `readFileSync` follow symlinks — so a symlink inside the repo pointing out of
+>    it passes containment and leaks its target. After the lexical check, resolve
+>    both the candidate and the root with `fs.realpathSync` and re-run `isInside`
+>    against the real paths before reading. Catch a `realpathSync` failure the way
+>    `statSync` failure is caught, so a broken symlink reports as missing.
+> 2. **`maxBytes` counts UTF-16 code units, not bytes.** Measure with
+>    `Buffer.byteLength` and truncate on a Buffer, backing off to the last complete
+>    character so a cut never emits a replacement character.
+
 Append to `src/company/queue.ts`:
 
 ```ts
