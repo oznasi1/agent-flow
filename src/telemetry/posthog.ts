@@ -50,8 +50,15 @@ export function stackDigest(stack: string | undefined): string {
   if (!stack) return "";
   const frames = stack
     .split("\n")
-    .filter((l) => l.includes("dist/extension.js"))
+    // Windows stacks use `dist\extension.js`; POSIX uses `dist/extension.js`.
+    // Match either separator here — the strip-and-normalize step below handles
+    // producing a single consistent form for PostHog grouping.
+    .filter((l) => /dist[/\\]extension\.js/.test(l))
     .map((l) => l.replace(/\(?(?:[A-Za-z]:)?[/\\][^\s()]*?(dist[/\\]extension\.js)/g, "($1").trim())
+    // Normalize any remaining backslashes (Windows drive/path separators) to
+    // forward slashes so the same frame groups identically in PostHog
+    // regardless of the reporting OS.
+    .map((l) => l.replace(/\\/g, "/"))
     .slice(0, MAX_STACK_FRAMES);
   return frames.join("\n").slice(0, MAX_STACK_BYTES);
 }
@@ -71,16 +78,20 @@ export function createPostHogSender(deps: PostHogSenderDeps): PostHogSender {
   let queue: QueuedEvent[] = [];
   let timer: ReturnType<typeof setInterval> | undefined;
   let inFlight: Promise<void> = Promise.resolve();
+  // Hard off switch: once dispose() has run, nothing may re-arm the interval
+  // or grow the queue, however many times dispose()/sendEventData() are
+  // called afterward and in whatever order.
+  let disposed = false;
 
   function ensureTimer(): void {
-    if (timer || !enabled) return;
+    if (timer || !enabled || disposed) return;
     timer = setInterval(() => void flush(), FLUSH_INTERVAL_MS);
     // Never hold the extension host's event loop open for analytics.
     (timer as unknown as { unref?: () => void }).unref?.();
   }
 
   function enqueue(event: string, properties: Record<string, unknown>): void {
-    if (!enabled) return;
+    if (!enabled || disposed) return;
     queue.push({ event, properties: { ...properties, distinct_id: deps.distinctId }, timestamp: new Date(now()).toISOString() });
     if (queue.length > QUEUE_CAP) {
       const dropped = queue.length - QUEUE_CAP;
@@ -148,6 +159,7 @@ export function createPostHogSender(deps: PostHogSenderDeps): PostHogSender {
       queue = [];
     },
     dispose(): void {
+      disposed = true;
       if (timer) clearInterval(timer);
       timer = undefined;
     },

@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BATCH_SIZE, createPostHogSender, QUEUE_CAP, stackDigest } from "../../../src/telemetry/posthog";
+import {
+  BATCH_SIZE,
+  createPostHogSender,
+  FLUSH_INTERVAL_MS,
+  QUEUE_CAP,
+  RETRY_DELAY_MS,
+  stackDigest,
+} from "../../../src/telemetry/posthog";
 
 function makeDeps(over: Partial<Parameters<typeof createPostHogSender>[0]> = {}) {
   const fetchImpl = vi.fn<typeof fetch>(async () => new Response("ok", { status: 200 }));
@@ -119,6 +126,65 @@ describe("createPostHogSender", () => {
     expect(body.batch[0].properties.stack_digest).not.toContain("/Users/someone");
     expect(JSON.stringify(body)).not.toContain("nope");
   });
+
+  it("dispose() clears the flush interval and is a hard off switch", async () => {
+    vi.useFakeTimers();
+    try {
+      const { deps, fetchImpl } = makeDeps();
+      const sender = createPostHogSender(deps);
+      // Below BATCH_SIZE so nothing auto-flushes; this only arms the interval.
+      sender.sendEventData("e");
+      sender.dispose();
+      // Even advancing well past FLUSH_INTERVAL_MS, the cleared interval must
+      // never fire again.
+      await vi.advanceTimersByTimeAsync(FLUSH_INTERVAL_MS * 3);
+      expect(fetchImpl).not.toHaveBeenCalled();
+
+      // A post-dispose sendEventData must not resurrect the interval or queue
+      // anything — dispose() is called repeatedly and in any order here too.
+      sender.sendEventData("e2");
+      sender.dispose();
+      sender.drop();
+      await sender.flush();
+      await vi.advanceTimersByTimeAsync(FLUSH_INTERVAL_MS * 3);
+      expect(fetchImpl).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("honors the default RETRY_DELAY_MS when retryDelayMs is omitted", async () => {
+    vi.useFakeTimers();
+    try {
+      let calls = 0;
+      const fetchImpl = vi.fn<typeof fetch>(async () => {
+        calls += 1;
+        return calls === 1 ? new Response("boom", { status: 500 }) : new Response("ok", { status: 200 });
+      });
+      // retryDelayMs deliberately omitted so the real default (and the real
+      // sleep() path) is exercised, not the tests' usual retryDelayMs: 0.
+      const { deps } = makeDeps({ fetchImpl: fetchImpl as unknown as typeof fetch });
+      const sender = createPostHogSender(deps);
+      sender.sendEventData("e");
+      const flushed = sender.flush();
+
+      // Let the first attempt (and its rejection) run.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+      // Just short of the default delay: still only one attempt.
+      await vi.advanceTimersByTimeAsync(RETRY_DELAY_MS - 1);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+      // Crossing RETRY_DELAY_MS fires the retry.
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+      await flushed;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("stackDigest", () => {
@@ -126,6 +192,15 @@ describe("stackDigest", () => {
     const digest = stackDigest("Error: x\n    at a (/Users/oz/dev/agent-flow/dist/extension.js:1:2)\n    at b (node:internal/foo:3:4)");
     expect(digest).toContain("dist/extension.js:1:2");
     expect(digest).not.toContain("/Users/oz");
+  });
+
+  it("retains Windows-style stack frames and normalizes separators", () => {
+    const digest = stackDigest("Error: x\n    at f (C:\\Users\\bob\\dev\\agent-flow\\dist\\extension.js:1:2)");
+    // Backslashes are normalized to forward slashes so the same frame groups
+    // identically in PostHog regardless of the reporting OS.
+    expect(digest).toContain("dist/extension.js:1:2");
+    expect(digest).not.toContain("C:\\Users\\bob");
+    expect(digest).not.toContain("\\");
   });
 
   it("returns an empty string for a missing stack", () => {
