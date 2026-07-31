@@ -16,17 +16,89 @@ async function spawnCycle(_mode: CycleMode): Promise<RunnerResult> {
   return { ok: false, detail: "The cycle script arrives in phase B — nothing was started." };
 }
 
-function gitRevert(sha: string): Promise<RunnerResult> {
+/** Long enough for a real revert with hooks, short enough that nobody waits. */
+const GIT_TIMEOUT_MS = 60_000;
+
+interface GitRun {
+  ok: boolean;
+  out: string;
+  timedOut: boolean;
+}
+
+/**
+ * Runs one git command to completion, or kills it. Without the timeout a hook
+ * that waits for input — or an editor git decided to open — leaves the promise
+ * pending forever, and with it the HTTP request the board is holding open.
+ */
+function runGit(args: string[], timeoutMs = GIT_TIMEOUT_MS): Promise<GitRun> {
   return new Promise((resolve) => {
-    const child = spawn("git", ["revert", "--no-edit", sha], { cwd: repoRoot });
+    const child = spawn("git", args, { cwd: repoRoot });
     let out = "";
+    let timedOut = false;
+    let settled = false;
+    const finish = (run: GitRun): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(run);
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, timeoutMs);
     child.stdout.on("data", (c: Buffer) => (out += c.toString()));
     child.stderr.on("data", (c: Buffer) => (out += c.toString()));
-    child.on("error", (e) => resolve({ ok: false, detail: e.message }));
+    child.on("error", (e) => finish({ ok: false, out: e.message, timedOut }));
     child.on("close", (code) =>
-      resolve({ ok: code === 0, detail: out.trim() || `git revert exited ${code}` }),
+      finish({
+        ok: code === 0 && !timedOut,
+        out: out.trim() || `git ${args.join(" ")} exited ${code}`,
+        timedOut,
+      }),
     );
   });
+}
+
+/**
+ * Reverts a landed commit, and leaves nothing half-done if it cannot.
+ *
+ * A conflicted `git revert` exits non-zero with REVERT_HEAD and conflict markers
+ * in place, so every later Undo failed with "revert already in progress" until
+ * the reviewer happened to know to run `git revert --abort` themselves. Unwind
+ * it here instead, and say so — but only when a revert really is in progress,
+ * since `--abort` with nothing to abort would fail and turn a plain "unknown
+ * sha" into a scary and untrue "the repository is mid-revert".
+ */
+async function gitRevert(sha: string): Promise<RunnerResult> {
+  const revert = await runGit(["revert", "--no-edit", sha]);
+  if (revert.ok) return { ok: true, detail: revert.out };
+
+  const why = revert.timedOut
+    ? `git revert ${sha} was killed after ${GIT_TIMEOUT_MS / 1000}s without finishing — ` +
+      "a hook or an editor was most likely waiting for input."
+    : `git revert ${sha} did not apply cleanly:\n${revert.out}`;
+
+  const inProgress = (await runGit(["rev-parse", "--verify", "--quiet", "REVERT_HEAD"])).ok;
+  if (!inProgress) {
+    return { ok: false, detail: `${why}\nNothing was left behind — the working tree is unchanged.` };
+  }
+
+  const abort = await runGit(["revert", "--abort"]);
+  if (abort.ok) {
+    return {
+      ok: false,
+      detail:
+        `${why}\nThe revert conflicted and has been aborted, so the working tree is clean ` +
+        "again and the next Undo will not trip over it. Nothing was changed.",
+    };
+  }
+  return {
+    ok: false,
+    detail:
+      `${why}\nThe revert conflicted, and aborting it also failed:\n${abort.out}\n` +
+      "The repository is still mid-revert — every later Undo will refuse until that is " +
+      `cleared. Run this in ${repoRoot}:\n  git revert --abort`,
+  };
 }
 
 const token = crypto.randomBytes(24).toString("hex");
