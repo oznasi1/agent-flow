@@ -1,6 +1,7 @@
 import { CompanyPaths } from "./paths";
 import { boardHtml } from "./boardHtml";
 import {
+  acknowledgeLanded,
   isPaused,
   lastCycle,
   readLanded,
@@ -112,6 +113,39 @@ export async function route(
       return { status: 400, json: { error: "paused must be a boolean" } };
     }
     return { status: 200, json: { paused: setPaused(ctx.paths, parsed.value.paused) } };
+  }
+
+  if (urlPath === "/api/cycle") {
+    if (method !== "POST") return { status: 405, json: { error: "use POST" } };
+    const parsed = parseBody(body);
+    if (!parsed.ok) return { status: 400, json: { error: "body must be a json object" } };
+    const mode = parsed.value.mode === undefined ? "full" : parsed.value.mode;
+    if (mode !== "full" && mode !== "apply") {
+      return { status: 400, json: { error: 'mode must be "full" or "apply"' } };
+    }
+    // The kill switch outranks the button.
+    if (isPaused(ctx.paths)) {
+      return { status: 409, json: { error: "the company is paused — unpause to run a cycle" } };
+    }
+    const result = await ctx.spawnCycle(mode);
+    return { status: 200, json: { ok: result.ok, detail: result.detail } };
+  }
+
+  if (urlPath === "/api/undo") {
+    if (method !== "POST") return { status: 405, json: { error: "use POST" } };
+    const parsed = parseBody(body);
+    if (!parsed.ok) return { status: 400, json: { error: "body must be a json object" } };
+    const id = parsed.value.id;
+    if (typeof id !== "string" || id.length === 0) {
+      return { status: 400, json: { error: "id is required" } };
+    }
+    const record = readLanded(ctx.paths).find((r) => r.id === id);
+    if (record === undefined) return { status: 404, json: { error: `no landed record "${id}"` } };
+    const result = await ctx.gitRevert(record.sha);
+    // Only clear the record once the revert actually succeeded, so a conflict
+    // leaves the Undo button available rather than losing the sha.
+    if (result.ok) acknowledgeLanded(ctx.paths, id);
+    return { status: 200, json: { ok: result.ok, detail: result.detail } };
   }
 
   return { status: 404, json: { error: "not found" } };

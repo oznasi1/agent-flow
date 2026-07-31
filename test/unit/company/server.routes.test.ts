@@ -76,6 +76,18 @@ const ROUTES: RouteSpec[] = [
     body: JSON.stringify({ paused: true }),
     assertUnaffected: () => expect(isPaused(ctx.paths)).toBe(false),
   },
+  {
+    path: "/api/cycle",
+    method: "POST",
+    body: JSON.stringify({ mode: "full" }),
+    assertUnaffected: () => expect(ctx.spawnCycle).not.toHaveBeenCalled(),
+  },
+  {
+    path: "/api/undo",
+    method: "POST",
+    body: JSON.stringify({ id: "hero" }),
+    assertUnaffected: () => expect(ctx.gitRevert).not.toHaveBeenCalled(),
+  },
 ];
 
 describe("token gate", () => {
