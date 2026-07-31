@@ -35,6 +35,13 @@ vi.mock("../../src/engine/presence", () => ({
 vi.mock("../../src/marketplaceView", () => ({
   MarketplacePanel: { show: vi.fn() },
 }));
+vi.mock("../../src/deckView", () => ({
+  DeckPanel: { show: vi.fn() },
+}));
+vi.mock("../../src/doctorView", () => ({
+  showDoctor: vi.fn(async () => undefined),
+  defaultDeps: vi.fn(() => ({})),
+}));
 vi.mock("../../src/telemetry/telemetry", () => ({
   initTelemetry: (...a: unknown[]) => initSpy(...a),
   track: (...a: unknown[]) => trackSpy(...a),
@@ -272,7 +279,7 @@ describe("activate", () => {
     expect(commands.registerCommand).toHaveBeenCalled();
   });
 
-  it("reports command_invoked for every registered command", async () => {
+  it("reports command_invoked with the matching command id for every registered command", async () => {
     const { context } = fakeContext();
     activate(context);
     const registered = commands.registerCommand.mock.calls.map(([id]) => id as string);
@@ -281,9 +288,34 @@ describe("activate", () => {
     for (const [id, cb] of commands.registerCommand.mock.calls) {
       trackSpy.mockClear();
       await (cb as (...a: unknown[]) => unknown)();
-      const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
-      expect(names, `${id} should report command_invoked`).toContain("command_invoked");
+      const invoked = trackSpy.mock.calls.flat().filter((e: any) => e.name === "command_invoked");
+      expect(invoked, `${id} should report exactly one command_invoked`).toHaveLength(1);
+      // The payload's `command` must be exactly the id with the "agentFlow." prefix
+      // stripped — not just that *some* command_invoked event fired, which would
+      // pass even if a future change decoupled the reported id from the real one.
+      expect((invoked[0] as any).command, `${id}'s command_invoked payload`).toBe(
+        (id as string).slice("agentFlow.".length),
+      );
     }
+  });
+
+  it("still runs the handler and returns its value when track() throws", async () => {
+    const { context } = fakeContext();
+    activate(context);
+    // Let the async extension_activated continuation settle first so its own
+    // track() call doesn't consume the mockImplementationOnce meant for the
+    // command below.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    trackSpy.mockClear();
+    trackSpy.mockImplementationOnce(() => {
+      throw new Error("telemetry exploded");
+    });
+
+    const ok = await cmd("agentFlow.signIn")!();
+
+    expect(ok).toBe(true);
+    expect(authStub.signIn).toHaveBeenCalled();
+    expect(window.showInformationMessage).toHaveBeenCalled();
   });
 });
 

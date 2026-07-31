@@ -24,7 +24,16 @@ function registerTracked<T>(
 ): vscode.Disposable {
   const command = id.slice("agentFlow.".length) as CommandId;
   return vscode.commands.registerCommand(id, (...args: any[]) => {
-    track({ name: "command_invoked", command });
+    // track() already swallows its own failures, but that guard lives inside a
+    // module this file doesn't control — a local try/catch here means a future
+    // regression in track() can only ever drop an event, never break the command
+    // itself. Silently swallowed: there is no logger threaded into this helper,
+    // and track()'s own catch already reports the common failure paths.
+    try {
+      track({ name: "command_invoked", command });
+    } catch {
+      // See comment above.
+    }
     return handler(...args);
   });
 }
