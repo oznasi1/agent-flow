@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import {
   AnalyticsEvent, EventName, OPEN_STRING_PROPS, STOCK_PROMPT_MODES, classifyFailure, toPromptModeProp,
 } from "../../../src/telemetry/events";
+// The REAL class, not a local stand-in — classifyFailure relies on its constructor
+// setting `this.name` explicitly (src/jira/client.ts), and a hand-rolled stand-in
+// declared locally in this file would keep passing even if that constructor
+// override were ever accidentally reverted. Safe to import here (unlike from
+// telemetry/events.ts itself): this test file, unlike that production module, is
+// allowed to depend on jira/client.ts's transitive `vscode` import, which
+// vitest.config.ts already aliases to test/_mocks/vscode.ts for every test file.
+import { JiraAuthError } from "../../../src/jira/client";
 
 /** One representative literal per Phase 1 event. The `Unsampled`/`AssertNever`
  * check below (after this array) is what actually forces a new event to be added
@@ -89,16 +97,17 @@ describe("toPromptModeProp", () => {
 });
 
 describe("classifyFailure", () => {
-  // Mirrors src/jira/client.ts's real JiraAuthError exactly: `class JiraAuthError
-  // extends Error {}` with no constructor override. Verified empirically that such
-  // a subclass's `.name` stays "Error" (Error.prototype.name), not "JiraAuthError" —
-  // only `.constructor.name` reflects the subclass. classifyFailure must therefore
-  // check both, or the real JiraAuthError would always fall through to "unknown".
-  class JiraAuthError extends Error {}
-
-  it("classifies a real-shaped JiraAuthError (name stays 'Error') via constructor name", () => {
+  it("classifies the real JiraAuthError as auth", () => {
     const e = new JiraAuthError("token expired");
-    expect(e.name).toBe("Error"); // sanity: confirms the subclassing gotcha this test guards
+    // Sanity: this is what classifyFailure actually depends on. JiraAuthError's
+    // constructor sets `this.name` explicitly for exactly this reason — a bare
+    // `class X extends Error {}` would leave `.name` as the inherited "Error",
+    // and relying on the class identifier instead would not survive esbuild's
+    // production minify (no keepNames), which renames it. Both were verified
+    // empirically; see the fix report in task-10-report.md for the minified-
+    // bundle check, which a stand-in class declared in this test file could
+    // never catch.
+    expect(e.name).toBe("JiraAuthError");
     expect(classifyFailure(e)).toBe("auth");
   });
 

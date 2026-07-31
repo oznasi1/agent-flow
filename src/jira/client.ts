@@ -4,7 +4,18 @@ import { parseJiraError } from "./errors";
 import { TransitionFieldMeta } from "./transitionFields";
 import { Filter, JiraTask, Size } from "../types";
 
-export class JiraAuthError extends Error {}
+export class JiraAuthError extends Error {
+  constructor(message: string) {
+    super(message);
+    // Explicit, like JiraApiError (jira/errors.ts) — a bare `extends Error` with no
+    // constructor override inherits `.name` from Error.prototype ("Error"), and the
+    // class identifier itself isn't a safe substitute: esbuild's production build
+    // (esbuild.js, minify:true, no keepNames) renames it. classifyFailure
+    // (telemetry/events.ts) checks `e.name === "JiraAuthError"` and needs this to
+    // survive minification; a string literal does.
+    this.name = "JiraAuthError";
+  }
+}
 
 // One import site for Jira failures: callers catching a rejected write need both
 // this and JiraAuthError, and they mean different things — auth re-gates the panel,

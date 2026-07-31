@@ -1384,13 +1384,51 @@ describe("Take funnel", () => {
     expect(done.failure_class).toBeDefined();
   });
 
-  it("marks repo_source as preselected when the card supplied repos", async () => {
+  it("reports cancelled (not launched) when the worktree picker inside launch() is cancelled — agentFlow.worktree's default ('ask')", async () => {
+    // cfg.worktree defaults to "ask" (src/config.ts:252) on a stock install, so this
+    // picker — not a rare edge case — fires on every Take unless the user changed the
+    // setting. Cancelling it (Escape) aborts launch() without throwing; before the
+    // Critical fix this reported outcome:"launched" because launch()'s return value
+    // was discarded entirely.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel launch()'s worktree picker
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234", ["acme-billing"]); // preselected: resolveKickoff shows no picker of its own
+    expect(openWorkspace).not.toHaveBeenCalled();
+    const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
+    expect(names).toEqual([
+      "take_started",
+      "take_prompt_mode_picked",
+      "take_destination_picked",
+      "take_repos_picked",
+      "take_completed",
+    ]);
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done.outcome).toBe("cancelled");
+  });
+
+  it("reports cancelled (not launched) when the workspace-mode picker inside launch() is cancelled (workspaceMode 'ask', 2+ repos, new window)", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, workspaceMode: "ask" });
+    const repos = mkRepos(["acme-billing", "centaur"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel launch()'s workspace-mode picker
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234", ["acme-billing", "centaur"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done.outcome).toBe("cancelled");
+  });
+
+  it("marks repo_source as preselected when the card supplied repos, and omits accepted_inference (inference never ran)", async () => {
     await takeHappyPath({ preselected: ["acme-billing"] });
     const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
     expect(picked.repo_source).toBe("preselected");
+    expect(picked.accepted_inference).toBeUndefined();
+    expect("accepted_inference" in picked).toBe(false);
   });
 
-  it("marks repo_source as destination when an existing/live-folder target fixes the repo set", async () => {
+  it("marks repo_source as destination when an existing/live-folder target fixes the repo set, and omits accepted_inference", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(
       { target: { kind: "live-folder", folder: "/other/legacy-app" } } as never,
@@ -1399,6 +1437,8 @@ describe("Take funnel", () => {
     await provider.takeTask("BILL-1234"); // no preselected repos
     const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
     expect(picked.repo_source).toBe("destination");
+    expect(picked.accepted_inference).toBeUndefined();
+    expect("accepted_inference" in picked).toBe(false);
   });
 
   it("marks repo_source as quickpick and accepted_inference true when the confirmed picks match inference exactly", async () => {
@@ -1434,6 +1474,28 @@ describe("Take funnel", () => {
     });
     // Confirms BOTH repos — one more than the single inferred one.
     vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }, { repo: repos[1] }] as never);
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234");
+    const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
+    expect(picked.repo_source).toBe("quickpick");
+    expect(picked.inferred_count).toBe(1);
+    expect(picked.accepted_inference).toBe(false);
+  });
+
+  it("marks accepted_inference false on a same-count swap (inferred acme-billing, user picks centaur instead)", async () => {
+    const repos = mkRepos(["acme-billing", "centaur"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    clientStub.getDetail.mockResolvedValue({
+      key: "BILL-1234",
+      summary: "Fix the billing thing",
+      descriptionText: "desc",
+      labels: [],
+      components: ["acme-billing"], // inference proposes acme-billing only
+      url: "https://jira/browse/BILL-1234",
+    });
+    // Confirms centaur instead — same count (1) as inferred, but a different repo.
+    // A count-only comparison would (wrongly) call this "accepted".
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[1] }] as never);
     const { provider } = setup();
     await provider.takeTask("BILL-1234");
     const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;

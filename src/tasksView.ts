@@ -731,6 +731,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     let services: ServiceRef[];
     let repoSource: RepoSource;
     let inferredCount = 0;
+    // Populated only in the QuickPick branch; used below to compare the actual
+    // *set* the user confirmed against what was inferred (not just its size —
+    // swapping one inferred repo for a different one must not read as "accepted").
+    let inferredNames = new Set<string>();
     if (preselected && preselected.length) {
       // Selection already made in the expanded card — resolve names to repos, skip QuickPick.
       repoSource = "preselected";
@@ -747,7 +751,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
         repos,
       );
-      const inferredNames = new Set(inferred.map((r) => r.service.name));
+      inferredNames = new Set(inferred.map((r) => r.service.name));
       inferredCount = inferred.length;
 
       const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
@@ -775,13 +779,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       return undefined;
     }
     if (flow) {
+      // Set comparison, not a count comparison: swapping one inferred repo for a
+      // different one leaves the count unchanged but is a real rejection of the
+      // suggestion. Only meaningful for the QuickPick branch — inference never
+      // runs for "preselected"/"destination", so the property is omitted there
+      // rather than reporting a misleading `false`.
+      const pickedNames = new Set(services.map((s) => s.name));
+      const acceptedInference =
+        repoSource === "quickpick"
+          ? pickedNames.size === inferredNames.size && [...pickedNames].every((n) => inferredNames.has(n))
+          : undefined;
       track({
         name: "take_repos_picked",
         flow_id: flow.id,
         repo_count: services.length,
         repo_source: repoSource,
-        // Only the QuickPick branch can accept or reject inference.
-        accepted_inference: repoSource === "quickpick" && services.length === inferredCount,
+        ...(acceptedInference !== undefined ? { accepted_inference: acceptedInference } : {}),
         inferred_count: inferredCount,
       });
     }
@@ -851,14 +864,18 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** Open + seed a resolved kick-off: worktree decision → workspace mode → brief →
    * openWorkspace → success toast. Shared by Take and Address PR. The destination
    * `target` is resolved earlier in resolveKickoff. `forceWorktree` (Address PR) always
-   * isolates in a worktree, ignoring cfg.worktree. */
+   * isolates in a worktree, ignoring cfg.worktree. Returns whether the launch actually
+   * happened — `false` means the caller backed out at one of this function's own
+   * pickers (worktree isolation, or workspace-mode when opening a new window with
+   * 2+ repos) rather than anything failing; `addressPr` ignores the return value,
+   * `takeTask` maps it to `take_completed`'s `outcome`. */
   private async launch(
     detail: JiraDetail,
     services: ServiceRef[],
     promptTemplate: string,
     forceWorktree: boolean,
     target: OpenTarget,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const cfg = getConfig();
     const key = detail.key;
 
@@ -874,7 +891,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ],
         { title: `${key} — isolate this task in a worktree?`, ignoreFocusOut: true },
       );
-      if (!p) return;
+      if (!p) return false;
       useWorktree = p.yes;
     }
     if (useWorktree) {
@@ -882,7 +899,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
 
     const args = await this.targetToOpenArgs(target, services.length, key, cfg);
-    if (!args) return;
+    if (!args) return false;
 
     const wantRemoteControl = await this.resolveRemoteControl(cfg);
 
@@ -919,6 +936,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         : "";
       this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${unadded}${seeded}${rcNote}`);
     }
+    return true;
   }
 
   /** Resolve the task prompt mode: the configured `taskMode` when it names a known
@@ -969,8 +987,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     repoCount = services.length;
 
     try {
-      await this.launch(detail, services, promptMode.prompt, false, target);
-      track({ name: "take_completed", flow_id: flow.id, outcome: "launched", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+      const launched = await this.launch(detail, services, promptMode.prompt, false, target);
+      track({ name: "take_completed", flow_id: flow.id, outcome: launched ? "launched" : "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), task_fp: taskFp });
     } catch (e) {
       track({ name: "take_completed", flow_id: flow.id, outcome: "failed", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), failure_class: classifyFailure(e), task_fp: taskFp });
       throw e; // onMessage's existing catch (tasksView.ts:255) still owns the user-facing handling.

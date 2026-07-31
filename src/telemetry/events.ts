@@ -27,22 +27,28 @@ export type FailureClass =
   | "auth" | "network" | "not_found" | "permission"
   | "conflict" | "timeout" | "parse" | "unknown";
 
-/** Map a thrown value to a failure class. Reads only the error's name/constructor
- * name and well-known `code` fields — never its message, which we do not send.
+/** Map a thrown value to a failure class. Reads only the error's `name` and
+ * well-known `code` fields — never its `message`, which we do not send.
  *
- * Checks both `name` and `constructor.name` for the class-identity comparisons
- * (JiraAuthError, AbortError): a hand-rolled subclass like this codebase's own
- * `class JiraAuthError extends Error {}` (src/jira/client.ts) never overrides
- * `name`, so `e.name` stays the inherited `"Error"` — only `e.constructor.name`
- * reflects the real subclass. Verified empirically. Native error types (AbortError
- * as thrown by fetch/AbortController, SyntaxError) do set `name` correctly, so both
- * checks are kept rather than relying on either alone. */
+ * Deliberately checks `.name`, not `instanceof JiraAuthError` — this module has
+ * no dependency on jira/client.ts (which transitively imports `vscode` via
+ * jira/auth.ts) and must stay that way, a leaf module importable in isolation.
+ * That only works because `JiraAuthError`'s constructor explicitly sets
+ * `this.name = "JiraAuthError"` (src/jira/client.ts), exactly like its sibling
+ * `JiraApiError` (src/jira/errors.ts) already did. A bare `class X extends
+ * Error {}` with no constructor override would inherit `.name` from
+ * `Error.prototype` (`"Error"`), and the class identifier itself is not a safe
+ * substitute for the same check: esbuild's production build (esbuild.js,
+ * minify:true, no keepNames) renames it, so `e.constructor.name` would not
+ * survive a real bundle either — verified against the actual minified
+ * dist/extension.js. Native error types (AbortError as thrown by
+ * fetch/AbortController, SyntaxError) set `.name` on their own, immune to both
+ * of these problems, so no special casing is needed for those. */
 export function classifyFailure(e: unknown): FailureClass {
   const name = e instanceof Error ? e.name : "";
-  const ctorName = e instanceof Error ? e.constructor.name : "";
   const code = (e as { code?: string } | null)?.code ?? "";
-  if (name === "JiraAuthError" || ctorName === "JiraAuthError" || code === "401" || code === "403") return "auth";
-  if (name === "AbortError" || ctorName === "AbortError" || code === "ETIMEDOUT") return "timeout";
+  if (name === "JiraAuthError" || code === "401" || code === "403") return "auth";
+  if (name === "AbortError" || code === "ETIMEDOUT") return "timeout";
   if (code === "ENOTFOUND" || code === "ECONNREFUSED" || code === "ENETUNREACH") return "network";
   if (code === "ENOENT") return "not_found";
   if (code === "EACCES" || code === "EPERM") return "permission";
@@ -132,7 +138,11 @@ export type UsageEvent =
   | { name: "take_started"; flow_id: string; source: "card" | "command" | "batch"; task_fp: string; inferred_count: number }
   | { name: "take_prompt_mode_picked"; flow_id: string; prompt_mode: PromptModeProp; is_custom_mode: boolean }
   | { name: "take_destination_picked"; flow_id: string; destination: DestinationProp; workspace_mode: WorkspaceModeProp; used_worktree: boolean }
-  | { name: "take_repos_picked"; flow_id: string; repo_count: number; repo_source: RepoSource; accepted_inference: boolean; inferred_count: number }
+  // `accepted_inference` is optional: it's only meaningful in the "quickpick"
+  // repo_source (inference doesn't run for "preselected"/"destination"), and
+  // omitting it there keeps a genuine `false` (the quickpick branch rejecting
+  // inference) distinguishable from "inference never ran".
+  | { name: "take_repos_picked"; flow_id: string; repo_count: number; repo_source: RepoSource; accepted_inference?: boolean; inferred_count: number }
   | { name: "take_completed"; flow_id: string; outcome: Outcome; destination?: DestinationProp; prompt_mode: PromptModeProp; repo_count: number; duration_ms: number; failure_class?: FailureClass; task_fp: string };
 
 /** Sent via logError — still delivered at telemetry level "error". */
