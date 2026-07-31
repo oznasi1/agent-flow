@@ -103,6 +103,20 @@ export function fireTelemetryEnabled(on: boolean): void {
 }
 
 export const UIKind = { Desktop: 1, Web: 2 } as const;
+
+let configChangeCbs: ((e: { affectsConfiguration(section: string): boolean }) => void)[] = [];
+/** Drive `workspace.onDidChangeConfiguration` from a test. `affected` is the set
+ * of dotted section keys the fired event should report as changed; the returned
+ * event's `affectsConfiguration` matches a requested section against them the
+ * way VS Code does — exact match or either side prefixing the other. */
+export function fireConfigurationChanged(affected: string | string[]): void {
+  const keys = Array.isArray(affected) ? affected : [affected];
+  const event = {
+    affectsConfiguration: (section: string) =>
+      keys.some((k) => k === section || k.startsWith(`${section}.`) || section.startsWith(`${k}.`)),
+  };
+  for (const cb of configChangeCbs) cb(event);
+}
 export const ExtensionMode = { Production: 1, Development: 2, Test: 3 } as const;
 
 /** Minimal stand-in for VS Code's TelemetryLogger: gates on `env.isTelemetryEnabled`,
@@ -145,6 +159,7 @@ export const env = {
   sessionId: "test-session-id",
   appHost: "desktop",
   remoteName: undefined as string | undefined,
+  uiKind: UIKind.Desktop as (typeof UIKind)[keyof typeof UIKind],
   isTelemetryEnabled: true,
   onDidChangeTelemetryEnabled: vi.fn((cb: (e: boolean) => void) => {
     telemetryEnabledCbs.push(cb);
@@ -162,6 +177,10 @@ export const workspace = {
   workspaceFolders: undefined as { uri: { fsPath: string } }[] | undefined,
   getConfiguration: vi.fn((_section?: string) => makeConfig()),
   openTextDocument: vi.fn(async (_opts?: unknown): Promise<any> => ({})),
+  onDidChangeConfiguration: vi.fn((cb: (e: { affectsConfiguration(section: string): boolean }) => void) => {
+    configChangeCbs.push(cb);
+    return { dispose: vi.fn() };
+  }),
 };
 
 export const Uri = {
@@ -202,6 +221,7 @@ export function resetVscodeMocks(): void {
   env.sessionId = "test-session-id";
   env.appHost = "desktop";
   env.remoteName = undefined;
+  env.uiKind = UIKind.Desktop;
   env.isTelemetryEnabled = true;
   telemetryEnabledCbs = [];
   env.onDidChangeTelemetryEnabled.mockClear();
@@ -213,6 +233,8 @@ export function resetVscodeMocks(): void {
   workspace.workspaceFolders = undefined;
   workspace.getConfiguration.mockReset().mockImplementation((_section?: string) => makeConfig());
   workspace.openTextDocument.mockReset().mockResolvedValue({});
+  configChangeCbs = [];
+  workspace.onDidChangeConfiguration.mockClear();
 
   Uri.parse.mockClear();
   Uri.file.mockClear();
