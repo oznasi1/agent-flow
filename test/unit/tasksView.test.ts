@@ -34,6 +34,11 @@ vi.mock("../../src/engine/presence", () => ({
 // the real parseJiraError produces instances the production code recognises.
 vi.mock("../../src/jira/client", async () => {
   const errors = await vi.importActual<typeof import("../../src/jira/errors")>("../../src/jira/errors");
+  // The real module, for isJiraNetworkError/markJiraNetworkFailure only — these
+  // are pure functions with no vscode-touching side effects at import time, so
+  // there's no reason to hand-roll a stand-in the way JiraAuthError needs one
+  // below; a duplicate here could silently drift from resolveOp's actual check.
+  const real = await vi.importActual<typeof import("../../src/jira/client")>("../../src/jira/client");
   // Mirrors the real class's constructor (src/jira/client.ts): classifyFailure
   // (telemetry/events.ts) checks `e.name === "JiraAuthError"`, and a bare
   // `extends Error {}` here would leave `.name` as the inherited "Error",
@@ -44,7 +49,13 @@ vi.mock("../../src/jira/client", async () => {
       this.name = "JiraAuthError";
     }
   }
-  return { JiraAuthError, JiraApiError: errors.JiraApiError, JiraClient: vi.fn() };
+  return {
+    JiraAuthError,
+    JiraApiError: errors.JiraApiError,
+    JiraClient: vi.fn(),
+    isJiraNetworkError: real.isJiraNetworkError,
+    markJiraNetworkFailure: real.markJiraNetworkFailure,
+  };
 });
 
 import { parseJiraError } from "../../src/jira/errors";
@@ -54,7 +65,7 @@ import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths } from "../../s
 import { createWorktrees } from "../../src/engine/worktree";
 import { openSharedWorkspace } from "../../src/engine/batchWorkspace";
 import { readLiveWindows, windowIdentity } from "../../src/engine/presence";
-import { JiraClient, JiraAuthError } from "../../src/jira/client";
+import { JiraClient, JiraAuthError, markJiraNetworkFailure } from "../../src/jira/client";
 import { TasksViewProvider } from "../../src/tasksView";
 import type { InboundMessage, OutboundMessage } from "../../src/types";
 import { SLACK_DM_SENTENCE } from "../../src/engine/prompt";
@@ -1467,6 +1478,40 @@ describe("Take funnel", () => {
     const opFailed = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
     expect(opFailed).toBeDefined();
     expect(opFailed.op).toBe("jira_fetch");
+  });
+
+  it("reports jira_fetch with failure_class network for an unreachable-host failure during take, and never leaks the site URL", async () => {
+    // request()'s network-level catch (src/jira/client.ts) throws a plain Error —
+    // not JiraApiError/JiraAuthError — for an unreachable host, tagged via
+    // markJiraNetworkFailure so resolveOp() and classifyFailure() both recognize
+    // it. The message embeds the user's own Jira site URL; operation_failed must
+    // never carry any part of it.
+    clientStub.getDetail.mockRejectedValueOnce(
+      markJiraNetworkFailure(new Error("Couldn't reach Jira at https://my-secret-org.atlassian.net: fetch failed"), "ENOTFOUND"),
+    );
+    const { send } = setup();
+    await send({ type: "take", key: "BILL-1234", services: ["acme-billing"] });
+    const opFailed = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(opFailed).toBeDefined();
+    expect(opFailed.op).toBe("jira_fetch");
+    expect(opFailed.failure_class).toBe("network");
+    expect(JSON.stringify(opFailed)).not.toContain("my-secret-org");
+  });
+
+  it("reports jira_fetch with failure_class timeout for a Jira timeout during take, and never leaks the site URL", async () => {
+    clientStub.getDetail.mockRejectedValueOnce(
+      markJiraNetworkFailure(
+        new Error("Jira didn't respond within 15s (https://my-secret-org.atlassian.net). Check agentFlow.jira.baseUrl and your network/VPN."),
+        "ETIMEDOUT",
+      ),
+    );
+    const { send } = setup();
+    await send({ type: "take", key: "BILL-1234", services: ["acme-billing"] });
+    const opFailed = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(opFailed).toBeDefined();
+    expect(opFailed.op).toBe("jira_fetch");
+    expect(opFailed.failure_class).toBe("timeout");
+    expect(JSON.stringify(opFailed)).not.toContain("my-secret-org");
   });
 
   it("still reports workspace_write when a take fails for a genuine non-Jira reason (launch() throwing an ENOENT)", async () => {

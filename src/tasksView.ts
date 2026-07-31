@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getConfig, AgentFlowConfig, ExploreAction, PR_REVIEW_AUTOFIX_CLAUSE } from "./config";
 import { JiraAuth } from "./jira/auth";
-import { JiraClient, JiraAuthError, JiraApiError, JiraDetail, TransitionOption } from "./jira/client";
+import { JiraClient, JiraAuthError, JiraApiError, JiraDetail, TransitionOption, isJiraNetworkError } from "./jira/client";
 import { describeJiraError } from "./jira/errors";
 import {
   promptableFields,
@@ -64,10 +64,16 @@ const JIRA_WRITE_MESSAGES: ReadonlySet<InboundMessage["type"]> = new Set([
  * before ever touching a workspace, and that Jira read has no try/catch of its
  * own — it is the single most failure-prone step in the flow, and MESSAGE_OPS
  * alone would mislabel its failure a workspace_write / pr_lookup. When the
- * thrown error is identifiably from the Jira client (JiraAuthError or
- * JiraApiError), that origin is trusted over the message-type default: jira_write
- * for the message types whose own Jira interaction is a write, jira_fetch for
- * everything else that reads Jira at all. A message absent from MESSAGE_OPS
+ * thrown error is identifiably from the Jira client — JiraAuthError, JiraApiError,
+ * or a network-level failure inside request() (unreachable host, DNS, timeout;
+ * see isJiraNetworkError, src/jira/client.ts) — that origin is trusted over the
+ * message-type default: jira_write for the message types whose own Jira
+ * interaction is a write, jira_fetch for everything else that reads Jira at all.
+ * The network-level case matters most in practice: an unreachable Jira (VPN off,
+ * bad site URL, firewall) is the single most common real-world failure this
+ * extension sees, and it is exactly what Doctor exists to diagnose — misattributing
+ * it to workspace_write/pr_lookup would send debugging effort at the wrong
+ * subsystem for the failure that happens most. A message absent from MESSAGE_OPS
  * (e.g. openExternal, reorder) still reports nothing regardless of the error's
  * origin — this override only ever narrows an op that MESSAGE_OPS already
  * assigned, never invents one for a message MESSAGE_OPS left out. Stateless by
@@ -77,7 +83,7 @@ const JIRA_WRITE_MESSAGES: ReadonlySet<InboundMessage["type"]> = new Set([
 function resolveOp(m: InboundMessage, e: unknown): Op | undefined {
   const messageOp = MESSAGE_OPS[m.type];
   if (!messageOp) return undefined;
-  if (e instanceof JiraAuthError || e instanceof JiraApiError) {
+  if (e instanceof JiraAuthError || e instanceof JiraApiError || isJiraNetworkError(e)) {
     return JIRA_WRITE_MESSAGES.has(m.type) ? "jira_write" : "jira_fetch";
   }
   return messageOp;
