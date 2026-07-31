@@ -1,9 +1,24 @@
 /** The event catalog. This file IS the privacy guarantee.
  *
- * Every string-typed property is a literal union, so a repo name, ticket key, file
- * path or prompt cannot be attached to an event without a compile error. There is
- * deliberately no `track(name: string, props: Record<string, unknown>)` anywhere in
- * this module — an escape hatch would quietly undo the whole design.
+ * Every string-typed property is a literal union. That guarantee holds for
+ * *values* everywhere: a variable whose type has widened to plain `string` (a
+ * repo name, ticket key, file path, prompt) is rejected wherever it flows into
+ * an AnalyticsEvent-typed slot — TS2345, unconditionally, no matter how it got
+ * there. There is deliberately no `track(name: string, props: Record<string,
+ * unknown>)` anywhere in this module — an escape hatch would quietly undo the
+ * whole design.
+ *
+ * TypeScript's *excess-property* check — the part that would catch an extra
+ * `repo: "acme-billing"` key tacked onto an otherwise-valid event — only fires
+ * for a fresh object literal assigned (or passed) directly where an
+ * AnalyticsEvent is expected. It does not fire once the literal has been
+ * bound to a variable or spread first:
+ *   const built = { name: "extension_installed" as const, repo: "acme" };
+ *   const ev: AnalyticsEvent = built;              // no error — `built` isn't fresh
+ * Callers of this catalog must therefore construct events as literals at the
+ * call site, not build them up in an intermediate object first. Closing that
+ * gap with a no-excess-props generic belongs on the sending facade a later
+ * task adds, not here.
  *
  * The only opaque string properties are listed in OPEN_STRING_PROPS, and
  * test/unit/telemetry/events.test.ts fails if that list grows. */
@@ -45,9 +60,9 @@ export type CommandId =
  * `flow_id` is a random UUID; `error_class` is an Error's constructor name;
  * `stack_digest` is our own bundled stack with paths stripped (see stackDigest()).
  * `*_fp` properties are matched by suffix and must be 16-char hex. */
-export const OPEN_STRING_PROPS: readonly string[] = ["flow_id", "error_class", "stack_digest"];
+export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as const;
 
-/** The ~27 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts. */
+/** The 24 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts. */
 export interface SettingsSnapshot {
   workspace_mode: "auto" | "multiroot" | "per-window" | "ask";
   open_in: "ask" | "new-window" | "this-window" | "pick-existing";

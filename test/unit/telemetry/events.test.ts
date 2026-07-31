@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
-  AnalyticsEvent, OPEN_STRING_PROPS, STOCK_PROMPT_MODES, toPromptModeProp,
+  AnalyticsEvent, EventName, OPEN_STRING_PROPS, STOCK_PROMPT_MODES, toPromptModeProp,
 } from "../../../src/telemetry/events";
 
-/** One representative literal per Phase 1 event. Every event name must appear here;
- * the count assertion below is what forces a new event to be added to this list. */
-const SAMPLES: AnalyticsEvent[] = [
+/** One representative literal per Phase 1 event. The `Unsampled`/`AssertNever`
+ * check below (after this array) is what actually forces a new event to be added
+ * here — it fails to compile the moment `AnalyticsEvent` grows a variant with no
+ * matching sample. `toHaveLength(10)` a few lines down is a plain regression
+ * check on the current count, nothing more; it does not by itself catch an
+ * unsampled event, since a `SAMPLES: AnalyticsEvent[]` array with fewer entries
+ * than the union still type-checks. */
+const SAMPLES = [
   { name: "extension_installed" },
   {
     name: "extension_activated", is_first_ever: true, has_jira_auth: false, is_configured: true,
@@ -26,7 +31,20 @@ const SAMPLES: AnalyticsEvent[] = [
   { name: "take_completed", flow_id: "f1", outcome: "launched", destination: "new", prompt_mode: "tdd", repo_count: 3, duration_ms: 4200, task_fp: "0123456789abcdef" },
   { name: "operation_failed", op: "git_worktree", failure_class: "conflict", retryable: false },
   { name: "unhandled_error", error_class: "TypeError", stack_digest: "at f (dist/extension.js:1:2)" },
-];
+] satisfies AnalyticsEvent[];
+
+/** `Unsampled` is every EventName with no entry in SAMPLES above. `AssertNever`
+ * only accepts `never`, so `_AllEventsSampled` fails to compile — "Type '...' does
+ * not satisfy the constraint 'never'" — the moment AnalyticsEvent grows a variant
+ * that isn't sampled. (A tempting-looking alternative, `const x: Unsampled[] = []`,
+ * does NOT work: an empty array literal is vacuously assignable to any array type,
+ * sampled or not, so it silently passes even when Unsampled is non-empty — verified
+ * empirically before choosing this form.) `SAMPLES` is declared with `satisfies`,
+ * not a `: AnalyticsEvent[]` annotation, specifically so `(typeof SAMPLES)[number]`
+ * keeps each entry's literal `name`, rather than collapsing to the union. */
+type Unsampled = Exclude<EventName, (typeof SAMPLES)[number]["name"]>;
+type AssertNever<T extends never> = T;
+type _AllEventsSampled = AssertNever<Unsampled>;
 
 describe("the event catalog", () => {
   it("covers every Phase 1 event exactly once", () => {
@@ -44,7 +62,7 @@ describe("the event catalog", () => {
       for (const [key, value] of Object.entries(ev)) {
         if (typeof value !== "string") continue;
         if (key === "name") continue;
-        if (OPEN_STRING_PROPS.includes(key)) continue;
+        if ((OPEN_STRING_PROPS as readonly string[]).includes(key)) continue;
         if (/_fp$/.test(key)) {
           expect(value, `${ev.name}.${key}`).toMatch(/^[0-9a-f]{16}$/);
           continue;
