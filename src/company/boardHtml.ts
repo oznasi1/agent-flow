@@ -66,6 +66,8 @@ export function boardHtml(): string {
   .strip .l { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; font-size: 13px; }
   .quar { color: var(--fail); }
   .empty { color: var(--dim); padding: 26px 0; }
+  .notice { background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+            padding: 8px 10px; margin-bottom: 14px; color: var(--dim); font-size: 12.5px; }
 </style>
 </head>
 <body>
@@ -84,7 +86,14 @@ export function boardHtml(): string {
 <script>
 const KEY = new URLSearchParams(location.search).get("key") || "";
 let state = { pending: [], landed: [], quarantined: [], paused: false, lastCycle: null };
-let sel = 0;
+// The selection is anchored to an item's id, never to its array position —
+// the pending array's order and length can both change under us between
+// polls, and an index would silently point at a different item.
+let selId = null;
+// Set for exactly one render when the selected item vanished out from under an
+// open, in-progress note (decided here or in another tab) — consumed by
+// renderDetail() to say so once, then cleared.
+let noticeSelectionGone = false;
 
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c =>
@@ -98,10 +107,25 @@ async function api(path, opts) {
 }
 
 async function load(opts) {
+  const priorSelId = selId;
+  const priorIndex = priorSelId === null ? -1 : state.pending.findIndex(i => i.id === priorSelId);
+  // Read before the fetch — the DOM hasn't changed yet, so this reflects
+  // whatever the reviewer had open when this load started.
+  const notePreviouslyOpen = !!(opts && opts.preserveNote) && noteInProgress();
+
   const { body } = await api("/api/queue");
   state = body;
-  if (sel >= state.pending.length) sel = Math.max(0, state.pending.length - 1);
-  render(opts);
+
+  const stillPresent = priorSelId !== null && state.pending.some(i => i.id === priorSelId);
+  let selectionDrifted = false;
+  if (!stillPresent) {
+    selectionDrifted = priorSelId !== null;
+    if (selectionDrifted && notePreviouslyOpen) noticeSelectionGone = true;
+    const fallback = Math.min(Math.max(priorIndex, 0), Math.max(state.pending.length - 1, 0));
+    selId = state.pending.length > 0 ? state.pending[fallback].id : null;
+  }
+
+  render(opts, selectionDrifted);
 }
 
 /**
@@ -141,7 +165,7 @@ function renderList() {
     list.innerHTML = '<p class="empty" style="padding:14px">Nothing waiting on you.</p>';
   } else {
     list.innerHTML = state.pending.map((it, i) =>
-      '<div class="row" data-i="' + i + '" aria-selected="' + (i === sel) + '">' +
+      '<div class="row" data-i="' + i + '" aria-selected="' + (it.id === selId) + '">' +
       '<span class="role">' + esc(it.role.replace(/^company-/, "")) + "</span>" +
       '<span class="t">' + esc(it.title) + "</span></div>").join("");
   }
@@ -158,7 +182,7 @@ function renderList() {
         '<button data-undo="' + esc(r.id) + '">Undo</button></div>').join("") + "</div>";
   }
   list.querySelectorAll("[data-i]").forEach(el =>
-    el.onclick = () => { sel = Number(el.dataset.i); render(); });
+    el.onclick = () => { selId = state.pending[Number(el.dataset.i)].id; render(); });
   list.querySelectorAll("[data-undo]").forEach(el =>
     el.onclick = async () => {
       if (!confirm("Revert this commit?")) return;
@@ -170,8 +194,16 @@ function renderList() {
 
 async function renderDetail() {
   const d = document.getElementById("detail");
-  const it = state.pending[sel];
-  if (!it) { d.innerHTML = '<p class="empty">Nothing selected.</p>'; return; }
+  const it = state.pending.find(i => i.id === selId);
+  // Consume the one-shot notice regardless of whether an item is still
+  // selected — either way this render is the one that has to explain it.
+  const explainGone = noticeSelectionGone;
+  noticeSelectionGone = false;
+  const notice = explainGone
+    ? '<p class="notice">The item you were revising was decided elsewhere — showing the next one instead.</p>'
+    : "";
+
+  if (!it) { d.innerHTML = notice + '<p class="empty">Nothing selected.</p>'; return; }
 
   const checks = it.checks
     ? '<div class="checks">' + Object.entries(it.checks)
@@ -179,6 +211,7 @@ async function renderDetail() {
     : "";
 
   d.innerHTML =
+    notice +
     "<h2>" + esc(it.title) + "</h2>" +
     '<p class="why">' + esc(it.why) + "</p>" +
     '<div class="meta"><span class="pill">' + esc(it.kind) + "</span>" +
@@ -206,7 +239,7 @@ async function renderDetail() {
   const { status, body } = await api("/api/artifact?id=" + encodeURIComponent(it.id));
   // The selection may have moved on while this was in flight — a stale artifact
   // must never land under a different card's title and metadata.
-  if (!state.pending[sel] || state.pending[sel].id !== it.id) return;
+  if (selId !== it.id) return;
   const art = document.getElementById("art");
   if (status !== 200) {
     art.innerHTML = '<div class="head quar">' + esc(body.error || "could not read the artifact") + "</div>";
@@ -226,7 +259,7 @@ async function renderDetail() {
 }
 
 async function decide(verdict) {
-  const it = state.pending[sel];
+  const it = state.pending.find(i => i.id === selId);
   if (!it) return;
   const noteEl = document.getElementById("note");
   const note = noteEl ? noteEl.value : "";
@@ -242,7 +275,7 @@ async function decide(verdict) {
   load();
 }
 
-function render(opts) {
+function render(opts, selectionDrifted) {
   document.getElementById("count").textContent = state.pending.length + " pending";
   document.getElementById("cycle").textContent = state.lastCycle || "no cycle yet";
   const pb = document.getElementById("pauseBtn");
@@ -251,9 +284,13 @@ function render(opts) {
   document.getElementById("runBtn").disabled = state.paused;
   // The list (counts, quarantine strip, landed strip) always reflects reality.
   // The detail pane is the one exception: while the reviewer has a revise note
-  // open, a background poll must not tear it down and lose what they typed.
+  // open for the still-selected item, a background poll must not tear it down
+  // and lose what they typed. If the selection itself drifted — the item the
+  // note belonged to is gone — there is nothing left to preserve, so the pane
+  // always rebuilds for whatever is selected now.
   renderList();
-  if (!(opts && opts.preserveNote && noteInProgress())) renderDetail();
+  if (!selectionDrifted && opts && opts.preserveNote && noteInProgress()) return;
+  renderDetail();
 }
 
 document.getElementById("pauseBtn").onclick = async () => {
@@ -271,8 +308,9 @@ document.addEventListener("keydown", e => {
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) decide("revise");
     return;
   }
-  if (e.key === "j" && sel < state.pending.length - 1) { sel++; render(); }
-  else if (e.key === "k" && sel > 0) { sel--; render(); }
+  const idx = selId === null ? -1 : state.pending.findIndex(i => i.id === selId);
+  if (e.key === "j" && idx < state.pending.length - 1) { selId = state.pending[idx + 1].id; render(); }
+  else if (e.key === "k" && idx > 0) { selId = state.pending[idx - 1].id; render(); }
   else if (e.key === "a") decide("approve");
   else if (e.key === "r") decide("reject");
   else if (e.key === "v") document.getElementById("rv").click();
