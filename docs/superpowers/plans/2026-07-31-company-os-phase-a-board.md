@@ -24,7 +24,7 @@
 
 | File | Responsibility |
 |---|---|
-| `src/company/types.ts` | Every shared type. No runtime code. Coverage-excluded, like `src/types.ts`. |
+| `src/company/types.ts` | Every shared type, plus the `as const` arrays those types derive from — one source of truth for both the union and the runtime membership check. No logic beyond that. Coverage-excluded, like `src/types.ts`. |
 | `src/company/paths.ts` | Turns a repo root into the set of company paths; creates the directories. |
 | `src/company/queue.ts` | The only module that touches company data: validate, read, record verdicts, resolve artifacts, pause. |
 | `src/company/server.ts` | `route()` — all HTTP behaviour — plus `createBoardServer()`. |
