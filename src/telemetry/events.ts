@@ -27,6 +27,29 @@ export type FailureClass =
   | "auth" | "network" | "not_found" | "permission"
   | "conflict" | "timeout" | "parse" | "unknown";
 
+/** Map a thrown value to a failure class. Reads only the error's name/constructor
+ * name and well-known `code` fields — never its message, which we do not send.
+ *
+ * Checks both `name` and `constructor.name` for the class-identity comparisons
+ * (JiraAuthError, AbortError): a hand-rolled subclass like this codebase's own
+ * `class JiraAuthError extends Error {}` (src/jira/client.ts) never overrides
+ * `name`, so `e.name` stays the inherited `"Error"` — only `e.constructor.name`
+ * reflects the real subclass. Verified empirically. Native error types (AbortError
+ * as thrown by fetch/AbortController, SyntaxError) do set `name` correctly, so both
+ * checks are kept rather than relying on either alone. */
+export function classifyFailure(e: unknown): FailureClass {
+  const name = e instanceof Error ? e.name : "";
+  const ctorName = e instanceof Error ? e.constructor.name : "";
+  const code = (e as { code?: string } | null)?.code ?? "";
+  if (name === "JiraAuthError" || ctorName === "JiraAuthError" || code === "401" || code === "403") return "auth";
+  if (name === "AbortError" || ctorName === "AbortError" || code === "ETIMEDOUT") return "timeout";
+  if (code === "ENOTFOUND" || code === "ECONNREFUSED" || code === "ENETUNREACH") return "network";
+  if (code === "ENOENT") return "not_found";
+  if (code === "EACCES" || code === "EPERM") return "permission";
+  if (name === "SyntaxError") return "parse";
+  return "unknown";
+}
+
 export type Op =
   | "jira_fetch" | "jira_write" | "jira_auth" | "git_worktree" | "repo_inference"
   | "pr_lookup" | "review_fetch" | "workspace_write" | "agent_seed" | "marketplace_read";

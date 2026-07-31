@@ -13,6 +13,16 @@ vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn() }));
 vi.mock("../../src/engine/workspace", () => ({ openWorkspace: vi.fn(), listWorkspaceFiles: vi.fn(() => []), workspaceFolderPaths: vi.fn(() => []) }));
 vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn((s: unknown) => s) }));
 vi.mock("../../src/engine/batchWorkspace", () => ({ openSharedWorkspace: vi.fn() }));
+// Telemetry: mocked wholesale so the Take-funnel tests observe track() calls without
+// a real singleton — fingerprint() returns "" until initTelemetry() runs (see
+// telemetry.ts), which would make every task_fp assertion below meaningless.
+const trackSpy = vi.fn();
+vi.mock("../../src/telemetry/telemetry", () => ({
+  track: (...a: unknown[]) => trackSpy(...a),
+  trackError: vi.fn(),
+  startFlow: () => ({ id: "flow-1", elapsedMs: () => 42 }),
+  fingerprint: () => "0123456789abcdef",
+}));
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: vi.fn(() => []),
   windowIdentity: vi.fn(() => undefined),
@@ -108,6 +118,7 @@ function makeClient() {
 }
 
 beforeEach(() => {
+  trackSpy.mockClear();
   clientStub = makeClient();
   vi.mocked(getConfig).mockReturnValue({ ...CFG });
   vi.mocked(discoverRepos).mockReturnValue(mkRepos(["account-service", "centaur"]));
@@ -1287,6 +1298,175 @@ describe("takeTask", () => {
       expect(openWorkspace).not.toHaveBeenCalled();
       expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
     });
+  });
+});
+
+describe("Take funnel", () => {
+  /** Drives a Take to a successful launch using a realistic ticket key and repo
+   * name (not the generic "ASM-1"/"account-service" this file uses elsewhere) so
+   * the leak test below has something concrete to check for. Default CFG (openIn
+   * "new-window" → target "new", worktree "never", taskMode "plan" → a configured
+   * mode, no picker) means the only QuickPick in play is the repo-confirm one —
+   * skipped when `preselected` is given (the in-card path), fired otherwise (the
+   * quickpick path), mirroring "confirms repos via QuickPick when none are
+   * preselected" above. */
+  async function takeHappyPath(opts: { preselected?: string[] } = {}) {
+    const repos = mkRepos(["acme-billing"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    if (!opts.preselected) {
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    }
+    const { provider, posted } = setup();
+    await provider.takeTask("BILL-1234", opts.preselected);
+    return posted;
+  }
+
+  /** Same shape, but openWorkspace (called inside launch()) rejects — proves a
+   * thrown launch failure is reported as take_completed{failed} and still
+   * propagates, since tasksView.ts:255's existing onMessage catch owns the
+   * user-facing handling of that rejection. */
+  function takeWithFailingLaunch() {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    vi.mocked(openWorkspace).mockRejectedValueOnce(new Error("disk full"));
+    const { provider } = setup();
+    return provider.takeTask("BILL-1234", ["acme-billing"]);
+  }
+
+  it("reports the full Take funnel on a successful launch", async () => {
+    await takeHappyPath();
+    const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
+    expect(names).toEqual([
+      "take_started",
+      "take_prompt_mode_picked",
+      "take_destination_picked",
+      "take_repos_picked",
+      "take_completed",
+    ]);
+    const started = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_started") as any;
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(started.flow_id).toBe(done.flow_id);
+    expect(started.task_fp).toMatch(/^[0-9a-f]{16}$/);
+    expect(done.outcome).toBe("launched");
+    expect(done.duration_ms).toBeGreaterThanOrEqual(0);
+  });
+
+  it("never sends a ticket key or repo name", async () => {
+    await takeHappyPath();
+    const serialized = JSON.stringify(trackSpy.mock.calls.flat());
+    expect(serialized).not.toContain("BILL-1234");
+    expect(serialized).not.toContain("acme-billing");
+  });
+
+  it("reports cancelled when the prompt-mode picker is dismissed", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234", ["acme-billing"]);
+    const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
+    expect(names).toEqual(["take_started", "take_completed"]);
+    expect((trackSpy.mock.calls.flat().at(-1) as any).outcome).toBe("cancelled");
+  });
+
+  it("reports cancelled with only the step events already fired when resolveKickoff aborts partway (repo QuickPick cancelled)", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel the repo-confirm QuickPick
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234"); // no preselected repos → reaches the QuickPick branch
+    const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
+    expect(names).toEqual(["take_started", "take_prompt_mode_picked", "take_destination_picked", "take_completed"]);
+    expect((trackSpy.mock.calls.flat().at(-1) as any).outcome).toBe("cancelled");
+  });
+
+  it("reports failed with a failure class when the launch throws, and still propagates the error", async () => {
+    await expect(takeWithFailingLaunch()).rejects.toThrow("disk full");
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done.outcome).toBe("failed");
+    expect(done.failure_class).toBeDefined();
+  });
+
+  it("marks repo_source as preselected when the card supplied repos", async () => {
+    await takeHappyPath({ preselected: ["acme-billing"] });
+    const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
+    expect(picked.repo_source).toBe("preselected");
+  });
+
+  it("marks repo_source as destination when an existing/live-folder target fixes the repo set", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(
+      { target: { kind: "live-folder", folder: "/other/legacy-app" } } as never,
+    );
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234"); // no preselected repos
+    const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
+    expect(picked.repo_source).toBe("destination");
+  });
+
+  it("marks repo_source as quickpick and accepted_inference true when the confirmed picks match inference exactly", async () => {
+    const repos = mkRepos(["acme-billing"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    clientStub.getDetail.mockResolvedValue({
+      key: "BILL-1234",
+      summary: "Fix the billing thing",
+      descriptionText: "desc",
+      labels: [],
+      components: ["acme-billing"], // inference matches this repo via component
+      url: "https://jira/browse/BILL-1234",
+    });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // confirms exactly what was inferred
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234");
+    const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
+    expect(picked.repo_source).toBe("quickpick");
+    expect(picked.inferred_count).toBe(1);
+    expect(picked.accepted_inference).toBe(true);
+  });
+
+  it("marks accepted_inference false when the confirmed repo count differs from inference", async () => {
+    const repos = mkRepos(["acme-billing", "centaur"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    clientStub.getDetail.mockResolvedValue({
+      key: "BILL-1234",
+      summary: "Fix the billing thing",
+      descriptionText: "desc",
+      labels: [],
+      components: ["acme-billing"],
+      url: "https://jira/browse/BILL-1234",
+    });
+    // Confirms BOTH repos — one more than the single inferred one.
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }, { repo: repos[1] }] as never);
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234");
+    const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
+    expect(picked.repo_source).toBe("quickpick");
+    expect(picked.inferred_count).toBe(1);
+    expect(picked.accepted_inference).toBe(false);
+  });
+
+  it("reports take_destination_picked with the resolved destination, workspace_mode, and used_worktree", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, workspaceMode: "per-window", worktree: "always" });
+    await takeHappyPath({ preselected: ["acme-billing"] });
+    const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_destination_picked") as any;
+    expect(picked.destination).toBe("new");
+    expect(picked.workspace_mode).toBe("per-window");
+    expect(picked.used_worktree).toBe(true);
+  });
+
+  it("reports take_repos_picked and take_completed with the real repo_count", async () => {
+    const repos = mkRepos(["acme-billing", "centaur"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234", ["acme-billing", "centaur"]);
+    const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(picked.repo_count).toBe(2);
+    expect(done.repo_count).toBe(2);
+  });
+
+  it("does not instrument addressPr's shared resolveKickoff call — no funnel events fire", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    const { provider } = setup();
+    await provider.addressPr("BILL-1234", ["acme-billing"]);
+    expect(trackSpy).not.toHaveBeenCalled();
   });
 });
 

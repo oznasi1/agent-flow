@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  AnalyticsEvent, EventName, OPEN_STRING_PROPS, STOCK_PROMPT_MODES, toPromptModeProp,
+  AnalyticsEvent, EventName, OPEN_STRING_PROPS, STOCK_PROMPT_MODES, classifyFailure, toPromptModeProp,
 } from "../../../src/telemetry/events";
 
 /** One representative literal per Phase 1 event. The `Unsampled`/`AssertNever`
@@ -85,6 +85,66 @@ describe("toPromptModeProp", () => {
 
   it("collapses a user-authored id to 'custom'", () => {
     expect(toPromptModeProp("acme-billing-hotfix")).toBe("custom");
+  });
+});
+
+describe("classifyFailure", () => {
+  // Mirrors src/jira/client.ts's real JiraAuthError exactly: `class JiraAuthError
+  // extends Error {}` with no constructor override. Verified empirically that such
+  // a subclass's `.name` stays "Error" (Error.prototype.name), not "JiraAuthError" —
+  // only `.constructor.name` reflects the subclass. classifyFailure must therefore
+  // check both, or the real JiraAuthError would always fall through to "unknown".
+  class JiraAuthError extends Error {}
+
+  it("classifies a real-shaped JiraAuthError (name stays 'Error') via constructor name", () => {
+    const e = new JiraAuthError("token expired");
+    expect(e.name).toBe("Error"); // sanity: confirms the subclassing gotcha this test guards
+    expect(classifyFailure(e)).toBe("auth");
+  });
+
+  it("classifies auth by well-known 401/403 codes", () => {
+    expect(classifyFailure({ code: "401" })).toBe("auth");
+    expect(classifyFailure({ code: "403" })).toBe("auth");
+  });
+
+  it("classifies timeout by AbortError name or ETIMEDOUT code", () => {
+    const abort = new Error("aborted");
+    abort.name = "AbortError";
+    expect(classifyFailure(abort)).toBe("timeout");
+    expect(classifyFailure({ code: "ETIMEDOUT" })).toBe("timeout");
+  });
+
+  it("classifies network by ENOTFOUND / ECONNREFUSED / ENETUNREACH codes", () => {
+    expect(classifyFailure({ code: "ENOTFOUND" })).toBe("network");
+    expect(classifyFailure({ code: "ECONNREFUSED" })).toBe("network");
+    expect(classifyFailure({ code: "ENETUNREACH" })).toBe("network");
+  });
+
+  it("classifies not_found by ENOENT code", () => {
+    expect(classifyFailure({ code: "ENOENT" })).toBe("not_found");
+  });
+
+  it("classifies permission by EACCES / EPERM codes", () => {
+    expect(classifyFailure({ code: "EACCES" })).toBe("permission");
+    expect(classifyFailure({ code: "EPERM" })).toBe("permission");
+  });
+
+  it("classifies parse by SyntaxError name", () => {
+    expect(classifyFailure(new SyntaxError("unexpected token"))).toBe("parse");
+  });
+
+  it("falls back to unknown for an unrecognised error", () => {
+    expect(classifyFailure(new Error("plain failure"))).toBe("unknown");
+  });
+
+  it("falls back to unknown for a non-Error thrown value, without throwing", () => {
+    expect(classifyFailure("a string")).toBe("unknown");
+    expect(classifyFailure(null)).toBe("unknown");
+    expect(classifyFailure(undefined)).toBe("unknown");
+  });
+
+  it("never reads the message — a message that looks like a 401 doesn't trigger 'auth'", () => {
+    expect(classifyFailure(new Error("401 Unauthorized"))).toBe("unknown");
   });
 });
 

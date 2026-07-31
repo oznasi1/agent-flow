@@ -24,6 +24,8 @@ import { createWorktrees } from "./engine/worktree";
 import { openSharedWorkspace, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
+import { track, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
+import { toPromptModeProp, classifyFailure, DestinationProp, PromptModeProp, RepoSource } from "./telemetry/events";
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 
@@ -693,6 +695,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   private async resolveKickoff(
     key: string,
     preselected?: string[],
+    flow?: Flow,
   ): Promise<{ detail: JiraDetail; services: ServiceRef[]; target: OpenTarget } | undefined> {
     const cfg = getConfig();
     if (!(await this.auth.isAuthenticated())) {
@@ -715,21 +718,37 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const target = await this.chooseOpenTarget(cfg);
     if (!target) return undefined;
 
+    if (flow) {
+      track({
+        name: "take_destination_picked",
+        flow_id: flow.id,
+        destination: target.kind as DestinationProp,
+        workspace_mode: cfg.workspaceMode === "per-window" ? "per-window" : "multiroot",
+        used_worktree: cfg.worktree === "always",
+      });
+    }
+
     let services: ServiceRef[];
+    let repoSource: RepoSource;
+    let inferredCount = 0;
     if (preselected && preselected.length) {
       // Selection already made in the expanded card — resolve names to repos, skip QuickPick.
+      repoSource = "preselected";
       const byName = new Map(repos.map((r) => [r.name, r]));
       services = preselected.map((n) => byName.get(n)).filter((r): r is ServiceRef => !!r);
     } else if (target.kind === "existing" || target.kind === "live-folder") {
       // The destination already fixes its repo set — use it as-is, no service pick.
+      repoSource = "destination";
       services = this.servicesFromExistingDestination(target, repos);
     } else {
       // New / this window — confirm the repos the task touches (inferred pre-selected).
+      repoSource = "quickpick";
       const inferred = inferServices(
         { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
         repos,
       );
       const inferredNames = new Set(inferred.map((r) => r.service.name));
+      inferredCount = inferred.length;
 
       const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
         repos.map((r) => ({
@@ -754,6 +773,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (services.length === 0) {
       this.toast("error", "No valid repos selected for this task.");
       return undefined;
+    }
+    if (flow) {
+      track({
+        name: "take_repos_picked",
+        flow_id: flow.id,
+        repo_count: services.length,
+        repo_source: repoSource,
+        // Only the QuickPick branch can accept or reject inference.
+        accepted_inference: repoSource === "quickpick" && services.length === inferredCount,
+        inferred_count: inferredCount,
+      });
     }
     return { detail, services, target };
   }
@@ -912,16 +942,39 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * `preselected` (from the in-card selection) skips the service QuickPick. */
   public async takeTask(key: string, preselected?: string[]): Promise<void> {
     const cfg = getConfig();
+    const flow = startFlow();
+    const taskFp = fingerprint(key);
+    let destination: DestinationProp | undefined;
+    let repoCount = 0;
+    let promptModeProp: PromptModeProp = "custom";
+
+    track({ name: "take_started", flow_id: flow.id, source: preselected?.length ? "card" : "command", task_fp: taskFp, inferred_count: 0 });
 
     // How should the agent start — pick a prompt mode (or use the configured default) FIRST.
     const promptMode = await this.choosePromptMode(cfg, `${key} — how should the agent start?`);
-    if (!promptMode) return;
+    if (!promptMode) {
+      track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", prompt_mode: promptModeProp, repo_count: 0, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+      return;
+    }
+    promptModeProp = toPromptModeProp(promptMode.id);
+    track({ name: "take_prompt_mode_picked", flow_id: flow.id, prompt_mode: promptModeProp, is_custom_mode: promptModeProp === "custom" });
 
-    const resolved = await this.resolveKickoff(key, preselected);
-    if (!resolved) return;
+    const resolved = await this.resolveKickoff(key, preselected, flow);
+    if (!resolved) {
+      track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+      return;
+    }
     const { detail, services, target } = resolved;
+    destination = target.kind as DestinationProp;
+    repoCount = services.length;
 
-    await this.launch(detail, services, promptMode.prompt, false, target);
+    try {
+      await this.launch(detail, services, promptMode.prompt, false, target);
+      track({ name: "take_completed", flow_id: flow.id, outcome: "launched", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+    } catch (e) {
+      track({ name: "take_completed", flow_id: flow.id, outcome: "failed", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), failure_class: classifyFailure(e), task_fp: taskFp });
+      throw e; // onMessage's existing catch (tasksView.ts:255) still owns the user-facing handling.
+    }
   }
 
   /** Launch several tasks at once, each in its own git worktree with its own seeded
