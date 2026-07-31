@@ -32,6 +32,20 @@ function writeItem(id: string, over: Record<string, unknown> = {}): void {
   );
 }
 
+function writeLanded(id: string, sha: string = "a1b2c3d4e5f6a7b8c9d0"): void {
+  fs.writeFileSync(
+    path.join(ctx.paths.landed, `${id}.json`),
+    JSON.stringify({
+      id,
+      cycle: "2026-07-31T17:09",
+      role: "company-architect",
+      title: "Test landed record",
+      sha,
+      landed_at: "2026-07-31T17:41:02Z",
+    }),
+  );
+}
+
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-company-routes-"));
   const paths = companyPaths(root);
@@ -232,7 +246,12 @@ describe("route table: token gate and method guard", () => {
   // were ever broken, the mutating routes (/api/decision, /api/pause) would
   // actually be able to succeed rather than being incidentally blocked by
   // some other validation (e.g. "no pending item").
-  beforeEach(() => writeItem("hero"));
+  // A landed "hero" record also exists so the /api/undo side-effect assertion
+  // is live: gitRevert is actually reachable when the token gate is removed.
+  beforeEach(() => {
+    writeItem("hero");
+    writeLanded("hero");
+  });
 
   it.each(ROUTES)("$method $path rejects a missing or wrong key with 401 and no side effect", async (spec) => {
     const noKey = await route(spec.method, spec.path, q(null), spec.body, ctx);
