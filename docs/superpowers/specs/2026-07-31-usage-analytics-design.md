@@ -202,11 +202,22 @@ version.
 | Event | Properties |
 |---|---|
 | `take_started` | `source`: card · command · batch, `task_fp`, `inferred_count` |
-| `take_repos_picked` | `repo_count`, `used_search`, `accepted_inference` |
-| `take_destination_picked` | `destination`: new-window · this-window · pick-existing · worktree, `workspace_mode`: multiroot · per-window |
+| `take_repos_picked` | `repo_count`, `repo_source`: preselected · destination · quickpick, `accepted_inference`, `inferred_count` |
+| `take_destination_picked` | `destination`: new · current · existing · live-folder, `workspace_mode`: multiroot · per-window, `used_worktree` |
 | `take_prompt_mode_picked` | `prompt_mode`, `is_custom_mode` |
 | `take_layout_picked` | `layout`: separate · shared *(batch flows only)* |
-| `take_completed` | `outcome`: launched · cancelled · failed, `destination`, `prompt_mode`, `repo_count`, `duration_ms`, `failure_class?`, `task_fp` |
+| `take_completed` | `outcome`: launched · cancelled · failed, `destination?`, `prompt_mode`, `repo_count`, `duration_ms`, `failure_class?`, `task_fp` |
+
+`repo_source` and `destination` are named for what the code can actually observe.
+`resolveKickoff` reaches its repo set three ways — an in-card preselection, a destination
+that already fixes its folders, or the confirm QuickPick — and only the third can accept or
+reject inference, so `accepted_inference` is meaningful only when
+`repo_source: "quickpick"`. A QuickPick exposes no search signal at all, so there is no
+`used_search` to report. Likewise `destination` mirrors `OpenTarget.kind`
+(new · current · existing · live-folder) rather than the `openIn` setting values, because
+the worktree decision is a separate branch downstream — hence its own `used_worktree`
+boolean. `destination` is absent on a `take_completed` that was cancelled before the
+destination pick.
 
 **`prompt_mode` is not the raw id.** `agentFlow.promptModes` is user-configurable, so a
 custom mode's id is a user-authored string — someone could name one `acme-billing-hotfix`.
