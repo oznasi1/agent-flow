@@ -62,14 +62,25 @@ export type CommandId =
  * `*_fp` properties are matched by suffix and must be 16-char hex. */
 export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as const;
 
-/** The 24 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts. */
+/** The 24 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
+ *
+ * `"invalid"` on the six enum-ish fields below (workspace_mode, open_in,
+ * explore_mode, worktree, remote_control, default_filter) is a sentinel, not a
+ * real setting value: settingsSnapshot.ts emits it whenever the underlying
+ * AgentFlowConfig value isn't one of the shipped choices — e.g. a hand-edited
+ * settings.json holding a value VS Code's own settings UI would never offer.
+ * It exists specifically so that case stays distinguishable from a user who
+ * genuinely left the setting at its default; collapsing both to the same
+ * shipped-default value would silently inflate the "default configuration"
+ * bucket in the resulting analytics. task_mode's "custom" plays the same role
+ * for that field and is not part of this six-field sentinel scheme. */
 export interface SettingsSnapshot {
-  workspace_mode: "auto" | "multiroot" | "per-window" | "ask";
-  open_in: "ask" | "new-window" | "this-window" | "pick-existing";
-  explore_mode: "ask" | "jiraTicket" | "knowledge" | "debug" | "general";
-  worktree: "ask" | "always" | "never";
-  remote_control: "off" | "on" | "ask";
-  default_filter: "unassigned" | "mysprint" | "mine" | "sprint" | "backlog";
+  workspace_mode: "auto" | "multiroot" | "per-window" | "ask" | "invalid";
+  open_in: "ask" | "new-window" | "this-window" | "pick-existing" | "invalid";
+  explore_mode: "ask" | "jiraTicket" | "knowledge" | "debug" | "general" | "invalid";
+  worktree: "ask" | "always" | "never" | "invalid";
+  remote_control: "off" | "on" | "ask" | "invalid";
+  default_filter: "unassigned" | "mysprint" | "mine" | "sprint" | "backlog" | "invalid";
   task_mode: TaskModeProp;
   seed_agent: boolean;
   filters_size: boolean;

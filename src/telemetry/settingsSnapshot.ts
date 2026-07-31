@@ -7,22 +7,34 @@ function taskModeProp(taskMode: string): TaskModeProp {
 }
 
 /** Validate a config value against its known set of shipped choices, collapsing
- * anything unrecognised to `fallback`. Several `AgentFlowConfig` fields are typed
- * as literal unions (or plain `string`) but `getConfig()` only casts the raw
- * setting value through a generic type parameter — it never checks it against
- * the manifest `enum` at runtime. VS Code's settings UI keeps a normal user
- * inside that enum, but a hand-edited `settings.json` can hold anything, so an
- * unvalidated pass-through here would transmit arbitrary user-authored text. */
-function enumOrFallback<T extends string>(value: string, allowed: readonly T[], fallback: T): T {
-  return (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
+ * anything unrecognised to the `"invalid"` sentinel — never to a real shipped
+ * value. Several `AgentFlowConfig` fields are typed as literal unions (or plain
+ * `string`) but `getConfig()` only casts the raw setting value through a
+ * generic type parameter — it never checks it against the manifest `enum` at
+ * runtime. VS Code's settings UI keeps a normal user inside that enum, but a
+ * hand-edited `settings.json` can hold anything, so an unvalidated pass-through
+ * here would transmit arbitrary user-authored text. Falling back to a real
+ * shipped default (e.g. "auto") would be just as wrong in a different way: it
+ * would make an invalid setting byte-identical, in the analytics, to a user who
+ * genuinely left the setting untouched — see the SettingsSnapshot doc comment
+ * in events.ts. */
+function enumOrInvalid<T extends string>(value: string, allowed: readonly T[]): T | "invalid" {
+  return (allowed as readonly string[]).includes(value) ? (value as T) : "invalid";
 }
 
-const WORKSPACE_MODES = ["auto", "multiroot", "per-window", "ask"] as const;
-const OPEN_IN_MODES = ["ask", "new-window", "this-window", "pick-existing"] as const;
-const EXPLORE_MODES = ["ask", "jiraTicket", "knowledge", "debug", "general"] as const;
-const WORKTREE_MODES = ["ask", "always", "never"] as const;
-const REMOTE_CONTROL_MODES = ["off", "on", "ask"] as const;
-const DEFAULT_FILTER_VALUES = ["unassigned", "mysprint", "mine", "sprint", "backlog"] as const;
+// Hand-duplicated from each setting's `enum` in package.json's manifest — kept
+// honest by a manifest-parity test in test/unit/telemetry/settingsSnapshot.test.ts
+// (same pattern as config.ts's DEFAULT_PROMPT_MODES / DEFAULT_PR_REVIEW_PROMPT
+// parity tests), so a manifest enum that grows a new option and forgets this
+// file doesn't silently collapse that new option to "invalid" forever. Exported
+// only so that test can compare against package.json; not part of the public
+// module surface otherwise.
+export const WORKSPACE_MODES = ["auto", "multiroot", "per-window", "ask"] as const;
+export const OPEN_IN_MODES = ["ask", "new-window", "this-window", "pick-existing"] as const;
+export const EXPLORE_MODES = ["ask", "jiraTicket", "knowledge", "debug", "general"] as const;
+export const WORKTREE_MODES = ["ask", "always", "never"] as const;
+export const REMOTE_CONTROL_MODES = ["off", "on", "ask"] as const;
+export const DEFAULT_FILTER_VALUES = ["unassigned", "mysprint", "mine", "sprint", "backlog"] as const;
 
 const STOCK_PROMPT_MODE_IDS = DEFAULT_PROMPT_MODES.map((m) => m.id).join(",");
 
@@ -35,16 +47,18 @@ const DEFAULT_EXPLORE_PROMPTS = new Map(DEFAULT_EXPLORE_ACTIONS.map((a) => [a.id
  * prReviewStatus, reviewRequestPrompt and every *Prompt — contributes at most a
  * "was it changed from the default" boolean. repoBlocklist contributes its
  * length. Every enum-ish setting is validated against its known values and
- * collapsed to a safe fallback when unrecognised, never cast — a hand-edited
- * settings.json can hold any string there. Tests assert none of the above leak. */
+ * collapsed to the `"invalid"` sentinel when unrecognised, never cast and never
+ * a real shipped default — a hand-edited settings.json can hold any string
+ * there, and reporting it as e.g. "auto" would be indistinguishable from a
+ * genuine default. Tests assert none of the above leak. */
 export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
   return {
-    workspace_mode: enumOrFallback(cfg.workspaceMode, WORKSPACE_MODES, "auto"),
-    open_in: enumOrFallback(cfg.openIn, OPEN_IN_MODES, "ask"),
-    explore_mode: enumOrFallback(cfg.exploreMode, EXPLORE_MODES, "ask"),
-    worktree: enumOrFallback(cfg.worktree, WORKTREE_MODES, "ask"),
-    remote_control: enumOrFallback(cfg.remoteControl, REMOTE_CONTROL_MODES, "off"),
-    default_filter: enumOrFallback(cfg.defaultFilter, DEFAULT_FILTER_VALUES, "mysprint"),
+    workspace_mode: enumOrInvalid(cfg.workspaceMode, WORKSPACE_MODES),
+    open_in: enumOrInvalid(cfg.openIn, OPEN_IN_MODES),
+    explore_mode: enumOrInvalid(cfg.exploreMode, EXPLORE_MODES),
+    worktree: enumOrInvalid(cfg.worktree, WORKTREE_MODES),
+    remote_control: enumOrInvalid(cfg.remoteControl, REMOTE_CONTROL_MODES),
+    default_filter: enumOrInvalid(cfg.defaultFilter, DEFAULT_FILTER_VALUES),
     task_mode: taskModeProp(cfg.taskMode),
     seed_agent: cfg.seedAgent,
     filters_size: cfg.filters.size,
