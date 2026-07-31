@@ -1,3 +1,4 @@
+import * as http from "http";
 import { CompanyPaths } from "./paths";
 import { boardHtml } from "./boardHtml";
 import {
@@ -149,4 +150,63 @@ export async function route(
   }
 
   return { status: 404, json: { error: "not found" } };
+}
+
+const MAX_BODY_BYTES = 1024 * 1024;
+
+function readBody(req: http.IncomingMessage): Promise<string | null> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let tooLarge = false;
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        // Drop what we have and keep draining. Destroying the request here would
+        // race the 413 response and surface to the client as a socket error.
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (tooLarge) {
+        reject(new Error("body too large"));
+        return;
+      }
+      resolve(chunks.length === 0 ? null : Buffer.concat(chunks).toString("utf8"));
+    });
+    req.on("error", reject);
+  });
+}
+
+/**
+ * Adapts `route()` to node:http. Bind it yourself — always to 127.0.0.1, never
+ * to a public interface: this server can merge and revert commits.
+ */
+export function createBoardServer(ctx: BoardContext): http.Server {
+  return http.createServer(async (req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    let body: string | null = null;
+    try {
+      body = await readBody(req);
+    } catch {
+      res.writeHead(413, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify({ error: "body too large" }));
+      return;
+    }
+
+    const result = await route(req.method ?? "GET", url.pathname, url.searchParams, body, ctx);
+    const headers: Record<string, string> = { "cache-control": "no-store" };
+    if (result.html !== undefined) {
+      headers["content-type"] = "text/html; charset=utf-8";
+      res.writeHead(result.status, headers);
+      res.end(result.html);
+      return;
+    }
+    headers["content-type"] = "application/json";
+    res.writeHead(result.status, headers);
+    res.end(JSON.stringify(result.json ?? {}));
+  });
 }
