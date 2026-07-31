@@ -5,6 +5,7 @@ import * as path from "path";
 import type { AddressInfo } from "net";
 import { companyPaths, ensureCompanyDirs } from "../../../src/company/paths";
 import { createBoardServer, BoardContext } from "../../../src/company/server";
+import { isPaused } from "../../../src/company/queue";
 
 let root: string;
 let ctx: BoardContext;
@@ -70,6 +71,33 @@ describe("createBoardServer", () => {
   it("sends no-store so a stale queue never renders", async () => {
     const res = await fetch(`${base}/api/queue?key=${KEY}`);
     expect(res.headers.get("cache-control")).toContain("no-store");
+  });
+
+  it("sends referrer-policy: no-referrer, since this URL carries the token", async () => {
+    const page = await fetch(`${base}/?key=${KEY}`);
+    expect(page.headers.get("referrer-policy")).toBe("no-referrer");
+    const api = await fetch(`${base}/api/queue?key=${KEY}`);
+    expect(api.headers.get("referrer-policy")).toBe("no-referrer");
+  });
+
+  it("forwards Sec-Fetch-Site and refuses a cross-site write that has the key", async () => {
+    const res = await fetch(`${base}/api/pause?key=${KEY}`, {
+      method: "POST",
+      headers: { "sec-fetch-site": "cross-site" },
+      body: JSON.stringify({ paused: true }),
+    });
+    expect(res.status).toBe(403);
+    expect(isPaused(ctx.paths)).toBe(false);
+  });
+
+  it("accepts the same write from the board's own page", async () => {
+    const res = await fetch(`${base}/api/pause?key=${KEY}`, {
+      method: "POST",
+      headers: { "sec-fetch-site": "same-origin" },
+      body: JSON.stringify({ paused: true }),
+    });
+    expect(res.status).toBe(200);
+    expect(isPaused(ctx.paths)).toBe(true);
   });
 
   it("500s and stays alive when a handler rejects", async () => {

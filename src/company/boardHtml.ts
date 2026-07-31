@@ -95,6 +95,16 @@ let selId = null;
 // renderDetail() to say so once, then cleared.
 let noticeSelectionGone = false;
 
+// Prepended to an html artifact's srcdoc, ahead of the artifact's own markup.
+// sandbox="" stops scripts but not network egress: an agent-authored document
+// could pull in an external subresource and set its own
+// <meta name="referrer" content="unsafe-url">, and for an about:srcdoc document
+// the referrer resolves through the parent — handing this page's port and
+// ?key=<token> to an arbitrary host. A CSP already in force can only be
+// tightened by a later policy, never loosened, so putting ours first settles it.
+const ARTIFACT_CSP =
+  "<meta http-equiv=\\"Content-Security-Policy\\" content=\\"default-src 'none'; style-src 'unsafe-inline'; img-src data:\\">";
+
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -248,7 +258,8 @@ async function renderDetail() {
   const head = '<div class="head">' + esc(body.type) +
     (body.truncated ? " · truncated" : "") + "</div>";
   if (body.type === "html") {
-    art.innerHTML = head + '<iframe sandbox="" srcdoc="' + esc(body.content) + '"></iframe>';
+    art.innerHTML = head +
+      '<iframe sandbox="" srcdoc="' + esc(ARTIFACT_CSP + body.content) + '"></iframe>';
   } else if (body.type === "diff") {
     art.innerHTML = head + "<pre>" + renderDiff(body.content) + "</pre>";
   } else if (body.type === "markdown") {

@@ -39,46 +39,46 @@ afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 
 describe("POST /api/cycle", () => {
   it("runs a full cycle by default", async () => {
-    const r = await route("POST", "/api/cycle", q(), "{}", ctx);
+    const r = await route("POST", "/api/cycle", q(), "{}", null, ctx);
     expect(r.status).toBe(200);
     expect(r.json).toEqual({ ok: true, detail: "started" });
     expect(ctx.spawnCycle).toHaveBeenCalledWith("full");
   });
 
   it("runs apply mode when asked", async () => {
-    await route("POST", "/api/cycle", q(), JSON.stringify({ mode: "apply" }), ctx);
+    await route("POST", "/api/cycle", q(), JSON.stringify({ mode: "apply" }), null, ctx);
     expect(ctx.spawnCycle).toHaveBeenCalledWith("apply");
   });
 
   it("400s an unknown mode without spawning anything", async () => {
-    const r = await route("POST", "/api/cycle", q(), JSON.stringify({ mode: "yolo" }), ctx);
+    const r = await route("POST", "/api/cycle", q(), JSON.stringify({ mode: "yolo" }), null, ctx);
     expect(r.status).toBe(400);
     expect(ctx.spawnCycle).not.toHaveBeenCalled();
   });
 
   it("refuses to start a cycle while paused", async () => {
-    await route("POST", "/api/pause", q(), JSON.stringify({ paused: true }), ctx);
-    const r = await route("POST", "/api/cycle", q(), "{}", ctx);
+    await route("POST", "/api/pause", q(), JSON.stringify({ paused: true }), null, ctx);
+    const r = await route("POST", "/api/cycle", q(), "{}", null, ctx);
     expect(r.status).toBe(409);
     expect(ctx.spawnCycle).not.toHaveBeenCalled();
   });
 
   it("passes a runner failure through as a 200 with ok:false", async () => {
     ctx.spawnCycle = vi.fn(async () => ({ ok: false, detail: "the cycle script is not installed yet" }));
-    const r = await route("POST", "/api/cycle", q(), "{}", ctx);
+    const r = await route("POST", "/api/cycle", q(), "{}", null, ctx);
     expect(r.status).toBe(200);
     expect(r.json).toEqual({ ok: false, detail: "the cycle script is not installed yet" });
   });
 
   it("405s a GET", async () => {
-    expect((await route("GET", "/api/cycle", q(), null, ctx)).status).toBe(405);
+    expect((await route("GET", "/api/cycle", q(), null, null, ctx)).status).toBe(405);
   });
 });
 
 describe("POST /api/undo", () => {
   it("reverts the recorded sha and clears the landed record", async () => {
     writeLanded("dedupe", "a1b2c3d4e5");
-    const r = await route("POST", "/api/undo", q(), JSON.stringify({ id: "dedupe" }), ctx);
+    const r = await route("POST", "/api/undo", q(), JSON.stringify({ id: "dedupe" }), null, ctx);
     expect(r.status).toBe(200);
     expect(r.json).toEqual({ ok: true, detail: "reverted 1 commit" });
     expect(ctx.gitRevert).toHaveBeenCalledWith("a1b2c3d4e5");
@@ -86,7 +86,7 @@ describe("POST /api/undo", () => {
   });
 
   it("404s an unknown record without reverting", async () => {
-    const r = await route("POST", "/api/undo", q(), JSON.stringify({ id: "ghost" }), ctx);
+    const r = await route("POST", "/api/undo", q(), JSON.stringify({ id: "ghost" }), null, ctx);
     expect(r.status).toBe(404);
     expect(ctx.gitRevert).not.toHaveBeenCalled();
   });
@@ -94,13 +94,13 @@ describe("POST /api/undo", () => {
   it("keeps the record when the revert fails, so it can be retried", async () => {
     writeLanded("dedupe", "a1b2c3d4e5");
     ctx.gitRevert = vi.fn(async () => ({ ok: false, detail: "conflict" }));
-    const r = await route("POST", "/api/undo", q(), JSON.stringify({ id: "dedupe" }), ctx);
+    const r = await route("POST", "/api/undo", q(), JSON.stringify({ id: "dedupe" }), null, ctx);
     expect(r.json).toEqual({ ok: false, detail: "conflict" });
     expect(fs.existsSync(path.join(ctx.paths.landed, "dedupe.json"))).toBe(true);
   });
 
   it("400s a missing id", async () => {
-    const r = await route("POST", "/api/undo", q(), "{}", ctx);
+    const r = await route("POST", "/api/undo", q(), "{}", null, ctx);
     expect(r.status).toBe(400);
     expect(ctx.gitRevert).not.toHaveBeenCalled();
   });

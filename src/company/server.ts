@@ -1,4 +1,5 @@
 import * as http from "http";
+import * as crypto from "crypto";
 import { CompanyPaths } from "./paths";
 import { boardHtml } from "./boardHtml";
 import {
@@ -12,7 +13,12 @@ import {
   setPaused,
 } from "./queue";
 
-export type CycleMode = "full" | "apply";
+export const CYCLE_MODES = ["full", "apply"] as const;
+export type CycleMode = (typeof CYCLE_MODES)[number];
+
+function isCycleMode(value: unknown): value is CycleMode {
+  return CYCLE_MODES.includes(value as CycleMode);
+}
 
 export interface RunnerResult {
   ok: boolean;
@@ -48,14 +54,59 @@ function parseBody(body: string | null): { ok: true; value: Record<string, unkno
   }
 }
 
+/**
+ * Compares the presented key to the token without leaking how much of it
+ * matched. A length mismatch is answered directly because timingSafeEqual
+ * throws on buffers of different sizes, and the token's length is fixed and
+ * public anyway.
+ */
+function tokenMatches(presented: string | null, token: string): boolean {
+  if (presented === null) return false;
+  const a = Buffer.from(presented, "utf8");
+  const b = Buffer.from(token, "utf8");
+  if (a.byteLength !== b.byteLength) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * True when a browser tells us this mutating request came from somewhere other
+ * than the board itself.
+ *
+ * The token alone is not enough. A POST with a JSON body and no custom headers
+ * is a CORS-simple request: any page in the browser can send it with
+ * `mode: "no-cors"`, no preflight, and it is delivered and executed — the
+ * attacker never has to read the response, only cause the write. So any page
+ * that learns the URL (from a referrer, a shared screen, shell history) can
+ * forge verdicts.
+ *
+ * `Sec-Fetch-Site` is set by the browser and cannot be spoofed by page script.
+ * Absent means the caller is not a browser at all — curl, a script, an
+ * integration test — and must keep working, so absent is allowed and only
+ * present-and-not-same-origin is refused.
+ */
+function isCrossSite(method: string, secFetchSite: string | null): boolean {
+  if (method === "GET" || method === "HEAD") return false;
+  return secFetchSite !== null && secFetchSite !== "same-origin";
+}
+
 export async function route(
   method: string,
   urlPath: string,
   query: URLSearchParams,
   body: string | null,
+  secFetchSite: string | null,
   ctx: BoardContext,
 ): Promise<RouteResult> {
-  if (query.get("key") !== ctx.token) return { status: 401, json: { error: "bad or missing key" } };
+  if (!tokenMatches(query.get("key"), ctx.token)) {
+    return { status: 401, json: { error: "bad or missing key" } };
+  }
+
+  if (isCrossSite(method, secFetchSite)) {
+    return {
+      status: 403,
+      json: { error: `refused a ${secFetchSite} request — the board only accepts writes from its own page` },
+    };
+  }
 
   if (urlPath === "/") {
     if (method !== "GET") return { status: 405, json: { error: "use GET" } };
@@ -121,8 +172,9 @@ export async function route(
     const parsed = parseBody(body);
     if (!parsed.ok) return { status: 400, json: { error: "body must be a json object" } };
     const mode = parsed.value.mode === undefined ? "full" : parsed.value.mode;
-    if (mode !== "full" && mode !== "apply") {
-      return { status: 400, json: { error: 'mode must be "full" or "apply"' } };
+    if (!isCycleMode(mode)) {
+      const allowed = CYCLE_MODES.map((m) => `"${m}"`).join(" or ");
+      return { status: 400, json: { error: `mode must be ${allowed}` } };
     }
     // The kill switch outranks the button.
     if (isPaused(ctx.paths)) {
@@ -186,6 +238,18 @@ function readBody(req: http.IncomingMessage): Promise<string | null> {
 }
 
 /**
+ * Reads one request header as a plain value, so `route()` never sees a
+ * node:http object. Node folds repeated headers into a single comma-joined
+ * string for everything except a handful of set-cookie-like names; the array
+ * branch is belt and braces.
+ */
+function headerValue(req: http.IncomingMessage, name: string): string | null {
+  const raw = req.headers[name];
+  if (Array.isArray(raw)) return raw[0] ?? null;
+  return raw ?? null;
+}
+
+/**
  * Adapts `route()` to node:http. Bind it yourself — always to 127.0.0.1, never
  * to a public interface: this server can merge and revert commits.
  */
@@ -223,9 +287,15 @@ export function createBoardServer(ctx: BoardContext): http.Server {
         url.pathname,
         url.searchParams,
         body,
+        headerValue(req, "sec-fetch-site"),
         ctx,
       );
-      const headers: Record<string, string> = { "cache-control": "no-store" };
+      // no-referrer keeps this URL — which carries the token in its query
+      // string — out of every request the page or its artifacts make.
+      const headers: Record<string, string> = {
+        "cache-control": "no-store",
+        "referrer-policy": "no-referrer",
+      };
       if (result.html !== undefined) {
         headers["content-type"] = "text/html; charset=utf-8";
         res.writeHead(result.status, headers);
