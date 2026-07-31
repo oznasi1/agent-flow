@@ -19,8 +19,19 @@ function sentEvents(): { name: string; data: Record<string, unknown> }[] {
   return calls.map(([name, data]: [string, Record<string, unknown>]) => ({ name, data }));
 }
 
+/** The real PostHogSender the facade built — it's the first (and, per test,
+ * only) argument createTelemetryLogger was called with. Spying on its own
+ * methods (rather than on the module-level createPostHogSender factory) lets
+ * a test assert exactly which sender method a consent-withdrawal path called,
+ * without caring how the facade obtained the sender. */
+function currentSender(): { drop(): void; flush(): Promise<void>; dispose(): void } {
+  return vscode.env.createTelemetryLogger.mock.calls[0][0];
+}
+
 beforeEach(() => resetTelemetryForTests());
-afterEach(() => { disposeTelemetry(); resetTelemetryForTests(); });
+// resetTelemetryForTests() alone is sufficient to isolate — it disposes any
+// listeners a previous initTelemetry() registered, same as disposeTelemetry().
+afterEach(() => resetTelemetryForTests());
 
 describe("track", () => {
   it("no-ops before init rather than throwing", () => {
@@ -93,7 +104,12 @@ describe("consent withdrawn mid-session", () => {
     const log = vi.fn();
     initTelemetry(makeContext(), log);
     track({ name: "extension_installed" });
+    const sender = currentSender();
+    const dropSpy = vi.spyOn(sender, "drop");
+    const flushSpy = vi.spyOn(sender, "flush");
     vscode.fireTelemetryEnabled(false);
+    expect(dropSpy).toHaveBeenCalledTimes(1);
+    expect(flushSpy).not.toHaveBeenCalled();
     expect(log.mock.calls.flat().join(" ")).toMatch(/discarded|consent withdrawn/i);
   });
 
@@ -101,8 +117,13 @@ describe("consent withdrawn mid-session", () => {
     const log = vi.fn();
     initTelemetry(makeContext(), log);
     track({ name: "extension_installed" });
+    const sender = currentSender();
+    const dropSpy = vi.spyOn(sender, "drop");
+    const flushSpy = vi.spyOn(sender, "flush");
     vscode.setConfig({ "telemetry.enabled": false });
     vscode.fireConfigurationChanged("agentFlow.telemetry.enabled");
+    expect(dropSpy).toHaveBeenCalledTimes(1);
+    expect(flushSpy).not.toHaveBeenCalled();
     expect(log.mock.calls.flat().join(" ")).toMatch(/discarded|consent withdrawn/i);
   });
 
@@ -110,8 +131,40 @@ describe("consent withdrawn mid-session", () => {
     const log = vi.fn();
     initTelemetry(makeContext(), log);
     track({ name: "extension_installed" });
+    const sender = currentSender();
+    const dropSpy = vi.spyOn(sender, "drop");
     vscode.fireConfigurationChanged("agentFlow.reposRoot");
+    expect(dropSpy).not.toHaveBeenCalled();
     expect(log.mock.calls.flat().join(" ")).not.toMatch(/discarded|consent withdrawn/i);
+  });
+});
+
+describe("resetTelemetryForTests / disposeTelemetry isolation", () => {
+  it("disposeTelemetry disposes the sender and stops its listeners from firing", () => {
+    const log = vi.fn();
+    initTelemetry(makeContext(), log);
+    const sender = currentSender();
+    const disposeSpy = vi.spyOn(sender, "dispose");
+    disposeTelemetry();
+    expect(disposeSpy).toHaveBeenCalledTimes(1);
+    log.mockClear();
+    vscode.fireTelemetryEnabled(false);
+    expect(log).not.toHaveBeenCalled();
+  });
+
+  it("resetting between tests disposes the previous listeners instead of leaking them", () => {
+    const staleLog = vi.fn();
+    initTelemetry(makeContext(), staleLog);
+    resetTelemetryForTests();
+
+    const currentLog = vi.fn();
+    initTelemetry(makeContext(), currentLog);
+    vscode.fireTelemetryEnabled(false);
+
+    // Exactly one listener responds: the current test's, not the stale one
+    // from before reset.
+    expect(staleLog).not.toHaveBeenCalled();
+    expect(currentLog).toHaveBeenCalledTimes(1);
   });
 });
 

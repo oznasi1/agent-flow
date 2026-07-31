@@ -130,6 +130,14 @@ export function disposeTelemetry(): void {
   state = undefined;
 }
 
+/** Identical to disposeTelemetry(): tests call this between cases so a stale
+ * initTelemetry() from a previous test never leaves its onDidChangeTelemetryEnabled
+ * / onDidChangeConfiguration listeners registered — those would otherwise still
+ * fire (alongside the current test's own listeners) against a later test's mocks.
+ * Safe to call when uninitialised, and safe to call more than once. Kept as a
+ * separate, differently-named export so call sites can say what they mean —
+ * "isolate the next test" vs. "the extension is deactivating" — even though
+ * the effect is the same. */
 export function resetTelemetryForTests(): void {
-  state = undefined;
+  disposeTelemetry();
 }

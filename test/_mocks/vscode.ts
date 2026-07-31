@@ -163,7 +163,9 @@ export const env = {
   isTelemetryEnabled: true,
   onDidChangeTelemetryEnabled: vi.fn((cb: (e: boolean) => void) => {
     telemetryEnabledCbs.push(cb);
-    return { dispose: vi.fn() };
+    // A real Disposable actually unregisters the listener — tests rely on this
+    // to prove a facade's dispose() path stops a stale listener from firing.
+    return { dispose: vi.fn(() => { telemetryEnabledCbs = telemetryEnabledCbs.filter((c) => c !== cb); }) };
   }),
   createTelemetryLogger: vi.fn((sender: any, opts?: any) => makeTelemetryLogger(sender, opts)),
   openExternal: vi.fn(async (_uri: unknown): Promise<boolean> => true),
@@ -179,7 +181,9 @@ export const workspace = {
   openTextDocument: vi.fn(async (_opts?: unknown): Promise<any> => ({})),
   onDidChangeConfiguration: vi.fn((cb: (e: { affectsConfiguration(section: string): boolean }) => void) => {
     configChangeCbs.push(cb);
-    return { dispose: vi.fn() };
+    // Same reasoning as env.onDidChangeTelemetryEnabled above: dispose() must
+    // really unregister, not just be a recorded no-op call.
+    return { dispose: vi.fn(() => { configChangeCbs = configChangeCbs.filter((c) => c !== cb); }) };
   }),
 };
 
