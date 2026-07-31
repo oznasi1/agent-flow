@@ -214,3 +214,56 @@ export function acknowledgeLanded(p: CompanyPaths, id: string): WriteResult {
   fs.rmSync(file, { force: true });
   return { ok: true };
 }
+
+/** True when `candidate` is `root` itself or sits beneath it. */
+export function isInside(root: string, candidate: string): boolean {
+  const r = path.resolve(root);
+  const c = path.resolve(candidate);
+  return c === r || c.startsWith(r + path.sep);
+}
+
+export interface ResolvedArtifact {
+  type: string;
+  content: string;
+  truncated: boolean;
+}
+
+const DEFAULT_MAX_BYTES = 262144;
+
+export function resolveArtifact(
+  p: CompanyPaths,
+  item: QueueItem,
+  maxBytes: number = DEFAULT_MAX_BYTES,
+): { ok: true; artifact: ResolvedArtifact } | { ok: false; error: string } {
+  const { type, path: rel, inline } = item.artifact;
+
+  if (typeof inline === "string" && inline.length > 0) {
+    return {
+      ok: true,
+      artifact: { type, content: inline.slice(0, maxBytes), truncated: inline.length > maxBytes },
+    };
+  }
+
+  if (typeof rel !== "string" || rel.length === 0) {
+    return { ok: false, error: "artifact has neither a path nor inline content" };
+  }
+
+  const resolved = path.resolve(p.repoRoot, rel);
+  if (!isInside(p.repoRoot, resolved)) {
+    return { ok: false, error: `artifact path resolves outside the repository: ${rel}` };
+  }
+
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(resolved);
+  } catch {
+    return { ok: false, error: `artifact file not found: ${rel}` };
+  }
+  if (!stat.isFile()) return { ok: false, error: `artifact path is not a file: ${rel}` };
+
+  const text = fs.readFileSync(resolved, "utf8");
+  return {
+    ok: true,
+    artifact: { type, content: text.slice(0, maxBytes), truncated: text.length > maxBytes },
+  };
+}
