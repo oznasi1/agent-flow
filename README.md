@@ -145,7 +145,8 @@ tree instead of injecting HTML, so a hostile file from a third-party marketplace
 anything; only `http`/`https` links become clickable.
 
 The panel is **read-only and offline** — it never writes to `~/.claude`, never runs
-`/plugin install`, and makes no network calls. **⟳ Rescan** re-reads the disk (so does
+`/plugin install`, and makes no network calls to populate itself (opening it is a
+tracked command like any other — see [Telemetry](#telemetry)). **⟳ Rescan** re-reads the disk (so does
 coming back to the panel after a pause), and **+ Add a marketplace** copies the
 `/plugin marketplace add owner/repo` command for you to run in Claude Code itself — new
 marketplaces show up here on the next scan.

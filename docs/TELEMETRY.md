@@ -59,8 +59,9 @@ your files, folders, repos, or workspace. The one string that is path-*shaped* i
 `dist/extension.js` — but that is the extension's own bundled file, identical
 across every install of Agent Flow, and carries nothing about you or your
 machine. Stack frames from anywhere else (VS Code itself, other extensions, your
-code) are filtered out before the digest is built — see `stackDigest()` in
-`posthog.ts`.
+code) are filtered out before the digest is built, and what remains is then
+truncated to at most 20 frames and 2,048 bytes (`MAX_STACK_FRAMES` /
+`MAX_STACK_BYTES` in `posthog.ts`) — see `stackDigest()` in `posthog.ts`.
 
 ## Identity
 
@@ -131,17 +132,28 @@ the registered logger's error path, with the stack already cleaned of
 cross-extension detail by VS Code itself before Agent Flow's own filtering (see
 [What is never collected](#what-is-never-collected)) runs on top of that.
 
-### A failing Take reports twice, on purpose
+### A failing Take can report twice, on purpose
 
-When a Take fails, **both** `take_completed{ outcome: "failed", failure_class,
-task_fp, flow_id }` and a separate `operation_failed{ op, failure_class,
-retryable }` are sent for the same failure. This is deliberate, not a bug or
-double-counting: `take_completed` is the funnel terminator — it carries
-`flow_id` so the whole Take can be reconstructed and always fires exactly once
-per Take, success or failure. `operation_failed` attributes the failure to a
-subsystem (`op`) so failures can be aggregated across every code path that can
-fail that way, not just Takes. Reading them as two separate incidents rather
-than one failure described from two angles would over-count.
+`take_completed{ outcome: "failed", failure_class, task_fp, flow_id }` always
+fires when a Take fails — it is the funnel terminator, carrying `flow_id` so
+the whole Take can be reconstructed, and it fires exactly once per Take,
+success or failure, regardless of how the Take was started. Whether a second,
+separate `operation_failed{ op, failure_class, retryable }` also fires for
+that same failure depends on the entry point:
+
+- **Started from the Deck** (a card's Take button, or a batch): the failure is
+  thrown back through `TasksViewProvider.onMessage`'s webview dispatcher,
+  whose catch block (`tasksView.ts:328-333`) is what emits `operation_failed`,
+  attributing the failure to a subsystem (`op`) so failures can be aggregated
+  across every code path that can fail that way, not just Takes. **Both**
+  events fire for the same failure here — reading them as two separate
+  incidents rather than one failure described from two angles would
+  over-count.
+- **Started from the command palette** (`agentFlow.takeTask` in
+  `extension.ts`): the command handler calls `TasksViewProvider.takeTask()`
+  directly, with no equivalent try/catch around it. A failure here is
+  reported only as `take_completed{ outcome: "failed" }` — `operation_failed`
+  does not fire, because nothing on this path calls `trackError`.
 
 ### Settings snapshot
 
