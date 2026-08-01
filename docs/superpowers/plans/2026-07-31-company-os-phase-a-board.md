@@ -20,6 +20,22 @@
 - **Follow the repo's test idiom:** `fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-…"))` in `beforeEach`, `fs.rmSync(..., { recursive: true, force: true })` in `afterEach`.
 - **Do not touch** `package.json`'s `version`, `package-lock.json`, or `CHANGELOG.md` — those belong to the orchestrator per `.claude/orchestrator/PROTOCOL.md`.
 
+## Samples superseded by review — read before re-running any task
+
+This plan was executed, reviewed task-by-task, and reviewed again as a whole
+branch. Six defects were found **in this document's own sample code** and fixed in
+the implementation. The code in `src/company/` is the reference; where a sample
+below disagrees with it, the sample is wrong. If you re-run a task, apply these:
+
+| Task | The sample's defect | What shipped instead |
+|---|---|---|
+| 1 | `types.ts` exports `KNOWN_KINDS`, `ARTIFACT_TYPES`, `KnownKind`, `KnownArtifactType` | Deleted — nothing ever referenced them. `RISKS` and `VERDICTS` stay; they back real runtime checks. |
+| 4 | `Decision` carries only `{id, verdict, note, at}`, and `recordVerdict` calls `fs.renameSync` into the archive unconditionally | `Decision` also carries `cycle`, `role`, `title` and `artifactSha256`; archiving refuses to overwrite an existing entry, checked **before** the log append so a refused verdict writes nothing. |
+| 5 | Lexical containment only, and a byte cap measured in UTF-16 code units | `realpathSync` re-check closes a symlink escape; truncation walks UTF-8 continuation bytes (the decode-and-guess version was quadratic — over 120s at the default cap). |
+| 6 | `route()` takes five parameters and authorizes on `query.get("key") !== ctx.token` | Six parameters including `secFetchSite`; mutating requests with a present, non-`same-origin` `Sec-Fetch-Site` are refused; the token compare is `crypto.timingSafeEqual`. |
+| 8 | No try/catch around the `route()` call | The whole handler body is wrapped from `new URL(...)` onward; a throw becomes a 500 rather than a process exit. |
+| 9 | Index-anchored selection, an unguarded poll, and a keyboard handler with no modifier check | Selection anchors to an item id; an in-progress note survives a poll; a modifier-carrying keypress records no verdict (⌘R used to file a silent reject). |
+
 ## File Structure
 
 | File | Responsibility |
