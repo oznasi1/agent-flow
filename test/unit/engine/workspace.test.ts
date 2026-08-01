@@ -755,21 +755,24 @@ describe("mergeReposIntoWorkspace", () => {
 });
 
 describe("openWorkspace — existing workspace", () => {
-  it("merges repos into the picked file and does not generate a new one", async () => {
-    // Picked workspace already contains centaur; account-service is missing.
+  it("merges exactly foldersToAdd — never anything derived from services", async () => {
+    // services names two repos; only the approved one may reach the file.
     readFileSync.mockImplementation((p) =>
       String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
     );
 
-    const result = await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/team.code-workspace" }));
+    const result = await openWorkspace(
+      baseReq({
+        existingWorkspaceFile: "/ws/team.code-workspace",
+        foldersToAdd: [{ name: "account-service", path: "/repos/account-service" }],
+      }),
+    );
 
     expect(result.mode).toBe("multiroot");
     expect(result.workspaceFile).toBe("/ws/team.code-workspace");
     expect(result.mergedRepos).toEqual(["account-service"]);
     expect(result.mergeFailed).toBeUndefined();
-    // No generated <KEY>.code-workspace was written.
     expect(writeArg((p) => p.endsWith("ASM-1.code-workspace"))).toBeUndefined();
-    // It opened the picked file.
     expect(result.opened).toContain("/ws/team.code-workspace");
   });
 
@@ -790,6 +793,83 @@ describe("openWorkspace — existing workspace", () => {
     const planCall = writeArg((p) => p.includes("/.agentflow/plans/"));
     expect(planCall).toBeDefined();
     expect(String(planCall![1])).toContain('"matchPath": "/ws/team.code-workspace"');
+  });
+
+  it("leaves the file untouched when foldersToAdd is absent", async () => {
+    // The user's workspace is their artifact: no approval, no write.
+    readFileSync.mockImplementation((p) =>
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+    );
+
+    const result = await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/team.code-workspace" }));
+
+    expect(writeArg((p) => p.endsWith(".code-workspace"))).toBeUndefined();
+    expect(result.mergedRepos).toEqual([]);
+    expect(result.mergeFailed).toBeUndefined();
+    expect(result.opened).toContain("/ws/team.code-workspace");
+  });
+
+  it("leaves the file untouched when foldersToAdd is empty", async () => {
+    readFileSync.mockImplementation((p) =>
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+    );
+    await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/team.code-workspace", foldersToAdd: [] }));
+    expect(writeArg((p) => p.endsWith(".code-workspace"))).toBeUndefined();
+  });
+
+  it("routes a worktree's mentions through its containing root", async () => {
+    execSync.mockReturnValue("src/export.py\n"); // git ls-files
+    readFileSync.mockImplementation((p) =>
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+    );
+
+    await openWorkspace(
+      baseReq({
+        services: [{ name: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-1", isGit: true }],
+        descriptionText: "fix `src/export.py`",
+        existingWorkspaceFile: "/ws/team.code-workspace",
+      }),
+    );
+
+    const planWrite = writeArg((p) => p.includes("/.agentflow/plans/"));
+    const plan = JSON.parse(String(planWrite![1]));
+    expect(plan.matches[0].prompt).toContain("@centaur/.claude/worktrees/ASM-1/src/export.py");
+  });
+
+  it("drops mentions for a repo that is inside no root", async () => {
+    execSync.mockReturnValue("src/export.py\n");
+    readFileSync.mockImplementation((p) =>
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+    );
+
+    await openWorkspace(
+      baseReq({
+        services: mkRepos(["infra"]),
+        descriptionText: "fix `src/export.py`",
+        existingWorkspaceFile: "/ws/team.code-workspace",
+      }),
+    );
+
+    const plan = JSON.parse(String(writeArg((p) => p.includes("/.agentflow/plans/"))![1]));
+    expect(plan.matches[0].prompt).not.toContain("Relevant files:");
+    expect(plan.matches[0].prompt).not.toContain("@infra");
+  });
+
+  it("uses an absolute {brief} path, which a non-root repo's relative form can't provide", async () => {
+    readFileSync.mockImplementation((p) =>
+      String(p).endsWith(".code-workspace") ? '{ "folders": [] }' : "",
+    );
+
+    await openWorkspace(
+      baseReq({
+        services: mkRepos(["centaur"]),
+        promptTemplate: "brief at {brief}",
+        existingWorkspaceFile: "/ws/team.code-workspace",
+      }),
+    );
+
+    const plan = JSON.parse(String(writeArg((p) => p.includes("/.agentflow/plans/"))![1]));
+    expect(plan.matches[0].prompt).toBe("brief at /repos/centaur/.pick-task/TASK.md");
   });
 });
 

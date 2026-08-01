@@ -44,6 +44,11 @@ export interface OpenRequest {
   seedAgent: boolean;
   openIn?: "new" | "current"; // "current" reuses the running window; default "new"
   existingWorkspaceFile?: string; // when set: open the task into this .code-workspace
+  /** Folders the user approved adding to `existingWorkspaceFile` — the ONLY thing
+   *  merged. Absent or empty leaves that file byte-identical. Never derived from
+   *  `services`: a saved workspace is the user's own artifact, and a taken ticket is
+   *  not consent to rewrite it. */
+  foldersToAdd?: { name: string; path: string }[];
   existingFolder?: string; // when set: focus this already-open folder window + seed it
   remoteControl?: boolean; // offer Claude Code's Remote Control in the opened session
   kind?: Run["kind"]; // what launched this run; omitted means a task
@@ -198,14 +203,26 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   const matches: PlanFile["matches"] = [];
   const effMode: WorkspaceMode = req.existingWorkspaceFile ? "multiroot" : req.existingFolder ? "per-window" : mode;
   if (req.existingWorkspaceFile) {
-    const merge = mergeReposIntoWorkspace(req.existingWorkspaceFile, services);
+    // Only the approved folders. An empty list still calls through, so an unparseable
+    // file is still reported as mergeFailed — it changes the mention mode below.
+    const merge = mergeReposIntoWorkspace(req.existingWorkspaceFile, req.foldersToAdd ?? []);
     mergedRepos = merge.added;
     mergeFailed = merge.ok ? undefined : true;
     workspaceFile = req.existingWorkspaceFile;
+    // Roots read AFTER the merge: a repo that is not a root of this window has no valid
+    // `@name/rel` form, and emitting one anyway resolves against a different checkout.
+    const roots = workspaceFolders(workspaceFile) ?? [];
     const mentions = services.flatMap((s) =>
-      (filesByRepo.get(s.name) ?? []).map((f) => mention("multiroot", s.name, f)),
+      (filesByRepo.get(s.name) ?? [])
+        .map((f) => mentionInWorkspace(roots, s.path, f))
+        .filter((m): m is string => !!m),
     );
-    matches.push({ matchPath: workspaceFile, prompt: agentPrompt(ticket, mentions, promptTemplate) });
+    // Absolute: {brief}'s default relative form names nothing when the repo isn't a root
+    // of the window (batchWorkspace does the same, for the same reason).
+    matches.push({
+      matchPath: workspaceFile,
+      prompt: agentPrompt(ticket, mentions, promptTemplate, briefs[0]?.path),
+    });
   } else if (req.existingFolder) {
     const folder = req.existingFolder;
     // Focus an already-open folder window and seed there. VS Code offers no way to
@@ -289,7 +306,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
  * if the file can't be read or safely parsed (caller opens it as-is + warns). */
 export function mergeReposIntoWorkspace(
   file: string,
-  repos: ServiceRef[],
+  repos: { name: string; path: string }[],
 ): { added: string[]; ok: boolean } {
   let text: string;
   try {
