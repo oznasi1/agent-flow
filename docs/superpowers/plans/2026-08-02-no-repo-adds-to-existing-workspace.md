@@ -164,8 +164,42 @@ tell 'nothing can be added safely' from 'empty, add everything'."
 The classifier that implements the dedup rule. Pure and read-only; it never writes.
 
 **Files:**
-- Modify: `src/engine/workspace.ts` (add after `workspaceFolders` from Task 1)
+- Modify: `src/engine/workspace.ts` (add after `workspaceFolders` from Task 1; **also amend `workspaceFolders`' shape guard** — see Step 0)
 - Test: `test/unit/engine/workspace.test.ts`
+
+**Step 0 — first, fix a guard Task 1 inherited from an under-specified brief.**
+
+Task 1 shipped `if (errors.length || … || !Array.isArray(doc.folders)) return undefined;`, which returns `undefined` for a `.code-workspace` whose `folders` key is **absent**. That file is perfectly parseable, and `mergeReposIntoWorkspace:304-312` has always treated it as fine (`doc.folders !== undefined && !Array.isArray(doc.folders)`). Left as-is, `planWorkspaceMerge` would report `ok:false` for it → no prompt and nothing added, contradicting this plan's own empty-folders behavior ("every candidate is `new` and the prompt lists them all").
+
+Reserve `undefined` for "cannot be read or safely parsed". In `src/engine/workspace.ts`, change `workspaceFolders`' guard to match the merge's, and default the list:
+
+```ts
+  if (
+    errors.length ||
+    !doc ||
+    typeof doc !== "object" ||
+    Array.isArray(doc) ||
+    (doc.folders !== undefined && !Array.isArray(doc.folders))
+  ) {
+    return undefined;
+  }
+  const wsDir = path.dirname(file);
+  return (doc.folders ?? [])
+    .filter(/* …unchanged from Task 1… */)
+```
+
+Task 1's existing tests all still hold: `'{ "folders": "nope" }'` is present-but-not-an-array, so it still returns `undefined`. `workspaceFolderPaths`' `[]`-on-failure contract is unaffected either way, so the pre-existing `nofolders.code-workspace` test keeps passing.
+
+Lock the new case in with one test added to Task 1's existing `describe("workspaceFolders", …)` block:
+
+```ts
+  it("treats an absent folders key as an empty workspace, not a parse failure", () => {
+    readFileSync.mockReturnValue('{ "settings": {} }');
+    expect(workspaceFolders("/ws/nofolders.code-workspace")).toEqual([]);
+  });
+```
+
+plus the `planWorkspaceMerge` counterpart in Step 1 below.
 
 **Interfaces:**
 - Consumes: `workspaceFolders(file): WorkspaceFolder[] | undefined` (Task 1).
@@ -258,6 +292,15 @@ describe("planWorkspaceMerge", () => {
       cand("centaur", "/repos/centaur"),
     ]);
     expect(plan.add.map((c) => c.repoName)).toEqual(["api", "centaur"]);
+    expect(plan.ok).toBe(true);
+  });
+
+  it("offers everything when the folders key is absent entirely", () => {
+    // A parseable file with no folders key is not a failure — mergeReposIntoWorkspace
+    // has always accepted it. ok:false here would mean no prompt and no add at all.
+    readFileSync.mockReturnValue('{ "settings": {} }');
+    const plan = planWorkspaceMerge("/ws/nofolders.code-workspace", [cand("api", "/repos/api")]);
+    expect(plan.add.map((c) => c.repoName)).toEqual(["api"]);
     expect(plan.ok).toBe(true);
   });
 
