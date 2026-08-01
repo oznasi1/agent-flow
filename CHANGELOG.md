@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.42] — 2026-08-02
+
+### Added
+
+- **Anonymous usage analytics**, so the features nobody uses can be found and
+  removed rather than maintained on a hunch. Events record *shape* only: which
+  feature was used, how many repos a task touched, which prompt mode was picked,
+  how long a flow took, and whether it succeeded, was cancelled or failed. They
+  never carry a repo name, ticket key, Jira project, summary, file path, prompt
+  text, or error message — the event catalogue is typed so that attaching one is a
+  compile error rather than a review oversight. Identity is VS Code's own
+  anonymous machine id; nothing new is minted, and the salt used to group a
+  ticket's events within one install never leaves the machine.
+
+  **Two independent switches turn it off, and either one is enough:** the new
+  `agentFlow.telemetry.enabled` setting, and VS Code's own
+  `telemetry.telemetryLevel` — which is honoured with no action required, so if
+  you already have telemetry off editor-wide, this sends nothing. Setting that
+  level to `error` sends failures only and no usage at all. Turning either off
+  mid-session discards whatever was queued rather than flushing it. A one-time,
+  non-blocking notice on first run says all of this, and
+  [`docs/TELEMETRY.md`](docs/TELEMETRY.md) lists every event, every property, and
+  everything that is never collected.
+
 ## [0.1.41] — 2026-07-30
 
 ### Changed
