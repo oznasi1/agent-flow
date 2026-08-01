@@ -78,6 +78,14 @@ export type TaskModeProp = "ask" | "stock" | "custom";
 /** Mirrors OpenTarget.kind in tasksView, not the `openIn` setting values: the
  * worktree decision is a separate branch downstream and gets its own boolean. */
 export type DestinationProp = "new" | "current" | "existing" | "live-folder";
+
+/** How a Take was started. Passed explicitly by the call site that knows —
+ * `onMessage`'s "take" case for a Deck card, `agentFlow.takeTask` for the command
+ * palette — never inferred from the shape of the arguments: a one-click Take from a
+ * collapsed card carries no repo selection and is still a card Take.
+ * `"batch"` is reserved: takeBatch is not instrumented in Phase 1, so nothing
+ * emits it yet. */
+export type TakeSource = "card" | "command" | "batch";
 export type WorkspaceModeProp = "multiroot" | "per-window";
 export type RepoSource = "preselected" | "destination" | "quickpick";
 export type Outcome = "launched" | "cancelled" | "failed";
@@ -135,15 +143,22 @@ export type UsageEvent =
   | { name: "extension_installed" }
   | ({ name: "extension_activated"; is_first_ever: boolean; has_jira_auth: boolean; is_configured: boolean } & SettingsSnapshot)
   | { name: "command_invoked"; command: CommandId }
-  | { name: "take_started"; flow_id: string; source: "card" | "command" | "batch"; task_fp: string; inferred_count: number }
+  | { name: "take_started"; flow_id: string; source: TakeSource; task_fp: string; inferred_count: number }
   | { name: "take_prompt_mode_picked"; flow_id: string; prompt_mode: PromptModeProp; is_custom_mode: boolean }
-  | { name: "take_destination_picked"; flow_id: string; destination: DestinationProp; workspace_mode: WorkspaceModeProp; used_worktree: boolean }
+  | { name: "take_destination_picked"; flow_id: string; destination: DestinationProp; workspace_mode: WorkspaceModeProp }
   // `accepted_inference` is optional: it's only meaningful in the "quickpick"
   // repo_source (inference doesn't run for "preselected"/"destination"), and
   // omitting it there keeps a genuine `false` (the quickpick branch rejecting
   // inference) distinguishable from "inference never ran".
   | { name: "take_repos_picked"; flow_id: string; repo_count: number; repo_source: RepoSource; accepted_inference?: boolean; inferred_count: number }
-  | { name: "take_completed"; flow_id: string; outcome: Outcome; destination?: DestinationProp; prompt_mode: PromptModeProp; repo_count: number; duration_ms: number; failure_class?: FailureClass; task_fp: string };
+  // `used_worktree` lives here, not on take_destination_picked: the decision is
+  // made later, inside launch(), and on the shipped default (`agentFlow.worktree:
+  // "ask"`) it is the user's answer to a QuickPick — not something the setting
+  // alone determines. Optional because a Take can end before that QuickPick is
+  // answered (cancelled at the prompt-mode or destination step, or a Jira failure
+  // in between), and omitting it there keeps "no decision was made" distinct from
+  // a genuine "no worktree".
+  | { name: "take_completed"; flow_id: string; outcome: Outcome; destination?: DestinationProp; prompt_mode: PromptModeProp; repo_count: number; duration_ms: number; used_worktree?: boolean; failure_class?: FailureClass; task_fp: string };
 
 /** Sent via logError — still delivered at telemetry level "error". */
 export type ErrorEvent =

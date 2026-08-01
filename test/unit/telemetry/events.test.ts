@@ -34,9 +34,9 @@ const SAMPLES = [
   { name: "command_invoked", command: "openDeck" },
   { name: "take_started", flow_id: "f1", source: "card", task_fp: "0123456789abcdef", inferred_count: 2 },
   { name: "take_prompt_mode_picked", flow_id: "f1", prompt_mode: "tdd", is_custom_mode: false },
-  { name: "take_destination_picked", flow_id: "f1", destination: "new", workspace_mode: "multiroot", used_worktree: false },
+  { name: "take_destination_picked", flow_id: "f1", destination: "new", workspace_mode: "multiroot" },
   { name: "take_repos_picked", flow_id: "f1", repo_count: 3, repo_source: "quickpick", accepted_inference: true, inferred_count: 2 },
-  { name: "take_completed", flow_id: "f1", outcome: "launched", destination: "new", prompt_mode: "tdd", repo_count: 3, duration_ms: 4200, task_fp: "0123456789abcdef" },
+  { name: "take_completed", flow_id: "f1", outcome: "launched", destination: "new", prompt_mode: "tdd", repo_count: 3, duration_ms: 4200, used_worktree: true, task_fp: "0123456789abcdef" },
   { name: "operation_failed", op: "git_worktree", failure_class: "conflict", retryable: false },
   { name: "unhandled_error", error_class: "TypeError", stack_digest: "at f (dist/extension.js:1:2)" },
 ] satisfies AnalyticsEvent[];

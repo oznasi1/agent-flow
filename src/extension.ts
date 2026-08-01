@@ -82,7 +82,8 @@ export function activate(context: vscode.ExtensionContext): void {
         prompt: `Ticket key (e.g. ${exampleKey})`,
         ignoreFocusOut: true,
       });
-      if (key) await provider.takeTask(key.trim().toUpperCase());
+      // Palette entry point — the only caller that knows this Take is a command.
+      if (key) await provider.takeTask(key.trim().toUpperCase(), "command");
     }),
 
     registerTracked("agentFlow.openDeck", () => DeckPanel.show(context, auth, log)),

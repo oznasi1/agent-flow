@@ -14,12 +14,6 @@ interface State {
   identity: Identity;
   log: (m: string) => void;
   disposables: vscode.Disposable[];
-  /** Mixed into every event's properties ourselves rather than left solely to
-   * `additionalCommonProperties`: VS Code's real TelemetryLogger merges that in
-   * on the way to the sender, after our own call to logUsage/logError has
-   * already happened — too late for anything (like a test double) that only
-   * observes the arguments of that call. */
-  commonProperties: Record<string, unknown>;
 }
 
 let state: State | undefined;
@@ -48,7 +42,6 @@ function settingEnabled(): boolean {
 export function initTelemetry(context: vscode.ExtensionContext, log: (m: string) => void): void {
   if (state) return;
   const identity = createIdentity(context.globalState);
-  const sender = createPostHogSender({ distinctId: identity.distinctId, log });
   const commonProperties = {
     session_id: identity.sessionId,
     env_type: context.extensionMode === vscode.ExtensionMode.Production ? "production" : "development",
@@ -57,12 +50,27 @@ export function initTelemetry(context: vscode.ExtensionContext, log: (m: string)
     remote_name: vscode.env.remoteName ?? "local",
     ui_kind: vscode.env.uiKind === vscode.UIKind.Web ? "web" : "desktop",
   };
-  // Passed through too so a real host's own TelemetryLogger mixes these into
-  // whatever it additionally forwards (e.g. its own built-in properties);
-  // harmless duplication with the manual merge in track()/trackError() below.
-  const logger = vscode.env.createTelemetryLogger(sender, { additionalCommonProperties: commonProperties });
+  // The sender owns both the consent gate and the common properties, because it is
+  // the only component every path reaches: VS Code routes unhandled extension-host
+  // errors to `sender.sendErrorData` itself, without passing through track() /
+  // trackError() or through `additionalCommonProperties`. Handing the sender
+  // `settingEnabled` (the function, re-read per event) keeps re-enabling
+  // mid-session working — nothing here is captured once and cached.
+  const sender = createPostHogSender({
+    distinctId: identity.distinctId,
+    log,
+    isConsented: settingEnabled,
+    commonProperties,
+  });
+  // No `additionalCommonProperties`: it would merge the same keys a second time
+  // on the logUsage/logError(name, data) paths only, which is exactly the
+  // non-uniformity the sender-side merge above exists to remove.
+  const logger = vscode.env.createTelemetryLogger(sender);
 
   // Consent withdrawn mid-session must discard what is queued, not flush it.
+  // Stopping *new* events is the sender's isConsented gate, not this handler's
+  // job — deliberately not sender.dispose(), which is a permanent off switch and
+  // would break re-enabling the setting later in the same session.
   // We log this ourselves rather than relying solely on PostHogSender.drop()'s
   // own (queue-non-empty-gated) message: until POSTHOG_API_KEY is a real key,
   // the sender no-ops and never queues anything, so that message would never
@@ -79,7 +87,7 @@ export function initTelemetry(context: vscode.ExtensionContext, log: (m: string)
     }),
   ];
 
-  state = { logger, sender, identity, log, disposables, commonProperties };
+  state = { logger, sender, identity, log, disposables };
 }
 
 /** Every key across the whole event catalog, distributed over the union so
@@ -98,8 +106,10 @@ type NoExcess<E> = E & Record<Exclude<keyof E, KeysOfUnion<AnalyticsEvent>>, nev
 export function track<E extends UsageEvent>(event: NoExcess<E>): void {
   if (!state || !settingEnabled() || !state.logger.isUsageEnabled) return;
   try {
+    // Only the event's own properties: the sender attaches the common ones to
+    // every event it queues, so merging them here too would just duplicate them.
     const { name, ...properties } = event as UsageEvent;
-    state.logger.logUsage(name, { ...state.commonProperties, ...properties });
+    state.logger.logUsage(name, properties);
   } catch (e) {
     state.log(`telemetry: track failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -109,7 +119,7 @@ export function trackError<E extends ErrorEvent>(event: NoExcess<E>): void {
   if (!state || !settingEnabled() || !state.logger.isErrorsEnabled) return;
   try {
     const { name, ...properties } = event as ErrorEvent;
-    state.logger.logError(name, { ...state.commonProperties, ...properties });
+    state.logger.logError(name, properties);
   } catch (e) {
     state.log(`telemetry: trackError failed: ${e instanceof Error ? e.message : String(e)}`);
   }

@@ -11,7 +11,17 @@ import {
 function makeDeps(over: Partial<Parameters<typeof createPostHogSender>[0]> = {}) {
   const fetchImpl = vi.fn<typeof fetch>(async () => new Response("ok", { status: 200 }));
   return {
-    deps: { apiKey: "phc_test", host: "https://ph.test", distinctId: "m1", log: vi.fn(), fetchImpl: fetchImpl as unknown as typeof fetch, now: () => 1_700_000_000_000, ...over },
+    deps: {
+      apiKey: "phc_test",
+      host: "https://ph.test",
+      distinctId: "m1",
+      log: vi.fn(),
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      now: () => 1_700_000_000_000,
+      isConsented: () => true,
+      commonProperties: { session_id: "s1", env_type: "development" },
+      ...over,
+    },
     fetchImpl,
   };
 }
@@ -110,6 +120,63 @@ describe("createPostHogSender", () => {
     await sender.flush();
     const [, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
     expect(init.signal).toBeDefined();
+  });
+
+  it("sends nothing at all while Agent Flow's own consent gate is off — including the host's unhandled-error path", async () => {
+    // sendErrorData is what VS Code calls by itself for an error escaping the
+    // extension host (TelemetryLoggerOptions.ignoreUnhandledErrors defaults to
+    // false), so it never passes through track()/trackError() and their gates.
+    // enqueue() is the only choke point that can stop it.
+    const { deps, fetchImpl } = makeDeps({ isConsented: () => false });
+    const sender = createPostHogSender(deps);
+    sender.sendErrorData(new Error("kaboom"), {});
+    await fill(sender, BATCH_SIZE);
+    await sender.flush();
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("resumes sending when the consent gate flips back on mid-session", async () => {
+    // The gate is a function, read per event: re-enabling agentFlow.telemetry.enabled
+    // in the same window must start working again, which is why consent withdrawal
+    // must never dispose() the sender.
+    let consented = false;
+    const { deps, fetchImpl } = makeDeps({ isConsented: () => consented });
+    const sender = createPostHogSender(deps);
+    sender.sendErrorData(new Error("dropped while off"), {});
+    await sender.flush();
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    consented = true;
+    sender.sendErrorData(new Error("sent once back on"), {});
+    await sender.flush();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const body = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body));
+    expect(body.batch).toHaveLength(1); // only the post-re-enable event, not the withheld one
+  });
+
+  it("attaches the common properties to every event, whichever path queued it", async () => {
+    const { deps, fetchImpl } = makeDeps();
+    const sender = createPostHogSender(deps);
+    sender.sendEventData("take_started", { flow_id: "f1" });
+    sender.sendErrorData(new Error("kaboom"), {}); // the host's own error path
+    await sender.flush();
+    const body = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body));
+    const unhandled = body.batch.find((e: any) => e.event === "unhandled_error");
+    expect(unhandled.properties.env_type).toBe("development");
+    expect(unhandled.properties.session_id).toBe("s1");
+    const usage = body.batch.find((e: any) => e.event === "take_started");
+    expect(usage.properties.env_type).toBe("development");
+    expect(usage.properties.session_id).toBe("s1");
+    expect(usage.properties.flow_id).toBe("f1");
+  });
+
+  it("lets an event's own properties win over a common property of the same name", async () => {
+    const { deps, fetchImpl } = makeDeps({ commonProperties: { env_type: "development", repo_count: 0 } });
+    const sender = createPostHogSender(deps);
+    sender.sendEventData("take_completed", { repo_count: 3 });
+    await sender.flush();
+    const body = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body));
+    expect(body.batch[0].properties.repo_count).toBe(3);
   });
 
   it("sends errors through sendErrorData as unhandled_error", async () => {

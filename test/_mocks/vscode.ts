@@ -120,8 +120,16 @@ export function fireConfigurationChanged(affected: string | string[]): void {
 export const ExtensionMode = { Production: 1, Development: 2, Test: 3 } as const;
 
 /** Minimal stand-in for VS Code's TelemetryLogger: gates on `env.isTelemetryEnabled`,
- * mixes `additionalCommonProperties` into every payload, and forwards to the sender.
- * `logError(Error)` goes to `sendErrorData`; `logError(string, data)` to `sendEventData`. */
+ * mixes `additionalCommonProperties` into the *named-event* payloads, and forwards to
+ * the sender. `logError(Error)` goes to `sendErrorData`; `logError(string, data)` to
+ * `sendEventData`.
+ *
+ * The `logError(Error)` branch deliberately does NOT merge
+ * `additionalCommonProperties`, because real VS Code doesn't either: that branch —
+ * which is also the one the host uses on its own for errors escaping the extension
+ * host — hands the sender only the caller's `data`. A mock that merged them there
+ * would hide exactly that gap. Common properties are the sender's job (see
+ * PostHogSenderDeps.commonProperties). */
 function makeTelemetryLogger(sender: any, opts?: any) {
   const common = opts?.additionalCommonProperties ?? {};
   return {
@@ -135,7 +143,7 @@ function makeTelemetryLogger(sender: any, opts?: any) {
     logError: vi.fn((nameOrErr: string | Error, data?: Record<string, any>) => {
       if (!env.isTelemetryEnabled) return;
       if (typeof nameOrErr === "string") sender.sendEventData(nameOrErr, { ...common, ...data });
-      else sender.sendErrorData(nameOrErr, { ...common, ...data });
+      else sender.sendErrorData(nameOrErr, data);
     }),
     dispose: vi.fn(() => { void sender.flush?.(); }),
   };

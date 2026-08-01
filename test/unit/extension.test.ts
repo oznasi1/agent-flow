@@ -156,12 +156,15 @@ describe("activate", () => {
     expect(window.showInformationMessage).toHaveBeenCalled();
   });
 
-  it("takeTask command normalizes the entered key and delegates", async () => {
+  it("takeTask command normalizes the entered key and delegates, tagging the Take as a command (not a card)", async () => {
+    // The palette is the only caller that can know this: takeTask must be told
+    // "command" explicitly, since a palette Take is indistinguishable from a
+    // collapsed-card Take by its arguments alone (both carry no preselection).
     vi.mocked(window.showInputBox).mockResolvedValue("  asm-1 ");
     const { context } = fakeContext();
     activate(context);
     await cmd("agentFlow.takeTask")!();
-    expect(providerStub.takeTask).toHaveBeenCalledWith("ASM-1");
+    expect(providerStub.takeTask).toHaveBeenCalledWith("ASM-1", "command");
   });
 
   it("takeTask command does nothing when the input is cancelled", async () => {

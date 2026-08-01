@@ -19,7 +19,11 @@ sending — telemetry code only runs when **both** are satisfied.
 - **`agentFlow.telemetry.enabled`** (default `true`) — Agent Flow's own setting.
   Turn it off in Settings, or click **Turn off** on the first-run notice, and
   nothing further is sent for this install. Turning it off mid-session discards
-  whatever is currently queued in memory rather than flushing it first.
+  whatever is currently queued in memory rather than flushing it first. The check
+  sits in the sender's queueing step, which every event crosses — including
+  `unhandled_error`, which VS Code hands to the sender itself without Agent Flow's
+  own code being involved. Turning the setting back on resumes sending in the same
+  window; the setting is re-read for each event rather than captured at startup.
 - **`telemetry.telemetryLevel`** — VS Code's own built-in setting, which Agent
   Flow always honours regardless of its own setting above. At `"off"`, nothing is
   sent. At `"error"`, only the two error events below (`operation_failed`,
@@ -87,7 +91,9 @@ Attached automatically to **every** event, usage and error alike: `session_id`,
 `env_type` (`"production"` or `"development"`), `app_name`, `app_host`,
 `remote_name` (or `"local"`), `ui_kind` (`"web"` or `"desktop"`), and
 `distinct_id`. These describe the editor environment, never anything about your
-project.
+project. They are attached by the sender as it queues each event, so the count is
+the same for an event Agent Flow sends deliberately and for an `unhandled_error`
+VS Code routes to the sender on its own.
 
 ### Usage events
 
@@ -98,11 +104,11 @@ Suppressed entirely when `telemetry.telemetryLevel` is `"error"` (or lower).
 | `extension_installed` | *(none)* | Once per machine, on the first activation ever. |
 | `extension_activated` | `is_first_ever: boolean`, `has_jira_auth: boolean`, `is_configured: boolean`, plus the full settings snapshot (see [Settings snapshot](#settings-snapshot) below) | Every activation, after the sign-in check resolves. |
 | `command_invoked` | `command`: one of `"refresh"`, `"setup"`, `"doctor"`, `"signIn"`, `"signOut"`, `"takeTask"`, `"openDeck"`, `"openMarketplace"` | Whenever one of Agent Flow's commands runs. |
-| `take_started` | `flow_id: string` (random UUID), `source`: `"card"` \| `"command"` \| `"batch"`, `task_fp: string`, `inferred_count: number` | A Take begins. |
+| `take_started` | `flow_id: string` (random UUID), `source`: `"card"` (a Deck card's Take button, expanded or not) \| `"command"` (the `agentFlow.takeTask` palette command) \| `"batch"`, `task_fp: string`, `inferred_count: number` | A Take begins. `source` is passed in by whichever entry point started the Take, not inferred. `"batch"` is reserved and unused today: `takeBatch` is not instrumented in Phase 1, so no event carries it. |
 | `take_prompt_mode_picked` | `flow_id`, `prompt_mode`: a stock mode id (`"plan"`, `"implementation"`, `"tdd"`, `"investigate"`, `"orchestrator"`, `"refine"`) or `"custom"`, `is_custom_mode: boolean` | The prompt mode for this Take is resolved. |
-| `take_destination_picked` | `flow_id`, `destination`: `"new"` \| `"current"` \| `"existing"` \| `"live-folder"`, `workspace_mode`: `"multiroot"` \| `"per-window"`, `used_worktree: boolean` | The open target for this Take is resolved. |
+| `take_destination_picked` | `flow_id`, `destination`: `"new"` \| `"current"` \| `"existing"` \| `"live-folder"`, `workspace_mode`: `"multiroot"` \| `"per-window"` | The open target for this Take is resolved. |
 | `take_repos_picked` | `flow_id`, `repo_count: number`, `repo_source`: `"preselected"` \| `"destination"` \| `"quickpick"`, `accepted_inference?: boolean`, `inferred_count: number` | The repo set for this Take is resolved. `accepted_inference` is present only for the `"quickpick"` source, where it's meaningful; omitted (not `false`) otherwise, so "inference never ran" stays distinguishable from a genuine rejection. |
-| `take_completed` | `flow_id`, `outcome`: `"launched"` \| `"cancelled"` \| `"failed"`, `destination?`, `prompt_mode`, `repo_count`, `duration_ms: number`, `failure_class?` (see [Errors](#errors--operation_failed-and-unhandled_error)), `task_fp` | The Take funnel ends, one way or another — this is the funnel terminator. |
+| `take_completed` | `flow_id`, `outcome`: `"launched"` \| `"cancelled"` \| `"failed"`, `destination?`, `prompt_mode`, `repo_count`, `duration_ms: number`, `used_worktree?: boolean`, `failure_class?` (see [Errors](#errors--operation_failed-and-unhandled_error)), `task_fp` | The Take funnel ends, one way or another — this is the funnel terminator. `used_worktree` is the decision actually applied, which on the shipped `agentFlow.worktree: "ask"` default is the user's answer to a QuickPick; it is omitted (not `false`) when the Take ended before that question was answered, so "never asked" stays distinguishable from "asked, declined". |
 
 ### Error events
 
@@ -134,16 +140,20 @@ cross-extension detail by VS Code itself before Agent Flow's own filtering (see
 
 ### A failing Take can report twice, on purpose
 
-`take_completed{ outcome: "failed", failure_class, task_fp, flow_id }` always
-fires when a Take fails — it is the funnel terminator, carrying `flow_id` so
-the whole Take can be reconstructed, and it fires exactly once per Take,
-success or failure, regardless of how the Take was started. Whether a second,
-separate `operation_failed{ op, failure_class, retryable }` also fires for
-that same failure depends on the entry point:
+`take_completed{ outcome: "failed", failure_class, task_fp, flow_id }` fires
+when a Take fails — it is the funnel terminator, carrying `flow_id` so the whole
+Take can be reconstructed. Exactly one `take_completed` follows every
+`take_started`, whatever happens in between and however the Take was started:
+every step after `take_started` — the prompt-mode pick, the ticket read, the
+destination and repo picks, the launch — runs inside the same `try`, so a Jira
+failure while reading the ticket terminates the funnel as a *failure* rather than
+looking like the user walking away. Whether a second, separate `operation_failed{
+op, failure_class, retryable }` also fires for that same failure depends on the
+entry point:
 
-- **Started from the Deck** (a card's Take button, or a batch): the failure is
+- **Started from the Deck** (a card's Take button): the failure is
   thrown back through `TasksViewProvider.onMessage`'s webview dispatcher,
-  whose catch block (`tasksView.ts:328-333`) is what emits `operation_failed`,
+  whose catch block (`tasksView.ts:330-335`) is what emits `operation_failed`,
   attributing the failure to a subsystem (`op`) so failures can be aggregated
   across every code path that can fail that way, not just Takes. **Both**
   events fire for the same failure here — reading them as two separate
@@ -179,7 +189,9 @@ transmitted and never silently mapped to a real default (e.g. `"auto"`) either
 saying what that value is, so that case stays distinguishable from a user who
 genuinely left the setting at its default.
 
-## Last updated
+## Keeping this page true
 
-For extension version **0.1.41**. If the event catalog changes, this file (and
-the drift test that checks it) must change with it.
+This page describes the event catalog as it stands in this repo, not a particular
+release: no version is stamped here, because a hard-coded number goes stale the
+moment the next version ships. If the event catalog changes, this file (and the
+drift test that checks it, `test/unit/telemetry/docs.test.ts`) must change with it.

@@ -152,11 +152,18 @@ category filters — need explicit events posted up from the webview.
 **Two independent gates**, both must be on:
 
 1. VS Code's `telemetry.telemetryLevel`, enforced inside `TelemetryLogger`. No code of ours.
-2. `agentFlow.telemetry.enabled`, default `true`.
+2. `agentFlow.telemetry.enabled`, default `true`, enforced in the **sender's queueing step**
+   — not in the `track()` / `trackError()` facade alone. Corrected during the whole-branch
+   review: `TelemetryLoggerOptions.ignoreUnhandledErrors` defaults to `false`, so VS Code
+   forwards errors escaping the extension host straight to `sender.sendErrorData`, a path
+   that never passes through the facade. The queueing step is the one choke point every
+   path crosses, so the gate belongs there.
 
-Both are live-reactive (`onDidChangeEnableStates` plus a config listener). Flipping either
+Both are live-reactive (`onDidChangeEnableStates` plus a config listener) and re-read per
+event, never cached, so re-enabling either mid-session resumes sending. Flipping either
 off **drops the queued batch rather than flushing it** — turning it off mid-session means
-the preceding minutes never leave the machine.
+the preceding minutes never leave the machine — and deliberately does *not* dispose the
+sender, which would be a permanent off switch for the rest of the window.
 
 **First-run notice.** Non-modal `showInformationMessage`, shown once ever (keyed in
 `globalState`): *"Agent Flow sends anonymous usage events to help decide what to build
@@ -203,10 +210,10 @@ version.
 |---|---|
 | `take_started` | `source`: card · command · batch, `task_fp`, `inferred_count` |
 | `take_repos_picked` | `repo_count`, `repo_source`: preselected · destination · quickpick, `accepted_inference`, `inferred_count` |
-| `take_destination_picked` | `destination`: new · current · existing · live-folder, `workspace_mode`: multiroot · per-window, `used_worktree` |
+| `take_destination_picked` | `destination`: new · current · existing · live-folder, `workspace_mode`: multiroot · per-window |
 | `take_prompt_mode_picked` | `prompt_mode`, `is_custom_mode` |
 | `take_layout_picked` | `layout`: separate · shared *(batch flows only)* |
-| `take_completed` | `outcome`: launched · cancelled · failed, `destination?`, `prompt_mode`, `repo_count`, `duration_ms`, `failure_class?`, `task_fp` |
+| `take_completed` | `outcome`: launched · cancelled · failed, `destination?`, `prompt_mode`, `repo_count`, `duration_ms`, `used_worktree?`, `failure_class?`, `task_fp` |
 
 `repo_source` and `destination` are named for what the code can actually observe.
 `resolveKickoff` reaches its repo set three ways — an in-card preselection, a destination
@@ -218,6 +225,20 @@ reject inference, so `accepted_inference` is meaningful only when
 the worktree decision is a separate branch downstream — hence its own `used_worktree`
 boolean. `destination` is absent on a `take_completed` that was cancelled before the
 destination pick.
+
+**`used_worktree` rides on `take_completed`, not `take_destination_picked`** (corrected
+during the whole-branch review: `take_destination_picked` fires inside `resolveKickoff`,
+before the decision exists, and on the shipped `agentFlow.worktree: "ask"` default the
+decision is a QuickPick answered later, inside `launch()` — reading the setting at
+destination time reported the wrong value for every Take on a stock install). It is
+optional and omitted when a Take ends before that question is answered, so "never asked"
+stays distinguishable from "asked, declined".
+
+**`source` is passed in by the entry point that knows it** — the webview dispatcher for a
+card Take, the `agentFlow.takeTask` command for a palette Take — never inferred from
+whether the call carried an in-card repo selection: a one-click Take from a collapsed card
+carries none and is still a card Take. `batch` is reserved; `takeBatch` is uninstrumented
+in Phase 1.
 
 **`prompt_mode` is not the raw id.** `agentFlow.promptModes` is user-configurable, so a
 custom mode's id is a user-authored string — someone could name one `acme-billing-hotfix`.
@@ -268,6 +289,13 @@ incidental data can reach it. `unhandled_error` is the safety net for what we di
 predict. Its `stack_digest` is the stack reduced to `dist/extension.js:line:col` frames —
 our own bundled code, absolute paths stripped, frames above the first of ours dropped,
 truncated to 20 frames or 2 KB, and **never** `error.message`.
+
+`unhandled_error` carries the common properties (`env_type`, `session_id`, …) like every
+other event, which is only true because the **sender** attaches them as it queues. The
+host's `additionalCommonProperties` reaches the `logUsage` / `logError(name, data)` payloads
+only, never the `logError(Error)` → `sendErrorData` path VS Code drives itself — so relying
+on it would have left the crash stream without `env_type`, and development crashes
+unfilterable. Corrected during the whole-branch review.
 
 ### Settings snapshot on `extension_activated`
 
@@ -324,8 +352,9 @@ thresholds.
 
 | File | What it pins |
 |---|---|
-| `posthog.test.ts` | The PostHog `/batch/` body contract; batch-at-20; flush-at-10s; retry-once-then-drop; 4xx no retry; abort at 5s; queue cap drops oldest. Injected `fetch` + clock. |
-| `telemetry.test.ts` | Both gates independently: VS Code level off → silence; setting off → silence; flip off mid-session → queue dropped, not flushed; a throwing sender never reaches the caller; common properties present. |
+| `posthog.test.ts` | The PostHog `/batch/` body contract; batch-at-20; flush-at-10s; retry-once-then-drop; 4xx no retry; abort at 5s; queue cap drops oldest; the consent gate blocking even `sendErrorData`, and re-enabling resuming; common properties on every queued event. Injected `fetch` + clock. |
+| `telemetry.test.ts` | Both gates independently: VS Code level off → silence; setting off → silence; flip off mid-session → queue dropped, not flushed; a throwing sender never reaches the caller. |
+| `telemetryWiring.test.ts` | What `initTelemetry` hands the sender: a live (per-event, uncached) consent gate and the common properties — the two things the facade no longer does itself. Uses a stub sender, since the shipped placeholder key makes a real one no-op before it reads its deps. |
 | `identity.test.ts` | Salt created once, reused, and **asserted absent from every serialized payload**. Fingerprints stable per salt, divergent across salts. |
 | `events.test.ts` | The privacy guarantee. Runtime: walk sample events, assert every string value is a declared literal-union member or a 16-char hex fingerprint. Compile-time: `@ts-expect-error` on `track({ name: "take_completed", repo: "acme-billing" })`. |
 | `notice.test.ts` | Shown once ever; suppressed while setup runs; *Turn off* writes the global setting. |

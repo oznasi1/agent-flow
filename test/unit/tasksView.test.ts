@@ -67,6 +67,7 @@ import { openSharedWorkspace } from "../../src/engine/batchWorkspace";
 import { readLiveWindows, windowIdentity } from "../../src/engine/presence";
 import { JiraClient, JiraAuthError, markJiraNetworkFailure } from "../../src/jira/client";
 import { TasksViewProvider } from "../../src/tasksView";
+import type { TakeSource } from "../../src/telemetry/events";
 import type { InboundMessage, OutboundMessage } from "../../src/types";
 import { SLACK_DM_SENTENCE } from "../../src/engine/prompt";
 
@@ -1028,7 +1029,7 @@ describe("error handling", () => {
 describe("takeTask", () => {
   it("opens the workspace for a preselected repo and toasts success", async () => {
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
         ticket: expect.objectContaining({ key: "ASM-1" }),
@@ -1042,7 +1043,7 @@ describe("takeTask", () => {
   it("errors when no repos are checked out", async () => {
     vi.mocked(discoverRepos).mockReturnValue([]);
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
@@ -1050,7 +1051,7 @@ describe("takeTask", () => {
   it("aborts when sign-in is declined", async () => {
     vi.mocked(commands.executeCommand).mockResolvedValue(false);
     const { provider } = setup({ authed: false });
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 
@@ -1059,14 +1060,14 @@ describe("takeTask", () => {
     vi.mocked(discoverRepos).mockReturnValue(repos);
     vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1");
+    await provider.takeTask("ASM-1", "command");
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ services: [repos[0]] }));
   });
 
   it("aborts when the repo QuickPick is cancelled", async () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
     const { provider } = setup();
-    await provider.takeTask("ASM-1");
+    await provider.takeTask("ASM-1", "command");
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 
@@ -1074,7 +1075,7 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: CFG.promptModes[0] } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ promptTemplate: "P {key}" }));
   });
 
@@ -1086,7 +1087,7 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask", promptModes: modes });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: modes[0] } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
 
     const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string; detail?: string }[];
     expect(items.map((i) => ({ label: i.label, detail: i.detail }))).toEqual([
@@ -1100,7 +1101,7 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask", promptModes: modes });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: modes[0] } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
 
     const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { detail?: string }[];
     expect(items[0].detail).toBeUndefined();
@@ -1110,7 +1111,7 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel the prompt-mode pick
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(clientStub.getDetail).not.toHaveBeenCalled(); // aborted before resolveKickoff read the ticket
     expect(openWorkspace).not.toHaveBeenCalled();
   });
@@ -1118,7 +1119,7 @@ describe("takeTask", () => {
   it("creates worktrees when worktree=always", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "always" });
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(createWorktrees).toHaveBeenCalled();
   });
 
@@ -1126,7 +1127,7 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(createWorktrees).toHaveBeenCalled();
   });
 
@@ -1134,7 +1135,7 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, workspaceMode: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: "multiroot" } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service", "centaur"]);
+    await provider.takeTask("ASM-1", "card", ["account-service", "centaur"]);
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "multiroot" }));
   });
 
@@ -1148,7 +1149,7 @@ describe("takeTask", () => {
       remoteControl: false,
     });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", ["account-service", "centaur"]);
+    await provider.takeTask("ASM-1", "card", ["account-service", "centaur"]);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
     expect(toast.message).toContain(".code-workspace");
   });
@@ -1159,7 +1160,7 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "new" } } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", ["account-service"]);
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
 
       expect(listWorkspaceFiles).not.toHaveBeenCalled();
       expect(openWorkspace).toHaveBeenCalledWith(
@@ -1172,7 +1173,7 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", ["account-service"]);
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
 
       expect(openWorkspace).not.toHaveBeenCalled();
     });
@@ -1189,7 +1190,7 @@ describe("takeTask", () => {
         .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", ["account-service"]);
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
 
       expect(listWorkspaceFiles).toHaveBeenCalledWith("/ws");
       expect(openWorkspace).toHaveBeenCalledWith(
@@ -1211,7 +1212,7 @@ describe("takeTask", () => {
       ] as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", ["account-service"]);
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({ existingWorkspaceFile: "/elsewhere/x.code-workspace" }),
@@ -1223,7 +1224,7 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", ["account-service"]);
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
 
       expect(openWorkspace).not.toHaveBeenCalled();
     });
@@ -1234,7 +1235,7 @@ describe("takeTask", () => {
       vi.mocked(window.showOpenDialog).mockResolvedValueOnce(undefined);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", ["account-service"]);
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
 
       expect(openWorkspace).not.toHaveBeenCalled();
     });
@@ -1245,7 +1246,7 @@ describe("takeTask", () => {
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", ["account-service"]);
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({ openIn: "current", existingWorkspaceFile: undefined }),
@@ -1268,7 +1269,7 @@ describe("takeTask", () => {
       });
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", ["account-service"]);
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
 
       const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
       expect(toast.level).toBe("info");
@@ -1291,7 +1292,7 @@ describe("takeTask", () => {
       });
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", ["account-service"]);
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
 
       const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
       expect(toast.level).toBe("success");
@@ -1310,7 +1311,7 @@ describe("takeTask", () => {
         .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1"); // no preselected repos
+      await provider.takeTask("ASM-1", "command"); // no preselected repos
 
       expect(window.showQuickPick).toHaveBeenCalledTimes(2); // no third (service) pick
       expect(openWorkspace).toHaveBeenCalledWith(
@@ -1328,7 +1329,7 @@ describe("takeTask", () => {
       );
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1"); // no preselected repos
+      await provider.takeTask("ASM-1", "command"); // no preselected repos
 
       expect(window.showQuickPick).toHaveBeenCalledTimes(1); // destination pick only
       expect(openWorkspace).toHaveBeenCalledWith(
@@ -1348,7 +1349,7 @@ describe("takeTask", () => {
         .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", ["account-service"]); // preselected wins
+      await provider.takeTask("ASM-1", "card", ["account-service"]); // preselected wins
 
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -1365,7 +1366,7 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/empty.code-workspace" } as never);
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1"); // no preselected repos
+      await provider.takeTask("ASM-1", "command"); // no preselected repos
 
       expect(openWorkspace).not.toHaveBeenCalled();
       expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
@@ -1382,14 +1383,14 @@ describe("Take funnel", () => {
    * skipped when `preselected` is given (the in-card path), fired otherwise (the
    * quickpick path), mirroring "confirms repos via QuickPick when none are
    * preselected" above. */
-  async function takeHappyPath(opts: { preselected?: string[] } = {}) {
+  async function takeHappyPath(opts: { preselected?: string[]; source?: TakeSource } = {}) {
     const repos = mkRepos(["acme-billing"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     if (!opts.preselected) {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
     }
     const { provider, posted } = setup();
-    await provider.takeTask("BILL-1234", opts.preselected);
+    await provider.takeTask("BILL-1234", opts.source ?? "card", opts.preselected);
     return posted;
   }
 
@@ -1401,7 +1402,7 @@ describe("Take funnel", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
     vi.mocked(openWorkspace).mockRejectedValueOnce(new Error("disk full"));
     const { provider } = setup();
-    return provider.takeTask("BILL-1234", ["acme-billing"]);
+    return provider.takeTask("BILL-1234", "card", ["acme-billing"]);
   }
 
   it("reports the full Take funnel on a successful launch", async () => {
@@ -1433,7 +1434,7 @@ describe("Take funnel", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
     const { provider } = setup();
-    await provider.takeTask("BILL-1234", ["acme-billing"]);
+    await provider.takeTask("BILL-1234", "card", ["acme-billing"]);
     const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
     expect(names).toEqual(["take_started", "take_completed"]);
     expect((trackSpy.mock.calls.flat().at(-1) as any).outcome).toBe("cancelled");
@@ -1443,7 +1444,7 @@ describe("Take funnel", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel the repo-confirm QuickPick
     const { provider } = setup();
-    await provider.takeTask("BILL-1234"); // no preselected repos → reaches the QuickPick branch
+    await provider.takeTask("BILL-1234", "command"); // no preselected repos → reaches the QuickPick branch
     const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
     expect(names).toEqual(["take_started", "take_prompt_mode_picked", "take_destination_picked", "take_completed"]);
     expect((trackSpy.mock.calls.flat().at(-1) as any).outcome).toBe("cancelled");
@@ -1536,7 +1537,7 @@ describe("Take funnel", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel launch()'s worktree picker
     const { provider } = setup();
-    await provider.takeTask("BILL-1234", ["acme-billing"]); // preselected: resolveKickoff shows no picker of its own
+    await provider.takeTask("BILL-1234", "card", ["acme-billing"]); // preselected: resolveKickoff shows no picker of its own
     expect(openWorkspace).not.toHaveBeenCalled();
     const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
     expect(names).toEqual([
@@ -1556,7 +1557,7 @@ describe("Take funnel", () => {
     vi.mocked(discoverRepos).mockReturnValue(repos);
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel launch()'s workspace-mode picker
     const { provider } = setup();
-    await provider.takeTask("BILL-1234", ["acme-billing", "centaur"]);
+    await provider.takeTask("BILL-1234", "card", ["acme-billing", "centaur"]);
     expect(openWorkspace).not.toHaveBeenCalled();
     const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
     expect(done.outcome).toBe("cancelled");
@@ -1576,7 +1577,7 @@ describe("Take funnel", () => {
       { target: { kind: "live-folder", folder: "/other/legacy-app" } } as never,
     );
     const { provider } = setup();
-    await provider.takeTask("BILL-1234"); // no preselected repos
+    await provider.takeTask("BILL-1234", "command"); // no preselected repos
     const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
     expect(picked.repo_source).toBe("destination");
     expect(picked.accepted_inference).toBeUndefined();
@@ -1596,7 +1597,7 @@ describe("Take funnel", () => {
     });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // confirms exactly what was inferred
     const { provider } = setup();
-    await provider.takeTask("BILL-1234");
+    await provider.takeTask("BILL-1234", "command");
     const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
     expect(picked.repo_source).toBe("quickpick");
     expect(picked.inferred_count).toBe(1);
@@ -1617,7 +1618,7 @@ describe("Take funnel", () => {
     // Confirms BOTH repos — one more than the single inferred one.
     vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }, { repo: repos[1] }] as never);
     const { provider } = setup();
-    await provider.takeTask("BILL-1234");
+    await provider.takeTask("BILL-1234", "command");
     const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
     expect(picked.repo_source).toBe("quickpick");
     expect(picked.inferred_count).toBe(1);
@@ -1639,27 +1640,131 @@ describe("Take funnel", () => {
     // A count-only comparison would (wrongly) call this "accepted".
     vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[1] }] as never);
     const { provider } = setup();
-    await provider.takeTask("BILL-1234");
+    await provider.takeTask("BILL-1234", "command");
     const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
     expect(picked.repo_source).toBe("quickpick");
     expect(picked.inferred_count).toBe(1);
     expect(picked.accepted_inference).toBe(false);
   });
 
-  it("reports take_destination_picked with the resolved destination, workspace_mode, and used_worktree", async () => {
+  it("reports take_destination_picked with the resolved destination and workspace_mode, and no worktree claim", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, workspaceMode: "per-window", worktree: "always" });
     await takeHappyPath({ preselected: ["acme-billing"] });
     const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_destination_picked") as any;
     expect(picked.destination).toBe("new");
     expect(picked.workspace_mode).toBe("per-window");
-    expect(picked.used_worktree).toBe(true);
+    // The worktree question hasn't been asked yet at this point in the funnel —
+    // this event must not pretend to answer it.
+    expect("used_worktree" in picked).toBe(false);
+  });
+
+  // agentFlow.worktree ships as "ask" (package.json / src/config.ts), so these two
+  // cases — not the "always"/"never" ones — are what every Take does by default.
+  it("reports used_worktree true on take_completed when the default worktree QuickPick is accepted", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never); // accept the worktree picker
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234", "card", ["acme-billing"]);
+    expect(createWorktrees).toHaveBeenCalledTimes(1);
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done.outcome).toBe("launched");
+    expect(done.used_worktree).toBe(true);
+  });
+
+  it("reports used_worktree false on take_completed when the default worktree QuickPick is declined", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: false } as never); // "work in the repo directly"
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234", "card", ["acme-billing"]);
+    expect(createWorktrees).not.toHaveBeenCalled();
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done.outcome).toBe("launched");
+    expect(done.used_worktree).toBe(false);
+  });
+
+  it("omits used_worktree when the Take ends before the worktree question is answered", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel the worktree picker
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234", "card", ["acme-billing"]);
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done.outcome).toBe("cancelled");
+    expect("used_worktree" in done).toBe(false);
+  });
+
+  it("still reports the worktree decision when the launch throws after it was made", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
+    vi.mocked(openWorkspace).mockRejectedValueOnce(new Error("disk full"));
+    const { provider } = setup();
+    await expect(provider.takeTask("BILL-1234", "card", ["acme-billing"])).rejects.toThrow("disk full");
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done.outcome).toBe("failed");
+    expect(done.used_worktree).toBe(true);
+  });
+
+  it("reports source card for a one-click Take from a collapsed card (no in-card selection)", async () => {
+    // App.tsx sends `services: undefined` unless the card is expanded WITH a
+    // selection, so the common card Take carries no repos — inferring the source
+    // from that would call it a palette Take.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: mkRepos(["acme-billing"])[0] }] as never);
+    const { send } = setup();
+    await send({ type: "take", key: "BILL-1234", services: undefined });
+    const started = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_started") as any;
+    expect(started.source).toBe("card");
+  });
+
+  it("reports source command for a palette Take even when the caller supplies no repos", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: mkRepos(["acme-billing"])[0] }] as never);
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234", "command");
+    const started = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_started") as any;
+    expect(started.source).toBe("command");
+  });
+
+  it("terminates the funnel with take_completed{failed} when the Jira read inside resolveKickoff fails, and still propagates", async () => {
+    // resolveKickoff() used to sit outside takeTask's try/catch: a failing ticket
+    // read left the funnel with no terminator at all, so a *failure* was
+    // indistinguishable from the user walking away. operation_failed is no
+    // substitute — it carries no flow_id.
+    clientStub.getDetail.mockRejectedValueOnce(
+      markJiraNetworkFailure(new Error("Couldn't reach Jira at https://my-secret-org.atlassian.net: fetch failed"), "ENOTFOUND"),
+    );
+    const { provider } = setup();
+    await expect(provider.takeTask("BILL-1234", "card", ["acme-billing"])).rejects.toThrow();
+    const events = trackSpy.mock.calls.flat();
+    expect(events.map((e: any) => e.name)).toEqual(["take_started", "take_prompt_mode_picked", "take_completed"]);
+    const done = events.find((e: any) => e.name === "take_completed") as any;
+    expect(done.outcome).toBe("failed");
+    expect(done.failure_class).toBe("network");
+    // Same flow_id as take_started, which is what makes the failed Take
+    // reconstructable — the reason operation_failed can't stand in for this.
+    expect(done.flow_id).toBe((events[0] as any).flow_id);
+    expect(JSON.stringify(done)).not.toContain("my-secret-org");
+  });
+
+  it("terminates the funnel with take_completed{failed} for a 404 on the ticket read too", async () => {
+    clientStub.getDetail.mockRejectedValueOnce(parseJiraError(404, JSON.stringify({ errorMessages: ["Issue does not exist"] })));
+    const { provider } = setup();
+    await expect(provider.takeTask("BILL-1234", "command")).rejects.toThrow();
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done.outcome).toBe("failed");
+    // JiraApiError carries `status`, not a `code` classifyFailure knows, so a 404
+    // lands in the catch-all class. The terminator firing at all is the point here.
+    expect(done.failure_class).toBe("unknown");
   });
 
   it("reports take_repos_picked and take_completed with the real repo_count", async () => {
     const repos = mkRepos(["acme-billing", "centaur"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     const { provider } = setup();
-    await provider.takeTask("BILL-1234", ["acme-billing", "centaur"]);
+    await provider.takeTask("BILL-1234", "card", ["acme-billing", "centaur"]);
     const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
     const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
     expect(picked.repo_count).toBe(2);
@@ -2080,7 +2185,7 @@ describe("live-window open targets", () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "existing", file: "/ws/team.code-workspace" } } as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
 
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ existingWorkspaceFile: "/ws/team.code-workspace", mode: "multiroot", openIn: "new" }),
@@ -2095,7 +2200,7 @@ describe("live-window open targets", () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/account-service" } } as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
 
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ existingFolder: "/repos/account-service", mode: "per-window", openIn: "new" }),
@@ -2112,7 +2217,7 @@ describe("live-window open targets", () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "new" } } as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
 
     const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string }[];
     const labels = items.map((i) => i.label);
@@ -2125,7 +2230,7 @@ describe("live-window open targets", () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "new" } } as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
 
     expect(readLiveWindows).not.toHaveBeenCalled();
   });
@@ -2294,7 +2399,7 @@ describe("remote control", () => {
 
   it("passes false and never prompts when the setting is off", async () => {
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(lastOpen().remoteControl).toBe(false);
     expect(window.showQuickPick).not.toHaveBeenCalled();
   });
@@ -2302,7 +2407,7 @@ describe("remote control", () => {
   it("passes true without prompting when the setting is on", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(lastOpen().remoteControl).toBe(true);
     expect(window.showQuickPick).not.toHaveBeenCalled();
   });
@@ -2311,7 +2416,7 @@ describe("remote control", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(lastOpen().remoteControl).toBe(true);
   });
 
@@ -2319,7 +2424,7 @@ describe("remote control", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // dismissed
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(lastOpen().remoteControl).toBe(false);
   });
@@ -2328,14 +2433,14 @@ describe("remote control", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service", "centaur"]);
+    await provider.takeTask("ASM-1", "card", ["account-service", "centaur"]);
     expect(window.showQuickPick).toHaveBeenCalledTimes(1);
   });
 
   it("ask: never shows the picker when seedAgent is off — no plan file could ever carry the answer", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask", seedAgent: false });
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(lastOpen().remoteControl).toBe(false);
   });
@@ -2350,7 +2455,7 @@ describe("remote control", () => {
       remoteControl: false, // withheld by the single-window guard
     });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", ["account-service", "centaur"]);
+    await provider.takeTask("ASM-1", "card", ["account-service", "centaur"]);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
     expect(toast.message).toContain("Remote Control skipped");
   });

@@ -58,13 +58,15 @@ describe("track", () => {
     expect(sentEvents()).toHaveLength(0);
   });
 
-  it("attaches the common properties", () => {
+  it("forwards the event's own properties and leaves the common ones to the sender", () => {
+    // The common properties (session_id, env_type, …) are attached inside the sender
+    // now, not here: that is the only place every path crosses, including VS Code
+    // forwarding an unhandled extension-host error straight to sendErrorData. See
+    // telemetryWiring.test.ts (what initTelemetry hands the sender) and
+    // posthog.test.ts (that the sender attaches them to every event).
     initTelemetry(makeContext(), vi.fn());
-    track({ name: "extension_installed" });
-    const data = sentEvents()[0].data;
-    expect(data.env_type).toBe("development");
-    expect(data.app_name).toBe("Cursor");
-    expect(data.session_id).toBe("test-session-id");
+    track({ name: "command_invoked", command: "openDeck" });
+    expect(sentEvents()[0]).toEqual({ name: "command_invoked", data: { command: "openDeck" } });
   });
 
   it("never lets a throwing logger reach the caller", () => {

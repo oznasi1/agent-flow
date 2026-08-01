@@ -25,6 +25,23 @@ export interface PostHogSenderDeps {
   /** Delay before the single retry on a 5xx/network failure. Defaults to
    * RETRY_DELAY_MS; tests set it to 0 to keep themselves fast. */
   retryDelayMs?: number;
+  /** Agent Flow's own consent gate (`agentFlow.telemetry.enabled`), read fresh on
+   * every event so turning the setting back on mid-session resumes sending.
+   *
+   * Required, and checked in enqueue() rather than only in the telemetry facade:
+   * not every path into this sender goes through track()/trackError(). VS Code
+   * forwards any error that escapes unhandled in the extension host straight to
+   * the registered logger's error path — `TelemetryLoggerOptions.ignoreUnhandledErrors`
+   * defaults to `false` — which lands on sendErrorData() without our own code
+   * being involved at all. enqueue() is the one choke point every path crosses,
+   * so the gate lives here. */
+  isConsented: () => boolean;
+  /** Attached to every queued event, whatever path produced it. Deliberately not
+   * left to `TelemetryLoggerOptions.additionalCommonProperties`: the host merges
+   * those into logUsage/logError(name, data) payloads only, never into the
+   * `logError(Error)` → sendErrorData path, so `unhandled_error` would otherwise
+   * ship without `env_type` and friends. */
+  commonProperties: Record<string, unknown>;
 }
 
 export interface PostHogSender extends vscode.TelemetrySender {
@@ -91,8 +108,12 @@ export function createPostHogSender(deps: PostHogSenderDeps): PostHogSender {
   }
 
   function enqueue(event: string, properties: Record<string, unknown>): void {
-    if (!enabled || disposed) return;
-    queue.push({ event, properties: { ...properties, distinct_id: deps.distinctId }, timestamp: new Date(now()).toISOString() });
+    if (!enabled || disposed || !deps.isConsented()) return;
+    queue.push({
+      event,
+      properties: { ...deps.commonProperties, ...properties, distinct_id: deps.distinctId },
+      timestamp: new Date(now()).toISOString(),
+    });
     if (queue.length > QUEUE_CAP) {
       const dropped = queue.length - QUEUE_CAP;
       queue = queue.slice(dropped);

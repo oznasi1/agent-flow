@@ -25,7 +25,7 @@ import { openSharedWorkspace, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
 import { track, trackError, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
-import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, PromptModeProp, RepoSource } from "./telemetry/events";
+import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, PromptModeProp, RepoSource, TakeSource } from "./telemetry/events";
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 
@@ -280,7 +280,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "take": {
-          await this.takeTask(m.key, m.services);
+          // A card Take, whether or not the card was expanded with a repo selection:
+          // this dispatcher only ever handles webview messages.
+          await this.takeTask(m.key, "card", m.services);
           break;
         }
         case "takeBatch": {
@@ -795,12 +797,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (!target) return undefined;
 
     if (flow) {
+      // No `used_worktree` here: the worktree decision happens later, in launch(),
+      // and on the shipped `agentFlow.worktree: "ask"` default it is a QuickPick
+      // answer this step cannot see. It rides on take_completed instead.
       track({
         name: "take_destination_picked",
         flow_id: flow.id,
-        destination: target.kind as DestinationProp,
+        // No cast: OpenTarget["kind"] and DestinationProp are the same union, and
+        // this is the one place an internal union feeds a wire enum — a 5th
+        // OpenTarget kind must fail to compile here, not silently transmit.
+        destination: target.kind,
         workspace_mode: cfg.workspaceMode === "per-window" ? "per-window" : "multiroot",
-        used_worktree: cfg.worktree === "always",
       });
     }
 
@@ -944,13 +951,20 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * happened — `false` means the caller backed out at one of this function's own
    * pickers (worktree isolation, or workspace-mode when opening a new window with
    * 2+ repos) rather than anything failing; `addressPr` ignores the return value,
-   * `takeTask` maps it to `take_completed`'s `outcome`. */
+   * `takeTask` maps it to `take_completed`'s `outcome`.
+   *
+   * `onWorktreeDecision` is how the real worktree answer gets back to the caller's
+   * analytics. A return value could not carry it: the decision is interesting
+   * precisely when what follows *throws* (a failed worktree creation or workspace
+   * write), and a throw discards the return value. Called at most once, as soon as
+   * the decision is settled and before it is acted on. */
   private async launch(
     detail: JiraDetail,
     services: ServiceRef[],
     promptTemplate: string,
     forceWorktree: boolean,
     target: OpenTarget,
+    onWorktreeDecision?: (used: boolean) => void,
   ): Promise<boolean> {
     const cfg = getConfig();
     const key = detail.key;
@@ -967,9 +981,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ],
         { title: `${key} — isolate this task in a worktree?`, ignoreFocusOut: true },
       );
+      // Cancelled: no decision was made, so nothing is reported.
       if (!p) return false;
       useWorktree = p.yes;
     }
+    onWorktreeDecision?.(useWorktree);
     if (useWorktree) {
       services = createWorktrees(services, detail.key, detail.summary, this.log);
     }
@@ -1033,40 +1049,58 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** The pick flow: prompt mode → read ticket → destination → confirm services → open + seed.
-   * `preselected` (from the in-card selection) skips the service QuickPick. */
-  public async takeTask(key: string, preselected?: string[]): Promise<void> {
+   * `preselected` (from the in-card selection) skips the service QuickPick.
+   *
+   * `source` is supplied by the caller that knows how the Take was started — the
+   * webview dispatcher for a Deck card, the `agentFlow.takeTask` command for the
+   * palette. It is deliberately not inferred from `preselected`: a one-click Take
+   * from a collapsed card sends no selection and is still a card Take. */
+  public async takeTask(key: string, source: TakeSource, preselected?: string[]): Promise<void> {
     const cfg = getConfig();
     const flow = startFlow();
     const taskFp = fingerprint(key);
     let destination: DestinationProp | undefined;
     let repoCount = 0;
     let promptModeProp: PromptModeProp = "custom";
+    // Set only once launch() has settled the worktree question; stays undefined for
+    // a Take that ends before then, so take_completed omits the property rather
+    // than reporting a decision nobody made.
+    let usedWorktree: boolean | undefined;
+    const worktreeProp = () => (usedWorktree === undefined ? {} : { used_worktree: usedWorktree });
 
-    track({ name: "take_started", flow_id: flow.id, source: preselected?.length ? "card" : "command", task_fp: taskFp, inferred_count: 0 });
+    track({ name: "take_started", flow_id: flow.id, source, task_fp: taskFp, inferred_count: 0 });
 
-    // How should the agent start — pick a prompt mode (or use the configured default) FIRST.
-    const promptMode = await this.choosePromptMode(cfg, `${key} — how should the agent start?`);
-    if (!promptMode) {
-      track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", prompt_mode: promptModeProp, repo_count: 0, duration_ms: flow.elapsedMs(), task_fp: taskFp });
-      return;
-    }
-    promptModeProp = toPromptModeProp(promptMode.id);
-    track({ name: "take_prompt_mode_picked", flow_id: flow.id, prompt_mode: promptModeProp, is_custom_mode: promptModeProp === "custom" });
-
-    const resolved = await this.resolveKickoff(key, preselected, flow);
-    if (!resolved) {
-      track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), task_fp: taskFp });
-      return;
-    }
-    const { detail, services, target } = resolved;
-    destination = target.kind as DestinationProp;
-    repoCount = services.length;
-
+    // Everything after take_started runs inside this try, so the funnel always gets
+    // its terminator: a Jira read failing inside resolveKickoff is a *failure*, and
+    // without this it looked identical to the user walking away. operation_failed is
+    // no substitute — it carries no flow_id, so the Take can't be reconstructed.
     try {
-      const launched = await this.launch(detail, services, promptMode.prompt, false, target);
-      track({ name: "take_completed", flow_id: flow.id, outcome: launched ? "launched" : "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+      // How should the agent start — pick a prompt mode (or use the configured default) FIRST.
+      const promptMode = await this.choosePromptMode(cfg, `${key} — how should the agent start?`);
+      if (!promptMode) {
+        track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", prompt_mode: promptModeProp, repo_count: 0, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+        return;
+      }
+      promptModeProp = toPromptModeProp(promptMode.id);
+      track({ name: "take_prompt_mode_picked", flow_id: flow.id, prompt_mode: promptModeProp, is_custom_mode: promptModeProp === "custom" });
+
+      const resolved = await this.resolveKickoff(key, preselected, flow);
+      if (!resolved) {
+        track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+        return;
+      }
+      const { detail, services, target } = resolved;
+      // No cast: OpenTarget["kind"] is DestinationProp, and keeping it
+      // compiler-checked is the point (see take_destination_picked above).
+      destination = target.kind;
+      repoCount = services.length;
+
+      const launched = await this.launch(detail, services, promptMode.prompt, false, target, (used) => {
+        usedWorktree = used;
+      });
+      track({ name: "take_completed", flow_id: flow.id, outcome: launched ? "launched" : "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), task_fp: taskFp });
     } catch (e) {
-      track({ name: "take_completed", flow_id: flow.id, outcome: "failed", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), failure_class: classifyFailure(e), task_fp: taskFp });
+      track({ name: "take_completed", flow_id: flow.id, outcome: "failed", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), failure_class: classifyFailure(e), task_fp: taskFp });
       throw e; // onMessage's existing catch (tasksView.ts:255) still owns the user-facing handling.
     }
   }
