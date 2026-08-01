@@ -365,11 +365,17 @@ export function workspaceFolders(file: string): WorkspaceFolder[] | undefined {
   const doc = jsoncParse(text, errors, { allowTrailingComma: true }) as
     | { folders?: { name?: string; path?: string }[] }
     | undefined;
-  if (errors.length || !doc || typeof doc !== "object" || Array.isArray(doc) || !Array.isArray(doc.folders)) {
+  if (
+    errors.length ||
+    !doc ||
+    typeof doc !== "object" ||
+    Array.isArray(doc) ||
+    (doc.folders !== undefined && !Array.isArray(doc.folders))
+  ) {
     return undefined;
   }
   const wsDir = path.dirname(file);
-  return doc.folders
+  return (doc.folders ?? [])
     .filter((f): f is { name?: string; path: string } => typeof f?.path === "string")
     .map((f) => ({
       ...(typeof f.name === "string" ? { name: f.name } : {}),
@@ -381,6 +387,56 @@ export function workspaceFolders(file: string): WorkspaceFolder[] | undefined {
  *  `[]` if the file can't be read or safely parsed. */
 export function workspaceFolderPaths(file: string): string[] {
   return (workspaceFolders(file) ?? []).map((f) => f.path);
+}
+
+/** A folder that might be added to an existing workspace. `label` is the folder name
+ *  written into the file; `repoName` is the bare repo name dedup compares on — batch
+ *  labels are key-qualified (`ASM-1-api`) but must still dedup against a folder the
+ *  workspace already calls `api`. */
+export interface MergeCandidate {
+  label: string;
+  repoName: string;
+  path: string;
+}
+
+export interface WorkspaceMergePlan {
+  /** In the workspace by neither path nor name — safe to offer. */
+  add: MergeCandidate[];
+  /** A folder with this repo's name already exists at a DIFFERENT path. Skipped without
+   *  asking: two roots by one name are indistinguishable in the explorer and make
+   *  `@name/…` ambiguous, which is the harm this whole change exists to prevent. */
+  duplicates: MergeCandidate[];
+  /** Already a declared folder by canonical path — nothing to do, nothing to report. */
+  present: MergeCandidate[];
+  /** false when the file can't be read or safely parsed; every bucket is empty. */
+  ok: boolean;
+}
+
+/** Classify `candidates` against the folders `file` already declares. Read-only.
+ *
+ *  Name comparison is case-insensitive and covers BOTH a folder's `name` field and its
+ *  path's basename: servicesFromExistingDestination derives an unmatched folder's
+ *  service name from the basename, so comparing only `name` would let a custom `name`
+ *  field defeat the rule against the service derived from that very folder. */
+export function planWorkspaceMerge(file: string, candidates: MergeCandidate[]): WorkspaceMergePlan {
+  const folders = workspaceFolders(file);
+  if (!folders) return { add: [], duplicates: [], present: [], ok: false };
+
+  const paths = new Set(folders.map((f) => f.path));
+  const names = new Set(
+    folders
+      .flatMap((f) => [f.name, path.basename(f.path)])
+      .filter((n): n is string => !!n)
+      .map((n) => n.toLowerCase()),
+  );
+
+  const plan: WorkspaceMergePlan = { add: [], duplicates: [], present: [], ok: true };
+  for (const c of candidates) {
+    if (paths.has(canon(c.path))) plan.present.push(c);
+    else if (names.has(c.repoName.toLowerCase())) plan.duplicates.push(c);
+    else plan.add.push(c);
+  }
+  return plan;
 }
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, agentPrompt, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef } from "../../../src/engine/workspace";
+import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
 import { commands, env, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -926,6 +926,11 @@ describe("workspaceFolders", () => {
     expect(workspaceFolders("/ws/empty.code-workspace")).toEqual([]);
   });
 
+  it("treats an absent folders key as an empty workspace, not a parse failure", () => {
+    readFileSync.mockReturnValue('{ "settings": {} }');
+    expect(workspaceFolders("/ws/nofolders.code-workspace")).toEqual([]);
+  });
+
   it("returns undefined when the file is unparseable", () => {
     readFileSync.mockReturnValue("{ this is : not json");
     expect(workspaceFolders("/ws/bad.code-workspace")).toBeUndefined();
@@ -939,6 +944,105 @@ describe("workspaceFolders", () => {
   it("returns undefined when folders is the wrong shape", () => {
     readFileSync.mockReturnValue('{ "folders": "nope" }');
     expect(workspaceFolders("/ws/bad-shape.code-workspace")).toBeUndefined();
+  });
+});
+
+describe("planWorkspaceMerge", () => {
+  const cand = (repoName: string, p: string, label = repoName): MergeCandidate => ({
+    label,
+    repoName,
+    path: p,
+  });
+
+  it("buckets an already-declared path as present", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("centaur", "/repos/centaur")]);
+    expect(plan.present.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.add).toEqual([]);
+    expect(plan.duplicates).toEqual([]);
+    expect(plan.ok).toBe(true);
+  });
+
+  it("buckets a worktree of an already-declared repo as a duplicate, not an addition", () => {
+    // The core case: same repo NAME, different path. A second root called `centaur`
+    // is indistinguishable in the explorer and makes @centaur/… ambiguous.
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [
+      cand("centaur", "/repos/centaur/.claude/worktrees/ASM-1"),
+    ]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.add).toEqual([]);
+  });
+
+  it("buckets a repo the workspace has by neither path nor name as an addition", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("infra", "/repos/infra")]);
+    expect(plan.add.map((c) => c.repoName)).toEqual(["infra"]);
+    expect(plan.duplicates).toEqual([]);
+  });
+
+  it("dedups against a folder's custom name field", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "name": "centaur", "path": "/elsewhere/c" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("centaur", "/repos/centaur")]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+  });
+
+  it("dedups against a folder's path basename even when a custom name differs", () => {
+    // servicesFromExistingDestination derives an unmatched folder's service name from
+    // the BASENAME, so comparing only the `name` field would let a custom name defeat
+    // the rule against the service derived from that very folder.
+    readFileSync.mockReturnValue('{ "folders": [{ "name": "Custom Label", "path": "/repos/centaur" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [
+      cand("centaur", "/repos/centaur/.claude/worktrees/ASM-1"),
+    ]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+  });
+
+  it("compares names case-insensitively", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "name": "API", "path": "/elsewhere/a" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("api", "/repos/api")]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["api"]);
+  });
+
+  it("dedups a key-qualified batch label against the bare repo name", () => {
+    // The label written into the file is ASM-1-api, but dedup must compare `api`.
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/api" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [
+      cand("api", "/repos/api/.claude/worktrees/ASM-1", "ASM-1-api"),
+    ]);
+    expect(plan.duplicates.map((c) => c.label)).toEqual(["ASM-1-api"]);
+    expect(plan.add).toEqual([]);
+  });
+
+  it("offers everything when the workspace declares no folders", () => {
+    readFileSync.mockReturnValue('{ "folders": [] }');
+    const plan = planWorkspaceMerge("/ws/empty.code-workspace", [
+      cand("api", "/repos/api"),
+      cand("centaur", "/repos/centaur"),
+    ]);
+    expect(plan.add.map((c) => c.repoName)).toEqual(["api", "centaur"]);
+    expect(plan.ok).toBe(true);
+  });
+
+  it("offers everything when the folders key is absent entirely", () => {
+    // A parseable file with no folders key is not a failure — mergeReposIntoWorkspace
+    // has always accepted it. ok:false here would mean no prompt and no add at all.
+    readFileSync.mockReturnValue('{ "settings": {} }');
+    const plan = planWorkspaceMerge("/ws/nofolders.code-workspace", [cand("api", "/repos/api")]);
+    expect(plan.add.map((c) => c.repoName)).toEqual(["api"]);
+    expect(plan.ok).toBe(true);
+  });
+
+  it("reports ok:false with empty buckets when the file is unparseable", () => {
+    readFileSync.mockReturnValue("{ broken");
+    const plan = planWorkspaceMerge("/ws/bad.code-workspace", [cand("api", "/repos/api")]);
+    expect(plan).toEqual({ add: [], duplicates: [], present: [], ok: false });
+  });
+
+  it("never writes", () => {
+    readFileSync.mockReturnValue('{ "folders": [] }');
+    planWorkspaceMerge("/ws/t.code-workspace", [cand("api", "/repos/api")]);
+    expect(writeFileSync).not.toHaveBeenCalled();
   });
 });
 
