@@ -1082,7 +1082,69 @@ describe("folderName", () => {
 });
 ```
 
-Add to `test/unit/tasksView.test.ts`, in the batch describe block (find it with `grep -n "takeBatch" test/unit/tasksView.test.ts`):
+**First**, close a coverage gap Task 5's review found. Task 5 shipped the pluralized multi-repo prompt title and the `join(", ")` name lists, but every one of its tests used a single-item `add`/`duplicates` array, so those branches are untested. Add this to the **`describe("existing workspace open target", …)`** block (not the batch block), beside Task 5's tests:
+
+```ts
+    it("pluralizes the prompt and lists every new repo when more than one is added", async () => {
+      pickExisting();
+      vi.mocked(planWorkspaceMerge).mockReturnValue({
+        add: [
+          { label: "infra", repoName: "infra", path: "/repos/infra" },
+          { label: "tooling", repoName: "tooling", path: "/repos/tooling" },
+        ],
+        duplicates: [],
+        present: [],
+        ok: true,
+      });
+      vi.mocked(window.showQuickPick)
+        .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never)
+        .mockResolvedValueOnce({ yes: true } as never);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      const addPrompt = vi.mocked(window.showQuickPick).mock.calls[1];
+      expect((addPrompt[1] as { title: string }).title).toBe("Add 2 folders to team.code-workspace?");
+      expect((addPrompt[0] as { label: string }[])[0].label).toBe("$(add) Add infra, tooling");
+      expect(openWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          foldersToAdd: [
+            { name: "infra", path: "/repos/infra" },
+            { name: "tooling", path: "/repos/tooling" },
+          ],
+        }),
+      );
+    });
+
+    it("names every duplicate in the toast when more than one is skipped", async () => {
+      pickExisting();
+      vi.mocked(planWorkspaceMerge).mockReturnValue({
+        add: [],
+        duplicates: [
+          { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/ASM-1" },
+          { label: "web", repoName: "web", path: "/repos/web/.claude/worktrees/ASM-1" },
+        ],
+        present: [],
+        ok: true,
+      });
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+      vi.mocked(openWorkspace).mockResolvedValue({
+        mode: "multiroot",
+        workspaceFile: "/ws/team.code-workspace",
+        briefs: [],
+        opened: ["/ws/team.code-workspace"],
+        remoteControl: false,
+      });
+
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      const toast = posted().find((m) => m.type === "toast") as { message: string };
+      expect(toast.message).toContain("api, web already in the workspace");
+    });
+```
+
+**Then** add to `test/unit/tasksView.test.ts`, in the batch describe block (find it with `grep -n "takeBatch" test/unit/tasksView.test.ts`):
 
 ```ts
     it("adds nothing to a shared existing workspace when every repo name is present", async () => {
