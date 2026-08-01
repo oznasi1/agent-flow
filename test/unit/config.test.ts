@@ -197,6 +197,17 @@ describe("DEFAULT_PROMPT_MODES", () => {
   });
 });
 
+describe("getConfig — telemetryEnabled", () => {
+  it("telemetryEnabled defaults to true", () => {
+    expect(getConfig().telemetryEnabled).toBe(true);
+  });
+
+  it("telemetryEnabled reflects the setting when disabled", () => {
+    setConfig({ "telemetry.enabled": false });
+    expect(getConfig().telemetryEnabled).toBe(false);
+  });
+});
+
 describe("getConfig — trackOpenWindows", () => {
   it("defaults trackOpenWindows to true and reads an override", () => {
     expect(getConfig().trackOpenWindows).toBe(true);
@@ -433,5 +444,12 @@ describe("package.json ⇄ config constants", () => {
     const ttl = props["agentFlow.reviewRequestsTtlSeconds"] as { default?: unknown; minimum?: unknown };
     expect(ttl.default).toBe(300);
     expect(ttl.minimum).toBe(60);
+  });
+
+  it("keeps the prReviewPrompt schema default byte-identical to DEFAULT_PR_REVIEW_PROMPT", () => {
+    // Same rationale as the promptModes check above: an untouched setting resolves
+    // to the manifest default, so telemetry's pr_review_prompt_customized comparison
+    // (settingsSnapshot.ts) is only correct if the two stay in step.
+    expect(props["agentFlow.prReviewPrompt"].default).toBe(DEFAULT_PR_REVIEW_PROMPT);
   });
 });

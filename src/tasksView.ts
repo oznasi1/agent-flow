@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { getConfig, AgentFlowConfig, ExploreAction, PR_REVIEW_AUTOFIX_CLAUSE } from "./config";
 import { JiraAuth } from "./jira/auth";
-import { JiraClient, JiraAuthError, JiraApiError, JiraDetail, TransitionOption } from "./jira/client";
+import { JiraClient, JiraAuthError, JiraApiError, JiraDetail, TransitionOption, isJiraNetworkError } from "./jira/client";
 import { describeJiraError } from "./jira/errors";
 import {
   promptableFields,
@@ -24,8 +24,81 @@ import { createWorktrees } from "./engine/worktree";
 import { openSharedWorkspace, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
+import { track, trackError, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
+import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, PromptModeProp, RepoSource, TakeSource } from "./telemetry/events";
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
+
+/** Which engine operation a webview message represents, for operation_failed.
+ * Messages absent from this map report as "jira_fetch" only if they read Jira;
+ * anything genuinely unclassifiable is left out and reports nothing. */
+const MESSAGE_OPS: Partial<Record<InboundMessage["type"], Op>> = {
+  ready: "jira_fetch",
+  retry: "jira_fetch",
+  fetch: "jira_fetch",
+  detail: "jira_fetch",
+  take: "workspace_write",
+  takeBatch: "workspace_write",
+  addressPr: "pr_lookup",
+  changeStatus: "jira_write",
+  addToMySprint: "jira_write",
+  removeFromSprint: "jira_write",
+  setComponent: "jira_write",
+  explore: "workspace_write",
+  runDoctor: "jira_fetch",
+};
+
+/** Message types whose Jira interaction is itself a write — the rest that read
+ * Jira at all (including `take`/`takeBatch`/`addressPr`, whose primary MESSAGE_OPS
+ * entry is a non-Jira op) are reads. Used only by resolveOp() below. */
+const JIRA_WRITE_MESSAGES: ReadonlySet<InboundMessage["type"]> = new Set([
+  "changeStatus",
+  "addToMySprint",
+  "removeFromSprint",
+  "setComponent",
+]);
+
+/** MESSAGE_OPS attributes a failure to a message's own primary purpose — `take` is
+ * "workspace_write" because opening/seeding a workspace is what it mostly does.
+ * But `take`, `takeBatch`, and `addressPr` all read a ticket via resolveKickoff()
+ * before ever touching a workspace, and that Jira read has no try/catch of its
+ * own — it is the single most failure-prone step in the flow, and MESSAGE_OPS
+ * alone would mislabel its failure a workspace_write / pr_lookup. When the
+ * thrown error is identifiably from the Jira client — JiraAuthError, JiraApiError,
+ * or a network-level failure inside request() (unreachable host, DNS, timeout;
+ * see isJiraNetworkError, src/jira/client.ts) — that origin is trusted over the
+ * message-type default: jira_write for the message types whose own Jira
+ * interaction is a write, jira_fetch for everything else that reads Jira at all.
+ * The network-level case matters most in practice: an unreachable Jira (VPN off,
+ * bad site URL, firewall) is the single most common real-world failure this
+ * extension sees, and it is exactly what Doctor exists to diagnose — misattributing
+ * it to workspace_write/pr_lookup would send debugging effort at the wrong
+ * subsystem for the failure that happens most. A message absent from MESSAGE_OPS
+ * (e.g. openExternal, reorder) still reports nothing regardless of the error's
+ * origin — this override only ever narrows an op that MESSAGE_OPS already
+ * assigned, never invents one for a message MESSAGE_OPS left out. Stateless by
+ * design: a pure function of the one error and message already in hand, not a
+ * mutable "current op" field, which would be wrong the moment two messages are
+ * in flight concurrently. */
+function resolveOp(m: InboundMessage, e: unknown): Op | undefined {
+  const messageOp = MESSAGE_OPS[m.type];
+  if (!messageOp) return undefined;
+  if (e instanceof JiraAuthError || e instanceof JiraApiError || isJiraNetworkError(e)) {
+    return JIRA_WRITE_MESSAGES.has(m.type) ? "jira_write" : "jira_fetch";
+  }
+  return messageOp;
+}
+
+/** Whether retrying the same operation, with nothing else changed, could plausibly
+ * succeed. Derived from `failure_class` — not a bespoke `instanceof` check — so it
+ * can never contradict the failure_class already on the same event. Auth needs
+ * re-authentication first; not_found and permission point at a state retrying
+ * alone won't change; parse means the response shape itself was unexpected, and
+ * retrying the identical request reproduces it deterministically. Network blips,
+ * timeouts, conflicts, and anything unclassified are presumed transient. */
+function isRetryable(failureClass: FailureClass): boolean {
+  return failureClass !== "auth" && failureClass !== "not_found" && failureClass !== "permission" && failureClass !== "parse";
+}
 
 /** Delay between opening successive batch windows — reduces focus-stealing and
  *  `open -a` thrash when several windows launch back-to-back. */
@@ -207,7 +280,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "take": {
-          await this.takeTask(m.key, m.services);
+          // A card Take, whether or not the card was expanded with a repo selection:
+          // this dispatcher only ever handles webview messages.
+          await this.takeTask(m.key, "card", m.services);
           break;
         }
         case "takeBatch": {
@@ -253,6 +328,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
       }
     } catch (e) {
+      const op = resolveOp(m, e);
+      if (op) {
+        const failure_class = classifyFailure(e);
+        trackError({ name: "operation_failed", op, failure_class, retryable: isRetryable(failure_class) });
+      }
       this.post({ type: "loading", loading: false });
       const msg = e instanceof Error ? e.message : String(e);
       if (e instanceof JiraAuthError) {
@@ -693,6 +773,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   private async resolveKickoff(
     key: string,
     preselected?: string[],
+    flow?: Flow,
   ): Promise<{ detail: JiraDetail; services: ServiceRef[]; target: OpenTarget } | undefined> {
     const cfg = getConfig();
     if (!(await this.auth.isAuthenticated())) {
@@ -715,21 +796,46 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const target = await this.chooseOpenTarget(cfg);
     if (!target) return undefined;
 
+    if (flow) {
+      // No `used_worktree` here: the worktree decision happens later, in launch(),
+      // and on the shipped `agentFlow.worktree: "ask"` default it is a QuickPick
+      // answer this step cannot see. It rides on take_completed instead.
+      track({
+        name: "take_destination_picked",
+        flow_id: flow.id,
+        // No cast: OpenTarget["kind"] and DestinationProp are the same union, and
+        // this is the one place an internal union feeds a wire enum — a 5th
+        // OpenTarget kind must fail to compile here, not silently transmit.
+        destination: target.kind,
+        workspace_mode: cfg.workspaceMode === "per-window" ? "per-window" : "multiroot",
+      });
+    }
+
     let services: ServiceRef[];
+    let repoSource: RepoSource;
+    let inferredCount = 0;
+    // Populated only in the QuickPick branch; used below to compare the actual
+    // *set* the user confirmed against what was inferred (not just its size —
+    // swapping one inferred repo for a different one must not read as "accepted").
+    let inferredNames = new Set<string>();
     if (preselected && preselected.length) {
       // Selection already made in the expanded card — resolve names to repos, skip QuickPick.
+      repoSource = "preselected";
       const byName = new Map(repos.map((r) => [r.name, r]));
       services = preselected.map((n) => byName.get(n)).filter((r): r is ServiceRef => !!r);
     } else if (target.kind === "existing" || target.kind === "live-folder") {
       // The destination already fixes its repo set — use it as-is, no service pick.
+      repoSource = "destination";
       services = this.servicesFromExistingDestination(target, repos);
     } else {
       // New / this window — confirm the repos the task touches (inferred pre-selected).
+      repoSource = "quickpick";
       const inferred = inferServices(
         { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
         repos,
       );
-      const inferredNames = new Set(inferred.map((r) => r.service.name));
+      inferredNames = new Set(inferred.map((r) => r.service.name));
+      inferredCount = inferred.length;
 
       const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
         repos.map((r) => ({
@@ -754,6 +860,26 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (services.length === 0) {
       this.toast("error", "No valid repos selected for this task.");
       return undefined;
+    }
+    if (flow) {
+      // Set comparison, not a count comparison: swapping one inferred repo for a
+      // different one leaves the count unchanged but is a real rejection of the
+      // suggestion. Only meaningful for the QuickPick branch — inference never
+      // runs for "preselected"/"destination", so the property is omitted there
+      // rather than reporting a misleading `false`.
+      const pickedNames = new Set(services.map((s) => s.name));
+      const acceptedInference =
+        repoSource === "quickpick"
+          ? pickedNames.size === inferredNames.size && [...pickedNames].every((n) => inferredNames.has(n))
+          : undefined;
+      track({
+        name: "take_repos_picked",
+        flow_id: flow.id,
+        repo_count: services.length,
+        repo_source: repoSource,
+        ...(acceptedInference !== undefined ? { accepted_inference: acceptedInference } : {}),
+        inferred_count: inferredCount,
+      });
     }
     return { detail, services, target };
   }
@@ -821,14 +947,25 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** Open + seed a resolved kick-off: worktree decision → workspace mode → brief →
    * openWorkspace → success toast. Shared by Take and Address PR. The destination
    * `target` is resolved earlier in resolveKickoff. `forceWorktree` (Address PR) always
-   * isolates in a worktree, ignoring cfg.worktree. */
+   * isolates in a worktree, ignoring cfg.worktree. Returns whether the launch actually
+   * happened — `false` means the caller backed out at one of this function's own
+   * pickers (worktree isolation, or workspace-mode when opening a new window with
+   * 2+ repos) rather than anything failing; `addressPr` ignores the return value,
+   * `takeTask` maps it to `take_completed`'s `outcome`.
+   *
+   * `onWorktreeDecision` is how the real worktree answer gets back to the caller's
+   * analytics. A return value could not carry it: the decision is interesting
+   * precisely when what follows *throws* (a failed worktree creation or workspace
+   * write), and a throw discards the return value. Called at most once, as soon as
+   * the decision is settled and before it is acted on. */
   private async launch(
     detail: JiraDetail,
     services: ServiceRef[],
     promptTemplate: string,
     forceWorktree: boolean,
     target: OpenTarget,
-  ): Promise<void> {
+    onWorktreeDecision?: (used: boolean) => void,
+  ): Promise<boolean> {
     const cfg = getConfig();
     const key = detail.key;
 
@@ -844,15 +981,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ],
         { title: `${key} — isolate this task in a worktree?`, ignoreFocusOut: true },
       );
-      if (!p) return;
+      // Cancelled: no decision was made, so nothing is reported.
+      if (!p) return false;
       useWorktree = p.yes;
     }
+    onWorktreeDecision?.(useWorktree);
     if (useWorktree) {
       services = createWorktrees(services, detail.key, detail.summary, this.log);
     }
 
     const args = await this.targetToOpenArgs(target, services.length, key, cfg);
-    if (!args) return;
+    if (!args) return false;
 
     const wantRemoteControl = await this.resolveRemoteControl(cfg);
 
@@ -889,6 +1028,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         : "";
       this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${unadded}${seeded}${rcNote}`);
     }
+    return true;
   }
 
   /** Resolve the task prompt mode: the configured `taskMode` when it names a known
@@ -909,19 +1049,60 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** The pick flow: prompt mode → read ticket → destination → confirm services → open + seed.
-   * `preselected` (from the in-card selection) skips the service QuickPick. */
-  public async takeTask(key: string, preselected?: string[]): Promise<void> {
+   * `preselected` (from the in-card selection) skips the service QuickPick.
+   *
+   * `source` is supplied by the caller that knows how the Take was started — the
+   * webview dispatcher for a Deck card, the `agentFlow.takeTask` command for the
+   * palette. It is deliberately not inferred from `preselected`: a one-click Take
+   * from a collapsed card sends no selection and is still a card Take. */
+  public async takeTask(key: string, source: TakeSource, preselected?: string[]): Promise<void> {
     const cfg = getConfig();
+    const flow = startFlow();
+    const taskFp = fingerprint(key);
+    let destination: DestinationProp | undefined;
+    let repoCount = 0;
+    let promptModeProp: PromptModeProp = "custom";
+    // Set only once launch() has settled the worktree question; stays undefined for
+    // a Take that ends before then, so take_completed omits the property rather
+    // than reporting a decision nobody made.
+    let usedWorktree: boolean | undefined;
+    const worktreeProp = () => (usedWorktree === undefined ? {} : { used_worktree: usedWorktree });
 
-    // How should the agent start — pick a prompt mode (or use the configured default) FIRST.
-    const promptMode = await this.choosePromptMode(cfg, `${key} — how should the agent start?`);
-    if (!promptMode) return;
+    track({ name: "take_started", flow_id: flow.id, source, task_fp: taskFp, inferred_count: 0 });
 
-    const resolved = await this.resolveKickoff(key, preselected);
-    if (!resolved) return;
-    const { detail, services, target } = resolved;
+    // Everything after take_started runs inside this try, so the funnel always gets
+    // its terminator: a Jira read failing inside resolveKickoff is a *failure*, and
+    // without this it looked identical to the user walking away. operation_failed is
+    // no substitute — it carries no flow_id, so the Take can't be reconstructed.
+    try {
+      // How should the agent start — pick a prompt mode (or use the configured default) FIRST.
+      const promptMode = await this.choosePromptMode(cfg, `${key} — how should the agent start?`);
+      if (!promptMode) {
+        track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", prompt_mode: promptModeProp, repo_count: 0, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+        return;
+      }
+      promptModeProp = toPromptModeProp(promptMode.id);
+      track({ name: "take_prompt_mode_picked", flow_id: flow.id, prompt_mode: promptModeProp, is_custom_mode: promptModeProp === "custom" });
 
-    await this.launch(detail, services, promptMode.prompt, false, target);
+      const resolved = await this.resolveKickoff(key, preselected, flow);
+      if (!resolved) {
+        track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+        return;
+      }
+      const { detail, services, target } = resolved;
+      // No cast: OpenTarget["kind"] is DestinationProp, and keeping it
+      // compiler-checked is the point (see take_destination_picked above).
+      destination = target.kind;
+      repoCount = services.length;
+
+      const launched = await this.launch(detail, services, promptMode.prompt, false, target, (used) => {
+        usedWorktree = used;
+      });
+      track({ name: "take_completed", flow_id: flow.id, outcome: launched ? "launched" : "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), task_fp: taskFp });
+    } catch (e) {
+      track({ name: "take_completed", flow_id: flow.id, outcome: "failed", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), failure_class: classifyFailure(e), task_fp: taskFp });
+      throw e; // onMessage's existing catch (tasksView.ts:255) still owns the user-facing handling.
+    }
   }
 
   /** Launch several tasks at once, each in its own git worktree with its own seeded

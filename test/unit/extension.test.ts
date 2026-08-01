@@ -10,6 +10,10 @@ const authStub = {
 };
 const providerStub = { refresh: vi.fn(async () => undefined), takeTask: vi.fn(async () => undefined) };
 
+const trackSpy = vi.fn();
+const initSpy = vi.fn();
+const disposeSpy = vi.fn();
+
 vi.mock("../../src/jira/auth", () => ({ ApiTokenAuth: vi.fn(() => authStub) }));
 vi.mock("../../src/tasksView", () => ({
   TasksViewProvider: Object.assign(vi.fn(() => providerStub), { viewType: "agentFlow.tasks" }),
@@ -30,6 +34,18 @@ vi.mock("../../src/engine/presence", () => ({
 }));
 vi.mock("../../src/marketplaceView", () => ({
   MarketplacePanel: { show: vi.fn() },
+}));
+vi.mock("../../src/deckView", () => ({
+  DeckPanel: { show: vi.fn() },
+}));
+vi.mock("../../src/doctorView", () => ({
+  showDoctor: vi.fn(async () => undefined),
+  defaultDeps: vi.fn(() => ({})),
+}));
+vi.mock("../../src/telemetry/telemetry", () => ({
+  initTelemetry: (...a: unknown[]) => initSpy(...a),
+  track: (...a: unknown[]) => trackSpy(...a),
+  disposeTelemetry: (...a: unknown[]) => disposeSpy(...a),
 }));
 
 import { activate, deactivate } from "../../src/extension";
@@ -140,12 +156,15 @@ describe("activate", () => {
     expect(window.showInformationMessage).toHaveBeenCalled();
   });
 
-  it("takeTask command normalizes the entered key and delegates", async () => {
+  it("takeTask command normalizes the entered key and delegates, tagging the Take as a command (not a card)", async () => {
+    // The palette is the only caller that can know this: takeTask must be told
+    // "command" explicitly, since a palette Take is indistinguishable from a
+    // collapsed-card Take by its arguments alone (both carry no preselection).
     vi.mocked(window.showInputBox).mockResolvedValue("  asm-1 ");
     const { context } = fakeContext();
     activate(context);
     await cmd("agentFlow.takeTask")!();
-    expect(providerStub.takeTask).toHaveBeenCalledWith("ASM-1");
+    expect(providerStub.takeTask).toHaveBeenCalledWith("ASM-1", "command");
   });
 
   it("takeTask command does nothing when the input is cancelled", async () => {
@@ -193,5 +212,135 @@ describe("activate", () => {
     vi.mocked(writePresence).mockClear();
     cb!();
     expect(writePresence).toHaveBeenCalledTimes(1);
+  });
+
+  it("initialises telemetry before the commands are registered", () => {
+    const { context } = fakeContext();
+    activate(context);
+    const initOrder = initSpy.mock.invocationCallOrder[0];
+    const firstRegisterOrder = vi.mocked(commands.registerCommand).mock.invocationCallOrder[0];
+    expect(initOrder).toBeLessThan(firstRegisterOrder);
+  });
+
+  it("reports extension_installed on the very first activation only", () => {
+    const { context, globalState } = fakeContext();
+    activate(context);
+    expect(trackSpy.mock.calls.flat().map((e: any) => e.name)).toContain("extension_installed");
+
+    trackSpy.mockClear();
+    const { context: context2 } = fakeContext({ sharedGlobalState: globalState });
+    activate(context2);
+    expect(trackSpy.mock.calls.flat().map((e: any) => e.name)).not.toContain("extension_installed");
+  });
+
+  it("reports extension_activated with the settings snapshot", async () => {
+    const { context } = fakeContext();
+    activate(context);
+    await vi.waitFor(() => {
+      expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "extension_activated")).toBe(true);
+    });
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "extension_activated") as any;
+    expect(ev.is_first_ever).toBe(true);
+    expect(ev.has_jira_auth).toBe(true);
+    expect(ev.workspace_mode).toBe("auto");
+    expect(ev.prompt_modes_count).toBe(6);
+  });
+
+  it("does not throw an unhandled rejection when isAuthenticated() rejects", async () => {
+    authStub.isAuthenticated.mockRejectedValueOnce(new Error("network down"));
+    const { context } = fakeContext();
+    expect(() => activate(context)).not.toThrow();
+    // Give the rejected promise's handlers a chance to run; a missing rejection
+    // handler here would surface as an unhandledRejection failing the test run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "extension_activated")).toBe(false);
+  });
+
+  it("does not propagate a failure raised while building extension_activated", async () => {
+    // `track()` self-guards internally, but the surrounding getConfig()/settingsSnapshot()
+    // calls run inside the isAuthenticated().then() continuation, after activate() has
+    // already returned — a throw there must be caught locally, not become an unhandled
+    // rejection. The first track() call is the synchronous extension_installed one; make
+    // only the second (extension_activated) throw.
+    trackSpy.mockImplementationOnce(() => undefined);
+    trackSpy.mockImplementationOnce(() => {
+      throw new Error("logUsage exploded");
+    });
+    const { context } = fakeContext();
+    expect(() => activate(context)).not.toThrow();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(trackSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("still activates when telemetry init throws", () => {
+    initSpy.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    const { context } = fakeContext();
+    expect(() => activate(context)).not.toThrow();
+    // The commands must still be registered — a telemetry failure cannot dispose them.
+    expect(commands.registerCommand).toHaveBeenCalled();
+  });
+
+  it("reports command_invoked with the matching command id for every registered command", async () => {
+    const { context } = fakeContext();
+    activate(context);
+    const registered = commands.registerCommand.mock.calls.map(([id]) => id as string);
+    expect(registered).toHaveLength(8);
+
+    for (const [id, cb] of commands.registerCommand.mock.calls) {
+      trackSpy.mockClear();
+      await (cb as (...a: unknown[]) => unknown)();
+      const invoked = trackSpy.mock.calls.flat().filter((e: any) => e.name === "command_invoked");
+      expect(invoked, `${id} should report exactly one command_invoked`).toHaveLength(1);
+      // The payload's `command` must be exactly the id with the "agentFlow." prefix
+      // stripped — not just that *some* command_invoked event fired, which would
+      // pass even if a future change decoupled the reported id from the real one.
+      expect((invoked[0] as any).command, `${id}'s command_invoked payload`).toBe(
+        (id as string).slice("agentFlow.".length),
+      );
+    }
+  });
+
+  it("still runs the handler and returns its value when track() throws", async () => {
+    const { context } = fakeContext();
+    activate(context);
+    // Let the async extension_activated continuation settle first so its own
+    // track() call doesn't consume the mockImplementationOnce meant for the
+    // command below.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    trackSpy.mockClear();
+    trackSpy.mockImplementationOnce(() => {
+      throw new Error("telemetry exploded");
+    });
+
+    const ok = await cmd("agentFlow.signIn")!();
+
+    expect(ok).toBe(true);
+    expect(authStub.signIn).toHaveBeenCalled();
+    expect(window.showInformationMessage).toHaveBeenCalled();
+  });
+});
+
+describe("deactivate", () => {
+  it("flushes telemetry", () => {
+    deactivate();
+    expect(disposeSpy).toHaveBeenCalled();
+  });
+
+  it("still flushes telemetry when removePresence throws", () => {
+    vi.mocked(removePresence).mockImplementationOnce(() => {
+      throw new Error("EACCES: cannot remove presence file");
+    });
+    expect(() => deactivate()).not.toThrow();
+    expect(disposeSpy).toHaveBeenCalled();
+  });
+
+  it("still runs removePresence, and does not throw, when disposeTelemetry throws", () => {
+    disposeSpy.mockImplementationOnce(() => {
+      throw new Error("dispose boom");
+    });
+    expect(() => deactivate()).not.toThrow();
+    expect(removePresence).toHaveBeenCalled();
   });
 });

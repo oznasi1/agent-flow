@@ -106,6 +106,17 @@ const EXPLORE_ACTION_DEFS: { id: string; label: string; settingKey: string; defa
   { id: "general", label: "General", settingKey: "explorePrompts.general", defaultPrompt: DEFAULT_EXPLORE_GENERAL_PROMPT },
 ];
 
+/** The shipped default explore actions — same ids, labels and order getConfig()
+ * always produces (the set of actions is fixed; only each `.prompt` can be
+ * customized via its own setting). settingsSnapshot.ts compares against this to
+ * detect a customized prompt without ever transmitting the prompt text itself. */
+export const DEFAULT_EXPLORE_ACTIONS: ExploreAction[] = EXPLORE_ACTION_DEFS.map((def) => ({
+  id: def.id,
+  label: def.label,
+  prompt: def.defaultPrompt,
+  slackDm: false,
+}));
+
 /** Seed for a PR-review kick-off (a task in the PR-review status). The agent locates
  * the task's GitHub PR by its Jira key, checks out its branch here, and assesses
  * readiness. Placeholders: {key} {summary} {url} {brief} {files}. The auto-fix
@@ -158,6 +169,7 @@ export interface AgentFlowConfig {
   // Batch sizes strictly greater than this prompt a confirmation before parallel launch.
   batchLaunchConfirmThreshold: number;
   trackOpenWindows: boolean;
+  telemetryEnabled: boolean;
   // Read PR/CI state from GitHub via the `gh` CLI and show it on the Deck's cards.
   prFacts: boolean;
   // How stale a cached PR fact may be before the Deck re-fetches it. Floored at 30s.
@@ -244,6 +256,7 @@ export function getConfig(): AgentFlowConfig {
     })(),
     batchLaunchConfirmThreshold: Math.max(1, c.get<number>("batchLaunchConfirmThreshold") ?? 6),
     trackOpenWindows: c.get<boolean>("trackOpenWindows") ?? true,
+    telemetryEnabled: c.get<boolean>("telemetry.enabled") ?? true,
     prFacts: c.get<boolean>("prFacts") ?? true,
     prFactsTtlSeconds: Math.max(30, c.get<number>("prFactsTtlSeconds") ?? 120),
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,

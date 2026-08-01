@@ -83,6 +83,33 @@ describe("request — error & response mapping", () => {
     await client(fakeAuth({ header: "Basic Zm9v" })).getTransitions("ASM-1");
     expect(fetchMock.mock.calls[0][1].headers).toMatchObject({ Authorization: "Basic Zm9v" });
   });
+
+  // operation_failed's op attribution (tasksView.ts's resolveOp) needs to recognize
+  // a network-level failure as Jira-origin without it becoming a JiraApiError/
+  // JiraAuthError (other code branches on those types by `instanceof`). These
+  // confirm request() itself — not just a hand-built test fixture — tags both
+  // network-level failure shapes for isJiraNetworkError and classifyFailure alike.
+  it("marks an unreachable-host failure as a plain, Jira-origin-tagged Error (not JiraApiError/JiraAuthError)", async () => {
+    installFetch([]); // the mocked fetch rejects — see installFetch's own doc comment
+    const err = await client().getTransitions("ASM-1").catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(mod.JiraApiError);
+    expect(err).not.toBeInstanceOf(mod.JiraAuthError);
+    expect(mod.isJiraNetworkError(err)).toBe(true);
+    expect(err.code).toBe("ENOTFOUND");
+    expect(err.message).toMatch(/Couldn't reach Jira at/);
+  });
+
+  it("marks a timeout (AbortError) failure the same way, with code ETIMEDOUT", async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
+    (globalThis as { fetch: unknown }).fetch = fetchMock;
+    const err = await client().getTransitions("ASM-1").catch((e) => e);
+    expect(err).not.toBeInstanceOf(mod.JiraApiError);
+    expect(err).not.toBeInstanceOf(mod.JiraAuthError);
+    expect(mod.isJiraNetworkError(err)).toBe(true);
+    expect(err.code).toBe("ETIMEDOUT");
+    expect(err.message).toMatch(/didn't respond within/);
+  });
 });
 
 describe("currentUserName / getMyself", () => {

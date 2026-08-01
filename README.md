@@ -145,7 +145,8 @@ tree instead of injecting HTML, so a hostile file from a third-party marketplace
 anything; only `http`/`https` links become clickable.
 
 The panel is **read-only and offline** — it never writes to `~/.claude`, never runs
-`/plugin install`, and makes no network calls. **⟳ Rescan** re-reads the disk (so does
+`/plugin install`, and makes no network calls to populate itself (opening it is a
+tracked command like any other — see [Telemetry](#telemetry)). **⟳ Rescan** re-reads the disk (so does
 coming back to the panel after a pause), and **+ Add a marketplace** copies the
 `/plugin marketplace add owner/repo` command for you to run in Claude Code itself — new
 marketplaces show up here on the next scan.
@@ -200,10 +201,12 @@ and — when `agentFlow.prFacts` is on — reads your **own** GitHub through you
 existing `gh` login. The review-requests strip shares that same gate rather than
 adding a new one: `agentFlow.reviewRequests` only produces a GitHub read while
 `agentFlow.prFacts` is also on, so turning PR facts off silences the strip too,
-regardless of its own setting. Nothing is sent to any service that isn't already
-yours, and Agent Flow stores no GitHub credentials of its own: every GitHub call
-goes through `gh`, so it inherits whatever host, SSO and token your CLI already
-has.
+regardless of its own setting. Nothing about your tickets, code or repos is sent
+to any service that isn't already yours, and Agent Flow stores no GitHub
+credentials of its own: every GitHub call goes through `gh`, so it inherits
+whatever host, SSO and token your CLI already
+has. Separately, Agent Flow also sends anonymous *usage* telemetry (not any of
+the above) — see [Telemetry](#telemetry) below.
 
 GitHub access is **read-only by default** — Agent Flow never merges or pushes.
 The one exception is opt-in: with `agentFlow.reviewWrites` on (it ships **off**),
@@ -359,6 +362,16 @@ matches your registered Marketplace publisher id and that a 128×128 PNG `icon` 
 ## Contributing
 
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Telemetry
+
+Agent Flow sends anonymous usage and error events (which features are used, where
+a flow gets abandoned, what fails) to a personal PostHog project, to help decide
+what to build next — never repo names, ticket keys, file paths, prompt text or
+error messages. Turn it off with `agentFlow.telemetry.enabled`, and VS Code's own
+`telemetry.telemetryLevel` is always honoured too (`"error"` sends only failures,
+`"off"` sends nothing). See [docs/TELEMETRY.md](docs/TELEMETRY.md) for the
+complete, itemized disclosure.
 
 ## License
 

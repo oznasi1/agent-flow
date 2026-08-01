@@ -1,0 +1,171 @@
+import { describe, expect, it } from "vitest";
+import {
+  AnalyticsEvent, EventName, OPEN_STRING_PROPS, STOCK_PROMPT_MODES, classifyFailure, toPromptModeProp,
+} from "../../../src/telemetry/events";
+// The REAL class, not a local stand-in — classifyFailure relies on its constructor
+// setting `this.name` explicitly (src/jira/client.ts), and a hand-rolled stand-in
+// declared locally in this file would keep passing even if that constructor
+// override were ever accidentally reverted. Safe to import here (unlike from
+// telemetry/events.ts itself): this test file, unlike that production module, is
+// allowed to depend on jira/client.ts's transitive `vscode` import, which
+// vitest.config.ts already aliases to test/_mocks/vscode.ts for every test file.
+import { JiraAuthError } from "../../../src/jira/client";
+
+/** One representative literal per Phase 1 event. The `Unsampled`/`AssertNever`
+ * check below (after this array) is what actually forces a new event to be added
+ * here — it fails to compile the moment `AnalyticsEvent` grows a variant with no
+ * matching sample. `toHaveLength(10)` a few lines down is a plain regression
+ * check on the current count, nothing more; it does not by itself catch an
+ * unsampled event, since a `SAMPLES: AnalyticsEvent[]` array with fewer entries
+ * than the union still type-checks. */
+const SAMPLES = [
+  { name: "extension_installed" },
+  {
+    name: "extension_activated", is_first_ever: true, has_jira_auth: false, is_configured: true,
+    workspace_mode: "auto", open_in: "ask", explore_mode: "ask", worktree: "ask",
+    remote_control: "off", default_filter: "mysprint", task_mode: "ask",
+    seed_agent: true, filters_size: true, filters_status: true, filters_repo: true,
+    filters_search: true, pr_review_auto_fix: true, pr_facts: true, review_requests: true,
+    review_writes: false, stamp_label_on_write: true, track_open_windows: true,
+    batch_confirm_threshold: 6, repo_blocklist_count: 0,
+    prompt_modes_count: 6, prompt_modes_customized: false,
+    explore_prompts_customized: false, pr_review_prompt_customized: false,
+  },
+  { name: "command_invoked", command: "openDeck" },
+  { name: "take_started", flow_id: "f1", source: "card", task_fp: "0123456789abcdef", inferred_count: 2 },
+  { name: "take_prompt_mode_picked", flow_id: "f1", prompt_mode: "tdd", is_custom_mode: false },
+  { name: "take_destination_picked", flow_id: "f1", destination: "new", workspace_mode: "multiroot" },
+  { name: "take_repos_picked", flow_id: "f1", repo_count: 3, repo_source: "quickpick", accepted_inference: true, inferred_count: 2 },
+  { name: "take_completed", flow_id: "f1", outcome: "launched", destination: "new", prompt_mode: "tdd", repo_count: 3, duration_ms: 4200, used_worktree: true, task_fp: "0123456789abcdef" },
+  { name: "operation_failed", op: "git_worktree", failure_class: "conflict", retryable: false },
+  { name: "unhandled_error", error_class: "TypeError", stack_digest: "at f (dist/extension.js:1:2)" },
+] satisfies AnalyticsEvent[];
+
+/** `Unsampled` is every EventName with no entry in SAMPLES above. `AssertNever`
+ * only accepts `never`, so `_AllEventsSampled` fails to compile — "Type '...' does
+ * not satisfy the constraint 'never'" — the moment AnalyticsEvent grows a variant
+ * that isn't sampled. (A tempting-looking alternative, `const x: Unsampled[] = []`,
+ * does NOT work: an empty array literal is vacuously assignable to any array type,
+ * sampled or not, so it silently passes even when Unsampled is non-empty — verified
+ * empirically before choosing this form.) `SAMPLES` is declared with `satisfies`,
+ * not a `: AnalyticsEvent[]` annotation, specifically so `(typeof SAMPLES)[number]`
+ * keeps each entry's literal `name`, rather than collapsing to the union. */
+type Unsampled = Exclude<EventName, (typeof SAMPLES)[number]["name"]>;
+type AssertNever<T extends never> = T;
+type _AllEventsSampled = AssertNever<Unsampled>;
+
+describe("the event catalog", () => {
+  it("covers every Phase 1 event exactly once", () => {
+    const names = SAMPLES.map((e) => e.name);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toHaveLength(10);
+  });
+
+  it("carries no free-form strings outside the allow-list", () => {
+    // Enum members are alphanumeric plus `.` `_` `-` (CommandId mirrors VS Code's
+    // camelCase command ids, e.g. "openDeck", so uppercase is allowed) — no spaces,
+    // no slashes, none of the punctuation free text tends to carry.
+    const ENUMISH = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+    for (const ev of SAMPLES) {
+      for (const [key, value] of Object.entries(ev)) {
+        if (typeof value !== "string") continue;
+        if (key === "name") continue;
+        if ((OPEN_STRING_PROPS as readonly string[]).includes(key)) continue;
+        if (/_fp$/.test(key)) {
+          expect(value, `${ev.name}.${key}`).toMatch(/^[0-9a-f]{16}$/);
+          continue;
+        }
+        expect(value, `${ev.name}.${key} must be an enum member, not free text`).toMatch(ENUMISH);
+        expect(value, `${ev.name}.${key} looks like a path`).not.toMatch(/[/\\]/);
+      }
+    }
+  });
+
+  it("allow-lists only the three opaque string properties", () => {
+    expect([...OPEN_STRING_PROPS].sort()).toEqual(["error_class", "flow_id", "stack_digest"].sort());
+  });
+});
+
+describe("toPromptModeProp", () => {
+  it("passes the six shipped ids through", () => {
+    for (const id of STOCK_PROMPT_MODES) expect(toPromptModeProp(id)).toBe(id);
+  });
+
+  it("collapses a user-authored id to 'custom'", () => {
+    expect(toPromptModeProp("acme-billing-hotfix")).toBe("custom");
+  });
+});
+
+describe("classifyFailure", () => {
+  it("classifies the real JiraAuthError as auth", () => {
+    const e = new JiraAuthError("token expired");
+    // Sanity: this is what classifyFailure actually depends on. JiraAuthError's
+    // constructor sets `this.name` explicitly for exactly this reason — a bare
+    // `class X extends Error {}` would leave `.name` as the inherited "Error",
+    // and relying on the class identifier instead would not survive esbuild's
+    // production minify (no keepNames), which renames it. Both were verified
+    // empirically; see the fix report in task-10-report.md for the minified-
+    // bundle check, which a stand-in class declared in this test file could
+    // never catch.
+    expect(e.name).toBe("JiraAuthError");
+    expect(classifyFailure(e)).toBe("auth");
+  });
+
+  it("classifies auth by well-known 401/403 codes", () => {
+    expect(classifyFailure({ code: "401" })).toBe("auth");
+    expect(classifyFailure({ code: "403" })).toBe("auth");
+  });
+
+  it("classifies timeout by AbortError name or ETIMEDOUT code", () => {
+    const abort = new Error("aborted");
+    abort.name = "AbortError";
+    expect(classifyFailure(abort)).toBe("timeout");
+    expect(classifyFailure({ code: "ETIMEDOUT" })).toBe("timeout");
+  });
+
+  it("classifies network by ENOTFOUND / ECONNREFUSED / ENETUNREACH codes", () => {
+    expect(classifyFailure({ code: "ENOTFOUND" })).toBe("network");
+    expect(classifyFailure({ code: "ECONNREFUSED" })).toBe("network");
+    expect(classifyFailure({ code: "ENETUNREACH" })).toBe("network");
+  });
+
+  it("classifies not_found by ENOENT code", () => {
+    expect(classifyFailure({ code: "ENOENT" })).toBe("not_found");
+  });
+
+  it("classifies permission by EACCES / EPERM codes", () => {
+    expect(classifyFailure({ code: "EACCES" })).toBe("permission");
+    expect(classifyFailure({ code: "EPERM" })).toBe("permission");
+  });
+
+  it("classifies parse by SyntaxError name", () => {
+    expect(classifyFailure(new SyntaxError("unexpected token"))).toBe("parse");
+  });
+
+  it("falls back to unknown for an unrecognised error", () => {
+    expect(classifyFailure(new Error("plain failure"))).toBe("unknown");
+  });
+
+  it("falls back to unknown for a non-Error thrown value, without throwing", () => {
+    expect(classifyFailure("a string")).toBe("unknown");
+    expect(classifyFailure(null)).toBe("unknown");
+    expect(classifyFailure(undefined)).toBe("unknown");
+  });
+
+  it("never reads the message — a message that looks like a 401 doesn't trigger 'auth'", () => {
+    expect(classifyFailure(new Error("401 Unauthorized"))).toBe("unknown");
+  });
+});
+
+describe("compile-time guard", () => {
+  it("rejects a user string added to an event", () => {
+    // This test's real assertion is the `@ts-expect-error` directive below, which
+    // only bites under `tsc --noEmit` — vitest transpiles with esbuild and does not
+    // type-check, so the runtime `expect` below is incidental. If a property is ever
+    // widened so this literal type-checks, `tsc` reports "Unused '@ts-expect-error'
+    // directive" and the build fails. Do not "simplify" this away.
+    // @ts-expect-error `repo` is not a property of take_completed, and no event accepts a repo name.
+    const bad: AnalyticsEvent = { name: "take_completed", flow_id: "f1", outcome: "launched", prompt_mode: "tdd", repo_count: 1, duration_ms: 1, task_fp: "0123456789abcdef", repo: "acme-billing" };
+    expect(bad).toBeTruthy();
+  });
+});

@@ -476,6 +476,11 @@
           "type": "string",
           "default": "claude-code",
           "description": "Label stamped on Jira items this extension updates when agentFlow.stampLabelOnWrite is enabled."
+        },
+        "agentFlow.telemetry.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Send anonymous usage and error events (which features are used, where flows are abandoned, what fails) to help decide what to build next. Never includes repo names, ticket keys, file paths, prompt text or error messages — see [TELEMETRY.md](https://github.com/oznasi1/agent-flow/blob/main/docs/TELEMETRY.md). VS Code's own `#telemetry.telemetryLevel#` setting is honoured regardless of this one."
         }
       }
     }
