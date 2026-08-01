@@ -21,7 +21,7 @@ import { injectSlackDm, insertBeforeFiles } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, type MergeCandidate } from "./engine/workspace";
 import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
 import { createWorktrees } from "./engine/worktree";
-import { openSharedWorkspace, type BatchTask } from "./engine/batchWorkspace";
+import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
 import { track, trackError, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
@@ -1250,6 +1250,21 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     let extra = "";
     if (shared && resolved.length) {
       try {
+        // Same guarantee as a single take: the workspace file is the user's artifact.
+        const additions =
+          target.kind === "existing"
+            ? await this.resolveWorkspaceAdditions(
+                target.file,
+                resolved.flatMap((r) =>
+                  r.task.services.map((s) => ({
+                    label: folderName(r.task.ticket.key, s.name),
+                    repoName: s.name,
+                    path: s.path,
+                  })),
+                ),
+              )
+            : { foldersToAdd: [], skipped: [] };
+
         const result = await openSharedWorkspace({
           tasks: resolved.map((r) => r.task),
           promptTemplate: promptMode.prompt,
@@ -1257,11 +1272,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           seedAgent: cfg.seedAgent,
           // OpenTarget and SharedTarget are the same four shapes — no cast needed.
           target,
+          foldersToAdd: additions.foldersToAdd,
         });
         launched = resolved.length;
         if (result.mergeFailed) extra = " That workspace's folders couldn't be parsed — the worktrees weren't added.";
         else if (result.unaddedFolders?.length) {
           extra = ` ${result.unaddedFolders.join(", ")} couldn't be added as roots to that window — the briefs are still in place.`;
+        }
+        if (additions.skipped.length) {
+          extra += ` ${[...new Set(additions.skipped)].join(", ")} already in the workspace — the worktrees weren't added as folders.`;
         }
         // A shared window seeds every session straight from its plan file — there's no
         // single clipboard paste for Remote Control to attach to, even for one task.

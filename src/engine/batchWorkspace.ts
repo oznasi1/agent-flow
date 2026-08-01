@@ -1,6 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
-import { Run, ServiceRef, WorkspaceMode } from "../types";
+import { Run, ServiceRef } from "../types";
 import { extractFileHints, resolveFilesInRepo, mention } from "./files";
 import { ensureGitExcluded } from "./gitExclude";
 import { gitState } from "./git";
@@ -11,8 +11,10 @@ import {
   TicketRef,
   agentPrompt,
   briefMarkdown,
+  mentionInWorkspace,
   mergeReposIntoWorkspace,
   openInEditor,
+  workspaceFolders,
   writePlanFile,
 } from "./workspace";
 
@@ -36,6 +38,9 @@ export interface SharedOpenRequest {
   workspaceDir: string;
   seedAgent: boolean;
   target: SharedTarget;
+  /** Folders the user approved adding to an `existing` target — the ONLY thing merged.
+   *  Absent or empty leaves that workspace file byte-identical. */
+  foldersToAdd?: { name: string; path: string }[];
 }
 
 export interface SharedOpenResult {
@@ -51,7 +56,7 @@ export interface SharedOpenResult {
 /** A task's worktree as a workspace folder. The key qualifier is load-bearing: two
  * tasks in one repo would otherwise present as two identically-named roots, and the
  * folder name is what an `@mention` resolves against. */
-function folderName(key: string, repo: string): string {
+export function folderName(key: string, repo: string): string {
   return `${key}-${repo}`;
 }
 
@@ -102,10 +107,7 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
   let unaddedFolders: string[] | undefined;
   let openTarget: string;
   if (target.kind === "existing") {
-    const merge = mergeReposIntoWorkspace(
-      target.file,
-      folders.map((f) => ({ name: f.name, path: f.path, isGit: true })),
-    );
+    const merge = mergeReposIntoWorkspace(target.file, req.foldersToAdd ?? []);
     mergedFolders = merge.added;
     mergeFailed = merge.ok ? undefined : true;
     workspaceFile = target.file;
@@ -125,11 +127,16 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
   }
   const matchPath = workspaceFile ?? openTarget;
   // A `@<folder>/<rel>` mention only resolves against a root the window actually has.
-  // The live-folder destination never gets the worktrees (above), and a failed merge
-  // never wrote them into the existing workspace either — in both cases the qualified
-  // form names nothing, so fall back to the bare relative form the single-task
-  // existingFolder path uses (workspace.ts).
-  const mentionMode: WorkspaceMode = workspaceFile && !mergeFailed ? "multiroot" : "per-window";
+  // For an existing workspace the roots are whatever it declares plus whatever was just
+  // merged, so resolve each repo against them: a worktree inside a declared root gets a
+  // precise mention, and a repo inside none gets no mention at all rather than one that
+  // silently names a different checkout. The live-folder destination never gets the
+  // worktrees, and a freshly written workspace has every folder as a root.
+  const roots = target.kind === "existing" ? workspaceFolders(target.file) ?? [] : undefined;
+  const mentionsFor = (key: string, s: ServiceRef, files: string[]): string[] =>
+    roots
+      ? files.map((f) => mentionInWorkspace(roots, s.path, f)).filter((m): m is string => !!m)
+      : files.map((f) => mention(workspaceFile ? "multiroot" : "per-window", folderName(key, s.name), f));
 
   // 4 — one plan + one run per task, all naming the same window. Durable writes come
   //     before the open: reusing the current window reloads this extension host.
@@ -143,9 +150,7 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
   if (seedAgent) {
     tasks.forEach((t, i) => {
       const mentions = t.services.flatMap((s) =>
-        (filesByPair.get(`${t.ticket.key}:${s.name}`) ?? []).map((f) =>
-          mention(mentionMode, folderName(t.ticket.key, s.name), f),
-        ),
+        mentionsFor(t.ticket.key, s, filesByPair.get(`${t.ticket.key}:${s.name}`) ?? []),
       );
       // Absolute, not the usual relative path: N worktree roots each hold
       // `.pick-task/TASK.md`, so a relative reference names no file in particular.

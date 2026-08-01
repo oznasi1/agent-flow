@@ -17,7 +17,15 @@ vi.mock("../../src/engine/workspace", () => ({
   planWorkspaceMerge: vi.fn(() => ({ add: [], duplicates: [], present: [], ok: true })),
 }));
 vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn((s: unknown) => s) }));
-vi.mock("../../src/engine/batchWorkspace", () => ({ openSharedWorkspace: vi.fn() }));
+// folderName is a pure function (no vscode/fs side effects) — keep the real one so
+// batch's dedup candidates carry genuine key-qualified labels, and only stub the
+// window-opening entrypoint the tests actually drive.
+vi.mock("../../src/engine/batchWorkspace", async () => {
+  const actual = await vi.importActual<typeof import("../../src/engine/batchWorkspace")>(
+    "../../src/engine/batchWorkspace",
+  );
+  return { ...actual, openSharedWorkspace: vi.fn() };
+});
 // Telemetry: mocked wholesale so the Take-funnel tests observe track() calls without
 // a real singleton — fingerprint() returns "" until initTelemetry() runs (see
 // telemetry.ts), which would make every task_fp assertion below meaningless.
@@ -1435,6 +1443,64 @@ describe("takeTask", () => {
         expect.objectContaining({ existingWorkspaceFile: undefined, foldersToAdd: [] }),
       );
     });
+
+    it("pluralizes the prompt and lists every new repo when more than one is added", async () => {
+      pickExisting();
+      vi.mocked(planWorkspaceMerge).mockReturnValue({
+        add: [
+          { label: "infra", repoName: "infra", path: "/repos/infra" },
+          { label: "tooling", repoName: "tooling", path: "/repos/tooling" },
+        ],
+        duplicates: [],
+        present: [],
+        ok: true,
+      });
+      vi.mocked(window.showQuickPick)
+        .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never)
+        .mockResolvedValueOnce({ yes: true } as never);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      const addPrompt = vi.mocked(window.showQuickPick).mock.calls[1];
+      expect((addPrompt[1] as { title: string }).title).toBe("Add 2 folders to team.code-workspace?");
+      expect((addPrompt[0] as { label: string }[])[0].label).toBe("$(add) Add infra, tooling");
+      expect(openWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          foldersToAdd: [
+            { name: "infra", path: "/repos/infra" },
+            { name: "tooling", path: "/repos/tooling" },
+          ],
+        }),
+      );
+    });
+
+    it("names every duplicate in the toast when more than one is skipped", async () => {
+      pickExisting();
+      vi.mocked(planWorkspaceMerge).mockReturnValue({
+        add: [],
+        duplicates: [
+          { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/ASM-1" },
+          { label: "web", repoName: "web", path: "/repos/web/.claude/worktrees/ASM-1" },
+        ],
+        present: [],
+        ok: true,
+      });
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+      vi.mocked(openWorkspace).mockResolvedValue({
+        mode: "multiroot",
+        workspaceFile: "/ws/team.code-workspace",
+        briefs: [],
+        opened: ["/ws/team.code-workspace"],
+        remoteControl: false,
+      });
+
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      const toast = posted().find((m) => m.type === "toast") as { message: string };
+      expect(toast.message).toContain("api, web already in the workspace");
+    });
   });
 
   describe("existing/live-folder destinations skip the repo picker", () => {
@@ -2307,6 +2373,28 @@ describe("takeBatch", () => {
     expect(openSharedWorkspace).toHaveBeenCalledTimes(1);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
     expect(toast.message).toContain("Remote Control skipped — a shared window seeds each session from its own plan file.");
+  });
+
+  it("adds nothing to a shared existing workspace when every repo name is present", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "pick-existing" });
+    vi.mocked(listWorkspaceFiles).mockReturnValue([
+      { file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 },
+    ]);
+    vi.mocked(planWorkspaceMerge).mockReturnValue({
+      add: [],
+      duplicates: [{ label: "ASM-1-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+      present: [],
+      ok: true,
+    });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+    vi.mocked(openSharedWorkspace).mockResolvedValue({
+      opened: true, briefs: [], seeded: 1, workspaceFile: "/ws/team.code-workspace",
+    });
+
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["account-service"]);
+
+    expect(openSharedWorkspace).toHaveBeenCalledWith(expect.objectContaining({ foldersToAdd: [] }));
   });
 });
 

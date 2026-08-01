@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openSharedWorkspace, type SharedOpenRequest } from "../../../src/engine/batchWorkspace";
+import { openSharedWorkspace, folderName, type SharedOpenRequest } from "../../../src/engine/batchWorkspace";
 import { commands } from "../../_mocks/vscode";
 
 vi.mock("fs");
@@ -122,14 +122,6 @@ describe("openSharedWorkspace", () => {
     expect(result.seeded).toBe(0);
   });
 
-  it("merges the folders into an existing workspace instead of writing a new one", async () => {
-    readFileSync.mockReturnValue(JSON.stringify({ folders: [{ path: "/repos/web" }] }));
-    const result = await openSharedWorkspace(baseReq({ target: { kind: "existing", file: "/ws/team.code-workspace" } }));
-    expect(result.workspaceFile).toBe("/ws/team.code-workspace");
-    expect(result.mergedFolders).toEqual(["ASM-1-api", "ASM-2-api"]);
-    expect(writes((p) => p === "/ws/ASM-1+1.code-workspace")).toHaveLength(0);
-  });
-
   it("reports mergeFailed and writes nothing when the existing workspace is unparseable", async () => {
     readFileSync.mockReturnValue("{ not json");
     const result = await openSharedWorkspace(baseReq({ target: { kind: "existing", file: "/ws/team.code-workspace" } }));
@@ -228,5 +220,61 @@ describe("openSharedWorkspace", () => {
       { forceNewWindow: false },
     );
     expect(result.opened).toBe(true);
+  });
+});
+
+describe("openSharedWorkspace — existing workspace", () => {
+  const existing = () => {
+    readFileSync.mockImplementation((p) =>
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/api" }] }' : "",
+    );
+  };
+
+  it("leaves the file untouched when foldersToAdd is absent", async () => {
+    existing();
+    const result = await openSharedWorkspace(
+      baseReq({ target: { kind: "existing", file: "/ws/team.code-workspace" } }),
+    );
+    expect(writes((p) => p.endsWith(".code-workspace"))).toHaveLength(0);
+    expect(result.mergedFolders).toEqual([]);
+    expect(result.workspaceFile).toBe("/ws/team.code-workspace");
+  });
+
+  it("merges exactly foldersToAdd", async () => {
+    existing();
+    const result = await openSharedWorkspace(
+      baseReq({
+        target: { kind: "existing", file: "/ws/team.code-workspace" },
+        foldersToAdd: [{ name: "ASM-1-infra", path: "/repos/infra/.claude/worktrees/ASM-1" }],
+      }),
+    );
+    expect(result.mergedFolders).toEqual(["ASM-1-infra"]);
+  });
+
+  it("routes a worktree's mentions through its containing root", async () => {
+    execSync.mockReturnValue("src/export.py\n");
+    existing();
+    await openSharedWorkspace(
+      baseReq({
+        tasks: [
+          {
+            ticket: { key: "ASM-1", summary: "one", url: "" },
+            planMd: "p",
+            descriptionText: "fix `src/export.py`",
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+          },
+        ],
+        target: { kind: "existing", file: "/ws/team.code-workspace" },
+      }),
+    );
+    const plan = JSON.parse(String(writes((p) => p.includes("/.agentflow/plans/"))[0][1]));
+    expect(plan.matches[0].prompt).toContain("@api/.claude/worktrees/ASM-1/src/export.py");
+  });
+});
+
+describe("folderName", () => {
+  it("key-qualifies so two tasks in one repo stay distinct roots", () => {
+    expect(folderName("ASM-1", "api")).toBe("ASM-1-api");
+    expect(folderName("ASM-2", "api")).toBe("ASM-2-api");
   });
 });
