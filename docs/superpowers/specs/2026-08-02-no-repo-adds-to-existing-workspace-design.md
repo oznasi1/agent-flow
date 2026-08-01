@@ -141,8 +141,10 @@ export function planWorkspaceMerge(file: string, candidates: MergeCandidate[]): 
 /** A declared folder: its canonical absolute path and its `name` field when present. */
 export interface WorkspaceFolder { name?: string; path: string }
 
-/** The folders `file` declares. `[]` if it can't be read or safely parsed. */
-export function workspaceFolders(file: string): WorkspaceFolder[];
+/** The folders `file` declares. **`undefined`** if it can't be read or safely parsed —
+ *  distinct from a valid file with no folders, which is `[]`. That distinction is the
+ *  only thing that lets `planWorkspaceMerge` tell `ok:false` from "empty, add everything". */
+export function workspaceFolders(file: string): WorkspaceFolder[] | undefined;
 
 /** The @mention for `rel` inside the repo at `repoPath`, given the workspace's roots.
  *  Exact root match → `@<root>/<rel>`. Inside root R → `@<R>/<path from R>/<rel>` (the
@@ -153,9 +155,10 @@ export function mentionInWorkspace(
 ): string | undefined;
 ```
 
-- **`workspaceFolderPaths`** becomes `workspaceFolders(file).map((f) => f.path)` — one
-  reader, so "which folders does this workspace have" can't drift between the plan, the
-  merge and `prefillPathsForTarget`.
+- **`workspaceFolderPaths`** becomes `(workspaceFolders(file) ?? []).map((f) => f.path)` —
+  one reader, so "which folders does this workspace have" can't drift between the plan, the
+  merge and `prefillPathsForTarget`. Its own `[]`-on-failure contract is unchanged, so
+  `prefillPathsForTarget` needs no edit.
 - **A root's name** is `name ?? path.basename(path)` — what VS Code displays and what
   `asRelativePath` prefixes.
 - **The existing-name set** for dedup is, per declared folder, its `name` field **and** its
@@ -255,22 +258,25 @@ private async resolveWorkspaceAdditions(
 `workspaceFolders` / `workspaceFolderPaths`: relative folder paths resolve against the
 file's directory; the paths reader still agrees with the folders reader.
 
-**`test/unit/tasksView.test.ts`** — the file-integrity assertions are the point; read the
-workspace file's bytes before and after and compare:
+**`test/unit/tasksView.test.ts`** — this suite `vi.mock`s `src/engine/workspace` wholesale,
+so it asserts on the **arguments** `openWorkspace` receives, not on file bytes. The
+file-integrity assertions live in `workspace.test.ts` (above); here, `foldersToAdd: []` is
+the observable proxy for "the file is not written". Its `vi.mock` factory must gain
+`planWorkspaceMerge`, or every existing test in the file throws.
 
 - **existing + worktree, all names already present** → the add-prompt `showQuickPick` is
-  **not** shown, and the file is byte-identical
-- **existing + a genuinely new repo, "Leave the workspace as-is"** → prompt shown, file
-  byte-identical, launch still completes (`openWorkspace` called)
+  **not** shown, and `openWorkspace` receives `foldersToAdd: []`
+- **existing + a genuinely new repo, "Leave the workspace as-is"** → prompt shown,
+  `foldersToAdd: []`, launch still completes (`openWorkspace` called)
 - **existing + a genuinely new repo, Esc** → same as "leave as-is"; the launch is not aborted
-- **existing + a genuinely new repo, "Add"** → the new folder is appended, existing folders
-  and formatting preserved, duplicates still absent
-- **existing + preselected repos already in the workspace** → no prompt, file byte-identical
-- **unparseable workspace file** → no prompt, no write, the `mergeFailed` toast fires
-- **batch + existing workspace where every repo name is present** → no prompt, file
-  byte-identical, N plan files still written
-- **regression:** `new` / `current` / `live-folder` destinations show no add-prompt and are
-  otherwise unchanged
+- **existing + a genuinely new repo, "Add"** → `foldersToAdd` is exactly that repo
+- **existing + preselected repos already in the workspace** → no prompt, `foldersToAdd: []`
+- **`planWorkspaceMerge` returns `ok:false`** → no prompt, `foldersToAdd: []`
+- **duplicates reach the toast** → the success message names them as already present
+- **batch + existing workspace where every repo name is present** → no prompt,
+  `openSharedWorkspace` receives `foldersToAdd: []`
+- **regression:** `new` / `current` / `live-folder` destinations show no add-prompt and pass
+  no `foldersToAdd`
 
 **`test/unit/engine/workspace.test.ts`** (same file, `openWorkspace` group):
 
