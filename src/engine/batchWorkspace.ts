@@ -130,8 +130,10 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
   // For an existing workspace the roots are whatever it declares plus whatever was just
   // merged, so resolve each repo against them: a worktree inside a declared root gets a
   // precise mention, and a repo inside none gets no mention at all rather than one that
-  // silently names a different checkout. The live-folder destination never gets the
-  // worktrees, and a freshly written workspace has every folder as a root.
+  // silently names a different checkout. An unparseable file falls to `?? []`, so every
+  // candidate matches no root and gets no mention at all — deliberate, not the old code's
+  // bare `@rel` fallback. The live-folder destination never gets the worktrees, and a
+  // freshly written workspace has every folder as a root.
   const roots = target.kind === "existing" ? workspaceFolders(target.file) ?? [] : undefined;
   const mentionsFor = (key: string, s: ServiceRef, files: string[]): string[] =>
     roots

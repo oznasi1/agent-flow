@@ -83,11 +83,12 @@ infra  worktree ~/dev/infra/.claude/worktrees/PROJ-9  → no root named infra  �
 ```
 
 ```
-┌ Add infra to mine.code-workspace? ─────────────────────────┐
-│ ▸ Add infra              Becomes a folder in the workspace │
-│ ▸ Leave the workspace as-is                                │
-│     Opens in its worktree; the brief uses absolute paths    │
-└────────────────────────────────────────────────────────────┘
+┌ Add infra to mine.code-workspace? ──────────────────────────────────┐
+│ ▸ Add infra              Becomes a folder in the workspace, pointing│
+│                          at this task's worktree                   │
+│ ▸ Leave the workspace as-is                                         │
+│     Opens in its worktree; the brief uses absolute paths            │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 With more than one new repo the title pluralizes to the count and the affirmative item

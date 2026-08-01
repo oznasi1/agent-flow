@@ -756,7 +756,10 @@ describe("mergeReposIntoWorkspace", () => {
 
 describe("openWorkspace — existing workspace", () => {
   it("merges exactly foldersToAdd — never anything derived from services", async () => {
-    // services names two repos; only the approved one may reach the file.
+    // foldersToAdd names a repo that's in neither `services` nor the file, so a
+    // regression to deriving the merge from `services` (which would settle on
+    // account-service, the one of the two not already declared) is caught: it
+    // wouldn't match "infra".
     readFileSync.mockImplementation((p) =>
       String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
     );
@@ -764,13 +767,13 @@ describe("openWorkspace — existing workspace", () => {
     const result = await openWorkspace(
       baseReq({
         existingWorkspaceFile: "/ws/team.code-workspace",
-        foldersToAdd: [{ name: "account-service", path: "/repos/account-service" }],
+        foldersToAdd: [{ name: "infra", path: "/repos/infra" }],
       }),
     );
 
     expect(result.mode).toBe("multiroot");
     expect(result.workspaceFile).toBe("/ws/team.code-workspace");
-    expect(result.mergedRepos).toEqual(["account-service"]);
+    expect(result.mergedRepos).toEqual(["infra"]);
     expect(result.mergeFailed).toBeUndefined();
     expect(writeArg((p) => p.endsWith("ASM-1.code-workspace"))).toBeUndefined();
     expect(result.opened).toContain("/ws/team.code-workspace");

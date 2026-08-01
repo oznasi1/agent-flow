@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `api`, then a third. Repos whose name the workspace already has are now skipped, and
   anything genuinely new is added only after you approve it. The task still opens in its
   worktree either way, and its `@mentions` now resolve through the containing root instead
-  of silently naming the main checkout.
+  of silently naming the main checkout. This only stops new duplicates — if a workspace
+  already picked up `api`-style duplicates under the old behavior, you'll want to delete
+  those leftover folders from it yourself.
 
 ## [0.1.42] — 2026-08-02
 

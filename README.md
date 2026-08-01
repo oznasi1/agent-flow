@@ -282,18 +282,21 @@ was skipped, so you're never left waiting for a `/remote-control` prompt.
 
 `agentFlow.openIn` controls where a task you take gets opened: `ask` (ask each time),
 `new-window`, `this-window` (reuse the current window), or `pick-existing` — pick an
-existing `.code-workspace` file and have the task's repos merged into it. That merge is
-non-destructive: Agent Flow only appends the repos the task needs (preserving the
-workspace file's existing folders, settings, and formatting) and opens it as a
-multi-root workspace; it never overwrites or removes what was already there.
+existing `.code-workspace` file to open the task into. Repos the workspace already has a
+folder for (matched by name) are skipped automatically and named in the toast — a
+worktree keeps its repo's bare name, so adding it anyway would grow a second root by
+that name. Anything genuinely new is added only after you approve it in a prompt;
+declining leaves the file byte-identical. Either way the workspace's existing folders,
+settings, and formatting are preserved and it opens as a multi-root workspace.
 
 When taking a task (or starting an Explore session) with `agentFlow.openIn` set to
 `ask`, Agent Flow also lists the windows you already have open — a repo folder or a
 saved workspace — so you can drop the task straight into one of them. Choosing an open
-**workspace** window merges the task's repos into it; choosing an open **folder** window
-focuses it and seeds the agent there (a folder window can't gain root folders, so any
-other repos the task touches keep their briefs but aren't added as roots). Set
-`agentFlow.trackOpenWindows` to `false` to turn this off.
+**workspace** window offers to add any genuinely new repos to it (the same skip-and-approve
+behavior above); choosing an open **folder** window focuses it and seeds the agent there
+(a folder window can't gain root folders, so any other repos the task touches keep their
+briefs but aren't added as roots). Set `agentFlow.trackOpenWindows` to `false` to turn
+this off.
 
 ## Architecture
 

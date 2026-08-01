@@ -245,10 +245,16 @@ describe("openSharedWorkspace — existing workspace", () => {
     const result = await openSharedWorkspace(
       baseReq({
         target: { kind: "existing", file: "/ws/team.code-workspace" },
-        foldersToAdd: [{ name: "ASM-1-infra", path: "/repos/infra/.claude/worktrees/ASM-1" }],
+        foldersToAdd: [
+          { name: "ASM-1-infra", path: "/repos/infra/.claude/worktrees/ASM-1" },
+          { name: "ASM-2-infra", path: "/repos/infra/.claude/worktrees/ASM-2" },
+        ],
       }),
     );
-    expect(result.mergedFolders).toEqual(["ASM-1-infra"]);
+    expect(result.mergedFolders).toEqual(["ASM-1-infra", "ASM-2-infra"]);
+    expect(result.workspaceFile).toBe("/ws/team.code-workspace");
+    // No new batch workspace file is written when the destination is an existing one.
+    expect(writes((p) => p.endsWith("ASM-1+1.code-workspace"))).toHaveLength(0);
   });
 
   it("routes a worktree's mentions through its containing root", async () => {

@@ -934,21 +934,29 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    *  Never returns undefined: dismissing the prompt means "leave the workspace as-is",
    *  not "abort". By the time this runs the worktrees exist and the launch is committed,
    *  so abandoning it over a folder-list question is the worse failure — the same
-   *  reasoning resolveRemoteControl documents. */
+   *  reasoning resolveRemoteControl documents. `declined` is true only when a prompt
+   *  actually appeared and the answer wasn't yes — never when there was nothing to ask. */
   private async resolveWorkspaceAdditions(
     file: string,
     candidates: MergeCandidate[],
-  ): Promise<{ foldersToAdd: { name: string; path: string }[]; skipped: string[] }> {
+  ): Promise<{ foldersToAdd: { name: string; path: string }[]; skipped: string[]; declined: boolean }> {
     const plan = planWorkspaceMerge(file, candidates);
-    const skipped = plan.duplicates.map((c) => c.repoName);
+    // Two batch tasks in one not-yet-added repo both land in `add` under distinct
+    // key-qualified labels but share a repoName — dedup here (both this bucket and the
+    // display names below) so neither the toast nor the prompt copy repeats a name.
+    const skipped = [...new Set(plan.duplicates.map((c) => c.repoName))];
     // ok:false → nothing can be added safely; openWorkspace reports mergeFailed.
-    if (!plan.ok || !plan.add.length) return { foldersToAdd: [], skipped };
+    if (!plan.ok || !plan.add.length) return { foldersToAdd: [], skipped, declined: false };
 
-    const names = plan.add.map((c) => c.repoName).join(", ");
+    const names = [...new Set(plan.add.map((c) => c.repoName))].join(", ");
     const short = file.split("/").pop() ?? file;
     const p = await vscode.window.showQuickPick(
       [
-        { label: `$(add) Add ${names}`, detail: `Becomes a folder in ${short}`, yes: true },
+        {
+          label: `$(add) Add ${names}`,
+          detail: `Becomes a folder in ${short}, pointing at this task's worktree`,
+          yes: true,
+        },
         {
           label: "$(circle-slash) Leave the workspace as-is",
           detail: "Opens in its worktree; the brief uses absolute paths",
@@ -963,8 +971,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ignoreFocusOut: true,
       },
     );
-    if (p?.yes !== true) return { foldersToAdd: [], skipped };
-    return { foldersToAdd: plan.add.map((c) => ({ name: c.label, path: c.path })), skipped };
+    if (p?.yes !== true) return { foldersToAdd: [], skipped, declined: true };
+    return { foldersToAdd: plan.add.map((c) => ({ name: c.label, path: c.path })), skipped, declined: false };
   }
 
   /** Toast fragment for a launch that asked for Remote Control and didn't get it —
@@ -1039,7 +1047,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           args.existingWorkspaceFile,
           services.map((s) => ({ label: s.name, repoName: s.name, path: s.path })),
         )
-      : { foldersToAdd: [], skipped: [] };
+      : { foldersToAdd: [], skipped: [], declined: false };
 
     const wantRemoteControl = await this.resolveRemoteControl(cfg);
 
@@ -1078,7 +1086,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       const unadded = result.unaddedRepos?.length
         ? ` ${result.unaddedRepos.join(", ")} couldn't be added as roots to that window — their briefs are still in place.`
         : "";
-      this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${skipped}${unadded}${seeded}${rcNote}`);
+      // Confirming the file was left alone is the point of asking — without this, a
+      // decline reads identically to there being nothing new to offer.
+      const declined =
+        additions.declined && result.workspaceFile ? ` Left ${result.workspaceFile.split("/").pop()} unchanged.` : "";
+      this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${skipped}${unadded}${declined}${seeded}${rcNote}`);
     }
     return true;
   }
@@ -1263,7 +1275,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
                   })),
                 ),
               )
-            : { foldersToAdd: [], skipped: [] };
+            : { foldersToAdd: [], skipped: [], declined: false };
 
         const result = await openSharedWorkspace({
           tasks: resolved.map((r) => r.task),
@@ -1280,7 +1292,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           extra = ` ${result.unaddedFolders.join(", ")} couldn't be added as roots to that window — the briefs are still in place.`;
         }
         if (additions.skipped.length) {
-          extra += ` ${[...new Set(additions.skipped)].join(", ")} already in the workspace — the worktrees weren't added as folders.`;
+          // Already deduped inside resolveWorkspaceAdditions — nothing to dedup again here.
+          extra += ` ${additions.skipped.join(", ")} already in the workspace — the worktrees weren't added as folders.`;
+        }
+        if (additions.declined && result.workspaceFile) {
+          extra += ` Left ${result.workspaceFile.split("/").pop()} unchanged.`;
         }
         // A shared window seeds every session straight from its plan file — there's no
         // single clipboard paste for Remote Control to attach to, even for one task.
