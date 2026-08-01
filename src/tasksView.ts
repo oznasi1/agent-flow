@@ -18,7 +18,7 @@ import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { injectSlackDm, insertBeforeFiles } from "./engine/prompt";
-import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths } from "./engine/workspace";
+import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, type MergeCandidate } from "./engine/workspace";
 import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
 import { createWorktrees } from "./engine/worktree";
 import { openSharedWorkspace, type BatchTask } from "./engine/batchWorkspace";
@@ -927,6 +927,46 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return p?.yes === true;
   }
 
+  /** Which folders (if any) the user wants added to an existing-workspace destination.
+   *  Duplicates are skipped without asking — a folder by that name is already there, so
+   *  there is no real question, only noise. Only genuinely new repos prompt.
+   *
+   *  Never returns undefined: dismissing the prompt means "leave the workspace as-is",
+   *  not "abort". By the time this runs the worktrees exist and the launch is committed,
+   *  so abandoning it over a folder-list question is the worse failure — the same
+   *  reasoning resolveRemoteControl documents. */
+  private async resolveWorkspaceAdditions(
+    file: string,
+    candidates: MergeCandidate[],
+  ): Promise<{ foldersToAdd: { name: string; path: string }[]; skipped: string[] }> {
+    const plan = planWorkspaceMerge(file, candidates);
+    const skipped = plan.duplicates.map((c) => c.repoName);
+    // ok:false → nothing can be added safely; openWorkspace reports mergeFailed.
+    if (!plan.ok || !plan.add.length) return { foldersToAdd: [], skipped };
+
+    const names = plan.add.map((c) => c.repoName).join(", ");
+    const short = file.split("/").pop() ?? file;
+    const p = await vscode.window.showQuickPick(
+      [
+        { label: `$(add) Add ${names}`, detail: `Becomes a folder in ${short}`, yes: true },
+        {
+          label: "$(circle-slash) Leave the workspace as-is",
+          detail: "Opens in its worktree; the brief uses absolute paths",
+          yes: false,
+        },
+      ],
+      {
+        title:
+          plan.add.length === 1
+            ? `Add ${names} to ${short}?`
+            : `Add ${plan.add.length} folders to ${short}?`,
+        ignoreFocusOut: true,
+      },
+    );
+    if (p?.yes !== true) return { foldersToAdd: [], skipped };
+    return { foldersToAdd: plan.add.map((c) => ({ name: c.label, path: c.path })), skipped };
+  }
+
   /** Toast fragment for a launch that asked for Remote Control and didn't get it —
    * `openWorkspace` withholds it when the launch opens more than one window. Without
    * this the user waits for a `/remote-control` prompt that never arrives. */
@@ -993,6 +1033,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const args = await this.targetToOpenArgs(target, services.length, key, cfg);
     if (!args) return false;
 
+    // A saved workspace is the user's own artifact — never write it without approval.
+    const additions = args.existingWorkspaceFile
+      ? await this.resolveWorkspaceAdditions(
+          args.existingWorkspaceFile,
+          services.map((s) => ({ label: s.name, repoName: s.name, path: s.path })),
+        )
+      : { foldersToAdd: [], skipped: [] };
+
     const wantRemoteControl = await this.resolveRemoteControl(cfg);
 
     const planMd = this.buildBrief(detail);
@@ -1008,6 +1056,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       openIn: args.openIn,
       existingWorkspaceFile: args.existingWorkspaceFile,
       existingFolder: args.existingFolder,
+      foldersToAdd: additions.foldersToAdd,
       remoteControl: wantRemoteControl,
     });
 
@@ -1023,10 +1072,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       );
     } else {
       const added = result.mergedRepos?.length ? ` Added ${result.mergedRepos.join(", ")}.` : "";
+      const skipped = additions.skipped.length
+        ? ` ${additions.skipped.join(", ")} already in the workspace — not added as folders.`
+        : "";
       const unadded = result.unaddedRepos?.length
         ? ` ${result.unaddedRepos.join(", ")} couldn't be added as roots to that window — their briefs are still in place.`
         : "";
-      this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${unadded}${seeded}${rcNote}`);
+      this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${skipped}${unadded}${seeded}${rcNote}`);
     }
     return true;
   }
