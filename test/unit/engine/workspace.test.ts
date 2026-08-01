@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
+import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
 import { commands, env, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -1067,5 +1067,48 @@ describe("workspaceFolderPaths", () => {
   it("returns [] when folders is missing or not an array", () => {
     readFileSync.mockReturnValue('{ "settings": {} }');
     expect(workspaceFolderPaths("/ws/nofolders.code-workspace")).toEqual([]);
+  });
+});
+
+describe("mentionInWorkspace", () => {
+  it("uses the root's own name when the repo IS a root", () => {
+    const roots = [{ path: "/repos/centaur" }];
+    expect(mentionInWorkspace(roots, "/repos/centaur", "src/x.ts")).toBe("@centaur/src/x.ts");
+  });
+
+  it("prefers a root's custom name field over its basename", () => {
+    const roots = [{ name: "Centaur Service", path: "/repos/centaur" }];
+    expect(mentionInWorkspace(roots, "/repos/centaur", "src/x.ts")).toBe("@Centaur Service/src/x.ts");
+  });
+
+  it("routes a worktree through its containing root", () => {
+    // The whole point: the worktree is not a root, but it IS inside one, so the
+    // mention can name it precisely instead of resolving to the main checkout.
+    const roots = [{ path: "/repos/centaur" }];
+    expect(mentionInWorkspace(roots, "/repos/centaur/.claude/worktrees/ASM-1", "src/x.ts")).toBe(
+      "@centaur/.claude/worktrees/ASM-1/src/x.ts",
+    );
+  });
+
+  it("picks the deepest containing root, matching VS Code's most-specific resolution", () => {
+    const roots = [{ path: "/repos" }, { path: "/repos/centaur" }];
+    expect(mentionInWorkspace(roots, "/repos/centaur/.claude/worktrees/ASM-1", "src/x.ts")).toBe(
+      "@centaur/.claude/worktrees/ASM-1/src/x.ts",
+    );
+  });
+
+  it("returns undefined when the repo is inside no root", () => {
+    // Emitting @centaur/src/x.ts here would point the agent at a DIFFERENT checkout.
+    const roots = [{ path: "/repos/centaur" }];
+    expect(mentionInWorkspace(roots, "/repos/infra", "src/x.ts")).toBeUndefined();
+  });
+
+  it("returns undefined when there are no roots at all", () => {
+    expect(mentionInWorkspace([], "/repos/centaur", "src/x.ts")).toBeUndefined();
+  });
+
+  it("does not treat a sibling with a shared prefix as containment", () => {
+    const roots = [{ path: "/repos/api" }];
+    expect(mentionInWorkspace(roots, "/repos/api-gateway", "src/x.ts")).toBeUndefined();
   });
 });

@@ -439,6 +439,28 @@ export function planWorkspaceMerge(file: string, candidates: MergeCandidate[]): 
   return plan;
 }
 
+/** The `@mention` for `rel` (relative to the repo at `repoPath`) in a window whose roots
+ *  are `roots`. The repo is a root → `@<root>/<rel>`. The repo is INSIDE a root →
+ *  `@<root>/<repo's path from that root>/<rel>`, which is the worktree case, since
+ *  worktrees live at `<repo>/.claude/worktrees/<KEY>`. Inside no root → undefined, and
+ *  the caller drops the mention: `@centaur/src/x.ts` when the root named `centaur` is
+ *  the MAIN checkout would send the agent to the wrong tree. */
+export function mentionInWorkspace(
+  roots: WorkspaceFolder[],
+  repoPath: string,
+  rel: string,
+): string | undefined {
+  const target = canon(repoPath);
+  // Deepest root wins, matching VS Code's most-specific-root resolution. The `+ sep`
+  // guard keeps /repos/api from swallowing the sibling /repos/api-gateway.
+  const root = roots
+    .filter((r) => r.path === target || target.startsWith(r.path + path.sep))
+    .sort((a, b) => b.path.length - a.path.length)[0];
+  if (!root) return undefined;
+  const inner = path.relative(root.path, target);
+  return mention("multiroot", root.name ?? path.basename(root.path), inner ? `${inner}/${rel}` : rel);
+}
+
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Resolve symlinks so the plan matchPath (written pre-open) and the window's
