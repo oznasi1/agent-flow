@@ -72,9 +72,9 @@ export function initTelemetry(context: vscode.ExtensionContext, log: (m: string)
   // job — deliberately not sender.dispose(), which is a permanent off switch and
   // would break re-enabling the setting later in the same session.
   // We log this ourselves rather than relying solely on PostHogSender.drop()'s
-  // own (queue-non-empty-gated) message: until POSTHOG_API_KEY is a real key,
-  // the sender no-ops and never queues anything, so that message would never
-  // fire even though consent genuinely was withdrawn.
+  // own message, which is gated on the queue being non-empty — withdrawing
+  // consent between flushes is genuine and worth recording even when there
+  // happened to be nothing queued at that moment.
   function withdrawConsent(): void {
     sender.drop();
     log("telemetry: consent withdrawn, discarding any queued events");

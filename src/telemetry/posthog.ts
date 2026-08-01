@@ -1,10 +1,21 @@
 import * as vscode from "vscode";
 
-export const POSTHOG_HOST = "https://us.i.posthog.com";
+/** EU cloud — the project's region, and keys are region-scoped.
+ *
+ * Verified empirically: PostHog's /batch/ endpoint answers `200 {"status":"Ok"}`
+ * to any well-formed request and validates the api_key asynchronously. A wrong
+ * region or a revoked key therefore fails COMPLETELY SILENTLY — 200s forever
+ * while every event is discarded server-side. Nothing on this side can detect
+ * it, so the only confirmation that ingestion works is seeing events appear in
+ * the PostHog project itself. Treat a change to this constant or to the key as
+ * needing that manual check. */
+export const POSTHOG_HOST = "https://eu.i.posthog.com";
 /** Public, write-only PostHog project ingestion key. NOT a secret — it is
- * world-readable in this OSS repo and in every published bundle. Replace the
- * placeholder with the real key; the sender no-ops while it is unset. */
-export const POSTHOG_API_KEY = "phc_REPLACE_ME";
+ * world-readable in this OSS repo and in every published bundle, exactly as it is
+ * in the JS bundle of every website using PostHog. It grants no read access.
+ * `PLACEHOLDER_KEY` below is the sentinel the no-op guard compares against — it
+ * must keep its original value, so never change both to the same string. */
+export const POSTHOG_API_KEY = "phc_kVqGDy2F5NbxPaBW272NkGvcUnCzdnM7rxeQk9qxGySa";
 export const PLACEHOLDER_KEY = "phc_REPLACE_ME";
 
 export const BATCH_SIZE = 20;
