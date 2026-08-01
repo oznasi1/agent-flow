@@ -340,29 +340,47 @@ export function mergeReposIntoWorkspace(
   return { added: missing.map((r) => r.name), ok: true };
 }
 
-/** Canonical absolute paths of the folders declared in a `.code-workspace` file,
- * resolved against the file's directory. `[]` if the file can't be read or safely
- * parsed. Mirrors the existing-folder resolution in mergeReposIntoWorkspace so the
- * "which repos does this workspace already have" check stays consistent with the merge. */
-export function workspaceFolderPaths(file: string): string[] {
+/** A folder declared by a `.code-workspace`: its canonical absolute path, and its
+ *  `name` field when the file sets one. */
+export interface WorkspaceFolder {
+  name?: string;
+  path: string;
+}
+
+/** The folders `file` declares, canonical and resolved against the file's directory.
+ *  `undefined` when the file can't be read or safely parsed — deliberately distinct
+ *  from `[]` (a valid file declaring no folders), because planWorkspaceMerge has to
+ *  tell "nothing can be added safely" from "empty, so add everything".
+ *
+ *  Single reader for "which folders does this workspace have", so the merge, the plan
+ *  and prefillPathsForTarget can't drift apart on the answer. */
+export function workspaceFolders(file: string): WorkspaceFolder[] | undefined {
   let text: string;
   try {
     text = fs.readFileSync(file, "utf8");
   } catch {
-    return [];
+    return undefined;
   }
   const errors: ParseError[] = [];
   const doc = jsoncParse(text, errors, { allowTrailingComma: true }) as
-    | { folders?: { path?: string }[] }
+    | { folders?: { name?: string; path?: string }[] }
     | undefined;
   if (errors.length || !doc || typeof doc !== "object" || Array.isArray(doc) || !Array.isArray(doc.folders)) {
-    return [];
+    return undefined;
   }
   const wsDir = path.dirname(file);
   return doc.folders
-    .map((f) => f?.path)
-    .filter((p): p is string => typeof p === "string")
-    .map((p) => canon(path.resolve(wsDir, p)));
+    .filter((f): f is { name?: string; path: string } => typeof f?.path === "string")
+    .map((f) => ({
+      ...(typeof f.name === "string" ? { name: f.name } : {}),
+      path: canon(path.resolve(wsDir, f.path)),
+    }));
+}
+
+/** Canonical absolute paths of the folders declared in a `.code-workspace` file.
+ *  `[]` if the file can't be read or safely parsed. */
+export function workspaceFolderPaths(file: string): string[] {
+  return (workspaceFolders(file) ?? []).map((f) => f.path);
 }
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));

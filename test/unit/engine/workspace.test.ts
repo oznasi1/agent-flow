@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolderPaths, agentPrompt, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef } from "../../../src/engine/workspace";
+import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, agentPrompt, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef } from "../../../src/engine/workspace";
 import { commands, env, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -902,6 +902,43 @@ describe("listWorkspaceFiles", () => {
     readdirSync.mockReturnValue(["dir.code-workspace"] as never);
     statSync.mockReturnValue({ isFile: () => false, mtimeMs: 5 } as unknown as fs.Stats);
     expect(listWorkspaceFiles("/ws")).toEqual([]);
+  });
+});
+
+describe("workspaceFolders", () => {
+  it("returns each folder's name and canonical path, resolved against the file's dir", () => {
+    readFileSync.mockReturnValue(
+      '{ "folders": [{ "name": "API", "path": "api" }, { "path": "/repos/centaur" }] }',
+    );
+    expect(workspaceFolders("/repos/team.code-workspace")).toEqual([
+      { name: "API", path: "/repos/api" },
+      { path: "/repos/centaur" },
+    ]);
+  });
+
+  it("skips folders with no string path", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "name": "nameless" }, { "path": "/repos/centaur" }] }');
+    expect(workspaceFolders("/ws/t.code-workspace")).toEqual([{ path: "/repos/centaur" }]);
+  });
+
+  it("distinguishes a valid empty folders array from a parse failure", () => {
+    readFileSync.mockReturnValue('{ "folders": [] }');
+    expect(workspaceFolders("/ws/empty.code-workspace")).toEqual([]);
+  });
+
+  it("returns undefined when the file is unparseable", () => {
+    readFileSync.mockReturnValue("{ this is : not json");
+    expect(workspaceFolders("/ws/bad.code-workspace")).toBeUndefined();
+  });
+
+  it("returns undefined when the file can't be read", () => {
+    readFileSync.mockImplementation(() => { throw new Error("ENOENT"); });
+    expect(workspaceFolders("/ws/missing.code-workspace")).toBeUndefined();
+  });
+
+  it("returns undefined when folders is the wrong shape", () => {
+    readFileSync.mockReturnValue('{ "folders": "nope" }');
+    expect(workspaceFolders("/ws/bad-shape.code-workspace")).toBeUndefined();
   });
 });
 
