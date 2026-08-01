@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Existing workspaces are no longer modified without asking.** Taking a task into a saved
+  `.code-workspace` used to append every repo that wasn't already a folder — and because a
+  worktree keeps its repo's name, a workspace with `api` grew a second root also called
+  `api`, then a third. Repos whose name the workspace already has are now skipped, and
+  anything genuinely new is added only after you approve it. The task still opens in its
+  worktree either way, and its `@mentions` now resolve through the containing root instead
+  of silently naming the main checkout.
+
 ## [0.1.42] — 2026-08-02
 
 ### Added
