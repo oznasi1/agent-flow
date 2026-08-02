@@ -1938,7 +1938,9 @@ it("counts several agents and lists them when expanded", () => {
   expect(screen.queryByText("svc-fa")).toBeNull();
   fireEvent.click(disclosure);
   expect(screen.getByText("svc-fa")).toBeTruthy();
-  expect(screen.getByText(/ended turn|idle/)).toBeTruthy();
+  // Each row carries its OWN state — the whole point of listing them.
+  expect(screen.getByText("working")).toBeTruthy();
+  expect(screen.getByText("idle")).toBeTruthy();
 });
 
 it("renders no agents row for a card with none", () => {
