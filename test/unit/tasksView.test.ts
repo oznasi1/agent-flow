@@ -1135,6 +1135,50 @@ describe("explore", () => {
     );
   });
 
+  it("anchors the Slack sentence on the real {files} placeholder even when a custom environment contains that literal text", async () => {
+    // Regression pin for the assembly order: injectSlackDm MUST run before applyExploreVars.
+    // With env="prod{files}" this genuinely discriminates the two orders —
+    //   correct  (inject then substitute): "VER {summary} on prod{files} for account-service <SENTENCE>{files}"
+    //   reversed (substitute then inject): "VER {summary} on prod <SENTENCE>{files} for account-service{files}"
+    // — because a reversed order lets injectSlackDm's indexOf("{files}") anchor on the
+    // substring smuggled in by the typed environment instead of the template's real placeholder.
+    const actions = CFG.exploreActions.map((a) => (a.id === "verify" ? { ...a, slackDm: true } : a));
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify", exploreActions: actions });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox)
+      .mockResolvedValueOnce("retry banner") // focus
+      .mockResolvedValueOnce("prod{files}"); // custom env smuggling the literal placeholder text
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "$(edit) Custom…" } as never) // no `env` → custom
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptTemplate: `VER {summary} on prod{files} for account-service ${SLACK_DM_SENTENCE}{files}`,
+      }),
+    );
+  });
+
+  it("treats a configured environment that shares the Custom… label as a real environment, not the escape hatch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify", environments: ["$(edit) Custom…"] });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner"); // focus only — no custom-env box expected
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "$(edit) Custom…", env: "$(edit) Custom…" } as never) // carries `env` → real pick
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(window.showInputBox).toHaveBeenCalledTimes(1);
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptTemplate: "VER {summary} on $(edit) Custom… for account-service{files}",
+      }),
+    );
+  });
+
   it("does not ask for an environment for an action that does not need one", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "debug" });
     const repos = mkRepos(["account-service"]);
