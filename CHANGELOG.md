@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The Deck reflects every Claude Code session open on this machine, not only what
+  Agent Flow launched. Sessions attach to the card that owns their directory —
+  a worktree with two agents now shows both — and a place with no tracked run
+  becomes a card of its own, with its ticket key and pull request inferred from
+  its branch. `⋯` → **Track it** pins one to the runs store. Toggle with
+  **Open agents** / `agentFlow.openAgents`.
+
+### Changed
+
+- An agent that has ended its turn now outranks one that is still working when a
+  card has several, so a multi-agent card lands in **Action required** rather
+  than hiding the one waiting on you behind the ones that are busy.
+- The Deck looks for a pull request by whether a repo is on a branch of its own
+  rather than by whether the run has a ticket, so an Explore session that made a
+  branch now finds its PR.
+
 ## [0.1.45] — 2026-08-02
 
 ### Added

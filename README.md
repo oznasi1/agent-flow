@@ -72,6 +72,19 @@ to git + Jira only. **Open** focuses the window if it's already open (never a du
 opens it fresh otherwise; **Diff** shows the working diff; **⋯** offers *Open in Jira* and
 *Forget*.
 
+The Deck also shows **every Claude Code session open on this machine**, not only
+the ones it launched — read from `~/.claude/sessions`, the registry Claude Code
+keeps of its running sessions. Sessions attach to the card that owns their
+directory, so a worktree with two agents in it lists both, in the order you
+opened them; a place with no tracked run of its own gets a card of its own,
+marked `local`. A local card reads its branch for a ticket key
+(`ASM-5641-team-table` → `ASM-5641`, marked `~inferred`) and for its pull
+request, so a worktree Claude Code made on its own lands on the board as
+complete as one you took. It disappears the moment you close its last agent —
+**⋯** → **Track it** pins it to the runs store first, and from there it
+behaves exactly like a task you took, **Forget** included. Turn it off with the
+**Open agents** toggle or `agentFlow.openAgents`.
+
 Each card also carries the **PR state** of every repo it touches, read from GitHub
 with the `gh` CLI: the PR number, CI (failing check names link to their runs, or a
 passing count), the review decision with any unresolved-thread count, and
@@ -205,8 +218,11 @@ regardless of its own setting. Nothing about your tickets, code or repos is sent
 to any service that isn't already yours, and Agent Flow stores no GitHub
 credentials of its own: every GitHub call goes through `gh`, so it inherits
 whatever host, SSO and token your CLI already
-has. Separately, Agent Flow also sends anonymous *usage* telemetry (not any of
-the above) — see [Telemetry](#telemetry) below.
+has. When `agentFlow.openAgents` is on, the Deck also reads `~/.claude/sessions` —
+Claude Code's own local registry of what's running — to find sessions it didn't
+launch; nothing in that registry leaves your machine either. Separately, Agent Flow
+also sends anonymous *usage* telemetry (not any of the above) — see
+[Telemetry](#telemetry) below.
 
 GitHub access is **read-only by default** — Agent Flow never merges or pushes.
 The one exception is opt-in: with `agentFlow.reviewWrites` on (it ships **off**),
@@ -247,6 +263,7 @@ repo, so they never get committed.
 | `agentFlow.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
 | `agentFlow.prFacts` | `true` | Read each in-flight task's PR state from GitHub via the `gh` CLI and show it on the Deck's cards. |
+| `agentFlow.openAgents` | `true` | Show every Claude Code session open on this machine on the Deck: as agents on the card that owns their directory, and as a `local` card of its own for a place Agent Flow never launched. Read from `~/.claude/sessions`. |
 | `agentFlow.prFactsTtlSeconds` | `120` | How stale a cached PR fact may be before the Deck re-fetches it (minimum 30). Only fetched while the Deck is open. |
 | `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on a card. |
 | `agentFlow.prReviewAutoFix` | `true` | After the PR-review agent assesses the PR, let it implement the requested changes (off = assess only). |
