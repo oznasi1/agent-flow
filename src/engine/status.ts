@@ -1,7 +1,7 @@
-import { AgentActivity, AgentState, DeckColumn, Run, RunStatus, PrEntryMap } from "../types";
+import { AgentActivity, AgentState, CardAgent, DeckColumn, Run, RunStatus, PrEntryMap } from "../types";
 import { gitState } from "./git";
 import { runTarget } from "./runs";
-import { readAgentActivity } from "./transcript";
+import { readAgentActivity, UNKNOWN_ACTIVITY } from "./transcript";
 import { canon } from "./paths";
 
 /** Inputs to the column decision — every field observable, none required. */
@@ -59,14 +59,15 @@ export function prSignals(prs: PrEntryMap): { open: boolean; blocked: boolean; m
   return { open, blocked, merged: all.every((f) => f.state === "MERGED") };
 }
 
-const UNKNOWN_AGENT: AgentActivity = { state: "unknown", lastActivityMs: null, slug: null };
-
-const STATE_RANK: Record<AgentState, number> = { working: 3, "needs-you": 2, idle: 1, unknown: 0 };
+// needs-you outranks working: deriveBucket's ladder tests needs-you first, and
+// with the old order it never saw one — any working session in the run buried
+// the agent that was actually waiting on a human.
+const STATE_RANK: Record<AgentState, number> = { "needs-you": 3, working: 2, idle: 1, unknown: 0 };
 
 /** The liveliest agent across a run's repos — a multi-repo task's session may live
  * in any of them. Ties broken by most-recent activity. Pure. */
 export function mostActive(activities: AgentActivity[]): AgentActivity {
-  if (activities.length === 0) return UNKNOWN_AGENT;
+  if (activities.length === 0) return UNKNOWN_ACTIVITY;
   return [...activities].sort((a, b) => {
     const byRank = STATE_RANK[b.state] - STATE_RANK[a.state];
     if (byRank !== 0) return byRank;
@@ -79,21 +80,39 @@ export interface JiraInfo {
   category: string | null;
 }
 
+/** Inputs to `buildRunStatus`, gathered in one place now that the function reads
+ * from git, Jira, the transcript, PR facts, presence, and open sessions. */
+export interface BuildRunStatusInput {
+  run: Run;
+  jira: JiraInfo | null;
+  projectsRoot: string;
+  nowMs: number;
+  /** Off → no transcript is read and every agent reads as unknown. */
+  liveSignal?: boolean;
+  openIdentities?: ReadonlySet<string>;
+  prs?: PrEntryMap;
+  /** Open sessions in this run's directories. */
+  agents?: CardAgent[];
+}
+
 /** Reconcile a durable Run with every observable source into the status a card
  * renders. `liveSignal` off (or no transcript) leaves the git + Jira backbone. */
-export function buildRunStatus(
-  run: Run,
-  jira: JiraInfo | null,
-  projectsRoot: string,
-  nowMs: number,
-  liveSignal = true,
-  openIdentities: ReadonlySet<string> = new Set(),
-  prs: PrEntryMap = {},
-): RunStatus {
+export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
+  const { run, jira, projectsRoot, nowMs } = i;
+  const liveSignal = i.liveSignal ?? true;
+  const agents = i.agents ?? [];
+  const prs = i.prs ?? {};
   const repos = run.repos.map((r) => gitState(r.name, r.path));
+  // The union of both readings. An open session is exact — addressed by its own
+  // sessionId, so two in one worktree report two states — and the per-repo read
+  // covers a repo with no session open, which is what stops a tracked card whose
+  // agent has since exited from dropping to parked.
   const agent = liveSignal
-    ? mostActive(run.repos.map((r) => readAgentActivity(projectsRoot, r.path, r.branch ?? null, nowMs)))
-    : UNKNOWN_AGENT;
+    ? mostActive([
+        ...agents.map((a) => a.activity),
+        ...run.repos.map((r) => readAgentActivity(projectsRoot, r.path, r.branch ?? null, nowMs)),
+      ])
+    : UNKNOWN_ACTIVITY;
   const pr = prSignals(prs);
   const column = deriveBucket({
     jiraCategory: jira?.category ?? null,
@@ -104,6 +123,16 @@ export function buildRunStatus(
     prMerged: pr.merged,
   });
   const target = runTarget(run);
-  const windowOpen = target ? openIdentities.has(canon(target)) : false;
-  return { run, column, jiraStatus: jira?.status ?? null, jiraCategory: jira?.category ?? null, repos, agent, windowOpen, prs };
+  const windowOpen = target ? (i.openIdentities ?? new Set<string>()).has(canon(target)) : false;
+  return {
+    run,
+    column,
+    jiraStatus: jira?.status ?? null,
+    jiraCategory: jira?.category ?? null,
+    repos,
+    agent,
+    windowOpen,
+    prs,
+    agents,
+  };
 }

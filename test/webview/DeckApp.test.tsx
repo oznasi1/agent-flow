@@ -30,6 +30,7 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   agent: { state: "working", lastActivityMs: 1_000, slug: "export-streaming" },
   windowOpen: false,
   prs: {},
+  agents: [],
   ...over,
 });
 

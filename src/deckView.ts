@@ -573,7 +573,7 @@ export class DeckPanel {
           }
         }
       }
-      out.push(buildRunStatus(run, jira, projectsRoot, now, this.liveSignal, openIdentities, prs));
+      out.push(buildRunStatus({ run, jira, projectsRoot, nowMs: now, liveSignal: this.liveSignal, openIdentities, prs }));
     }
     return out;
   }

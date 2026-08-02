@@ -159,7 +159,7 @@ const mkRun = (over: Partial<Run> = {}): Run => ({
 });
 const statusFor = (run: Run): RunStatus => ({
   run, column: "progress", jiraStatus: null, jiraCategory: null, repos: [],
-  agent: { state: "unknown", lastActivityMs: null, slug: null }, windowOpen: false, prs: {},
+  agent: { state: "unknown", lastActivityMs: null, slug: null }, windowOpen: false, prs: {}, agents: [],
 });
 const reviewFixture = (): ReviewRequest => ({
   id: "CyberJackGit/aws-ops#8491", repo: "CyberJackGit/aws-ops", repoName: "aws-ops",
@@ -195,7 +195,7 @@ beforeEach(() => {
   h.runs = [mkRun()];
   h.openInEditor.mockClear().mockResolvedValue(true);
   h.taskDiff.mockClear().mockReturnValue("");
-  h.buildRunStatus.mockReset().mockImplementation((run: Run) => statusFor(run));
+  h.buildRunStatus.mockReset().mockImplementation((i: { run: Run }) => statusFor(i.run));
   h.removeRun.mockClear();
   h.getStatus.mockClear().mockResolvedValue({ status: "In Review", category: "indeterminate" });
   h.prEntries = {};
@@ -280,7 +280,7 @@ describe("DeckPanel", () => {
     await p._fire({ type: "deck:setLive", on: false });
     const runsPost = posts(p).reverse().find((m) => m.type === "deck:runs");
     expect(runsPost.liveSignal).toBe(false);
-    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.anything(), null, expect.any(String), expect.any(Number), false, expect.any(Set), {});
+    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({ jira: null, liveSignal: false, prs: {} }));
   });
 
   it("inspect open re-opens the repo path via the editor", async () => {
@@ -396,7 +396,7 @@ describe("DeckPanel", () => {
     show();
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });
-    const prs = h.buildRunStatus.mock.calls.at(-1)![6];
+    const prs = h.buildRunStatus.mock.calls.at(-1)![0].prs;
     expect(prs).toEqual({});
   });
 
@@ -445,8 +445,7 @@ describe("DeckPanel", () => {
     await p._fire({ type: "deck:refresh" });
     expect(h.getStatus).toHaveBeenCalledWith("ASM-1");
     expect(h.buildRunStatus).toHaveBeenCalledWith(
-      expect.anything(), { status: "In Review", category: "indeterminate" },
-      expect.any(String), expect.any(Number), true, expect.any(Set), {},
+      expect.objectContaining({ jira: { status: "In Review", category: "indeterminate" }, liveSignal: true, prs: {} }),
     );
   });
 
@@ -455,7 +454,7 @@ describe("DeckPanel", () => {
     show(true);
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });
-    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.anything(), null, expect.any(String), expect.any(Number), true, expect.any(Set), {});
+    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({ jira: null, liveSignal: true, prs: {} }));
   });
 
   it("keeps rendering when a Jira lookup fails for another reason", async () => {
@@ -566,10 +565,9 @@ describe("DeckPanel PR facts", () => {
     show();
     await settled();
     expect(h.buildRunStatus).toHaveBeenCalledWith(
-      // `show()` defaults to unauthenticated, so jira is null here — `expect.anything()`
-      // excludes null/undefined, so this position must match the literal value.
-      expect.anything(), null, expect.any(String), expect.any(Number),
-      expect.any(Boolean), expect.any(Set), h.prEntries,
+      // `show()` defaults to unauthenticated, so jira is null here — `objectContaining`
+      // still requires this key to match the literal value.
+      expect.objectContaining({ jira: null, prs: h.prEntries }),
     );
   });
 
@@ -691,10 +689,9 @@ describe("DeckPanel PR facts", () => {
     expect(h.probeGh).not.toHaveBeenCalled();
     expect(h.buildRunStatus).toHaveBeenCalledWith(
       // `show()` defaults to unauthenticated, so jira is null here (see the
-      // "passes cached PR entries" test above for why `expect.anything()`
-      // cannot stand in for that position).
-      expect.anything(), null, expect.any(String), expect.any(Number),
-      expect.any(Boolean), expect.any(Set), {},
+      // "passes cached PR entries" test above for why `objectContaining`
+      // still pins that key to the literal value).
+      expect.objectContaining({ jira: null, prs: {} }),
     );
     expect(posts(lastPanel()).find((m) => m.type === "deck:runs")).toMatchObject({ prFacts: false });
   });
@@ -805,8 +802,7 @@ describe("DeckPanel PR facts", () => {
     show();
     await settled();
     expect(h.buildRunStatus).toHaveBeenCalledWith(
-      expect.anything(), null, expect.any(String), expect.any(Number),
-      expect.any(Boolean), expect.any(Set), { svc: svcEntry },
+      expect.objectContaining({ jira: null, prs: { svc: svcEntry } }),
     );
   });
 

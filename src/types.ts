@@ -127,6 +127,14 @@ export interface AgentActivity {
   slug: string | null; // session slug (title), when known
 }
 
+/** One open Claude Code session attached to a card, with its own live state.
+ * `activity` is UNKNOWN_ACTIVITY when the Live signal is off — the registry
+ * still knows the session is open, it is only the transcript that goes unread. */
+export interface CardAgent {
+  session: OpenSession;
+  activity: AgentActivity;
+}
+
 /** A run reconciled with all observable sources — what a card renders. */
 export interface RunStatus {
   run: Run;
@@ -137,6 +145,7 @@ export interface RunStatus {
   agent: AgentActivity;
   windowOpen: boolean; // is this run's target window currently open? (from presence)
   prs: PrEntryMap; // repo name → observed PR state ({} when prFacts is off)
+  agents: CardAgent[]; // every open session in this run's directories
 }
 
 // ── PR & CI observation ─────────────────────────────────────────────────────

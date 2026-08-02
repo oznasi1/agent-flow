@@ -5,7 +5,7 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import { deriveBucket, mostActive, buildRunStatus, prSignals } from "../../../src/engine/status";
 import { encodeProjectDir } from "../../../src/engine/transcript";
-import { AgentActivity, Run, PrEntryMap, PrFacts } from "../../../src/types";
+import { AgentActivity, AgentState, CardAgent, Run, PrEntryMap, PrFacts } from "../../../src/types";
 
 const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
   number: 1, url: "https://github.com/o/r/pull/1", title: "t", state: "OPEN", isDraft: false,
@@ -14,6 +14,11 @@ const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
 });
 const entries = (...facts: (PrFacts | null)[]): PrEntryMap =>
   Object.fromEntries(facts.map((f, i) => [`repo${i}`, { facts: f, fetchedAt: 0 }]));
+
+const agent = (state: AgentState, lastActivityMs: number): CardAgent => ({
+  session: { pid: 1, sessionId: `s-${state}-${lastActivityMs}`, cwd: "/r/svc", startedAt: 1, name: "svc-7e" },
+  activity: { state, lastActivityMs, slug: null },
+});
 
 describe("deriveBucket", () => {
   it("puts a Jira-done ticket in Done even if the agent is working", () => {
@@ -84,6 +89,17 @@ describe("mostActive", () => {
 
   it("breaks ties by most-recent activity", () => {
     expect(mostActive([act("idle", 100), act("idle", 200)]).lastActivityMs).toBe(200);
+  });
+
+  it("prefers an agent that needs you over one still working", () => {
+    // deriveBucket's ladder tests needs-you first and never used to see it: the
+    // old rank discarded it in favour of any working session. Three agents busy
+    // and one waiting on you is Action required, not In progress.
+    const picked = mostActive([
+      { state: "working", lastActivityMs: 9_000, slug: null },
+      { state: "needs-you", lastActivityMs: 1_000, slug: null },
+    ]);
+    expect(picked.state).toBe("needs-you");
   });
 });
 
@@ -178,63 +194,96 @@ describe("buildRunStatus", () => {
   afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
   it("combines a live working agent + in-progress Jira into the In-progress column", () => {
-    const s = buildRunStatus(run, { status: "In Progress", category: "indeterminate" }, projRoot, NOW, true);
+    const s = buildRunStatus({ run, jira: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW, liveSignal: true });
     expect(s.column).toBe("progress");
     expect(s.agent.state).toBe("working");
     expect(s.repos[0].dirty).toBe(true);
   });
 
   it("keeps the git backbone when the live signal is off (agent unknown)", () => {
-    const s = buildRunStatus(run, { status: "In Progress", category: "indeterminate" }, projRoot, NOW, false);
+    const s = buildRunStatus({ run, jira: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW, liveSignal: false });
     expect(s.agent.state).toBe("unknown");
     expect(s.repos[0].dirty).toBe(true);
     expect(s.column).toBe("progress");
   });
 
   it("puts a Jira-done run in Done despite a working agent", () => {
-    const s = buildRunStatus(run, { status: "Done", category: "done" }, projRoot, NOW, true);
+    const s = buildRunStatus({ run, jira: { status: "Done", category: "done" }, projectsRoot: projRoot, nowMs: NOW, liveSignal: true });
     expect(s.column).toBe("done");
   });
 
   it("still renders the backbone with no Jira info", () => {
-    const s = buildRunStatus(run, null, projRoot, NOW, true);
+    const s = buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true });
     expect(s.repos[0].name).toBe("repo");
     expect(s.jiraStatus).toBeNull();
   });
 
   it("marks windowOpen when the run's target is an open window identity", () => {
     const ids = new Set([fs.realpathSync(repoPath)]);
-    const s = buildRunStatus(run, null, projRoot, NOW, true, ids);
+    const s = buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true, openIdentities: ids });
     expect(s.windowOpen).toBe(true);
   });
 
   it("leaves windowOpen false when no identity matches", () => {
-    const s = buildRunStatus(run, null, projRoot, NOW, true, new Set(["/somewhere/else"]));
+    const s = buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true, openIdentities: new Set(["/somewhere/else"]) });
     expect(s.windowOpen).toBe(false);
   });
 
   it("defaults windowOpen to false when no identities are passed", () => {
-    expect(buildRunStatus(run, null, projRoot, NOW, true).windowOpen).toBe(false);
+    expect(buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true }).windowOpen).toBe(false);
   });
 
   it("defaults prs to an empty map when none are passed", () => {
-    expect(buildRunStatus(run, null, projRoot, NOW, true).prs).toEqual({});
+    expect(buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true }).prs).toEqual({});
   });
 
   it("threads PR entries through onto the status", () => {
     const prs = entries(prFacts());
-    const s = buildRunStatus(run, null, projRoot, NOW, true, new Set(), prs);
+    const s = buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true, openIdentities: new Set(), prs });
     expect(s.prs).toBe(prs);
   });
 
   it("promotes a run with a conflicting PR into Needs you despite a working agent", () => {
-    const s = buildRunStatus(run, { status: "In Progress", category: "indeterminate" }, projRoot, NOW, true, new Set(), entries(prFacts({ mergeable: "conflicting" })));
+    const s = buildRunStatus({
+      run, jira: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW,
+      liveSignal: true, openIdentities: new Set(), prs: entries(prFacts({ mergeable: "conflicting" })),
+    });
     expect(s.agent.state).toBe("working");
     expect(s.column).toBe("needs");
   });
 
   it("puts a run whose PR merged into Done even when Jira says in progress", () => {
-    const s = buildRunStatus(run, { status: "In Progress", category: "indeterminate" }, projRoot, NOW, true, new Set(), entries(prFacts({ state: "MERGED" })));
+    const s = buildRunStatus({
+      run, jira: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW,
+      liveSignal: true, openIdentities: new Set(), prs: entries(prFacts({ state: "MERGED" })),
+    });
     expect(s.column).toBe("done");
+  });
+
+  describe("buildRunStatus with open sessions", () => {
+    it("is decided by the sessions, not by the newest transcript", () => {
+      const s = buildRunStatus({
+        run, jira: null, projectsRoot: projRoot, nowMs: NOW,
+        agents: [agent("working", NOW - 1_000), agent("needs-you", NOW - 60_000)],
+      });
+      expect(s.agent.state).toBe("needs-you");
+      expect(s.column).toBe("needs");
+      expect(s.agents).toHaveLength(2);
+    });
+
+    it("keeps a card's per-repo state when no session is open for it", () => {
+      // A tracked run whose agent has since exited must not drop to parked.
+      const s = buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, agents: [] });
+      expect(s.agent.state).not.toBe("unknown");
+      expect(s.agents).toEqual([]);
+    });
+
+    it("reports every session as unknown with the live signal off", () => {
+      const s = buildRunStatus({
+        run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: false,
+        agents: [agent("working", NOW - 1_000)],
+      });
+      expect(s.agent.state).toBe("unknown");
+    });
   });
 });
