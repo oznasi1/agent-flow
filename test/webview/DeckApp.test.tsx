@@ -309,10 +309,14 @@ describe("DeckApp", () => {
   });
 
   it("shows the place's name when nothing was inferred", () => {
-    render(<DeckApp />);
+    const { container } = render(<DeckApp />);
     host(runsMsg([mkLocal({ run: { ...mkLocal().run, url: "", summary: "centaur" } })]));
     expect(screen.queryByText("~inferred")).toBeNull();
     expect(screen.getByText("centaur")).toBeTruthy();
+    // The requirement is that the key slot itself shows "local" — scope to
+    // that element rather than screen.getByText("local"), which the
+    // beside-summary chip would also satisfy in the inferred-key scenario.
+    expect(container.querySelector(".key")?.textContent).toBe("local");
   });
 
   it("offers Track it and no Forget", () => {
