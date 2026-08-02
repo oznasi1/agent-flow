@@ -90,6 +90,12 @@ export const DEFAULT_EXPLORE_GENERAL_PROMPT =
   "Help me make progress on this — ask what I need if it's unclear before diving in. " +
   "Don't change code unless I ask.{files}";
 
+/** Environments offered when an Explore action asks which environment to verify
+ * against. A bare string list — not an array of objects — so VS Code's settings
+ * page renders it as an editable list widget; the same constraint that made each
+ * explore prompt its own setting. */
+export const DEFAULT_ENVIRONMENTS = ["dev", "staging", "production"];
+
 /** One Explore action as seen by the flow: id + picker label + resolved prompt + Slack toggle. */
 export interface ExploreAction {
   id: string;
@@ -159,6 +165,8 @@ export interface AgentFlowConfig {
   promptModes: PromptMode[];
   exploreMode: string; // "ask", or an ExploreAction id
   exploreActions: ExploreAction[];
+  // Environments offered by Explore actions that verify against a live env.
+  environments: string[];
   prReviewStatus: string; // task status that reveals the "Address PR" card action
   prReviewAutoFix: boolean; // after assessing, proceed to implement the PR's requested changes
   prReviewPrompt: string; // seeded prompt for the PR-review kick-off
@@ -205,6 +213,22 @@ function explicitConfigValue<T>(c: vscode.WorkspaceConfiguration, key: string): 
   return (i?.workspaceFolderValue ?? i?.workspaceValue ?? i?.globalValue) as T | undefined;
 }
 
+/** Trimmed, de-duplicated, non-empty environment names. Falls back to the shipped
+ * defaults when the setting is absent, isn't an array, or holds nothing usable —
+ * the same empty-means-default behavior `promptModes` has. A `Set` gives dedupe
+ * with first-seen order for free. */
+function readEnvironments(c: vscode.WorkspaceConfiguration): string[] {
+  const raw = c.get<unknown[]>("environments");
+  if (!Array.isArray(raw)) return [...DEFAULT_ENVIRONMENTS];
+  const seen = new Set<string>();
+  for (const v of raw) {
+    if (typeof v !== "string") continue;
+    const trimmed = v.trim();
+    if (trimmed) seen.add(trimmed);
+  }
+  return seen.size ? [...seen] : [...DEFAULT_ENVIRONMENTS];
+}
+
 export function getConfig(): AgentFlowConfig {
   const c = vscode.workspace.getConfiguration("agentFlow");
   const slackRaw = c.get<Record<string, unknown>>("exploreSlackDm") ?? {};
@@ -246,6 +270,7 @@ export function getConfig(): AgentFlowConfig {
     })(),
     exploreMode: c.get<string>("exploreMode") || "ask",
     exploreActions,
+    environments: readEnvironments(c),
     prReviewStatus: c.get<string>("prReviewStatus") || "PR initiated",
     prReviewAutoFix: c.get<boolean>("prReviewAutoFix") ?? true,
     prReviewPrompt: c.get<string>("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT,

@@ -377,6 +377,19 @@
             "general": false
           }
         },
+        "agentFlow.environments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": [
+            "dev",
+            "staging",
+            "production"
+          ],
+          "markdownDescription": "Environments offered when an Explore action asks which environment to verify against. The picker always also offers **Custom…**, so a one-off environment doesn't need to be added here first."
+        },
         "agentFlow.prReviewStatus": {
           "type": "string",
           "default": "PR initiated",

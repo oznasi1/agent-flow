@@ -108,6 +108,7 @@ const CFG = {
     { id: "debug", label: "Debug", prompt: "DBG {summary}{files}", slackDm: false },
     { id: "general", label: "General", prompt: "GEN {summary}{files}", slackDm: false },
   ],
+  environments: ["dev", "staging", "production"],
   prReviewStatus: "PR initiated",
   prReviewAutoFix: true,
   prReviewPrompt: "PR {key}{files}",

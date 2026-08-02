@@ -11,6 +11,7 @@ import {
   DEFAULT_EXPLORE_GENERAL_PROMPT,
   DEFAULT_PR_REVIEW_PROMPT,
   DEFAULT_REVIEW_REQUEST_PROMPT,
+  DEFAULT_ENVIRONMENTS,
 } from "../../src/config";
 import { setConfig } from "../_mocks/vscode";
 import pkg from "../../package.json";
@@ -270,6 +271,32 @@ describe("getConfig — explore actions", () => {
   });
 });
 
+describe("getConfig — environments", () => {
+  it("defaults to the shipped environment list", () => {
+    expect(getConfig().environments).toEqual(["dev", "staging", "production"]);
+  });
+
+  it("trims, drops blanks and non-strings, and de-duplicates preserving order", () => {
+    setConfig({ environments: ["  prod ", "dev", "", "prod", 7, null, "dev"] });
+    expect(getConfig().environments).toEqual(["prod", "dev"]);
+  });
+
+  it("falls back to the defaults when the list holds nothing usable", () => {
+    setConfig({ environments: ["", "   "] });
+    expect(getConfig().environments).toEqual(DEFAULT_ENVIRONMENTS);
+  });
+
+  it("falls back to the defaults when the setting is not an array", () => {
+    setConfig({ environments: "staging" });
+    expect(getConfig().environments).toEqual(DEFAULT_ENVIRONMENTS);
+  });
+
+  it("hands back a copy, so a caller cannot mutate the shipped defaults", () => {
+    getConfig().environments.push("mutated");
+    expect(DEFAULT_ENVIRONMENTS).toEqual(["dev", "staging", "production"]);
+  });
+});
+
 describe("getConfig — filter visibility", () => {
   it("defaults every filter control to visible when nothing is configured", () => {
     expect(getConfig().filters).toEqual({ size: true, status: true, repo: true, search: true });
@@ -396,6 +423,10 @@ describe("package.json ⇄ config constants", () => {
     const p = props["agentFlow.promptModes"] as { items?: { required?: string[]; properties?: Record<string, unknown> } };
     expect(p.items?.required).toEqual(["id", "label", "prompt"]);
     expect(Object.keys(p.items?.properties ?? {})).toContain("detail");
+  });
+
+  it("keeps the environments schema default equal to DEFAULT_ENVIRONMENTS", () => {
+    expect(props["agentFlow.environments"].default).toEqual(DEFAULT_ENVIRONMENTS);
   });
 
   it("keeps the deprecated explorePrompt default equal to the knowledge default (migration target)", () => {
