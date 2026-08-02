@@ -15,7 +15,7 @@ import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntr
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
 import { discoverRepos } from "./engine/repos";
-import { launchReview, reviewRunKey } from "./engine/review/launch";
+import { launchReview, resolveReviewMode, reviewRunKey } from "./engine/review/launch";
 import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
@@ -353,8 +353,18 @@ export class DeckPanel {
     const req = this.reviewById(id);
     if (!req) return; // the queue moved on before the click landed
     const cfg = getConfig();
+    // Resolve — or ask — before launchReview runs, because launchReview's first
+    // act is createWorktrees. A picker raised any later would leave a worktree
+    // and a branch behind every time someone pressed Escape.
+    const mode =
+      resolveReviewMode(cfg.reviewRequestModes, cfg.reviewRequestMode) ??
+      (await vscode.window.showQuickPick(
+        cfg.reviewRequestModes.map((m) => ({ label: m.label, detail: m.detail, mode: m })),
+        { title: `Review ${req.repoName}#${req.number}`, ignoreFocusOut: true },
+      ))?.mode;
+    if (!mode) return; // picker cancelled — no worktree, no window, no toast
     const res = await launchReview(
-      { req, template: cfg.reviewRequestPrompt, workspaceDir: cfg.workspaceDir, seedAgent: cfg.seedAgent },
+      { req, template: mode.prompt, workspaceDir: cfg.workspaceDir, seedAgent: cfg.seedAgent },
       { createWorktrees, openWorkspace, log: this.log },
     );
     if (!res.ok) {

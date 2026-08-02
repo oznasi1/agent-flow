@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { window, ViewColumn, env, workspace } from "../_mocks/vscode";
+import { window, ViewColumn, env, workspace, setConfig } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
 import type { PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
@@ -119,13 +119,22 @@ vi.mock("../../src/engine/review/launch", async (importActual) => {
   const actual = await importActual<typeof import("../../src/engine/review/launch")>();
   return { ...actual, launchReview: (...args: Parameters<typeof actual.launchReview>) => h.launchReview(...args) };
 });
-vi.mock("../../src/config", () => ({
-  getConfig: () => ({
-    baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds,
-    reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: [],
-    reviewWrites: h.reviewWrites, stampLabelOnWrite: h.stampLabelOnWrite,
-  }),
-}));
+vi.mock("../../src/config", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/config")>();
+  return {
+    ...actual,
+    getConfig: () => ({
+      baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds,
+      reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: [],
+      reviewWrites: h.reviewWrites, stampLabelOnWrite: h.stampLabelOnWrite,
+      // Sourced from the real getConfig() (itself driven by the globally-mocked
+      // vscode module) rather than hardcoded here, so a test's setConfig({
+      // reviewRequestModes / reviewRequestMode }) actually reaches launchReviewFor.
+      reviewRequestModes: actual.getConfig().reviewRequestModes,
+      reviewRequestMode: actual.getConfig().reviewRequestMode,
+    }),
+  };
+});
 vi.mock("../../src/jira/client", () => ({
   // Mirrors the real class's constructor (src/jira/client.ts), which sets
   // `this.name` explicitly so classifyFailure's `e.name === "JiraAuthError"`
@@ -1088,6 +1097,71 @@ describe("DeckPanel review detail", () => {
 });
 
 describe("DeckPanel review launch", () => {
+  const TWO_MODES = [
+    { id: "backend", label: "Backend services", detail: "Backend review skill", prompt: "BE {number}" },
+    { id: "frontend", label: "Frontend", detail: "Frontend review skill", prompt: "FE {number}" },
+  ];
+
+  it("does not ask which mode to use when only the stock one is configured", async () => {
+    // The no-regression guard: an install that never touched the setting must
+    // still launch a review in one click.
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(h.launchReview).toHaveBeenCalled();
+  });
+
+  it("asks which mode to use and seeds the one picked", async () => {
+    setConfig({ reviewRequestModes: TWO_MODES });
+    window.showQuickPick.mockResolvedValueOnce({ label: "Frontend", mode: TWO_MODES[1] });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    // The picked mode's own template, not merely some template: an
+    // implementation that always seeded modes[0] would pass a looser check.
+    expect(h.launchReview).toHaveBeenCalledWith(
+      expect.objectContaining({ template: "FE {number}" }),
+      expect.anything(),
+    );
+  });
+
+  it("offers every configured mode, label and detail", async () => {
+    setConfig({ reviewRequestModes: TWO_MODES });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ label: "Backend services", detail: "Backend review skill" }),
+        expect.objectContaining({ label: "Frontend", detail: "Frontend review skill" }),
+      ],
+      expect.objectContaining({ title: "Review aws-ops#8491" }),
+    );
+  });
+
+  it("creates nothing when the mode picker is cancelled", async () => {
+    setConfig({ reviewRequestModes: TWO_MODES });
+    window.showQuickPick.mockResolvedValueOnce(undefined);
+    const p = await showAndWarm();
+    const before = posts(p).length;
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    // launchReview is what creates the worktree and opens the window, so
+    // asserting it was never reached is asserting no side effect happened —
+    // stronger than checking for the absence of a toast.
+    expect(h.launchReview).not.toHaveBeenCalled();
+    expect(posts(p).slice(before).some((m) => m.type === "toast")).toBe(false);
+  });
+
+  it("skips the picker when a mode is pinned, and seeds that one", async () => {
+    setConfig({ reviewRequestModes: TWO_MODES, reviewRequestMode: "backend" });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(h.launchReview).toHaveBeenCalledWith(
+      expect.objectContaining({ template: "BE {number}" }),
+      expect.anything(),
+    );
+  });
+
   it("launches a review and toasts", async () => {
     const p = await showAndWarm();
     await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });

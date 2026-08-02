@@ -339,11 +339,10 @@ describe("review-request settings", () => {
     expect(c.reviewRequests).toBe(true);
     expect(c.reviewRequestsTtlSeconds).toBe(300);
     expect(c.reviewWrites).toBe(false);
-    // Both safety properties of the default prompt, not just a loose substring:
-    // where findings go, and that nothing gets posted to GitHub automatically.
-    expect(c.reviewRequestPrompt).toContain(".pick-task/REVIEW-{number}.md");
-    expect(c.reviewRequestPrompt).toMatch(/do not post/i);
-    expect(c.reviewRequestPrompt).toBe(DEFAULT_REVIEW_REQUEST_PROMPT);
+    // Both safety properties of the stock mode's prompt, not just a loose
+    // substring: where findings go, and that nothing gets posted automatically.
+    expect(c.reviewRequestModes[0].prompt).toContain(".pick-task/REVIEW-{number}.md");
+    expect(c.reviewRequestModes[0].prompt).toMatch(/do not post/i);
   });
 
   it("honors reviewRequests set to false", () => {
@@ -364,16 +363,6 @@ describe("review-request settings", () => {
   it("honours an explicit TTL above the floor", () => {
     setConfig({ reviewRequestsTtlSeconds: 900 });
     expect(getConfig().reviewRequestsTtlSeconds).toBe(900);
-  });
-
-  it("honours an explicit prompt override", () => {
-    setConfig({ reviewRequestPrompt: "just look at it" });
-    expect(getConfig().reviewRequestPrompt).toBe("just look at it");
-  });
-
-  it("falls back to the default prompt for an empty override", () => {
-    setConfig({ reviewRequestPrompt: "" });
-    expect(getConfig().reviewRequestPrompt).toContain("REVIEW-{number}.md");
   });
 
   it("defaults to the single stock review mode, asked for each time", () => {

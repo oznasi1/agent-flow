@@ -197,8 +197,6 @@ export interface AgentFlowConfig {
   // Allow submitting approve / comment / request-changes from the Deck. The only
   // setting in Agent Flow that lets it write to GitHub.
   reviewWrites: boolean;
-  // Seeded prompt for Review-with-agent.
-  reviewRequestPrompt: string;
   // Seed modes offered by Review with agent, same shape as promptModes. Never
   // empty — an unusable configured value falls back to DEFAULT_REVIEW_REQUEST_MODES.
   reviewRequestModes: PromptMode[];
@@ -282,7 +280,6 @@ export function getConfig(): AgentFlowConfig {
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,
-    reviewRequestPrompt: c.get<string>("reviewRequestPrompt") || DEFAULT_REVIEW_REQUEST_PROMPT,
     reviewRequestModes: (() => {
       const m = c.get<PromptMode[]>("reviewRequestModes");
       const valid = Array.isArray(m) ? m.filter((x) => x && x.id && x.label && x.prompt) : [];
