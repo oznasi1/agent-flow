@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { execFileSync } from "child_process";
-import { readOpenSessions, defaultSessionsDir, groupByPlace } from "../../../src/engine/sessions";
+import { readOpenSessions, defaultSessionsDir, groupByPlace, OpenSession } from "../../../src/engine/sessions";
 
 const DEAD = 2 ** 30;
 
