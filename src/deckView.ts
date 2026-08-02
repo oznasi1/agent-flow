@@ -10,7 +10,7 @@ import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { openInEditor, openWorkspace, BRIEF_DIR } from "./engine/workspace";
 import { createWorktrees } from "./engine/worktree";
-import { prEligible, taskDiff } from "./engine/git";
+import { currentBranch, prEligible, repoRoot, taskDiff } from "./engine/git";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
@@ -19,6 +19,7 @@ import { launchReview, resolveReviewMode, reviewRunKey } from "./engine/review/l
 import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
+import { inferTicket, localRunFor } from "./engine/localRuns";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity, UNKNOWN_ACTIVITY } from "./engine/transcript";
 import { canon } from "./engine/paths";
@@ -55,6 +56,10 @@ export class DeckPanel {
   private timer: ReturnType<typeof setInterval> | undefined;
   private liveSignal = true;
   private readonly jiraCache = new Map<string, { at: number; status: string | null; category: string | null }>();
+  /** The last refresh's synthetic runs for places no tracked run claimed — cleared
+   * and repopulated on every rebuild. A local card has no record on disk, so this
+   * is the only place `run(key)` can resolve one for Open and Diff. */
+  private readonly localRuns = new Map<string, Run>();
   private prFacts: boolean; // seeded from config in the constructor; the only writer after that is deck:setPrFacts
   private openAgents: boolean; // seeded from config in the constructor; the only writer after that is deck:setOpenAgents
   private readonly prQueue = new RefreshQueue();
@@ -569,7 +574,34 @@ export class DeckPanel {
       agentsByKey.set(run.key, mine);
     }
 
-    const all = tracked; // Task 11 appends the local runs here
+    // Whatever no tracked run claimed is a place you are working in that the Deck
+    // has never heard of. One git call each for the branch — buildRunStatus does
+    // the rest of the git work from run.repos, so this does not double it.
+    const cfg = getConfig();
+    this.localRuns.clear();
+    const locals: Run[] = [];
+    // A local card's key (Task 6's localKey) is a hash of its place, not a Jira
+    // issue key — even when a ticket is inferred from the branch. jiraStatus
+    // must be asked for the ticket's own key, so this maps a local run's key to
+    // it, one entry per card with an inferred ticket.
+    const localTickets = new Map<string, string>();
+    for (const [place, sessions] of places) {
+      if (claimed.has(place)) continue;
+      const branch = currentBranch(place);
+      const ticket = inferTicket(branch, cfg.project, cfg.baseUrl);
+      const run = localRunFor(place, sessions, { isGit: repoRoot(place) !== "", branch }, ticket, now);
+      this.localRuns.set(run.key, run);
+      if (ticket) localTickets.set(run.key, ticket.key);
+      agentsByKey.set(
+        run.key,
+        sessions.map((s) => ({
+          session: s,
+          activity: this.liveSignal ? readSessionActivity(projectsRoot, s.cwd, s.sessionId, now) : UNKNOWN_ACTIVITY,
+        })),
+      );
+      locals.push(run);
+    }
+    const all = [...tracked, ...locals];
     // One round trip per run, all at once. Serially this was the bulk of a cold
     // refresh, and back then every Forget waited on the whole pass before its card
     // left the board — the webview now drops that card optimistically, but the pass
@@ -577,7 +609,7 @@ export class DeckPanel {
     // its own errors, so this can never reject; run keys are unique, so concurrent
     // calls never duplicate a cache miss.
     const jiras = await Promise.all(
-      all.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(run.key) : null)),
+      all.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(localTickets.get(run.key) ?? run.key) : null)),
     );
     const out: RunStatus[] = [];
     for (const [i, run] of all.entries()) {
@@ -716,8 +748,11 @@ export class DeckPanel {
     }
   }
 
+  /** The run a card's action acts on. A local card has no record on disk — it is
+   * a place with an agent open in it — so the last refresh's synthetic runs are
+   * the only place to look it up. */
   private run(key: string): Run | undefined {
-    return readRuns(defaultRunsDir()).find((r) => r.key === key);
+    return readRuns(defaultRunsDir()).find((r) => r.key === key) ?? this.localRuns.get(key);
   }
 
   private async inspect(key: string, action: "open" | "diff", repoName?: string): Promise<void> {

@@ -67,6 +67,10 @@ const h = vi.hoisted(() => ({
   })),
   existsSync: vi.fn((_p: string) => false),
   readFileSync: vi.fn((_p: string, _e?: string) => ""),
+  // Local cards (Task 11): the branch `currentBranch` reports for /r/centaur —
+  // steerable per test, unlike repoRoot below, because the branch is exactly the
+  // thing a local card's ticket inference and "no card twice" tests need to vary.
+  branch: "ASM-5641-team-table" as string | null,
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -92,6 +96,7 @@ vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn() }));
 vi.mock("../../src/engine/git", () => ({
   taskDiff: h.taskDiff,
   repoRoot: (p: string) => p,
+  currentBranch: (p: string) => (p === "/r/centaur" ? h.branch : "main"),
   prEligible: (r: { isGit: boolean; branch?: string }) => r.isGit && !!r.branch && r.branch !== "master",
 }));
 // groupByPlace and canon stay real — only the two functions that touch the real
@@ -235,6 +240,11 @@ const showAndWarm = async (authed = false): Promise<ReturnType<typeof lastPanel>
 const builtFor = (key: string) =>
   h.buildRunStatus.mock.calls.map((c) => c[0] as { run: Run; agents: CardAgent[]; prs: PrEntryMap }).filter((i) => i.run.key === key).at(-1)!;
 
+/** Every local card's key is a hash (engine/localRuns.ts's localKey) — read it off
+ * the built input rather than hard-coding one. */
+const builtLocal = () =>
+  h.buildRunStatus.mock.calls.map((c) => c[0] as { run: Run; agents: CardAgent[] }).filter((i) => i.run.kind === "local").at(-1)!;
+
 const sess = (over: Partial<OpenSession> = {}): OpenSession => ({
   pid: 1, sessionId: "s1", cwd: "/r/svc", startedAt: 100, name: "svc-7e", ...over,
 });
@@ -268,6 +278,7 @@ beforeEach(() => {
   h.reviewWrites = false;
   h.stampLabelOnWrite = true;
   h.reviewSubmit.mockClear().mockResolvedValue({ ok: true });
+  h.branch = "ASM-5641-team-table";
   // Confirm by default: resolve the label passed as the modal's sole action item,
   // rather than vscode's own mock default of `undefined` (which reads as "declined"
   // for every other suite in this file). Individual tests override this per case.
@@ -697,6 +708,78 @@ describe("DeckPanel open agents", () => {
     await settled();
     const run = posts(lastPanel()).filter((m) => m.type === "deck:runs").at(-1)!;
     expect(run.openAgents).toBe(false);
+  });
+});
+
+describe("DeckPanel local cards", () => {
+  it("makes a card for a place no tracked run owns", async () => {
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show();
+    await settled();
+    expect(h.buildRunStatus).toHaveBeenCalledTimes(1);
+    expect(builtLocal().agents.map((a) => a.session.name)).toEqual(["centaur-7e"]);
+  });
+
+  it("infers the ticket a branch names, and polls Jira for it", async () => {
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show(true);
+    await settled();
+    expect(builtLocal().run.url).toContain("/browse/ASM-5641");
+    expect(h.getStatus).toHaveBeenCalledWith("ASM-5641");
+  });
+
+  it("infers nothing from a default branch, and polls no Jira", async () => {
+    h.runs = [];
+    h.branch = "main";
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show(true);
+    await settled();
+    expect(builtLocal().run.url).toBe("");
+    expect(h.getStatus).not.toHaveBeenCalled();
+  });
+
+  it("does not make a second card for a place a tracked run already owns", async () => {
+    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "ASM-1-x" }] })];
+    h.openSessions = [sess()];
+    show();
+    await settled();
+    expect(h.buildRunStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("makes no local cards with the toggle off", async () => {
+    h.openAgents = false;
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur" })];
+    show();
+    await settled();
+    expect(h.buildRunStatus).not.toHaveBeenCalled();
+  });
+
+  it("still makes local cards with the live signal off", async () => {
+    // The registry knows a session is open without any transcript being read, so
+    // the card appears — its agents just report unknown.
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show();
+    await settled();
+    const p = lastPanel();
+    await p._fire({ type: "deck:setLive", on: false });
+    await settled();
+    const built = builtLocal();
+    expect(built.agents).toHaveLength(1);
+    expect(built.agents[0].activity.state).toBe("unknown");
+  });
+
+  it("opens a local card's directory", async () => {
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur" })];
+    show();
+    await settled();
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: builtLocal().run.key, action: "open" });
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/centaur");
   });
 });
 
