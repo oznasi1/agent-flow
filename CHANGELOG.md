@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Explore can verify a feature on an environment.** A fifth Explore action, **Verify on
+  an environment**, asks which environment to check — from the new `agentFlow.environments`
+  list, or a one-off you type — alongside the repos you already pick, then seeds a
+  read-only prompt asking the agent to inspect those services in that environment (logs,
+  error rates, metrics and traces, deployed version) and return a working / broken /
+  inconclusive verdict with evidence. The prompt is editable at
+  `agentFlow.explorePrompts.verify`, and `agentFlow.exploreMode` can pin Explore to it.
+  Agent Flow itself never touches the environment — the agent does that with its own tools.
+
 ## [0.1.43] — 2026-08-02
 
 ### Changed

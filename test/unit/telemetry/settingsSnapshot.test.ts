@@ -121,6 +121,21 @@ describe("settingsSnapshot", () => {
   it("reports a verify exploreMode as itself, not as invalid", () => {
     expect(settingsSnapshot({ ...getConfig(), exploreMode: "verify" }).explore_mode).toBe("verify");
   });
+
+  it("does not flag the shipped environment list as customized", () => {
+    expect(settingsSnapshot(getConfig()).environments_customized).toBe(false);
+  });
+
+  it("flags a customized environment list without revealing the names", () => {
+    const s = settingsSnapshot({ ...getConfig(), environments: ["acme-prod-eu", "acme-canary"] });
+    expect(s.environments_customized).toBe(true);
+    expect(JSON.stringify(s)).not.toContain("acme");
+  });
+
+  it("treats a reordered environment list as customized", () => {
+    const s = settingsSnapshot({ ...getConfig(), environments: ["production", "staging", "dev"] });
+    expect(s.environments_customized).toBe(true);
+  });
 });
 
 describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
