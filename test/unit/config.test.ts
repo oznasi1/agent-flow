@@ -386,6 +386,18 @@ describe("review-request settings", () => {
     expect(modes[0].label).toBe(DEFAULT_REVIEW_REQUEST_MODES[0].label);
   });
 
+  it("falls back to the stock modes when the legacy prompt is explicitly cleared to \"\"", () => {
+    // Worth its own test: explicitConfigValue returns "" (not undefined) for a
+    // user who cleared the setting, and "" is falsy — the migration must fall
+    // through to the stock modes rather than seed a mode whose prompt is empty.
+    // An implementation that checked `legacy !== undefined` instead of
+    // truthiness would ship that empty-prompt mode and nothing else would catch it.
+    setConfig({ reviewRequestPrompt: "" });
+    const modes = getConfig().reviewRequestModes;
+    expect(modes).toEqual(DEFAULT_REVIEW_REQUEST_MODES);
+    expect(modes[0].prompt).toBe(DEFAULT_REVIEW_REQUEST_PROMPT);
+  });
+
   it("lets an explicit modes list beat the deprecated prompt", () => {
     setConfig({
       reviewRequestPrompt: "legacy",
