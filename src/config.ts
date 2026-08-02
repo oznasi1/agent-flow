@@ -90,6 +90,18 @@ export const DEFAULT_EXPLORE_GENERAL_PROMPT =
   "Help me make progress on this — ask what I need if it's unclear before diving in. " +
   "Don't change code unless I ask.{files}";
 
+/** Seed for the "Verify on an environment" action — check a feature against a live
+ * environment for the picked services. Placeholders: {summary} (the feature), {env},
+ * {services}, {brief}, {files}. Deliberately tool-agnostic: which observability tools
+ * the agent has is the user's own Claude Code setup, not ours. */
+export const DEFAULT_EXPLORE_VERIFY_PROMPT =
+  'Verification session — checking a feature in a live environment, not the code in this checkout. Feature: "{summary}". ' +
+  "Environment: {env}. Services in scope: {services}. A brief listing the repos in scope is at {brief}. " +
+  "Using the observability tools available to you, check these services in {env}: recent logs and error rates, " +
+  "the relevant metrics and traces, and which version is actually deployed. Then give a verdict — working, broken, " +
+  "or inconclusive — with the evidence behind it and where to look next. " +
+  "Read-only: don't change code, and don't mutate the environment.{files}";
+
 /** Environments offered when an Explore action asks which environment to verify
  * against. A bare string list — not an array of objects — so VS Code's settings
  * page renders it as an editable list widget; the same constraint that made each
@@ -102,14 +114,17 @@ export interface ExploreAction {
   label: string;
   prompt: string;
   slackDm: boolean;
+  /** This action collects an environment before opening, and its prompt may use {env}. */
+  needsEnv: boolean;
 }
 
 /** Fixed built-in actions. `settingKey` is the multiline string setting holding the prompt. */
-const EXPLORE_ACTION_DEFS: { id: string; label: string; settingKey: string; defaultPrompt: string }[] = [
+const EXPLORE_ACTION_DEFS: { id: string; label: string; settingKey: string; defaultPrompt: string; needsEnv?: boolean }[] = [
   { id: "jiraTicket", label: "Open a Jira ticket", settingKey: "explorePrompts.jiraTicket", defaultPrompt: DEFAULT_EXPLORE_JIRA_TICKET_PROMPT },
   { id: "knowledge", label: "Enhance knowledge / flow", settingKey: "explorePrompts.knowledge", defaultPrompt: DEFAULT_EXPLORE_PROMPT },
   { id: "debug", label: "Debug", settingKey: "explorePrompts.debug", defaultPrompt: DEFAULT_EXPLORE_DEBUG_PROMPT },
   { id: "general", label: "General", settingKey: "explorePrompts.general", defaultPrompt: DEFAULT_EXPLORE_GENERAL_PROMPT },
+  { id: "verify", label: "Verify on an environment", settingKey: "explorePrompts.verify", defaultPrompt: DEFAULT_EXPLORE_VERIFY_PROMPT, needsEnv: true },
 ];
 
 /** The shipped default explore actions — same ids, labels and order getConfig()
@@ -121,6 +136,7 @@ export const DEFAULT_EXPLORE_ACTIONS: ExploreAction[] = EXPLORE_ACTION_DEFS.map(
   label: def.label,
   prompt: def.defaultPrompt,
   slackDm: false,
+  needsEnv: def.needsEnv === true,
 }));
 
 /** Seed for a PR-review kick-off (a task in the PR-review status). The agent locates
@@ -248,6 +264,7 @@ export function getConfig(): AgentFlowConfig {
     label: def.label,
     prompt: resolvePrompt(def),
     slackDm: slackRaw[def.id] === true,
+    needsEnv: def.needsEnv === true,
   }));
   return {
     baseUrl: (c.get<string>("jira.baseUrl") || "").replace(/\/+$/, ""),

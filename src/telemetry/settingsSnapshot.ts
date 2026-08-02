@@ -31,15 +31,15 @@ function enumOrInvalid<T extends string>(value: string, allowed: readonly T[]): 
 // module surface otherwise.
 export const WORKSPACE_MODES = ["auto", "multiroot", "per-window", "ask"] as const;
 export const OPEN_IN_MODES = ["ask", "new-window", "this-window", "pick-existing"] as const;
-export const EXPLORE_MODES = ["ask", "jiraTicket", "knowledge", "debug", "general"] as const;
+export const EXPLORE_MODES = ["ask", "jiraTicket", "knowledge", "debug", "general", "verify"] as const;
 export const WORKTREE_MODES = ["ask", "always", "never"] as const;
 export const REMOTE_CONTROL_MODES = ["off", "on", "ask"] as const;
 export const DEFAULT_FILTER_VALUES = ["unassigned", "mysprint", "mine", "sprint", "backlog"] as const;
 
 const STOCK_PROMPT_MODE_IDS = DEFAULT_PROMPT_MODES.map((m) => m.id).join(",");
 
-/** Shipped default prompt per explore-action id (jiraTicket/knowledge/debug/general —
- * the id set never varies, only each action's `.prompt` can be customized). */
+/** Shipped default prompt per explore-action id (the id set never varies, only each
+ * action's `.prompt` can be customized). */
 const DEFAULT_EXPLORE_PROMPTS = new Map(DEFAULT_EXPLORE_ACTIONS.map((a) => [a.id, a.prompt]));
 
 /** Reduce config to shape only. Every setting whose value is user-authored —

@@ -117,6 +117,10 @@ describe("settingsSnapshot", () => {
     expect(s.remote_control).not.toBe("off");
     expect(JSON.stringify(s)).not.toContain("acme-internal-BILL-5678");
   });
+
+  it("reports a verify exploreMode as itself, not as invalid", () => {
+    expect(settingsSnapshot({ ...getConfig(), exploreMode: "verify" }).explore_mode).toBe("verify");
+  });
 });
 
 describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
