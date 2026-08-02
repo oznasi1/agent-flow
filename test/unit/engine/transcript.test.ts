@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { encodeProjectDir, deriveActivity, readAgentActivity, TranscriptLine } from "../../../src/engine/transcript";
+import { encodeProjectDir, deriveActivity, readAgentActivity, readSessionActivity, UNKNOWN_ACTIVITY, TranscriptLine } from "../../../src/engine/transcript";
 
 describe("encodeProjectDir", () => {
   it("replaces slashes with dashes", () => {
@@ -103,5 +103,45 @@ describe("readAgentActivity", () => {
 
   it("is unknown (no throw) when the project dir is missing", () => {
     expect(readAgentActivity(root, "/repo/does-not-exist", null, NOW).state).toBe("unknown");
+  });
+});
+
+describe("readSessionActivity", () => {
+  const NOW = 1_800_000_000_000;
+  let root: string;
+  const cwd = "/Users/dev/projects/centaur";
+
+  const write = (id: string, lines: object[], mtimeMs: number): void => {
+    const dir = path.join(root, encodeProjectDir(cwd));
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${id}.jsonl`);
+    fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+    fs.utimesSync(file, new Date(mtimeMs), new Date(mtimeMs));
+  };
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-sessact-"));
+    // The named session finished its turn an hour ago; a *newer* transcript beside
+    // it is mid-tool-use. Addressing by id must not drift to the newer one.
+    write("named", [{ type: "user" }, { type: "assistant", message: { stop_reason: "end_turn" } }], NOW - 3_600_000);
+    write("newer", [{ type: "user" }, { type: "assistant", message: { stop_reason: "tool_use" } }], NOW - 5_000);
+  });
+
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it("reads the named transcript, not the newest one beside it", () => {
+    expect(readSessionActivity(root, cwd, "named", NOW).state).toBe("needs-you");
+  });
+
+  it("reads a different session in the same directory independently", () => {
+    expect(readSessionActivity(root, cwd, "newer", NOW).state).toBe("working");
+  });
+
+  it("is unknown when the session's transcript is absent", () => {
+    expect(readSessionActivity(root, cwd, "gone", NOW)).toEqual(UNKNOWN_ACTIVITY);
+  });
+
+  it("is unknown when the project directory does not exist", () => {
+    expect(readSessionActivity(root, "/nowhere", "x", NOW)).toEqual(UNKNOWN_ACTIVITY);
   });
 });

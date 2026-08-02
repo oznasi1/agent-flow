@@ -46,7 +46,9 @@ export function deriveActivity(lines: TranscriptLine[], mtimeMs: number, nowMs: 
   return { state: "idle", lastActivityMs: mtimeMs, slug };
 }
 
-const UNKNOWN: AgentActivity = { state: "unknown", lastActivityMs: null, slug: null };
+/** No transcript, or nothing meaningful in it. Exported because status.ts needs
+ * the same value and had its own copy. */
+export const UNKNOWN_ACTIVITY: AgentActivity = { state: "unknown", lastActivityMs: null, slug: null };
 
 function parseLines(file: string, tail = 200): TranscriptLine[] {
   let raw: string;
@@ -95,9 +97,9 @@ export function readAgentActivity(
       })
       .sort((a, b) => b.mtimeMs - a.mtimeMs);
   } catch {
-    return UNKNOWN; // no project dir / unreadable → graceful degradation
+    return UNKNOWN_ACTIVITY; // no project dir / unreadable → graceful degradation
   }
-  if (files.length === 0) return UNKNOWN;
+  if (files.length === 0) return UNKNOWN_ACTIVITY;
 
   // Prefer the newest transcript whose branch matches this run; otherwise the
   // newest overall. (A worktree cwd already isolates one branch; a repo checked
@@ -106,4 +108,26 @@ export function readAgentActivity(
   const match = branch ? parsed.find((f) => lastBranch(f.lines) === branch) : undefined;
   const chosen = match ?? parsed[0];
   return deriveActivity(chosen.lines, chosen.mtimeMs, nowMs);
+}
+
+/**
+ * Live state of one named session. Its transcript is `<sessionId>.jsonl` in the
+ * project dir encoding its cwd — an exact address, unlike readAgentActivity's
+ * "newest transcript for this branch", which is the best a run record can do.
+ * "unknown" when the file is absent or unreadable.
+ */
+export function readSessionActivity(
+  projectsRoot: string,
+  cwd: string,
+  sessionId: string,
+  nowMs: number,
+): AgentActivity {
+  const file = path.join(projectsRoot, encodeProjectDir(cwd), `${sessionId}.jsonl`);
+  let mtimeMs: number;
+  try {
+    mtimeMs = fs.statSync(file).mtimeMs;
+  } catch {
+    return UNKNOWN_ACTIVITY;
+  }
+  return deriveActivity(parseLines(file), mtimeMs, nowMs);
 }
