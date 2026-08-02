@@ -267,7 +267,7 @@ the question. **Explore** asks what kind of session to start: **Open a Jira tick
 knowledge / flow**, **Debug**, **General**, or **Verify on an environment**. Verify also
 asks which environment to check the repos you picked against — from
 `agentFlow.environments`, or a one-off you type — and seeds a read-only prompt that
-inspects their logs, errors, metrics and deployed version there. Edit any Explore prompt
+inspects their logs, error rates, metrics and traces, and deployed version there. Edit any Explore prompt
 under `agentFlow.explorePrompts.*`, or pin one action with `agentFlow.exploreMode`.
 The **Address PR** kick-off always runs in a worktree. Per-task worktrees
 are created inside each repo at `.claude/worktrees/<KEY>` (and git-excluded

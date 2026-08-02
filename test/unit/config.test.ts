@@ -272,6 +272,11 @@ describe("getConfig — explore actions", () => {
     expect(byId).toEqual({ jiraTicket: true, knowledge: false, debug: false, general: false, verify: false });
   });
 
+  it("flips slackDm for the verify action too", () => {
+    setConfig({ exploreSlackDm: { verify: true } });
+    expect(getConfig().exploreActions.find((a) => a.id === "verify")?.slackDm).toBe(true);
+  });
+
   it("migrates a customized legacy explorePrompt into the knowledge action", () => {
     setConfig({ explorePrompt: "legacy explore {summary}{files}" });
     expect(getConfig().exploreActions.find((x) => x.id === "knowledge")?.prompt).toBe("legacy explore {summary}{files}");

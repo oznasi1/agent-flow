@@ -955,6 +955,21 @@ describe("explore", () => {
     );
   });
 
+  it("offers all five configured actions, in order, from the exploreMode 'ask' picker", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "ask" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ action: CFG.exploreActions[0] } as never) // action picker → Jira ticket
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { send } = setup();
+    await send({ type: "explore" });
+    const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string }[];
+    expect(items).toHaveLength(5);
+    expect(items.map((i) => i.label)).toEqual(CFG.exploreActions.map((a) => a.label));
+  });
+
   it("uses the configured action directly and skips the action picker", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "jiraTicket" });
     const repos = mkRepos(["account-service"]);

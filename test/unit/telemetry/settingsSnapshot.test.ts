@@ -145,7 +145,10 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
   // manifest option added and forgotten here would silently collapse to
   // "invalid" forever. Same pattern as config.test.ts's DEFAULT_PROMPT_MODES /
   // DEFAULT_PR_REVIEW_PROMPT parity tests.
-  const props = pkg.contributes.configuration.properties as Record<string, { enum?: string[] }>;
+  const props = pkg.contributes.configuration.properties as Record<
+    string,
+    { enum?: string[]; enumDescriptions?: string[] }
+  >;
 
   it("keeps WORKSPACE_MODES equal to agentFlow.workspaceMode's manifest enum", () => {
     expect([...WORKSPACE_MODES]).toEqual(props["agentFlow.workspaceMode"].enum);
@@ -157,6 +160,16 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
 
   it("keeps EXPLORE_MODES equal to agentFlow.exploreMode's manifest enum", () => {
     expect([...EXPLORE_MODES]).toEqual(props["agentFlow.exploreMode"].enum);
+  });
+
+  it("keeps agentFlow.exploreMode's enum and enumDescriptions the same length", () => {
+    // enumDescriptions is positional — VS Code pairs entry i of enumDescriptions
+    // with entry i of enum. Equal length alone doesn't guarantee they're correctly
+    // paired, but a length mismatch guarantees they're NOT: an enum entry with no
+    // description, or a description pointing at the wrong option.
+    expect(props["agentFlow.exploreMode"].enumDescriptions?.length).toBe(
+      props["agentFlow.exploreMode"].enum?.length,
+    );
   });
 
   it("keeps WORKTREE_MODES equal to agentFlow.worktree's manifest enum", () => {
