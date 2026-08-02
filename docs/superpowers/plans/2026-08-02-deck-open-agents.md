@@ -14,7 +14,7 @@
 
 - **Every read of `~/.claude` is best-effort.** An unreadable, absent or malformed file yields an empty result and never throws. The Deck must degrade to exactly today's behaviour.
 - **Never write to or delete from `~/.claude/sessions`.** It is Claude Code's directory. Unlike `presence.ts`, which prunes its own records, this code only reads.
-- **Run `npx vitest run` after each task.** The repo's bar is ≥95% line coverage on changed files.
+- **Run `npx tsc --noEmit` AND `npx vitest run` after each task.** Both are CI gates. The typecheck one is not optional and not implied by the tests: vitest transpiles through esbuild, which strips type annotations without checking they resolve, so a missing type-only import passes the entire suite and fails CI. The repo's bar is ≥95% line coverage on changed files.
 - **Webview design rules:** red is only for real failures; no persistent hint lines on cards; mono (`var(--mono)`) only for identifiers.
 - **Commit after every task**, using the repo's conventional-commit style (`feat(deck):`, `refactor(engine):`, `docs:`).
 - Test files mirror source paths: `src/engine/x.ts` → `test/unit/engine/x.test.ts`; webview → `test/webview/`.
