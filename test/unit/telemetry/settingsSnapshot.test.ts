@@ -117,6 +117,25 @@ describe("settingsSnapshot", () => {
     expect(s.remote_control).not.toBe("off");
     expect(JSON.stringify(s)).not.toContain("acme-internal-BILL-5678");
   });
+
+  it("reports a verify exploreMode as itself, not as invalid", () => {
+    expect(settingsSnapshot({ ...getConfig(), exploreMode: "verify" }).explore_mode).toBe("verify");
+  });
+
+  it("does not flag the shipped environment list as customized", () => {
+    expect(settingsSnapshot(getConfig()).environments_customized).toBe(false);
+  });
+
+  it("flags a customized environment list without revealing the names", () => {
+    const s = settingsSnapshot({ ...getConfig(), environments: ["acme-prod-eu", "acme-canary"] });
+    expect(s.environments_customized).toBe(true);
+    expect(JSON.stringify(s)).not.toContain("acme");
+  });
+
+  it("treats a reordered environment list as customized", () => {
+    const s = settingsSnapshot({ ...getConfig(), environments: ["production", "staging", "dev"] });
+    expect(s.environments_customized).toBe(true);
+  });
 });
 
 describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
@@ -126,7 +145,10 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
   // manifest option added and forgotten here would silently collapse to
   // "invalid" forever. Same pattern as config.test.ts's DEFAULT_PROMPT_MODES /
   // DEFAULT_PR_REVIEW_PROMPT parity tests.
-  const props = pkg.contributes.configuration.properties as Record<string, { enum?: string[] }>;
+  const props = pkg.contributes.configuration.properties as Record<
+    string,
+    { enum?: string[]; enumDescriptions?: string[] }
+  >;
 
   it("keeps WORKSPACE_MODES equal to agentFlow.workspaceMode's manifest enum", () => {
     expect([...WORKSPACE_MODES]).toEqual(props["agentFlow.workspaceMode"].enum);
@@ -138,6 +160,16 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
 
   it("keeps EXPLORE_MODES equal to agentFlow.exploreMode's manifest enum", () => {
     expect([...EXPLORE_MODES]).toEqual(props["agentFlow.exploreMode"].enum);
+  });
+
+  it("keeps agentFlow.exploreMode's enum and enumDescriptions the same length", () => {
+    // enumDescriptions is positional — VS Code pairs entry i of enumDescriptions
+    // with entry i of enum. Equal length alone doesn't guarantee they're correctly
+    // paired, but a length mismatch guarantees they're NOT: an enum entry with no
+    // description, or a description pointing at the wrong option.
+    expect(props["agentFlow.exploreMode"].enumDescriptions?.length).toBe(
+      props["agentFlow.exploreMode"].enum?.length,
+    );
   });
 
   it("keeps WORKTREE_MODES equal to agentFlow.worktree's manifest enum", () => {

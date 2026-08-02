@@ -310,14 +310,16 @@
             "jiraTicket",
             "knowledge",
             "debug",
-            "general"
+            "general",
+            "verify"
           ],
           "enumDescriptions": [
             "Choose an action each time you click Explore",
             "Open a Jira ticket — explore, then create a ticket capturing the findings",
             "Enhance knowledge / flow — map the code paths and explain how it works",
             "Debug — reproduce and root-cause a problem",
-            "General — open-ended working session"
+            "General — open-ended working session",
+            "Verify on an environment — check a feature against a live env for the picked services"
           ],
           "default": "ask",
           "markdownDescription": "Which Explore action to start. `ask` shows a picker each time; otherwise that action's prompt is seeded directly. Prompts are editable under `agentFlow.explorePrompts`."
@@ -325,26 +327,32 @@
         "agentFlow.explorePrompts.jiraTicket": {
           "type": "string",
           "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **Open a Jira ticket** Explore action. Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
+          "markdownDescription": "Prompt seeded for the **Open a Jira ticket** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
           "default": "Exploration session. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Dig into this, then draft and create a Jira ticket that captures what you found — a clear problem statement, the affected code paths, and a proposed approach. Add the `claude-code` label to the ticket, and share the ticket key and URL.{files}"
         },
         "agentFlow.explorePrompts.knowledge": {
           "type": "string",
           "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **Enhance knowledge / flow** Explore action. Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
+          "markdownDescription": "Prompt seeded for the **Enhance knowledge / flow** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
           "default": "Exploration session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me understand how this works: map the relevant code paths, explain the flow, and flag anything surprising or worth a follow-up ticket. Don't change code unless I ask.{files}"
         },
         "agentFlow.explorePrompts.debug": {
           "type": "string",
           "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **Debug** Explore action. Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
+          "markdownDescription": "Prompt seeded for the **Debug** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
           "default": "Debugging session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Reproduce the problem, trace it to a root cause, and explain what's going wrong with evidence from the code. Propose a fix, but don't change code unless I ask.{files}"
         },
         "agentFlow.explorePrompts.general": {
           "type": "string",
           "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **General** Explore action. Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
+          "markdownDescription": "Prompt seeded for the **General** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
           "default": "Working session. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me make progress on this — ask what I need if it's unclear before diving in. Don't change code unless I ask.{files}"
+        },
+        "agentFlow.explorePrompts.verify": {
+          "type": "string",
+          "editPresentation": "multilineText",
+          "markdownDescription": "Prompt seeded for the **Verify on an environment** Explore action. Placeholders: `{summary}` (the feature), `{env}` (only this action collects one), `{services}` (the repos you picked), `{brief}`, `{files}`.",
+          "default": "Verification session — checking a feature in a live environment, not the code in this checkout. Feature: \"{summary}\". Environment: {env}. Services in scope: {services}. A brief listing the repos in scope is at {brief}. Using the observability tools available to you, check these services in {env}: recent logs and error rates, the relevant metrics and traces, and which version is actually deployed. Then give a verdict — working, broken, or inconclusive — with the evidence behind it and where to look next. Read-only: don't change code, and don't mutate the environment.{files}"
         },
         "agentFlow.exploreSlackDm": {
           "type": "object",
@@ -365,6 +373,10 @@
             "general": {
               "type": "boolean",
               "description": "General"
+            },
+            "verify": {
+              "type": "boolean",
+              "description": "Verify on an environment"
             }
           },
           "additionalProperties": {
@@ -374,8 +386,22 @@
             "jiraTicket": false,
             "knowledge": false,
             "debug": false,
-            "general": false
+            "general": false,
+            "verify": false
           }
+        },
+        "agentFlow.environments": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true,
+          "default": [
+            "dev",
+            "staging",
+            "production"
+          ],
+          "markdownDescription": "Environments offered when an Explore action asks which environment to verify against. The picker always also offers **Custom…**, so a one-off environment doesn't need to be added here first."
         },
         "agentFlow.prReviewStatus": {
           "type": "string",

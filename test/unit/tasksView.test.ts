@@ -103,11 +103,13 @@ const CFG = {
   promptModes: [{ id: "plan", label: "Plan", prompt: "P {key}" }],
   exploreMode: "ask",
   exploreActions: [
-    { id: "jiraTicket", label: "Open a Jira ticket", prompt: "JT {summary}{files}", slackDm: false },
-    { id: "knowledge", label: "Enhance knowledge / flow", prompt: "Explore {summary}{files}", slackDm: false },
-    { id: "debug", label: "Debug", prompt: "DBG {summary}{files}", slackDm: false },
-    { id: "general", label: "General", prompt: "GEN {summary}{files}", slackDm: false },
+    { id: "jiraTicket", label: "Open a Jira ticket", prompt: "JT {summary}{files}", slackDm: false, needsEnv: false },
+    { id: "knowledge", label: "Enhance knowledge / flow", prompt: "Explore {summary}{files}", slackDm: false, needsEnv: false },
+    { id: "debug", label: "Debug", prompt: "DBG {summary}{files}", slackDm: false, needsEnv: false },
+    { id: "general", label: "General", prompt: "GEN {summary}{files}", slackDm: false, needsEnv: false },
+    { id: "verify", label: "Verify on an environment", prompt: "VER {summary} on {env} for {services}{files}", slackDm: false, needsEnv: true },
   ],
+  environments: ["dev", "staging", "production"],
   prReviewStatus: "PR initiated",
   prReviewAutoFix: true,
   prReviewPrompt: "PR {key}{files}",
@@ -953,6 +955,21 @@ describe("explore", () => {
     );
   });
 
+  it("offers all five configured actions, in order, from the exploreMode 'ask' picker", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "ask" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ action: CFG.exploreActions[0] } as never) // action picker → Jira ticket
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { send } = setup();
+    await send({ type: "explore" });
+    const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string }[];
+    expect(items).toHaveLength(5);
+    expect(items.map((i) => i.label)).toEqual(CFG.exploreActions.map((a) => a.label));
+  });
+
   it("uses the configured action directly and skips the action picker", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "jiraTicket" });
     const repos = mkRepos(["account-service"]);
@@ -1002,6 +1019,195 @@ describe("explore", () => {
     await send({ type: "explore" });
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ promptTemplate: `JT {summary} ${SLACK_DM_SENTENCE}{files}` }),
+    );
+  });
+
+  it("asks for an environment and fills {env} and {services} for the verify action", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
+    const repos = mkRepos(["account-service", "centaur"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "staging", env: "staging" } as never) // env picker
+      .mockResolvedValueOnce([{ repo: repos[0] }, { repo: repos[1] }] as never); // repo picker
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptTemplate: "VER {summary} on staging for account-service, centaur{files}",
+        ticket: expect.objectContaining({ key: "verify-staging-retry-banner", summary: "retry banner on staging" }),
+      }),
+    );
+  });
+
+  it("offers the configured environments plus a Custom… entry", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify", environments: ["dev", "prod"] });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "dev", env: "dev" } as never)
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string }[];
+    expect(items.map((i) => i.label)).toEqual(["dev", "prod", "$(edit) Custom…"]);
+  });
+
+  it("takes a one-off environment through the Custom… input box", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox)
+      .mockResolvedValueOnce("retry banner") // focus
+      .mockResolvedValueOnce("  staging-eu  "); // custom env, untrimmed
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "$(edit) Custom…" } as never) // no `env` → custom
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ promptTemplate: "VER {summary} on staging-eu for account-service{files}" }),
+    );
+  });
+
+  it("aborts before the destination step when the environment picker is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["account-service"]));
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never); // cancel env pick
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("aborts when the Custom… environment input is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["account-service"]));
+    vi.mocked(window.showInputBox)
+      .mockResolvedValueOnce("retry banner")
+      .mockResolvedValueOnce(undefined); // cancel the custom env box
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ label: "$(edit) Custom…" } as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("requires a focus for verify and leaves it optional for the other actions", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "dev", env: "dev" } as never)
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    const opts = vi.mocked(window.showInputBox).mock.calls[0][0] as {
+      title: string;
+      validateInput?: (v: string) => string | undefined;
+    };
+    expect(opts.title).toBe("Verify — which feature or change?");
+    expect(opts.validateInput?.("   ")).toBe("Name the feature or change to verify");
+    expect(opts.validateInput?.("retry banner")).toBeUndefined();
+  });
+
+  it("leaves the other actions' focus box optional and unvalidated", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "knowledge" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    const opts = vi.mocked(window.showInputBox).mock.calls[0][0] as {
+      title: string;
+      validateInput?: (v: string) => string | undefined;
+    };
+    expect(opts.title).toBe("Explore — what do you want to dig into?");
+    expect(opts.validateInput).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ ticket: expect.objectContaining({ key: "explore-codebase-exploration" }) }),
+    );
+  });
+
+  it("applies the Slack sentence before substituting the environment", async () => {
+    const actions = CFG.exploreActions.map((a) => (a.id === "verify" ? { ...a, slackDm: true } : a));
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify", exploreActions: actions });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "prod", env: "prod" } as never)
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptTemplate: `VER {summary} on prod for account-service ${SLACK_DM_SENTENCE}{files}`,
+      }),
+    );
+  });
+
+  it("anchors the Slack sentence on the real {files} placeholder even when a custom environment contains that literal text", async () => {
+    // Regression pin for the assembly order: injectSlackDm MUST run before applyExploreVars.
+    // With env="prod{files}" this genuinely discriminates the two orders —
+    //   correct  (inject then substitute): "VER {summary} on prod{files} for account-service <SENTENCE>{files}"
+    //   reversed (substitute then inject): "VER {summary} on prod <SENTENCE>{files} for account-service{files}"
+    // — because a reversed order lets injectSlackDm's indexOf("{files}") anchor on the
+    // substring smuggled in by the typed environment instead of the template's real placeholder.
+    const actions = CFG.exploreActions.map((a) => (a.id === "verify" ? { ...a, slackDm: true } : a));
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify", exploreActions: actions });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox)
+      .mockResolvedValueOnce("retry banner") // focus
+      .mockResolvedValueOnce("prod{files}"); // custom env smuggling the literal placeholder text
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "$(edit) Custom…" } as never) // no `env` → custom
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptTemplate: `VER {summary} on prod{files} for account-service ${SLACK_DM_SENTENCE}{files}`,
+      }),
+    );
+  });
+
+  it("treats a configured environment that shares the Custom… label as a real environment, not the escape hatch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify", environments: ["$(edit) Custom…"] });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner"); // focus only — no custom-env box expected
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "$(edit) Custom…", env: "$(edit) Custom…" } as never) // carries `env` → real pick
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(window.showInputBox).toHaveBeenCalledTimes(1);
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptTemplate: "VER {summary} on $(edit) Custom… for account-service{files}",
+      }),
+    );
+  });
+
+  it("does not ask for an environment for an action that does not need one", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "debug" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1); // the repo picker only
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        promptTemplate: "DBG {summary}{files}",
+        ticket: expect.objectContaining({ key: "explore-focus", summary: "focus" }),
+      }),
     );
   });
 });

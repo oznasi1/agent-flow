@@ -35,3 +35,17 @@ export const SLACK_DM_SENTENCE =
 export function injectSlackDm(template: string, enabled: boolean): string {
   return enabled ? insertBeforeFiles(template, " " + SLACK_DM_SENTENCE) : template;
 }
+
+/** Fill the Explore-only placeholders in a seeded template: `{services}` (the repos
+ * picked for the session) and `{env}` (the environment, for actions that ask for
+ * one). Substituted here rather than in renderPrompt so no other prompt path has to
+ * supply an env it doesn't have — the same pre-substitution engine/review/launch.ts
+ * does for {repo}/{number}/{author}. `{env}` is left as-is when no env was
+ * collected, so a user who adds it to an action that never asks sees an unfilled
+ * placeholder rather than a silent blank. Function-replacers keep `$&`/`$1` inside
+ * a typed value verbatim. */
+export function applyExploreVars(template: string, vars: { env?: string; services: string }): string {
+  const { env, services } = vars;
+  const filled = template.replace(/\{services\}/g, () => services);
+  return env === undefined ? filled : filled.replace(/\{env\}/g, () => env);
+}

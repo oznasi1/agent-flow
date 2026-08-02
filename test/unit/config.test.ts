@@ -9,8 +9,10 @@ import {
   DEFAULT_EXPLORE_JIRA_TICKET_PROMPT,
   DEFAULT_EXPLORE_DEBUG_PROMPT,
   DEFAULT_EXPLORE_GENERAL_PROMPT,
+  DEFAULT_EXPLORE_VERIFY_PROMPT,
   DEFAULT_PR_REVIEW_PROMPT,
   DEFAULT_REVIEW_REQUEST_PROMPT,
+  DEFAULT_ENVIRONMENTS,
 } from "../../src/config";
 import { setConfig } from "../_mocks/vscode";
 import pkg from "../../package.json";
@@ -233,13 +235,24 @@ describe("getConfig — batch launch", () => {
 });
 
 describe("getConfig — explore actions", () => {
-  it("defaults to four actions with built-in labels and default prompts, all Slack-off", () => {
+  it("defaults to five actions with built-in labels and default prompts, all Slack-off", () => {
     expect(getConfig().exploreActions).toEqual([
-      { id: "jiraTicket", label: "Open a Jira ticket", prompt: DEFAULT_EXPLORE_JIRA_TICKET_PROMPT, slackDm: false },
-      { id: "knowledge", label: "Enhance knowledge / flow", prompt: DEFAULT_EXPLORE_PROMPT, slackDm: false },
-      { id: "debug", label: "Debug", prompt: DEFAULT_EXPLORE_DEBUG_PROMPT, slackDm: false },
-      { id: "general", label: "General", prompt: DEFAULT_EXPLORE_GENERAL_PROMPT, slackDm: false },
+      { id: "jiraTicket", label: "Open a Jira ticket", prompt: DEFAULT_EXPLORE_JIRA_TICKET_PROMPT, slackDm: false, needsEnv: false },
+      { id: "knowledge", label: "Enhance knowledge / flow", prompt: DEFAULT_EXPLORE_PROMPT, slackDm: false, needsEnv: false },
+      { id: "debug", label: "Debug", prompt: DEFAULT_EXPLORE_DEBUG_PROMPT, slackDm: false, needsEnv: false },
+      { id: "general", label: "General", prompt: DEFAULT_EXPLORE_GENERAL_PROMPT, slackDm: false, needsEnv: false },
+      { id: "verify", label: "Verify on an environment", prompt: DEFAULT_EXPLORE_VERIFY_PROMPT, slackDm: false, needsEnv: true },
     ]);
+  });
+
+  it("marks only the verify action as needing an environment", () => {
+    const needsEnv = getConfig().exploreActions.filter((a) => a.needsEnv).map((a) => a.id);
+    expect(needsEnv).toEqual(["verify"]);
+  });
+
+  it("uses a verify prompt override from settings", () => {
+    setConfig({ "explorePrompts.verify": "check {summary} on {env}{files}" });
+    expect(getConfig().exploreActions.find((x) => x.id === "verify")?.prompt).toBe("check {summary} on {env}{files}");
   });
 
   it("defaults exploreMode to 'ask' and honors a configured value", () => {
@@ -256,7 +269,12 @@ describe("getConfig — explore actions", () => {
   it("flips slackDm per action id and ignores non-boolean values", () => {
     setConfig({ exploreSlackDm: { jiraTicket: true, knowledge: "yes", debug: 1 } });
     const byId = Object.fromEntries(getConfig().exploreActions.map((x) => [x.id, x.slackDm]));
-    expect(byId).toEqual({ jiraTicket: true, knowledge: false, debug: false, general: false });
+    expect(byId).toEqual({ jiraTicket: true, knowledge: false, debug: false, general: false, verify: false });
+  });
+
+  it("flips slackDm for the verify action too", () => {
+    setConfig({ exploreSlackDm: { verify: true } });
+    expect(getConfig().exploreActions.find((a) => a.id === "verify")?.slackDm).toBe(true);
   });
 
   it("migrates a customized legacy explorePrompt into the knowledge action", () => {
@@ -267,6 +285,32 @@ describe("getConfig — explore actions", () => {
   it("prefers an explicit explorePrompts.knowledge over the legacy explorePrompt", () => {
     setConfig({ explorePrompt: "legacy {files}", "explorePrompts.knowledge": "new {files}" });
     expect(getConfig().exploreActions.find((x) => x.id === "knowledge")?.prompt).toBe("new {files}");
+  });
+});
+
+describe("getConfig — environments", () => {
+  it("defaults to the shipped environment list", () => {
+    expect(getConfig().environments).toEqual(["dev", "staging", "production"]);
+  });
+
+  it("trims, drops blanks and non-strings, and de-duplicates preserving order", () => {
+    setConfig({ environments: ["  prod ", "dev", "", "prod", 7, null, "dev"] });
+    expect(getConfig().environments).toEqual(["prod", "dev"]);
+  });
+
+  it("falls back to the defaults when the list holds nothing usable", () => {
+    setConfig({ environments: ["", "   "] });
+    expect(getConfig().environments).toEqual(DEFAULT_ENVIRONMENTS);
+  });
+
+  it("falls back to the defaults when the setting is not an array", () => {
+    setConfig({ environments: "staging" });
+    expect(getConfig().environments).toEqual(DEFAULT_ENVIRONMENTS);
+  });
+
+  it("hands back a copy, so a caller cannot mutate the shipped defaults", () => {
+    getConfig().environments.push("mutated");
+    expect(DEFAULT_ENVIRONMENTS).toEqual(["dev", "staging", "production"]);
   });
 });
 
@@ -384,6 +428,7 @@ describe("package.json ⇄ config constants", () => {
     expect(props["agentFlow.explorePrompts.knowledge"].default).toBe(DEFAULT_EXPLORE_PROMPT);
     expect(props["agentFlow.explorePrompts.debug"].default).toBe(DEFAULT_EXPLORE_DEBUG_PROMPT);
     expect(props["agentFlow.explorePrompts.general"].default).toBe(DEFAULT_EXPLORE_GENERAL_PROMPT);
+    expect(props["agentFlow.explorePrompts.verify"].default).toBe(DEFAULT_EXPLORE_VERIFY_PROMPT);
   });
 
   it("keeps the promptModes schema default byte-identical to DEFAULT_PROMPT_MODES", () => {
@@ -396,6 +441,10 @@ describe("package.json ⇄ config constants", () => {
     const p = props["agentFlow.promptModes"] as { items?: { required?: string[]; properties?: Record<string, unknown> } };
     expect(p.items?.required).toEqual(["id", "label", "prompt"]);
     expect(Object.keys(p.items?.properties ?? {})).toContain("detail");
+  });
+
+  it("keeps the environments schema default equal to DEFAULT_ENVIRONMENTS", () => {
+    expect(props["agentFlow.environments"].default).toEqual(DEFAULT_ENVIRONMENTS);
   });
 
   it("keeps the deprecated explorePrompt default equal to the knowledge default (migration target)", () => {

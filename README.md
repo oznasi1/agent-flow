@@ -255,6 +255,7 @@ repo, so they never get committed.
 | `agentFlow.reviewWrites` | `false` | Allow submitting approve / comment / request changes to GitHub from the Deck. |
 | `agentFlow.reviewRequestPrompt` | *(built-in)* | Prompt seeded by **Review with agent**. |
 | `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
+| `agentFlow.environments` | `["dev", "staging", "production"]` | Environments offered by the **Verify on an environment** Explore action. The picker also offers **Custom…** for a one-off. |
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
 `agentFlow.exploreMode`, `agentFlow.explorePrompts.*`, `agentFlow.prReviewPrompt`, and
@@ -262,7 +263,13 @@ Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
 start: **Plan first**, **Implementation**, **Test-driven**, **Investigate &
 root-cause**, **Orchestrator**, or **Refine the ticket**. Edit those prompts, or add
 your own mode, under `agentFlow.promptModes`; pin one with `agentFlow.taskMode` to skip
-the question. The **Address PR** kick-off always runs in a worktree. Per-task worktrees
+the question. **Explore** asks what kind of session to start: **Open a Jira ticket**, **Enhance
+knowledge / flow**, **Debug**, **General**, or **Verify on an environment**. Verify also
+asks which environment to check the repos you picked against — from
+`agentFlow.environments`, or a one-off you type — and seeds a read-only prompt that
+inspects their logs, error rates, metrics and traces, and deployed version there. Edit any Explore prompt
+under `agentFlow.explorePrompts.*`, or pin one action with `agentFlow.exploreMode`.
+The **Address PR** kick-off always runs in a worktree. Per-task worktrees
 are created inside each repo at `.claude/worktrees/<KEY>` (and git-excluded
 automatically).
 
