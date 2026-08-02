@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { window, ViewColumn, env, workspace, setConfig } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
-import type { CardAgent, OpenSession, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
+import type { AgentActivity, CardAgent, OpenSession, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
@@ -46,6 +46,13 @@ const h = vi.hoisted(() => ({
   // Every Claude Code session open on this machine (Task 8) — the registry
   // readOpenSessions reads, stubbed here rather than touching real ~/.claude/sessions.
   openSessions: [] as OpenSession[],
+  // Per-session live activity (Task 8) — stubbed so the liveSignal-on case can
+  // assert a real, known AgentActivity is threaded through to the right
+  // CardAgent, without this suite re-testing readSessionActivity's own parsing
+  // of a real transcript file (engine/transcript.test.ts already does that).
+  sessionActivity: vi.fn((_projectsRoot: string, _cwd: string, _sessionId: string, _nowMs: number): AgentActivity => (
+    { state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" }
+  )),
   // Review launch + draft handoff (Task 12): the worktree launcher and the two
   // fs primitives decorateReviews/loadReviewDraft need — kept in the hoisted
   // block like every other side effect this suite stubs out.
@@ -85,6 +92,14 @@ vi.mock("../../src/engine/sessions", async (importActual) => ({
   ...(await importActual<typeof import("../../src/engine/sessions")>()),
   readOpenSessions: () => h.openSessions,
   defaultSessionsDir: () => "/sessions",
+}));
+// UNKNOWN_ACTIVITY stays real (deckView.ts imports it directly, and it is the
+// exact value the liveSignal-off case asserts against) — only the transcript
+// read itself, which would otherwise hit a real (absent) file, is replaced.
+vi.mock("../../src/engine/transcript", async (importActual) => ({
+  ...(await importActual<typeof import("../../src/engine/transcript")>()),
+  readSessionActivity: (projectsRoot: string, cwd: string, sessionId: string, nowMs: number) =>
+    h.sessionActivity(projectsRoot, cwd, sessionId, nowMs),
 }));
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: () => [],
@@ -236,6 +251,7 @@ beforeEach(() => {
   h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }];
   h.reviewRequests = true;
   h.openSessions = [];
+  h.sessionActivity.mockClear().mockReturnValue({ state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" });
   h.launchReview.mockClear().mockResolvedValue({ ok: true, runKey: "review-aws-ops-8491" });
   h.existsSync.mockClear().mockReturnValue(false);
   h.readFileSync.mockClear().mockReturnValue("");
@@ -615,6 +631,33 @@ describe("DeckPanel open agents", () => {
     show();
     await settled();
     expect(builtFor("ASM-1").agents).toEqual([]);
+  });
+
+  it("marks every attached agent's activity unknown when the live signal is off, while still listing the session", async () => {
+    // liveSignal off must not drop the session from the card — the registry
+    // still knows it's open; only its transcript goes unread.
+    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.openSessions = [sess()];
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:setLive", on: false });
+    const agents = builtFor("ASM-1").agents;
+    expect(agents).toHaveLength(1);
+    expect(agents[0].session.name).toBe("svc-7e");
+    expect(agents[0].activity).toEqual({ state: "unknown", lastActivityMs: null, slug: null });
+    expect(h.sessionActivity).not.toHaveBeenCalled();
+  });
+
+  it("reads the session's own live activity when the live signal is on, keyed to that session", async () => {
+    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.openSessions = [sess()];
+    show();
+    await settled();
+    // Called with the session's own cwd and sessionId, not the run's repo path
+    // or the place key — a session started in a subdirectory has its transcript
+    // filed under that subdirectory, which only the session's own cwd names.
+    expect(h.sessionActivity).toHaveBeenCalledWith(expect.any(String), "/r/svc", "s1", expect.any(Number));
+    expect(builtFor("ASM-1").agents[0].activity).toEqual({ state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" });
   });
 });
 
