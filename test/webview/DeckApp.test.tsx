@@ -7,7 +7,7 @@ vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
 import { DeckApp } from "../../src/webview/DeckApp";
 import { send } from "../../src/webview/vscodeApi";
-import type { OutboundMessage, PrFacts, ReviewRequest, RunStatus } from "../../src/types";
+import type { AgentActivity, CardAgent, OutboundMessage, PrFacts, ReviewRequest, RunStatus } from "../../src/types";
 
 const sent = vi.mocked(send);
 
@@ -35,6 +35,11 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
 });
 
 const runsMsg = (runs: RunStatus[]): OutboundMessage => ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, ghNote: null });
+
+const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
+  session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
+  activity: { state, lastActivityMs, slug: null },
+});
 
 beforeEach(() => sent.mockClear());
 
@@ -426,6 +431,35 @@ describe("DeckApp PR-facts chrome", () => {
     render(<DeckApp />);
     host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, ghNote: "gh CLI not found — PR facts off" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
+  });
+
+  it("names a single agent instead of counting to one", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })]));
+    expect(screen.getByText("svc-7e")).toBeTruthy();
+    expect(screen.queryByText(/1 agent/)).toBeNull();
+  });
+
+  it("counts several agents and lists them when expanded", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
+    const disclosure = screen.getByRole("button", { name: /2 agents/ });
+    expect(screen.queryByText("svc-fa")).toBeNull();
+    fireEvent.click(disclosure);
+    expect(screen.getByText("svc-fa")).toBeTruthy();
+    // Each row carries its OWN state — the whole point of listing them.
+    expect(screen.getByText("working")).toBeTruthy();
+    expect(screen.getByText("idle")).toBeTruthy();
+  });
+
+  it("renders no agents row for a card with none", () => {
+    // Not screen.queryByRole("button", { name: /agent/ }) — the header's own
+    // "Open agents" toggle always renders and its accessible name matches that
+    // pattern too, so an unscoped query would pass even if AgentsRow leaked an
+    // empty control. Scope to the card's own markup instead.
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({ agents: [] })]));
+    expect(container.querySelector(".c-agents")).toBeNull();
   });
 });
 

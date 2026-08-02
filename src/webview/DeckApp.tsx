@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun } from "../types";
+import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun } from "../types";
 import { ReviewStrip } from "./ReviewStrip";
 
 let toastSeq = 0;
@@ -118,6 +118,44 @@ function RepoChip({ g }: { g: RepoGit }): JSX.Element {
   );
 }
 
+const AGENT_STATE: Record<AgentActivity["state"], { text: string; tone: Tone }> = {
+  working: { text: "working", tone: "working" },
+  "needs-you": { text: "ended turn", tone: "attn" },
+  idle: { text: "idle", tone: "idle" },
+  unknown: { text: "open", tone: "parked" },
+};
+
+/** Every agent open in this card's directories. Collapsed it is one line — the
+ * name when there is one agent, a count when there are more; expanded it is a
+ * row each, because two sessions in one worktree are two different states and a
+ * single aggregate dot cannot say both. */
+function AgentsRow({ agents }: { agents: CardAgent[] }): JSX.Element | null {
+  const [open, setOpen] = React.useState(false);
+  if (agents.length === 0) return null;
+  const label = agents.length === 1 ? agents[0].session.name ?? "1 agent" : `${agents.length} agents`;
+  return (
+    <div className="c-agents">
+      <button type="button" className="ag-toggle" onClick={() => setOpen((o) => !o)}
+        title="Claude Code sessions open in this directory">
+        <span className="ag-caret">{open ? "▾" : "▸"}</span>
+        <span className="ag-label">{label}</span>
+      </button>
+      {open && agents.map((a) => {
+        const st = AGENT_STATE[a.activity.state];
+        return (
+          <div className="ag-row" key={a.session.sessionId}>
+            <span className={`sdot tone-${st.tone} ${st.tone === "working" ? "pulse" : ""}`} />
+            <span className="ag-name">{a.session.name ?? a.session.sessionId.slice(0, 8)}</span>
+            <span className={`ag-state tone-${st.tone}`}>{st.text}</span>
+            <span className="ag-age">{a.activity.lastActivityMs ? timeAgo(a.activity.lastActivityMs) : ""}</span>
+            <span className="ag-open">open {timeAgo(a.session.startedAt)}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (key: string) => void }): JSX.Element {
   const col = COLUMNS.find((c) => c.id === r.column)!;
   const accent = `var(${col.varName})`;
@@ -180,6 +218,8 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
           <PrBlock key={name} repo={name} f={e.facts} showRepo={withPr.length > 1} />
         ));
       })()}
+
+      <AgentsRow agents={r.agents} />
 
       <div className="c-foot">
         {r.jiraStatus && <span className="pill" title={`Jira status: ${r.jiraStatus}`}>{r.jiraStatus}</span>}

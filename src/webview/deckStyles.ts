@@ -192,6 +192,23 @@ export const DECK_CSS = `
   .repo .add { color: var(--c-done); } .repo .del { color: var(--c-danger); }
   .repo .dirty { color: var(--c-idle); }
 
+  /* Agents open in this card's directories. Names are identifiers, so mono; the
+     row is a control, so it takes the same focus treatment as .act. */
+  .c-agents { margin-top: 7px; }
+  .ag-toggle { display: flex; align-items: center; gap: 5px; width: 100%; padding: 0;
+    background: none; border: 0; color: var(--dim); font: inherit; font-size: var(--t-data);
+    cursor: pointer; text-align: left; }
+  .ag-toggle:hover { color: var(--vscode-foreground); }
+  .ag-caret { flex: none; width: 9px; }
+  .ag-label { font-family: var(--mono); }
+  .ag-row { display: flex; align-items: center; gap: 6px; margin: 4px 0 0 14px;
+    font-size: var(--t-data); color: var(--dim); min-width: 0; }
+  .ag-name { font-family: var(--mono); color: var(--vscode-foreground);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ag-state.tone-attn { color: var(--c-attn); }
+  .ag-age { margin-left: auto; flex: none; }
+  .ag-open { flex: none; opacity: .7; }
+
   .c-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; min-width: 0; }
   .pill { flex: 0 1 auto; min-width: 0; font-size: var(--t-body);
     border: 1px solid var(--hair); border-radius: 20px; padding: 1px 9px;
