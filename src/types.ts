@@ -81,6 +81,18 @@ export function runKind(run: Run): "task" | "explore" | "review" {
   return RUN_KINDS.has(run.kind as string) ? (run.kind as "task" | "explore" | "review") : "task";
 }
 
+/** One open Claude Code session, as ~/.claude/sessions/<pid>.json records it.
+ * Only the fields the Deck reads; the file carries more. Declared here rather
+ * than in engine/sessions.ts because the webview renders session names and must
+ * not import a module that touches `fs`. */
+export interface OpenSession {
+  pid: number;
+  sessionId: string; // names the transcript: <sessionId>.jsonl
+  cwd: string;
+  startedAt: number; // epoch ms, 0 when the record omits it
+  name: string | null; // Claude's derived label, e.g. "agent-flow-2e"
+}
+
 /** Is this run attached to a Jira ticket? An Explore session is launched with a
  * synthetic `explore-<slug>` key and no ticket url: there is no Jira issue to
  * poll, and `gh pr list --head <default-branch>` can only return a pull request
