@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isTicketRun, runKind } from "../../src/types";
+import { isTicketRun, runKind, ticketKeyFor } from "../../src/types";
 import type { Run } from "../../src/types";
 
 const mkRun = (over: Partial<Run> = {}): Run => ({
@@ -32,6 +32,35 @@ describe("isTicketRun", () => {
     // A review run has a url — a PR's, not a Jira issue's. Only `kind` (not the
     // url check) is what must keep it out of Jira polling.
     expect(isTicketRun(mkRun({ kind: "review", url: "https://github.com/o/r/pull/1" }))).toBe(false);
+  });
+});
+
+describe("ticketKeyFor", () => {
+  it("is a no-op for a normal task run — the key already equals the url tail", () => {
+    expect(ticketKeyFor(mkRun({ key: "ASM-1", url: "https://jira/browse/ASM-1" }))).toBe("ASM-1");
+  });
+
+  it("derives the real ticket from the url when the record's own key is a place-hash", () => {
+    // Exactly what Track it writes for case 3: a tracked run already owned the
+    // inferred key, so the record is saved under its local place-hash instead —
+    // the ticket survives only in the url.
+    expect(ticketKeyFor(mkRun({ key: "local-centaur-1a2b3c4d", url: "https://jira/browse/ASM-5641" }))).toBe("ASM-5641");
+  });
+
+  it("falls back to the key for an Explore run, which has no url", () => {
+    expect(ticketKeyFor(mkRun({ key: "explore-retry-logic", url: "" }))).toBe("explore-retry-logic");
+  });
+
+  it("falls back to the key for a review run's PR url — no /browse/ to find", () => {
+    expect(ticketKeyFor(mkRun({ key: "review-aws-ops-8491", url: "https://github.com/o/r/pull/8491", kind: "review" }))).toBe(
+      "review-aws-ops-8491",
+    );
+  });
+
+  it("survives a record with no url field at all", () => {
+    const legacy = { ...mkRun() } as Partial<Run>;
+    delete legacy.url;
+    expect(ticketKeyFor(legacy as Run)).toBe(legacy.key);
   });
 });
 

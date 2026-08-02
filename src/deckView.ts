@@ -23,7 +23,7 @@ import { inferTicket, localRunFor } from "./engine/localRuns";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity, UNKNOWN_ACTIVITY } from "./engine/transcript";
 import { canon } from "./engine/paths";
-import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind } from "./types";
+import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
@@ -199,13 +199,21 @@ export class DeckPanel {
    * hanging `gh` must never stall the git and transcript reads. The epoch is
    * captured at enqueue time so a fetch still in flight when the run is
    * forgotten can detect that and skip its write, rather than recreating the
-   * cache file `deck:forget` just deleted. */
-  private enqueuePr(key: string, repo: { name: string; path: string }, branch: string | null, previous?: PrEntry): void {
+   * cache file `deck:forget` just deleted.
+   *
+   * `key` and `searchKey` differ for a local card: `key` is `run.key` — the
+   * store's identity, always — while `searchKey` is what the provider's
+   * fallback `--search "<searchKey> in:title"` can actually match against. For
+   * every run Agent Flow launched the two are the same string; for a local card
+   * with an inferred ticket, `key` is the place-hash and `searchKey` is the
+   * ticket (see `ticketKeyFor`) — the only one of the two a PR title could ever
+   * contain. */
+  private enqueuePr(key: string, searchKey: string, repo: { name: string; path: string }, branch: string | null, previous?: PrEntry): void {
     const epoch = this.prEpoch.get(key) ?? 0;
     this.prQueue.push(repo.path, async () => {
       let res: FetchResult;
       try {
-        res = await this.pr.fetch(repo.path, branch, key);
+        res = await this.pr.fetch(repo.path, branch, searchKey);
       } catch {
         // A provider must never throw, but a thrown error here must still not
         // leave this entry unstamped — an unstamped entry reads as stale on
@@ -580,18 +588,12 @@ export class DeckPanel {
     const cfg = getConfig();
     this.localRuns.clear();
     const locals: Run[] = [];
-    // A local card's key (Task 6's localKey) is a hash of its place, not a Jira
-    // issue key — even when a ticket is inferred from the branch. jiraStatus
-    // must be asked for the ticket's own key, so this maps a local run's key to
-    // it, one entry per card with an inferred ticket.
-    const localTickets = new Map<string, string>();
     for (const [place, sessions] of places) {
       if (claimed.has(place)) continue;
       const branch = currentBranch(place);
       const ticket = inferTicket(branch, cfg.project, cfg.baseUrl);
       const run = localRunFor(place, sessions, { isGit: repoRoot(place) !== "", branch }, ticket, now);
       this.localRuns.set(run.key, run);
-      if (ticket) localTickets.set(run.key, ticket.key);
       agentsByKey.set(
         run.key,
         sessions.map((s) => ({
@@ -608,13 +610,15 @@ export class DeckPanel {
     // is still what the board's next authoritative state waits on. jiraStatus owns
     // its own errors, so this can never reject; run keys are unique, so concurrent
     // calls never duplicate a cache miss.
+    // ticketKeyFor, not run.key: a run saved under its place-hash (Track it, when
+    // the inferred key already belonged to another run) carries its ticket only
+    // in its url — polling run.key there would 404 forever, every tick.
     const jiras = await Promise.all(
-      all.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(localTickets.get(run.key) ?? run.key) : null)),
+      all.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(ticketKeyFor(run)) : null)),
     );
     const out: RunStatus[] = [];
     for (const [i, run] of all.entries()) {
       const jira = jiras[i];
-      // Jira still asks "is there a ticket": a synthetic key 404s forever.
       const stored = this.prFacts ? readPrEntries(defaultPrFactsDir(), run.key) : {};
       // A repo on its default branch is filtered out here as well as below, so a
       // stale entry written before this rule existed stays inert on disk rather
@@ -625,13 +629,13 @@ export class DeckPanel {
       // PrBlock and vote in prSignals, pinning a card in Needs you or out of
       // Done with Forget as the only escape.
       const prs: PrEntryMap = Object.fromEntries(
-        run.repos.filter((r) => prEligible(r) && stored[r.name]).map((r) => [r.name, stored[r.name]]),
+        run.repos.filter((r) => stored[r.name] && prEligible(r)).map((r) => [r.name, stored[r.name]]),
       );
       if (ghReady) {
         const ttlMs = getConfig().prFactsTtlSeconds * 1000;
         for (const repo of run.repos) {
           if (prEligible(repo) && isStale(prs[repo.name], ttlMs, now)) {
-            this.enqueuePr(run.key, repo, repo.branch ?? null, prs[repo.name]);
+            this.enqueuePr(run.key, ticketKeyFor(run), repo, repo.branch ?? null, prs[repo.name]);
           }
         }
       }
@@ -762,7 +766,7 @@ export class DeckPanel {
   private async track(key: string): Promise<void> {
     const local = this.localRuns.get(key);
     if (!local) return; // not a local card — nothing to promote
-    const inferredKey = local.url ? local.url.split("/browse/")[1] : "";
+    const inferredKey = local.url ? ticketKeyFor(local) : "";
     const taken = inferredKey ? readRuns(defaultRunsDir()).some((r) => r.key === inferredKey) : true;
     const run: Run = {
       ...local,

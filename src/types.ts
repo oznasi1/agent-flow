@@ -108,6 +108,18 @@ export function isTicketRun(run: Run): boolean {
   return typeof run.url === "string" && run.url.trim().length > 0;
 }
 
+/** The Jira key to poll for a run. A task run's key IS its ticket, but a local
+ * card Track it saved under its place-hash — because a real run already owned
+ * the inferred key — carries the ticket only in its url. Deriving from the url
+ * covers both, and is what the record key already equals for every run Agent
+ * Flow launched. */
+export function ticketKeyFor(run: Run): string {
+  const url = typeof run.url === "string" ? run.url : "";
+  const marker = "/browse/";
+  const i = url.indexOf(marker);
+  return i >= 0 ? url.slice(i + marker.length) : run.key;
+}
+
 /** Per-repo git state — the reliable backbone of a run's status. */
 export interface RepoGit {
   name: string;

@@ -814,6 +814,24 @@ describe("DeckPanel track it", () => {
     expect(written.url).toContain("/browse/ASM-5641");
   });
 
+  it("polls the real ticket, not the place-hash, for a record Track it saved under its local key", async () => {
+    // Exactly what the previous test just wrote to disk: on the *next* refresh
+    // this is a tracked run (`readRuns` would return it), so it is no longer
+    // synthesized as a local card and `localTickets`-style bookkeeping never
+    // sees it. The ticket must still come from its own url, not its key —
+    // otherwise every tick polls Jira for "local-centaur-1a2b3c4d", which 404s
+    // forever.
+    h.runs = [mkRun({
+      key: "local-centaur-1a2b3c4d", url: "https://jira/browse/ASM-5641", kind: "task",
+      repos: [{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-5641-team-table" }],
+    })];
+    show(true);
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" });
+    expect(h.getStatus).toHaveBeenCalledWith("ASM-5641");
+    expect(h.getStatus).not.toHaveBeenCalledWith("local-centaur-1a2b3c4d");
+  });
+
   it("writes a place with no ticket as an explore run", async () => {
     h.runs = [];
     h.branch = "main";
@@ -896,6 +914,17 @@ describe("DeckPanel PR facts", () => {
     await showAndWarm();
     expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "ASM-1");
     expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "ASM-1", "svc", expect.objectContaining({ facts: null, fetchedAt: expect.any(Number) }));
+  });
+
+  it("searches by the inferred ticket key, not the local place-hash, for an untracked place", async () => {
+    // The provider's `--head` search already covers the common case; this is
+    // the fallback `--search "<key> in:title"` term specifically. A local
+    // card's own key (a place-hash) could never match a PR title — the ticket
+    // a branch names is the one string that stands a chance.
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    await showAndWarm(true);
+    expect(h.prFetch).toHaveBeenCalledWith("/r/centaur", "ASM-5641-team-table", "ASM-5641");
   });
 
   it("does not refetch an entry inside its TTL", async () => {
