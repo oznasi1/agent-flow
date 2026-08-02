@@ -2,7 +2,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { OpenSession } from "../types";
-import { pidAlive } from "./paths";
+import { pidAlive, canon } from "./paths";
+import { repoRoot } from "./git";
 
 export type { OpenSession }; // re-exported so callers can take both from here
 
@@ -65,4 +66,22 @@ export function readOpenSessions(dir: string): OpenSession[] {
   // Oldest first: the expansion then lists a place's agents in the order they
   // were opened, and a local card's createdAt is simply the first one's start.
   return out.sort((a, b) => a.startedAt - b.startedAt);
+}
+
+/**
+ * Sessions grouped by the git repo root containing their cwd, so one started in
+ * `centaur/src` groups with one started in `centaur` — and so a place compares
+ * equal to a run record's repo path, which is always a root. A cwd in no repo
+ * groups under itself. Keys are canonicalised, so /var and /private/var
+ * spellings of one directory land in one group.
+ */
+export function groupByPlace(sessions: OpenSession[]): Map<string, OpenSession[]> {
+  const out = new Map<string, OpenSession[]>();
+  for (const s of sessions) {
+    const place = canon(repoRoot(s.cwd) || s.cwd);
+    const list = out.get(place);
+    if (list) list.push(s);
+    else out.set(place, [s]);
+  }
+  return out;
 }

@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { readOpenSessions, defaultSessionsDir } from "../../../src/engine/sessions";
+import { execFileSync } from "child_process";
+import { readOpenSessions, defaultSessionsDir, groupByPlace } from "../../../src/engine/sessions";
 
 const DEAD = 2 ** 30;
 
@@ -102,5 +103,48 @@ describe("readOpenSessions", () => {
 describe("defaultSessionsDir", () => {
   it("points at ~/.claude/sessions", () => {
     expect(defaultSessionsDir()).toBe(path.join(os.homedir(), ".claude", "sessions"));
+  });
+});
+
+describe("groupByPlace", () => {
+  let repo: string;
+  let root: string; // repo, realpath-resolved — what a place key looks like
+
+  const session = (cwd: string, id: string): OpenSession => ({
+    pid: process.pid, sessionId: id, cwd, startedAt: 1, name: id,
+  });
+
+  beforeAll(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-place-"));
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", repo]);
+    fs.mkdirSync(path.join(repo, "src"));
+    root = fs.realpathSync(repo);
+  });
+
+  afterAll(() => fs.rmSync(repo, { recursive: true, force: true }));
+
+  it("groups a session in a subdirectory with one at the repo root", () => {
+    const m = groupByPlace([session(repo, "a"), session(path.join(repo, "src"), "b")]);
+    expect([...m.keys()]).toEqual([root]);
+    expect(m.get(root)!.map((s) => s.sessionId)).toEqual(["a", "b"]);
+  });
+
+  it("groups a cwd in no repo under itself", () => {
+    const loose = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-loose-place-"));
+    const m = groupByPlace([session(loose, "a")]);
+    expect([...m.keys()]).toEqual([fs.realpathSync(loose)]);
+    fs.rmSync(loose, { recursive: true, force: true });
+  });
+
+  it("keeps two different repos apart", () => {
+    const other = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-place2-"));
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", other]);
+    const m = groupByPlace([session(repo, "a"), session(other, "b")]);
+    expect(m.size).toBe(2);
+    fs.rmSync(other, { recursive: true, force: true });
+  });
+
+  it("returns an empty map for no sessions", () => {
+    expect(groupByPlace([]).size).toBe(0);
   });
 });
