@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Review with agent can offer more than one seed prompt.** The new
+  `agentFlow.reviewRequestModes` holds a list of named review modes — same shape as
+  `agentFlow.promptModes` — and with two or more configured, clicking **Review with
+  agent** asks which to seed. Written for reviewers who keep separate review skills per
+  area, e.g. one for backend services and one for frontend. Pin one with
+  `agentFlow.reviewRequestMode` to skip the question. One **Full review** mode ships, so
+  an install that changes nothing still launches a review in a single click.
+
+### Deprecated
+
+- `agentFlow.reviewRequestPrompt` — superseded by `agentFlow.reviewRequestModes`. A value
+  you customized is migrated into the **Full review** mode automatically; nothing to do.
+
 ## [0.1.43] — 2026-08-02
 
 ### Changed

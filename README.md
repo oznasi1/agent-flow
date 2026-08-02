@@ -253,7 +253,8 @@ repo, so they never get committed.
 | `agentFlow.reviewRequests` | `true` | Show the Deck's review-requests strip: open GitHub PRs that ask for your review. |
 | `agentFlow.reviewRequestsTtlSeconds` | `300` | How stale the cached review queue may be before a refetch (minimum 60). |
 | `agentFlow.reviewWrites` | `false` | Allow submitting approve / comment / request changes to GitHub from the Deck. |
-| `agentFlow.reviewRequestPrompt` | *(built-in)* | Prompt seeded by **Review with agent**. |
+| `agentFlow.reviewRequestModes` | *(one built-in mode)* | Seed modes offered by **Review with agent**. Add your own — e.g. separate backend and frontend review modes — and clicking asks which to use. |
+| `agentFlow.reviewRequestMode` | `ask` | Pin one review mode by `id` to skip the question. |
 | `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
@@ -262,9 +263,12 @@ Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
 start: **Plan first**, **Implementation**, **Test-driven**, **Investigate &
 root-cause**, **Orchestrator**, or **Refine the ticket**. Edit those prompts, or add
 your own mode, under `agentFlow.promptModes`; pin one with `agentFlow.taskMode` to skip
-the question. The **Address PR** kick-off always runs in a worktree. Per-task worktrees
-are created inside each repo at `.claude/worktrees/<KEY>` (and git-excluded
-automatically).
+the question. **Review with agent** works the same way on its own list: one **Full
+review** mode ships, and once you add a second — a backend-services reviewer and a
+frontend one, say — clicking asks which to seed. Pin one with
+`agentFlow.reviewRequestMode`. The **Address PR** kick-off always runs in a worktree.
+Per-task worktrees are created inside each repo at `.claude/worktrees/<KEY>` (and
+git-excluded automatically).
 
 **Remote Control.** With `agentFlow.remoteControl` set to `on` or `ask`, the Claude Code
 panel is pre-filled with `/remote-control <KEY>` instead of the task prompt, and the task
