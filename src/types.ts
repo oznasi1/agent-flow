@@ -64,9 +64,11 @@ export interface Run {
   url: string;
   createdAt: number; // epoch ms
   /** What launched this run. Absent means "task" — every record written before
-   * review runs existed. …existing comment continues… "local" is the one kind
-   * that is never written to the runs store: it marks a place discovered from an
-   * open Claude Code session, and stops being true the moment Track it lands. */
+   * review runs existed. Review runs carry a PR url rather than a Jira one, so
+   * this, not the url, is what keeps them out of Jira polling and the columns.
+   * "local" is the one kind that is never written to the runs store: it marks a
+   * place discovered from an open Claude Code session, and stops being true the
+   * moment Track it lands. */
   kind?: "task" | "explore" | "review" | "local";
   mode: WorkspaceMode;
   workspaceFile?: string; // multi-root .code-workspace, when mode === "multiroot"
