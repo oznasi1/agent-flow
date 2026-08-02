@@ -129,6 +129,18 @@ describe("groupByPlace", () => {
     expect(m.get(root)!.map((s) => s.sessionId)).toEqual(["a", "b"]);
   });
 
+  it("groups a symlinked path with the real one", () => {
+    // /var vs /private/var on macOS is the case canon() exists for — this pins
+    // it at groupByPlace's own level rather than only at canon()'s.
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-place-link-"));
+    const link = path.join(parent, "link");
+    fs.symlinkSync(repo, link);
+    const m = groupByPlace([session(repo, "a"), session(link, "b")]);
+    expect(m.size).toBe(1);
+    expect(m.get(root)!.map((s) => s.sessionId).sort()).toEqual(["a", "b"]);
+    fs.rmSync(parent, { recursive: true, force: true });
+  });
+
   it("groups a cwd in no repo under itself", () => {
     const loose = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-loose-place-"));
     const m = groupByPlace([session(loose, "a")]);

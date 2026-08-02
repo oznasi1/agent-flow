@@ -285,5 +285,43 @@ describe("buildRunStatus", () => {
       });
       expect(s.agent.state).toBe("unknown");
     });
+
+    it("unions the per-session and per-repo signals rather than using the per-repo read only when no session is open", () => {
+      // Its own repo and transcript, isolated from the outer `run`/`repoPath`
+      // fixture (shared "working" reading every other case here depends on):
+      // this one needs its per-repo signal to resolve to needs-you specifically.
+      const localRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-status-union-"));
+      const localRepo = path.join(localRoot, "repo");
+      fs.mkdirSync(localRepo, { recursive: true });
+      const g = (...a: string[]) => execFileSync("git", ["-C", localRepo, ...a], { stdio: ["ignore", "pipe", "ignore"] });
+      g("init", "-q");
+      g("config", "user.email", "t@t.dev");
+      g("config", "user.name", "T");
+      fs.writeFileSync(path.join(localRepo, "f.txt"), "a\n");
+      g("add", "-A");
+      g("commit", "-q", "-m", "init");
+
+      const localProjRoot = path.join(localRoot, "projects");
+      const tdir = path.join(localProjRoot, encodeProjectDir(localRepo));
+      fs.mkdirSync(tdir, { recursive: true });
+      const tfile = path.join(tdir, "s.jsonl");
+      // end_turn → readAgentActivity reads this repo's own signal as needs-you,
+      // regardless of age (deriveActivity treats end_turn as actionable at any age).
+      fs.writeFileSync(tfile, JSON.stringify({ type: "assistant", slug: "wip", message: { stop_reason: "end_turn" } }) + "\n");
+      fs.utimesSync(tfile, NOW / 1000, NOW / 1000);
+
+      const localRun: Run = {
+        key: "ASM-10", summary: "x", url: "https://x/ASM-10", createdAt: 1, mode: "per-window",
+        repos: [{ name: "repo", path: localRepo, isGit: true, branch: "main" }], briefPaths: [],
+      };
+      const s = buildRunStatus({
+        run: localRun, jira: null, projectsRoot: localProjRoot, nowMs: NOW,
+        agents: [agent("idle", NOW - 5_000)],
+      });
+      // A "sessions-only when present" fallback would stop at the idle session
+      // and never read the per-repo signal at all, reporting idle instead.
+      expect(s.agent.state).toBe("needs-you");
+      fs.rmSync(localRoot, { recursive: true, force: true });
+    });
   });
 });
