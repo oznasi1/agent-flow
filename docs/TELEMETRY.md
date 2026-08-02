@@ -50,7 +50,7 @@ Regardless of any setting, Agent Flow never sends:
   sent (see [Errors](#errors--operation_failed-and-unhandled_error) below)
 - The value of any user-authored setting — `baseUrl`, `project`, `githubOrg`,
   `reposRoot`, `workspaceDir`, `provenanceLabel`, `prReviewStatus`,
-  `reviewRequestPrompt`, or any of the `*Prompt` / `promptModes` /
+  `reviewRequestModes`, or any of the `*Prompt` / `promptModes` /
   `explorePrompts.*` content. Where a setting like this matters for the product
   decisions this data informs, only a derived, non-identifying fact is sent — e.g.
   `prompt_modes_customized: true`, not the customized text; `repo_blocklist_count:
@@ -167,17 +167,17 @@ entry point:
 
 ### Settings snapshot
 
-`extension_activated` includes a 24-field reduction of your configuration,
+`extension_activated` includes a 27-field reduction of your configuration,
 built by `settingsSnapshot()`. Every field is either a boolean, a count, or a
 value drawn from a fixed, shipped set of choices — never a user-authored string:
 
 | Field | Values |
 |---|---|
 | `workspace_mode`, `open_in`, `explore_mode`, `worktree`, `remote_control`, `default_filter` | One of that setting's shipped choices, or the literal string `"invalid"` |
-| `task_mode` | `"ask"`, `"stock"` (pinned to a shipped prompt mode), or `"custom"` |
+| `task_mode`, `review_mode` | `"ask"`, `"stock"` (pinned to a shipped mode), or `"custom"` |
 | `seed_agent`, `filters_size`, `filters_status`, `filters_repo`, `filters_search`, `pr_review_auto_fix`, `pr_facts`, `review_requests`, `review_writes`, `stamp_label_on_write`, `track_open_windows` | `true` / `false` |
-| `batch_confirm_threshold`, `repo_blocklist_count`, `prompt_modes_count` | Numbers |
-| `prompt_modes_customized`, `explore_prompts_customized`, `pr_review_prompt_customized` | `true` / `false` — *whether* the corresponding user-authored text was changed from the shipped default, never the text itself |
+| `batch_confirm_threshold`, `repo_blocklist_count`, `prompt_modes_count`, `review_modes_count` | Numbers |
+| `prompt_modes_customized`, `explore_prompts_customized`, `pr_review_prompt_customized`, `review_modes_customized` | `true` / `false` — *whether* the corresponding user-authored text was changed from the shipped default, never the text itself |
 
 **The `"invalid"` sentinel.** Six of the fields above (`workspace_mode`,
 `open_in`, `explore_mode`, `worktree`, `remote_control`, `default_filter`) can

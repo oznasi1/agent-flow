@@ -30,6 +30,7 @@ const SAMPLES = [
     batch_confirm_threshold: 6, repo_blocklist_count: 0,
     prompt_modes_count: 6, prompt_modes_customized: false,
     explore_prompts_customized: false, pr_review_prompt_customized: false,
+    review_mode: "ask", review_modes_count: 1, review_modes_customized: false,
   },
   { name: "command_invoked", command: "openDeck" },
   { name: "take_started", flow_id: "f1", source: "card", task_fp: "0123456789abcdef", inferred_count: 2 },

@@ -1,9 +1,14 @@
-import { AgentFlowConfig, DEFAULT_EXPLORE_ACTIONS, DEFAULT_PR_REVIEW_PROMPT, DEFAULT_PROMPT_MODES } from "../config";
-import { SettingsSnapshot, STOCK_PROMPT_MODES, TaskModeProp } from "./events";
+import {
+  AgentFlowConfig, DEFAULT_EXPLORE_ACTIONS, DEFAULT_PR_REVIEW_PROMPT, DEFAULT_PROMPT_MODES,
+  DEFAULT_REVIEW_REQUEST_MODES,
+} from "../config";
+import { SettingsSnapshot, STOCK_PROMPT_MODES, STOCK_REVIEW_MODES, TaskModeProp } from "./events";
 
-function taskModeProp(taskMode: string): TaskModeProp {
-  if (taskMode === "ask") return "ask";
-  return (STOCK_PROMPT_MODES as readonly string[]).includes(taskMode) ? "stock" : "custom";
+/** Collapse an "ask, or a mode id" setting to a shape-only value. A custom id is
+ * user-authored text and must never be transmitted; it becomes "custom". */
+function modeProp(value: string, stock: readonly string[]): TaskModeProp {
+  if (value === "ask") return "ask";
+  return stock.includes(value) ? "stock" : "custom";
 }
 
 /** Validate a config value against its known set of shipped choices, collapsing
@@ -37,6 +42,7 @@ export const REMOTE_CONTROL_MODES = ["off", "on", "ask"] as const;
 export const DEFAULT_FILTER_VALUES = ["unassigned", "mysprint", "mine", "sprint", "backlog"] as const;
 
 const STOCK_PROMPT_MODE_IDS = DEFAULT_PROMPT_MODES.map((m) => m.id).join(",");
+const STOCK_REVIEW_MODE_IDS = DEFAULT_REVIEW_REQUEST_MODES.map((m) => m.id).join(",");
 
 /** Shipped default prompt per explore-action id (jiraTicket/knowledge/debug/general —
  * the id set never varies, only each action's `.prompt` can be customized). */
@@ -44,7 +50,7 @@ const DEFAULT_EXPLORE_PROMPTS = new Map(DEFAULT_EXPLORE_ACTIONS.map((a) => [a.id
 
 /** Reduce config to shape only. Every setting whose value is user-authored —
  * baseUrl, project, githubOrg, reposRoot, workspaceDir, provenanceLabel,
- * prReviewStatus, reviewRequestPrompt and every *Prompt — contributes at most a
+ * prReviewStatus, reviewRequestModes and every *Prompt — contributes at most a
  * "was it changed from the default" boolean. repoBlocklist contributes its
  * length. Every enum-ish setting is validated against its known values and
  * collapsed to the `"invalid"` sentinel when unrecognised, never cast and never
@@ -59,7 +65,7 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     worktree: enumOrInvalid(cfg.worktree, WORKTREE_MODES),
     remote_control: enumOrInvalid(cfg.remoteControl, REMOTE_CONTROL_MODES),
     default_filter: enumOrInvalid(cfg.defaultFilter, DEFAULT_FILTER_VALUES),
-    task_mode: taskModeProp(cfg.taskMode),
+    task_mode: modeProp(cfg.taskMode, STOCK_PROMPT_MODES),
     seed_agent: cfg.seedAgent,
     filters_size: cfg.filters.size,
     filters_status: cfg.filters.status,
@@ -77,5 +83,8 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     prompt_modes_customized: cfg.promptModes.map((m) => m.id).join(",") !== STOCK_PROMPT_MODE_IDS,
     explore_prompts_customized: cfg.exploreActions.some((a) => DEFAULT_EXPLORE_PROMPTS.get(a.id) !== a.prompt),
     pr_review_prompt_customized: cfg.prReviewPrompt !== DEFAULT_PR_REVIEW_PROMPT,
+    review_mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES),
+    review_modes_count: cfg.reviewRequestModes.length,
+    review_modes_customized: cfg.reviewRequestModes.map((m) => m.id).join(",") !== STOCK_REVIEW_MODE_IDS,
   };
 }

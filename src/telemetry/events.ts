@@ -71,6 +71,12 @@ export function toPromptModeProp(id: string): PromptModeProp {
   return (STOCK_PROMPT_MODES as readonly string[]).includes(id) ? (id as StockPromptMode) : "custom";
 }
 
+/** The single review mode shipped in DEFAULT_REVIEW_REQUEST_MODES.
+ * `agentFlow.reviewRequestModes` is user-configurable, so a custom mode's id is
+ * a user-authored string and must never be sent — modeProp() in
+ * settingsSnapshot.ts collapses anything unrecognised to "custom". */
+export const STOCK_REVIEW_MODES = ["full"] as const;
+
 /** `agentFlow.taskMode` holds "ask" or a prompt-mode id, so its raw value is
  * user-authored too. */
 export type TaskModeProp = "ask" | "stock" | "custom";
@@ -99,7 +105,7 @@ export type CommandId =
  * `*_fp` properties are matched by suffix and must be 16-char hex. */
 export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as const;
 
-/** The 24 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
+/** The 27 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
  *
  * `"invalid"` on the six enum-ish fields below (workspace_mode, open_in,
  * explore_mode, worktree, remote_control, default_filter) is a sentinel, not a
@@ -136,6 +142,9 @@ export interface SettingsSnapshot {
   prompt_modes_customized: boolean;
   explore_prompts_customized: boolean;
   pr_review_prompt_customized: boolean;
+  review_mode: TaskModeProp;
+  review_modes_count: number;
+  review_modes_customized: boolean;
 }
 
 /** Sent via logUsage — suppressed entirely at telemetry level "error". */

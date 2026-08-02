@@ -22,6 +22,9 @@ describe("settingsSnapshot", () => {
     expect(s.pr_review_prompt_customized).toBe(false);
     expect(s.review_writes).toBe(false);
     expect(s.repo_blocklist_count).toBe(0);
+    expect(s.review_mode).toBe("ask");
+    expect(s.review_modes_count).toBe(1);
+    expect(s.review_modes_customized).toBe(false);
   });
 
   it("collapses a user-authored taskMode id to 'custom'", () => {
@@ -32,6 +35,31 @@ describe("settingsSnapshot", () => {
   it("reports a shipped taskMode id as 'stock'", () => {
     const cfg = { ...getConfig(), taskMode: "tdd" };
     expect(settingsSnapshot(cfg).task_mode).toBe("stock");
+  });
+
+  it("collapses a user-authored reviewRequestMode id to 'custom'", () => {
+    const cfg = { ...getConfig(), reviewRequestMode: "acme-backend" };
+    const s = settingsSnapshot(cfg);
+    expect(s.review_mode).toBe("custom");
+    expect(JSON.stringify(s)).not.toContain("acme-backend");
+  });
+
+  it("reports the shipped reviewRequestMode id as 'stock'", () => {
+    expect(settingsSnapshot({ ...getConfig(), reviewRequestMode: "full" }).review_mode).toBe("stock");
+  });
+
+  it("flags customized review modes without revealing them", () => {
+    const cfg = {
+      ...getConfig(),
+      reviewRequestModes: [
+        { id: "acme-backend", label: "Backend services", detail: "D", prompt: "P" },
+        { id: "acme-frontend", label: "Frontend", detail: "D", prompt: "P" },
+      ],
+    };
+    const s = settingsSnapshot(cfg);
+    expect(s.review_modes_customized).toBe(true);
+    expect(s.review_modes_count).toBe(2);
+    expect(JSON.stringify(s)).not.toContain("acme-");
   });
 
   it("flags customized prompt modes without revealing them", () => {
