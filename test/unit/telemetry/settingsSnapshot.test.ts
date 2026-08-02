@@ -21,6 +21,7 @@ describe("settingsSnapshot", () => {
     expect(s.prompt_modes_customized).toBe(false);
     expect(s.explore_prompts_customized).toBe(false);
     expect(s.pr_review_prompt_customized).toBe(false);
+    expect(s.open_agents).toBe(true);
     expect(s.review_writes).toBe(false);
     expect(s.repo_blocklist_count).toBe(0);
     expect(s.review_mode).toBe("ask");

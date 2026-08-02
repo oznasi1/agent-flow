@@ -76,6 +76,7 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     pr_review_auto_fix: cfg.prReviewAutoFix,
     pr_facts: cfg.prFacts,
     review_requests: cfg.reviewRequests,
+    open_agents: cfg.openAgents,
     review_writes: cfg.reviewWrites,
     stamp_label_on_write: cfg.stampLabelOnWrite,
     track_open_windows: cfg.trackOpenWindows,

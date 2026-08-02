@@ -133,6 +133,7 @@ export interface SettingsSnapshot {
   pr_review_auto_fix: boolean;
   pr_facts: boolean;
   review_requests: boolean;
+  open_agents: boolean;
   review_writes: boolean;
   stamp_label_on_write: boolean;
   track_open_windows: boolean;
