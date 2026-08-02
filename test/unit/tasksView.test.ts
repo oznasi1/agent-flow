@@ -122,6 +122,8 @@ const CFG = {
   reviewRequestsTtlSeconds: 300,
   reviewWrites: false,
   reviewRequestPrompt: "Review {url}{files}",
+  reviewRequestModes: [{ id: "full", label: "Full review", prompt: "Review {url}{files}" }],
+  reviewRequestMode: "ask",
   stampLabelOnWrite: true,
   provenanceLabel: "claude-code",
   filters: { size: true, status: true, repo: true, search: true },

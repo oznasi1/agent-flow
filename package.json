@@ -461,10 +461,54 @@
           "default": false,
           "markdownDescription": "Allow submitting **approve / comment / request changes** to GitHub from the Deck's review strip. Off by default — this is the only setting that lets Agent Flow write to GitHub. Every submit still asks for confirmation."
         },
+        "agentFlow.reviewRequestModes": {
+          "type": "array",
+          "markdownDescription": "Seed modes offered by **Review with agent** on the Deck's review strip. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`. Add your own — e.g. separate backend and frontend review modes — and with two or more configured, clicking **Review with agent** asks which to use. Pin one with `#agentFlow.reviewRequestMode#` to skip the question.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "label",
+              "prompt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable id (used by reviewRequestMode)."
+              },
+              "label": {
+                "type": "string",
+                "description": "Shown in the picker."
+              },
+              "detail": {
+                "type": "string",
+                "description": "Optional line shown under the label in the picker. Omit it and the mode shows its label only."
+              },
+              "prompt": {
+                "type": "string",
+                "description": "Template with {repo} {number} {author} {key} {summary} {url} {brief} {files}."
+              }
+            }
+          },
+          "default": [
+            {
+              "id": "full",
+              "label": "Full review",
+              "detail": "Correctness, edge cases, tests — findings to .pick-task/REVIEW-<n>.md",
+              "prompt": "Review pull request {url} — {repo}#{number}, \"{summary}\", by {author}. Check it out with `gh pr checkout {number} --repo {repo}`, then read the full diff against its base branch. Assess correctness, edge cases, tests, and anything that would break in production. Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, each with the file and line it refers to. Do not post anything to GitHub; the human submits the review.{files}"
+            }
+          ]
+        },
+        "agentFlow.reviewRequestMode": {
+          "type": "string",
+          "default": "ask",
+          "markdownDescription": "Which review mode to seed when you click **Review with agent**: `ask` to choose each time, or the `id` of one of `#agentFlow.reviewRequestModes#`. With only one mode configured no picker is shown either way."
+        },
         "agentFlow.reviewRequestPrompt": {
           "type": "string",
           "editPresentation": "multilineText",
           "default": "",
+          "markdownDeprecationMessage": "Deprecated — use `agentFlow.reviewRequestModes`. If you customized this, its value is migrated into the **Full review** mode automatically.",
           "markdownDescription": "Prompt seeded when you launch **Review with agent** on a review request. Empty uses the built-in default. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`."
         },
         "agentFlow.stampLabelOnWrite": {

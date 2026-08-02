@@ -11,6 +11,7 @@ import {
   DEFAULT_EXPLORE_GENERAL_PROMPT,
   DEFAULT_PR_REVIEW_PROMPT,
   DEFAULT_REVIEW_REQUEST_PROMPT,
+  DEFAULT_REVIEW_REQUEST_MODES,
 } from "../../src/config";
 import { setConfig } from "../_mocks/vscode";
 import pkg from "../../package.json";
@@ -374,6 +375,57 @@ describe("review-request settings", () => {
     setConfig({ reviewRequestPrompt: "" });
     expect(getConfig().reviewRequestPrompt).toContain("REVIEW-{number}.md");
   });
+
+  it("defaults to the single stock review mode, asked for each time", () => {
+    const c = getConfig();
+    expect(c.reviewRequestModes).toEqual(DEFAULT_REVIEW_REQUEST_MODES);
+    // The one-mode default is load-bearing: it is what keeps a fresh install's
+    // Review-with-agent a single click instead of a click plus a picker.
+    expect(c.reviewRequestModes).toHaveLength(1);
+    expect(c.reviewRequestModes[0].prompt).toBe(DEFAULT_REVIEW_REQUEST_PROMPT);
+    expect(c.reviewRequestMode).toBe("ask");
+  });
+
+  it("migrates a customized legacy reviewRequestPrompt into the stock mode", () => {
+    setConfig({ reviewRequestPrompt: "just look at it" });
+    const modes = getConfig().reviewRequestModes;
+    expect(modes).toHaveLength(1);
+    expect(modes[0].prompt).toBe("just look at it");
+    // Only the prompt is replaced. The mode keeps its identity so that a
+    // reviewRequestMode: "full" pin still resolves after the migration.
+    expect(modes[0].id).toBe("full");
+    expect(modes[0].label).toBe(DEFAULT_REVIEW_REQUEST_MODES[0].label);
+  });
+
+  it("lets an explicit modes list beat the deprecated prompt", () => {
+    setConfig({
+      reviewRequestPrompt: "legacy",
+      reviewRequestModes: [{ id: "backend", label: "Backend", prompt: "BE {number}" }],
+    });
+    expect(getConfig().reviewRequestModes).toEqual([{ id: "backend", label: "Backend", prompt: "BE {number}" }]);
+  });
+
+  it("falls back to the stock list for an empty modes array", () => {
+    setConfig({ reviewRequestModes: [] });
+    expect(getConfig().reviewRequestModes).toEqual(DEFAULT_REVIEW_REQUEST_MODES);
+  });
+
+  it("falls back to the stock list when every entry is missing a required field", () => {
+    // A mode without `prompt` would seed an empty session — worse than ignoring
+    // the setting entirely, so an all-invalid list is treated as no list.
+    setConfig({ reviewRequestModes: [{ id: "x", label: "X" }, { label: "No id", prompt: "P" }] });
+    expect(getConfig().reviewRequestModes).toEqual(DEFAULT_REVIEW_REQUEST_MODES);
+  });
+
+  it("drops only the invalid entries from a mixed modes array", () => {
+    setConfig({ reviewRequestModes: [{ id: "ok", label: "OK", prompt: "P" }, { id: "bad", label: "Bad" }] });
+    expect(getConfig().reviewRequestModes).toEqual([{ id: "ok", label: "OK", prompt: "P" }]);
+  });
+
+  it("honours an explicit reviewRequestMode pin", () => {
+    setConfig({ reviewRequestMode: "backend" });
+    expect(getConfig().reviewRequestMode).toBe("backend");
+  });
 });
 
 describe("package.json ⇄ config constants", () => {
@@ -451,5 +503,16 @@ describe("package.json ⇄ config constants", () => {
     // to the manifest default, so telemetry's pr_review_prompt_customized comparison
     // (settingsSnapshot.ts) is only correct if the two stay in step.
     expect(props["agentFlow.prReviewPrompt"].default).toBe(DEFAULT_PR_REVIEW_PROMPT);
+  });
+
+  it("keeps the reviewRequestModes schema default byte-identical to DEFAULT_REVIEW_REQUEST_MODES", () => {
+    // Same reasoning as the promptModes parity test above: an untouched setting
+    // resolves to the manifest default, so a correct code constant alone reaches nobody.
+    expect(props["agentFlow.reviewRequestModes"].default).toEqual(DEFAULT_REVIEW_REQUEST_MODES);
+  });
+
+  it("marks the legacy reviewRequestPrompt deprecated and points at its replacement", () => {
+    const p = props["agentFlow.reviewRequestPrompt"] as { markdownDeprecationMessage?: string };
+    expect(p.markdownDeprecationMessage).toMatch(/reviewRequestModes/);
   });
 });

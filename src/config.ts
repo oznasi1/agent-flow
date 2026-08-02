@@ -144,6 +144,21 @@ export const DEFAULT_REVIEW_REQUEST_PROMPT =
   "Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, " +
   "each with the file and line it refers to. Do not post anything to GitHub; the human submits the review.{files}";
 
+/** The stock review modes offered by **Review with agent**, in picker order.
+ * One entry by default: a single mode short-circuits the picker, so a fresh
+ * install keeps today's one-click launch. Keep this array identical to the
+ * `agentFlow.reviewRequestModes` default in package.json; that manifest default
+ * is what VS Code serves to users who never touched the setting. A test
+ * enforces the two staying in step. */
+export const DEFAULT_REVIEW_REQUEST_MODES: PromptMode[] = [
+  {
+    id: "full",
+    label: "Full review",
+    detail: "Correctness, edge cases, tests — findings to .pick-task/REVIEW-<n>.md",
+    prompt: DEFAULT_REVIEW_REQUEST_PROMPT,
+  },
+];
+
 export interface AgentFlowConfig {
   baseUrl: string;
   project: string;
@@ -184,6 +199,11 @@ export interface AgentFlowConfig {
   reviewWrites: boolean;
   // Seeded prompt for Review-with-agent.
   reviewRequestPrompt: string;
+  // Seed modes offered by Review with agent, same shape as promptModes. Never
+  // empty — an unusable configured value falls back to DEFAULT_REVIEW_REQUEST_MODES.
+  reviewRequestModes: PromptMode[];
+  // "ask", or a reviewRequestModes id.
+  reviewRequestMode: string;
   stampLabelOnWrite: boolean;
   provenanceLabel: string;
   // Which secondary filter controls the task-pool sidebar shows. Each defaults to
@@ -263,6 +283,17 @@ export function getConfig(): AgentFlowConfig {
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,
     reviewRequestPrompt: c.get<string>("reviewRequestPrompt") || DEFAULT_REVIEW_REQUEST_PROMPT,
+    reviewRequestModes: (() => {
+      const m = c.get<PromptMode[]>("reviewRequestModes");
+      const valid = Array.isArray(m) ? m.filter((x) => x && x.id && x.label && x.prompt) : [];
+      if (valid.length) return valid;
+      // Migrate a customized legacy reviewRequestPrompt into the stock mode.
+      // Only reached when reviewRequestModes is unset or unusable: an explicit
+      // modes list is a deliberate replacement and wins over the deprecated string.
+      const legacy = explicitConfigValue<string>(c, "reviewRequestPrompt");
+      return legacy ? [{ ...DEFAULT_REVIEW_REQUEST_MODES[0], prompt: legacy }] : DEFAULT_REVIEW_REQUEST_MODES;
+    })(),
+    reviewRequestMode: c.get<string>("reviewRequestMode") || "ask",
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,
     provenanceLabel: c.get<string>("provenanceLabel") || "claude-code",
     filters: {
