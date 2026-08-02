@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Deck reflects every Claude Code session open on this machine, not only what
   Agent Flow launched. Sessions attach to the card that owns their directory —
   a worktree with two agents now shows both — and a place with no tracked run
-  becomes a card of its own, with its ticket key and pull request inferred from
-  its branch. `⋯` → **Track it** pins one to the runs store. Toggle with
+  becomes a card of its own, with its ticket key inferred from its branch and its
+  pull request found from it. `⋯` → **Track it** pins one to the runs store. Toggle with
   **Open agents** / `agentFlow.openAgents`.
 
 ### Changed

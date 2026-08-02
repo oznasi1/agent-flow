@@ -220,7 +220,11 @@ credentials of its own: every GitHub call goes through `gh`, so it inherits
 whatever host, SSO and token your CLI already
 has. When `agentFlow.openAgents` is on, the Deck also reads `~/.claude/sessions` —
 Claude Code's own local registry of what's running — to find sessions it didn't
-launch; nothing in that registry leaves your machine either. Separately, Agent Flow
+launch; nothing in that registry leaves your machine either, but when `agentFlow.prFacts`
+is also on, a session sitting on a feature branch gets the same `gh pr list` (and,
+when needed, `gh api graphql`) read run *in that directory* too — even one you never
+pointed Agent Flow at, like an OSS clone, a client checkout, or another team's repo.
+Separately, Agent Flow
 also sends anonymous *usage* telemetry (not any of the above) — see
 [Telemetry](#telemetry) below.
 
