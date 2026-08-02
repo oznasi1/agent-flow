@@ -10,7 +10,7 @@ import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { openInEditor, openWorkspace, BRIEF_DIR } from "./engine/workspace";
 import { createWorktrees } from "./engine/worktree";
-import { taskDiff } from "./engine/git";
+import { prEligible, taskDiff } from "./engine/git";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
@@ -577,28 +577,24 @@ export class DeckPanel {
     );
     const out: RunStatus[] = [];
     for (const [i, run] of all.entries()) {
-      // A session with no ticket has nothing to look up. Its key is synthetic, so
-      // every Jira call 404s; and it has no branch we named, so `gh pr list
-      // --head <default-branch>` matches whatever PR was last opened *from* that
-      // branch — somebody else's, rendered on this card as if it were the task's.
-      const isTracked = isTicketRun(run);
       const jira = jiras[i];
-      const stored = this.prFacts && isTracked ? readPrEntries(defaultPrFactsDir(), run.key) : {};
-      // Drop entries for repos that have left the run — re-taking a task with a
-      // different repo selection can leave one behind. It is never re-staled
-      // (only repos in run.repos are checked below), yet an orphan would still
-      // render as a PrBlock and vote in prSignals, pinning a card in Needs you
-      // or out of Done with Forget as the only escape.
+      // Jira still asks "is there a ticket": a synthetic key 404s forever.
+      const stored = this.prFacts ? readPrEntries(defaultPrFactsDir(), run.key) : {};
+      // A repo on its default branch is filtered out here as well as below, so a
+      // stale entry written before this rule existed stays inert on disk rather
+      // than rendering as this run's pull request. This also drops entries for
+      // repos that have left the run — re-taking a task with a different repo
+      // selection can leave one behind. It is never re-staled (only repos in
+      // run.repos are checked below), yet an orphan would still render as a
+      // PrBlock and vote in prSignals, pinning a card in Needs you or out of
+      // Done with Forget as the only escape.
       const prs: PrEntryMap = Object.fromEntries(
-        run.repos.filter((r) => stored[r.name]).map((r) => [r.name, stored[r.name]]),
+        run.repos.filter((r) => prEligible(r) && stored[r.name]).map((r) => [r.name, stored[r.name]]),
       );
-      if (ghReady && isTracked) {
+      if (ghReady) {
         const ttlMs = getConfig().prFactsTtlSeconds * 1000;
         for (const repo of run.repos) {
-          // A non-git service (worktree.ts can hand one through unchanged) has no
-          // PR to fetch — `gh pr list` would just fail there forever, re-arming
-          // every TTL and burning a queue slot each cycle.
-          if (repo.isGit && isStale(prs[repo.name], ttlMs, now)) {
+          if (prEligible(repo) && isStale(prs[repo.name], ttlMs, now)) {
             this.enqueuePr(run.key, repo, repo.branch ?? null, prs[repo.name]);
           }
         }

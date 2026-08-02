@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { window, ViewColumn, env, workspace, setConfig } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
-import type { AgentActivity, CardAgent, OpenSession, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
+import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
@@ -85,7 +85,14 @@ vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn() }));
 // repoRoot stubbed alongside the real taskDiff: groupByPlace (engine/sessions)
 // calls the real repoRoot, which would shell out to git for a fixture path like
 // "/r/svc" and get "" back rather than the fixtures' own place key.
-vi.mock("../../src/engine/git", () => ({ taskDiff: h.taskDiff, repoRoot: (p: string) => p }));
+// prEligible: a faithful-enough stand-in for the real branch-vs-origin/HEAD
+// check (Task 2) — "master" plays the role of "this repo's default branch" so
+// a test can choose the answer just by naming a branch, without a real repo.
+vi.mock("../../src/engine/git", () => ({
+  taskDiff: h.taskDiff,
+  repoRoot: (p: string) => p,
+  prEligible: (r: { isGit: boolean; branch?: string }) => r.isGit && !!r.branch && r.branch !== "master",
+}));
 // groupByPlace and canon stay real — only the two functions that touch the real
 // filesystem (~/.claude/sessions) are replaced.
 vi.mock("../../src/engine/sessions", async (importActual) => ({
@@ -224,7 +231,7 @@ const showAndWarm = async (authed = false): Promise<ReturnType<typeof lastPanel>
  * do. `.at(-1)` matches the last call for this run's key, since the
  * constructor's own unawaited refresh can race the explicit one a test fires. */
 const builtFor = (key: string) =>
-  h.buildRunStatus.mock.calls.map((c) => c[0] as { run: Run; agents: CardAgent[] }).filter((i) => i.run.key === key).at(-1)!;
+  h.buildRunStatus.mock.calls.map((c) => c[0] as { run: Run; agents: CardAgent[]; prs: PrEntryMap }).filter((i) => i.run.key === key).at(-1)!;
 
 const sess = (over: Partial<OpenSession> = {}): OpenSession => ({
   pid: 1, sessionId: "s1", cwd: "/r/svc", startedAt: 100, name: "svc-7e", ...over,
@@ -436,7 +443,7 @@ describe("DeckPanel", () => {
     // A stale prfacts file left by an earlier version must not render: the PR it
     // names was matched off the repo's default branch and belongs to another task.
     h.prEntries = { svc: { facts: null, fetchedAt: Date.now() } };
-    h.runs = [mkRun({ key: "explore-retry-logic", url: "" })];
+    h.runs = [mkRun({ key: "explore-retry-logic", url: "", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "master" }] })];
     show();
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });
@@ -662,6 +669,29 @@ describe("DeckPanel open agents", () => {
 });
 
 describe("DeckPanel PR facts", () => {
+  it("does not read stored PR facts for a repo sitting on its default branch", async () => {
+    // The Explore defect: prfacts/explore-*.json was left on disk as inert, and a
+    // looser gate brings a stranger's closed PR straight back onto the card.
+    h.runs = [mkRun({ key: "explore-x", url: "", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "master" }] })];
+    h.prEntries = { svc: { fetchedAt: Date.now(), facts: null } };
+    await showAndWarm(true);
+    expect(builtFor("explore-x").prs).toEqual({});
+  });
+
+  it("fetches a PR for an Explore run whose agent made a branch", async () => {
+    h.runs = [mkRun({ key: "explore-x", url: "", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "explore-x-fix" }] })];
+    h.prEntries = {};
+    await showAndWarm(true);
+    expect(h.prFetch).toHaveBeenCalled();
+  });
+
+  it("still fetches a PR for a tracked run on its task branch", async () => {
+    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "ASM-1-x" }] })];
+    h.prEntries = {};
+    await showAndWarm(true);
+    expect(h.prFetch).toHaveBeenCalled();
+  });
+
   it("passes cached PR entries to the status builder", async () => {
     h.prEntries = { svc: { facts: null, fetchedAt: Date.now() } };
     show();
@@ -759,8 +789,12 @@ describe("DeckPanel PR facts", () => {
     expect(h.prFetch).not.toHaveBeenCalled();
   });
 
-  it("does not fetch a PR for a run with no ticket", async () => {
-    h.runs = [mkRun({ key: "explore-retry-logic", url: "" })];
+  it("does not fetch a PR for a run sitting on its default branch", async () => {
+    // Previously asserted with the run's default (feature) branch, which — now
+    // that the gate is branch-based, not ticket-based — correctly enqueues.
+    // "master" is the actual Explore defect: an untracked run's repo left on
+    // the branch it started on.
+    h.runs = [mkRun({ key: "explore-retry-logic", url: "", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "master" }] })];
     await showAndWarm();
     expect(h.prFetch).not.toHaveBeenCalled();
   });
@@ -860,10 +894,13 @@ describe("DeckPanel PR facts", () => {
     expect(h.removePrEntries).toHaveBeenCalledWith("/prfacts", "ASM-1");
   });
 
-  it("skips repos with no branch and no key match rather than throwing", async () => {
+  it("skips a repo with no known branch, without throwing", async () => {
+    // prEligible (Task 2) requires a branch to say a repo can own a PR — a repo
+    // whose branch is unknown can no longer be told apart from one sitting on
+    // its default branch, so it no longer gets a fetch, but it must not throw.
     h.runs = [mkRun({ repos: [{ name: "svc", path: "/r/svc", isGit: true }] })];
     await showAndWarm();
-    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", null, "ASM-1");
+    expect(h.prFetch).not.toHaveBeenCalled();
   });
 
   it("drains the refresh queue when the panel is hidden — a dropped job never fetches", async () => {
