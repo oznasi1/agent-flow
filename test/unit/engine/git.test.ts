@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { execFileSync } from "child_process";
-import { gitState, taskDiff } from "../../../src/engine/git";
+import { gitState, taskDiff, repoRoot, currentBranch, defaultBranch, prEligible } from "../../../src/engine/git";
 
 describe("gitState", () => {
   let repo: string;
@@ -160,5 +160,98 @@ describe("taskDiff", () => {
 
   it("returns empty for a path that is not a git repo", () => {
     expect(taskDiff("/definitely/not/here")).toBe("");
+  });
+});
+
+describe("repoRoot & currentBranch", () => {
+  let repo: string;
+  const g = (...a: string[]) => execFileSync("git", ["-C", repo, ...a], { stdio: ["ignore", "pipe", "ignore"] });
+
+  beforeAll(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-root-"));
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", repo]);
+    g("config", "user.email", "t@t.dev");
+    g("config", "user.name", "T");
+    fs.writeFileSync(path.join(repo, "a.txt"), "1\n");
+    g("add", "-A");
+    g("commit", "-q", "-m", "init");
+    fs.mkdirSync(path.join(repo, "src"));
+  });
+
+  afterAll(() => fs.rmSync(repo, { recursive: true, force: true }));
+
+  it("resolves a subdirectory to the repo root", () => {
+    expect(repoRoot(path.join(repo, "src"))).toBe(fs.realpathSync(repo));
+  });
+
+  it("is empty for a path in no repo", () => {
+    const loose = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-loose-"));
+    expect(repoRoot(loose)).toBe("");
+    fs.rmSync(loose, { recursive: true, force: true });
+  });
+
+  it("reads the checked-out branch", () => {
+    expect(currentBranch(repo)).toBe("main");
+  });
+
+  it("is null for a path in no repo", () => {
+    expect(currentBranch("/definitely/not/here")).toBeNull();
+  });
+});
+
+describe("defaultBranch & prEligible", () => {
+  // Its own origin, because defaultBranch resolves from origin/HEAD. Each test
+  // that needs a different answer builds its own repo: both helpers memoize per
+  // path for the life of the process, so one directory has one answer forever.
+  const clone = (name: string): string => {
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), `agent-flow-${name}-origin-`));
+    const work = fs.mkdtempSync(path.join(os.tmpdir(), `agent-flow-${name}-`));
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "--bare", "-q", bare]);
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", work]);
+    const g = (...a: string[]) => execFileSync("git", ["-C", work, ...a], { stdio: ["ignore", "pipe", "ignore"] });
+    g("config", "user.email", "t@t.dev");
+    g("config", "user.name", "T");
+    fs.writeFileSync(path.join(work, "a.txt"), "1\n");
+    g("add", "-A");
+    g("commit", "-q", "-m", "init");
+    g("remote", "add", "origin", bare);
+    g("push", "-q", "-u", "origin", "HEAD");
+    g("remote", "set-head", "origin", "-a");
+    return work;
+  };
+
+  it("reads origin/HEAD as a short name", () => {
+    expect(defaultBranch(clone("db"))).toBe("main");
+  });
+
+  it("is empty for a repo with no origin", () => {
+    const solo = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-db-solo-"));
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", solo]);
+    expect(defaultBranch(solo)).toBe("");
+    fs.rmSync(solo, { recursive: true, force: true });
+  });
+
+  it("says a feature branch can own a PR", () => {
+    const work = clone("elig");
+    expect(prEligible({ path: work, isGit: true, branch: "ASM-1-x" })).toBe(true);
+  });
+
+  it("says the default branch cannot", () => {
+    // `gh pr list --head main` matches every PR ever opened from main — this is
+    // the check that stopped a stranger's closed PR rendering on an Explore card.
+    const work = clone("elig-def");
+    expect(prEligible({ path: work, isGit: true, branch: "main" })).toBe(false);
+  });
+
+  it("says a repo with no origin cannot", () => {
+    const solo = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-elig-solo-"));
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", solo]);
+    expect(prEligible({ path: solo, isGit: true, branch: "ASM-1-x" })).toBe(false);
+    fs.rmSync(solo, { recursive: true, force: true });
+  });
+
+  it("says a non-git service cannot, and one with no branch cannot", () => {
+    expect(prEligible({ path: "/svc", isGit: false, branch: "ASM-1-x" })).toBe(false);
+    expect(prEligible({ path: "/svc", isGit: true })).toBe(false);
   });
 });

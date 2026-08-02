@@ -25,8 +25,7 @@ function git(repoPath: string, args: string[]): string {
  * Degrades to zeros/null for a non-git or missing path rather than throwing.
  */
 export function gitState(name: string, repoPath: string): RepoGit {
-  const branchRaw = git(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"]);
-  const branch = branchRaw && branchRaw !== "HEAD" ? branchRaw : null;
+  const branch = currentBranch(repoPath);
   const dirty = git(repoPath, ["status", "--porcelain"]).length > 0;
 
   const aheadRaw = git(repoPath, ["rev-list", "--count", "@{u}..HEAD"]);
@@ -76,4 +75,54 @@ export function taskDiff(repoPath: string): string {
   const base = defaultRemoteRef(repoPath);
   const from = base ? git(repoPath, ["merge-base", "HEAD", base]) : "";
   return git(repoPath, ["diff", from || "HEAD"]);
+}
+
+// Memoized per path for the life of the extension host. A directory does not
+// change repo, and origin/HEAD is written by `git clone` and effectively never
+// moves — so a value good once is good until the window reloads. This is what
+// keeps prEligible free to be called for every repo on every refresh.
+const rootMemo = new Map<string, string>();
+const defaultBranchMemo = new Map<string, string>();
+
+/** The git repo root containing `cwd`, so a session started in `centaur/src`
+ * resolves to the same place as one started in `centaur` — and so a place
+ * compares equal to a run record's repo path, which is always a root. "" when
+ * `cwd` is in no repo at all. */
+export function repoRoot(cwd: string): string {
+  const hit = rootMemo.get(cwd);
+  if (hit !== undefined) return hit;
+  const root = git(cwd, ["rev-parse", "--show-toplevel"]);
+  rootMemo.set(cwd, root);
+  return root;
+}
+
+/** The checked-out branch, or null on a detached HEAD or a non-git path. Not
+ * memoized: unlike a repo's root and its default branch, this is exactly the
+ * thing that changes while the Deck is open. */
+export function currentBranch(repoPath: string): string | null {
+  const raw = git(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  return raw && raw !== "HEAD" ? raw : null;
+}
+
+/** The repo's default branch, short — "main", "master", whatever origin/HEAD
+ * names. "" when the repo has no origin, which also means it has no pull
+ * requests to find. */
+export function defaultBranch(repoPath: string): string {
+  const hit = defaultBranchMemo.get(repoPath);
+  if (hit !== undefined) return hit;
+  const ref = defaultRemoteRef(repoPath); // "origin/main" | ""
+  const short = ref.startsWith("origin/") ? ref.slice("origin/".length) : ref;
+  defaultBranchMemo.set(repoPath, short);
+  return short;
+}
+
+/** Can this repo's branch own a pull request of its own? A branch that IS the
+ * default branch cannot: `gh pr list --head main` matches every PR ever opened
+ * from main, none of which belongs to this run — the Deck once rendered a
+ * stranger's closed PR on an Explore card exactly that way. A repo with no
+ * origin has no pull requests at all, and a non-git service has no branch. */
+export function prEligible(repo: { path: string; isGit: boolean; branch?: string }): boolean {
+  if (!repo.isGit || !repo.branch) return false;
+  const def = defaultBranch(repo.path);
+  return def !== "" && repo.branch !== def;
 }
