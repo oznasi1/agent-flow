@@ -341,6 +341,23 @@ describe("DeckApp", () => {
     fireEvent.click(screen.getByRole("button", { name: "⋯" }));
     expect(screen.getByRole("button", { name: "Forget" })).toBeTruthy();
   });
+
+  it("labels a Track'd ticketless place 'explore', not its raw place-hash key", () => {
+    // After Track it on a place with no inferred ticket, the record survives as
+    // kind: "explore" but keeps the local-<hash> key it always had (track()
+    // never renames it) — the key slot should say what the record now is.
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      run: {
+        key: "local-centaur-1a2b3c4d", summary: "centaur", url: "", createdAt: 1,
+        kind: "explore", mode: "per-window",
+        repos: [{ name: "centaur", path: "/r/centaur", isGit: true }], briefPaths: [],
+      },
+      jiraStatus: null, jiraCategory: null,
+    })]));
+    expect(screen.getByText("explore")).toBeInTheDocument();
+    expect(screen.queryByText("local-centaur-1a2b3c4d")).not.toBeInTheDocument();
+  });
 });
 
 const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
@@ -515,6 +532,24 @@ describe("DeckApp PR-facts chrome", () => {
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
     const manyLabel = many.container.querySelector(".ag-label")!;
     expect(manyLabel.classList.contains("id")).toBe(false);
+  });
+
+  it("suppresses the open-since label when a session's startedAt is unknown (0)", () => {
+    // readOpenSessions defaults a missing startedAt to 0; timeAgo(0) returns ""
+    // (a falsy ms short-circuits it), which would otherwise render a bare "open"
+    // with nothing after it.
+    const { container } = render(<DeckApp />);
+    const noStart: CardAgent = {
+      session: { pid: 1, sessionId: "svc-7e", cwd: "/r/svc", startedAt: 0, name: "svc-7e" },
+      activity: { state: "working", lastActivityMs: Date.now(), slug: null },
+    };
+    host(runsMsg([mkStatus({ agents: [noStart, mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
+    fireEvent.click(screen.getByRole("button", { name: /2 agents/ }));
+    const rows = [...container.querySelectorAll(".ag-row")];
+    const zeroRow = rows.find((r) => r.textContent?.includes("svc-7e"))!;
+    expect(zeroRow.querySelector(".ag-open")).toBeNull();
+    const knownRow = rows.find((r) => r.textContent?.includes("svc-fa"))!;
+    expect(knownRow.querySelector(".ag-open")?.textContent).toMatch(/^open /);
   });
 
   it("renders no agents row for a card with none", () => {

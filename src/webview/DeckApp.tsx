@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind } from "../types";
+import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind, ticketKeyFor } from "../types";
 import { ReviewStrip } from "./ReviewStrip";
 
 let toastSeq = 0;
@@ -152,7 +152,10 @@ function AgentsRow({ agents }: { agents: CardAgent[] }): JSX.Element | null {
             <span className="ag-name">{a.session.name ?? a.session.sessionId.slice(0, 8)}</span>
             <span className={`ag-state tone-${st.tone}`}>{st.text}</span>
             <span className="ag-age">{timeAgo(a.activity.lastActivityMs)}</span>
-            <span className="ag-open">open {timeAgo(a.session.startedAt)}</span>
+            {/* readOpenSessions defaults a missing startedAt to 0 — timeAgo(0) is ""
+                (falsy ms short-circuits it), which would otherwise render a bare
+                "open" with nothing after it. */}
+            {a.session.startedAt > 0 && <span className="ag-open">open {timeAgo(a.session.startedAt)}</span>}
           </div>
         );
       })}
@@ -169,8 +172,11 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
   const tracked = isTicketRun(r.run);
   // The short label is only honest for a real Explore session. isTicketRun keys off
   // an empty url and never inspects the key, so anything else untracked keeps its
-  // key on the chip rather than being relabelled as something it is not.
-  const explore = r.run.key.startsWith("explore-");
+  // key on the chip rather than being relabelled as something it is not. A Track'd
+  // ticketless place is the one exception with an "explore-"-less key: its record
+  // is kind: "explore" but Track it never renames it off its local- place-hash, so
+  // that prefix reads as "explore" here too — it is exactly what the record now is.
+  const explore = r.run.key.startsWith("explore-") || r.run.key.startsWith("local-");
   // A place with an agent open in it that Agent Flow never launched. It has no
   // record on disk, so there is nothing to Forget — closing its agents is what
   // removes it.
@@ -178,7 +184,7 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
   // The key came from the branch, not from a launch. Say so: the branch could
   // name a ticket somebody else owns, and the Jira status on this card would
   // then be theirs.
-  const inferredKey = local && r.run.url ? r.run.url.split("/browse/")[1] : "";
+  const inferredKey = local && r.run.url ? ticketKeyFor(r.run) : "";
   const [menuOpen, setMenuOpen] = React.useState(false);
   React.useEffect(() => {
     if (!menuOpen) return;
