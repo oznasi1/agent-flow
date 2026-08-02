@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderPrompt, injectSlackDm, insertBeforeFiles, SLACK_DM_SENTENCE, type PromptVars } from "../../../src/engine/prompt";
+import { renderPrompt, injectSlackDm, insertBeforeFiles, SLACK_DM_SENTENCE, applyExploreVars, type PromptVars } from "../../../src/engine/prompt";
 
 const V: PromptVars = {
   key: "ASM-5412",
@@ -77,5 +77,35 @@ describe("injectSlackDm", () => {
 
   it("inserts before the first {files} only", () => {
     expect(injectSlackDm("a{files}b{files}", true)).toBe(`a ${SLACK_DM_SENTENCE}{files}b{files}`);
+  });
+});
+
+describe("applyExploreVars", () => {
+  it("fills {env} and {services}", () => {
+    expect(applyExploreVars("check {services} on {env}", { env: "staging", services: "api, worker" })).toBe(
+      "check api, worker on staging",
+    );
+  });
+
+  it("replaces every occurrence of each placeholder", () => {
+    expect(applyExploreVars("{env}/{services}/{env}", { env: "dev", services: "api" })).toBe("dev/api/dev");
+  });
+
+  it("leaves {env} untouched when no environment was collected", () => {
+    expect(applyExploreVars("look at {services} on {env}", { services: "api" })).toBe("look at api on {env}");
+  });
+
+  it("does not interpret $ patterns in a substituted value", () => {
+    expect(applyExploreVars("{env} {services}", { env: "$&", services: "$1" })).toBe("$& $1");
+  });
+
+  it("leaves the placeholders renderPrompt owns alone", () => {
+    expect(applyExploreVars("{summary} {brief} {env}{files}", { env: "prod", services: "api" })).toBe(
+      "{summary} {brief} prod{files}",
+    );
+  });
+
+  it("returns a template with no explore placeholders verbatim", () => {
+    expect(applyExploreVars("just start{files}", { env: "prod", services: "api" })).toBe("just start{files}");
   });
 });

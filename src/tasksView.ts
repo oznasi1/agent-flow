@@ -17,7 +17,7 @@ import {
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
-import { injectSlackDm, insertBeforeFiles } from "./engine/prompt";
+import { applyExploreVars, injectSlackDm, insertBeforeFiles } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, type MergeCandidate } from "./engine/workspace";
 import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
 import { createWorktrees } from "./engine/worktree";
@@ -659,6 +659,27 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return pick?.action;
   }
 
+  /** Pick the environment for an action that needs one: the configured list plus a
+   * Custom… escape hatch for a one-off value. The item carries its own `env` rather
+   * than reusing `label`, so an environment literally named like the Custom… entry
+   * can't be mistaken for it. Returns undefined when the user cancels either step. */
+  private async chooseEnvironment(cfg: AgentFlowConfig): Promise<string | undefined> {
+    const pick = await vscode.window.showQuickPick<vscode.QuickPickItem & { env?: string }>(
+      [...cfg.environments.map((e) => ({ label: e, env: e })), { label: "$(edit) Custom…" }],
+      { title: "Verify — which environment?", placeHolder: "Pick an environment", ignoreFocusOut: true },
+    );
+    if (!pick) return undefined;
+    if (pick.env) return pick.env;
+    const typed = await vscode.window.showInputBox({
+      title: "Verify — environment name",
+      prompt: "The environment to verify against.",
+      placeHolder: "e.g. staging-eu",
+      ignoreFocusOut: true,
+      validateInput: (v) => (v.trim() ? undefined : "Name the environment"),
+    });
+    return typed?.trim() || undefined;
+  }
+
   /** Explore flow: pick repos freely (no ticket), open a workspace, and seed a Claude Code
    * agent for investigation/knowledge — a Jira ticket can come out of it later. */
   public async explore(): Promise<void> {
@@ -672,14 +693,32 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const action = await this.chooseExploreAction(cfg);
     if (!action) return; // picker cancelled
 
-    const raw = await vscode.window.showInputBox({
-      title: "Explore — what do you want to dig into?",
-      prompt: "A focus for the session (optional). A Jira ticket can come later.",
-      placeHolder: "e.g. how the aggregator retries failed scans",
-      ignoreFocusOut: true,
-    });
+    const raw = await vscode.window.showInputBox(
+      action.needsEnv
+        ? {
+            title: "Verify — which feature or change?",
+            prompt: "The feature or change to verify on the environment.",
+            placeHolder: "e.g. the new retry banner on checkout",
+            ignoreFocusOut: true,
+            validateInput: (v) => (v.trim() ? undefined : "Name the feature or change to verify"),
+          }
+        : {
+            title: "Explore — what do you want to dig into?",
+            prompt: "A focus for the session (optional). A Jira ticket can come later.",
+            placeHolder: "e.g. how the aggregator retries failed scans",
+            ignoreFocusOut: true,
+          },
+    );
     if (raw === undefined) return; // cancelled (empty is allowed → generic focus)
     const topic = raw.trim() || "Codebase exploration";
+
+    // Verify needs to know where; the other actions never ask. Before the destination
+    // step, so cancelling here has created and opened nothing.
+    let env: string | undefined;
+    if (action.needsEnv) {
+      env = await this.chooseEnvironment(cfg);
+      if (!env) return; // environment pick cancelled
+    }
 
     // Destination first — an existing workspace / live folder already fixes its repos.
     const target = await this.chooseOpenTarget(cfg);
@@ -715,15 +754,23 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
     const wantRemoteControl = await this.resolveRemoteControl(cfg);
 
-    const slug = topic.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "explore";
-    const planMd = `## Exploration: ${topic}\n\n_No Jira ticket yet — a knowledge/exploration session. If it turns into work, open a ticket afterwards._`;
+    const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+    const slug = slugify(topic) || "explore";
+    const serviceNames = services.map((s) => s.name).join(", ");
+    const key = env ? `verify-${slugify(env) || "env"}-${slug}` : `explore-${slug}`;
+    const summary = env ? `${topic} on ${env}` : topic;
+    const planMd = env
+      ? `## Verify: ${topic} on ${env}\n\n_Verification session — environment: ${env}. Services in scope: ${serviceNames}._`
+      : `## Exploration: ${topic}\n\n_No Jira ticket yet — a knowledge/exploration session. If it turns into work, open a ticket afterwards._`;
     const result = await openWorkspace({
-      ticket: { key: `explore-${slug}`, summary: topic, url: "" },
+      ticket: { key, summary, url: "" },
       planMd,
       descriptionText: "",
       services,
       mode: args.mode,
-      promptTemplate: injectSlackDm(action.prompt, action.slackDm),
+      // Slack sentence first: it anchors on {files} in the *authored* template, so a
+      // typed environment containing "{files}" can never become that anchor.
+      promptTemplate: applyExploreVars(injectSlackDm(action.prompt, action.slackDm), { env, services: serviceNames }),
       workspaceDir: cfg.workspaceDir,
       seedAgent: cfg.seedAgent,
       openIn: args.openIn,
@@ -737,7 +784,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       : `${result.opened.length} window(s)`;
     const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
-    this.toast("success", `Opened ${where} to explore. Brief seeded in each repo.${seeded}${rcNote}`);
+    const what = env ? `to verify on ${env}` : "to explore";
+    this.toast("success", `Opened ${where} ${what}. Brief seeded in each repo.${seeded}${rcNote}`);
   }
 
   /** One repo → its own window; multiple → per the workspaceMode setting (asking if configured). */

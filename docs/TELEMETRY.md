@@ -167,7 +167,7 @@ entry point:
 
 ### Settings snapshot
 
-`extension_activated` includes a 27-field reduction of your configuration,
+`extension_activated` includes a 28-field reduction of your configuration,
 built by `settingsSnapshot()`. Every field is either a boolean, a count, or a
 value drawn from a fixed, shipped set of choices — never a user-authored string:
 
@@ -177,7 +177,7 @@ value drawn from a fixed, shipped set of choices — never a user-authored strin
 | `task_mode`, `review_mode` | `"ask"`, `"stock"` (pinned to a shipped mode), or `"custom"` |
 | `seed_agent`, `filters_size`, `filters_status`, `filters_repo`, `filters_search`, `pr_review_auto_fix`, `pr_facts`, `review_requests`, `review_writes`, `stamp_label_on_write`, `track_open_windows` | `true` / `false` |
 | `batch_confirm_threshold`, `repo_blocklist_count`, `prompt_modes_count`, `review_modes_count` | Numbers |
-| `prompt_modes_customized`, `explore_prompts_customized`, `pr_review_prompt_customized`, `review_modes_customized` | `true` / `false` — *whether* the corresponding user-authored text was changed from the shipped default, never the text itself |
+| `prompt_modes_customized`, `explore_prompts_customized`, `environments_customized`, `pr_review_prompt_customized`, `review_modes_customized` | `true` / `false` — *whether* the corresponding user-authored text was changed from the shipped default, never the text itself |
 
 **The `"invalid"` sentinel.** Six of the fields above (`workspace_mode`,
 `open_in`, `explore_mode`, `worktree`, `remote_control`, `default_filter`) can

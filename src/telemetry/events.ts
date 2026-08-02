@@ -105,7 +105,7 @@ export type CommandId =
  * `*_fp` properties are matched by suffix and must be 16-char hex. */
 export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as const;
 
-/** The 27 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
+/** The 28 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
  *
  * `"invalid"` on the six enum-ish fields below (workspace_mode, open_in,
  * explore_mode, worktree, remote_control, default_filter) is a sentinel, not a
@@ -120,7 +120,7 @@ export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as c
 export interface SettingsSnapshot {
   workspace_mode: "auto" | "multiroot" | "per-window" | "ask" | "invalid";
   open_in: "ask" | "new-window" | "this-window" | "pick-existing" | "invalid";
-  explore_mode: "ask" | "jiraTicket" | "knowledge" | "debug" | "general" | "invalid";
+  explore_mode: "ask" | "jiraTicket" | "knowledge" | "debug" | "general" | "verify" | "invalid";
   worktree: "ask" | "always" | "never" | "invalid";
   remote_control: "off" | "on" | "ask" | "invalid";
   default_filter: "unassigned" | "mysprint" | "mine" | "sprint" | "backlog" | "invalid";
@@ -141,6 +141,7 @@ export interface SettingsSnapshot {
   prompt_modes_count: number;
   prompt_modes_customized: boolean;
   explore_prompts_customized: boolean;
+  environments_customized: boolean;
   pr_review_prompt_customized: boolean;
   review_mode: TaskModeProp;
   review_modes_count: number;

@@ -1,6 +1,6 @@
 import {
-  AgentFlowConfig, DEFAULT_EXPLORE_ACTIONS, DEFAULT_PR_REVIEW_PROMPT, DEFAULT_PROMPT_MODES,
-  DEFAULT_REVIEW_REQUEST_MODES,
+  AgentFlowConfig, DEFAULT_ENVIRONMENTS, DEFAULT_EXPLORE_ACTIONS, DEFAULT_PR_REVIEW_PROMPT,
+  DEFAULT_PROMPT_MODES, DEFAULT_REVIEW_REQUEST_MODES,
 } from "../config";
 import { SettingsSnapshot, STOCK_PROMPT_MODES, STOCK_REVIEW_MODES, TaskModeProp } from "./events";
 
@@ -36,7 +36,7 @@ function enumOrInvalid<T extends string>(value: string, allowed: readonly T[]): 
 // module surface otherwise.
 export const WORKSPACE_MODES = ["auto", "multiroot", "per-window", "ask"] as const;
 export const OPEN_IN_MODES = ["ask", "new-window", "this-window", "pick-existing"] as const;
-export const EXPLORE_MODES = ["ask", "jiraTicket", "knowledge", "debug", "general"] as const;
+export const EXPLORE_MODES = ["ask", "jiraTicket", "knowledge", "debug", "general", "verify"] as const;
 export const WORKTREE_MODES = ["ask", "always", "never"] as const;
 export const REMOTE_CONTROL_MODES = ["off", "on", "ask"] as const;
 export const DEFAULT_FILTER_VALUES = ["unassigned", "mysprint", "mine", "sprint", "backlog"] as const;
@@ -44,8 +44,10 @@ export const DEFAULT_FILTER_VALUES = ["unassigned", "mysprint", "mine", "sprint"
 const STOCK_PROMPT_MODE_IDS = DEFAULT_PROMPT_MODES.map((m) => m.id).join(",");
 const STOCK_REVIEW_MODE_IDS = DEFAULT_REVIEW_REQUEST_MODES.map((m) => m.id).join(",");
 
-/** Shipped default prompt per explore-action id (jiraTicket/knowledge/debug/general —
- * the id set never varies, only each action's `.prompt` can be customized). */
+const DEFAULT_ENVIRONMENT_LIST = DEFAULT_ENVIRONMENTS.join(",");
+
+/** Shipped default prompt per explore-action id (the id set never varies, only each
+ * action's `.prompt` can be customized). */
 const DEFAULT_EXPLORE_PROMPTS = new Map(DEFAULT_EXPLORE_ACTIONS.map((a) => [a.id, a.prompt]));
 
 /** Reduce config to shape only. Every setting whose value is user-authored —
@@ -82,6 +84,9 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     prompt_modes_count: cfg.promptModes.length,
     prompt_modes_customized: cfg.promptModes.map((m) => m.id).join(",") !== STOCK_PROMPT_MODE_IDS,
     explore_prompts_customized: cfg.exploreActions.some((a) => DEFAULT_EXPLORE_PROMPTS.get(a.id) !== a.prompt),
+    // Order-sensitive, and only ever a boolean — environment names are user-authored
+    // and never transmitted.
+    environments_customized: cfg.environments.join(",") !== DEFAULT_ENVIRONMENT_LIST,
     pr_review_prompt_customized: cfg.prReviewPrompt !== DEFAULT_PR_REVIEW_PROMPT,
     review_mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES),
     review_modes_count: cfg.reviewRequestModes.length,
