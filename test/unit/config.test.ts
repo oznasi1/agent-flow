@@ -13,7 +13,7 @@ import {
   DEFAULT_REVIEW_REQUEST_PROMPT,
   DEFAULT_REVIEW_REQUEST_MODES,
 } from "../../src/config";
-import { setConfig } from "../_mocks/vscode";
+import { setConfig, setDefaultConfig } from "../_mocks/vscode";
 import pkg from "../../package.json";
 
 describe("expandHome", () => {
@@ -426,6 +426,23 @@ describe("review-request settings", () => {
   it("honours an explicit reviewRequestMode pin", () => {
     setConfig({ reviewRequestMode: "backend" });
     expect(getConfig().reviewRequestMode).toBe("backend");
+  });
+
+  it("still migrates a customized legacy reviewRequestPrompt when reviewRequestModes is only served via the manifest default", () => {
+    // The trap this guards against: package.json registers a non-empty manifest
+    // default for reviewRequestModes (one entry, id "full"), so a real VS Code
+    // install hands that array to `c.get("reviewRequestModes")` for every user
+    // who never touched the setting — indistinguishable, to a plain `c.get`
+    // read, from a deliberate customization. The plain `setConfig` store above
+    // can't model that gap (an unset key there just returns undefined), so this
+    // is the one test that actually exercises the manifest-default path and
+    // would have caught the regression where the migration below was dead code.
+    setDefaultConfig({ reviewRequestModes: DEFAULT_REVIEW_REQUEST_MODES });
+    setConfig({ reviewRequestPrompt: "customized legacy prompt" });
+    const modes = getConfig().reviewRequestModes;
+    expect(modes).toHaveLength(1);
+    expect(modes[0].id).toBe("full");
+    expect(modes[0].prompt).toBe("customized legacy prompt");
   });
 });
 

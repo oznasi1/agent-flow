@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { AgentFlowConfig, getConfig } from "../../../src/config";
+import { AgentFlowConfig, DEFAULT_REVIEW_REQUEST_MODES, getConfig } from "../../../src/config";
 import {
   DEFAULT_FILTER_VALUES, EXPLORE_MODES, OPEN_IN_MODES, REMOTE_CONTROL_MODES,
   settingsSnapshot, WORKSPACE_MODES, WORKTREE_MODES,
 } from "../../../src/telemetry/settingsSnapshot";
+import { STOCK_REVIEW_MODES } from "../../../src/telemetry/events";
 import pkg from "../../../package.json";
 
 describe("settingsSnapshot", () => {
@@ -178,5 +179,17 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
 
   it("keeps DEFAULT_FILTER_VALUES equal to agentFlow.defaultFilter's manifest enum", () => {
     expect([...DEFAULT_FILTER_VALUES]).toEqual(props["agentFlow.defaultFilter"].enum);
+  });
+});
+
+describe("events.ts ⇄ config.ts stock review mode ids", () => {
+  // events.ts deliberately does not import config.ts (it must stay importable in
+  // isolation — see its module doc comment), so STOCK_REVIEW_MODES is hand-
+  // duplicated there instead of derived from DEFAULT_REVIEW_REQUEST_MODES like
+  // STOCK_REVIEW_MODE_IDS is here. Nothing else catches the two drifting apart:
+  // if a second stock mode ships, an unpinned STOCK_REVIEW_MODES would still
+  // report "custom" for it. This test is that pin.
+  it("keeps STOCK_REVIEW_MODES equal to DEFAULT_REVIEW_REQUEST_MODES' ids", () => {
+    expect([...STOCK_REVIEW_MODES]).toEqual(DEFAULT_REVIEW_REQUEST_MODES.map((m) => m.id));
   });
 });

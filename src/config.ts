@@ -281,12 +281,18 @@ export function getConfig(): AgentFlowConfig {
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,
     reviewRequestModes: (() => {
-      const m = c.get<PromptMode[]>("reviewRequestModes");
-      const valid = Array.isArray(m) ? m.filter((x) => x && x.id && x.label && x.prompt) : [];
-      if (valid.length) return valid;
+      // `c.get` would return the manifest default here, which is a non-empty
+      // array — that is what VS Code serves to anyone who never touched the
+      // setting, and it would make the legacy migration below unreachable.
+      // Only an explicitly-set value tells us the user chose a modes list.
+      const explicit = explicitConfigValue<PromptMode[]>(c, "reviewRequestModes");
+      if (explicit !== undefined) {
+        const valid = Array.isArray(explicit) ? explicit.filter((x) => x && x.id && x.label && x.prompt) : [];
+        // An explicit modes list is a deliberate replacement and wins over the
+        // deprecated string, even when it is unusable and we fall back to stock.
+        return valid.length ? valid : DEFAULT_REVIEW_REQUEST_MODES;
+      }
       // Migrate a customized legacy reviewRequestPrompt into the stock mode.
-      // Only reached when reviewRequestModes is unset or unusable: an explicit
-      // modes list is a deliberate replacement and wins over the deprecated string.
       const legacy = explicitConfigValue<string>(c, "reviewRequestPrompt");
       return legacy ? [{ ...DEFAULT_REVIEW_REQUEST_MODES[0], prompt: legacy }] : DEFAULT_REVIEW_REQUEST_MODES;
     })(),

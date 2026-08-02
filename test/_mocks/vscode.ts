@@ -15,9 +15,27 @@ export function setConfig(values: Record<string, unknown>): void {
   configStore = { ...configStore, ...values };
 }
 
+// A separate store for manifest ("schema") defaults — what real VS Code serves
+// from `get()` for a key the user never touched, distinct from the explicit
+// values `configStore` holds. Most tests never call `setDefaultConfig`, so this
+// stays empty and `get`/`inspect` behave exactly as before.
+let defaultsStore: Record<string, unknown> = {};
+/** Seed a manifest default for a key, as package.json's `contributes.configuration`
+ * would. Only `get()` should ever see this — `inspect()` must keep reporting no
+ * explicit value, since that asymmetry (get returns the manifest default,
+ * inspect reports nothing set) is exactly what real VS Code does and is what a
+ * migration-from-legacy-setting code path needs to be tested against. */
+export function setDefaultConfig(values: Record<string, unknown>): void {
+  defaultsStore = { ...defaultsStore, ...values };
+}
+
 function makeConfig() {
   return {
-    get: vi.fn((key: string, def?: unknown) => (key in configStore ? configStore[key] : def)),
+    get: vi.fn((key: string, def?: unknown) => {
+      if (key in configStore) return configStore[key];
+      if (key in defaultsStore) return defaultsStore[key];
+      return def;
+    }),
     update: vi.fn(async (key: string, value: unknown, _target?: unknown): Promise<void> => {
       configStore[key] = value;
     }),
@@ -208,6 +226,7 @@ export const Uri = {
  * to defaults. Wired into a global beforeEach in test/_setup.ts. */
 export function resetVscodeMocks(): void {
   configStore = {};
+  defaultsStore = {};
 
   window.showInputBox.mockReset().mockResolvedValue(undefined);
   window.showQuickPick.mockReset().mockResolvedValue(undefined);
