@@ -306,6 +306,7 @@ export type InboundMessage =
   | { type: "deck:setOpenAgents"; on: boolean }
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
   | { type: "deck:forget"; key: string }
+  | { type: "deck:track"; key: string }
   | { type: "deck:setReviewSort"; sort: ReviewSort }
   | { type: "deck:reviewExpand"; id: string }
   | { type: "deck:reviewLaunch"; id: string }

@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
   taskDiff: vi.fn((_p: string) => ""),
   buildRunStatus: vi.fn(),
   removeRun: vi.fn(),
+  writeRun: vi.fn(),
   getStatus: vi.fn(async (_k: string) => ({ status: "In Review", category: "indeterminate" })),
   prEntries: {} as Record<string, unknown>,
   writePrEntry: vi.fn(),
@@ -76,6 +77,7 @@ vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
   readRuns: () => h.runs,
   removeRun: h.removeRun,
+  writeRun: h.writeRun,
 }));
 vi.mock("../../src/engine/status", () => ({ buildRunStatus: h.buildRunStatus }));
 vi.mock("../../src/engine/workspace", () => ({
@@ -255,6 +257,7 @@ beforeEach(() => {
   h.taskDiff.mockClear().mockReturnValue("");
   h.buildRunStatus.mockReset().mockImplementation((i: { run: Run }) => statusFor(i.run));
   h.removeRun.mockClear();
+  h.writeRun.mockClear();
   h.getStatus.mockClear().mockResolvedValue({ status: "In Review", category: "indeterminate" });
   h.prEntries = {};
   h.prFacts = true;
@@ -780,6 +783,60 @@ describe("DeckPanel local cards", () => {
     const p = lastPanel();
     await p._fire({ type: "deck:inspect", key: builtLocal().run.key, action: "open" });
     expect(h.openInEditor).toHaveBeenCalledWith("/r/centaur");
+  });
+});
+
+describe("DeckPanel track it", () => {
+  /** Build one local card, track it, and hand back the record that was written. */
+  const trackLocal = async (): Promise<Run> => {
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show();
+    await settled();
+    const p = lastPanel();
+    await p._fire({ type: "deck:track", key: builtLocal().run.key });
+    await settled();
+    return h.writeRun.mock.calls.at(-1)![1] as Run;
+  };
+
+  it("writes an inferred ticket's key as a task run", async () => {
+    h.runs = [];
+    const written = await trackLocal();
+    expect(written).toMatchObject({ key: "ASM-5641", kind: "task" });
+    expect(written.url).toContain("/browse/ASM-5641");
+  });
+
+  it("keeps the local key when a tracked run already owns the inferred one", async () => {
+    // Writing ASM-5641.json here would silently replace a real launch record.
+    h.runs = [mkRun({ key: "ASM-5641" })];
+    const written = await trackLocal();
+    expect(written.key).toMatch(/^local-/);
+    expect(written.kind).toBe("task");
+    expect(written.url).toContain("/browse/ASM-5641");
+  });
+
+  it("writes a place with no ticket as an explore run", async () => {
+    h.runs = [];
+    h.branch = "main";
+    const written = await trackLocal();
+    expect(written).toMatchObject({ kind: "explore", url: "" });
+    expect(written.key).toMatch(/^local-/);
+  });
+
+  it("drops the local key's cached PR facts, which the new key refetches", async () => {
+    h.runs = [];
+    const written = await trackLocal();
+    expect(h.removePrEntries).toHaveBeenCalledWith(expect.anything(), expect.stringMatching(/^local-/));
+    expect(written.key).not.toMatch(/^local-/);
+  });
+
+  it("ignores a track for a key that is not a local card", async () => {
+    h.runs = [mkRun({ key: "ASM-1" })];
+    h.openSessions = [];
+    show();
+    await settled();
+    await lastPanel()._fire({ type: "deck:track", key: "ASM-1" });
+    await settled();
+    expect(h.writeRun).not.toHaveBeenCalled();
   });
 });
 

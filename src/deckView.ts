@@ -5,7 +5,7 @@ import * as path from "path";
 import { getConfig } from "./config";
 import { JiraAuth } from "./jira/auth";
 import { JiraClient, JiraAuthError } from "./jira/client";
-import { readRuns, defaultRunsDir, removeRun } from "./engine/runs";
+import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { openInEditor, openWorkspace, BRIEF_DIR } from "./engine/workspace";
@@ -734,6 +734,9 @@ export class DeckPanel {
         this.prEpoch.set(m.key, (this.prEpoch.get(m.key) ?? 0) + 1);
         await this.refreshBusy();
         break;
+      case "deck:track":
+        await this.track(m.key);
+        break;
       case "openExternal": {
         const u = vscode.Uri.parse(m.url);
         // f.url and every failing check's detailsUrl/targetUrl now come from
@@ -746,6 +749,35 @@ export class DeckPanel {
         break;
       }
     }
+  }
+
+  /**
+   * Pin a local card: write the synthetic run we already built to the runs store,
+   * so it survives its agents closing and behaves exactly like a Take'd one.
+   *
+   * The key it lands under is the inferred ticket's when one was inferred *and*
+   * no tracked run already owns it — otherwise the local key, which cannot
+   * collide with anything. Never overwrite a real launch record.
+   */
+  private async track(key: string): Promise<void> {
+    const local = this.localRuns.get(key);
+    if (!local) return; // not a local card — nothing to promote
+    const inferredKey = local.url ? local.url.split("/browse/")[1] : "";
+    const taken = inferredKey ? readRuns(defaultRunsDir()).some((r) => r.key === inferredKey) : true;
+    const run: Run = {
+      ...local,
+      key: inferredKey && !taken ? inferredKey : key,
+      // "task" and "explore" are the two kinds the rest of the Deck already
+      // understands: a ticket to poll, or a session with none. "local" means
+      // "discovered, not recorded" and stops being true the moment this lands.
+      kind: local.url ? "task" : "explore",
+    };
+    writeRun(defaultRunsDir(), run);
+    // The facts cached under the local key are orphaned — the new key refetches
+    // once rather than inheriting a file nothing will ever re-stale.
+    removePrEntries(defaultPrFactsDir(), key);
+    this.localRuns.delete(key);
+    await this.refreshBusy();
   }
 
   /** The run a card's action acts on. A local card has no record on disk — it is
