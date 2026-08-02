@@ -452,6 +452,22 @@ describe("DeckApp PR-facts chrome", () => {
     expect(screen.getByText("idle")).toBeTruthy();
   });
 
+  it("gives the collapsed label mono only when it is a name, not a count", () => {
+    // Mono is for identifiers on this board. A solo agent's collapsed label IS
+    // its session name, so it earns .id; "N agents" is prose about a count and
+    // must not carry the identifier styling, even though both sit in .ag-label.
+    const solo = render(<DeckApp />);
+    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })]));
+    const soloLabel = solo.container.querySelector(".ag-label")!;
+    expect(soloLabel.classList.contains("id")).toBe(true);
+    solo.unmount();
+
+    const many = render(<DeckApp />);
+    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
+    const manyLabel = many.container.querySelector(".ag-label")!;
+    expect(manyLabel.classList.contains("id")).toBe(false);
+  });
+
   it("renders no agents row for a card with none", () => {
     // Not screen.queryByRole("button", { name: /agent/ }) — the header's own
     // "Open agents" toggle always renders and its accessible name matches that

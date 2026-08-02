@@ -132,13 +132,17 @@ const AGENT_STATE: Record<AgentActivity["state"], { text: string; tone: Tone }> 
 function AgentsRow({ agents }: { agents: CardAgent[] }): JSX.Element | null {
   const [open, setOpen] = React.useState(false);
   if (agents.length === 0) return null;
-  const label = agents.length === 1 ? agents[0].session.name ?? "1 agent" : `${agents.length} agents`;
+  // A single agent's label IS its name — an identifier, so it earns the mono
+  // treatment (.id). Falling back to "1 agent", or counting several ("N agents"),
+  // is prose, not an identifier, and must not go mono.
+  const soloName = agents.length === 1 ? agents[0].session.name : null;
+  const label = soloName ?? (agents.length === 1 ? "1 agent" : `${agents.length} agents`);
   return (
     <div className="c-agents">
       <button type="button" className="ag-toggle" onClick={() => setOpen((o) => !o)}
         title="Claude Code sessions open in this directory">
         <span className="ag-caret">{open ? "▾" : "▸"}</span>
-        <span className="ag-label">{label}</span>
+        <span className={`ag-label ${soloName ? "id" : ""}`}>{label}</span>
       </button>
       {open && agents.map((a) => {
         const st = AGENT_STATE[a.activity.state];
@@ -147,7 +151,7 @@ function AgentsRow({ agents }: { agents: CardAgent[] }): JSX.Element | null {
             <span className={`sdot tone-${st.tone} ${st.tone === "working" ? "pulse" : ""}`} />
             <span className="ag-name">{a.session.name ?? a.session.sessionId.slice(0, 8)}</span>
             <span className={`ag-state tone-${st.tone}`}>{st.text}</span>
-            <span className="ag-age">{a.activity.lastActivityMs ? timeAgo(a.activity.lastActivityMs) : ""}</span>
+            <span className="ag-age">{timeAgo(a.activity.lastActivityMs)}</span>
             <span className="ag-open">open {timeAgo(a.session.startedAt)}</span>
           </div>
         );

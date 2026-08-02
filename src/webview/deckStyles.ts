@@ -200,7 +200,10 @@ export const DECK_CSS = `
     cursor: pointer; text-align: left; }
   .ag-toggle:hover { color: var(--vscode-foreground); }
   .ag-caret { flex: none; width: 9px; }
-  .ag-label { font-family: var(--mono); }
+  /* .ag-label is layout only. Mono is for identifiers, and this text isn't always
+     one — "3 agents" is a count, only a solo session's own name (.id) is an
+     identifier — so the typeface follows AgentsRow's own call, not the class. */
+  .ag-label.id { font-family: var(--mono); }
   .ag-row { display: flex; align-items: center; gap: 6px; margin: 4px 0 0 14px;
     font-size: var(--t-data); color: var(--dim); min-width: 0; }
   .ag-name { font-family: var(--mono); color: var(--vscode-foreground);
