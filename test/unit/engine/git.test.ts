@@ -190,6 +190,18 @@ describe("repoRoot & currentBranch", () => {
     fs.rmSync(loose, { recursive: true, force: true });
   });
 
+  it("serves a repeat call from the memo instead of recomputing", () => {
+    const temp = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-root-memo-"));
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", temp]);
+    const first = repoRoot(temp);
+    expect(first).toBe(fs.realpathSync(temp));
+    fs.rmSync(temp, { recursive: true, force: true });
+    // The directory is gone: a recomputing implementation would shell out to a
+    // missing path and git()'s catch-all would turn that into "". Getting the
+    // same non-empty answer back proves the memo served it, not git.
+    expect(repoRoot(temp)).toBe(first);
+  });
+
   it("reads the checked-out branch", () => {
     expect(currentBranch(repo)).toBe("main");
   });
@@ -229,6 +241,16 @@ describe("defaultBranch & prEligible", () => {
     execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", solo]);
     expect(defaultBranch(solo)).toBe("");
     fs.rmSync(solo, { recursive: true, force: true });
+  });
+
+  it("serves a repeat call from the memo instead of recomputing", () => {
+    const work = clone("db-memo");
+    const first = defaultBranch(work);
+    expect(first).toBe("main");
+    fs.rmSync(work, { recursive: true, force: true });
+    // Without a working tree, defaultRemoteRef's git calls all fail and recompute
+    // to "". Getting "main" back proves the memo served it, not a fresh lookup.
+    expect(defaultBranch(work)).toBe(first);
   });
 
   it("says a feature branch can own a PR", () => {
