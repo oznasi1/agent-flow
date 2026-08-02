@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.44] — 2026-08-02
+
 ### Added
 
 - **Explore can verify a feature on an environment.** A fifth Explore action, **Verify on
