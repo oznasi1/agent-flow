@@ -19,7 +19,10 @@ import { launchReview, resolveReviewMode, reviewRunKey } from "./engine/review/l
 import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
-import { InboundMessage, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind } from "./types";
+import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
+import { readSessionActivity, UNKNOWN_ACTIVITY } from "./engine/transcript";
+import { canon } from "./engine/paths";
+import { CardAgent, InboundMessage, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
@@ -530,12 +533,39 @@ export class DeckPanel {
   private async buildAll(): Promise<RunStatus[]> {
     // Review runs are work in flight, but not *your ticket's* work: they surface
     // on their strip row, not as a fifth kind of card in In progress.
-    const runs = readRuns(defaultRunsDir()).filter((r) => runKind(r) !== "review");
+    const tracked = readRuns(defaultRunsDir()).filter((r) => runKind(r) !== "review");
     const projectsRoot = path.join(os.homedir(), ".claude", "projects");
     const now = Date.now();
     const authed = await this.auth.isAuthenticated();
     const ghReady = this.ghReady();
     const openIdentities = new Set(readLiveWindows(defaultWindowsDir()).map((w) => w.identity));
+
+    // Every Claude Code session open on this machine, grouped by the directory it
+    // runs in. A place is claimed by at most one tracked run; Task 11 turns what
+    // is left into cards of its own.
+    const places = groupByPlace(readOpenSessions(defaultSessionsDir()));
+    const claimed = new Set<string>();
+    const agentsByKey = new Map<string, CardAgent[]>();
+    for (const run of tracked) {
+      const mine: CardAgent[] = [];
+      for (const repo of run.repos) {
+        const place = canon(repo.path);
+        const sessions = places.get(place);
+        if (!sessions) continue;
+        claimed.add(place);
+        for (const s of sessions) {
+          mine.push({
+            session: s,
+            // Addressed by sessionId, so two sessions in one worktree report
+            // their own states rather than sharing the newest transcript's.
+            activity: this.liveSignal ? readSessionActivity(projectsRoot, s.cwd, s.sessionId, now) : UNKNOWN_ACTIVITY,
+          });
+        }
+      }
+      agentsByKey.set(run.key, mine);
+    }
+
+    const all = tracked; // Task 11 appends the local runs here
     // One round trip per run, all at once. Serially this was the bulk of a cold
     // refresh, and back then every Forget waited on the whole pass before its card
     // left the board — the webview now drops that card optimistically, but the pass
@@ -543,17 +573,17 @@ export class DeckPanel {
     // its own errors, so this can never reject; run keys are unique, so concurrent
     // calls never duplicate a cache miss.
     const jiras = await Promise.all(
-      runs.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(run.key) : null)),
+      all.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(run.key) : null)),
     );
     const out: RunStatus[] = [];
-    for (const [i, run] of runs.entries()) {
+    for (const [i, run] of all.entries()) {
       // A session with no ticket has nothing to look up. Its key is synthetic, so
       // every Jira call 404s; and it has no branch we named, so `gh pr list
       // --head <default-branch>` matches whatever PR was last opened *from* that
       // branch — somebody else's, rendered on this card as if it were the task's.
-      const tracked = isTicketRun(run);
+      const isTracked = isTicketRun(run);
       const jira = jiras[i];
-      const stored = this.prFacts && tracked ? readPrEntries(defaultPrFactsDir(), run.key) : {};
+      const stored = this.prFacts && isTracked ? readPrEntries(defaultPrFactsDir(), run.key) : {};
       // Drop entries for repos that have left the run — re-taking a task with a
       // different repo selection can leave one behind. It is never re-staled
       // (only repos in run.repos are checked below), yet an orphan would still
@@ -562,7 +592,7 @@ export class DeckPanel {
       const prs: PrEntryMap = Object.fromEntries(
         run.repos.filter((r) => stored[r.name]).map((r) => [r.name, stored[r.name]]),
       );
-      if (ghReady && tracked) {
+      if (ghReady && isTracked) {
         const ttlMs = getConfig().prFactsTtlSeconds * 1000;
         for (const repo of run.repos) {
           // A non-git service (worktree.ts can hand one through unchanged) has no
@@ -573,7 +603,11 @@ export class DeckPanel {
           }
         }
       }
-      out.push(buildRunStatus({ run, jira, projectsRoot, nowMs: now, liveSignal: this.liveSignal, openIdentities, prs }));
+      out.push(buildRunStatus({
+        run, jira, projectsRoot, nowMs: now,
+        liveSignal: this.liveSignal, openIdentities, prs,
+        agents: agentsByKey.get(run.key) ?? [],
+      }));
     }
     return out;
   }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { window, ViewColumn, env, workspace, setConfig } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
-import type { PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
+import type { CardAgent, OpenSession, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
@@ -43,6 +43,9 @@ const h = vi.hoisted(() => ({
   reviewSubmit: vi.fn(async (_repo: string, _number: number, _verb: ReviewVerb, _body: string): Promise<{ ok: true } | { ok: false; message: string }> => ({ ok: true })),
   repos: [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }] as ServiceRef[],
   reviewRequests: true as boolean,
+  // Every Claude Code session open on this machine (Task 8) — the registry
+  // readOpenSessions reads, stubbed here rather than touching real ~/.claude/sessions.
+  openSessions: [] as OpenSession[],
   // Review launch + draft handoff (Task 12): the worktree launcher and the two
   // fs primitives decorateReviews/loadReviewDraft need — kept in the hoisted
   // block like every other side effect this suite stubs out.
@@ -72,7 +75,17 @@ vi.mock("../../src/engine/workspace", () => ({
   BRIEF_DIR: ".pick-task",
 }));
 vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn() }));
-vi.mock("../../src/engine/git", () => ({ taskDiff: h.taskDiff }));
+// repoRoot stubbed alongside the real taskDiff: groupByPlace (engine/sessions)
+// calls the real repoRoot, which would shell out to git for a fixture path like
+// "/r/svc" and get "" back rather than the fixtures' own place key.
+vi.mock("../../src/engine/git", () => ({ taskDiff: h.taskDiff, repoRoot: (p: string) => p }));
+// groupByPlace and canon stay real — only the two functions that touch the real
+// filesystem (~/.claude/sessions) are replaced.
+vi.mock("../../src/engine/sessions", async (importActual) => ({
+  ...(await importActual<typeof import("../../src/engine/sessions")>()),
+  readOpenSessions: () => h.openSessions,
+  defaultSessionsDir: () => "/sessions",
+}));
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: () => [],
   defaultWindowsDir: () => "/windows",
@@ -191,6 +204,17 @@ const showAndWarm = async (authed = false): Promise<ReturnType<typeof lastPanel>
   return p;
 };
 
+/** buildRunStatus is mocked in this suite, so open-agents assertions have to go
+ * through what buildAll *passes* it — the same way the PR-facts cases already
+ * do. `.at(-1)` matches the last call for this run's key, since the
+ * constructor's own unawaited refresh can race the explicit one a test fires. */
+const builtFor = (key: string) =>
+  h.buildRunStatus.mock.calls.map((c) => c[0] as { run: Run; agents: CardAgent[] }).filter((i) => i.run.key === key).at(-1)!;
+
+const sess = (over: Partial<OpenSession> = {}): OpenSession => ({
+  pid: 1, sessionId: "s1", cwd: "/r/svc", startedAt: 100, name: "svc-7e", ...over,
+});
+
 beforeEach(() => {
   h.runs = [mkRun()];
   h.openInEditor.mockClear().mockResolvedValue(true);
@@ -211,6 +235,7 @@ beforeEach(() => {
   h.reviewDetail.mockClear().mockResolvedValue({ failing: [], unresolved: null });
   h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }];
   h.reviewRequests = true;
+  h.openSessions = [];
   h.launchReview.mockClear().mockResolvedValue({ ok: true, runKey: "review-aws-ops-8491" });
   h.existsSync.mockClear().mockReturnValue(false);
   h.readFileSync.mockClear().mockReturnValue("");
@@ -564,6 +589,32 @@ describe("DeckPanel", () => {
     await Promise.all([first, second]);
     const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
     expect(loads).toEqual([true, false]);
+  });
+});
+
+describe("DeckPanel open agents", () => {
+  it("attaches every open session in a run's repo to that run's card", async () => {
+    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "ASM-1-x" }] })];
+    h.openSessions = [sess(), sess({ pid: 2, sessionId: "s2", startedAt: 200, name: "svc-fa" })];
+    show();
+    await settled();
+    expect(builtFor("ASM-1").agents.map((a) => a.session.name)).toEqual(["svc-7e", "svc-fa"]);
+  });
+
+  it("gives a run with no session open an empty agents list", async () => {
+    h.runs = [mkRun({ key: "ASM-1" })];
+    h.openSessions = [];
+    show();
+    await settled();
+    expect(builtFor("ASM-1").agents).toEqual([]);
+  });
+
+  it("does not attach a session running somewhere else", async () => {
+    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.openSessions = [sess({ cwd: "/r/other", name: "other-1" })];
+    show();
+    await settled();
+    expect(builtFor("ASM-1").agents).toEqual([]);
   });
 });
 
