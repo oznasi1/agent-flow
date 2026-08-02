@@ -465,6 +465,11 @@
           "default": true,
           "markdownDescription": "Read each in-flight task's pull-request state from GitHub with the `gh` CLI, and show it on the Deck's cards — CI, review and mergeability. Requires `gh` on your PATH and logged in (`gh auth login`); Agent Flow stores no GitHub credentials of its own. Off = the Deck's git + Jira backbone only."
         },
+        "agentFlow.openAgents": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show every Claude Code session open on this machine on the Deck — as agents on the card that owns their directory, and as a card of its own for a place Agent Flow never launched. Read from `~/.claude/sessions`. Off = only the tasks Agent Flow launched."
+        },
         "agentFlow.prFactsTtlSeconds": {
           "type": "number",
           "default": 120,

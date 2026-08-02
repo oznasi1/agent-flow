@@ -34,7 +34,7 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   ...over,
 });
 
-const runsMsg = (runs: RunStatus[]): OutboundMessage => ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, ghNote: null });
+const runsMsg = (runs: RunStatus[]): OutboundMessage => ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, ghNote: null });
 
 beforeEach(() => sent.mockClear());
 
@@ -415,9 +415,16 @@ describe("DeckApp PR-facts chrome", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:setPrFacts", on: false });
   });
 
+  it("posts deck:setOpenAgents when the toggle is clicked", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByRole("button", { name: /open agents/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:setOpenAgents", on: false });
+  });
+
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, ghNote: "gh CLI not found — PR facts off" });
+    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, ghNote: "gh CLI not found — PR facts off" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 });

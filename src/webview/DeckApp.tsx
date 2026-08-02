@@ -217,6 +217,7 @@ export function DeckApp(): JSX.Element {
   const [runs, setRuns] = React.useState<RunStatus[]>([]);
   const [live, setLive] = React.useState(true);
   const [prFacts, setPrFacts] = React.useState(true);
+  const [openAgents, setOpenAgents] = React.useState(true);
   const [ghNote, setGhNote] = React.useState<string | null>(null);
   const [syncedAt, setSyncedAt] = React.useState<number | null>(null);
   const [, forceTick] = React.useState(0);
@@ -263,6 +264,7 @@ export function DeckApp(): JSX.Element {
         setRuns(m.runs);
         setLive(m.liveSignal);
         setPrFacts(m.prFacts);
+        setOpenAgents(m.openAgents);
         setGhNote(m.ghNote);
         setSyncedAt(Date.now());
       } else if (m.type === "toast") {
@@ -352,6 +354,14 @@ export function DeckApp(): JSX.Element {
           </button>
           <button type="button" className={`ctl ${prFacts ? "on" : ""}`} onClick={() => { const next = !prFacts; setPrFacts(next); send({ type: "deck:setPrFacts", on: next }); }} title="Read each task's PR state from GitHub with the gh CLI. Off → git + Jira only.">
             <span className="switch" />PR facts
+          </button>
+          <button
+            type="button"
+            className={`ctl ${openAgents ? "on" : ""}`}
+            onClick={() => { const next = !openAgents; setOpenAgents(next); send({ type: "deck:setOpenAgents", on: next }); }}
+            title="Show every Claude Code session open on this machine, read from ~/.claude/sessions. Off → only what Agent Flow launched."
+          >
+            <span className="switch" />Open agents
           </button>
         </div>
         <button type="button" className="ctl" title="Re-read git, Jira and PR state now" onClick={() => send({ type: "deck:refresh" })}>

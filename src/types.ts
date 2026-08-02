@@ -303,6 +303,7 @@ export type InboundMessage =
   | { type: "deck:refresh" }
   | { type: "deck:setLive"; on: boolean }
   | { type: "deck:setPrFacts"; on: boolean }
+  | { type: "deck:setOpenAgents"; on: boolean }
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
   | { type: "deck:forget"; key: string }
   | { type: "deck:setReviewSort"; sort: ReviewSort }
@@ -348,7 +349,7 @@ export type OutboundMessage =
   | { type: "error"; message: string; canRetry: boolean; canRunDoctor?: boolean }
   | { type: "loading"; loading: boolean }
   // The Deck
-  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; ghNote: string | null }
+  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; ghNote: string | null }
   | { type: "deck:loading"; loading: boolean }
   | {
       type: "deck:reviews";

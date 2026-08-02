@@ -213,6 +213,10 @@ export interface AgentFlowConfig {
   prFacts: boolean;
   // How stale a cached PR fact may be before the Deck re-fetches it. Floored at 30s.
   prFactsTtlSeconds: number;
+  // Show every Claude Code session open on this machine on the Deck: as agents on
+  // the card that owns their directory, and as a card of its own for a place
+  // Agent Flow never launched. Read from ~/.claude/sessions; off = today's board.
+  openAgents: boolean;
   // Show the Deck's review-requests strip: open PRs that ask for your review.
   reviewRequests: boolean;
   // How stale the cached review queue may be before a refetch. Floored at 60s —
@@ -319,6 +323,7 @@ export function getConfig(): AgentFlowConfig {
     telemetryEnabled: c.get<boolean>("telemetry.enabled") ?? true,
     prFacts: c.get<boolean>("prFacts") ?? true,
     prFactsTtlSeconds: Math.max(30, c.get<number>("prFactsTtlSeconds") ?? 120),
+    openAgents: c.get<boolean>("openAgents") ?? true,
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,

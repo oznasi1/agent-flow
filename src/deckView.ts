@@ -22,7 +22,7 @@ import { sortRequests } from "./engine/review/sort";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity, UNKNOWN_ACTIVITY } from "./engine/transcript";
 import { canon } from "./engine/paths";
-import { CardAgent, InboundMessage, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind } from "./types";
+import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
@@ -56,6 +56,7 @@ export class DeckPanel {
   private liveSignal = true;
   private readonly jiraCache = new Map<string, { at: number; status: string | null; category: string | null }>();
   private prFacts: boolean; // seeded from config in the constructor; the only writer after that is deck:setPrFacts
+  private openAgents: boolean; // seeded from config in the constructor; the only writer after that is deck:setOpenAgents
   private readonly prQueue = new RefreshQueue();
   private readonly pr: PrProvider = new GhProvider();
   private readonly reviewProvider: ReviewProvider = new GhReviewProvider();
@@ -120,6 +121,7 @@ export class DeckPanel {
     // deck:setPrFacts toggle changes it — a later refresh must not stomp the
     // user's in-session toggle by re-reading config on every tick.
     this.prFacts = getConfig().prFacts;
+    this.openAgents = getConfig().openAgents;
     this.panel.webview.html = this.html(this.panel.webview);
     this.panel.webview.onDidReceiveMessage((m: InboundMessage) => this.onMessage(m), null, this.disposables);
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
@@ -543,7 +545,9 @@ export class DeckPanel {
     // Every Claude Code session open on this machine, grouped by the directory it
     // runs in. A place is claimed by at most one tracked run; Task 11 turns what
     // is left into cards of its own.
-    const places = groupByPlace(readOpenSessions(defaultSessionsDir()));
+    const places = this.openAgents
+      ? groupByPlace(readOpenSessions(defaultSessionsDir()))
+      : new Map<string, OpenSession[]>();
     const claimed = new Set<string>();
     const agentsByKey = new Map<string, CardAgent[]>();
     for (const run of tracked) {
@@ -618,6 +622,7 @@ export class DeckPanel {
         runs,
         liveSignal: this.liveSignal,
         prFacts: this.prFacts,
+        openAgents: this.openAgents,
         ghNote: this.prFacts && this.ghGap ? GH_NOTES[this.ghGap.kind] : null,
       });
       // The disabled branch posts its own "cleared" state directly — enqueueReviews
@@ -660,6 +665,10 @@ export class DeckPanel {
           this.ghGap = undefined;
           this.ghProbe = null;
         }
+        await this.refreshBusy();
+        break;
+      case "deck:setOpenAgents":
+        this.openAgents = m.on;
         await this.refreshBusy();
         break;
       case "deck:inspect":

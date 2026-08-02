@@ -120,6 +120,7 @@ const CFG = {
   telemetryEnabled: true,
   prFacts: true,
   prFactsTtlSeconds: 120,
+  openAgents: true,
   reviewRequests: true,
   reviewRequestsTtlSeconds: 300,
   reviewWrites: false,

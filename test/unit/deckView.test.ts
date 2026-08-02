@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   probeGh: vi.fn(async (): Promise<GhGap | null> => null),
   prFacts: true as boolean,
   ttlSeconds: 120,
+  openAgents: true as boolean,
   // Review-requests strip (Task 7): a gh-backed search, an on-disk cache, and the
   // repos discoverable on this machine — independent of the PR-facts fixtures above.
   reviewSearch: vi.fn(async (): Promise<{ issueCount: number; requests: ReviewRequest[] } | null> => ({
@@ -160,6 +161,7 @@ vi.mock("../../src/config", async (importActual) => {
     ...actual,
     getConfig: () => ({
       baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds,
+      openAgents: h.openAgents,
       reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: [],
       reviewWrites: h.reviewWrites, stampLabelOnWrite: h.stampLabelOnWrite,
       // Sourced from the real getConfig() (itself driven by the globally-mocked
@@ -247,6 +249,7 @@ beforeEach(() => {
   h.prEntries = {};
   h.prFacts = true;
   h.ttlSeconds = 120;
+  h.openAgents = true;
   h.writePrEntry.mockClear();
   h.removePrEntries.mockClear();
   h.prFetch.mockClear().mockResolvedValue({ ok: true, facts: null });
@@ -665,6 +668,35 @@ describe("DeckPanel open agents", () => {
     // filed under that subdirectory, which only the session's own cwd names.
     expect(h.sessionActivity).toHaveBeenCalledWith(expect.any(String), "/r/svc", "s1", expect.any(Number));
     expect(builtFor("ASM-1").agents[0].activity).toEqual({ state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" });
+  });
+
+  it("reads no sessions at all with open agents off", async () => {
+    h.openAgents = false;
+    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.openSessions = [sess()];
+    show();
+    await settled();
+    expect(builtFor("ASM-1").agents).toEqual([]);
+  });
+
+  it("re-reads when the toggle comes back on", async () => {
+    h.openAgents = false;
+    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.openSessions = [sess()];
+    show();
+    await settled();
+    const p = lastPanel();
+    await p._fire({ type: "deck:setOpenAgents", on: true });
+    await settled();
+    expect(builtFor("ASM-1").agents).toHaveLength(1);
+  });
+
+  it("tells the webview which way the toggle is set", async () => {
+    h.openAgents = false;
+    show();
+    await settled();
+    const run = posts(lastPanel()).filter((m) => m.type === "deck:runs").at(-1)!;
+    expect(run.openAgents).toBe(false);
   });
 });
 
