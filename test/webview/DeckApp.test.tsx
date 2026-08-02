@@ -292,6 +292,51 @@ describe("DeckApp", () => {
     host({ type: "toast", level: "error", message: "Nothing to open for ASM-1." });
     expect(screen.getByText("Nothing to open for ASM-1.")).toBeInTheDocument();
   });
+
+  const mkLocal = (over: Partial<RunStatus> = {}) => mkStatus({
+    run: { key: "local-centaur-1a2b3c4d", summary: "team table new design",
+      url: "https://jira/browse/ASM-5641", createdAt: 1, kind: "local", mode: "per-window",
+      repos: [{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-5641-team-table" }], briefPaths: [] },
+    ...over,
+  });
+
+  it("marks a local card and flags an inferred key", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkLocal()]));
+    expect(screen.getByText("local")).toBeTruthy();
+    expect(screen.getByText("~inferred")).toBeTruthy();
+    expect(screen.getByText("ASM-5641")).toBeTruthy();
+  });
+
+  it("shows the place's name when nothing was inferred", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkLocal({ run: { ...mkLocal().run, url: "", summary: "centaur" } })]));
+    expect(screen.queryByText("~inferred")).toBeNull();
+    expect(screen.getByText("centaur")).toBeTruthy();
+  });
+
+  it("offers Track it and no Forget", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkLocal()]));
+    fireEvent.click(screen.getByRole("button", { name: "⋯" }));
+    expect(screen.getByRole("button", { name: "Track it" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Forget" })).toBeNull();
+  });
+
+  it("posts deck:track", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkLocal()]));
+    fireEvent.click(screen.getByRole("button", { name: "⋯" }));
+    fireEvent.click(screen.getByRole("button", { name: "Track it" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:track", key: "local-centaur-1a2b3c4d" });
+  });
+
+  it("still offers Forget on a tracked card", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByRole("button", { name: "⋯" }));
+    expect(screen.getByRole("button", { name: "Forget" })).toBeTruthy();
+  });
 });
 
 const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({

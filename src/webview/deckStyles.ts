@@ -162,6 +162,13 @@ export const DECK_CSS = `
      key; drops the affordances, because there is nothing to click through to. */
   .key.untracked { cursor: default; opacity: .75; }
   .key.untracked:hover { color: var(--dim); }
+  /* A muted marker on a card, never a status: "local", "~inferred". Nothing here
+     is red — a discovered card is not a failure. */
+  .chip { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 3px;
+    border: 1px solid var(--vscode-panel-border, var(--dim)); color: var(--dim);
+    font-size: var(--t-data); opacity: .8; vertical-align: baseline; }
+  .key-wrap { margin-left: auto; display: flex; align-items: baseline; gap: 4px; min-width: 0; }
+  .key-wrap .key { margin-left: 0; }
   .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }
   .sdot.tone-working { background: var(--c-done); }
   .sdot.tone-idle    { background: var(--c-idle); }

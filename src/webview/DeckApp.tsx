@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun } from "../types";
+import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind } from "../types";
 import { ReviewStrip } from "./ReviewStrip";
 
 let toastSeq = 0;
@@ -171,6 +171,14 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
   // an empty url and never inspects the key, so anything else untracked keeps its
   // key on the chip rather than being relabelled as something it is not.
   const explore = r.run.key.startsWith("explore-");
+  // A place with an agent open in it that Agent Flow never launched. It has no
+  // record on disk, so there is nothing to Forget — closing its agents is what
+  // removes it.
+  const local = runKind(r.run) === "local";
+  // The key came from the branch, not from a launch. Say so: the branch could
+  // name a ticket somebody else owns, and the Jira status on this card would
+  // then be theirs.
+  const inferredKey = local && r.run.url ? r.run.url.split("/browse/")[1] : "";
   const [menuOpen, setMenuOpen] = React.useState(false);
   React.useEffect(() => {
     if (!menuOpen) return;
@@ -190,15 +198,29 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
           <span className={`sdot tone-${sv.tone} ${sv.tone === "working" ? "pulse" : ""}`} />
           {sv.text}
         </span>
-        {tracked ? (
+        {inferredKey ? (
+          <span className="key-wrap">
+            <span className="chip" title="Read from the branch name — Agent Flow did not launch this">~inferred</span>
+            <button
+              className="key"
+              title={`Open ${inferredKey} in Jira`}
+              onClick={() => send({ type: "openExternal", url: r.run.url })}
+            >
+              {inferredKey}
+            </button>
+          </span>
+        ) : tracked ? (
           <button className="key" title={`Open ${r.run.key} in Jira`} onClick={() => send({ type: "openExternal", url: r.run.url })}>
             {r.run.key}
           </button>
         ) : (
-          <span className="key untracked" title={r.run.key}>{explore ? "explore" : r.run.key}</span>
+          <span className="key untracked" title={r.run.key}>{local ? "local" : explore ? "explore" : r.run.key}</span>
         )}
       </div>
-      <div className="c-title" title={r.run.summary}>{r.run.summary}</div>
+      <div className="c-title" title={r.run.summary}>
+        {local && inferredKey && <span className="chip">local</span>}
+        {r.run.summary}
+      </div>
 
       {/* Where the work lives and when it started, on one line: this used to be a
           half-empty branch row followed by "launched …" trailing the repo chips, where
@@ -247,7 +269,11 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
                 {tracked && (
                   <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "openExternal", url: r.run.url }); }}>Open in Jira</button>
                 )}
-                <button className="mi danger" onClick={() => { setMenuOpen(false); onForget(r.run.key); }}>Forget</button>
+                {local ? (
+                  <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "deck:track", key: r.run.key }); }}>Track it</button>
+                ) : (
+                  <button className="mi danger" onClick={() => { setMenuOpen(false); onForget(r.run.key); }}>Forget</button>
+                )}
               </div>
             )}
           </span>
