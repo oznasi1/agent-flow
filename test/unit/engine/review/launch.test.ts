@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { reviewRunKey, renderReviewTemplate, launchReview } from "../../../../src/engine/review/launch";
+import { reviewRunKey, renderReviewTemplate, launchReview, resolveReviewMode } from "../../../../src/engine/review/launch";
 import { branchName } from "../../../../src/engine/worktree";
-import type { ReviewRequest } from "../../../../src/types";
+import type { PromptMode, ReviewRequest } from "../../../../src/types";
 import type { OpenRequest, OpenResult } from "../../../../src/engine/workspace";
 
 const req: ReviewRequest = {
@@ -139,5 +139,31 @@ describe("launchReview", () => {
     const d = deps({ openWorkspace: vi.fn(async () => { throw new Error("disk full"); }) });
     const out = await launchReview({ req, template: "t", workspaceDir: "/ws", seedAgent: true }, d);
     expect(out).toEqual({ ok: false, message: "Couldn't open a review worktree for aws-ops#8491: Error: disk full" });
+  });
+});
+
+describe("resolveReviewMode", () => {
+  const backend: PromptMode = { id: "backend", label: "Backend services", prompt: "BE" };
+  const frontend: PromptMode = { id: "frontend", label: "Frontend", prompt: "FE" };
+
+  it("uses the mode the setting names, without asking", () => {
+    expect(resolveReviewMode([backend, frontend], "frontend")).toBe(frontend);
+  });
+
+  it("asks when the setting is 'ask' and there is a real choice", () => {
+    expect(resolveReviewMode([backend, frontend], "ask")).toBeNull();
+  });
+
+  it("asks when the setting names a mode that does not exist", () => {
+    // A typo shows the picker rather than silently seeding a mode the user
+    // didn't name — the same reason an unknown id isn't treated as the first one.
+    expect(resolveReviewMode([backend, frontend], "backnd")).toBeNull();
+  });
+
+  it("never asks when there is only one mode, whatever the setting says", () => {
+    // The one-mode short-circuit is what keeps a default install a single click.
+    expect(resolveReviewMode([backend], "ask")).toBe(backend);
+    expect(resolveReviewMode([backend], "nonsense")).toBe(backend);
+    expect(resolveReviewMode([backend], "backend")).toBe(backend);
   });
 });

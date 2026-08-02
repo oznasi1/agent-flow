@@ -1,4 +1,4 @@
-import { ReviewRequest, ServiceRef } from "../../types";
+import { PromptMode, ReviewRequest, ServiceRef } from "../../types";
 import type { OpenRequest, OpenResult } from "../workspace";
 
 /** A review's synthetic run key, and therefore its worktree directory name under
@@ -20,6 +20,18 @@ export function renderReviewTemplate(
     .replace(/\{repo\}/g, () => v.repo)
     .replace(/\{number\}/g, () => String(v.number))
     .replace(/\{author\}/g, () => v.author);
+}
+
+/** The review mode to seed without asking, or null when the user must pick.
+ * Two ways to skip the picker: `configured` names a real mode, or there is only
+ * one mode to offer — a QuickPick with a single item is friction, not a choice.
+ * An id that matches nothing falls through to the picker rather than to the
+ * first mode: a typo should ask, not quietly seed a prompt nobody named.
+ * `modes` is never empty; getConfig guarantees that. */
+export function resolveReviewMode(modes: PromptMode[], configured: string): PromptMode | null {
+  const pinned = modes.find((m) => m.id === configured);
+  if (pinned) return pinned;
+  return modes.length === 1 ? modes[0] : null;
 }
 
 export interface LaunchReviewRequest {
