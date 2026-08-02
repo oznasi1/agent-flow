@@ -1210,10 +1210,10 @@ Expected: PASS
 - [ ] **Step 6: Add `agents` to the two `RunStatus` fixtures**
 
 `RunStatus` gained a required field, so both fixtures need it or nothing type-checks:
-- `test/unit/deckView.test.ts:160` — `statusFor` gains `agents: []`
-- `test/webview/DeckApp.test.tsx:20` — `mkStatus` gains `agents: []`
+- `statusFor` in `test/unit/deckView.test.ts` gains `agents: []`
+- `mkStatus` in `test/webview/DeckApp.test.tsx` gains `agents: []`
 
-Also change `h.buildRunStatus`'s implementation at `test/unit/deckView.test.ts:198` to the object form: `.mockImplementation((i: { run: Run }) => statusFor(i.run))`.
+Also change `h.buildRunStatus`'s implementation in that file's `beforeEach` to the object form: `.mockImplementation((i: { run: Run }) => statusFor(i.run))`. The throwing override further down the file takes no arguments and needs no change.
 
 - [ ] **Step 7: Run the whole suite**
 
@@ -1234,7 +1234,7 @@ git commit -m "feat(deck): a card carries its open agents, and needs-you outrank
 Restructures `buildAll` into the shape the local cards need in Task 11, and delivers the first visible fix: a run whose worktree holds two sessions shows both.
 
 **Files:**
-- Modify: `src/deckView.ts:520-569`
+- Modify: `src/deckView.ts` — the whole body of `private async buildAll()`
 - Test: `test/unit/deckView.test.ts`
 
 **Interfaces:**
