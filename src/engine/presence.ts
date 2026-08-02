@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { canon, pidAlive } from "./paths";
 
 export interface WindowIdentity {
   identity: string; // canonical path — a .code-workspace file or a single folder
@@ -20,14 +21,6 @@ export function defaultWindowsDir(): string {
   return path.join(os.homedir(), ".agentflow", "windows");
 }
 
-/** Resolve symlinks so identities compare equal across /var↔/private/var etc. */
-function canon(p: string): string {
-  try {
-    return fs.realpathSync(p);
-  } catch {
-    return p;
-  }
-}
 
 /** This window's seed identity — the SAME value maybeSeedAgent matches on. A saved
  * .code-workspace file wins; else a lone folder; else undefined (empty windows and
@@ -65,16 +58,6 @@ export function removePresence(dir: string, pid: number): void {
   }
 }
 
-/** `kill(pid, 0)` sends no signal — it only probes: it throws ESRCH for a dead pid
- * and EPERM for a live process we don't own. Either "no error" or EPERM ⇒ alive. */
-function pidAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
 
 /** Best-effort unlink — pruning is a housekeeping side effect of reading, so a
  * failure here (e.g. EACCES/EBUSY) must never fail the read itself. */
