@@ -1470,7 +1470,7 @@ describe("DeckPanel review launch", () => {
     );
   });
 
-  it("offers every configured mode, label and detail", async () => {
+  it("offers every configured mode, label and detail, plus the stock mode the list didn't mention", async () => {
     setConfig({ reviewRequestModes: TWO_MODES });
     const p = await showAndWarm();
     await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
@@ -1478,6 +1478,10 @@ describe("DeckPanel review launch", () => {
       [
         expect.objectContaining({ label: "Backend services", detail: "Backend review skill" }),
         expect.objectContaining({ label: "Frontend", detail: "Frontend review skill" }),
+        // reviewRequestModes now layers over the built-ins rather than replacing
+        // them, so the stock "Full review" mode this list never mentioned is
+        // still offered, appended after the user's own two.
+        expect.objectContaining({ label: "Full review" }),
       ],
       expect.objectContaining({ title: "Review aws-ops#8491" }),
     );
