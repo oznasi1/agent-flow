@@ -496,7 +496,7 @@
         },
         "agentFlow.reviewRequestModes": {
           "type": "array",
-          "markdownDescription": "Seed modes offered by **Review with agent** on the Deck's review strip. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`. Add your own — e.g. separate backend and frontend review modes — and with two or more configured, clicking **Review with agent** asks which to use. Pin one with `#agentFlow.reviewRequestMode#` to skip the question. Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"full\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you.",
+          "markdownDescription": "Seed modes offered by **Review with agent** on the Deck's review strip. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`. Add your own — e.g. separate backend and frontend review modes — and clicking **Review with agent** asks which to use, since your entry joins the built-in **Full review** rather than replacing it. Pin one with `#agentFlow.reviewRequestMode#` to skip the question. Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"full\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you.",
           "items": {
             "type": "object",
             "required": [
@@ -537,7 +537,7 @@
         "agentFlow.reviewRequestMode": {
           "type": "string",
           "default": "ask",
-          "markdownDescription": "Which review mode to seed when you click **Review with agent**: `ask` to choose each time, or the `id` of one of `#agentFlow.reviewRequestModes#`. With only one mode configured no picker is shown either way."
+          "markdownDescription": "Which review mode to seed when you click **Review with agent**: `ask` to choose each time, or the `id` of one of `#agentFlow.reviewRequestModes#`. A stock install has one mode and shows no picker; add or hide modes so only one is left and the picker stays away."
         },
         "agentFlow.reviewRequestPrompt": {
           "type": "string",
