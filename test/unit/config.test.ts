@@ -627,9 +627,9 @@ describe("package.json ⇄ config constants", () => {
     expect(props["agentFlow.promptModes"].default).toEqual(DEFAULT_PROMPT_MODES);
   });
 
-  it("leaves detail out of the promptModes required fields", () => {
+  it("leaves label, detail and prompt out of the promptModes required fields", () => {
     const p = props["agentFlow.promptModes"] as { items?: { required?: string[]; properties?: Record<string, unknown> } };
-    expect(p.items?.required).toEqual(["id", "label", "prompt"]);
+    expect(p.items?.required).toEqual(["id"]);
     expect(Object.keys(p.items?.properties ?? {})).toContain("detail");
   });
 
@@ -702,4 +702,25 @@ describe("package.json ⇄ config constants", () => {
     const p = props["agentFlow.reviewRequestPrompt"] as { markdownDeprecationMessage?: string };
     expect(p.markdownDeprecationMessage).toMatch(/reviewRequestModes/);
   });
+
+  it.each(["agentFlow.promptModes", "agentFlow.reviewRequestModes"])(
+    "requires only an id per entry of %s, so an override or a hide entry validates",
+    (key) => {
+      const items = (props[key] as { items: { required: string[]; properties: Record<string, unknown> } }).items;
+      expect(items.required).toEqual(["id"]);
+      expect(items.properties.hidden).toEqual({
+        type: "boolean",
+        description: "Set to true to drop this built-in mode from the picker.",
+      });
+    },
+  );
+
+  it.each(["agentFlow.promptModes", "agentFlow.reviewRequestModes"])(
+    "documents that %s layers over the built-in modes",
+    (key) => {
+      const md = (props[key] as { markdownDescription: string }).markdownDescription;
+      expect(md).toMatch(/layer/i);
+      expect(md).toContain('"hidden": true');
+    },
+  );
 });
