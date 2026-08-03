@@ -641,6 +641,28 @@ describe("task card actions", () => {
     expect(sent).toHaveBeenCalledWith({ type: "take", key: "ASM-1", services: undefined });
   });
 
+  it("rails a card by its status category, not its priority", () => {
+    render(<App />);
+    authed();
+    host({ type: "tasks", filter: "mine", tasks: [
+      mkTask({ key: "ASM-1", summary: "Moving", statusCategory: "indeterminate", priority: "Highest" }),
+      mkTask({ key: "ASM-2", summary: "Not started", statusCategory: "new", priority: "Low" }),
+    ] });
+    expect(screen.getByText("Moving").closest(".card")).toHaveClass("s-progress");
+    expect(screen.getByText("Not started").closest(".card")).toHaveClass("s-new");
+  });
+
+  it("chips only the highest priority", () => {
+    render(<App />);
+    authed();
+    host({ type: "tasks", filter: "mine", tasks: [
+      mkTask({ key: "ASM-1", summary: "Urgent", priority: "Highest" }),
+      mkTask({ key: "ASM-2", summary: "Ordinary", priority: "High" }),
+    ] });
+    expect(within(screen.getByText("Urgent").closest(".card")!).getByText("Highest")).toBeInTheDocument();
+    expect(within(screen.getByText("Ordinary").closest(".card")!).queryByText("Highest")).not.toBeInTheDocument();
+  });
+
   it("shows an Address PR button on a card in the configured PR-review status", () => {
     withTask(mkTask({ key: "ASM-9", status: "PR initiated", statusCategory: "indeterminate" }));
     expect(screen.getByRole("button", { name: /Address PR/i })).toBeInTheDocument();
@@ -731,7 +753,8 @@ describe("task card actions", () => {
   it("renders the estimate and service chips", () => {
     withTask(mkTask({ key: "ASM-1", estimateSeconds: 3600, services: ["centaur"] }));
     expect(screen.getByText(/1h/)).toBeInTheDocument();
-    expect(screen.getByText("centaur")).toBeInTheDocument();
+    // ~ marks it as inferred, matching the Deck's ~inferred convention.
+    expect(screen.getByText("~centaur")).toBeInTheDocument();
   });
 
   it("shows ticket detail once it arrives", () => {
@@ -813,7 +836,8 @@ describe("task card actions", () => {
     withChips({ inferred: ["pricing-api"] });
     fireEvent.click(screen.getByText("Fix bug")); // collapse
     const meta = document.querySelector(".meta") as HTMLElement;
-    expect(within(meta).getByText("pricing-api")).toBeInTheDocument();
+    // The ~ prefix marks it as inferred, matching the Deck's ~inferred convention.
+    expect(within(meta).getByText("~pricing-api")).toBeInTheDocument();
   });
 
   /** Add a repo the way a user does: open the RepoPicker, filter to one match,

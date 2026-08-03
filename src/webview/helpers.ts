@@ -48,12 +48,25 @@ export function isPrReviewStatus(status: string, configured: string): boolean {
   return a.length > 0 && b.length > 0 && a === b;
 }
 
-/** Map a Jira priority name to its card CSS class. Pure. */
-export function prioClass(p: string): string {
-  const s = (p || "").toLowerCase();
-  if (s === "highest" || s === "high") return "p-high";
-  if (s === "medium") return "p-med";
-  return "p-low";
+/**
+ * The card's left rail answers "where is this in the flow?", the same question the
+ * Deck's rail answers — it used to answer "how urgent is this?", which meant the
+ * same visual position meant two things across two surfaces. Jira's statusCategory
+ * is the only status axis the sidebar receives, so there are exactly three hues.
+ */
+export function railClass(statusCategory: string | undefined): string {
+  if (statusCategory === "indeterminate") return "s-progress";
+  if (statusCategory === "done") return "s-done";
+  return "s-new";
+}
+
+/**
+ * Urgency moved off the rail and onto a chip, because a chip can be ignored and a
+ * 3px rail cannot. Highest only — flagging High as well made a third of the pool
+ * urgent, which is the same as flagging none of it.
+ */
+export function isTopPriority(priority: string): boolean {
+  return (priority || "").toLowerCase() === "highest";
 }
 
 /** Append `x` unless it's already there, returning the original array when it is —

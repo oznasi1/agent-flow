@@ -96,23 +96,32 @@ export const CSS = `
   .card.drop-before { box-shadow: inset 0 2px 0 0 var(--vscode-focusBorder); }
   .card.drop-after  { box-shadow: inset 0 -2px 0 0 var(--vscode-focusBorder); }
 
-  .card { position: relative; border: 1px solid var(--vscode-panel-border);
-    border-radius: 6px; background: var(--vscode-editor-background);
-    padding: 9px 11px 9px 14px; overflow: hidden; }
-  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
-  .card.p-high::before { background: var(--c-danger); }
-  .card.p-med::before  { background: var(--c-idle); }
-  .card.p-low::before  { background: var(--vscode-panel-border); }
-  .card:hover { border-color: var(--vscode-focusBorder); }
+  .card { position: relative; border: 1px solid var(--hair); border-radius: var(--r-card);
+    background: color-mix(in srgb, var(--vscode-foreground) 4%, var(--vscode-editor-background));
+    padding: 9px 11px 9px 14px; overflow: hidden;
+    transition: border-color .12s ease, background-color .12s ease; }
+  .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+    background: var(--rail); opacity: .5; }
+  .card.s-new      { --rail: var(--dim); }
+  .card.s-progress { --rail: var(--c-progress); }
+  .card.s-done     { --rail: var(--c-done); }
+  .card:hover { border-color: color-mix(in srgb, var(--vscode-foreground) 25%, transparent); }
+  .card:focus-within { border-color: var(--vscode-focusBorder); }
 
   .card-main { cursor: pointer; }
   .card-top { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; row-gap: 6px; margin-bottom: 3px; }
   .chev { color: var(--vscode-descriptionForeground); font-size: 14px; line-height: 1;
     width: 10px; display: inline-block; transition: transform .12s ease; }
   .chev.open { transform: rotate(90deg); }
-  .key { font-family: var(--vscode-editor-font-family, monospace); font-size: 11px;
-    color: var(--vscode-textLink-foreground); text-decoration: none; }
-  .key:hover { text-decoration: underline; }
+  /* An identifier: mono, dim, and the link affordance arrives on hover — a blue
+     key on every card was six links competing with the one button that matters. */
+  .key { font-family: var(--mono); font-size: var(--t-data); color: var(--dim); text-decoration: none; }
+  .key:hover { color: var(--vscode-textLink-foreground); }
+
+  /* Urgency, and only at the top level. --c-attn, never --c-danger: an urgent
+     ticket is not a broken one. */
+  .p-top { font-size: var(--t-micro); font-weight: 600; padding: 0 5px; border-radius: var(--r-chip);
+    color: var(--c-attn); border: 1px solid color-mix(in srgb, var(--c-attn) 45%, transparent); }
   .status { font-size: 10px; padding: 1px 7px; border-radius: 10px;
     color: var(--vscode-descriptionForeground); border: 1px solid var(--vscode-panel-border); }
   .status-btn { display: inline-flex; align-items: center; gap: 3px; cursor: pointer;
@@ -135,35 +144,17 @@ export const CSS = `
   /* Right-aligned action cluster; wraps together to its own line if the row is tight */
   .card-actions { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; }
 
-  /* Secondary action: add to my sprint (assign to me + active sprint) */
-  .sprint-add { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500;
-    padding: 3px 11px 3px 9px; border-radius: 14px; cursor: pointer; white-space: nowrap;
-    border: 1px solid var(--vscode-panel-border); background: transparent;
-    color: var(--vscode-foreground);
-    transition: color .12s ease, border-color .12s ease, background .12s ease; }
-  .sprint-add:hover { color: var(--vscode-foreground); border-color: var(--vscode-focusBorder);
-    background: var(--vscode-toolbar-hoverBackground); }
-  .sprint-add svg { display: block; }
-
-  /* Secondary action: remove from my sprint (move to backlog) */
-  .sprint-remove { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500;
-    padding: 3px 11px 3px 9px; border-radius: 14px; cursor: pointer; white-space: nowrap;
-    border: 1px solid var(--vscode-panel-border); background: transparent;
-    color: var(--vscode-descriptionForeground);
-    transition: color .12s ease, border-color .12s ease, background .12s ease; }
-  .sprint-remove:hover { color: var(--vscode-foreground); border-color: var(--vscode-focusBorder);
-    background: var(--vscode-toolbar-hoverBackground); }
-  .sprint-remove svg { display: block; }
-
-  /* PR-review kick-off: outlined like sprint-add, tinted to read as "ready to ship" */
-  .address-pr { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500;
-    padding: 3px 11px 3px 9px; border-radius: 14px; cursor: pointer; white-space: nowrap;
-    border: 1px solid var(--c-done); background: transparent;
-    color: var(--c-done);
-    transition: color .12s ease, border-color .12s ease, background .12s ease; }
-  .address-pr:hover { border-color: var(--vscode-focusBorder);
-    background: var(--vscode-toolbar-hoverBackground); }
-  .address-pr svg { display: block; }
+  /* Address PR gives up its green: green means Done on the Deck, and a PR waiting
+     on you is the opposite of done. */
+  .address-pr, .sprint-add, .sprint-remove {
+    display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-body); font-weight: 500;
+    height: 24px; padding: 0 10px; border-radius: var(--r-ctl); cursor: pointer; white-space: nowrap;
+    border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
+    transition: background-color .12s ease, border-color .12s ease; }
+  .sprint-remove { color: var(--dim); }
+  .address-pr:hover, .sprint-add:hover, .sprint-remove:hover {
+    background: var(--vscode-toolbar-hoverBackground);
+    border-color: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); }
 
   .detail { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
   .detail-loading { font-size: 11px; color: var(--vscode-descriptionForeground); }
@@ -225,9 +216,11 @@ export const CSS = `
   .meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .assignee { font-size: 11px; color: var(--vscode-descriptionForeground); }
   .assignee.unassigned { color: var(--c-idle); }
-  .svc { font-size: 10px; padding: 1px 6px; border-radius: 4px;
-    background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
-  .svc.guess { opacity: .8; font-style: italic; }
+  /* Repo names are identifiers, so mono; an inferred one wears a ~ rather than
+     italics, matching the Deck's ~inferred convention. */
+  .svc { font-family: var(--mono); font-size: var(--t-data); padding: 1px 6px;
+    border-radius: var(--r-chip); border: 1px solid var(--hair); color: var(--dim); }
+  .svc.guess { font-style: normal; opacity: .8; }
 
   .empty, .gate { text-align: center; color: var(--vscode-descriptionForeground);
     padding: 28px 12px; font-size: 12px; }
@@ -245,13 +238,12 @@ export const CSS = `
     padding: 8px 11px; border-radius: 7px; font-size: 12px; line-height: 1.4;
     background: var(--vscode-notifications-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
     color: var(--vscode-notifications-foreground, var(--vscode-foreground));
-    border: 1px solid var(--vscode-notifications-border, var(--vscode-panel-border));
-    border-left-width: 3px; box-shadow: 0 4px 14px rgba(0,0,0,.35);
+    border: 1px solid var(--hair); box-shadow: 0 6px 20px -8px rgba(0,0,0,.5);
     animation: toast-in .16s ease; }
   @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-  .toast--success { border-left-color: var(--c-done); }
-  .toast--error   { border-left-color: var(--c-danger); }
-  .toast--info    { border-left-color: var(--vscode-focusBorder); }
+  .toast--success { border-color: var(--c-done); }
+  .toast--error   { border-color: var(--c-danger); }
+  .toast--info    { border-color: var(--vscode-focusBorder); }
   .toast-ico { flex: none; font-weight: 700; line-height: 1.4; }
   .toast--success .toast-ico { color: var(--c-done); }
   .toast--error .toast-ico   { color: var(--c-danger); }

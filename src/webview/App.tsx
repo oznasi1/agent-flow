@@ -1,7 +1,7 @@
 import * as React from "react";
 import Fuse from "fuse.js";
 import { send } from "./vscodeApi";
-import { addOnce, deriveStatuses, fmtEst, isPrReviewStatus, matchesStatus, moveKey, prioClass } from "./helpers";
+import { addOnce, deriveStatuses, fmtEst, isPrReviewStatus, isTopPriority, matchesStatus, moveKey, railClass } from "./helpers";
 import { Filter, FilterVisibility, JiraTask, OutboundMessage, Size } from "../types";
 import { GaugeMark } from "./GaugeMark";
 
@@ -707,7 +707,7 @@ function TaskCard(props: {
   };
 
   const cls = [
-    "card", prioClass(task.priority),
+    "card", railClass(task.statusCategory),
     open ? "open" : "",
     dnd?.dragging ? "dragging" : "",
     dnd?.hint === "before" ? "drop-before" : dnd?.hint === "after" ? "drop-after" : "",
@@ -755,6 +755,7 @@ function TaskCard(props: {
             title="Open in Jira"
             onClick={(e) => e.stopPropagation() /* don't toggle expand; global handler opens externally */}
           >{task.key}</a>
+          {isTopPriority(task.priority) && <span className="p-top" title={`Priority: ${task.priority}`}>Highest</span>}
           {task.status && (
             <button
               className={`status status-btn status--${task.statusCategory || "new"}`}
@@ -807,7 +808,7 @@ function TaskCard(props: {
             {/* The edited list once a detail has loaded for this card, falling back
                 to the inferred guess until then. */}
             {(detail?.selected ?? task.services ?? []).map((s) => (
-              <span key={s} className="svc guess">{s}</span>
+              <span key={s} className="svc guess" title="Inferred from the ticket, not recorded on it">~{s}</span>
             ))}
           </div>
         )}

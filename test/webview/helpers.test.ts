@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addOnce, deriveStatuses, fmtEst, isPrReviewStatus, matchesStatus, moveKey, prioClass } from "../../src/webview/helpers";
+import { addOnce, deriveStatuses, fmtEst, isPrReviewStatus, isTopPriority, matchesStatus, moveKey, railClass } from "../../src/webview/helpers";
 import { mkTask } from "../_helpers/factories";
 
 const tasks = (...keys: string[]) => keys.map((k) => mkTask({ key: k }));
@@ -25,19 +25,30 @@ describe("fmtEst", () => {
   });
 });
 
-describe("prioClass", () => {
-  it("maps highest/high to p-high", () => {
-    expect(prioClass("Highest")).toBe("p-high");
-    expect(prioClass("High")).toBe("p-high");
+describe("railClass", () => {
+  it("maps Jira's three status categories onto the three rail hues", () => {
+    expect(railClass("new")).toBe("s-new");
+    expect(railClass("indeterminate")).toBe("s-progress");
+    expect(railClass("done")).toBe("s-done");
   });
 
-  it("maps medium to p-med", () => {
-    expect(prioClass("Medium")).toBe("p-med");
+  it("treats an unknown or missing category as not started", () => {
+    expect(railClass(undefined)).toBe("s-new");
+    expect(railClass("")).toBe("s-new");
+    expect(railClass("wat")).toBe("s-new");
+  });
+});
+
+describe("isTopPriority", () => {
+  it("is true for Highest only", () => {
+    expect(isTopPriority("Highest")).toBe(true);
+    expect(isTopPriority("highest")).toBe(true);
   });
 
-  it("maps anything else (incl. empty) to p-low", () => {
-    expect(prioClass("Low")).toBe("p-low");
-    expect(prioClass("")).toBe("p-low");
+  it("is false for every other level, including High", () => {
+    for (const p of ["High", "Medium", "Low", "Lowest", ""]) {
+      expect(isTopPriority(p)).toBe(false);
+    }
   });
 });
 
