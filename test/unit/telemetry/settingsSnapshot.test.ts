@@ -66,6 +66,11 @@ describe("settingsSnapshot", () => {
     const s = settingsSnapshot(cfg);
     expect(s.review_modes_custom).toBe(2);
     expect(s.review_modes_overridden).toBe(0);
+    // This cfg is hand-built, bypassing resolveModes — the real resolver would
+    // append the missing "full" built-in rather than list only these two
+    // customs, so "hidden: 1" alongside a resolved length of 2 is a state it
+    // could never actually produce. This pins modeCounts in isolation, not a
+    // reachable resolved list.
     expect(s.review_modes_hidden).toBe(1);
     expect(s.review_modes_count).toBe(2);
     expect(JSON.stringify(s)).not.toContain("acme-");
@@ -76,6 +81,11 @@ describe("settingsSnapshot", () => {
     const s = settingsSnapshot(cfg);
     expect(s.prompt_modes_custom).toBe(1);
     expect(s.prompt_modes_overridden).toBe(0);
+    // Same as the review-modes case above: this hand-built cfg bypasses
+    // resolveModes, so "hidden: 6" (every built-in) alongside a resolved
+    // length of 1 is a state the real resolver could never produce — an
+    // all-hidden list falls back to the built-ins there. This pins modeCounts
+    // in isolation, not a reachable resolved list.
     expect(s.prompt_modes_hidden).toBe(DEFAULT_PROMPT_MODES.length);
     expect(s.prompt_modes_count).toBe(1);
     expect(JSON.stringify(s)).not.toContain("mine");

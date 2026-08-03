@@ -202,6 +202,18 @@ describe("getConfig — promptModes layering", () => {
     expect(getConfig().promptModes.map((m) => m.id)).not.toContain("tdd");
   });
 
+  it("lets hidden win over a competing override of the same id, hidden entry first", () => {
+    // The mirror of the case above: the resolver's `hidden` filter runs after
+    // the merge, so which of the two entries comes first must not matter.
+    setConfig({
+      promptModes: [
+        { id: "tdd", hidden: true },
+        { id: "tdd", label: "Test-driven", prompt: "mine {key}" },
+      ],
+    });
+    expect(getConfig().promptModes.map((m) => m.id)).not.toContain("tdd");
+  });
+
   it("drops a custom mode marked hidden", () => {
     setConfig({
       promptModes: [
@@ -234,6 +246,14 @@ describe("getConfig — promptModes layering", () => {
     const modes = getConfig().promptModes;
     expect(modes.map((m) => m.id)).toEqual(stockIds);
     expect(modes[0].prompt).toBe("mine {key}");
+  });
+
+  it("trims a padded label but leaves an inherited prompt untouched", () => {
+    setConfig({ promptModes: [{ id: " plan ", label: "  My Plan  " }] });
+    const plan = getConfig().promptModes[0];
+    expect(plan.id).toBe("plan");
+    expect(plan.label).toBe("My Plan");
+    expect(plan.prompt).toBe(DEFAULT_PROMPT_MODES[0].prompt);
   });
 
   it("keeps the first of two overrides of the same id", () => {

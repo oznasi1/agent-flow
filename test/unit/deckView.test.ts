@@ -1487,6 +1487,24 @@ describe("DeckPanel review launch", () => {
     );
   });
 
+  it("raises a picker with exactly one custom review mode configured, offering it alongside the stock mode", async () => {
+    // The layering consequence finding 1 flags: a single custom entry used to
+    // keep the zero-friction launch (modes.length === 1 short-circuited the
+    // picker in resolveReviewMode). Layering now appends stock "full", making
+    // it 2, so the picker appears where it didn't before.
+    const ONE_MODE = [{ id: "backend", label: "Backend services", detail: "Backend review skill", prompt: "BE {number}" }];
+    setConfig({ reviewRequestModes: ONE_MODE });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ label: "Backend services", detail: "Backend review skill" }),
+        expect.objectContaining({ label: "Full review" }),
+      ],
+      expect.objectContaining({ title: "Review aws-ops#8491" }),
+    );
+  });
+
   it("creates nothing when the mode picker is cancelled", async () => {
     setConfig({ reviewRequestModes: TWO_MODES });
     window.showQuickPick.mockResolvedValueOnce(undefined);

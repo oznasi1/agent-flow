@@ -45,6 +45,12 @@ export function pickExplicit<T>(
   i: Inspected<T> | undefined,
 ): { value: T; target: vscode.ConfigurationTarget } | undefined {
   if (!i) return undefined;
+  // Neither agentFlow.promptModes nor agentFlow.reviewRequestModes declares a
+  // `scope` in package.json, so both are window-scoped and VS Code never
+  // actually reports a workspaceFolderValue for them — this branch is
+  // unreachable in practice. It stays anyway to mirror explicitConfigValue's
+  // precedence in config.ts; the two functions agreeing is the point, even
+  // though only two of the three scopes here are ever exercised.
   if (i.workspaceFolderValue !== undefined) {
     return { value: i.workspaceFolderValue, target: vscode.ConfigurationTarget.WorkspaceFolder };
   }
@@ -72,6 +78,11 @@ export function affectedFromInspect(
 ): Affected | undefined {
   const explicit = pickExplicit(i);
   if (!explicit || !Array.isArray(explicit.value)) return undefined;
+  // An explicit `[]` already resolves to the built-ins today, before this
+  // function ever runs — nothing is about to change for that user, so treat
+  // it the same as an untouched setting rather than reporting every built-in
+  // as newly missing.
+  if (!explicit.value.length) return undefined;
   const listed = new Set<string>();
   for (const raw of explicit.value) {
     if (!raw || typeof raw !== "object") continue;
@@ -110,7 +121,7 @@ export async function maybeShowModesNotice(
 
     const n = affected.reduce((sum, a) => sum + a.missing.length, 0);
     const choice = await vscode.window.showInformationMessage(
-      `Your customized prompt modes now layer on top of the built-in ones — ${n} new ` +
+      `Your customized prompt mode lists now layer on top of the built-in ones — ${n} new ` +
         `${n === 1 ? "mode is" : "modes are"} showing.`,
       DETAILS,
       HIDE,

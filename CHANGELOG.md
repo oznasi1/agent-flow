@@ -18,7 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   add a mode of your own, and `{"id": "tdd", "hidden": true}` to drop a built-in.
   Modes you don't list are appended, so future built-ins reach you too. If your
   list omitted built-ins, a one-time notification offers to hide the newcomers
-  and keep the picker you had.
+  and keep the picker you had. If your `reviewRequestModes` held a single mode,
+  **Review with agent** now asks which mode to use, because the built-in
+  **Full review** is offered alongside yours — **Hide the new ones** (or a
+  `hidden: true` entry) restores the single-click launch.
 
 ## [0.1.48] — 2026-08-03
 

@@ -294,8 +294,9 @@ asks which environment to check the repos you picked against — from
 inspects their logs, error rates, metrics and traces, and deployed version there. Edit any Explore prompt
 under `agentFlow.explorePrompts.*`, or pin one action with `agentFlow.exploreMode`.
 **Review with agent** works the same way on its own list: one **Full review** mode ships,
-and once you add a second — a backend-services reviewer and a frontend one, say — clicking
-asks which to seed. Pin one with `agentFlow.reviewRequestMode`. The **Address PR** kick-off
+and once you add one of your own — a backend-services reviewer, say — clicking asks which to
+seed, since your entry joins **Full review** rather than replacing it. Pin one with
+`agentFlow.reviewRequestMode`. The **Address PR** kick-off
 always runs in a worktree. Per-task worktrees are created inside each repo at
 `.claude/worktrees/<KEY>` (and git-excluded automatically).
 

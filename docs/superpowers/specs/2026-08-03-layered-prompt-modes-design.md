@@ -183,8 +183,9 @@ consuming `PromptMode[]`, and `hidden` never reaches them — it is resolved awa
   a dead end with no in-product way out, so it is not a reachable state.
 - `taskMode` / `reviewRequestMode` naming a hidden or unknown id keeps today's
   behavior: fall back to showing the picker.
-- The notice never throws; a failed settings write surfaces as a VS Code error
-  and leaves the resolved list correct regardless.
+- The notice never throws; a failed settings write is best-effort and its
+  failure is swallowed along with everything else in that path, leaving the
+  resolved list correct regardless.
 
 ## Testing
 

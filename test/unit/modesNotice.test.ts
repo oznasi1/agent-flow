@@ -3,6 +3,7 @@ import * as vscode from "../_mocks/vscode";
 import { DEFAULT_PROMPT_MODES } from "../../src/config";
 import {
   affectedFromInspect,
+  LAYERING_DOCS_URL,
   maybeShowModesNotice,
   MODES_NOTICE_KEY,
   pickExplicit,
@@ -72,6 +73,12 @@ describe("affectedFromInspect", () => {
     ).toBeUndefined();
   });
 
+  it("reports nothing for an explicit empty array — it already resolved to the built-ins before this ever runs", () => {
+    expect(
+      affectedFromInspect({ key: "promptModes", globalValue: [] }, "promptModes", DEFAULT_PROMPT_MODES),
+    ).toBeUndefined();
+  });
+
   it("reports every built-in when the list names none of them", () => {
     const a = affectedFromInspect(
       { key: "promptModes", globalValue: [{ id: "spike", label: "S", prompt: "p" }] },
@@ -114,6 +121,15 @@ describe("maybeShowModesNotice", () => {
     expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
+  it("says nothing for an explicit empty array — nothing changed for that user", async () => {
+    // promptModes: [] already resolved to the built-ins before affectedFromInspect
+    // ever runs (config.test.ts pins this), so this must not be told "6 new
+    // modes are showing" for a setting that, in effect, was never customized.
+    vscode.setConfig({ promptModes: [] });
+    await maybeShowModesNotice(ctx(), { setupRunning: false });
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
   it("shows once and records that it did", async () => {
     vscode.setConfig({ promptModes: [{ id: "plan" }] });
     const c = ctx();
@@ -145,7 +161,10 @@ describe("maybeShowModesNotice", () => {
     vscode.setConfig({ promptModes: [{ id: "plan" }] });
     vscode.window.showInformationMessage.mockResolvedValueOnce("What changed");
     await maybeShowModesNotice(ctx(), { setupRunning: false });
-    expect(vscode.env.openExternal).toHaveBeenCalled();
+    // LAYERING_DOCS_URL pointed at a CHANGELOG with no matching entry for two
+    // commits of this branch — asserting only that openExternal was called
+    // would have missed that regression entirely.
+    expect(String(vscode.env.openExternal.mock.calls[0][0])).toBe(LAYERING_DOCS_URL);
   });
 
   it("appends hidden entries for exactly the unlisted ids on 'Hide the new ones'", async () => {

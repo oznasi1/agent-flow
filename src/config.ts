@@ -309,7 +309,10 @@ function resolveModes(
     }
     if (seen.has(id)) continue;
     const builtIn = byId.get(id);
-    const label = nonBlank(entry.label) ?? builtIn?.label;
+    // Trimmed, unlike prompt below: a label is picker chrome, and padding in it
+    // would render literally, while padding in a prompt template can be
+    // intentional.
+    const label = nonBlank(entry.label)?.trim() ?? builtIn?.label;
     const prompt = nonBlank(entry.prompt) ?? builtIn?.prompt;
     // A mode of the user's own has no built-in to inherit from, so it needs both.
     if (!label || !prompt) continue;
@@ -403,9 +406,15 @@ export function getConfig(): AgentFlowConfig {
       if (explicitConfigValue<unknown>(c, "reviewRequestModes") !== undefined) {
         return resolveModes(c, "reviewRequestModes", DEFAULT_REVIEW_REQUEST_MODES);
       }
-      // Migrate a customized legacy reviewRequestPrompt into the stock mode.
+      // Migrate a customized legacy reviewRequestPrompt into the first built-in,
+      // carrying the rest of DEFAULT_REVIEW_REQUEST_MODES along with `slice(1)`
+      // rather than hand-building a one-element array — so if a second stock
+      // review mode ever ships, legacy-prompt users still receive it instead of
+      // freezing at just the one mode this migration patches.
       const legacy = explicitConfigValue<string>(c, "reviewRequestPrompt");
-      return legacy ? [{ ...DEFAULT_REVIEW_REQUEST_MODES[0], prompt: legacy }] : DEFAULT_REVIEW_REQUEST_MODES;
+      return legacy
+        ? [{ ...DEFAULT_REVIEW_REQUEST_MODES[0], prompt: legacy }, ...DEFAULT_REVIEW_REQUEST_MODES.slice(1)]
+        : DEFAULT_REVIEW_REQUEST_MODES;
     })(),
     reviewRequestMode: c.get<string>("reviewRequestMode") || "ask",
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,
