@@ -81,7 +81,7 @@
       },
       {
         "command": "agentFlow.openDeck",
-        "title": "Agent Flow Deck: Open the Deck (in-flight)",
+        "title": "Open the Deck (in-flight)",
         "icon": "$(dashboard)"
       },
       {

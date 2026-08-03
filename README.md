@@ -59,8 +59,8 @@ orchestrate, not ready to set up.
 
 ### The Deck — your in-flight board
 
-Once you've taken tasks, the **Deck** (open it with **"Agent Flow Deck: Open the Deck
-(in-flight)"**) is the board of everything you've launched, in a classic pipeline —
+Once you've taken tasks, the **Deck** (open it with **"Open the Deck (in-flight)"**)
+is the board of everything you've launched, in a classic pipeline —
 **In progress · Action required · In review · Done**.
 
 <img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Done). Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a best-effort live agent status (working, idle, ended turn, parked, or merged), the PR and CI state, the Jira status, and Open / Diff actions. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button; a summary strip counts each column and the Live-signal and PR-facts toggles are on." />

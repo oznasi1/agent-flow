@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **One name everywhere: Agent Flow Deck.** The marketplace listing already said it,
   but every surface inside the extension still said "Agent Flow" — a name other tools
-  use too. Command palette entries are now `Agent Flow Deck: …`, and so are the
+  use too. Command palette entries are now `Agent Flow Deck: …` — except the Deck's
+  own, which would have read "Agent Flow Deck: Open the Deck (in-flight)" and is now
+  simply **Open the Deck (in-flight)**. Renamed too are the
   activity-bar and settings titles, the output channel, the Deck and Marketplace
   window titles, the Doctor report, the setup steps, and every notification, empty
   state and setting description. Review comments drafted from the Deck sign off with
