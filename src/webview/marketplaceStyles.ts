@@ -18,9 +18,8 @@ export const MARKETPLACE_CSS = `
   .btn { cursor: pointer; font-family: inherit; font-size: 12px; padding: 5px 11px; border-radius: 6px;
     border: 1px solid var(--hair); background: transparent; color: var(--vscode-foreground); }
   .btn:hover { background: var(--vscode-toolbar-hoverBackground); }
-  .btn.pri { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-    border-color: var(--vscode-button-background); }
-  .btn.pri:hover { background: var(--vscode-button-hoverBackground); }
+  .btn.pri { background: var(--brand); color: var(--brand-ink); border-color: var(--brand); }
+  .btn.pri:hover { background: color-mix(in srgb, var(--brand) 84%, var(--vscode-foreground)); }
 
   .bar { flex: none; padding: 11px 18px; display: flex; flex-direction: column; gap: 9px;
     border-bottom: 1px solid var(--hair); }

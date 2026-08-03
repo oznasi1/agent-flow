@@ -41,7 +41,20 @@ export const TOKENS_CSS = `
     --r-card: 10px;
     --r-ctl: 6px;
     --r-chip: 5px;
+
+    /* The one fixed hue in the product. Measured 5.57:1 on the dark editor ground
+       and 6.00:1 on the dark sidebar; the light variant exists because #2AA79B on
+       white is 2.96:1, which fails. */
+    --brand: #2AA79B;
+    --brand-ink: #04211E;
   }
+
+  /* VS Code stamps the theme kind onto <body>, so the swap needs no JavaScript. */
+  body.vscode-light { --brand: #157F76; --brand-ink: #ffffff; }
+  /* A user who chose high contrast chose it for a reason. The accent steps aside
+     entirely rather than tinting a theme built to avoid tint. */
+  body.vscode-high-contrast,
+  body.vscode-high-contrast-light { --brand: currentColor; }
 `;
 
 // box-sizing and the reduced-motion query were common to all three surfaces;

@@ -11,6 +11,7 @@ const OWNED = [
   "--c-progress", "--c-attn", "--c-review", "--c-done", "--c-idle", "--c-danger",
   "--k-skill", "--k-command", "--k-agent", "--k-hook", "--k-plugin",
   "--hair", "--edge", "--mono", "--dim",
+  "--brand", "--brand-ink",
 ];
 
 const SURFACES: [string, string][] = [
@@ -69,5 +70,29 @@ describe.each(SURFACES)("%s sheet", (_name, sheet) => {
   it("carries no reset of its own", () => {
     expect(sheet).not.toContain("box-sizing");
     expect(sheet).not.toContain("prefers-reduced-motion");
+  });
+});
+
+describe("brand accent", () => {
+  it("declares the dark default, the light override and the high-contrast opt-out", () => {
+    expect(TOKENS_CSS).toContain("--brand: #2AA79B");
+    expect(TOKENS_CSS).toContain("--brand-ink: #04211E");
+    expect(TOKENS_CSS).toMatch(/body\.vscode-light\s*{[^}]*--brand:\s*#157F76/);
+    expect(TOKENS_CSS).toMatch(/body\.vscode-light\s*{[^}]*--brand-ink:\s*#ffffff/);
+    expect(TOKENS_CSS).toMatch(/body\.vscode-high-contrast[^{]*{[^}]*--brand:\s*currentColor/);
+  });
+
+  // The board's rule: one card at a time gets to be loud, and the loud one is
+  // orange. A teal button inside the attention card would be a second claim on
+  // the same attention.
+  it("never reaches a .attn selector on the Deck", () => {
+    const attnBlocks = [...DECK_CSS.matchAll(/([^}]*\.attn[^{]*){([^}]*)}/g)].map((m) => m[2]);
+    expect(attnBlocks.length).toBeGreaterThan(0);
+    expect(attnBlocks.filter((b) => b.includes("--brand"))).toEqual([]);
+  });
+
+  it("is spent on exactly the three agreed surfaces", () => {
+    const users = SURFACES.filter(([, sheet]) => sheet.includes("var(--brand"));
+    expect(users.map(([name]) => name).sort()).toEqual(["deck", "marketplace", "sidebar"]);
   });
 });

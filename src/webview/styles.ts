@@ -140,12 +140,11 @@ export const CSS = `
   .status--indeterminate { color: var(--c-idle); }
   .status--done { color: var(--c-done); }
   .spacer { flex: 1; }
-  .take { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500;
-    padding: 3px 11px 3px 9px; border-radius: 14px; cursor: pointer; border: none;
-    background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-    transition: transform .08s ease, background .12s ease; }
-  .take:hover { background: var(--vscode-button-hoverBackground); transform: translateY(-1px); }
-  .take:active { transform: translateY(0); }
+  .take { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+    padding: 3px 11px 3px 9px; border-radius: var(--r-ctl); cursor: pointer; border: none;
+    background: var(--brand); color: var(--brand-ink);
+    transition: background .12s ease; }
+  .take:hover { background: color-mix(in srgb, var(--brand) 84%, var(--vscode-foreground)); }
   .take-icon { display: block; }
 
   /* Right-aligned action cluster; wraps together to its own line if the row is tight */

@@ -202,8 +202,9 @@ export const DECK_CSS = `
     transition: background-color .12s ease, border-color .12s ease, color .12s ease; }
   .act:hover { background: var(--vscode-toolbar-hoverBackground); border-color: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); }
   .act.primary { font-weight: 600;
-    background: color-mix(in srgb, var(--vscode-foreground) 14%, var(--vscode-editor-background));
-    border-color: color-mix(in srgb, var(--vscode-foreground) 28%, transparent); }
+    background: color-mix(in srgb, var(--brand) 13%, transparent);
+    border-color: color-mix(in srgb, var(--brand) 52%, transparent);
+    color: color-mix(in srgb, var(--brand) 72%, var(--vscode-foreground)); }
   .act.primary:hover { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
     border-color: var(--vscode-button-background); }
   /* The board's only colored call to action, on the only card that is asking for one.
