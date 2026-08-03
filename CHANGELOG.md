@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.48] — 2026-08-03
+
 ### Changed
 
 - **Take's repo confirmation puts the pre-checked repos on top.** The
