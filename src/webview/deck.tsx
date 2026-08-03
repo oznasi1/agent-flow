@@ -2,11 +2,16 @@ import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { DeckApp } from "./DeckApp";
 import { DECK_CSS } from "./deckStyles";
+import { BASE_CSS, TOKENS_CSS } from "./tokens";
 import { send } from "./vscodeApi";
 
-const style = document.createElement("style");
-style.textContent = DECK_CSS;
-document.head.appendChild(style);
+// Tokens first, then the reset, then the surface sheet: later sheets must win
+// specificity ties against the reset, not the other way round.
+for (const css of [TOKENS_CSS, BASE_CSS, DECK_CSS]) {
+  const style = document.createElement("style");
+  style.textContent = css;
+  document.head.appendChild(style);
+}
 
 // Same defense-in-depth as the Tasks webview: any external link click goes to the
 // host to open in the real browser, never navigating the panel iframe away.

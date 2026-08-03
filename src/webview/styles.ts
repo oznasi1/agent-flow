@@ -1,7 +1,6 @@
 // Injected into the webview <head>. Uses VS Code theme variables so it matches
 // the user's editor theme (light or dark) automatically, with subtle accents.
 export const CSS = `
-  * { box-sizing: border-box; }
   body { margin: 0; padding: 0;
     font-family: var(--vscode-font-family);
     font-size: var(--vscode-font-size, 13px);
@@ -116,8 +115,8 @@ export const CSS = `
     border-radius: 6px; background: var(--vscode-editor-background);
     padding: 9px 11px 9px 14px; overflow: hidden; }
   .card::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
-  .card.p-high::before { background: var(--vscode-editorError-foreground, #f85149); }
-  .card.p-med::before  { background: var(--vscode-editorWarning-foreground, #d29922); }
+  .card.p-high::before { background: var(--c-danger); }
+  .card.p-med::before  { background: var(--c-idle); }
   .card.p-low::before  { background: var(--vscode-panel-border); }
   .card:hover { border-color: var(--vscode-focusBorder); }
 
@@ -138,8 +137,8 @@ export const CSS = `
   .status-btn:hover .status-caret { opacity: 1; }
   /* Colour per status category */
   .status--new { color: var(--vscode-descriptionForeground); }
-  .status--indeterminate { color: var(--vscode-charts-yellow, #d29922); }
-  .status--done { color: var(--vscode-charts-green, #3fb950); }
+  .status--indeterminate { color: var(--c-idle); }
+  .status--done { color: var(--c-done); }
   .spacer { flex: 1; }
   .take { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500;
     padding: 3px 11px 3px 9px; border-radius: 14px; cursor: pointer; border: none;
@@ -175,8 +174,8 @@ export const CSS = `
   /* PR-review kick-off: outlined like sprint-add, tinted to read as "ready to ship" */
   .address-pr { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500;
     padding: 3px 11px 3px 9px; border-radius: 14px; cursor: pointer; white-space: nowrap;
-    border: 1px solid var(--vscode-charts-green, #3fb950); background: transparent;
-    color: var(--vscode-charts-green, #3fb950);
+    border: 1px solid var(--c-done); background: transparent;
+    color: var(--c-done);
     transition: color .12s ease, border-color .12s ease, background .12s ease; }
   .address-pr:hover { border-color: var(--vscode-focusBorder);
     background: var(--vscode-toolbar-hoverBackground); }
@@ -217,7 +216,6 @@ export const CSS = `
     background: var(--vscode-input-background, var(--vscode-editor-background));
     animation: repo-in .12s ease; }
   @keyframes repo-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
-  @media (prefers-reduced-motion: reduce) { .repo-combo, .repo-pop { animation: none; } }
 
   .repo-search { display: flex; align-items: center; gap: 7px; padding: 6px 10px;
     border-bottom: 1px solid var(--vscode-panel-border); }
@@ -242,7 +240,7 @@ export const CSS = `
   .summary { font-size: 12.5px; line-height: 1.4; margin: 2px 0 6px; }
   .meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .assignee { font-size: 11px; color: var(--vscode-descriptionForeground); }
-  .assignee.unassigned { color: var(--vscode-editorWarning-foreground, #d29922); }
+  .assignee.unassigned { color: var(--c-idle); }
   .svc { font-size: 10px; padding: 1px 6px; border-radius: 4px;
     background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
   .svc.guess { opacity: .8; font-style: italic; }
@@ -267,14 +265,13 @@ export const CSS = `
     border-left-width: 3px; box-shadow: 0 4px 14px rgba(0,0,0,.35);
     animation: toast-in .16s ease; }
   @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-  @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
-  .toast--success { border-left-color: var(--vscode-charts-green, #3fb950); }
-  .toast--error   { border-left-color: var(--vscode-errorForeground, #f85149); }
-  .toast--info    { border-left-color: var(--vscode-focusBorder, #4daafc); }
+  .toast--success { border-left-color: var(--c-done); }
+  .toast--error   { border-left-color: var(--c-danger); }
+  .toast--info    { border-left-color: var(--vscode-focusBorder); }
   .toast-ico { flex: none; font-weight: 700; line-height: 1.4; }
-  .toast--success .toast-ico { color: var(--vscode-charts-green, #3fb950); }
-  .toast--error .toast-ico   { color: var(--vscode-errorForeground, #f85149); }
-  .toast--info .toast-ico    { color: var(--vscode-focusBorder, #4daafc); }
+  .toast--success .toast-ico { color: var(--c-done); }
+  .toast--error .toast-ico   { color: var(--c-danger); }
+  .toast--info .toast-ico    { color: var(--vscode-focusBorder); }
   .toast-msg { flex: 1; }
   .toast-action { flex: none; align-self: flex-start; cursor: pointer; font-size: 11px;
     padding: 2px 8px; border-radius: 4px; white-space: nowrap;

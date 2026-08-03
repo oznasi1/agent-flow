@@ -1,7 +1,6 @@
 // Injected into the Marketplace panel <head>. Uses VS Code theme variables so it
 // matches the editor theme (light or dark). Mirrors the Deck's visual grammar.
 export const MARKETPLACE_CSS = `
-  * { box-sizing: border-box; }
   html, body { height: 100%; }
   body { margin: 0;
     font-family: var(--vscode-font-family);
@@ -9,16 +8,6 @@ export const MARKETPLACE_CSS = `
     color: var(--vscode-foreground);
     background: var(--vscode-editor-background); }
   #root { height: 100vh; display: flex; flex-direction: column; }
-
-  :root {
-    --hair: var(--vscode-panel-border);
-    --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
-    --skill: var(--vscode-charts-blue, #4aa3df);
-    --command: var(--vscode-charts-green, #4ac26b);
-    --agent: var(--vscode-charts-purple, #b083f0);
-    --hook: var(--vscode-charts-yellow, #d7a531);
-    --plugin: var(--vscode-descriptionForeground);
-  }
 
   .hd { flex: none; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     padding: 13px 18px; border-bottom: 1px solid var(--hair); }
@@ -93,11 +82,11 @@ export const MARKETPLACE_CSS = `
 
   .glyph { flex: none; width: 19px; height: 19px; border-radius: 5px; display: inline-flex;
     align-items: center; justify-content: center; font-size: 10.5px; font-weight: 700; font-family: var(--mono); }
-  .t-skill .glyph { background: color-mix(in srgb, var(--skill) 18%, transparent); color: var(--skill); }
-  .t-command .glyph { background: color-mix(in srgb, var(--command) 18%, transparent); color: var(--command); }
-  .t-agent .glyph { background: color-mix(in srgb, var(--agent) 18%, transparent); color: var(--agent); }
-  .t-hook .glyph { background: color-mix(in srgb, var(--hook) 18%, transparent); color: var(--hook); }
-  .t-plugin .glyph { background: color-mix(in srgb, var(--plugin) 18%, transparent); color: var(--plugin); }
+  .t-skill .glyph { background: color-mix(in srgb, var(--k-skill) 18%, transparent); color: var(--k-skill); }
+  .t-command .glyph { background: color-mix(in srgb, var(--k-command) 18%, transparent); color: var(--k-command); }
+  .t-agent .glyph { background: color-mix(in srgb, var(--k-agent) 18%, transparent); color: var(--k-agent); }
+  .t-hook .glyph { background: color-mix(in srgb, var(--k-hook) 18%, transparent); color: var(--k-hook); }
+  .t-plugin .glyph { background: color-mix(in srgb, var(--k-plugin) 18%, transparent); color: var(--k-plugin); }
 
   .detail { flex: 0 0 44%; min-width: 340px; overflow-y: auto; padding: 18px;
     display: flex; flex-direction: column; gap: 11px; }

@@ -12,7 +12,6 @@
 //    That is why the primary button is a quiet surface everywhere except in Action
 //    required — six identical bright slabs signal nothing.
 export const DECK_CSS = `
-  * { box-sizing: border-box; }
   html, body { height: 100%; }
   body { margin: 0;
     font-family: var(--vscode-font-family);
@@ -21,44 +20,8 @@ export const DECK_CSS = `
     background: var(--vscode-editor-background);
     overflow: hidden; }
   #root { height: 100vh; display: flex; flex-direction: column; }
-  button { font: inherit; color: inherit; }
-  :focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; border-radius: 4px; }
-  @media (prefers-reduced-motion: reduce) {
-    * { transition: none !important; animation: none !important; }
-  }
 
   :root {
-    /* Column accents. */
-    --c-progress: var(--vscode-charts-blue, #4aa3df);
-    --c-attn:    var(--vscode-charts-orange, #e0913a);
-    --c-review:  var(--vscode-charts-purple, #b083f0);
-    --c-done:    var(--vscode-charts-green, #4ac26b);
-    /* Warm but passive: an idle agent or an uncommitted file is worth noticing, not
-       worth acting on. Deliberately paler than --c-attn, which is the call to act. */
-    --c-idle:    var(--vscode-charts-yellow, #d7a531);
-    /* Something is actually broken or destructive: failing checks, deletions, Forget. */
-    --c-danger:  var(--vscode-charts-red, #e5534b);
-
-    --hair: var(--vscode-panel-border);
-    /* Controls need an edge that survives sitting on a card, which is already 4%
-       lighter than the editor background — panelBorder disappears against it, which is
-       what made Diff look like a bare label next to Open. */
-    --edge: color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
-    --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
-    --dim: var(--vscode-descriptionForeground);
-
-    /* Type scale. Four steps plus the two header sizes — every font-size below is
-       one of these, so a new element can't quietly invent a seventh. */
-    --t-micro: 10px;   /* stat labels, branch */
-    --t-data: 10.5px;  /* mono identifiers, PR table */
-    --t-body: 11px;    /* status, meta, controls, legend */
-    --t-title: 13px;   /* card summary */
-
-    /* One radius per role. */
-    --r-card: 10px;
-    --r-ctl: 6px;
-    --r-chip: 5px;
-
     /* Six rows, plus a deliberate half-row peek: a clean cut at a row boundary reads as
        "the list ends here", where a sliced row reads as "there is more" — and that is the
        only scroll hint this container gets. Derived, so the intent survives a row-height
