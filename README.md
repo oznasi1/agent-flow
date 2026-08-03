@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="media/icon.png" alt="Agent Flow logo" width="96" height="96" />
+<img src="media/icon.png" alt="Agent Flow Deck logo" width="96" height="96" />
 
-# Agent Flow
+# Agent Flow Deck
 
 **Grab a Jira task and spin up its workspace** — a task pool in your VS Code / Cursor
 sidebar that opens the right repos and pre-seeds a Claude Code agent.
@@ -11,13 +11,13 @@ sidebar that opens the right repos and pre-seeds a Claude Code agent.
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![VS Code ^1.90.0](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC?logo=visualstudiocode&logoColor=white)
 
-<img src="media/screenshot.png" alt="The Agent Flow task pool in the VS Code sidebar — filter tabs, size and status lenses, a repo multiselect and a fuzzy title search, and per-card Take / Address PR actions" width="420" />
+<img src="media/screenshot.png" alt="The Agent Flow Deck task pool in the VS Code sidebar — filter tabs, size and status lenses, a repo multiselect and a fuzzy title search, and per-card Take / Address PR actions" width="420" />
 
 </div>
 
 ---
 
-Agent Flow turns *"what should I work on?"* into a workspace with an agent already primed.
+Agent Flow Deck turns *"what should I work on?"* into a workspace with an agent already primed.
 
 Pick a Jira task → it infers which repos the task touches → opens them as a workspace →
 seeds a task brief and pre-fills a Claude Code agent with the plan. You land ready to
@@ -59,7 +59,7 @@ orchestrate, not ready to set up.
 
 ### The Deck — your in-flight board
 
-Once you've taken tasks, the **Deck** (open it with **"Agent Flow: Open the Deck
+Once you've taken tasks, the **Deck** (open it with **"Agent Flow Deck: Open the Deck
 (in-flight)"**) is the board of everything you've launched, in a classic pipeline —
 **In progress · Action required · In review · Done**.
 
@@ -121,13 +121,13 @@ you turn `agentFlow.stampLabelOnWrite` off.
 ### The Marketplace — browse your skills, commands & agents
 
 The **Marketplace** (open it with the puzzle-piece (`$(extensions)`) button beside the
-Deck's button in the sidebar title bar, or **"Agent Flow: Open the Marketplace"**) is a
+Deck's button in the sidebar title bar, or **"Agent Flow Deck: Open the Marketplace"**) is a
 searchable browser of everything Claude Code can do on this machine. It reads your local
 `~/.claude` — the marketplaces you've added, the plugins you've installed, and the skills,
 slash commands, agents and hooks inside them — plus any skills or commands you wrote
 yourself in `~/.claude` or in the open workspace's `.claude/`.
 
-<img src="media/marketplace.png" alt="The Agent Flow Marketplace: a search box over type pills (All, Skills, Commands, Agents, Hooks, Plugins) with live counts, scope pills (Everywhere, Installed only, Enabled only) and a Plugins picker, and a row of clickable marketplace tags. The browse list is grouped into category sections — Yours first, then Development — each row showing its type glyph, name, plugin, marketplace and blurb, with disabled ones struck through. The detail pane on the right shows the selected skill's tags, description, where it came from, a Copy snippet, Open file / Reveal in Finder actions, and its SKILL.md rendered underneath." />
+<img src="media/marketplace.png" alt="The Agent Flow Deck Marketplace: a search box over type pills (All, Skills, Commands, Agents, Hooks, Plugins) with live counts, scope pills (Everywhere, Installed only, Enabled only) and a Plugins picker, and a row of clickable marketplace tags. The browse list is grouped into category sections — Yours first, then Development — each row showing its type glyph, name, plugin, marketplace and blurb, with disabled ones struck through. The detail pane on the right shows the selected skill's tags, description, where it came from, a Copy snippet, Open file / Reveal in Finder actions, and its SKILL.md rendered underneath." />
 
 Search is fuzzy and ranked — `revw` finds `/review`, `mkpl` finds `marketplace` — with the
 best match selected as you type and the type tallies following the query. From the search
@@ -166,7 +166,7 @@ marketplaces show up here on the next scan.
 
 ## Quick start
 
-> Agent Flow ships with **no organization-specific defaults** — everything you need is
+> Agent Flow Deck ships with **no organization-specific defaults** — everything you need is
 > collected in a short first-run wizard.
 
 1. **Install the extension.**
@@ -178,15 +178,15 @@ marketplaces show up here on the next scan.
      …or in the Extensions view use **⋯ → Install from VSIX…**.
    - _(Once published, you'll also be able to install it from the VS Code Marketplace.)_
 2. **Install the [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)**
-   (`anthropic.claude-code`) — Agent Flow seeds its agent panel. Without it, the task brief
+   (`anthropic.claude-code`) — Agent Flow Deck seeds its agent panel. Without it, the task brief
    is still written and used as a fallback.
-3. **Open the Agent Flow icon** in the activity bar. On first activation it offers a guided
+3. **Open the Agent Flow Deck icon** in the activity bar. On first activation it offers a guided
    setup — enter your Jira site, project key, and repos directory, then sign in with an
    [Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens).
-   (Re-run it anytime with **"Agent Flow: Run Setup…"**.)
+   (Re-run it anytime with **"Agent Flow Deck: Run Setup…"**.)
 4. **Pick a task** from the pool. Click a card to expand it — the inferred repos are
    pre-selected; adjust them, then press **▶ Take**.
-5. **Land in a primed workspace.** Agent Flow opens the task's repos, drops a
+5. **Land in a primed workspace.** Agent Flow Deck opens the task's repos, drops a
    `.pick-task/TASK.md` brief into each, and pre-fills the Claude Code panel with your
    prompt — press **Enter** to start.
 
@@ -205,17 +205,17 @@ marketplaces show up here on the next scan.
   or in the usual install dirs (`/opt/homebrew/bin`, `/usr/local/bin`,
   `/opt/local/bin`, `~/.local/bin`, `~/bin`) — the editor does not always hand
   extensions your shell's `PATH`. If the Deck still says gh is missing, the
-  **Agent Flow** output channel logs the binary it tried and what it said.
+  **Agent Flow Deck** output channel logs the binary it tried and what it said.
 
 ## Data & privacy
 
-Agent Flow talks to **your** Jira Cloud site, reads your **local** repo checkouts,
+Agent Flow Deck talks to **your** Jira Cloud site, reads your **local** repo checkouts,
 and — when `agentFlow.prFacts` is on — reads your **own** GitHub through your
 existing `gh` login. The review-requests strip shares that same gate rather than
 adding a new one: `agentFlow.reviewRequests` only produces a GitHub read while
 `agentFlow.prFacts` is also on, so turning PR facts off silences the strip too,
 regardless of its own setting. Nothing about your tickets, code or repos is sent
-to any service that isn't already yours, and Agent Flow stores no GitHub
+to any service that isn't already yours, and Agent Flow Deck stores no GitHub
 credentials of its own: every GitHub call goes through `gh`, so it inherits
 whatever host, SSO and token your CLI already
 has. When `agentFlow.openAgents` is on, the Deck also reads `~/.claude/sessions` —
@@ -223,17 +223,17 @@ Claude Code's own local registry of what's running — to find sessions it didn'
 launch; nothing in that registry leaves your machine either, but when `agentFlow.prFacts`
 is also on, a session sitting on a feature branch gets the same `gh pr list` (and,
 when needed, `gh api graphql`) read run *in that directory* too — even one you never
-pointed Agent Flow at, like an OSS clone, a client checkout, or another team's repo.
-Separately, Agent Flow
+pointed Agent Flow Deck at, like an OSS clone, a client checkout, or another team's repo.
+Separately, Agent Flow Deck
 also sends anonymous *usage* telemetry (not any of the above) — see
 [Telemetry](#telemetry) below.
 
-GitHub access is **read-only by default** — Agent Flow never merges or pushes.
+GitHub access is **read-only by default** — Agent Flow Deck never merges or pushes.
 The one exception is opt-in: with `agentFlow.reviewWrites` on (it ships **off**),
 the Deck's review strip can submit a review — approve, comment, or request
 changes — on a PR that asked for yours. Every submit shows a modal confirmation
 naming the verb, the repo and the PR number before anything reaches GitHub, and
-every submit attempt — success or failure — is logged to the **Agent Flow**
+every submit attempt — success or failure — is logged to the **Agent Flow Deck**
 output channel. A review body loaded from the agent's draft is marked as
 agent-drafted when it goes out (a fixed line, not the configurable
 `agentFlow.provenanceLabel`), unless `agentFlow.stampLabelOnWrite` is off.
@@ -241,7 +241,7 @@ Nothing else about the feature writes anywhere: the review agent itself is told,
 in its seeded prompt, not to post anything to GitHub — the human submits the
 review.
 
-**Agent Flow: Doctor** probes rather than only reading config: it makes two
+**Agent Flow Deck: Doctor** probes rather than only reading config: it makes two
 authenticated GETs to your own Jira site and runs `gh auth status`, which is what
 catches a revoked token instead of reporting it as a network problem. It writes
 nothing anywhere except your clipboard, and only when you ask it to copy the
@@ -267,7 +267,7 @@ repo, so they never get committed.
 | `agentFlow.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
 | `agentFlow.prFacts` | `true` | Read each in-flight task's PR state from GitHub via the `gh` CLI and show it on the Deck's cards. |
-| `agentFlow.openAgents` | `true` | Show every Claude Code session open on this machine on the Deck: as agents on the card that owns their directory, and as a `local` card of its own for a place Agent Flow never launched. Read from `~/.claude/sessions`. |
+| `agentFlow.openAgents` | `true` | Show every Claude Code session open on this machine on the Deck: as agents on the card that owns their directory, and as a `local` card of its own for a place Agent Flow Deck never launched. Read from `~/.claude/sessions`. |
 | `agentFlow.prFactsTtlSeconds` | `120` | How stale a cached PR fact may be before the Deck re-fetches it (minimum 30). Only fetched while the Deck is open. |
 | `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on a card. |
 | `agentFlow.prReviewAutoFix` | `true` | After the PR-review agent assesses the PR, let it implement the requested changes (off = assess only). |
@@ -276,7 +276,7 @@ repo, so they never get committed.
 | `agentFlow.reviewWrites` | `false` | Allow submitting approve / comment / request changes to GitHub from the Deck. |
 | `agentFlow.reviewRequestModes` | *(one built-in mode)* | Seed modes offered by **Review with agent**. Add your own — e.g. separate backend and frontend review modes — and clicking asks which to use. |
 | `agentFlow.reviewRequestMode` | `ask` | Pin one review mode by `id` to skip the question. |
-| `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
+| `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow Deck opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
 | `agentFlow.environments` | `["dev", "staging", "production"]` | Environments offered by the **Verify on an environment** Explore action. The picker also offers **Custom…** for a one-off. |
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
@@ -321,7 +321,7 @@ declining leaves the file byte-identical. Either way the workspace's existing fo
 settings, and formatting are preserved and it opens as a multi-root workspace.
 
 When taking a task (or starting an Explore session) with `agentFlow.openIn` set to
-`ask`, Agent Flow also lists the windows you already have open — a repo folder or a
+`ask`, Agent Flow Deck also lists the windows you already have open — a repo folder or a
 saved workspace — so you can drop the task straight into one of them. Choosing an open
 **workspace** window offers to add any genuinely new repos to it (the same skip-and-approve
 behavior above); choosing an open **folder** window focuses it and seeds the agent there
@@ -371,8 +371,8 @@ npm test             # vitest
 npm run typecheck    # tsc --noEmit
 ```
 
-Press **F5** (Run Agent Flow) to launch an Extension Development Host with the extension
-loaded. Open the **Agent Flow** icon in the activity bar and complete the first-run setup.
+Press **F5** (Run Agent Flow Deck) to launch an Extension Development Host with the extension
+loaded. Open the **Agent Flow Deck** icon in the activity bar and complete the first-run setup.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full command list and conventions.
 
@@ -399,7 +399,7 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Telemetry
 
-Agent Flow sends anonymous usage and error events (which features are used, where
+Agent Flow Deck sends anonymous usage and error events (which features are used, where
 a flow gets abandoned, what fails) to a personal PostHog project, to help decide
 what to build next — never repo names, ticket keys, file paths, prompt text or
 error messages. Turn it off with `agentFlow.telemetry.enabled`, and VS Code's own

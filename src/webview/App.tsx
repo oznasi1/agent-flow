@@ -170,7 +170,7 @@ export function App(): JSX.Element {
     watchdog.current = window.setTimeout(() => {
       if (!gotState.current) {
         setError({
-          message: "Agent Flow isn't responding. Open the “Agent Flow” output channel for details, or reload the window.",
+          message: "Agent Flow Deck isn't responding. Open the “Agent Flow Deck” output channel for details, or reload the window.",
           canRetry: true,
         });
       }
@@ -429,7 +429,7 @@ export function App(): JSX.Element {
   if (!configured) {
     return gate(
       <div className="gate">
-        <div>Agent Flow isn't connected to Jira yet — add your site URL and project to get started.</div>
+        <div>Agent Flow Deck isn't connected to Jira yet — add your site URL and project to get started.</div>
         <button className="btn" onClick={() => send({ type: "runSetup" })}>Run setup</button>
       </div>,
     );
@@ -438,7 +438,7 @@ export function App(): JSX.Element {
   if (authed === false) {
     return gate(
       <div className="gate">
-        <div>Connect Agent Flow to your Jira to see your task pool.</div>
+        <div>Connect Agent Flow Deck to your Jira to see your task pool.</div>
         <button className="btn" onClick={() => send({ type: "signIn" })}>Sign in to Jira</button>
       </div>,
     );

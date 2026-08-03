@@ -23,7 +23,7 @@ export class MarketplacePanel {
     }
     const panel = vscode.window.createWebviewPanel(
       "agentFlow.marketplace",
-      "Agent Flow — Marketplace",
+      "Agent Flow Deck — Marketplace",
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] },
     );

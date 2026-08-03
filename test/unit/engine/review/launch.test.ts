@@ -130,7 +130,7 @@ describe("launchReview", () => {
     const out = await launchReview({ req, template: "t", workspaceDir: "/ws", seedAgent: true }, d);
     expect(out).toEqual({
       ok: false,
-      message: "Couldn't create a git worktree in aws-ops — not reviewing aws-ops#8491 in your main checkout. The Agent Flow output channel has the reason.",
+      message: "Couldn't create a git worktree in aws-ops — not reviewing aws-ops#8491 in your main checkout. The Agent Flow Deck output channel has the reason.",
     });
     expect(d.openWorkspace).not.toHaveBeenCalled();
   });

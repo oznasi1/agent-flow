@@ -45,7 +45,7 @@ export function localKey(place: string): string {
 }
 
 /**
- * The card for a place Agent Flow never launched, shaped as a Run so the whole
+ * The card for a place Agent Flow Deck never launched, shaped as a Run so the whole
  * existing pipeline — gitState, deriveBucket, prSignals, presence, Open, Diff —
  * renders it with no special case. Never written to the runs store unless the
  * user picks Track it.

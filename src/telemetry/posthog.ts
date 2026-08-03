@@ -36,7 +36,7 @@ export interface PostHogSenderDeps {
   /** Delay before the single retry on a 5xx/network failure. Defaults to
    * RETRY_DELAY_MS; tests set it to 0 to keep themselves fast. */
   retryDelayMs?: number;
-  /** Agent Flow's own consent gate (`agentFlow.telemetry.enabled`), read fresh on
+  /** Agent Flow Deck's own consent gate (`agentFlow.telemetry.enabled`), read fresh on
    * every event so turning the setting back on mid-session resumes sending.
    *
    * Required, and checked in enqueue() rather than only in the telemetry facade:

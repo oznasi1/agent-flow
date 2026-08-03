@@ -94,7 +94,7 @@ export class GhReviewProvider implements ReviewProvider {
     return { failing, unresolved };
   }
 
-  /** The only command in Agent Flow that writes to GitHub. The caller confirms
+  /** The only command in Agent Flow Deck that writes to GitHub. The caller confirms
    * first; this only refuses what GitHub would refuse anyway, and reports the
    * rejection — GitHub's own wording is more useful than ours.
    *

@@ -86,7 +86,7 @@ export class GhProvider implements PrProvider {
       let chosen: GhPr | undefined;
       // The live branch is exact, and correct for Address PR runs too — the agent
       // checked out the PR's own head. The key search only covers a PR opened from
-      // a branch Agent Flow didn't name.
+      // a branch Agent Flow Deck didn't name.
       if (branch) chosen = pickPr(await this.list(repoPath, ["--head", branch]));
       if (!chosen) chosen = pickPr(await this.list(repoPath, ["--search", `${key} in:title`]));
       if (!chosen) return { ok: true, facts: null };

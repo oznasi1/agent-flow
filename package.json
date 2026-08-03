@@ -39,7 +39,7 @@
       "activitybar": [
         {
           "id": "agentFlow",
-          "title": "Agent Flow",
+          "title": "Agent Flow Deck",
           "icon": "media/agent-flow.svg"
         }
       ]
@@ -56,37 +56,37 @@
     "commands": [
       {
         "command": "agentFlow.refresh",
-        "title": "Agent Flow: Refresh Tasks",
+        "title": "Agent Flow Deck: Refresh Tasks",
         "icon": "$(refresh)"
       },
       {
         "command": "agentFlow.setup",
-        "title": "Agent Flow: Run Setup…"
+        "title": "Agent Flow Deck: Run Setup…"
       },
       {
         "command": "agentFlow.doctor",
-        "title": "Agent Flow: Doctor"
+        "title": "Agent Flow Deck: Doctor"
       },
       {
         "command": "agentFlow.signIn",
-        "title": "Agent Flow: Sign in to Jira"
+        "title": "Agent Flow Deck: Sign in to Jira"
       },
       {
         "command": "agentFlow.signOut",
-        "title": "Agent Flow: Sign out of Jira"
+        "title": "Agent Flow Deck: Sign out of Jira"
       },
       {
         "command": "agentFlow.takeTask",
-        "title": "Agent Flow: Take Task…"
+        "title": "Agent Flow Deck: Take Task…"
       },
       {
         "command": "agentFlow.openDeck",
-        "title": "Agent Flow: Open the Deck (in-flight)",
+        "title": "Agent Flow Deck: Open the Deck (in-flight)",
         "icon": "$(dashboard)"
       },
       {
         "command": "agentFlow.openMarketplace",
-        "title": "Agent Flow: Open the Marketplace",
+        "title": "Agent Flow Deck: Open the Marketplace",
         "icon": "$(library)"
       }
     ],
@@ -110,7 +110,7 @@
       ]
     },
     "configuration": {
-      "title": "Agent Flow",
+      "title": "Agent Flow Deck",
       "properties": {
         "agentFlow.jira.baseUrl": {
           "type": "string",
@@ -162,7 +162,7 @@
             "Tasks not in the active sprint"
           ],
           "default": "mysprint",
-          "description": "Default task filter lens shown when Agent Flow opens."
+          "description": "Default task filter lens shown when Agent Flow Deck opens."
         },
         "agentFlow.filters.size": {
           "type": "boolean",
@@ -443,11 +443,11 @@
           ],
           "enumDescriptions": [
             "Never offer Remote Control",
-            "Offer Remote Control for every session Agent Flow launches",
+            "Offer Remote Control for every session Agent Flow Deck launches",
             "Ask once each time you launch"
           ],
           "default": "off",
-          "markdownDescription": "Offer Claude Code's **Remote Control** for the session Agent Flow opens, so you can drive it from claude.ai or the Claude mobile app. The panel is pre-filled with `/remote-control <KEY>` and your task prompt goes to the clipboard: press Enter to connect, then paste to start the task. Skipped for launches that open more than one window, because a single clipboard can't serve them."
+          "markdownDescription": "Offer Claude Code's **Remote Control** for the session Agent Flow Deck opens, so you can drive it from claude.ai or the Claude mobile app. The panel is pre-filled with `/remote-control <KEY>` and your task prompt goes to the clipboard: press Enter to connect, then paste to start the task. Skipped for launches that open more than one window, because a single clipboard can't serve them."
         },
         "agentFlow.batchLaunchConfirmThreshold": {
           "type": "number",
@@ -458,17 +458,17 @@
         "agentFlow.trackOpenWindows": {
           "type": "boolean",
           "default": true,
-          "description": "Track your open Agent Flow windows so a task can be opened into a window you already have open (shown as extra choices in the \"Open the task where?\" picker)."
+          "description": "Track your open Agent Flow Deck windows so a task can be opened into a window you already have open (shown as extra choices in the \"Open the task where?\" picker)."
         },
         "agentFlow.prFacts": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Read each in-flight task's pull-request state from GitHub with the `gh` CLI, and show it on the Deck's cards — CI, review and mergeability. Requires `gh` on your PATH and logged in (`gh auth login`); Agent Flow stores no GitHub credentials of its own. Off = the Deck's git + Jira backbone only."
+          "markdownDescription": "Read each in-flight task's pull-request state from GitHub with the `gh` CLI, and show it on the Deck's cards — CI, review and mergeability. Requires `gh` on your PATH and logged in (`gh auth login`); Agent Flow Deck stores no GitHub credentials of its own. Off = the Deck's git + Jira backbone only."
         },
         "agentFlow.openAgents": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Show every Claude Code session open on this machine on the Deck — as agents on the card that owns their directory, and as a card of its own for a place Agent Flow never launched. Read from `~/.claude/sessions`. Off = only the tasks Agent Flow launched."
+          "markdownDescription": "Show every Claude Code session open on this machine on the Deck — as agents on the card that owns their directory, and as a card of its own for a place Agent Flow Deck never launched. Read from `~/.claude/sessions`. Off = only the tasks Agent Flow Deck launched."
         },
         "agentFlow.prFactsTtlSeconds": {
           "type": "number",
@@ -490,7 +490,7 @@
         "agentFlow.reviewWrites": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Allow submitting **approve / comment / request changes** to GitHub from the Deck's review strip. Off by default — this is the only setting that lets Agent Flow write to GitHub. Every submit still asks for confirmation."
+          "markdownDescription": "Allow submitting **approve / comment / request changes** to GitHub from the Deck's review strip. Off by default — this is the only setting that lets Agent Flow Deck write to GitHub. Every submit still asks for confirmation."
         },
         "agentFlow.reviewRequestModes": {
           "type": "array",

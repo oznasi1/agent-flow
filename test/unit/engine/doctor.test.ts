@@ -280,7 +280,7 @@ describe("summarize", () => {
 describe("formatReport", () => {
   it("writes one line per check, grouped, with a summary header", () => {
     const report = formatReport(runChecks({ ...healthy(), baseUrl: "" }));
-    expect(report).toContain("Agent Flow Doctor");
+    expect(report).toContain("Agent Flow Deck Doctor");
     expect(report).toContain("1 problem");
     expect(report).toContain("[fail] Site configured");
     expect(report).toContain("Jira");

@@ -1,6 +1,6 @@
-# Contributing to Agent Flow
+# Contributing to Agent Flow Deck
 
-Thanks for your interest in improving Agent Flow! This is a VS Code / Cursor extension written
+Thanks for your interest in improving Agent Flow Deck! This is a VS Code / Cursor extension written
 in TypeScript, with React webviews bundled by esbuild and tested with Vitest.
 
 ## Getting started
@@ -25,8 +25,8 @@ npm install
 
 ## Running the extension
 
-Press **F5** in VS Code (the "Run Agent Flow" launch config) to open an Extension Development
-Host with a `build` pre-launch task. Open the **Agent Flow** icon in the activity bar and
+Press **F5** in VS Code (the "Run Agent Flow Deck" launch config) to open an Extension Development
+Host with a `build` pre-launch task. Open the **Agent Flow Deck** icon in the activity bar and
 complete the first-run setup wizard.
 
 ## Conventions

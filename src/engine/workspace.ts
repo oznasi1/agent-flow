@@ -132,7 +132,7 @@ export function briefMarkdown(
 
 ${jiraLine}- **Repos in scope:** ${names}
 - **This repo:** \`${thisRepo}\`
-- _Seeded by Agent Flow at ${stamp}. This file is git-excluded — delete it any time._
+- _Seeded by Agent Flow Deck at ${stamp}. This file is git-excluded — delete it any time._
 
 ---
 
@@ -629,7 +629,7 @@ async function seedClaudeCode(
     if (!remoteControl) return;
     const paste = process.platform === "darwin" ? "⌘V" : "Ctrl+V";
     vscode.window.showInformationMessage(
-      `Agent Flow: ${key} — press Enter to connect Remote Control, then ${paste} + Enter to start the task (it's on your clipboard).`,
+      `Agent Flow Deck: ${key} — press Enter to connect Remote Control, then ${paste} + Enter to start the task (it's on your clipboard).`,
     );
   };
 
@@ -669,7 +669,7 @@ async function seedClaudeCode(
   // the briefs instead — they hold the same context and sit in the window's roots.
   if (multi) {
     vscode.window.showInformationMessage(
-      `Agent Flow: couldn't start Claude Code for ${key}. Its brief is in ${BRIEF_DIR}/${BRIEF_FILE} — open it to start the task.`,
+      `Agent Flow Deck: couldn't start Claude Code for ${key}. Its brief is in ${BRIEF_DIR}/${BRIEF_FILE} — open it to start the task.`,
     );
     log(`seed ${key}: no Claude Code available — pointed at the brief (batch, clipboard withheld)`);
     return;
@@ -677,7 +677,7 @@ async function seedClaudeCode(
   if (remoteControl) log(`seed ${key}: Remote Control dropped — the clipboard is needed for the prompt`);
   await vscode.env.clipboard.writeText(prompt);
   vscode.window.showInformationMessage(
-    `Agent Flow: opened workspace for ${key}. Claude Code prompt copied — paste it into the panel to start.`,
+    `Agent Flow Deck: opened workspace for ${key}. Claude Code prompt copied — paste it into the panel to start.`,
   );
   log(`seed ${key}: fell back to clipboard`);
 }

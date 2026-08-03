@@ -89,7 +89,7 @@ describe("problem indication", () => {
 
   it("shows no Doctor button on a failure it can't diagnose", () => {
     render(<App />);
-    host({ type: "error", message: "Agent Flow isn't responding.", canRetry: true });
+    host({ type: "error", message: "Agent Flow Deck isn't responding.", canRetry: true });
     expect(screen.queryByRole("button", { name: /Run Doctor/i })).not.toBeInTheDocument();
   });
 });

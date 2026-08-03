@@ -19,7 +19,7 @@ export async function maybeShowTelemetryNotice(
     await context.globalState.update(NOTICE_KEY, true);
 
     const choice = await vscode.window.showInformationMessage(
-      "Agent Flow sends anonymous usage and error events to help decide what to build next. No repo names, ticket keys, file paths or prompt text.",
+      "Agent Flow Deck sends anonymous usage and error events to help decide what to build next. No repo names, ticket keys, file paths or prompt text.",
       DETAILS,
       TURN_OFF,
     );

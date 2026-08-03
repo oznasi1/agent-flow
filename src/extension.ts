@@ -40,10 +40,10 @@ function registerTracked<T>(
 
 export function activate(context: vscode.ExtensionContext): void {
   const auth = new ApiTokenAuth(context.secrets);
-  const output = vscode.window.createOutputChannel("Agent Flow");
+  const output = vscode.window.createOutputChannel("Agent Flow Deck");
   const log = (m: string) => output.appendLine(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
   const provider = new TasksViewProvider(context, auth, log);
-  log("Agent Flow activated");
+  log("Agent Flow Deck activated");
 
   // Telemetry must come up before the commands below so `command_invoked` can
   // use it. A throw here must NEVER escape activate() — see the comment on the
@@ -64,7 +64,7 @@ export function activate(context: vscode.ExtensionContext): void {
     registerTracked("agentFlow.signIn", async () => {
       const ok = await auth.signIn();
       if (ok) {
-        vscode.window.showInformationMessage("Agent Flow: signed in to Jira.");
+        vscode.window.showInformationMessage("Agent Flow Deck: signed in to Jira.");
         await provider.refresh();
       }
       return ok;
@@ -72,7 +72,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     registerTracked("agentFlow.signOut", async () => {
       await auth.signOut();
-      vscode.window.showInformationMessage("Agent Flow: signed out of Jira.");
+      vscode.window.showInformationMessage("Agent Flow Deck: signed out of Jira.");
     }),
 
     registerTracked("agentFlow.takeTask", async () => {

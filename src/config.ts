@@ -215,7 +215,7 @@ export interface AgentFlowConfig {
   prFactsTtlSeconds: number;
   // Show every Claude Code session open on this machine on the Deck: as agents on
   // the card that owns their directory, and as a card of its own for a place
-  // Agent Flow never launched. Read from ~/.claude/sessions; off = today's board.
+  // Agent Flow Deck never launched. Read from ~/.claude/sessions; off = today's board.
   openAgents: boolean;
   // Show the Deck's review-requests strip: open PRs that ask for your review.
   reviewRequests: boolean;
@@ -223,7 +223,7 @@ export interface AgentFlowConfig {
   // review requests move on a human timescale, not a CI one.
   reviewRequestsTtlSeconds: number;
   // Allow submitting approve / comment / request-changes from the Deck. The only
-  // setting in Agent Flow that lets it write to GitHub.
+  // setting in Agent Flow Deck that lets it write to GitHub.
   reviewWrites: boolean;
   // Seed modes offered by Review with agent, same shape as promptModes. Never
   // empty — an unusable configured value falls back to DEFAULT_REVIEW_REQUEST_MODES.

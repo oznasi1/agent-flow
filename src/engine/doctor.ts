@@ -1,4 +1,4 @@
-// Agent Flow depends on five things outside itself — a reachable Jira site, valid
+// Agent Flow Deck depends on five things outside itself — a reachable Jira site, valid
 // credentials, `gh` installed *and* signed in, a reposRoot that holds checkouts, and
 // the Claude Code extension. Today each one fails at the moment of use, narrowly,
 // and three of them fail silently. This module decides what is broken; it does no
@@ -294,7 +294,7 @@ export function summarize(checks: Check[]): string {
 /** Plain text for the clipboard — pasteable into a ticket or a Slack thread, so no
  *  codicons and no markup. */
 export function formatReport(checks: Check[]): string {
-  const lines = [`Agent Flow Doctor — ${summarize(checks)}`, ""];
+  const lines = [`Agent Flow Deck Doctor — ${summarize(checks)}`, ""];
   let group: DoctorGroup | null = null;
   for (const c of [...checks].sort((a, b) => groupOrder(a.group) - groupOrder(b.group))) {
     if (c.group !== group) {

@@ -8,7 +8,7 @@ import { repoRoot } from "./git";
 export type { OpenSession }; // re-exported so callers can take both from here
 
 /** ~/.claude/sessions — Claude Code's live session registry, one file per running
- * session. Claude Code owns this directory: Agent Flow only ever reads it, and
+ * session. Claude Code owns this directory: Agent Flow Deck only ever reads it, and
  * never prunes a stale record the way presence.ts prunes its own. */
 export function defaultSessionsDir(): string {
   return path.join(os.homedir(), ".claude", "sessions");

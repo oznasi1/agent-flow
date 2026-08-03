@@ -32,14 +32,14 @@ const JIRA_TTL_MS = 30_000;
  * `gh` living somewhere the extension host's PATH cannot see it is by far the
  * likeliest cause, and reads to a signed-in user as the Deck being broken. */
 const GH_NOTES: Record<GhGap["kind"], string> = {
-  missing: "gh CLI not found — PR facts off. Run Agent Flow: Doctor",
-  "signed-out": "gh is not signed in — PR facts off. Run Agent Flow: Doctor",
+  missing: "gh CLI not found — PR facts off. Run Agent Flow Deck: Doctor",
+  "signed-out": "gh is not signed in — PR facts off. Run Agent Flow Deck: Doctor",
 };
 
 /** Appended to a review body the agent drafted, when provenance stamping is on.
  * Posting an agent's words as unmarked human review is the kind of thing worth
  * being straight about with teammates. */
-export const REVIEW_PROVENANCE = "_Drafted with Claude Code via Agent Flow._";
+export const REVIEW_PROVENANCE = "_Drafted with Claude Code via Agent Flow Deck._";
 
 const VERB_LABEL: Record<ReviewVerb, string> = {
   approve: "Approve",
@@ -47,7 +47,7 @@ const VERB_LABEL: Record<ReviewVerb, string> = {
   "request-changes": "Request changes",
 };
 
-/** The Deck: a full-window board of every task launched via Agent Flow, opened as a
+/** The Deck: a full-window board of every task launched via Agent Flow Deck, opened as a
  * singleton editor-area panel. Reuses the Jira client, runs store, and status engine. */
 export class DeckPanel {
   private static current: DeckPanel | undefined;
@@ -108,7 +108,7 @@ export class DeckPanel {
     }
     const panel = vscode.window.createWebviewPanel(
       "agentFlow.deck",
-      "Agent Flow — In-flight",
+      "Agent Flow Deck — In-flight",
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] },
     );
@@ -204,7 +204,7 @@ export class DeckPanel {
    * `key` and `searchKey` differ for a local card: `key` is `run.key` — the
    * store's identity, always — while `searchKey` is what the provider's
    * fallback `--search "<searchKey> in:title"` can actually match against. For
-   * every run Agent Flow launched the two are the same string; for a local card
+   * every run Agent Flow Deck launched the two are the same string; for a local card
    * with an inferred ticket, `key` is the place-hash and `searchKey` is the
    * ticket (see `ticketKeyFor`) — the only one of the two a PR title could ever
    * contain. */

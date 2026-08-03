@@ -1,11 +1,23 @@
 # Changelog
 
-All notable changes to **Agent Flow** are documented here.
+All notable changes to **Agent Flow Deck** are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+### Changed
+
+- **One name everywhere: Agent Flow Deck.** The marketplace listing already said it,
+  but every surface inside the extension still said "Agent Flow" — a name other tools
+  use too. Command palette entries are now `Agent Flow Deck: …`, and so are the
+  activity-bar and settings titles, the output channel, the Deck and Marketplace
+  window titles, the Doctor report, the setup steps, and every notification, empty
+  state and setting description. Review comments drafted from the Deck sign off with
+  _"Drafted with Claude Code via Agent Flow Deck."_ Setting keys (`agentFlow.*`),
+  command IDs and the extension ID are unchanged, so nothing you have configured
+  breaks.
 
 ## [0.1.46] — 2026-08-03
 

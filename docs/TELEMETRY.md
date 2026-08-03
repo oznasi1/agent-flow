@@ -1,6 +1,6 @@
 # Telemetry
 
-Agent Flow can send anonymous **usage** and **error** events to help decide what to
+Agent Flow Deck can send anonymous **usage** and **error** events to help decide what to
 build next — which features get used, where a flow gets abandoned, what fails and
 how often. This page is the complete, accurate account of that system: every
 claim below is checkable against the three source files it is drawn from —
@@ -16,12 +16,12 @@ event is added here without being documented.
 Two independent switches gate everything below. Either one turned off stops all
 sending — telemetry code only runs when **both** are satisfied.
 
-- **`agentFlow.telemetry.enabled`** (default `true`) — Agent Flow's own setting.
+- **`agentFlow.telemetry.enabled`** (default `true`) — Agent Flow Deck's own setting.
   Turn it off in Settings, or click **Turn off** on the first-run notice, and
   nothing further is sent for this install. Turning it off mid-session discards
   whatever is currently queued in memory rather than flushing it first. The check
   sits in the sender's queueing step, which every event crosses — including
-  `unhandled_error`, which VS Code hands to the sender itself without Agent Flow's
+  `unhandled_error`, which VS Code hands to the sender itself without Agent Flow Deck's
   own code being involved. Turning the setting back on resumes sending in the same
   window; the setting is re-read for each event rather than captured at startup.
 - **`telemetry.telemetryLevel`** — VS Code's own built-in setting, which Agent
@@ -40,7 +40,7 @@ whatever was still queued rather than persisting it anywhere.
 
 ## What is never collected
 
-Regardless of any setting, Agent Flow never sends:
+Regardless of any setting, Agent Flow Deck never sends:
 
 - Jira ticket keys, Jira project keys, or Jira summaries/descriptions
 - Repo names, file paths, folder paths, or anything about your workspace layout
@@ -61,7 +61,7 @@ On the "no paths" point specifically: nothing is ever sent that names a path to
 your files, folders, repos, or workspace. The one string that is path-*shaped* is
 `unhandled_error`'s `stack_digest`, which can contain the token
 `dist/extension.js` — but that is the extension's own bundled file, identical
-across every install of Agent Flow, and carries nothing about you or your
+across every install of Agent Flow Deck, and carries nothing about you or your
 machine. Stack frames from anywhere else (VS Code itself, other extensions, your
 code) are filtered out before the digest is built, and what remains is then
 truncated to at most 20 frames and 2,048 bytes (`MAX_STACK_FRAMES` /
@@ -70,7 +70,7 @@ truncated to at most 20 frames and 2,048 bytes (`MAX_STACK_FRAMES` /
 ## Identity
 
 - **`distinct_id`** is `vscode.env.machineId` — VS Code's own anonymous, stable
-  per-machine identifier. Agent Flow mints no identifier of its own.
+  per-machine identifier. Agent Flow Deck mints no identifier of its own.
 - **`session_id`** is `vscode.env.sessionId` — VS Code's own per-editor-session
   identifier, attached to every event.
 - **Fingerprints** (`task_fp` on the Take-funnel events) are a salted SHA-256
@@ -92,7 +92,7 @@ Attached automatically to **every** event, usage and error alike: `session_id`,
 `remote_name` (or `"local"`), `ui_kind` (`"web"` or `"desktop"`), and
 `distinct_id`. These describe the editor environment, never anything about your
 project. They are attached by the sender as it queues each event, so the count is
-the same for an event Agent Flow sends deliberately and for an `unhandled_error`
+the same for an event Agent Flow Deck sends deliberately and for an `unhandled_error`
 VS Code routes to the sender on its own.
 
 ### Usage events
@@ -103,7 +103,7 @@ Suppressed entirely when `telemetry.telemetryLevel` is `"error"` (or lower).
 |---|---|---|
 | `extension_installed` | *(none)* | Once per machine, on the first activation ever. |
 | `extension_activated` | `is_first_ever: boolean`, `has_jira_auth: boolean`, `is_configured: boolean`, plus the full settings snapshot (see [Settings snapshot](#settings-snapshot) below) | Every activation, after the sign-in check resolves. |
-| `command_invoked` | `command`: one of `"refresh"`, `"setup"`, `"doctor"`, `"signIn"`, `"signOut"`, `"takeTask"`, `"openDeck"`, `"openMarketplace"` | Whenever one of Agent Flow's commands runs. |
+| `command_invoked` | `command`: one of `"refresh"`, `"setup"`, `"doctor"`, `"signIn"`, `"signOut"`, `"takeTask"`, `"openDeck"`, `"openMarketplace"` | Whenever one of Agent Flow Deck's commands runs. |
 | `take_started` | `flow_id: string` (random UUID), `source`: `"card"` (a Deck card's Take button, expanded or not) \| `"command"` (the `agentFlow.takeTask` palette command) \| `"batch"`, `task_fp: string`, `inferred_count: number` | A Take begins. `source` is passed in by whichever entry point started the Take, not inferred. `"batch"` is reserved and unused today: `takeBatch` is not instrumented in Phase 1, so no event carries it. |
 | `take_prompt_mode_picked` | `flow_id`, `prompt_mode`: a stock mode id (`"plan"`, `"implementation"`, `"tdd"`, `"investigate"`, `"orchestrator"`, `"refine"`) or `"custom"`, `is_custom_mode: boolean` | The prompt mode for this Take is resolved. |
 | `take_destination_picked` | `flow_id`, `destination`: `"new"` \| `"current"` \| `"existing"` \| `"live-folder"`, `workspace_mode`: `"multiroot"` \| `"per-window"` | The open target for this Take is resolved. |
@@ -131,11 +131,11 @@ convenience so "was this worth retrying" doesn't need a `failure_class` lookup
 table re-derived in every dashboard. It adds no information beyond
 `failure_class` itself.
 
-`unhandled_error` is not something Agent Flow's own code calls explicitly —
+`unhandled_error` is not something Agent Flow Deck's own code calls explicitly —
 it's VS Code's built-in behavior: `vscode.TelemetryLogger` automatically routes
 any exception that escapes unhandled from within the extension host process to
 the registered logger's error path, with the stack already cleaned of
-cross-extension detail by VS Code itself before Agent Flow's own filtering (see
+cross-extension detail by VS Code itself before Agent Flow Deck's own filtering (see
 [What is never collected](#what-is-never-collected)) runs on top of that.
 
 ### A failing Take can report twice, on purpose

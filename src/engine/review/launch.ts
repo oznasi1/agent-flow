@@ -73,7 +73,7 @@ export async function launchReview(
   // teammate's branch. Refuse: an un-launched review costs a click, a hijacked checkout
   // can cost work in progress.
   if (services.some((s) => s.path === base.path)) {
-    return { ok: false, message: `Couldn't create a git worktree in ${req.repoName} — not reviewing ${req.repoName}#${req.number} in your main checkout. The Agent Flow output channel has the reason.` };
+    return { ok: false, message: `Couldn't create a git worktree in ${req.repoName} — not reviewing ${req.repoName}#${req.number} in your main checkout. The Agent Flow Deck output channel has the reason.` };
   }
   try {
     await deps.openWorkspace({

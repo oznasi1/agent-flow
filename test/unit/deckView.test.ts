@@ -1719,7 +1719,7 @@ describe("DeckPanel review submit", () => {
     const p = await showAndWarm();
     await p._fire(submitMsg({ verb: "comment", body: "the retry budget is unbounded", fromDraft: true }));
     expect(h.reviewSubmit.mock.calls[0][3]).toBe(
-      "the retry budget is unbounded\n\n_Drafted with Claude Code via Agent Flow._",
+      "the retry budget is unbounded\n\n_Drafted with Claude Code via Agent Flow Deck._",
     );
   });
 

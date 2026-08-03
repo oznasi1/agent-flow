@@ -161,7 +161,7 @@ export async function showDoctor(d: DoctorDeps): Promise<void> {
   d.log(`doctor: ${summary}`);
 
   const picked = await vscode.window.showQuickPick(buildItems(checks), {
-    title: `Agent Flow Doctor — ${summary}`,
+    title: `Agent Flow Deck Doctor — ${summary}`,
     placeHolder: "Pick a problem to fix, or copy the report",
     ignoreFocusOut: true,
   });

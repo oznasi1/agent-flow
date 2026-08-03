@@ -122,7 +122,7 @@ describe("createPostHogSender", () => {
     expect(init.signal).toBeDefined();
   });
 
-  it("sends nothing at all while Agent Flow's own consent gate is off — including the host's unhandled-error path", async () => {
+  it("sends nothing at all while Agent Flow Deck's own consent gate is off — including the host's unhandled-error path", async () => {
     // sendErrorData is what VS Code calls by itself for an error escaping the
     // extension host (TelemetryLoggerOptions.ignoreUnhandledErrors defaults to
     // false), so it never passes through track()/trackError() and their gates.

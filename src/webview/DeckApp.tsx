@@ -177,7 +177,7 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
   // is kind: "explore" but Track it never renames it off its local- place-hash, so
   // that prefix reads as "explore" here too — it is exactly what the record now is.
   const explore = r.run.key.startsWith("explore-") || r.run.key.startsWith("local-");
-  // A place with an agent open in it that Agent Flow never launched. It has no
+  // A place with an agent open in it that Agent Flow Deck never launched. It has no
   // record on disk, so there is nothing to Forget — closing its agents is what
   // removes it.
   const local = runKind(r.run) === "local";
@@ -206,7 +206,7 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
         </span>
         {inferredKey ? (
           <span className="key-wrap">
-            <span className="chip" title="Read from the branch name — Agent Flow did not launch this">~inferred</span>
+            <span className="chip" title="Read from the branch name — Agent Flow Deck did not launch this">~inferred</span>
             <button
               className="key"
               title={`Open ${inferredKey} in Jira`}
@@ -435,7 +435,7 @@ export function DeckApp(): JSX.Element {
             type="button"
             className={`ctl ${openAgents ? "on" : ""}`}
             onClick={() => { const next = !openAgents; setOpenAgents(next); send({ type: "deck:setOpenAgents", on: next }); }}
-            title="Show every Claude Code session open on this machine, read from ~/.claude/sessions. Off → only what Agent Flow launched."
+            title="Show every Claude Code session open on this machine, read from ~/.claude/sessions. Off → only what Agent Flow Deck launched."
           >
             <span className="switch" />Open agents
           </button>
@@ -486,7 +486,7 @@ export function DeckApp(): JSX.Element {
       {runs.length === 0 ? (
         <div className="empty">
           <div className="big">No tasks in flight</div>
-          <div>Take a task from the Agent Flow Tasks pool and it shows up here.</div>
+          <div>Take a task from the Agent Flow Deck Tasks pool and it shows up here.</div>
         </div>
       ) : (
         <div className="board">

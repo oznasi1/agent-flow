@@ -35,7 +35,7 @@ export async function runSetup(
   log("setup: started");
 
   const baseUrl = await vscode.window.showInputBox({
-    title: "Agent Flow Setup (1/4)",
+    title: "Agent Flow Deck Setup (1/4)",
     prompt: "Your Atlassian Jira Cloud site URL",
     ignoreFocusOut: true,
     placeHolder: "https://your-org.atlassian.net",
@@ -52,7 +52,7 @@ export async function runSetup(
   if (baseUrl === undefined) return abort(log, "cancelled at site URL");
 
   const project = await vscode.window.showInputBox({
-    title: "Agent Flow Setup (2/4)",
+    title: "Agent Flow Deck Setup (2/4)",
     prompt: "Jira project key to pull tasks from",
     ignoreFocusOut: true,
     placeHolder: "ABC",
@@ -61,7 +61,7 @@ export async function runSetup(
   if (project === undefined) return abort(log, "cancelled at project key");
 
   const reposRoot = await vscode.window.showInputBox({
-    title: "Agent Flow Setup (3/4)",
+    title: "Agent Flow Deck Setup (3/4)",
     prompt: "Directory where your repo checkouts live",
     ignoreFocusOut: true,
     value: "~/projects",
@@ -82,14 +82,14 @@ export async function runSetup(
   // Step 4/4: credentials, via the existing two-step sign-in.
   if (!(await auth.signIn())) {
     vscode.window.showWarningMessage(
-      'Agent Flow: settings saved, but Jira sign-in was cancelled. Use "Agent Flow: Sign in to Jira" to finish.',
+      'Agent Flow Deck: settings saved, but Jira sign-in was cancelled. Use "Agent Flow Deck: Sign in to Jira" to finish.',
     );
     return abort(log, "sign-in skipped (config saved)");
   }
 
   await context.globalState.update(SETUP_COMPLETE_KEY, true);
   log("setup: complete");
-  vscode.window.showInformationMessage("Agent Flow is set up. Loading your tasks…");
+  vscode.window.showInformationMessage("Agent Flow Deck is set up. Loading your tasks…");
   await refresh?.();
   return true;
 }
@@ -117,7 +117,7 @@ export async function maybeRunSetup(
   }
 
   const choice = await vscode.window.showInformationMessage(
-    "Welcome to Agent Flow — let's connect it to your Jira.",
+    "Welcome to Agent Flow Deck — let's connect it to your Jira.",
     "Set up",
     "Later",
   );
