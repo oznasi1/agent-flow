@@ -3,8 +3,8 @@ import { commands, env, window } from "../_mocks/vscode";
 import { fakeAuth, fakeContext, mkRepos } from "../_helpers/factories";
 
 // ── sibling modules the controller depends on ──────────────────────────────
-// Keep the real config constants (DEFAULT_PR_REVIEW_PROMPT, PR_REVIEW_AUTOFIX_CLAUSE,
-// …) faithful — only getConfig is stubbed so tests control the resolved settings.
+// Keep the real config constants (DEFAULT_PR_REVIEW_PROMPT, …) faithful — only
+// getConfig is stubbed so tests control the resolved settings.
 vi.mock("../../src/config", async () => {
   const actual = await vi.importActual<typeof import("../../src/config")>("../../src/config");
   return { ...actual, getConfig: vi.fn() };
@@ -76,7 +76,7 @@ vi.mock("../../src/jira/client", async () => {
 });
 
 import { parseJiraError } from "../../src/jira/errors";
-import { getConfig, PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/config";
+import { getConfig } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge } from "../../src/engine/workspace";
 import { createWorktrees } from "../../src/engine/worktree";
@@ -86,7 +86,7 @@ import { JiraClient, JiraAuthError, markJiraNetworkFailure } from "../../src/jir
 import { TasksViewProvider } from "../../src/tasksView";
 import type { TakeSource } from "../../src/telemetry/events";
 import type { InboundMessage, OutboundMessage } from "../../src/types";
-import { SLACK_DM_SENTENCE } from "../../src/engine/prompt";
+import { SLACK_DM_SENTENCE, PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
 
 const CFG = {
   baseUrl: "https://jira",

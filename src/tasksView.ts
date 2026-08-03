@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { getConfig, AgentFlowConfig, ExploreAction, PR_REVIEW_AUTOFIX_CLAUSE } from "./config";
+import { getConfig, AgentFlowConfig, ExploreAction } from "./config";
 import { JiraAuth } from "./jira/auth";
 import { JiraClient, JiraAuthError, JiraApiError, JiraDetail, TransitionOption, isJiraNetworkError } from "./jira/client";
 import { describeJiraError } from "./jira/errors";
@@ -17,7 +17,7 @@ import {
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
-import { applyExploreVars, injectSlackDm, insertBeforeFiles } from "./engine/prompt";
+import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, type MergeCandidate } from "./engine/workspace";
 import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
 import { createWorktrees } from "./engine/worktree";
@@ -1456,16 +1456,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const resolved = await this.resolveKickoff(key, preselected);
     if (!resolved) return;
     const { detail, services, target } = resolved;
-    await this.launch(detail, services, this.prReviewTemplate(getConfig()), true, target);
-  }
-
-  /** Assemble the PR-review prompt: the configured base, with the auto-fix clause
-   * inserted just before the trailing {files} block when prReviewAutoFix is on.
-   * Reuses insertBeforeFiles — the same technique as the Explore Slack-DM sentence. */
-  private prReviewTemplate(cfg: AgentFlowConfig): string {
-    return cfg.prReviewAutoFix
-      ? insertBeforeFiles(cfg.prReviewPrompt, " " + PR_REVIEW_AUTOFIX_CLAUSE)
-      : cfg.prReviewPrompt;
+    const cfg = getConfig();
+    await this.launch(detail, services, prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix), true, target);
   }
 
   /** Where to open a taken task — new window, this window, a saved workspace, or a
