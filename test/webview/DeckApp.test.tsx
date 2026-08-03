@@ -34,7 +34,8 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   ...over,
 });
 
-const runsMsg = (runs: RunStatus[]): OutboundMessage => ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, ghNote: null });
+const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated"): OutboundMessage =>
+  ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, ghNote: null, prReviewStatus });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
@@ -495,7 +496,7 @@ describe("DeckApp PR-facts chrome", () => {
 
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, ghNote: "gh CLI not found — PR facts off" });
+    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 
@@ -917,5 +918,59 @@ describe("DeckApp review writes", () => {
     render(<DeckApp />);
     host({ type: "toast", level: "info", message: "just fyi" });
     expect(screen.queryByRole("button", { name: /open pr/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("DeckApp — Address PR", () => {
+  const prCard = (over: Partial<RunStatus> = {}) => mkStatus({ jiraStatus: "PR initiated", ...over });
+
+  it("shows the button when the Jira status matches the configured one", () => {
+    render(<DeckApp />);
+    host(runsMsg([prCard()]));
+    expect(screen.getByRole("button", { name: "Address PR" })).toBeInTheDocument();
+  });
+
+  it("matches the status case-insensitively and ignores surrounding space", () => {
+    render(<DeckApp />);
+    host(runsMsg([prCard({ jiraStatus: "  pr initiated  " })]));
+    expect(screen.getByRole("button", { name: "Address PR" })).toBeInTheDocument();
+  });
+
+  it("hides the button on a card in any other status", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ jiraStatus: "In Progress" })]));
+    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+  });
+
+  it("hides the button when the run has no Jira status at all", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ jiraStatus: null })]));
+    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+  });
+
+  it("hides the button when the setting is empty", () => {
+    render(<DeckApp />);
+    host(runsMsg([prCard()], ""));
+    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+  });
+
+  it("hides the button on a local card, whose ticket key is only inferred", () => {
+    render(<DeckApp />);
+    host(runsMsg([prCard({ run: { ...mkStatus().run, kind: "local" } })]));
+    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+  });
+
+  it("posts deck:addressPr with the run key on click", () => {
+    render(<DeckApp />);
+    host(runsMsg([prCard()]));
+    fireEvent.click(screen.getByRole("button", { name: "Address PR" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:addressPr", key: "ASM-1" });
+  });
+
+  it("leads the action row, before Open", () => {
+    render(<DeckApp />);
+    host(runsMsg([prCard()]));
+    const labels = Array.from(document.querySelectorAll(".actions .act")).map((b) => b.textContent);
+    expect(labels).toEqual(["Address PR", "Open", "Diff"]);
   });
 });

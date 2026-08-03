@@ -142,17 +142,13 @@ export const DEFAULT_EXPLORE_ACTIONS: ExploreAction[] = EXPLORE_ACTION_DEFS.map(
 /** Seed for a PR-review kick-off (a task in the PR-review status). The agent locates
  * the task's GitHub PR by its Jira key, checks out its branch here, and assesses
  * readiness. Placeholders: {key} {summary} {url} {brief} {files}. The auto-fix
- * sentence (below) is appended just before {files} when agentFlow.prReviewAutoFix is on. */
+ * sentence is appended just before {files} when agentFlow.prReviewAutoFix is on —
+ * see PR_REVIEW_AUTOFIX_CLAUSE and prReviewTemplate in engine/prompt.ts. */
 export const DEFAULT_PR_REVIEW_PROMPT =
   'Jira {key} ({url}): "{summary}". This task has an open GitHub PR — all our PRs carry the Jira key in their title and branch. ' +
   "Using `gh` (or the GitHub tools available to you): find the PR for {key}, run `gh pr checkout` to bring its branch " +
   "into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested " +
   "changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}";
-
-/** Appended to the PR-review prompt (just before {files}) when prReviewAutoFix is on. */
-export const PR_REVIEW_AUTOFIX_CLAUSE =
-  "If it's ready, go ahead and implement the requested changes on this branch so it's ready for me to review — " +
-  "do not push or merge without me.";
 
 /** Seed for reviewing a teammate's PR from the Deck's review strip. Distinct from
  * DEFAULT_PR_REVIEW_PROMPT, which addresses feedback on *your own* PR. The agent

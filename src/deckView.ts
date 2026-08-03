@@ -8,13 +8,14 @@ import { JiraClient, JiraAuthError } from "./jira/client";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
-import { openInEditor, openWorkspace, BRIEF_DIR } from "./engine/workspace";
+import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
 import { createWorktrees } from "./engine/worktree";
 import { currentBranch, prEligible, repoRoot, taskDiff } from "./engine/git";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
 import { discoverRepos } from "./engine/repos";
+import { prReviewTemplate } from "./engine/prompt";
 import { launchReview, resolveReviewMode, reviewRunKey } from "./engine/review/launch";
 import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
@@ -660,6 +661,10 @@ export class DeckPanel {
         prFacts: this.prFacts,
         openAgents: this.openAgents,
         ghNote: this.prFacts && this.ghGap ? GH_NOTES[this.ghGap.kind] : null,
+        // Read fresh on every post rather than cached in a field: it is a plain
+        // string setting a user can edit mid-session, and the board re-posts often
+        // enough that this is the whole of "keep it live".
+        prReviewStatus: getConfig().prReviewStatus,
       });
       // The disabled branch posts its own "cleared" state directly — enqueueReviews
       // only ever posts once a search settles or is already fresh, neither of
@@ -741,6 +746,9 @@ export class DeckPanel {
       case "deck:track":
         await this.track(m.key);
         break;
+      case "deck:addressPr":
+        await this.addressPr(m.key);
+        break;
       case "openExternal": {
         const u = vscode.Uri.parse(m.url);
         // f.url and every failing check's detailsUrl/targetUrl now come from
@@ -821,6 +829,98 @@ export class DeckPanel {
     }
     const doc = await vscode.workspace.openTextDocument({ content: chunks.join("\n\n"), language: "diff" });
     await vscode.window.showTextDocument(doc, { preview: true });
+  }
+
+  /**
+   * Re-seed an in-flight run with the Address PR prompt.
+   *
+   * The sidebar's kick-off acts on a *ticket*: nothing is on disk yet, so it reads
+   * Jira, asks where to open, asks which repos, and makes a worktree. A Deck card acts
+   * on a *run* that already has all three, so this asks nothing.
+   *
+   * Deliberately not openWorkspace, even though that is the function this mirrors:
+   * openWorkspace rewrites the runs-store record with a fresh createdAt and re-derives
+   * kind, which would reset "launched 4h ago" to "launched 0s ago" on a run taken
+   * yesterday. It would rewrite every brief too, which needs a Jira fetch to do
+   * faithfully. Re-seeding is the smaller operation, so it uses the smaller primitives
+   * openWorkspace is itself built from, and the only thing that hits disk is the
+   * transient plan file.
+   *
+   * Seeding reaches the window whether or not it is already open: watchPlansAndSeed
+   * makes a live window seed itself when the plan lands, and openInEditor shells to
+   * `open -a`, which focuses an existing window rather than opening a second one.
+   */
+  private async addressPr(key: string): Promise<void> {
+    const run = this.run(key);
+    if (!run) {
+      this.toast("error", `No run record for ${key}.`);
+      return;
+    }
+    // The webview only ever sends this for a card gated on isPrReviewStatus &&
+    // kind !== "local" — but `this.run(key)` falls back to the in-memory
+    // localRuns map, so a hand-crafted deck:addressPr naming a local key would
+    // still resolve one. A local card's ticket is inferred from a branch name;
+    // seeding a PR-review agent against that inference on one click is exactly
+    // what this feature must never do. The other two guards below (no record,
+    // nothing to open) are enforced host-side rather than trusted to the
+    // webview, so this one is too — unreachable today, but cheap insurance
+    // against a future caller that isn't as careful.
+    if (runKind(run) === "local") {
+      this.log(`deck: addressPr ignored for local card ${key}`);
+      return;
+    }
+    const cfg = getConfig();
+    const template = prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix);
+    // ticketKeyFor, not run.key: track() saves a promoted local card under its
+    // place-hash key when the inferred Jira key was already owned by another
+    // run, and that ticket then lives only in the run's url. Seeding the prompt
+    // with run.key there would tell the agent to match a PR title against a
+    // hash rather than a Jira key. The plan file's `key` names the same ticket
+    // (it is what the on-disk filename and the seeded-session guard key off),
+    // so it uses the same derivation rather than a second, disagreeing one.
+    const ticketKey = ticketKeyFor(run);
+    const ticket = { key: ticketKey, summary: run.summary, url: run.url };
+    // Mirror the shape this run was launched in — that is what its windows are. A
+    // multiroot run is one window on the workspace file, rendered against the absolute
+    // brief the launch wrote; a per-window run is one window per repo, where the
+    // relative .pick-task/TASK.md resolves inside each. Same split openWorkspace makes,
+    // and it keeps every window of a multi-repo run seeded rather than just the first.
+    // Keyed on workspaceFile's presence, not mode, the way inspect() already does it.
+    // mentions is empty: file hints come from the ticket description, and re-fetching
+    // Jira is exactly what this path exists to avoid.
+    const matches = run.workspaceFile
+      ? [{ matchPath: run.workspaceFile, prompt: agentPrompt(ticket, [], template, run.briefPaths[0]) }]
+      : run.repos.map((r) => ({ matchPath: r.path, prompt: agentPrompt(ticket, [], template) }));
+    if (matches.length === 0) {
+      this.toast("error", `Nothing to open for ${key}.`);
+      return;
+    }
+    // Honor seedAgent the way every other launch does: with it off, nothing seeds
+    // anywhere, and writing a plan file no window will act on would just litter.
+    if (cfg.seedAgent) {
+      writePlanFile({ key: ticketKey, createdAt: Date.now(), seedAgent: true, matches });
+    }
+    // Collected rather than one toast per failing match: a multi-repo run with
+    // two dead windows would otherwise show the identical "Couldn't open ASM-1."
+    // twice, telling the user nothing about which repo actually failed.
+    const failedRepos: string[] = [];
+    for (const m of matches) {
+      if (await openInEditor(m.matchPath)) continue;
+      failedRepos.push(run.repos.find((r) => r.path === m.matchPath)?.name ?? m.matchPath);
+    }
+    if (failedRepos.length === 1 && matches.length === 1) {
+      // The common case (one repo, or the single multiroot workspace file) keeps
+      // the plain message — naming the sole repo would just repeat the key.
+      this.toast("error", `Couldn't open ${key}.`);
+    } else if (failedRepos.length > 0) {
+      this.toast("error", `Couldn't open ${key} (${failedRepos.join(", ")}).`);
+    } else if (!cfg.seedAgent) {
+      // Address PR with seedAgent off is otherwise silently indistinguishable
+      // from plain Open — nothing seeded, no toast, no way to tell the two
+      // apart from what actually happened. Only reached when every window did
+      // open: a failure already got its own explanation above.
+      this.toast("info", `Opened ${key}'s window — nothing seeded, agentFlow.seedAgent is off.`);
+    }
   }
 
   private dispose(): void {

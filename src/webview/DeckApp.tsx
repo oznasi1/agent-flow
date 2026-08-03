@@ -2,6 +2,7 @@ import * as React from "react";
 import { send } from "./vscodeApi";
 import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind, ticketKeyFor } from "../types";
 import { ReviewStrip } from "./ReviewStrip";
+import { isPrReviewStatus } from "./helpers";
 
 let toastSeq = 0;
 
@@ -163,7 +164,7 @@ function AgentsRow({ agents }: { agents: CardAgent[] }): JSX.Element | null {
   );
 }
 
-function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (key: string) => void }): JSX.Element {
+function Card({ r, live, prReviewStatus, onForget }: { r: RunStatus; live: boolean; prReviewStatus: string; onForget: (key: string) => void }): JSX.Element {
   const col = COLUMNS.find((c) => c.id === r.column)!;
   const accent = `var(${col.varName})`;
   const sv = stateView(r, live);
@@ -181,6 +182,12 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
   // record on disk, so there is nothing to Forget — closing its agents is what
   // removes it.
   const local = runKind(r.run) === "local";
+  // Offer Address PR once the ticket reaches the configured PR-review status. Never on
+  // a local card: its key is read off the branch name (see inferredKey just below), so
+  // the status on it may belong to a ticket that is not ours — not something to seed an
+  // agent against on one click. A run with no Jira status needs no separate guard;
+  // isPrReviewStatus is false whenever either side is empty.
+  const canAddressPr = !local && isPrReviewStatus(r.jiraStatus ?? "", prReviewStatus);
   // The key came from the branch, not from a launch. Say so: the branch could
   // name a ticket somebody else owns, and the Jira status on this card would
   // then be theirs.
@@ -256,6 +263,15 @@ function Card({ r, live, onForget }: { r: RunStatus; live: boolean; onForget: (k
       <div className="c-foot">
         {r.jiraStatus && <span className="pill" title={`Jira status: ${r.jiraStatus}`}>{r.jiraStatus}</span>}
         <div className="actions">
+          {canAddressPr && (
+            <button
+              className="act"
+              title={`Address the PR for ${r.run.key} — open its workspace and work through the review feedback`}
+              onClick={() => send({ type: "deck:addressPr", key: r.run.key })}
+            >
+              Address PR
+            </button>
+          )}
           {/* An already-open window used to say so in a line of its own on every such
               card. The button that behaves differently is the right place to explain
               it: a 5px marker carries "there is something to focus", the tooltip
@@ -295,6 +311,7 @@ export function DeckApp(): JSX.Element {
   const [prFacts, setPrFacts] = React.useState(true);
   const [openAgents, setOpenAgents] = React.useState(true);
   const [ghNote, setGhNote] = React.useState<string | null>(null);
+  const [prReviewStatus, setPrReviewStatus] = React.useState("");
   const [syncedAt, setSyncedAt] = React.useState<number | null>(null);
   const [, forceTick] = React.useState(0);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string; action?: { label: string; url: string } }[]>([]);
@@ -342,6 +359,7 @@ export function DeckApp(): JSX.Element {
         setPrFacts(m.prFacts);
         setOpenAgents(m.openAgents);
         setGhNote(m.ghNote);
+        setPrReviewStatus(m.prReviewStatus);
         setSyncedAt(Date.now());
       } else if (m.type === "toast") {
         const id = ++toastSeq;
@@ -503,7 +521,7 @@ export function DeckApp(): JSX.Element {
                   <span className="rule" />
                 </div>
                 <div className="col-body">
-                  {list.map((r) => <Card key={r.run.key} r={r} live={live} onForget={forget} />)}
+                  {list.map((r) => <Card key={r.run.key} r={r} live={live} prReviewStatus={prReviewStatus} onForget={forget} />)}
                 </div>
               </section>
             );
