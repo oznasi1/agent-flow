@@ -140,13 +140,19 @@ export interface SettingsSnapshot {
   batch_confirm_threshold: number;
   repo_blocklist_count: number;
   prompt_modes_count: number;
-  prompt_modes_customized: boolean;
+  // How the resolved prompt-mode list differs from the built-ins it layered
+  // over. Counts only — labels, details and prompts are user-authored text.
+  prompt_modes_overridden: number;
+  prompt_modes_custom: number;
+  prompt_modes_hidden: number;
   explore_prompts_customized: boolean;
   environments_customized: boolean;
   pr_review_prompt_customized: boolean;
   review_mode: TaskModeProp;
   review_modes_count: number;
-  review_modes_customized: boolean;
+  review_modes_overridden: number;
+  review_modes_custom: number;
+  review_modes_hidden: number;
 }
 
 /** Sent via logUsage — suppressed entirely at telemetry level "error". */

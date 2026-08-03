@@ -2,6 +2,7 @@ import {
   AgentFlowConfig, DEFAULT_ENVIRONMENTS, DEFAULT_EXPLORE_ACTIONS, DEFAULT_PR_REVIEW_PROMPT,
   DEFAULT_PROMPT_MODES, DEFAULT_REVIEW_REQUEST_MODES,
 } from "../config";
+import { PromptMode } from "../types";
 import { SettingsSnapshot, STOCK_PROMPT_MODES, STOCK_REVIEW_MODES, TaskModeProp } from "./events";
 
 /** Collapse an "ask, or a mode id" setting to a shape-only value. A custom id is
@@ -41,14 +42,31 @@ export const WORKTREE_MODES = ["ask", "always", "never"] as const;
 export const REMOTE_CONTROL_MODES = ["off", "on", "ask"] as const;
 export const DEFAULT_FILTER_VALUES = ["unassigned", "mysprint", "mine", "sprint", "backlog"] as const;
 
-const STOCK_PROMPT_MODE_IDS = DEFAULT_PROMPT_MODES.map((m) => m.id).join(",");
-const STOCK_REVIEW_MODE_IDS = DEFAULT_REVIEW_REQUEST_MODES.map((m) => m.id).join(",");
-
 const DEFAULT_ENVIRONMENT_LIST = DEFAULT_ENVIRONMENTS.join(",");
 
 /** Shipped default prompt per explore-action id (the id set never varies, only each
  * action's `.prompt` can be customized). */
 const DEFAULT_EXPLORE_PROMPTS = new Map(DEFAULT_EXPLORE_ACTIONS.map((a) => [a.id, a.prompt]));
+
+/** How a resolved mode list differs from the built-ins it layered over: how many
+ * built-ins the user overrode, how many modes are their own, how many built-ins
+ * they hid. Derived by diffing ids and comparing values — the resolved list is
+ * all this function gets, and no label, detail or prompt ever leaves it. */
+function modeCounts(
+  resolved: PromptMode[],
+  builtIns: PromptMode[],
+): { overridden: number; custom: number; hidden: number } {
+  const byId = new Map(builtIns.map((m) => [m.id, m]));
+  let overridden = 0;
+  let custom = 0;
+  for (const m of resolved) {
+    const builtIn = byId.get(m.id);
+    if (!builtIn) custom++;
+    else if (builtIn.label !== m.label || builtIn.detail !== m.detail || builtIn.prompt !== m.prompt) overridden++;
+  }
+  const present = new Set(resolved.map((m) => m.id));
+  return { overridden, custom, hidden: builtIns.filter((m) => !present.has(m.id)).length };
+}
 
 /** Reduce config to shape only. Every setting whose value is user-authored —
  * baseUrl, project, githubOrg, reposRoot, workspaceDir, provenanceLabel,
@@ -60,6 +78,8 @@ const DEFAULT_EXPLORE_PROMPTS = new Map(DEFAULT_EXPLORE_ACTIONS.map((a) => [a.id
  * there, and reporting it as e.g. "auto" would be indistinguishable from a
  * genuine default. Tests assert none of the above leak. */
 export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
+  const promptCounts = modeCounts(cfg.promptModes, DEFAULT_PROMPT_MODES);
+  const reviewCounts = modeCounts(cfg.reviewRequestModes, DEFAULT_REVIEW_REQUEST_MODES);
   return {
     workspace_mode: enumOrInvalid(cfg.workspaceMode, WORKSPACE_MODES),
     open_in: enumOrInvalid(cfg.openIn, OPEN_IN_MODES),
@@ -83,7 +103,9 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     batch_confirm_threshold: cfg.batchLaunchConfirmThreshold,
     repo_blocklist_count: cfg.repoBlocklist.length,
     prompt_modes_count: cfg.promptModes.length,
-    prompt_modes_customized: cfg.promptModes.map((m) => m.id).join(",") !== STOCK_PROMPT_MODE_IDS,
+    prompt_modes_overridden: promptCounts.overridden,
+    prompt_modes_custom: promptCounts.custom,
+    prompt_modes_hidden: promptCounts.hidden,
     explore_prompts_customized: cfg.exploreActions.some((a) => DEFAULT_EXPLORE_PROMPTS.get(a.id) !== a.prompt),
     // Order-sensitive, and only ever a boolean — environment names are user-authored
     // and never transmitted.
@@ -91,6 +113,8 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     pr_review_prompt_customized: cfg.prReviewPrompt !== DEFAULT_PR_REVIEW_PROMPT,
     review_mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES),
     review_modes_count: cfg.reviewRequestModes.length,
-    review_modes_customized: cfg.reviewRequestModes.map((m) => m.id).join(",") !== STOCK_REVIEW_MODE_IDS,
+    review_modes_overridden: reviewCounts.overridden,
+    review_modes_custom: reviewCounts.custom,
+    review_modes_hidden: reviewCounts.hidden,
   };
 }
