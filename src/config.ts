@@ -247,6 +247,82 @@ function explicitConfigValue<T>(c: vscode.WorkspaceConfiguration, key: string): 
   return (i?.workspaceFolderValue ?? i?.workspaceValue ?? i?.globalValue) as T | undefined;
 }
 
+/** One entry of a mode-list setting exactly as settings.json may hold it: every
+ * field unknown, because a hand-edited file can put anything here. Only `id` is
+ * meaningful on its own — the rest are optional so an entry can override one
+ * field of a built-in, or hide it, without restating the whole mode. */
+interface ModeEntry {
+  id?: unknown;
+  label?: unknown;
+  detail?: unknown;
+  prompt?: unknown;
+  hidden?: unknown;
+}
+
+/** The value if it is a string with something other than whitespace in it. */
+function nonBlank(v: unknown): string | undefined {
+  return typeof v === "string" && v.trim() ? v : undefined;
+}
+
+/** Resolve a mode-list setting into the list the picker shows. The setting is a
+ * *layer* over `builtIns`, never a replacement for it: an entry whose `id` names
+ * a built-in overrides that built-in field by field, an unknown `id` adds a mode
+ * of the user's own, and `hidden: true` drops a built-in. Built-ins the user
+ * never listed are appended in shipped order, which is the whole point — before
+ * this, a customized list froze at the modes that existed the day it was written
+ * and every later addition was invisible, silently, with nothing in the UI to
+ * suggest anything was missing.
+ *
+ * The user's own entries stay first, in their order, so a deliberate reordering
+ * survives; new built-ins land at the end, the one position that never disturbs
+ * an existing arrangement. `hidden` wins over an override of the same id
+ * wherever the two appear.
+ *
+ * Reads the *explicit* value only. `c.get` cannot tell a user's array from the
+ * manifest default, and layering that default over itself would leave `hidden`
+ * with nothing to hide for a user who never touched the setting. */
+function resolveModes(
+  c: vscode.WorkspaceConfiguration,
+  key: string,
+  builtIns: PromptMode[],
+): PromptMode[] {
+  const explicit = explicitConfigValue<unknown>(c, key);
+  if (!Array.isArray(explicit)) return builtIns;
+
+  const byId = new Map(builtIns.map((m) => [m.id, m]));
+  const hidden = new Set<string>();
+  const listed: PromptMode[] = [];
+  const seen = new Set<string>();
+
+  for (const raw of explicit) {
+    if (!raw || typeof raw !== "object") continue;
+    const entry = raw as ModeEntry;
+    const id = typeof entry.id === "string" ? entry.id.trim() : "";
+    if (!id) continue;
+    if (entry.hidden === true) {
+      hidden.add(id);
+      continue;
+    }
+    if (seen.has(id)) continue;
+    const builtIn = byId.get(id);
+    // Trimmed, unlike prompt below: a label is picker chrome, and padding in it
+    // would render literally, while padding in a prompt template can be
+    // intentional.
+    const label = nonBlank(entry.label)?.trim() ?? builtIn?.label;
+    const prompt = nonBlank(entry.prompt) ?? builtIn?.prompt;
+    // A mode of the user's own has no built-in to inherit from, so it needs both.
+    if (!label || !prompt) continue;
+    const detail = nonBlank(entry.detail) ?? builtIn?.detail;
+    seen.add(id);
+    listed.push({ id, label, prompt, ...(detail !== undefined ? { detail } : {}) });
+  }
+
+  const appended = builtIns.filter((m) => !seen.has(m.id));
+  const resolved = [...listed, ...appended].filter((m) => !hidden.has(m.id));
+  // An empty picker is a dead end with no in-product way out of it.
+  return resolved.length ? resolved : builtIns;
+}
+
 /** Trimmed, de-duplicated, non-empty environment names. Falls back to the shipped
  * defaults when the setting is absent, isn't an array, or holds nothing usable —
  * the same empty-means-default behavior `promptModes` has. A `Set` gives dedupe
@@ -299,10 +375,7 @@ export function getConfig(): AgentFlowConfig {
     workspaceMode: (c.get<AgentFlowConfig["workspaceMode"]>("workspaceMode")) || "auto",
     openIn: (c.get<AgentFlowConfig["openIn"]>("openIn")) || "ask",
     taskMode: c.get<string>("taskMode") || "ask",
-    promptModes: (() => {
-      const m = c.get<PromptMode[]>("promptModes");
-      return Array.isArray(m) && m.length ? m.filter((x) => x && x.id && x.label && x.prompt) : DEFAULT_PROMPT_MODES;
-    })(),
+    promptModes: resolveModes(c, "promptModes", DEFAULT_PROMPT_MODES),
     exploreMode: c.get<string>("exploreMode") || "ask",
     exploreActions,
     environments: readEnvironments(c),
@@ -324,20 +397,20 @@ export function getConfig(): AgentFlowConfig {
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,
     reviewRequestModes: (() => {
-      // `c.get` would return the manifest default here, which is a non-empty
-      // array — that is what VS Code serves to anyone who never touched the
-      // setting, and it would make the legacy migration below unreachable.
-      // Only an explicitly-set value tells us the user chose a modes list.
-      const explicit = explicitConfigValue<PromptMode[]>(c, "reviewRequestModes");
-      if (explicit !== undefined) {
-        const valid = Array.isArray(explicit) ? explicit.filter((x) => x && x.id && x.label && x.prompt) : [];
-        // An explicit modes list is a deliberate replacement and wins over the
-        // deprecated string, even when it is unusable and we fall back to stock.
-        return valid.length ? valid : DEFAULT_REVIEW_REQUEST_MODES;
+      // An explicit modes list is a deliberate layer over the built-ins and wins
+      // over the deprecated string, even when it holds nothing usable.
+      if (explicitConfigValue<unknown>(c, "reviewRequestModes") !== undefined) {
+        return resolveModes(c, "reviewRequestModes", DEFAULT_REVIEW_REQUEST_MODES);
       }
-      // Migrate a customized legacy reviewRequestPrompt into the stock mode.
+      // Migrate a customized legacy reviewRequestPrompt into the first built-in,
+      // carrying the rest of DEFAULT_REVIEW_REQUEST_MODES along with `slice(1)`
+      // rather than hand-building a one-element array — so if a second stock
+      // review mode ever ships, legacy-prompt users still receive it instead of
+      // freezing at just the one mode this migration patches.
       const legacy = explicitConfigValue<string>(c, "reviewRequestPrompt");
-      return legacy ? [{ ...DEFAULT_REVIEW_REQUEST_MODES[0], prompt: legacy }] : DEFAULT_REVIEW_REQUEST_MODES;
+      return legacy
+        ? [{ ...DEFAULT_REVIEW_REQUEST_MODES[0], prompt: legacy }, ...DEFAULT_REVIEW_REQUEST_MODES.slice(1)]
+        : DEFAULT_REVIEW_REQUEST_MODES;
     })(),
     reviewRequestMode: c.get<string>("reviewRequestMode") || "ask",
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,

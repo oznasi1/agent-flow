@@ -139,28 +139,143 @@ describe("getConfig — PR review", () => {
   });
 });
 
-describe("getConfig — promptModes validation", () => {
-  it("keeps a valid custom array", () => {
-    const custom = [{ id: "debug", label: "Debug", prompt: "reproduce {key}" }];
-    setConfig({ promptModes: custom });
-    expect(getConfig().promptModes).toEqual(custom);
-  });
+describe("getConfig — promptModes layering", () => {
+  const stockIds = DEFAULT_PROMPT_MODES.map((m) => m.id);
 
-  it("keeps an optional detail on a custom mode", () => {
-    const custom = [{ id: "debug", label: "Debug", detail: "Reproduce it first", prompt: "reproduce {key}" }];
-    setConfig({ promptModes: custom });
-    expect(getConfig().promptModes).toEqual(custom);
-  });
-
-  it("filters out entries missing id/label/prompt", () => {
+  it("appends built-ins the user never listed, keeping the user's entries first", () => {
     setConfig({
       promptModes: [
-        { id: "ok", label: "OK", prompt: "go" },
-        { id: "bad", label: "missing prompt" },
-        { label: "no id", prompt: "x" },
+        { id: "plan", label: "Plan first", prompt: "my plan {key}" },
+        { id: "implementation", label: "Implementation", prompt: "my impl {key}" },
       ],
     });
-    expect(getConfig().promptModes).toEqual([{ id: "ok", label: "OK", prompt: "go" }]);
+    const modes = getConfig().promptModes;
+    expect(modes.map((m) => m.id)).toEqual(stockIds);
+    expect(modes[0].prompt).toBe("my plan {key}");
+    expect(modes[1].prompt).toBe("my impl {key}");
+    // The regression this exists to prevent: modes added after the user
+    // customized the setting must still reach them.
+    expect(modes.map((m) => m.id)).toContain("orchestrator");
+  });
+
+  it("fills a field the override omits from the built-in it overrides", () => {
+    setConfig({ promptModes: [{ id: "plan", prompt: "mine {key}" }] });
+    const plan = getConfig().promptModes[0];
+    expect(plan).toEqual({
+      id: "plan",
+      label: DEFAULT_PROMPT_MODES[0].label,
+      detail: DEFAULT_PROMPT_MODES[0].detail,
+      prompt: "mine {key}",
+    });
+  });
+
+  it("keeps a user's reordering of the built-ins", () => {
+    setConfig({ promptModes: [{ id: "tdd" }, { id: "plan" }] });
+    const ids = getConfig().promptModes.map((m) => m.id);
+    expect(ids.slice(0, 2)).toEqual(["tdd", "plan"]);
+    expect(new Set(ids)).toEqual(new Set(stockIds));
+  });
+
+  it("appends a mode of the user's own after the built-ins", () => {
+    const spike = { id: "spike", label: "Spike", detail: "Timebox it", prompt: "spike {key}" };
+    setConfig({ promptModes: [spike] });
+    const modes = getConfig().promptModes;
+    expect(modes).toHaveLength(stockIds.length + 1);
+    expect(modes[0]).toEqual(spike);
+    expect(modes.slice(1)).toEqual(DEFAULT_PROMPT_MODES);
+  });
+
+  it("drops a built-in marked hidden", () => {
+    setConfig({ promptModes: [{ id: "tdd", hidden: true }] });
+    const ids = getConfig().promptModes.map((m) => m.id);
+    expect(ids).not.toContain("tdd");
+    expect(ids).toEqual(stockIds.filter((id) => id !== "tdd"));
+  });
+
+  it("lets hidden win over a competing override of the same id", () => {
+    setConfig({
+      promptModes: [
+        { id: "tdd", label: "Test-driven", prompt: "mine {key}" },
+        { id: "tdd", hidden: true },
+      ],
+    });
+    expect(getConfig().promptModes.map((m) => m.id)).not.toContain("tdd");
+  });
+
+  it("lets hidden win over a competing override of the same id, hidden entry first", () => {
+    // The mirror of the case above: the resolver's `hidden` filter runs after
+    // the merge, so which of the two entries comes first must not matter.
+    setConfig({
+      promptModes: [
+        { id: "tdd", hidden: true },
+        { id: "tdd", label: "Test-driven", prompt: "mine {key}" },
+      ],
+    });
+    expect(getConfig().promptModes.map((m) => m.id)).not.toContain("tdd");
+  });
+
+  it("drops a custom mode marked hidden", () => {
+    setConfig({
+      promptModes: [
+        { id: "spike", label: "Spike", prompt: "spike {key}" },
+        { id: "spike", hidden: true },
+      ],
+    });
+    expect(getConfig().promptModes.map((m) => m.id)).toEqual(stockIds);
+  });
+
+  it("ignores an unknown id that carries no label or no prompt", () => {
+    setConfig({
+      promptModes: [
+        { id: "no-prompt", label: "No prompt" },
+        { id: "no-label", prompt: "x {key}" },
+        { id: "usable", label: "Usable", prompt: "y {key}" },
+      ],
+    });
+    const modes = getConfig().promptModes;
+    expect(modes.map((m) => m.id)).toEqual(["usable", ...stockIds]);
+  });
+
+  it("ignores entries that are not objects or have no usable id", () => {
+    setConfig({ promptModes: [null, 42, "nope", {}, { id: "   " }, { id: 7 }] });
+    expect(getConfig().promptModes).toEqual(DEFAULT_PROMPT_MODES);
+  });
+
+  it("trims a padded id so it still matches its built-in", () => {
+    setConfig({ promptModes: [{ id: "  plan  ", prompt: "mine {key}" }] });
+    const modes = getConfig().promptModes;
+    expect(modes.map((m) => m.id)).toEqual(stockIds);
+    expect(modes[0].prompt).toBe("mine {key}");
+  });
+
+  it("trims a padded label but leaves an inherited prompt untouched", () => {
+    setConfig({ promptModes: [{ id: " plan ", label: "  My Plan  " }] });
+    const plan = getConfig().promptModes[0];
+    expect(plan.id).toBe("plan");
+    expect(plan.label).toBe("My Plan");
+    expect(plan.prompt).toBe(DEFAULT_PROMPT_MODES[0].prompt);
+  });
+
+  it("keeps the first of two overrides of the same id", () => {
+    setConfig({
+      promptModes: [
+        { id: "plan", prompt: "first {key}" },
+        { id: "plan", prompt: "second {key}" },
+      ],
+    });
+    const modes = getConfig().promptModes;
+    expect(modes.filter((m) => m.id === "plan")).toHaveLength(1);
+    expect(modes[0].prompt).toBe("first {key}");
+  });
+
+  it("drops a blank label or prompt on an override rather than blanking the built-in", () => {
+    setConfig({ promptModes: [{ id: "plan", label: "   ", prompt: "" }] });
+    expect(getConfig().promptModes[0]).toEqual(DEFAULT_PROMPT_MODES[0]);
+  });
+
+  it("falls back to the built-ins when every one of them is hidden", () => {
+    setConfig({ promptModes: DEFAULT_PROMPT_MODES.map((m) => ({ id: m.id, hidden: true })) });
+    expect(getConfig().promptModes).toEqual(DEFAULT_PROMPT_MODES);
   });
 
   it("falls back to defaults for an empty array", () => {
@@ -170,6 +285,13 @@ describe("getConfig — promptModes validation", () => {
 
   it("falls back to defaults for a non-array value", () => {
     setConfig({ promptModes: "nonsense" });
+    expect(getConfig().promptModes).toEqual(DEFAULT_PROMPT_MODES);
+  });
+
+  it("returns the built-ins untouched when the value only comes from the manifest default", () => {
+    // `get` serves the manifest default; `inspect` reports nothing set. Layering
+    // that default over itself would leave `hidden` nothing to hide.
+    setDefaultConfig({ promptModes: DEFAULT_PROMPT_MODES });
     expect(getConfig().promptModes).toEqual(DEFAULT_PROMPT_MODES);
   });
 });
@@ -442,12 +564,17 @@ describe("review-request settings", () => {
     expect(modes[0].prompt).toBe(DEFAULT_REVIEW_REQUEST_PROMPT);
   });
 
-  it("lets an explicit modes list beat the deprecated prompt", () => {
+  it("layers an explicit modes list over the stock mode and ignores the legacy prompt", () => {
     setConfig({
       reviewRequestPrompt: "legacy",
       reviewRequestModes: [{ id: "backend", label: "Backend", prompt: "BE {number}" }],
     });
-    expect(getConfig().reviewRequestModes).toEqual([{ id: "backend", label: "Backend", prompt: "BE {number}" }]);
+    const modes = getConfig().reviewRequestModes;
+    expect(modes).toEqual([
+      { id: "backend", label: "Backend", prompt: "BE {number}" },
+      ...DEFAULT_REVIEW_REQUEST_MODES,
+    ]);
+    expect(modes.map((m) => m.prompt)).not.toContain("legacy");
   });
 
   it("falls back to the stock list for an empty modes array", () => {
@@ -462,9 +589,22 @@ describe("review-request settings", () => {
     expect(getConfig().reviewRequestModes).toEqual(DEFAULT_REVIEW_REQUEST_MODES);
   });
 
-  it("drops only the invalid entries from a mixed modes array", () => {
+  it("drops an unusable entry but keeps the usable one and the stock mode", () => {
     setConfig({ reviewRequestModes: [{ id: "ok", label: "OK", prompt: "P" }, { id: "bad", label: "Bad" }] });
-    expect(getConfig().reviewRequestModes).toEqual([{ id: "ok", label: "OK", prompt: "P" }]);
+    expect(getConfig().reviewRequestModes).toEqual([
+      { id: "ok", label: "OK", prompt: "P" },
+      ...DEFAULT_REVIEW_REQUEST_MODES,
+    ]);
+  });
+
+  it("gives back the stock mode to a reviewer who replaced it with their own pair", () => {
+    setConfig({
+      reviewRequestModes: [
+        { id: "backend", label: "Backend", prompt: "BE {number}" },
+        { id: "frontend", label: "Frontend", prompt: "FE {number}" },
+      ],
+    });
+    expect(getConfig().reviewRequestModes.map((m) => m.id)).toEqual(["backend", "frontend", "full"]);
   });
 
   it("honours an explicit reviewRequestMode pin", () => {
@@ -507,9 +647,9 @@ describe("package.json ⇄ config constants", () => {
     expect(props["agentFlow.promptModes"].default).toEqual(DEFAULT_PROMPT_MODES);
   });
 
-  it("leaves detail out of the promptModes required fields", () => {
+  it("leaves label, detail and prompt out of the promptModes required fields", () => {
     const p = props["agentFlow.promptModes"] as { items?: { required?: string[]; properties?: Record<string, unknown> } };
-    expect(p.items?.required).toEqual(["id", "label", "prompt"]);
+    expect(p.items?.required).toEqual(["id"]);
     expect(Object.keys(p.items?.properties ?? {})).toContain("detail");
   });
 
@@ -582,4 +722,25 @@ describe("package.json ⇄ config constants", () => {
     const p = props["agentFlow.reviewRequestPrompt"] as { markdownDeprecationMessage?: string };
     expect(p.markdownDeprecationMessage).toMatch(/reviewRequestModes/);
   });
+
+  it.each(["agentFlow.promptModes", "agentFlow.reviewRequestModes"])(
+    "requires only an id per entry of %s, so an override or a hide entry validates",
+    (key) => {
+      const items = (props[key] as { items: { required: string[]; properties: Record<string, unknown> } }).items;
+      expect(items.required).toEqual(["id"]);
+      expect(items.properties.hidden).toEqual({
+        type: "boolean",
+        description: "Set to true to drop this built-in mode from the picker.",
+      });
+    },
+  );
+
+  it.each(["agentFlow.promptModes", "agentFlow.reviewRequestModes"])(
+    "documents that %s layers over the built-in modes",
+    (key) => {
+      const md = (props[key] as { markdownDescription: string }).markdownDescription;
+      expect(md).toMatch(/layer/i);
+      expect(md).toContain('"hidden": true');
+    },
+  );
 });

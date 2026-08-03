@@ -1494,7 +1494,7 @@ describe("DeckPanel review launch", () => {
     );
   });
 
-  it("offers every configured mode, label and detail", async () => {
+  it("offers every configured mode, label and detail, plus the stock mode the list didn't mention", async () => {
     setConfig({ reviewRequestModes: TWO_MODES });
     const p = await showAndWarm();
     await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
@@ -1502,6 +1502,28 @@ describe("DeckPanel review launch", () => {
       [
         expect.objectContaining({ label: "Backend services", detail: "Backend review skill" }),
         expect.objectContaining({ label: "Frontend", detail: "Frontend review skill" }),
+        // reviewRequestModes now layers over the built-ins rather than replacing
+        // them, so the stock "Full review" mode this list never mentioned is
+        // still offered, appended after the user's own two.
+        expect.objectContaining({ label: "Full review" }),
+      ],
+      expect.objectContaining({ title: "Review aws-ops#8491" }),
+    );
+  });
+
+  it("raises a picker with exactly one custom review mode configured, offering it alongside the stock mode", async () => {
+    // The layering consequence finding 1 flags: a single custom entry used to
+    // keep the zero-friction launch (modes.length === 1 short-circuited the
+    // picker in resolveReviewMode). Layering now appends stock "full", making
+    // it 2, so the picker appears where it didn't before.
+    const ONE_MODE = [{ id: "backend", label: "Backend services", detail: "Backend review skill", prompt: "BE {number}" }];
+    setConfig({ reviewRequestModes: ONE_MODE });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick).toHaveBeenCalledWith(
+      [
+        expect.objectContaining({ label: "Backend services", detail: "Backend review skill" }),
+        expect.objectContaining({ label: "Full review" }),
       ],
       expect.objectContaining({ title: "Review aws-ops#8491" }),
     );
