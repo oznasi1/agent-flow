@@ -9,8 +9,16 @@ export const CSS = `
   #root { padding: 8px 8px 20px; }
 
   .header { display: flex; align-items: center; gap: 8px; padding: 4px 4px 10px; }
-  .header .title { font-weight: 600; font-size: 13px; }
+  .header .title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
   .header .me { color: var(--vscode-descriptionForeground); font-size: 11px; margin-left: 8px; }
+
+  /* The mark is the sidebar's status display: lit dots are open Agent Flow
+     windows. Unlit and texture dots ride the theme foreground so the ring keeps
+     its shape on any background. */
+  .gauge { flex: none; display: block; }
+  .gauge .lit { fill: var(--brand); }
+  .gauge .unlit { fill: currentColor; opacity: .26; }
+  .gauge .tex { fill: currentColor; opacity: .4; }
   .explore { display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
     font-size: 11px; font-weight: 500; padding: 3px 11px 3px 9px; border-radius: 14px;
     cursor: pointer; border: none;

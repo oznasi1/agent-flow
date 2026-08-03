@@ -337,7 +337,9 @@ export type OutboundMessage =
   // `configured` is false until the Jira site URL + project key are set (first-run
   // setup). The webview uses it to show a "run setup" call-to-action rather than a
   // blank/loading panel.
-  | { type: "state"; authed: boolean; configured: boolean; project: string; me: string | null; prReviewStatus: string; filters: FilterVisibility }
+  // liveCount is absent when trackOpenWindows is off: the sidebar then shows the
+  // static mark rather than claiming zero windows are open.
+  | { type: "state"; authed: boolean; configured: boolean; project: string; me: string | null; prReviewStatus: string; filters: FilterVisibility; liveCount?: number }
   | { type: "tasks"; filter: Filter; tasks: JiraTask[] }
   | { type: "detail"; key: string; descriptionText: string; inferred: string[]; repos: string[];
       // The components actually on the issue, spelled as Jira spells them, and the

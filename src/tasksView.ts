@@ -19,7 +19,7 @@ import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { applyExploreVars, injectSlackDm, insertBeforeFiles } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, type MergeCandidate } from "./engine/workspace";
-import { readLiveWindows, windowIdentity, defaultWindowsDir } from "./engine/presence";
+import { readLiveWindows, windowIdentity, defaultWindowsDir, PresenceRecord } from "./engine/presence";
 import { createWorktrees } from "./engine/worktree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
@@ -142,7 +142,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * (project name, and the PR-review status string that gates the "Address PR" action). */
   private postState(authed: boolean, configured: boolean, me: string | null): void {
     const cfg = getConfig();
-    this.post({ type: "state", authed, configured, project: cfg.project, me, prReviewStatus: cfg.prReviewStatus, filters: cfg.filters });
+    this.post({ type: "state", authed, configured, project: cfg.project, me,
+      prReviewStatus: cfg.prReviewStatus, filters: cfg.filters,
+      liveCount: cfg.trackOpenWindows ? this.liveWindows().length : undefined });
   }
 
   private toast(
@@ -1493,18 +1495,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return p.target;
   }
 
+  /** Live Agent-Flow windows other than this one. One source for both the open-target
+   * picker and the sidebar's gauge count. */
+  private liveWindows(): PresenceRecord[] {
+    const self = windowIdentity()?.identity;
+    return readLiveWindows(defaultWindowsDir()).filter((w) => w.identity !== self);
+  }
+
   /** Live Agent-Flow windows (excluding the current one) as open-target picks. A
    * workspace window maps to the existing merge+focus path; a folder window focuses
    * and seeds in place. */
   private liveWindowItems(): { label: string; detail: string; target: OpenTarget }[] {
-    const self = windowIdentity()?.identity;
-    return readLiveWindows(defaultWindowsDir())
-      .filter((w) => w.identity !== self)
-      .map((w) => ({
-        label: `$(window) ${w.label}`,
-        detail: w.kind === "workspace" ? `open now · ${w.folders} folder${w.folders === 1 ? "" : "s"}` : "open now",
-        target: w.kind === "workspace" ? { kind: "existing", file: w.identity } : { kind: "live-folder", folder: w.identity },
-      }));
+    return this.liveWindows().map((w) => ({
+      label: `$(window) ${w.label}`,
+      detail: w.kind === "workspace" ? `open now · ${w.folders} folder${w.folders === 1 ? "" : "s"}` : "open now",
+      target: w.kind === "workspace" ? { kind: "existing", file: w.identity } : { kind: "live-folder", folder: w.identity },
+    }));
   }
 
   /** Resolve an OpenTarget to the openWorkspace arguments, asking the multiroot-vs-

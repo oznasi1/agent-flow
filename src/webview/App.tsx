@@ -3,6 +3,7 @@ import Fuse from "fuse.js";
 import { send } from "./vscodeApi";
 import { addOnce, deriveStatuses, fmtEst, isPrReviewStatus, matchesStatus, moveKey, prioClass } from "./helpers";
 import { Filter, FilterVisibility, JiraTask, OutboundMessage, Size } from "../types";
+import { GaugeMark } from "./GaugeMark";
 
 let toastSeq = 0;
 
@@ -104,6 +105,7 @@ export function App(): JSX.Element {
   const [configured, setConfigured] = React.useState(true); // assume yes until told otherwise (no setup-flash)
   const [error, setError] = React.useState<{ message: string; canRetry: boolean; canRunDoctor?: boolean } | null>(null);
   const [project, setProject] = React.useState("");
+  const [liveCount, setLiveCount] = React.useState<number | undefined>(undefined);
   const [me, setMe] = React.useState<string | null>(null);
   // The task status that reveals the "Address PR" card action (configurable; from the host).
   const [prReviewStatus, setPrReviewStatus] = React.useState("");
@@ -190,6 +192,7 @@ export function App(): JSX.Element {
           setMe(m.me);
           setPrReviewStatus(m.prReviewStatus);
           setFilters(m.filters);
+          setLiveCount(m.liveCount);
           break;
         case "error":
           setLoading(false);
@@ -447,7 +450,7 @@ export function App(): JSX.Element {
   return (
     <div>
       <div className="header">
-        <span className="title">📋 {project || "Tasks"}</span>
+        <span className="title"><GaugeMark live={liveCount} /> {project || "Tasks"}</span>
         <button
           className="explore"
           onClick={() => send({ type: "explore" })}

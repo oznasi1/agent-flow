@@ -214,14 +214,14 @@ describe("ready", () => {
   it("reports authed state with the current user and auto-fetches", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true } });
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
 
   it("reports unauthed state and does not fetch", async () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true } });
+    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
   });
 
@@ -229,7 +229,7 @@ describe("ready", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, baseUrl: "", project: "" });
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: false, project: "", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true } });
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: false, project: "", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
   });
 
@@ -238,7 +238,7 @@ describe("ready", () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
     // A state is posted before (and regardless of) the /myself round-trip…
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true } });
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     // …and the task list — the real payload — still loads.
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
@@ -246,7 +246,7 @@ describe("ready", () => {
   it("re-establishes state and fetches on retry", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "retry" });
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true } });
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
 
@@ -257,12 +257,48 @@ describe("ready", () => {
   });
 });
 
+describe("state — liveCount", () => {
+  it("reports the live window count from the same source as the open-target picker", async () => {
+    vi.mocked(readLiveWindows).mockReturnValue([
+      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, updatedAt: 9 },
+      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 8 },
+    ]);
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", liveCount: 2 }));
+  });
+
+  it("excludes the current window from the count, same as the picker", async () => {
+    vi.mocked(windowIdentity).mockReturnValue({ identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1 });
+    vi.mocked(readLiveWindows).mockReturnValue([
+      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, updatedAt: 9 },
+      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 8 },
+    ]);
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", liveCount: 1 }));
+  });
+
+  it("omits liveCount from state when window tracking is off, rather than reporting zero", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, trackOpenWindows: false });
+    vi.mocked(readLiveWindows).mockReturnValue([
+      { pid: 1, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 8 },
+    ]);
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane",
+      prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true } });
+    const stateMsg = posted().find((m) => m.type === "state") as { liveCount?: number };
+    expect(stateMsg.liveCount).toBeUndefined();
+  });
+});
+
 describe("fetch", () => {
   it("does not fetch when unauthenticated", async () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "fetch", filter: "mine", size: "any" });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
-    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true } });
+    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
   });
 
   it("toggles loading and posts tasks with a services guess", async () => {
@@ -1233,7 +1269,7 @@ describe("error handling", () => {
     clientStub.fetchTasks.mockRejectedValue(new JiraAuthError("expired"));
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mine", size: "any" });
-    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true } });
+    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
     expect(posted()).toContainEqual({ type: "loading", loading: false });
     // Auth errors re-gate (no persistent error banner — the sign-in screen is the cue).

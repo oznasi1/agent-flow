@@ -43,10 +43,23 @@ describe("mount + auth gate", () => {
     render(<App />);
     authed();
     host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "ASM-1", summary: "Fix the bug" })] });
-    expect(screen.getByText(/📋\s*ASM/)).toBeInTheDocument(); // header title, not the card key
+    expect(screen.getByText("ASM")).toBeInTheDocument(); // header title, not the card key
     expect(screen.getByText("Jane")).toBeInTheDocument();
     expect(screen.getByText("ASM-1")).toBeInTheDocument();
     expect(screen.getByText("Fix the bug")).toBeInTheDocument();
+  });
+
+  it("reports open windows on the header gauge", () => {
+    render(<App />);
+    host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane",
+           prReviewStatus: "PR initiated", filters: ALL_FILTERS, liveCount: 2 });
+    expect(screen.getByRole("img", { name: "2 Agent Flow windows open" })).toBeInTheDocument();
+  });
+
+  it("falls back to the static mark when the host reports no count", () => {
+    render(<App />);
+    authed();
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 });
 
