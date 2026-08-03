@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **Design spec:** `docs/superpowers/specs/2026-08-03-layered-prompt-modes-design.md`. It is the authority; this plan implements it.
-- **CI gates — all three must pass before any commit:** `npm run typecheck` (must be clean), `npm test` (currently 1755+ tests, all must pass), `npm run build` (must succeed). Run `npm run test:cov` before the final commit.
+- **CI gates — all three must pass before any commit:** `npm run typecheck` (must be clean), `npm test` (1833 tests in 65 files as of Task 1's commit `a6a102b`, all must pass), `npm run build` (must succeed). Run `npm run test:cov` before the final commit.
 - **Coverage thresholds are enforced** by `npm run test:cov` — `statements: 90, branches: 85, functions: 85, lines: 90` (`vitest.config.ts:40`). `src/**` is included; new files are not exempt.
 - **Do not edit the shared `vscode` mock** (`test/_mocks/vscode.ts`). Its `inspect` returns only `{key, globalValue}`, which is why scope selection is factored into an exported pure function testable with hand-built inspect objects. Changing the shared mock risks the whole suite.
 - **`PromptMode`** (`src/types.ts:44-49`) is `{id: string; label: string; detail?: string; prompt: string}`. **Do not add `hidden` to it** — `hidden` is a settings-file-only concept, resolved away before any consumer sees a `PromptMode`.
