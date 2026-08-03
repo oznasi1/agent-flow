@@ -74,12 +74,18 @@ describe.each(SURFACES)("%s sheet", (_name, sheet) => {
 });
 
 describe("brand accent", () => {
-  it("declares the dark default, the light override and the high-contrast opt-out", () => {
+  it("declares the dark default and the light override", () => {
     expect(TOKENS_CSS).toContain("--brand: #2AA79B");
     expect(TOKENS_CSS).toContain("--brand-ink: #04211E");
     expect(TOKENS_CSS).toMatch(/body\.vscode-light\s*{[^}]*--brand:\s*#157F76/);
     expect(TOKENS_CSS).toMatch(/body\.vscode-light\s*{[^}]*--brand-ink:\s*#ffffff/);
-    expect(TOKENS_CSS).toMatch(/body\.vscode-high-contrast[^{]*{[^}]*--brand:\s*currentColor/);
+  });
+
+  // Regression guard. currentColor in any property other than `color` resolves to
+  // that element's own color, so `background: var(--brand)` on a filled button
+  // would equal its label color and the text would disappear. This nearly shipped.
+  it("never resolves the accent to currentColor", () => {
+    expect(TOKENS_CSS).not.toContain("currentColor");
   });
 
   // The board's rule: one card at a time gets to be loud, and the loud one is

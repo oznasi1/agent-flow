@@ -51,10 +51,10 @@ export const TOKENS_CSS = `
 
   /* VS Code stamps the theme kind onto <body>, so the swap needs no JavaScript. */
   body.vscode-light { --brand: #157F76; --brand-ink: #ffffff; }
-  /* A user who chose high contrast chose it for a reason. The accent steps aside
-     entirely rather than tinting a theme built to avoid tint. */
-  body.vscode-high-contrast,
-  body.vscode-high-contrast-light { --brand: currentColor; }
+  /* No high-contrast override: the CSS current-color keyword, used outside the
+     color property itself, would resolve a filled button's background to its
+     own label color. The hue already measures 7.10:1 on #000000 and 4.85:1 on
+     #ffffff, so it needs no opt-out. */
 `;
 
 // box-sizing and the reduced-motion query were common to all three surfaces;
