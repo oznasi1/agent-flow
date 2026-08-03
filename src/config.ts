@@ -149,11 +149,6 @@ export const DEFAULT_PR_REVIEW_PROMPT =
   "into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested " +
   "changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}";
 
-/** Appended to the PR-review prompt (just before {files}) when prReviewAutoFix is on. */
-export const PR_REVIEW_AUTOFIX_CLAUSE =
-  "If it's ready, go ahead and implement the requested changes on this branch so it's ready for me to review — " +
-  "do not push or merge without me.";
-
 /** Seed for reviewing a teammate's PR from the Deck's review strip. Distinct from
  * DEFAULT_PR_REVIEW_PROMPT, which addresses feedback on *your own* PR. The agent
  * writes its findings to a file; the human submits the review. Placeholders:

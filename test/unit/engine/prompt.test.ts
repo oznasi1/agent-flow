@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderPrompt, injectSlackDm, insertBeforeFiles, SLACK_DM_SENTENCE, applyExploreVars, type PromptVars } from "../../../src/engine/prompt";
+import { renderPrompt, injectSlackDm, insertBeforeFiles, SLACK_DM_SENTENCE, applyExploreVars, prReviewTemplate, PR_REVIEW_AUTOFIX_CLAUSE, type PromptVars } from "../../../src/engine/prompt";
 
 const V: PromptVars = {
   key: "ASM-5412",
@@ -107,5 +107,25 @@ describe("applyExploreVars", () => {
 
   it("returns a template with no explore placeholders verbatim", () => {
     expect(applyExploreVars("just start{files}", { env: "prod", services: "api" })).toBe("just start{files}");
+  });
+});
+
+describe("prReviewTemplate", () => {
+  it("inserts the auto-fix clause just before {files} when autoFix is on", () => {
+    const t = prReviewTemplate("Assess the PR for {key}.{files}", true);
+    expect(t).toContain(PR_REVIEW_AUTOFIX_CLAUSE);
+    expect(t.indexOf(PR_REVIEW_AUTOFIX_CLAUSE)).toBeLessThan(t.indexOf("{files}"));
+  });
+
+  it("appends the clause at the end when the prompt has no {files}", () => {
+    expect(prReviewTemplate("Assess the PR for {key}.", true)).toBe(
+      `Assess the PR for {key}. ${PR_REVIEW_AUTOFIX_CLAUSE}`,
+    );
+  });
+
+  it("returns the prompt untouched when autoFix is off", () => {
+    expect(prReviewTemplate("Assess the PR for {key}.{files}", false)).toBe(
+      "Assess the PR for {key}.{files}",
+    );
   });
 });
