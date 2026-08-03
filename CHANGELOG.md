@@ -7,23 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.46] — 2026-08-03
+
 ### Added
 
-- The Deck reflects every Claude Code session open on this machine, not only what
-  Agent Flow launched. Sessions attach to the card that owns their directory —
-  a worktree with two agents now shows both — and a place with no tracked run
-  becomes a card of its own, with its ticket key inferred from its branch and its
-  pull request found from it. `⋯` → **Track it** pins one to the runs store. Toggle with
-  **Open agents** / `agentFlow.openAgents`.
+- **The Deck reflects every Claude Code session open on this machine**, not only the
+  tasks Agent Flow launched. Sessions attach to the card that owns their directory —
+  a worktree with two agents now shows both, each with its own live state — and a
+  place with no tracked run becomes a card of its own, marked `local`, with its
+  ticket key inferred from its branch and its pull request found from it. `⋯` →
+  **Track it** pins one to the runs store so it survives its agents closing. Read
+  from `~/.claude/sessions`; toggle with **Open agents** / `agentFlow.openAgents`.
 
 ### Changed
 
-- An agent that has ended its turn now outranks one that is still working when a
-  card has several, so a multi-agent card lands in **Action required** rather
-  than hiding the one waiting on you behind the ones that are busy.
-- The Deck looks for a pull request by whether a repo is on a branch of its own
-  rather than by whether the run has a ticket, so an Explore session that made a
-  branch now finds its PR.
+- **An agent waiting on you now outranks one that is busy.** When a card has several
+  agents, the one that has ended its turn decides the column, so the card lands in
+  **Action required** instead of hiding it behind the ones still working.
+- **A pull request is found by branch, not by ticket.** The Deck looks for a PR by
+  whether a repo is on a branch of its own rather than by whether the run has a Jira
+  ticket, so an Explore session that made a branch now finds its PR.
 
 ## [0.1.45] — 2026-08-02
 
