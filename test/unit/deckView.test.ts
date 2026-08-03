@@ -9,6 +9,9 @@ import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 const h = vi.hoisted(() => ({
   runs: [] as Run[],
   openInEditor: vi.fn(async (_t: string) => true),
+  writePlanFile: vi.fn(),
+  prReviewPrompt: "Assess the PR for {key}.{files}" as string,
+  prReviewAutoFix: false as boolean,
   taskDiff: vi.fn((_p: string) => ""),
   buildRunStatus: vi.fn(),
   removeRun: vi.fn(),
@@ -42,6 +45,7 @@ const h = vi.hoisted(() => ({
   // the Jira-provenance toggle reused for a review body, and the submit call itself.
   reviewWrites: false as boolean,
   stampLabelOnWrite: true as boolean,
+  seedAgent: true as boolean,
   reviewSubmit: vi.fn(async (_repo: string, _number: number, _verb: ReviewVerb, _body: string): Promise<{ ok: true } | { ok: false; message: string }> => ({ ok: true })),
   repos: [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }] as ServiceRef[],
   reviewRequests: true as boolean,
@@ -87,6 +91,12 @@ vi.mock("../../src/engine/workspace", () => ({
   // import of BRIEF_DIR and openWorkspace resolves to something.
   openWorkspace: vi.fn(),
   BRIEF_DIR: ".pick-task",
+  writePlanFile: h.writePlanFile,
+  // A stub that encodes its brief argument in the output, so a test can assert
+  // which brief a match was rendered against without re-testing renderPrompt —
+  // engine/prompt.test.ts already owns that.
+  agentPrompt: (t: { key: string }, _mentions: string[], template: string, briefPath?: string) =>
+    `${template} [key=${t.key} brief=${briefPath ?? "(relative)"}]`,
 }));
 vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn() }));
 // repoRoot stubbed alongside the real taskDiff: groupByPlace (engine/sessions)
@@ -171,6 +181,7 @@ vi.mock("../../src/config", async (importActual) => {
       openAgents: h.openAgents,
       reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: [],
       reviewWrites: h.reviewWrites, stampLabelOnWrite: h.stampLabelOnWrite,
+      prReviewPrompt: h.prReviewPrompt, prReviewAutoFix: h.prReviewAutoFix, seedAgent: h.seedAgent,
       // Sourced from the real getConfig() (itself driven by the globally-mocked
       // vscode module) rather than hardcoded here, so a test's setConfig({
       // reviewRequestModes / reviewRequestMode }) actually reaches launchReviewFor.
@@ -195,6 +206,7 @@ vi.mock("../../src/jira/client", () => ({
 }));
 
 import { DeckPanel } from "../../src/deckView";
+import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
 import { JiraAuthError } from "../../src/jira/client";
 
 const mkRun = (over: Partial<Run> = {}): Run => ({
@@ -254,6 +266,10 @@ const sess = (over: Partial<OpenSession> = {}): OpenSession => ({
 beforeEach(() => {
   h.runs = [mkRun()];
   h.openInEditor.mockClear().mockResolvedValue(true);
+  h.writePlanFile.mockClear();
+  h.prReviewPrompt = "Assess the PR for {key}.{files}";
+  h.prReviewAutoFix = false;
+  h.seedAgent = true;
   h.taskDiff.mockClear().mockReturnValue("");
   h.buildRunStatus.mockReset().mockImplementation((i: { run: Run }) => statusFor(i.run));
   h.removeRun.mockClear();
@@ -2022,5 +2038,113 @@ describe("DeckPanel review submit", () => {
     const dones = posts(p).filter((m) => m.type === "deck:reviewSubmitDone");
     expect(dones.length).toBe(before + 1);
     expect(dones.at(-1)).toEqual({ type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled" });
+  });
+});
+
+describe("DeckPanel — Address PR", () => {
+  it("writes one plan matching the repo window for a per-window run", async () => {
+    h.runs = [mkRun()];
+    show();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    expect(h.writePlanFile).toHaveBeenCalledWith({
+      key: "ASM-1",
+      createdAt: expect.any(Number),
+      seedAgent: true,
+      matches: [{
+        matchPath: "/r/svc",
+        prompt: "Assess the PR for {key}.{files} [key=ASM-1 brief=(relative)]",
+      }],
+    });
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
+  });
+
+  it("matches the workspace file and the launch's own brief for a multiroot run", async () => {
+    h.runs = [mkRun({
+      mode: "multiroot",
+      workspaceFile: "/ws/ASM-1.code-workspace",
+      briefPaths: ["/r/svc/.pick-task/TASK.md"],
+    })];
+    show();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    expect(h.writePlanFile).toHaveBeenCalledWith(expect.objectContaining({
+      matches: [{
+        matchPath: "/ws/ASM-1.code-workspace",
+        prompt: "Assess the PR for {key}.{files} [key=ASM-1 brief=/r/svc/.pick-task/TASK.md]",
+      }],
+    }));
+    expect(h.openInEditor).toHaveBeenCalledWith("/ws/ASM-1.code-workspace");
+  });
+
+  it("seeds every window of a multi-repo per-window run", async () => {
+    h.runs = [mkRun({
+      repos: [
+        { name: "svc", path: "/r/svc", isGit: true, branch: "b" },
+        { name: "ui", path: "/r/ui", isGit: true, branch: "b" },
+      ],
+    })];
+    show();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { matchPath: string }[] };
+    expect(plan.matches.map((m) => m.matchPath)).toEqual(["/r/svc", "/r/ui"]);
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/ui");
+  });
+
+  it("applies the auto-fix clause when prReviewAutoFix is on", async () => {
+    h.prReviewAutoFix = true;
+    h.runs = [mkRun()];
+    show();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { prompt: string }[] };
+    expect(plan.matches[0].prompt).toContain(PR_REVIEW_AUTOFIX_CLAUSE);
+  });
+
+  it("leaves the run record untouched — the card keeps its launched-at", async () => {
+    h.runs = [mkRun({ createdAt: 1_700_000_000_000 })];
+    show();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    expect(h.writeRun).not.toHaveBeenCalled();
+  });
+
+  it("opens the window but writes no plan when seedAgent is off", async () => {
+    h.seedAgent = false;
+    h.runs = [mkRun()];
+    show();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    expect(h.writePlanFile).not.toHaveBeenCalled();
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
+  });
+
+  it("toasts an error when there is no run record for the key", async () => {
+    h.runs = [];
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:addressPr", key: "ASM-9" });
+    expect(h.writePlanFile).not.toHaveBeenCalled();
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "error", message: "No run record for ASM-9." }),
+    );
+  });
+
+  it("toasts an error when the run has nothing to open", async () => {
+    h.runs = [mkRun({ repos: [] })];
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:addressPr", key: "ASM-1" });
+    expect(h.writePlanFile).not.toHaveBeenCalled();
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "error", message: "Nothing to open for ASM-1." }),
+    );
+  });
+
+  it("toasts an error when the editor refuses to open", async () => {
+    h.runs = [mkRun()];
+    h.openInEditor.mockResolvedValueOnce(false);
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:addressPr", key: "ASM-1" });
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "error", message: "Couldn't open ASM-1." }),
+    );
   });
 });
