@@ -1289,6 +1289,27 @@ describe("takeTask", () => {
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ services: [repos[0]] }));
   });
 
+  it("lists the pre-checked repos first, keeping discovery order within each group", async () => {
+    const repos = mkRepos(["aardvark-service", "billing-service", "centaur", "delta-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "Do the thing",
+      descriptionText: "desc",
+      labels: ["billing-service"],
+      components: ["delta-service"],
+      url: "https://jira/browse/ASM-1",
+    });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[1] }] as never);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", "command");
+    const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string; picked: boolean }[];
+    // Inference order would put delta-service (component) ahead of billing-service
+    // (label); the partition keeps discovery order inside each group instead.
+    expect(items.map((i) => i.label)).toEqual(["billing-service", "delta-service", "aardvark-service", "centaur"]);
+    expect(items.map((i) => i.picked)).toEqual([true, true, false, false]);
+  });
+
   it("aborts when the repo QuickPick is cancelled", async () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
     const { provider } = setup();

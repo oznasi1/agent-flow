@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Take's repo confirmation puts the pre-checked repos on top.** The
+  "confirm the repos this task touches" list was in plain discovery order, so on a
+  `reposRoot` with dozens of repos the ones inferred from the ticket — the whole point
+  of the step — sat below the fold, and the pick read as if nothing had been suggested.
+  Inferred repos now lead the list; discovery order still holds within each group.
+
 ## [0.1.47] — 2026-08-03
 
 ### Changed

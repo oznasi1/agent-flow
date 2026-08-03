@@ -885,8 +885,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       inferredNames = new Set(inferred.map((r) => r.service.name));
       inferredCount = inferred.length;
 
+      // Pre-checked repos first. A QuickPick renders items in the order it's handed
+      // them, so on a reposRoot with dozens of repos the inferred ones — the whole
+      // point of the step — sit below the fold and read as "nothing was suggested".
+      // Stable partition, so discovery order still holds within each group.
+      const ordered = [
+        ...repos.filter((r) => inferredNames.has(r.name)),
+        ...repos.filter((r) => !inferredNames.has(r.name)),
+      ];
+
       const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
-        repos.map((r) => ({
+        ordered.map((r) => ({
           label: r.name,
           description: inferredNames.has(r.name)
             ? `inferred (${inferred.find((i) => i.service.name === r.name)!.reason})`
