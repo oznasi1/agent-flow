@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- **Accent tokens, exact values.** `--brand: #2AA79B` / `--brand-ink: #04211E` in `:root`; `--brand: #157F76` / `--brand-ink: #ffffff` under `body.vscode-light`; `--brand: currentColor` under `body.vscode-high-contrast` and `body.vscode-high-contrast-light`.
+- **Accent tokens, exact values.** `--brand: #2AA79B` / `--brand-ink: #04211E` in `:root`; `--brand: #157F76` / `--brand-ink: #ffffff` under `body.vscode-light`. **No high-contrast override** — high contrast gets the real accent. An earlier version of this constraint set `--brand: currentColor` there; that resolves a filled button's `background` to its own `color` (`--brand-ink`), making the label invisible. The hue needs no opt-out: 7.10:1 on `#000000`, 4.85:1 on `#ffffff`, fills at 5.72 and 4.85. Ruled 2026-08-03.
 - **The accent may appear in exactly three places:** the sidebar header gauge, the sidebar `Take` button (filled), and the Deck's ordinary `.act.primary` (tinted outline). Nowhere else — never on the Deck's `.card.attn` in any form, never on a status dot, rail, chip, link, or Marketplace kind color.
 - **No new dependencies and no new typefaces.** Fonts stay `var(--vscode-font-family)` and `var(--vscode-editor-font-family)`.
 - **Mono is for identifiers and counts only.** Prose is always the UI font.
@@ -329,12 +329,18 @@ Append to `test/webview/tokens.test.ts`:
 
 ```ts
 describe("brand accent", () => {
-  it("declares the dark default, the light override and the high-contrast opt-out", () => {
+  it("declares the dark default and the light override", () => {
     expect(TOKENS_CSS).toContain("--brand: #2AA79B");
     expect(TOKENS_CSS).toContain("--brand-ink: #04211E");
     expect(TOKENS_CSS).toMatch(/body\.vscode-light\s*{[^}]*--brand:\s*#157F76/);
     expect(TOKENS_CSS).toMatch(/body\.vscode-light\s*{[^}]*--brand-ink:\s*#ffffff/);
-    expect(TOKENS_CSS).toMatch(/body\.vscode-high-contrast[^{]*{[^}]*--brand:\s*currentColor/);
+  });
+
+  // Regression guard. currentColor in any property other than `color` resolves to
+  // that element's own color, so `background: var(--brand)` on a filled button
+  // would equal its label color and the text would disappear. This nearly shipped.
+  it("never resolves the accent to currentColor", () => {
+    expect(TOKENS_CSS).not.toContain("currentColor");
   });
 
   // The board's rule: one card at a time gets to be loud, and the loud one is
@@ -372,10 +378,12 @@ Inside the existing `:root` block, after the radii:
 
   /* VS Code stamps the theme kind onto <body>, so the swap needs no JavaScript. */
   body.vscode-light { --brand: #157F76; --brand-ink: #ffffff; }
-  /* A user who chose high contrast chose it for a reason. The accent steps aside
-     entirely rather than tinting a theme built to avoid tint. */
-  body.vscode-high-contrast,
-  body.vscode-high-contrast-light { --brand: currentColor; }
+
+  /* No high-contrast override, deliberately. Setting --brand to currentColor there
+     looks respectful and breaks the filled buttons: background: var(--brand) would
+     resolve to the element's own color — which is var(--brand-ink) — so the label
+     would vanish into its own background. The hue needs no opt-out anyway: 7.10:1
+     on #000000 and 4.85:1 on #ffffff, with fills at 5.72 and 4.85. */
 ```
 
 Add `"--brand"` and `"--brand-ink"` to the `OWNED` array in the test file.

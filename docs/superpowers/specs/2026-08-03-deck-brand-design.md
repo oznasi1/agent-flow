@@ -43,12 +43,21 @@ VS Code sets `vscode-dark` / `vscode-light` / `vscode-high-contrast` on `body`, 
 pure CSS:
 
 ```css
-:root                     { --brand: #2AA79B; --brand-ink: #04211E; }
-body.vscode-light         { --brand: #157F76; --brand-ink: #ffffff; }
-body.vscode-high-contrast { --brand: currentColor; }
+:root             { --brand: #2AA79B; --brand-ink: #04211E; }
+body.vscode-light { --brand: #157F76; --brand-ink: #ffffff; }
 ```
 
-High-contrast themes are never tinted — a user who chose HC chose it for a reason.
+**High contrast gets the real accent, not an opt-out.** An earlier draft set
+`--brand: currentColor` under `body.vscode-high-contrast` on the theory that an HC theme should never
+be tinted. That is broken, not merely conservative: `background: var(--brand)` resolves `currentColor`
+to the element's own `color`, which is `var(--brand-ink)` — so a filled button's background equals its
+label color and the text disappears. It would have shipped invisible `Take` and `Open file` buttons in
+the one theme people choose for legibility.
+
+The accent needs no opt-out anyway. Measured on both HC grounds: **7.10:1** on `#000000` and **4.85:1**
+on `#ffffff`, with fills at 5.72 and 4.85. Keeping the real hue is both simpler and safer, and it
+removes every self-referential `currentColor` from the accent's derivations. Ruled 2026-08-03 after
+Task 2's review caught it.
 
 Measured contrast, each pair in the role it actually ships in:
 
