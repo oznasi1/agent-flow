@@ -70,7 +70,14 @@
 
 ## Task 1: Extract the shared token module
 
-Pure extraction. Zero visual change is the acceptance criterion — if a screenshot differs, something was dropped.
+Extraction, plus one deliberate unification. The acceptance criterion is **no visual change except the two deltas named below** — if anything else differs in a screenshot, something was dropped.
+
+`BASE_CSS` carries four rules, and only `box-sizing` was genuinely present on all three surfaces before this task. `button { font: inherit; color: inherit; }` and the `:focus-visible` outline existed only in `deckStyles.ts`. Sharing them is intentional, and it changes two things on the sidebar and the Marketplace:
+
+- `.gate .btn` (the `Retry` / `Run setup` / `Sign in to Jira` buttons) sets `font-size` but never `font-family`. Form controls don't inherit font, so those buttons rendered in the browser's UA button font and now render in the UI font.
+- Every focusable element on those two surfaces gains a keyboard focus outline. Neither surface had one; that is a defect being fixed, not a regression.
+
+Both are approved. A reviewer should confirm they are the *only* behavioral deltas, not object to them.
 
 **Files:**
 - Create: `src/webview/tokens.ts`

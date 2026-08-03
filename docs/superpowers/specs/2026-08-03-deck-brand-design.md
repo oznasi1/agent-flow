@@ -114,8 +114,12 @@ seam.
 - `TOKENS_CSS` — the `:root` block: type scale, radii, `--hair`, `--edge`, `--mono`, `--dim`, the six
   status hues, the brand triplet, and the `body.vscode-light` / `body.vscode-high-contrast`
   overrides.
-- `BASE_CSS` — the reset all three surfaces currently repeat: `box-sizing`, `:focus-visible`,
-  `prefers-reduced-motion`, scrollbar.
+- `BASE_CSS` — `box-sizing`, `button { font: inherit }`, `:focus-visible`, and the
+  `prefers-reduced-motion` query. Only `box-sizing` was actually present on all three surfaces
+  before this work; the button reset and the focus outline lived in `deckStyles.ts` alone. Sharing
+  them is a deliberate unification, not a pure move: the sidebar and the Marketplace gain a
+  keyboard focus indicator neither previously had, and the sidebar's gate buttons stop rendering
+  in the browser's UA button font. Both approved 2026-08-03.
 
 Each entry (`index.tsx`, `deck.tsx`, `marketplace.tsx`) appends `TOKENS_CSS`, then `BASE_CSS`, then
 its own sheet. Order matters: tokens go first so surface rules win specificity ties.
