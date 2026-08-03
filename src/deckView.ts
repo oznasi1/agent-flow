@@ -856,9 +856,30 @@ export class DeckPanel {
       this.toast("error", `No run record for ${key}.`);
       return;
     }
+    // The webview only ever sends this for a card gated on isPrReviewStatus &&
+    // kind !== "local" — but `this.run(key)` falls back to the in-memory
+    // localRuns map, so a hand-crafted deck:addressPr naming a local key would
+    // still resolve one. A local card's ticket is inferred from a branch name;
+    // seeding a PR-review agent against that inference on one click is exactly
+    // what this feature must never do. The other two guards below (no record,
+    // nothing to open) are enforced host-side rather than trusted to the
+    // webview, so this one is too — unreachable today, but cheap insurance
+    // against a future caller that isn't as careful.
+    if (runKind(run) === "local") {
+      this.log(`deck: addressPr ignored for local card ${key}`);
+      return;
+    }
     const cfg = getConfig();
     const template = prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix);
-    const ticket = { key: run.key, summary: run.summary, url: run.url };
+    // ticketKeyFor, not run.key: track() saves a promoted local card under its
+    // place-hash key when the inferred Jira key was already owned by another
+    // run, and that ticket then lives only in the run's url. Seeding the prompt
+    // with run.key there would tell the agent to match a PR title against a
+    // hash rather than a Jira key. The plan file's `key` names the same ticket
+    // (it is what the on-disk filename and the seeded-session guard key off),
+    // so it uses the same derivation rather than a second, disagreeing one.
+    const ticketKey = ticketKeyFor(run);
+    const ticket = { key: ticketKey, summary: run.summary, url: run.url };
     // Mirror the shape this run was launched in — that is what its windows are. A
     // multiroot run is one window on the workspace file, rendered against the absolute
     // brief the launch wrote; a per-window run is one window per repo, where the
@@ -877,10 +898,28 @@ export class DeckPanel {
     // Honor seedAgent the way every other launch does: with it off, nothing seeds
     // anywhere, and writing a plan file no window will act on would just litter.
     if (cfg.seedAgent) {
-      writePlanFile({ key: run.key, createdAt: Date.now(), seedAgent: true, matches });
+      writePlanFile({ key: ticketKey, createdAt: Date.now(), seedAgent: true, matches });
     }
+    // Collected rather than one toast per failing match: a multi-repo run with
+    // two dead windows would otherwise show the identical "Couldn't open ASM-1."
+    // twice, telling the user nothing about which repo actually failed.
+    const failedRepos: string[] = [];
     for (const m of matches) {
-      if (!(await openInEditor(m.matchPath))) this.toast("error", `Couldn't open ${key}.`);
+      if (await openInEditor(m.matchPath)) continue;
+      failedRepos.push(run.repos.find((r) => r.path === m.matchPath)?.name ?? m.matchPath);
+    }
+    if (failedRepos.length === 1 && matches.length === 1) {
+      // The common case (one repo, or the single multiroot workspace file) keeps
+      // the plain message — naming the sole repo would just repeat the key.
+      this.toast("error", `Couldn't open ${key}.`);
+    } else if (failedRepos.length > 0) {
+      this.toast("error", `Couldn't open ${key} (${failedRepos.join(", ")}).`);
+    } else if (!cfg.seedAgent) {
+      // Address PR with seedAgent off is otherwise silently indistinguishable
+      // from plain Open — nothing seeded, no toast, no way to tell the two
+      // apart from what actually happened. Only reached when every window did
+      // open: a failure already got its own explanation above.
+      this.toast("info", `Opened ${key}'s window — nothing seeded, agentFlow.seedAgent is off.`);
     }
   }
 

@@ -38,8 +38,10 @@ orchestrate, not ready to set up.
   `<KEY>.code-workspace` (or one window per repo, or a per-task git worktree), and pre-fills
   the Claude Code panel with your chosen prompt mode (you press Enter to start).
 - **Address PR** — once a task reaches your PR-review status (default `PR initiated`), an
-  **Address PR** button appears on the card. It kicks off an agent **in a worktree** that finds
-  the task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
+  **Address PR** button appears on the card. From the sidebar's task card it kicks off an agent
+  **in a fresh worktree**; from a Deck card it re-seeds the run's own already-open workspace
+  instead, since a Deck card already has a worktree of its own. Either way the agent finds the
+  task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
   for your fixes — then, by default, starts implementing the requested changes (toggle with
   `agentFlow.prReviewAutoFix`).
 - **Review queue** — a strip on the Deck lists every open PR that asks for *your* review,
@@ -293,8 +295,9 @@ inspects their logs, error rates, metrics and traces, and deployed version there
 under `agentFlow.explorePrompts.*`, or pin one action with `agentFlow.exploreMode`.
 **Review with agent** works the same way on its own list: one **Full review** mode ships,
 and once you add a second — a backend-services reviewer and a frontend one, say — clicking
-asks which to seed. Pin one with `agentFlow.reviewRequestMode`. The **Address PR** kick-off
-always runs in a worktree. Per-task worktrees are created inside each repo at
+asks which to seed. Pin one with `agentFlow.reviewRequestMode`. The sidebar's **Address PR**
+kick-off always runs in a fresh worktree; a Deck card's re-seeds the run's own worktree in
+place instead, since one already exists. Per-task worktrees are created inside each repo at
 `.claude/worktrees/<KEY>` (and git-excluded automatically).
 
 **Remote Control.** With `agentFlow.remoteControl` set to `on` or `ask`, the Claude Code

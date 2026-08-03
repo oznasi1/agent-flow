@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Address PR now appears on Deck cards too.** Once a card's Jira status matches
+  `agentFlow.prReviewStatus`, an **Address PR** button shows up next to Open, the same
+  as the sidebar's task card. The sidebar's version acts on a bare ticket — nothing is
+  on disk yet, so it has to read Jira, ask where to open, ask which repos, and make a
+  worktree. A Deck card already has all three: its own repos, its own workspace, its
+  own brief. So its Address PR asks nothing and just re-seeds the workspace you already
+  have with the PR-review prompt, in place.
+
 ## [0.1.48] — 2026-08-03
 
 ### Changed

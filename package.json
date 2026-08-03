@@ -406,7 +406,7 @@
         "agentFlow.prReviewStatus": {
           "type": "string",
           "default": "PR initiated",
-          "description": "Task status that reveals the \"Address PR\" button on a card (matched case-insensitively against the Jira status name). When a task reaches this status, clicking the button kicks off an agent — in a worktree — that finds the task's GitHub PR and assesses whether it's ready for our fixes."
+          "description": "Task status that reveals the \"Address PR\" button on a card (matched case-insensitively against the Jira status name). When a task reaches this status, clicking the button kicks off an agent that finds the task's GitHub PR and assesses whether it's ready for our fixes — in a fresh worktree from the sidebar's task card, or in the run's own already-open workspace from a Deck card."
         },
         "agentFlow.prReviewAutoFix": {
           "type": "boolean",

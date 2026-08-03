@@ -2111,7 +2111,14 @@ describe("DeckPanel — Address PR", () => {
     h.runs = [mkRun({ createdAt: 1_700_000_000_000 })];
     show();
     await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    // A positive assertion that the handler actually ran: without it, deleting
+    // addressPr outright would still leave writeRun uncalled, and the test below
+    // would pass for the wrong reason.
+    expect(h.writePlanFile).toHaveBeenCalled();
     expect(h.writeRun).not.toHaveBeenCalled();
+    // The record itself still carries its original launched-at — the whole
+    // point of not routing through openWorkspace (which stamps a fresh one).
+    expect(h.runs.find((r) => r.key === "ASM-1")?.createdAt).toBe(1_700_000_000_000);
   });
 
   it("opens the window but writes no plan when seedAgent is off", async () => {
@@ -2153,6 +2160,66 @@ describe("DeckPanel — Address PR", () => {
     await p._fire({ type: "deck:addressPr", key: "ASM-1" });
     expect(posts(p)).toContainEqual(
       expect.objectContaining({ type: "toast", level: "error", message: "Couldn't open ASM-1." }),
+    );
+  });
+
+  it("collects failures across a multi-repo run into a single toast naming each repo", async () => {
+    h.runs = [mkRun({
+      repos: [
+        { name: "svc", path: "/r/svc", isGit: true, branch: "b" },
+        { name: "ui", path: "/r/ui", isGit: true, branch: "b" },
+      ],
+    })];
+    h.openInEditor.mockResolvedValue(false);
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:addressPr", key: "ASM-1" });
+    const toasts = posts(p).filter((m) => m.type === "toast" && m.level === "error");
+    // One toast, not one per failing window — and it names both.
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].message).toBe("Couldn't open ASM-1 (svc, ui).");
+  });
+
+  it("uses the real Jira key for the prompt and the plan file, not a promoted local card's place-hash", async () => {
+    // track() saves a promoted local card under its place-hash key when the
+    // inferred Jira key already belongs to another run — kind: "task", so it
+    // still reaches the PR-review status and shows the button — but the ticket
+    // itself only lives in its url. run.key here is exactly that hash.
+    h.runs = [mkRun({ key: "local-api-1a2b3c4d", url: "https://jira/browse/ASM-7" })];
+    show();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "local-api-1a2b3c4d" });
+    const plan = h.writePlanFile.mock.calls.at(-1)![0] as { key: string; matches: { prompt: string }[] };
+    // The mock agentPrompt encodes the ticket key it was given as "[key=...]".
+    expect(plan.matches[0].prompt).toContain("[key=ASM-7 ");
+    expect(plan.matches[0].prompt).not.toContain("local-api-1a2b3c4d");
+    expect(plan.key).toBe("ASM-7");
+  });
+
+  it("ignores an addressPr for a local card, even though run(key) can resolve one from localRuns", async () => {
+    // The webview never sends this — a local card's button is gated off — but
+    // run(key) falls back to the in-memory localRuns map regardless of kind, so
+    // the guard has to be enforced here too, not just trusted to the webview.
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show();
+    await settled();
+    const localKey = builtLocal().run.key;
+    const p = lastPanel();
+    await p._fire({ type: "deck:addressPr", key: localKey });
+    await settled();
+    expect(h.writePlanFile).not.toHaveBeenCalled();
+    expect(h.openInEditor).not.toHaveBeenCalled();
+  });
+
+  it("tells the user nothing was seeded when agentFlow.seedAgent is off", async () => {
+    h.seedAgent = false;
+    h.runs = [mkRun()];
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:addressPr", key: "ASM-1" });
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "info", message: expect.stringContaining("agentFlow.seedAgent") }),
     );
   });
 });
