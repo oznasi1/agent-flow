@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TOKENS_CSS, BASE_CSS } from "../../src/webview/tokens";
+import { TOKENS_CSS, BASE_CSS, CONTROLS_CSS } from "../../src/webview/tokens";
 import { CSS } from "../../src/webview/styles";
 import { DECK_CSS } from "../../src/webview/deckStyles";
 import { MARKETPLACE_CSS } from "../../src/webview/marketplaceStyles";
@@ -100,5 +100,18 @@ describe("brand accent", () => {
   it("is spent on exactly the three agreed surfaces", () => {
     const users = SURFACES.filter(([, sheet]) => sheet.includes("var(--brand"));
     expect(users.map(([name]) => name).sort()).toEqual(["deck", "marketplace", "sidebar"]);
+  });
+});
+
+describe("CONTROLS_CSS", () => {
+  it("defines the segmented control and declares no tokens of its own", () => {
+    expect(CONTROLS_CSS).toContain(".seg");
+    expect(declarationsIn(CONTROLS_CSS)).toEqual([]);
+  });
+
+  it("marks the on-state with weight and foreground, never a fill", () => {
+    const on = CONTROLS_CSS.match(/\.seg > button\[aria-pressed="true"\]\s*{([^}]*)}/);
+    expect(on).not.toBeNull();
+    expect(on![1]).not.toContain("--vscode-button-background");
   });
 });

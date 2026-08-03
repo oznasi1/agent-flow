@@ -69,3 +69,22 @@ export const BASE_CSS = `
     * { transition: none !important; animation: none !important; }
   }
 `;
+
+// One control language, shared by the sidebar and the Marketplace. Derived from
+// the Deck's .ctls/.ctl rules; the Deck itself still carries its own copy, and
+// migrating it is deliberately out of scope for this pass.
+//
+// The on-state is weight and foreground, never a fill: six filled slabs in a row
+// signal nothing, and a filled pill next to a teal Take reads as two primaries.
+export const CONTROLS_CSS = `
+  .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--edge); border-radius: var(--r-ctl); overflow: hidden; }
+  .seg > button { font: inherit; font-size: var(--t-body); height: 24px; padding: 0 10px;
+    border: 0; border-radius: 0; background: transparent; color: var(--dim);
+    cursor: pointer; white-space: nowrap;
+    transition: color .12s ease, background-color .12s ease; }
+  .seg > button + button { box-shadow: inset 1px 0 0 var(--edge); }
+  .seg > button:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+  .seg > button[aria-pressed="true"] { color: var(--vscode-foreground); font-weight: 600;
+    background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
+  .seg-label { font-size: var(--t-micro); color: var(--dim); margin-right: 2px; }
+`;

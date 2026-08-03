@@ -461,51 +461,63 @@ export function App(): JSX.Element {
         {me && <span className="me">{me}</span>}
       </div>
 
-      <div className="tabs">
-        {FILTERS.map((f) => (
-          <button key={f.id} className={`tab${filter === f.id ? " active" : ""}`} onClick={() => refetch(f.id, size)}>
-            {f.label}
-          </button>
-        ))}
+      <div className="lenses">
+        <div className="lens">
+          <div className="seg" role="group" aria-label="Task filter">
+            {FILTERS.map((f) => (
+              <button
+                key={f.id}
+                aria-pressed={filter === f.id}
+                onClick={() => refetch(f.id, size)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {filters.size && (
+          <div className="lens">
+            <span className="seg-label">Size</span>
+            <div className="seg" role="group" aria-label="Size">
+              {SIZES.map((s) => (
+                <button
+                  key={s.id}
+                  aria-pressed={size === s.id}
+                  title={s.title}
+                  onClick={() => refetch(filter, s.id)}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {filters.status && availableStatuses.length > 0 && (
+          <div className="lens">
+            <span className="seg-label">Status</span>
+            <div className="seg" role="group" aria-label="Status">
+              <button
+                aria-pressed={statuses.size === 0}
+                title="Any status"
+                onClick={() => setStatuses(new Set())}
+              >
+                All
+              </button>
+              {availableStatuses.map((s) => (
+                <button
+                  key={s.name}
+                  aria-pressed={statuses.has(s.name)}
+                  onClick={() => toggleStatus(s.name)}
+                >
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
-
-      {filters.size && (
-        <div className="sizes">
-          <span className="sizes-label">Size</span>
-          {SIZES.map((s) => (
-            <button
-              key={s.id}
-              className={`size-chip${size === s.id ? " active" : ""}`}
-              title={s.title}
-              onClick={() => refetch(filter, s.id)}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {filters.status && availableStatuses.length > 0 && (
-        <div className="statuses">
-          <span className="statuses-label">Status</span>
-          <button
-            className={`status-chip${statuses.size === 0 ? " active" : ""}`}
-            title="Any status"
-            onClick={() => setStatuses(new Set())}
-          >
-            All
-          </button>
-          {availableStatuses.map((s) => (
-            <button
-              key={s.name}
-              className={`status-chip${statuses.has(s.name) ? " active" : ""}`}
-              onClick={() => toggleStatus(s.name)}
-            >
-              {s.name}
-            </button>
-          ))}
-        </div>
-      )}
 
       {filters.repo && (
         <RepoMultiSelect

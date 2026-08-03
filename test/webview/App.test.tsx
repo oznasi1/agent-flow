@@ -121,6 +121,15 @@ describe("filter + size lenses", () => {
     fireEvent.click(screen.getByRole("button", { name: "S" }));
     expect(sent).toHaveBeenCalledWith({ type: "fetch", filter: "mysprint", size: "s" });
   });
+
+  it("exposes the filter lens as a pressed-state group", () => {
+    render(<App />);
+    authed();
+    const mine = screen.getByRole("button", { name: "Mine" });
+    expect(mine).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(mine);
+    expect(sent).toHaveBeenCalledWith(expect.objectContaining({ type: "fetch", filter: "mine" }));
+  });
 });
 
 describe("status filter lens", () => {
@@ -133,10 +142,10 @@ describe("status filter lens", () => {
         mkTask({ key: "ASM-2", summary: "wip one", status: "In Progress", statusCategory: "indeterminate" }),
       ],
     });
-  // The filter chips live in the .statuses row — scope queries there so they don't
-  // collide with the same-labelled status button on each card.
+  // The filter chips live in the Status segmented group — scope queries there so
+  // they don't collide with the same-labelled status button on each card.
   const chip = (name: string) =>
-    within(document.querySelector(".statuses") as HTMLElement).getByRole("button", { name });
+    within(document.querySelector('[role="group"][aria-label="Status"]') as HTMLElement).getByRole("button", { name });
 
   it("shows a chip per distinct status and narrows the pool by the selected ones", () => {
     render(<App />);
@@ -175,7 +184,7 @@ describe("status filter lens", () => {
     render(<App />);
     authed();
     host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", status: "" })] });
-    expect(document.querySelector(".statuses")).toBeNull();
+    expect(document.querySelector('[aria-label="Status"]')).toBeNull();
   });
 
   it("prunes a selected status that is absent after a refetch (no invisible filter)", () => {
@@ -205,8 +214,8 @@ describe("configurable filter visibility", () => {
     render(<App />);
     authed();
     oneTask();
-    expect(document.querySelector(".sizes")).not.toBeNull();
-    expect(document.querySelector(".statuses")).not.toBeNull();
+    expect(document.querySelector('[aria-label="Size"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Status"]')).not.toBeNull();
     expect(document.querySelector(".repo-select")).not.toBeNull();
   });
 
@@ -214,8 +223,8 @@ describe("configurable filter visibility", () => {
     render(<App />);
     authed("PR initiated", off({ size: false }));
     oneTask();
-    expect(document.querySelector(".sizes")).toBeNull();
-    expect(document.querySelector(".statuses")).not.toBeNull();
+    expect(document.querySelector('[aria-label="Size"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Status"]')).not.toBeNull();
     expect(document.querySelector(".repo-select")).not.toBeNull();
   });
 
@@ -223,8 +232,8 @@ describe("configurable filter visibility", () => {
     render(<App />);
     authed("PR initiated", off({ status: false }));
     oneTask();
-    expect(document.querySelector(".statuses")).toBeNull();
-    expect(document.querySelector(".sizes")).not.toBeNull();
+    expect(document.querySelector('[aria-label="Status"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Size"]')).not.toBeNull();
     expect(document.querySelector(".repo-select")).not.toBeNull();
   });
 
