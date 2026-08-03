@@ -32,8 +32,8 @@ const JIRA_TTL_MS = 30_000;
  * `gh` living somewhere the extension host's PATH cannot see it is by far the
  * likeliest cause, and reads to a signed-in user as the Deck being broken. */
 const GH_NOTES: Record<GhGap["kind"], string> = {
-  missing: "gh CLI not found — PR facts off. Run Agent Flow Deck: Doctor",
-  "signed-out": "gh is not signed in — PR facts off. Run Agent Flow Deck: Doctor",
+  missing: "gh CLI not found — PR facts off. Run Doctor",
+  "signed-out": "gh is not signed in — PR facts off. Run Doctor",
 };
 
 /** Appended to a review body the agent drafted, when provenance stamping is on.

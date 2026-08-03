@@ -82,7 +82,7 @@ export async function runSetup(
   // Step 4/4: credentials, via the existing two-step sign-in.
   if (!(await auth.signIn())) {
     vscode.window.showWarningMessage(
-      'Agent Flow Deck: settings saved, but Jira sign-in was cancelled. Use "Agent Flow Deck: Sign in to Jira" to finish.',
+      'Agent Flow Deck: settings saved, but Jira sign-in was cancelled. Use "Sign in to Jira" to finish.',
     );
     return abort(log, "sign-in skipped (config saved)");
   }

@@ -56,28 +56,28 @@
     "commands": [
       {
         "command": "agentFlow.refresh",
-        "title": "Agent Flow Deck: Refresh Tasks",
+        "title": "Refresh Tasks",
         "icon": "$(refresh)"
       },
       {
         "command": "agentFlow.setup",
-        "title": "Agent Flow Deck: Run Setup…"
+        "title": "Run Setup…"
       },
       {
         "command": "agentFlow.doctor",
-        "title": "Agent Flow Deck: Doctor"
+        "title": "Doctor"
       },
       {
         "command": "agentFlow.signIn",
-        "title": "Agent Flow Deck: Sign in to Jira"
+        "title": "Sign in to Jira"
       },
       {
         "command": "agentFlow.signOut",
-        "title": "Agent Flow Deck: Sign out of Jira"
+        "title": "Sign out of Jira"
       },
       {
         "command": "agentFlow.takeTask",
-        "title": "Agent Flow Deck: Take Task…"
+        "title": "Take Task…"
       },
       {
         "command": "agentFlow.openDeck",
@@ -86,7 +86,7 @@
       },
       {
         "command": "agentFlow.openMarketplace",
-        "title": "Agent Flow Deck: Open the Marketplace",
+        "title": "Open the Marketplace",
         "icon": "$(library)"
       }
     ],

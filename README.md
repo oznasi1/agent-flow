@@ -121,7 +121,7 @@ you turn `agentFlow.stampLabelOnWrite` off.
 ### The Marketplace — browse your skills, commands & agents
 
 The **Marketplace** (open it with the puzzle-piece (`$(extensions)`) button beside the
-Deck's button in the sidebar title bar, or **"Agent Flow Deck: Open the Marketplace"**) is a
+Deck's button in the sidebar title bar, or **"Open the Marketplace"**) is a
 searchable browser of everything Claude Code can do on this machine. It reads your local
 `~/.claude` — the marketplaces you've added, the plugins you've installed, and the skills,
 slash commands, agents and hooks inside them — plus any skills or commands you wrote
@@ -183,7 +183,7 @@ marketplaces show up here on the next scan.
 3. **Open the Agent Flow Deck icon** in the activity bar. On first activation it offers a guided
    setup — enter your Jira site, project key, and repos directory, then sign in with an
    [Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens).
-   (Re-run it anytime with **"Agent Flow Deck: Run Setup…"**.)
+   (Re-run it anytime with **"Run Setup…"**.)
 4. **Pick a task** from the pool. Click a card to expand it — the inferred repos are
    pre-selected; adjust them, then press **▶ Take**.
 5. **Land in a primed workspace.** Agent Flow Deck opens the task's repos, drops a
@@ -241,7 +241,7 @@ Nothing else about the feature writes anywhere: the review agent itself is told,
 in its seeded prompt, not to post anything to GitHub — the human submits the
 review.
 
-**Agent Flow Deck: Doctor** probes rather than only reading config: it makes two
+The **Doctor** command probes rather than only reading config: it makes two
 authenticated GETs to your own Jira site and runs `gh auth status`, which is what
 catches a revoked token instead of reporting it as a network problem. It writes
 nothing anywhere except your clipboard, and only when you ask it to copy the

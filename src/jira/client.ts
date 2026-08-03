@@ -94,7 +94,7 @@ export class JiraClient {
     const header = await this.auth.getAuthHeader();
     if (!header) throw new JiraAuthError("Not signed in to Jira.");
     if (!this.baseUrl) {
-      throw new Error("No Jira site URL configured. Run “Agent Flow Deck: Run Setup…”.");
+      throw new Error("No Jira site URL configured. Use the “Run Setup…” command.");
     }
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), REQUEST_TIMEOUT_MS);

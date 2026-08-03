@@ -11,15 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **One name everywhere: Agent Flow Deck.** The marketplace listing already said it,
   but every surface inside the extension still said "Agent Flow" — a name other tools
-  use too. Command palette entries are now `Agent Flow Deck: …` — except the Deck's
-  own, which would have read "Agent Flow Deck: Open the Deck (in-flight)" and is now
-  simply **Open the Deck (in-flight)**. Renamed too are the
-  activity-bar and settings titles, the output channel, the Deck and Marketplace
-  window titles, the Doctor report, the setup steps, and every notification, empty
-  state and setting description. Review comments drafted from the Deck sign off with
-  _"Drafted with Claude Code via Agent Flow Deck."_ Setting keys (`agentFlow.*`),
-  command IDs and the extension ID are unchanged, so nothing you have configured
-  breaks.
+  use too. Renamed: the activity-bar and settings section titles, the output channel,
+  the Deck and Marketplace window titles, the Doctor report header, the setup steps,
+  and every notification, empty state, tooltip and setting description. Review
+  comments drafted from the Deck now sign off with _"Drafted with Claude Code via
+  Agent Flow Deck."_
+- **Commands lost their name prefix.** They read `Agent Flow: Refresh Tasks`,
+  `Agent Flow: Doctor` and so on; they are now simply **Refresh Tasks**, **Doctor**,
+  **Run Setup…**, **Sign in to Jira**, **Sign out of Jira**, **Take Task…**,
+  **Open the Deck (in-flight)** and **Open the Marketplace** — the extension's own
+  name was doubling up with the Deck's, and the sidebar title-bar buttons read as
+  plain verbs. Command IDs (`agentFlow.*`) are unchanged, so keybindings and
+  `workbench.action` references keep working; searching the palette for "agent flow"
+  no longer finds them by name.
+- Setting keys (`agentFlow.*`) and the extension ID are unchanged, so nothing you
+  have configured breaks.
 
 ## [0.1.46] — 2026-08-03
 
