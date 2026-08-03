@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `agentFlow.promptModes` and `agentFlow.reviewRequestModes` now **layer over**
+  the built-in modes instead of replacing them. A customized list used to freeze
+  at the modes that shipped the day it was written, so every mode added later —
+  **Test-driven**, **Investigate & root-cause**, **Orchestrator**, **Refine the
+  ticket** — was invisible, with nothing in the UI to suggest one was missing.
+  Reuse a built-in `id` to override only the fields you set, use a new `id` to
+  add a mode of your own, and `{"id": "tdd", "hidden": true}` to drop a built-in.
+  Modes you don't list are appended, so future built-ins reach you too. If your
+  list omitted built-ins, a one-time notification offers to hide the newcomers
+  and keep the picker you had.
+
 ## [0.1.48] — 2026-08-03
 
 ### Changed

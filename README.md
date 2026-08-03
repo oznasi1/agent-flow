@@ -274,7 +274,7 @@ repo, so they never get committed.
 | `agentFlow.reviewRequests` | `true` | Show the Deck's review-requests strip: open GitHub PRs that ask for your review. |
 | `agentFlow.reviewRequestsTtlSeconds` | `300` | How stale the cached review queue may be before a refetch (minimum 60). |
 | `agentFlow.reviewWrites` | `false` | Allow submitting approve / comment / request changes to GitHub from the Deck. |
-| `agentFlow.reviewRequestModes` | *(one built-in mode)* | Seed modes offered by **Review with agent**. Add your own — e.g. separate backend and frontend review modes — and clicking asks which to use. |
+| `agentFlow.reviewRequestModes` | *(one built-in mode)* | Seed modes offered by **Review with agent**, layered over the built-in one. Add your own — e.g. separate backend and frontend review modes — and clicking asks which to use. |
 | `agentFlow.reviewRequestMode` | `ask` | Pin one review mode by `id` to skip the question. |
 | `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow Deck opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
 | `agentFlow.environments` | `["dev", "staging", "production"]` | Environments offered by the **Verify on an environment** Explore action. The picker also offers **Custom…** for a one-off. |
@@ -283,9 +283,11 @@ Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
 `agentFlow.exploreMode`, `agentFlow.explorePrompts.*`, `agentFlow.prReviewPrompt`, and
 `agentFlow.worktree` — see the Settings UI. Taking a task asks how the agent should
 start: **Plan first**, **Implementation**, **Test-driven**, **Investigate &
-root-cause**, **Orchestrator**, or **Refine the ticket**. Edit those prompts, or add
-your own mode, under `agentFlow.promptModes`; pin one with `agentFlow.taskMode` to skip
-the question. **Explore** asks what kind of session to start: **Open a Jira ticket**, **Enhance
+root-cause**, **Orchestrator**, or **Refine the ticket**. Edit those prompts, or add your own mode, under
+`agentFlow.promptModes`; pin one with `agentFlow.taskMode` to skip the question.
+Your entries layer over the built-in modes rather than replacing them — reuse a
+built-in `id` to override just the fields you set, and add `"hidden": true` to an
+entry to drop that built-in — so modes added in a later release still reach you. **Explore** asks what kind of session to start: **Open a Jira ticket**, **Enhance
 knowledge / flow**, **Debug**, **General**, or **Verify on an environment**. Verify also
 asks which environment to check the repos you picked against — from
 `agentFlow.environments`, or a one-off you type — and seeds a read-only prompt that
