@@ -113,5 +113,9 @@ describe("CONTROLS_CSS", () => {
     const on = CONTROLS_CSS.match(/\.seg > button\[aria-pressed="true"\]\s*{([^}]*)}/);
     expect(on).not.toBeNull();
     expect(on![1]).not.toContain("--vscode-button-background");
+    // The on-state may tint with the foreground via color-mix; it must never take a
+    // theme fill token directly. Asserting the absence of one specific variable let
+    // any other fill token through.
+    expect(on![1]).not.toMatch(/background:\s*var\(--vscode-/);
   });
 });

@@ -130,6 +130,17 @@ describe("filter + size lenses", () => {
     fireEvent.click(mine);
     expect(sent).toHaveBeenCalledWith(expect.objectContaining({ type: "fetch", filter: "mine" }));
   });
+
+  it("groups all three lenses for assistive tech", () => {
+    render(<App />);
+    authed();
+    // The Status lens only renders once the pool has a status to show — deliver
+    // that the way the neighbouring "status filter lens" tests do.
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", status: "To Do", statusCategory: "new" })] });
+    for (const name of ["Task filter", "Size", "Status"]) {
+      expect(screen.getByRole("group", { name })).toBeInTheDocument();
+    }
+  });
 });
 
 describe("status filter lens", () => {

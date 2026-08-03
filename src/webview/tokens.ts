@@ -82,7 +82,6 @@ export const CONTROLS_CSS = `
     border: 0; border-radius: 0; background: transparent; color: var(--dim);
     cursor: pointer; white-space: nowrap;
     transition: color .12s ease, background-color .12s ease; }
-  .seg > button + button { box-shadow: inset 1px 0 0 var(--edge); }
   .seg > button:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
   .seg > button[aria-pressed="true"] { color: var(--vscode-foreground); font-weight: 600;
     background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
