@@ -44,8 +44,10 @@ export const TOKENS_CSS = `
   }
 `;
 
-// The reset all three surfaces repeated. Injected after TOKENS_CSS and before the
-// surface sheet, so surface rules still win specificity ties.
+// box-sizing and the reduced-motion query were common to all three surfaces;
+// the button reset and :focus-visible outline were deckStyles.ts's alone,
+// unified here on purpose — the sidebar and Marketplace had no keyboard focus
+// indicator before this.
 export const BASE_CSS = `
   * { box-sizing: border-box; }
   button { font: inherit; color: inherit; }
