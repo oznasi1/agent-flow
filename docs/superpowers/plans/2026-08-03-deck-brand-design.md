@@ -424,15 +424,56 @@ The preview heads declare `--vscode-*` variables but never set a theme class, so
 
 These files are gitignored; they are tooling, not deliverables, so they are not in the commit.
 
+- [ ] **Step 6b: Add a harness script that can shoot any surface**
+
+The existing scripts cannot serve this plan: `shoot-deck.js`, `shoot-marketplace.js` and `shoot-reviews.js` each hardcode a destination inside `media/`, so running one mid-plan would overwrite a committed screenshot with half-branded UI; and `shoot-any.js` / `shoot-narrow.js` both bundle `dist/deck.js`, so **no existing script can shoot the sidebar at all** — `preview/head.html` has never been paired with `dist/webview.js`.
+
+Create `preview/shoot-surface.js` (gitignored tooling, not committed):
+
+```js
+// Shoot any one webview surface: pair a preview head with its bundle and write
+// wherever you're told. The older scripts each hardcode a media/ destination,
+// which makes them unusable for mid-plan review shots.
+//
+// Usage: node preview/shoot-surface.js <head> <bundle> <dest> [width] [theme]
+//   node preview/shoot-surface.js preview/head.html dist/webview.js out.png 380
+//   node preview/shoot-surface.js preview/deck-head.html dist/deck.js out.png 1340 light
+const { execFileSync } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+
+const root = path.join(__dirname, "..");
+const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const [headFile, bundleFile, dest, width = "1340", theme = "dark"] = process.argv.slice(2);
+
+const head = fs.readFileSync(path.join(root, headFile), "utf8");
+const bundle = fs.readFileSync(path.join(root, bundleFile), "utf8");
+const page = path.join(root, "preview/_tmp-surface.html");
+fs.writeFileSync(page, head.replace("</body>", `  <script>${bundle}</script>\n</body>`));
+
+execFileSync(CHROME, [
+  "--headless=new", "--disable-gpu", "--hide-scrollbars",
+  "--force-device-scale-factor=2", `--window-size=${width},760`,
+  "--virtual-time-budget=5000",
+  `--screenshot=${path.join(root, dest)}`,
+  `file://${page}${theme === "light" ? "?theme=light" : ""}`,
+], { stdio: ["ignore", "ignore", "inherit"] });
+console.log(`${dest} ← ${headFile} + ${bundleFile} (${theme})`);
+```
+
+If a head's canned data no longer matches its component's props the page will render blank or throw — the Deck head is known to be stale in this way. When that happens, patch the head's mock data locally to satisfy the current props; it is gitignored scratch, so note what you patched in your report rather than committing it.
+
 - [ ] **Step 7: Review the accent on both themes**
 
 ```bash
-node preview/shoot-deck.js preview/deck-head.html preview/_brand-deck-dark.png
-node preview/shoot-deck.js preview/deck-head.html preview/_brand-deck-light.png light
-node preview/shoot-narrow.js preview/head.html preview/_brand-side-dark.png
+npm run build
+node preview/shoot-surface.js preview/deck-head.html dist/deck.js preview/_brand-deck-dark.png 1340
+node preview/shoot-surface.js preview/deck-head.html dist/deck.js preview/_brand-deck-light.png 1340 light
+node preview/shoot-surface.js preview/head.html dist/webview.js preview/_brand-side-dark.png 380
+node preview/shoot-surface.js preview/head.html dist/webview.js preview/_brand-side-light.png 380 light
 ```
 
-Confirm by eye: the Deck's ordinary `Open` is teal-tinted, the attention card's `Open` is still orange, and the sidebar `Take` is a teal fill with a legible label on both themes.
+Confirm by eye: the Deck's ordinary `Open` is teal-tinted, the attention card's `Open` is still orange, and the sidebar `Take` is a teal fill with a legible label on both themes. Nothing in `media/` may change — `git status` must show no modified PNGs.
 
 - [ ] **Step 8: Run the full gates**
 
@@ -865,8 +906,13 @@ Expected: PASS. Any failure will be a query that relied on the old class names �
 
 - [ ] **Step 7: Check the narrow panel**
 
-Run: `node preview/shoot-narrow.js preview/head.html preview/_seg-narrow.png`
-Expected: at the narrowest sidebar width the status group wraps as a unit; no button is clipped and no row overflows horizontally. If a group overflows, add `flex-wrap: wrap` to `.seg` rather than shrinking the buttons.
+```bash
+npm run build
+node preview/shoot-surface.js preview/head.html dist/webview.js preview/_seg-narrow.png 300
+node preview/shoot-surface.js preview/head.html dist/webview.js preview/_seg-wide.png 480
+```
+
+Expected: at 300px the status group wraps as a unit; no button is clipped and no row overflows horizontally. If a group overflows, add `flex-wrap: wrap` to `.seg` rather than shrinking the buttons. Nothing in `media/` may change.
 
 - [ ] **Step 8: Run the full gates**
 
@@ -1094,11 +1140,13 @@ Expected: PASS.
 - [ ] **Step 9: Review both themes and the narrow panel**
 
 ```bash
-node preview/shoot-narrow.js preview/head.html preview/_card-narrow.png
-node preview/shoot-any.js preview/head.html preview/_card-light.png light
+npm run build
+node preview/shoot-surface.js preview/head.html dist/webview.js preview/_card-dark.png 380
+node preview/shoot-surface.js preview/head.html dist/webview.js preview/_card-light.png 380 light
+node preview/shoot-surface.js preview/head.html dist/webview.js preview/_card-narrow.png 300
 ```
 
-Confirm: no red anywhere on a card, the rail reads as flow position, the `Highest` chip is amber and rare, `Take` is the only filled thing on the card.
+Confirm: no red anywhere on a card, the rail reads as flow position, the `Highest` chip is amber and rare, `Take` is the only filled thing on the card. Nothing in `media/` may change.
 
 - [ ] **Step 10: Run the full gates**
 
@@ -1231,8 +1279,13 @@ Expected: PASS. Existing tests that clicked a pill by name still pass — the ac
 
 - [ ] **Step 7: Review**
 
-Run: `node preview/shoot-marketplace.js preview/marketplace-head.html preview/_mkt-dark.png`
-Expected: the filter rows read as two grouped controls; `Open file` is the only teal thing on the panel.
+```bash
+npm run build
+node preview/shoot-surface.js preview/marketplace-head.html dist/marketplace.js preview/_mkt-dark.png 1360
+node preview/shoot-surface.js preview/marketplace-head.html dist/marketplace.js preview/_mkt-light.png 1360 light
+```
+
+Expected: the filter rows read as two grouped controls; `Open file` is the only teal thing on the panel. Do **not** use `shoot-marketplace.js` — it hardcodes `media/marketplace.png` and would overwrite the committed screenshot. Nothing in `media/` may change.
 
 - [ ] **Step 8: Run the full gates**
 
@@ -1329,13 +1382,18 @@ not a rewrite pass.
 
 - [ ] **Step 5: Reshoot the three product screenshots**
 
+This is the one task where writing into `media/` is the intent:
+
 ```bash
-node preview/shoot-narrow.js preview/head.html media/screenshot.png
-node preview/shoot-deck.js preview/deck-head.html media/deck.png
-node preview/shoot-marketplace.js preview/marketplace-head.html media/marketplace.png
+npm run build
+node preview/shoot-surface.js preview/head.html dist/webview.js media/screenshot.png 420
+node preview/shoot-surface.js preview/deck-head.html dist/deck.js media/deck.png 1340
+node preview/shoot-surface.js preview/marketplace-head.html dist/marketplace.js media/marketplace.png 1360
 ```
 
-Open all three. Every one must show the branded UI — teal `Take`, the gauge in the sidebar header, segmented lenses, no red rail. If any still shows the old chrome, the harness is running a stale `dist/`; re-run `npm run build` and shoot again.
+Open all three. Every one must show the branded UI — teal `Take`, the gauge in the sidebar header, segmented lenses, no red rail. If any still shows the old chrome, the harness ran a stale `dist/`; re-run `npm run build` and shoot again. If a shot comes out blank, the head's canned data no longer matches its component's props — patch the gitignored head, don't change the component.
+
+Compare each new PNG against the one it replaces before staging: same framing and roughly the same dimensions. A screenshot that silently changed aspect ratio makes the README hero look broken.
 
 - [ ] **Step 6: High-contrast check**
 
