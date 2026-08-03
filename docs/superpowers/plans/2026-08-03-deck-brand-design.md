@@ -16,7 +16,18 @@
 - **The accent may appear in exactly three places:** the sidebar header gauge, the sidebar `Take` button (filled), and the Deck's ordinary `.act.primary` (tinted outline). Nowhere else — never on the Deck's `.card.attn` in any form, never on a status dot, rail, chip, link, or Marketplace kind color.
 - **No new dependencies and no new typefaces.** Fonts stay `var(--vscode-font-family)` and `var(--vscode-editor-font-family)`.
 - **Mono is for identifiers and counts only.** Prose is always the UI font.
-- **Type scale is closed:** `--t-micro: 10px`, `--t-data: 10.5px`, `--t-body: 11px`, `--t-title: 13px`, plus the 15px surface header. No task may introduce a fifth size.
+- **Type scale:** `--t-micro: 10px`, `--t-data: 10.5px`, `--t-body: 11px`, `--t-title: 13px`, plus the 15px surface header. **No task may introduce a new size, and every rule a task rewrites must use a token.** The scale is not yet closed across `styles.ts`, which predates it: these literals live in rules no task in this plan touches, and they stay for now rather than silently resizing text a user reads every day —
+
+  | size | `styles.ts` lines |
+  | --- | --- |
+  | `8px` | 137 |
+  | `9px` | 236 |
+  | `11.5px` | 187, 235 |
+  | `12px` | 58, 93, 195, 227, 251, 254, 257, 263, 296 |
+  | `12.5px` | 242 |
+  | `14px` | 95, 126 |
+
+  A reviewer seeing one of these on an **unchanged** line should not flag it; seeing one on a **changed** line should. Closing the scale across the whole sheet is a follow-up, noted in Out of scope.
 - **Radii are closed:** `--r-card: 10px`, `--r-ctl: 6px`, `--r-chip: 5px`.
 - **Rail hues use Jira `statusCategory` only** — `new` → `--dim`, `indeterminate` → `--c-progress`, `done` → `--c-done`. No fourth rail hue.
 - **Priority chip appears for `Highest` only,** in `--c-attn`.
@@ -217,7 +228,7 @@ In `src/webview/deckStyles.ts`: delete the `* { box-sizing }`, `button { font: i
   }
 ```
 
-In `src/webview/styles.ts`: delete the `* { box-sizing: border-box; }` rule (line 4). Leave everything else — Tasks 4 and 5 rewrite it.
+In `src/webview/styles.ts`: delete the `* { box-sizing: border-box; }` rule (line 4), and delete both surface-specific reduced-motion rules — `@media (prefers-reduced-motion: reduce) { .repo-combo, .repo-pop { animation: none; } }` (line 220) and `@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }` (line 270). `BASE_CSS` disables every animation under the same query with `* { animation: none !important }`, which is strictly broader, so both rules are now redundant rather than load-bearing. Keep the `@keyframes` they guard. Leave everything else — Tasks 4 and 5 rewrite it.
 
 In `src/webview/marketplaceStyles.ts`: delete `* { box-sizing: border-box; }` (line 4) and the whole `:root { … }` block (lines 13–21). Then replace each kind-hue usage with its token: `var(--skill)` → `var(--k-skill)`, `var(--command)` → `var(--k-command)`, `var(--agent)` → `var(--k-agent)`, `var(--hook)` → `var(--k-hook)`, `var(--plugin)` → `var(--k-plugin)`.
 
@@ -1351,6 +1362,7 @@ the extension does internally."
 
 ## Out of scope
 
+- Closing the type scale across all of `styles.ts`. The sixteen off-scale literals listed in Global Constraints live in rules no task here rewrites; converting them changes text sizes a user reads daily and deserves its own review.
 - Migrating the Deck's own `.ctl` / `.act` rules onto `CONTROLS_CSS`. The Deck is the reference surface and its markup already ships against those classes; a follow-up can converge them.
 - A font-outlined SVG wordmark with the tracked uppercase treatment (needs a font pipeline).
 - Teal in the activity-bar icon — VS Code masks view icons to the theme foreground.
