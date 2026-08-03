@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **The Deck reflects every Claude Code session open on this machine**, not only the
-  tasks Agent Flow launched. Sessions attach to the card that owns their directory —
+  tasks Agent Flow Deck launched. Sessions attach to the card that owns their directory —
   a worktree with two agents now shows both, each with its own live state — and a
   place with no tracked run becomes a card of its own, marked `local`, with its
   ticket key inferred from its branch and its pull request found from it. `⋯` →
@@ -76,7 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   error rates, metrics and traces, deployed version) and return a working / broken /
   inconclusive verdict with evidence. The prompt is editable at
   `agentFlow.explorePrompts.verify`, and `agentFlow.exploreMode` can pin Explore to it.
-  Agent Flow itself never touches the environment — the agent does that with its own tools.
+  Agent Flow Deck itself never touches the environment — the agent does that with its own tools.
 
 ## [0.1.43] — 2026-08-02
 
@@ -139,7 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the row can load into the review box.
 - **Opt-in review submission** (`agentFlow.reviewWrites`, default off): approve,
   comment or request changes from the Deck, each behind a confirmation dialog
-  naming the verb, repo and PR number. This is the first thing in Agent Flow
+  naming the verb, repo and PR number. This is the first thing in Agent Flow Deck
   that writes to GitHub.
 - Settings: `agentFlow.reviewRequests`, `agentFlow.reviewRequestsTtlSeconds`,
   `agentFlow.reviewWrites`, `agentFlow.reviewRequestPrompt`.
@@ -187,7 +187,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`Agent Flow: Doctor` — one command that checks everything Agent Flow depends
+- **`Agent Flow: Doctor` — one command that checks everything Agent Flow Deck depends
   on and offers the fix.** It probes your Jira site and project, your stored
   credentials, `git`, your repos root and workspace directory, `gh`, the Claude Code
   extension and its version, and the runs store — then lists what's broken, worst
@@ -197,7 +197,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Three things that used to fail without telling you:
 
-  - **A revoked or expired Jira token read as signed-in.** Agent Flow only checked
+  - **A revoked or expired Jira token read as signed-in.** Agent Flow Deck only checked
     that an email and token were *stored*, so an invalid one looked fine and every
     later fetch failed in a way indistinguishable from a network problem. Doctor
     actually calls Jira, and tells the two apart: bad credentials are a problem,
@@ -222,13 +222,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Change Status now asks for the fields your workflow requires.** Closing a
-  ticket on a workflow that demands a Resolution used to fail outright. Agent Flow
+  ticket on a workflow that demands a Resolution used to fail outright. Agent Flow Deck
   now reads the transition's screen and prompts for each required field first —
   a pick list for Resolution and friends, an input box for text, numbers and
   dates — then sends them with the transition. Escape at any prompt and nothing
   is written.
 - Some workflows enforce requirements that aren't on the transition screen at all,
-  so a refusal gets **one rescue attempt**: Agent Flow reads which field the
+  so a refusal gets **one rescue attempt**: Agent Flow Deck reads which field the
   rejection names, asks for it, and retries once. A second refusal is reported
   rather than retried.
 
@@ -281,7 +281,7 @@ new optional `detail` field holds the description line.
 ### Fixed
 
 - **Exploration sessions showed someone else's pull request.** A session with no
-  Jira ticket has a made-up key and no branch Agent Flow named, so looking it up
+  Jira ticket has a made-up key and no branch Agent Flow Deck named, so looking it up
   asked Jira about an issue that doesn't exist and asked GitHub for pull requests
   from the default branch — which matched whatever was opened from it last, quite
   possibly a colleague's. Ticketless cards are now left out of both lookups, their
@@ -312,7 +312,7 @@ new optional `detail` field holds the description line.
 
 ### Fixed
 
-- **The Agent Flow icon in the activity bar looked smaller than its neighbours.**
+- **The Agent Flow Deck icon in the activity bar looked smaller than its neighbours.**
   Every view-container icon is normalised into the same 24px box, so only the
   artwork's extent inside it decides how big the mark reads — and ours filled 18.90
   of 24 against the ~21px Files, Search and Source Control occupy. The mark is now
@@ -523,7 +523,7 @@ new optional `detail` field holds the description line.
 ### Changed
 - **Skip the repo picker for existing-workspace destinations.** When you open a task
   (Explore, Take, or Address PR) into an existing workspace or a live folder, the
-  destination already fixes which repos are present — so Agent Flow now uses that repo
+  destination already fixes which repos are present — so Agent Flow Deck now uses that repo
   set directly instead of prompting you to pick repos again. The picker still appears
   for new / current-window destinations. Workspace folders outside `reposRoot` are
   honored too.
