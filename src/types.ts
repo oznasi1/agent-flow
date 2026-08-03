@@ -363,7 +363,7 @@ export type OutboundMessage =
   | { type: "error"; message: string; canRetry: boolean; canRunDoctor?: boolean }
   | { type: "loading"; loading: boolean }
   // The Deck
-  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; ghNote: string | null }
+  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; ghNote: string | null; prReviewStatus: string }
   | { type: "deck:loading"; loading: boolean }
   | {
       type: "deck:reviews";

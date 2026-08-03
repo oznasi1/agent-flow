@@ -182,6 +182,7 @@ vi.mock("../../src/config", async (importActual) => {
       reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: [],
       reviewWrites: h.reviewWrites, stampLabelOnWrite: h.stampLabelOnWrite,
       prReviewPrompt: h.prReviewPrompt, prReviewAutoFix: h.prReviewAutoFix, seedAgent: h.seedAgent,
+      prReviewStatus: "PR initiated",
       // Sourced from the real getConfig() (itself driven by the globally-mocked
       // vscode module) rather than hardcoded here, so a test's setConfig({
       // reviewRequestModes / reviewRequestMode }) actually reaches launchReviewFor.
@@ -337,6 +338,13 @@ describe("DeckPanel", () => {
     expect(runsPost.runs).toHaveLength(1);
     expect(runsPost.runs[0].run.key).toBe("ASM-1");
     expect(runsPost.liveSignal).toBe(true);
+  });
+
+  it("posts the configured PR-review status so cards can gate the button", async () => {
+    show();
+    await settled();
+    const msg = posts(lastPanel()).find((m) => m.type === "deck:runs");
+    expect(msg.prReviewStatus).toBe("PR initiated");
   });
 
   it("keeps review runs off the board — only the ticket run reaches it", async () => {

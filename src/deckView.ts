@@ -661,6 +661,10 @@ export class DeckPanel {
         prFacts: this.prFacts,
         openAgents: this.openAgents,
         ghNote: this.prFacts && this.ghGap ? GH_NOTES[this.ghGap.kind] : null,
+        // Read fresh on every post rather than cached in a field: it is a plain
+        // string setting a user can edit mid-session, and the board re-posts often
+        // enough that this is the whole of "keep it live".
+        prReviewStatus: getConfig().prReviewStatus,
       });
       // The disabled branch posts its own "cleared" state directly — enqueueReviews
       // only ever posts once a search settles or is already fresh, neither of
