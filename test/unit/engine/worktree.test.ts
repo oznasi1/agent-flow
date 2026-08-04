@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { branchName, createWorktrees } from "../../../src/engine/worktree";
+import { branchName, createWorktrees, repoRootOfWorktree } from "../../../src/engine/worktree";
 import { ensureGitExcluded } from "../../../src/engine/gitExclude";
 import { mkRepos } from "../../_helpers/factories";
 
@@ -34,6 +34,43 @@ describe("branchName", () => {
 
   it("collapses runs of non-alphanumerics into a single dash", () => {
     expect(branchName("ASM-4", "a   b__c")).toBe("ASM-4-a-b-c");
+  });
+});
+
+describe("repoRootOfWorktree", () => {
+  it("returns the repo a worktree belongs to", () => {
+    expect(repoRootOfWorktree("/repos/centaur/.claude/worktrees/ASM-1")).toBe("/repos/centaur");
+  });
+
+  it("keeps any path below the worktree attached to the same repo", () => {
+    expect(repoRootOfWorktree("/repos/centaur/.claude/worktrees/ASM-1/src/x.ts")).toBe(
+      "/repos/centaur",
+    );
+  });
+
+  it("unwinds a worktree nested inside a worktree to the outermost repo", () => {
+    // Splitting on the FIRST marker undoes the whole cascade in one step: a polluted
+    // workspace could otherwise hand us .../ASM-1/.claude/worktrees/ASM-2 and we would
+    // treat ASM-1 as the repo.
+    expect(
+      repoRootOfWorktree("/repos/centaur/.claude/worktrees/ASM-1/.claude/worktrees/ASM-2"),
+    ).toBe("/repos/centaur");
+  });
+
+  it("returns undefined for a plain repo path", () => {
+    expect(repoRootOfWorktree("/repos/centaur")).toBeUndefined();
+  });
+
+  it("returns undefined for a .claude path that is not a worktree", () => {
+    expect(repoRootOfWorktree("/repos/centaur/.claude/settings.json")).toBeUndefined();
+  });
+
+  it("returns undefined for the worktrees directory itself", () => {
+    expect(repoRootOfWorktree("/repos/centaur/.claude/worktrees")).toBeUndefined();
+  });
+
+  it("returns undefined when there is no repo prefix", () => {
+    expect(repoRootOfWorktree("/.claude/worktrees/ASM-1")).toBeUndefined();
   });
 });
 

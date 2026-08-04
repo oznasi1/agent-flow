@@ -23,6 +23,19 @@ export function branchName(key: string, summary: string): string {
   return slug ? `${key}-${slug}` : key;
 }
 
+/** The repo a worktree path belongs to: the prefix before our `.claude/worktrees/<KEY>`
+ *  segment. Splits on the FIRST occurrence, so a worktree nested inside a worktree unwinds
+ *  all the way to the outermost real repo in one step. `undefined` for any path that isn't
+ *  one of our worktrees — including the `worktrees` directory itself, which is not one.
+ *
+ *  The inverse of the layout createWorktrees writes, and it lives here so the convention
+ *  and its reader cannot drift apart. */
+export function repoRootOfWorktree(p: string): string | undefined {
+  const marker = `${path.sep}${WORKTREE_DIR}${path.sep}`;
+  const at = p.indexOf(marker);
+  return at > 0 ? p.slice(0, at) : undefined;
+}
+
 function git(repo: string, args: string[]): void {
   execFileSync("git", ["-C", repo, ...args], { stdio: "pipe" });
 }
