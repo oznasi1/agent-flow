@@ -2,12 +2,12 @@ import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { MarketplaceApp } from "./MarketplaceApp";
 import { MARKETPLACE_CSS } from "./marketplaceStyles";
-import { BASE_CSS, TOKENS_CSS } from "./tokens";
+import { BASE_CSS, CONTROLS_CSS, TOKENS_CSS } from "./tokens";
 import { send } from "./vscodeApi";
 
-// Tokens first, then the reset, then the surface sheet: later sheets must win
-// specificity ties against the reset, not the other way round.
-for (const css of [TOKENS_CSS, BASE_CSS, MARKETPLACE_CSS]) {
+// Tokens first, then the reset, then the shared controls, then the surface
+// sheet: later sheets must win specificity ties against the earlier ones.
+for (const css of [TOKENS_CSS, BASE_CSS, CONTROLS_CSS, MARKETPLACE_CSS]) {
   const style = document.createElement("style");
   style.textContent = css;
   document.head.appendChild(style);

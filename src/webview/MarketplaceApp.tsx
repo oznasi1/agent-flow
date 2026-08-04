@@ -139,7 +139,7 @@ function rowScore(r: Row, terms: string[]): number | null {
 
 function Pill({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }): JSX.Element {
   return (
-    <button type="button" className={`pill${on ? " on" : ""}`} onClick={onClick}>
+    <button type="button" aria-pressed={on} onClick={onClick}>
       {children}
     </button>
   );
@@ -342,20 +342,24 @@ export function MarketplaceApp(): JSX.Element {
           />
         </div>
         <div className="pills">
-          <Pill on={type === "all"} onClick={() => setFilter("all")}>All<span className="n">{assets.length}</span></Pill>
-          {TYPES.map((t) => (
-            <Pill key={t.k} on={type === t.k} onClick={() => setFilter(t.k)}>
-              {t.label}<span className="n">{counts[t.k]}</span>
+          <div className="seg" role="group" aria-label="Kind">
+            <Pill on={type === "all"} onClick={() => setFilter("all")}>All<span className="n">{assets.length}</span></Pill>
+            {TYPES.map((t) => (
+              <Pill key={t.k} on={type === t.k} onClick={() => setFilter(t.k)}>
+                {t.label}<span className="n">{counts[t.k]}</span>
+              </Pill>
+            ))}
+            <Pill on={type === "plugins"} onClick={() => setFilter("plugins")}>
+              Plugins<span className="n">{plugins.length}</span>
             </Pill>
-          ))}
-          <Pill on={type === "plugins"} onClick={() => setFilter("plugins")}>
-            Plugins<span className="n">{plugins.length}</span>
-          </Pill>
+          </div>
         </div>
         <div className="pills">
-          <Pill on={scope === "all"} onClick={() => { setScope("all"); setSel(0); }}>Everywhere</Pill>
-          <Pill on={scope === "installed"} onClick={() => { setScope("installed"); setSel(0); }}>Installed only</Pill>
-          <Pill on={scope === "enabled"} onClick={() => { setScope("enabled"); setSel(0); }}>Enabled only</Pill>
+          <div className="seg" role="group" aria-label="Scope">
+            <Pill on={scope === "all"} onClick={() => { setScope("all"); setSel(0); }}>Everywhere</Pill>
+            <Pill on={scope === "installed"} onClick={() => { setScope("installed"); setSel(0); }}>Installed only</Pill>
+            <Pill on={scope === "enabled"} onClick={() => { setScope("enabled"); setSel(0); }}>Enabled only</Pill>
+          </div>
           <PluginPicker
             items={pickerItems}
             selected={pluginSel}

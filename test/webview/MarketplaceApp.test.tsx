@@ -79,6 +79,25 @@ describe("MarketplaceApp", () => {
     expect(screen.queryByText("build")).not.toBeInTheDocument();
   });
 
+  it("exposes the kind filters as a pressed-state group", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    const all = screen.getByRole("button", { name: /^All/ });
+    expect(all).toHaveAttribute("aria-pressed", "true");
+    const skills = screen.getByRole("button", { name: /^Skills/ });
+    expect(skills).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(skills);
+    expect(skills).toHaveAttribute("aria-pressed", "true");
+    expect(all).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("groups the kind and scope lenses for assistive tech", () => {
+    render(<MarketplaceApp />);
+    host(assetsMsg());
+    expect(screen.getByRole("group", { name: "Kind" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Scope" })).toBeInTheDocument();
+  });
+
   // Regression: several hooks can share an event, matcher and file, which used to
   // give them the same React key. Duplicate keys orphan the DOM nodes, so those
   // rows survived every later filter change and showed up under Skills.

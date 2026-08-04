@@ -29,13 +29,18 @@ export const MARKETPLACE_CSS = `
   .search input:focus { outline: none; border-color: var(--vscode-focusBorder); }
 
   .pills { display: flex; gap: 5px; flex-wrap: wrap; }
-  .pill { cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px;
-    font-size: 11.5px; padding: 4px 10px; border-radius: 20px; border: 1px solid var(--hair);
-    background: transparent; color: var(--vscode-foreground); }
-  .pill:hover { background: var(--vscode-toolbar-hoverBackground); }
-  .pill.on { background: var(--vscode-list-activeSelectionBackground); border-color: var(--vscode-focusBorder);
-    color: var(--vscode-list-activeSelectionForeground); }
-  .pill .n { font-family: var(--mono); font-size: 10px; opacity: .8; }
+  .seg > button .n { margin-left: 5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .seg > button[aria-pressed="true"] .n { color: var(--vscode-foreground); }
+
+  /* PluginPicker's own dropdown trigger — not part of the "seg" group above (it
+     opens a popover rather than toggling a filter directly), but it still needs
+     to read as a quiet, non-filled control rather than an unstyled bare button. */
+  .pill { cursor: pointer; font-family: inherit; font-size: var(--t-body); padding: 4px 10px;
+    border-radius: var(--r-ctl); border: 1px solid var(--edge); background: transparent; color: var(--dim); }
+  .pill:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+  .pill.on { color: var(--vscode-foreground); font-weight: 600; }
+  .pill .n { margin-left: 5px; font-family: var(--mono); font-size: var(--t-micro); color: var(--dim); }
+  .pill.on .n { color: var(--vscode-foreground); }
 
   .srcs { display: flex; gap: 5px; flex-wrap: wrap; }
   .tag { font-size: 10px; padding: 1px 7px; border-radius: 20px; border: 1px solid var(--hair);
@@ -62,10 +67,10 @@ export const MARKETPLACE_CSS = `
   .grouphd .rule { flex: 1; height: 1px; background: var(--hair); }
 
   .chips { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
-  .chip { cursor: pointer; font-family: inherit; font-size: 11px; padding: 3px 9px; border-radius: 20px;
-    border: 1px solid var(--vscode-focusBorder); background: var(--vscode-list-activeSelectionBackground);
-    color: var(--vscode-list-activeSelectionForeground); }
-  .chip:hover { opacity: .85; }
+  .chip { cursor: pointer; font-family: var(--mono); font-size: var(--t-data); padding: 1px 7px;
+    border-radius: var(--r-chip); border: 1px solid var(--hair);
+    background: transparent; color: var(--dim); }
+  .chip:hover { color: var(--vscode-foreground); border-color: var(--edge); }
   .chip.clear { border-color: var(--hair); background: transparent; color: var(--vscode-descriptionForeground); }
 
   .row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 18px; cursor: pointer;
