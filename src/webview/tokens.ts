@@ -79,8 +79,13 @@ export const BASE_CSS = `
 export const CONTROLS_CSS = `
   .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--edge); border-radius: var(--r-ctl); overflow: hidden; }
   /* A real border, not the inset-shadow separator .ctl uses: that separator strands
-     itself at the start of a wrapped row (nothing to sit against), where a border
-     just doesn't render on an edge that isn't there. */
+     itself at the start of a wrapped row (nothing to sit against). This rule isn't
+     wrap-safe either, though — :not(:first-child) is DOM order, not visual row
+     position, so a wrapped row's first button still matches and draws its own
+     border-left, landing immediately inside .seg's own 1px border. That reads as a
+     ~2px-thick left edge on wrapped rows only. Judged the acceptable trade-off: a
+     thickened edge on the container's own border reads as one control, where the
+     old inset-shadow separator floated free inside a row with nothing beside it. */
   .seg > button:not(:first-child) { border-left: 1px solid var(--edge); }
   .seg > button { font: inherit; font-size: var(--t-body); height: 24px; padding: 0 10px;
     border: 0; border-radius: 0; background: transparent; color: var(--dim);
