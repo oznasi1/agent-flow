@@ -707,6 +707,7 @@ describe("task card actions", () => {
     const remove = screen.getByRole("button", { name: /Remove ASM-1 from your active sprint/i });
     expect(remove).toBeInTheDocument();
     expect(remove).toHaveTextContent("");
+    expect(remove).toHaveAttribute("aria-label", expect.stringContaining("ASM-1"));
   });
 
   it("does not show Remove on other tabs", () => {

@@ -1293,6 +1293,13 @@ node preview/shoot-surface.js preview/head.html dist/webview.js preview/_5b-ligh
 Confirm all three: `Take` is the only filled control on the panel, `Highest` is the only amber
 thing on any card, and no card's action row wraps. Nothing under `media/` may change.
 
+Note (accepted 2026-08-04): the icon-only `Remove` change tightens the row and removes the empty
+gap a wrap used to leave, but a card with all three actions (`Remove`, `Address PR`, `Take`) is
+still expected to wrap at 420px — only PR-ready cards carry three actions, and wrapping tightly
+with no leftover hole was judged an acceptable outcome rather than a defect to fix. The
+"no card's action row wraps" line above is the original criterion, not the accepted result;
+don't treat a report of wrapping on a three-action card as a regression.
+
 - [ ] **Step 8: Run the full gates**
 
 Run: `npm run typecheck && npm test && npm run test:cov && npm run build`
