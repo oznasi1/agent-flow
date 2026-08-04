@@ -456,6 +456,26 @@ export function planWorkspaceMerge(file: string, candidates: MergeCandidate[]): 
   return plan;
 }
 
+/** The declared root that contains `target` — path-equal, or `target` nested beneath it.
+ *  Deepest root wins, matching VS Code's most-specific-root resolution. The `+ path.sep`
+ *  guard keeps /repos/api from swallowing the sibling /repos/api-gateway. `undefined` when
+ *  `target` is inside no root.
+ *
+ *  Single reader for "is this path already reachable from a root this workspace has", so
+ *  merge planning, the write layer and mention rendering cannot disagree on the answer —
+ *  the same reasoning that makes `workspaceFolders` the single reader for the folder list.
+ *  `roots` must carry canonical paths (`workspaceFolders` returns them); `target` is
+ *  canonicalized here. */
+export function containingRoot(
+  roots: WorkspaceFolder[],
+  target: string,
+): WorkspaceFolder | undefined {
+  const t = canon(target);
+  return roots
+    .filter((r) => r.path === t || t.startsWith(r.path + path.sep))
+    .sort((a, b) => b.path.length - a.path.length)[0];
+}
+
 /** The `@mention` for `rel` (relative to the repo at `repoPath`) in a window whose roots
  *  are `roots`. The repo is a root → `@<root>/<rel>`. The repo is INSIDE a root →
  *  `@<root>/<repo's path from that root>/<rel>`, which is the worktree case, since
@@ -467,14 +487,9 @@ export function mentionInWorkspace(
   repoPath: string,
   rel: string,
 ): string | undefined {
-  const target = canon(repoPath);
-  // Deepest root wins, matching VS Code's most-specific-root resolution. The `+ sep`
-  // guard keeps /repos/api from swallowing the sibling /repos/api-gateway.
-  const root = roots
-    .filter((r) => r.path === target || target.startsWith(r.path + path.sep))
-    .sort((a, b) => b.path.length - a.path.length)[0];
+  const root = containingRoot(roots, repoPath);
   if (!root) return undefined;
-  const inner = path.relative(root.path, target);
+  const inner = path.relative(root.path, canon(repoPath));
   return mention("multiroot", root.name ?? path.basename(root.path), inner ? `${inner}/${rel}` : rel);
 }
 

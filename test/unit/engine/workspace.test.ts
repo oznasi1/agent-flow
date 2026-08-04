@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
+import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
 import { commands, env, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -1150,6 +1150,43 @@ describe("workspaceFolderPaths", () => {
   it("returns [] when folders is missing or not an array", () => {
     readFileSync.mockReturnValue('{ "settings": {} }');
     expect(workspaceFolderPaths("/ws/nofolders.code-workspace")).toEqual([]);
+  });
+});
+
+describe("containingRoot", () => {
+  const roots = (...paths: string[]) => paths.map((p) => ({ path: p }));
+
+  it("matches a root exactly", () => {
+    expect(containingRoot(roots("/repos/api"), "/repos/api")?.path).toBe("/repos/api");
+  });
+
+  it("matches a path nested one level under a root", () => {
+    expect(containingRoot(roots("/repos/api"), "/repos/api/src")?.path).toBe("/repos/api");
+  });
+
+  it("matches a worktree several levels under a root", () => {
+    expect(
+      containingRoot(roots("/repos/api"), "/repos/api/.claude/worktrees/ASM-1")?.path,
+    ).toBe("/repos/api");
+  });
+
+  it("picks the deepest of two containing roots", () => {
+    // VS Code resolves a path against its most specific root; so must we, or a mention
+    // would name the outer root and point at the wrong tree.
+    const found = containingRoot(roots("/repos", "/repos/api"), "/repos/api/src/x.ts");
+    expect(found?.path).toBe("/repos/api");
+  });
+
+  it("does not let a root swallow a sibling that shares its prefix", () => {
+    expect(containingRoot(roots("/repos/api"), "/repos/api-gateway")).toBeUndefined();
+  });
+
+  it("returns undefined for a path inside no root", () => {
+    expect(containingRoot(roots("/repos/api"), "/elsewhere/web")).toBeUndefined();
+  });
+
+  it("returns undefined when there are no roots", () => {
+    expect(containingRoot([], "/repos/api")).toBeUndefined();
   });
 });
 
