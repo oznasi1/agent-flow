@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The light-background lockup no longer reads as dark speckle on the Marketplace.**
+  0.1.54 inverted the mark's non-brand dots to the word's ink at the icon's own 80%,
+  which does hold the dark variant's contrast *relationship* — cluster 9.3:1, teal
+  4.9:1 on white, against 12.2:1 and 6.4:1 on the icon's near-black. But small dark
+  dots on white carry far more perceptual weight than small light dots on black, so
+  the cluster outweighed the accents instead of framing them, and the teal had been
+  darkened to `#157F76` until it stopped reading as teal. The Marketplace listing
+  shows the banner at roughly 660px on pure white — it ignores the README's
+  `width="280"` — so it got the full effect where the README's shrunk copy hid it.
+  The light lockup now uses the icon's own `#2AA79B` for the six accent dots, with
+  the cluster dropped to `#16191C` at 30% so it recedes into texture. This reverses
+  the 2026-08-04 ruling that picked `#157F76` for its 4.9:1 on white: WCAG exempts
+  logotypes from contrast minimums, the wordmark beside the mark carries 16:1, and
+  the ring's legibility comes from its shape rather than from the teal alone.
+- **The lockup PNGs are no longer upscaled on the Marketplace.** Both re-render at
+  1120px instead of 560px — 2x the README's display width, so the listing's ~660px
+  rendering downsamples a sharp source instead of stretching a soft one. The README
+  is unchanged; it still asks for 280px.
+
 ## [0.1.55] — 2026-08-04
 
 ### Fixed
