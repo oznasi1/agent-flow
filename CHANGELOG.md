@@ -16,9 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **A single teal accent, spent in exactly six places**: the sidebar's header gauge,
+- **A single teal accent, spent in exactly seven places**: the sidebar's header gauge,
   its `Take` button, its sticky batch-launch bar, and its sign-in/setup button; the
-  Deck's ordinary primary action; and the Marketplace's `Open file`. Everything
+  Deck's ordinary primary action and its `Live signal`/`PR facts` toggle track (a
+  state indicator, not a second verb); and the Marketplace's `Open file`. Everything
   else — status dots, rails, chips, links — stays monochrome, on purpose.
 - **The sidebar's task, size and status filters read as grouped, segmented
   controls**, matching the Deck's — not three separate rows of blue-filled pills.

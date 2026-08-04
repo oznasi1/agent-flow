@@ -74,16 +74,18 @@ Measured contrast, each pair in the role it actually ships in:
 
 ### Where the accent may appear
 
-Exactly six places (this list originally read "three" and omitted the Marketplace's `Open file`
+Exactly seven places (this list originally read "three" and omitted the Marketplace's `Open file`
 from day one — a spec defect, not drift, caught by the final whole-branch review; `.batch-launch`
-and `.gate .btn` were added by that same review's ruling):
+and `.gate .btn` were added by that same review's ruling, and the Deck's toggle track by a later one):
 
 1. the sidebar header gauge,
 2. the sidebar `Take` button — filled, because it is the pool's one verb,
 3. the sidebar's sticky batch-launch bar — the same verb as `Take`, directly beneath a column of it,
 4. the sidebar's gate button (`Sign in to Jira` / `Run setup`) — the one action a gated panel offers,
 5. the Deck's ordinary primary `Open` — tinted outline,
-6. the Marketplace's `Open file` (`.btn.pri`) — filled, the panel's one verb.
+6. the Deck's toggle on-state track (`Live signal` / `PR facts`) — a state indicator, not a verb, so a
+   24×14px switch can carry the accent without competing with `Open` as a second primary,
+7. the Marketplace's `Open file` (`.btn.pri`) — filled, the panel's one verb.
 
 Forbidden everywhere else, specifically: the attention card in any form (orange owns attention),
 status dots, rails, chips, links, and the Marketplace kind colors.
@@ -283,7 +285,7 @@ Four commits:
 
 1. `tokens.ts` plus all three surfaces consuming it — pure extraction, zero visual change, trivially
    reviewable.
-2. Brand tokens, the accent in its allowed places (six — see "Where the accent may appear"), gauge
+2. Brand tokens, the accent in its allowed places (seven — see "Where the accent may appear"), gauge
    and `liveCount`.
 3. The sidebar port.
 4. Assets, copy, fresh screenshots.

@@ -124,7 +124,7 @@ describe("brand accent", () => {
       ".gate .btn", ".gate .btn:hover",
       ".batch-launch", ".batch-launch:hover",
     ],
-    deck: [".act.primary", ".act.primary:hover"],
+    deck: [".act.primary", ".act.primary:hover", ".ctl.on .switch", ".ctl.on .switch::after"],
     marketplace: [".btn.pri", ".btn.pri:hover"],
     controls: [],
   };

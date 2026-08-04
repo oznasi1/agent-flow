@@ -64,8 +64,14 @@ export const DECK_CSS = `
     border: 1px solid var(--hair); position: relative; flex: none; transition: background .15s; }
   .switch::after { content: ""; position: absolute; top: 1px; left: 1px; width: 10px; height: 10px;
     border-radius: 50%; background: var(--dim); transition: transform .15s, background .15s; }
-  .ctl.on .switch { background: var(--vscode-button-background); border-color: var(--vscode-button-background); }
-  .ctl.on .switch::after { transform: translateX(10px); background: var(--vscode-button-foreground); }
+  /* The one place besides .act.primary that spends --brand, and the same rule that
+     lets it: a filled control is off-limits everywhere else because it would read
+     as a second verb next to Open, but an on-state track isn't asking to be
+     pressed — it's reporting whether Live signal or PR facts already is. At
+     24×14px it reads as a status light, not a button, so the accent here restates
+     state rather than diluting the one-primary-per-surface rule. */
+  .ctl.on .switch { background: var(--brand); border-color: var(--brand); }
+  .ctl.on .switch::after { transform: translateX(10px); background: var(--brand-ink); }
   /* tabular-nums, not mono: "synced 4s ago" is a sentence, but its number ticks every
      second and must not reflow the control while it does. */
   .synced { font-size: var(--t-body); font-variant-numeric: tabular-nums; }
