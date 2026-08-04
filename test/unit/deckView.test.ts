@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { window, ViewColumn, env, workspace, setConfig } from "../_mocks/vscode";
+import { window, ViewColumn, env, workspace, setConfig, ConfigurationTarget } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
@@ -882,6 +882,29 @@ describe("retire sweep", () => {
     }));
     await sweep();
     expect(h.removeRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("board grouping", () => {
+  it("persists the grouping globally and echoes it back on the next post", async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    await p._fire({ type: "deck:setGrouping", grouping: "workspaces" });
+    await settled();
+    // getConfiguration hands out a fresh stub per call, so the write is asserted
+    // across every stub this pass produced rather than against one of them.
+    const updates = workspace.getConfiguration.mock.results
+      .flatMap((r) => (r.value as { update: { mock: { calls: unknown[][] } } }).update.mock.calls);
+    expect(updates).toContainEqual(["deckGrouping", "workspaces", ConfigurationTarget.Global]);
+    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)!.grouping).toBe("workspaces");
+  });
+
+  it("posts the grouping the setting already holds, without being asked", async () => {
+    setConfig({ deckGrouping: "workspaces" });
+    show();
+    await settled();
+    expect(posts(lastPanel()).filter((m) => m.type === "deck:runs").at(-1)!.grouping).toBe("workspaces");
   });
 });
 

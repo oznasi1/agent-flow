@@ -799,6 +799,7 @@ export class DeckPanel {
         // string setting a user can edit mid-session, and the board re-posts often
         // enough that this is the whole of "keep it live".
         prReviewStatus: getConfig().prReviewStatus,
+        grouping: getConfig().deckGrouping,
       });
       // The disabled branch posts its own "cleared" state directly — enqueueReviews
       // only ever posts once a search settles or is already fresh, neither of
@@ -854,6 +855,14 @@ export class DeckPanel {
         break;
       case "deck:setOpenAgents":
         this.openAgents = m.on;
+        await this.refreshBusy();
+        break;
+      case "deck:setGrouping":
+        // Persisted, unlike the three trust toggles beside it: a view preference
+        // re-picked on every panel open is a daily papercut.
+        await vscode.workspace
+          .getConfiguration("agentFlow")
+          .update("deckGrouping", m.grouping, vscode.ConfigurationTarget.Global);
         await this.refreshBusy();
         break;
       case "deck:setReviewQueue":

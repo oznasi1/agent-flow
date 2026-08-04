@@ -34,8 +34,9 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   ...over,
 });
 
-const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated"): OutboundMessage =>
-  ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: null, prReviewStatus });
+const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated",
+                 grouping: "agents" | "workspaces" = "agents"): OutboundMessage =>
+  ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: null, prReviewStatus, grouping });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
@@ -534,20 +535,23 @@ describe("DeckApp PR-facts chrome", () => {
 
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated" });
+    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", grouping: "agents" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 
+  // The nested agents row belongs to the Workspaces lens — the Agents lens gives
+  // each of these sessions a card of its own instead, so every case below says
+  // which grouping it is about rather than relying on the default.
   it("names a single agent instead of counting to one", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })]));
+    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })], "PR initiated", "workspaces"));
     expect(screen.getByText("svc-7e")).toBeTruthy();
     expect(screen.queryByText(/1 agent/)).toBeNull();
   });
 
   it("counts several agents and lists them when expanded", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
+    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })], "PR initiated", "workspaces"));
     const disclosure = screen.getByRole("button", { name: /2 agents/ });
     expect(screen.queryByText("svc-fa")).toBeNull();
     fireEvent.click(disclosure);
@@ -562,13 +566,13 @@ describe("DeckApp PR-facts chrome", () => {
     // its session name, so it earns .id; "N agents" is prose about a count and
     // must not carry the identifier styling, even though both sit in .ag-label.
     const solo = render(<DeckApp />);
-    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })]));
+    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })], "PR initiated", "workspaces"));
     const soloLabel = solo.container.querySelector(".ag-label")!;
     expect(soloLabel.classList.contains("id")).toBe(true);
     solo.unmount();
 
     const many = render(<DeckApp />);
-    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
+    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })], "PR initiated", "workspaces"));
     const manyLabel = many.container.querySelector(".ag-label")!;
     expect(manyLabel.classList.contains("id")).toBe(false);
   });
@@ -582,7 +586,7 @@ describe("DeckApp PR-facts chrome", () => {
       session: { pid: 1, sessionId: "svc-7e", cwd: "/r/svc", startedAt: 0, name: "svc-7e" },
       activity: { state: "working", lastActivityMs: Date.now(), slug: null },
     };
-    host(runsMsg([mkStatus({ agents: [noStart, mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
+    host(runsMsg([mkStatus({ agents: [noStart, mkAgent("svc-fa", "idle", Date.now() - 60_000)] })], "PR initiated", "workspaces"));
     fireEvent.click(screen.getByRole("button", { name: /2 agents/ }));
     const rows = [...container.querySelectorAll(".ag-row")];
     const zeroRow = rows.find((r) => r.textContent?.includes("svc-7e"))!;
@@ -1034,5 +1038,82 @@ describe("DeckApp — Address PR", () => {
     host(runsMsg([prCard()]));
     const labels = Array.from(document.querySelectorAll(".actions .act")).map((b) => b.textContent);
     expect(labels).toEqual(["Address PR", "Open", "Diff"]);
+  });
+});
+
+describe("Agents view", () => {
+  it("renders one card per agent, each with its own state and name", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ agents: [
+      { ...mkAgent("agent-flow-2e", "working", 100), repo: "svc" },
+      { ...mkAgent("svc-7f", "needs-you", 200), repo: "svc" },
+    ] })]));
+    expect(screen.getByText("agent-flow-2e")).toBeInTheDocument();
+    expect(screen.getByText("svc-7f")).toBeInTheDocument();
+    expect(screen.getByText(/working ·/)).toBeInTheDocument();
+    expect(screen.getByText(/ended turn ·/)).toBeInTheDocument();
+    // One run, two cards, so the ticket appears twice.
+    expect(screen.getAllByText("ASM-1")).toHaveLength(2);
+  });
+
+  it("sends the agent's own repo with Open, so each opens its own directory", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ agents: [{ ...mkAgent("a1", "working", 100), repo: "web" }] })]));
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "ASM-1", action: "open", repo: "web" });
+  });
+
+  it("renders one parked card with no agent name for an agentless run", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null } })]));
+    expect(screen.getByText(/parked · git \+ Jira only/)).toBeInTheDocument();
+    expect(screen.getAllByText("ASM-1")).toHaveLength(1);
+  });
+
+  it("collapses to one card per run when Open agents is off", () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([mkStatus({ agents: [] })]), openAgents: false } as OutboundMessage);
+    expect(screen.getAllByText("ASM-1")).toHaveLength(1);
+  });
+
+  it("shows the workspace view's nested agents row instead when grouping is workspaces", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ agents: [{ ...mkAgent("agent-flow-2e", "working", 100), repo: "svc" }] })],
+                 "PR initiated", "workspaces"));
+    // The collapsed agents row, not a card per agent.
+    expect(screen.getByTitle(/sessions open in this directory/i)).toBeInTheDocument();
+    expect(screen.getAllByText("ASM-1")).toHaveLength(1);
+  });
+
+  it("splits one run's agents across the columns their own states put them in", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ agents: [
+      { ...mkAgent("a-working", "working", 100), repo: "svc" },
+      { ...mkAgent("a-ended", "needs-you", 200), repo: "svc" },
+    ] })]));
+    const columns = Array.from(document.querySelectorAll(".col")).map((c) => ({
+      name: c.querySelector(".nm")!.textContent,
+      cards: Array.from(c.querySelectorAll(".c-agent")).map((a) => a.textContent),
+    }));
+    expect(columns.find((c) => c.name === "In progress")!.cards).toEqual(["a-working"]);
+    expect(columns.find((c) => c.name === "Action required")!.cards).toEqual(["a-ended"]);
+  });
+
+  it("counts cards, not runs, in the stat tiles", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ agents: [
+      { ...mkAgent("a1", "working", 100), repo: "svc" },
+      { ...mkAgent("a2", "working", 200), repo: "svc" },
+    ] })]));
+    const tiles = Array.from(document.querySelectorAll(".stat")).map((s) => [s.querySelector(".l")!.textContent, s.querySelector(".n")!.textContent]);
+    expect(tiles).toContainEqual(["In progress", "2"]);
+    expect(tiles).toContainEqual(["Total", "2"]);
+  });
+
+  it("asks the host to persist the grouping when the control is clicked", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByRole("button", { name: "Workspaces" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:setGrouping", grouping: "workspaces" });
   });
 });
