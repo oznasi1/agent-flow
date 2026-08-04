@@ -7,7 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.1.58] — 2026-08-04
+## [0.1.59] — 2026-08-04
+
+### Changed
+
+- **A card's Diff button opens the editor's own multi-file diff view.** It used to
+  concatenate every repo's patch into one read-only text document — searchable, but with
+  no file tree, no per-file navigation, and no way to fix a typo you spotted while
+  reading. Now each changed file is a real diff editor with the merge-base on the left and
+  the live worktree file on the right, so edits save straight into the run. Renames diff as
+  one change rather than an add plus a delete, and a multi-repo run groups by repo root.
+  Binary files are left out: their "before" side would arrive through a text provider and
+  render as mojibake. The flat patch survives as a fallback for editors that never
+  registered `vscode.changes`, and a run whose only changes are binary says so instead of
+  opening an empty editor.
 
 ### Fixed
 
