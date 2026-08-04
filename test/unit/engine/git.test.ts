@@ -3,7 +3,17 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { execFileSync } from "child_process";
-import { gitState, taskDiff, repoRoot, currentBranch, defaultBranch, prEligible } from "../../../src/engine/git";
+import {
+  gitState,
+  taskDiff,
+  taskDiffBase,
+  taskChangedFiles,
+  showFileAtRef,
+  repoRoot,
+  currentBranch,
+  defaultBranch,
+  prEligible,
+} from "../../../src/engine/git";
 
 describe("gitState", () => {
   let repo: string;
@@ -275,5 +285,94 @@ describe("defaultBranch & prEligible", () => {
   it("says a non-git service cannot, and one with no branch cannot", () => {
     expect(prEligible({ path: "/svc", isGit: false, branch: "ASM-1-x" })).toBe(false);
     expect(prEligible({ path: "/svc", isGit: true })).toBe(false);
+  });
+});
+
+describe("taskDiffBase / taskChangedFiles / showFileAtRef", () => {
+  let work: string;
+  let bare: string;
+  const g = (...a: string[]) => execFileSync("git", ["-C", work, ...a], { stdio: ["ignore", "pipe", "ignore"] });
+
+  beforeAll(() => {
+    bare = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-origin-cf-"));
+    work = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-changed-"));
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "--bare", "-q", bare]);
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", work]);
+    g("config", "user.email", "t@t.dev");
+    g("config", "user.name", "T");
+    fs.writeFileSync(path.join(work, "keep.txt"), "1\n2\n3\n");
+    fs.writeFileSync(path.join(work, "gone.txt"), "bye\n");
+    fs.writeFileSync(path.join(work, "old name.txt"), "renamed body\nline two\nline three\n");
+    fs.writeFileSync(path.join(work, "pic.bin"), Buffer.from([0, 1, 2, 0, 3]));
+    g("add", "-A");
+    g("commit", "-q", "-m", "init");
+    g("remote", "add", "origin", bare);
+    g("push", "-q", "-u", "origin", "HEAD");
+    g("remote", "set-head", "origin", "-a");
+
+    // Branch off and make one of every change, committed — the case a plain
+    // `git diff HEAD` reports as nothing.
+    g("checkout", "-q", "-b", "work");
+    fs.appendFileSync(path.join(work, "keep.txt"), "4\n");
+    fs.rmSync(path.join(work, "gone.txt"));
+    fs.renameSync(path.join(work, "old name.txt"), path.join(work, "new name.txt"));
+    fs.writeFileSync(path.join(work, "added.txt"), "fresh\n");
+    fs.writeFileSync(path.join(work, "pic.bin"), Buffer.from([9, 9, 9, 9, 9]));
+    g("add", "-A");
+    g("commit", "-q", "-m", "work");
+  });
+
+  afterAll(() => {
+    fs.rmSync(work, { recursive: true, force: true });
+    fs.rmSync(bare, { recursive: true, force: true });
+  });
+
+  it("resolves a real sha as the base, not HEAD", () => {
+    const base = taskDiffBase(work);
+    expect(base).toMatch(/^[0-9a-f]{40}$/);
+    expect(base).not.toBe(execFileSync("git", ["-C", work, "rev-parse", "HEAD"]).toString().trim());
+  });
+
+  it("degrades to HEAD when the repo has no origin to compare with", () => {
+    const solo = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-solo-"));
+    execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", solo]);
+    expect(taskDiffBase(solo)).toBe("HEAD");
+    fs.rmSync(solo, { recursive: true, force: true });
+  });
+
+  it("reports committed adds, modifies and deletes against the base", () => {
+    const files = taskChangedFiles(work);
+    const byPath = Object.fromEntries(files.map((f) => [f.path, f]));
+    expect(byPath["added.txt"].status).toBe("A");
+    expect(byPath["keep.txt"].status).toBe("M");
+    expect(byPath["gone.txt"].status).toBe("D");
+  });
+
+  it("reports a rename as one entry carrying both paths, not an add plus a delete", () => {
+    const r = taskChangedFiles(work).find((f) => f.status === "R");
+    expect(r).toBeTruthy();
+    expect(r!.path).toBe("new name.txt");
+    expect(r!.oldPath).toBe("old name.txt");
+    expect(taskChangedFiles(work).some((f) => f.path === "old name.txt" && f.status === "D")).toBe(false);
+  });
+
+  it("flags a binary file and leaves text files unflagged", () => {
+    const files = taskChangedFiles(work);
+    expect(files.find((f) => f.path === "pic.bin")!.binary).toBe(true);
+    expect(files.find((f) => f.path === "keep.txt")!.binary).toBe(false);
+  });
+
+  it("returns nothing for a non-git path instead of throwing", () => {
+    expect(taskChangedFiles(path.join(work, "nope"))).toEqual([]);
+  });
+
+  it("reads a file's content at a ref with its trailing newline intact", () => {
+    // Trimming here would strip the final newline and show a phantom
+    // last-line change in every diff.
+    expect(showFileAtRef(work, taskDiffBase(work), "keep.txt")).toBe("1\n2\n3\n");
+  });
+
+  it("returns empty for a file absent at that ref", () => {
+    expect(showFileAtRef(work, taskDiffBase(work), "added.txt")).toBe("");
   });
 });
