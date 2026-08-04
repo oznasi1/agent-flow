@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The README lockup carries the real mark instead of a one-colour stand-in.** The
+  banner drew a simplified sixteen-dot ring in flat teal, so the README opened with a
+  mark that shared nothing but a silhouette with the icon sitting next to it in the
+  extensions list. Both lockups (`media/logo.svg`, `media/logo-light.svg`, PNGs
+  re-rendered at 560px) now use the icon's own dot cluster, lifted from
+  `media/icon-src.svg` — the six teal dots plus the non-brand dots at the same 80%.
+  The light-background variant inverts those dots to the word's ink `#16191C`, which
+  holds the same contrast relationship the dark one has, so the teal still reads as
+  the brand colour on white rather than getting buried. The old lockup also clipped
+  its bottom dot — the mark's box ran past the viewBox — so the canvas is recomposed
+  at 373×88 with even padding and the mark centred on the wordmark's cap height. The
+  README displays it at the same size as before.
+
 ## [0.1.53] — 2026-08-04
 
 ### Changed
