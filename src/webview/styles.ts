@@ -14,11 +14,13 @@ export const CSS = `
 
   /* The mark is the sidebar's status display: lit dots are open Agent Flow
      windows. Unlit and texture dots ride the theme foreground so the ring keeps
-     its shape on any background. */
+     its shape on any background, and sit just under it rather than at a quarter
+     of it — at .26 the ring read as a smudge at 15px. The count stays legible
+     because lit/unlit differ in hue, not only in weight. */
   .gauge { flex: none; display: block; }
   .gauge .lit { fill: var(--brand); }
-  .gauge .unlit { fill: currentColor; opacity: .26; }
-  .gauge .tex { fill: currentColor; opacity: .4; }
+  .gauge .unlit { fill: currentColor; opacity: .85; }
+  .gauge .tex { fill: currentColor; opacity: .85; }
   /* The pool's one filled control is Take. Explore is the way out when no ticket
      fits — useful, not primary — so it shares the secondary action language below
      with Address PR and the sprint actions, rather than repeating it. */

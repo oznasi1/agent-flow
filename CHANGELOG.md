@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The mark's non-brand dots are near-white instead of dark grey.** They sat at 26%
+  opacity everywhere they appear — in the extension icon that resolved to roughly
+  `#3F4142` on the graphite tile, so at the 32px the extensions list actually renders
+  only the six teal dots read and the rest of the ring turned into a smudge. The
+  extension and Marketplace icons now draw them at 80% white (`media/icon-src.svg`,
+  `media/icon-store-src.svg`, PNGs re-rendered at 256×256), and the sidebar's gauge
+  mark takes the theme foreground at 85% for both its unlit and texture dots, so it
+  stays theme-correct on light backgrounds instead of hardcoding white. The teal is
+  unchanged, and the gauge count is still readable because lit and unlit dots differ
+  in hue, not only in weight.
+
 ## [0.1.52] — 2026-08-04
 
 ### Fixed
