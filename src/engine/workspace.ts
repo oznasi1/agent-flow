@@ -423,6 +423,11 @@ export interface WorkspaceMergePlan {
    *  asking: two roots by one name are indistinguishable in the explorer and make
    *  `@name/…` ambiguous, which is the harm this whole change exists to prevent. */
   duplicates: MergeCandidate[];
+  /** Inside a declared root, so already reachable and visible beneath it. Skipped without
+   *  asking — adding it would nest a root inside a root and buy nothing. Distinct from
+   *  `duplicates` because the containing root's name may match nothing about this repo:
+   *  a workspace rooted at the repos parent directory, or a root the user renamed. */
+  redundant: MergeCandidate[];
   /** Already a declared folder by canonical path — nothing to do, nothing to report. */
   present: MergeCandidate[];
   /** false when the file can't be read or safely parsed; every bucket is empty. */
@@ -434,10 +439,12 @@ export interface WorkspaceMergePlan {
  *  Name comparison is case-insensitive and covers BOTH a folder's `name` field and its
  *  path's basename: servicesFromExistingDestination derives an unmatched folder's
  *  service name from the basename, so comparing only `name` would let a custom `name`
- *  field defeat the rule against the service derived from that very folder. */
+ *  field defeat the rule against the service derived from that very folder.
+ *  A candidate already inside one of the declared roots is `redundant` — reachable and
+ *  visible there already, so a root of its own would nest a root inside a root. */
 export function planWorkspaceMerge(file: string, candidates: MergeCandidate[]): WorkspaceMergePlan {
   const folders = workspaceFolders(file);
-  if (!folders) return { add: [], duplicates: [], present: [], ok: false };
+  if (!folders) return { add: [], duplicates: [], redundant: [], present: [], ok: false };
 
   const paths = new Set(folders.map((f) => f.path));
   const names = new Set(
@@ -447,10 +454,11 @@ export function planWorkspaceMerge(file: string, candidates: MergeCandidate[]): 
       .map((n) => n.toLowerCase()),
   );
 
-  const plan: WorkspaceMergePlan = { add: [], duplicates: [], present: [], ok: true };
+  const plan: WorkspaceMergePlan = { add: [], duplicates: [], redundant: [], present: [], ok: true };
   for (const c of candidates) {
     if (paths.has(canon(c.path))) plan.present.push(c);
     else if (names.has(c.repoName.toLowerCase())) plan.duplicates.push(c);
+    else if (containingRoot(folders, c.path)) plan.redundant.push(c);
     else plan.add.push(c);
   }
   return plan;

@@ -1119,13 +1119,70 @@ describe("planWorkspaceMerge", () => {
   it("reports ok:false with empty buckets when the file is unparseable", () => {
     readFileSync.mockReturnValue("{ broken");
     const plan = planWorkspaceMerge("/ws/bad.code-workspace", [cand("api", "/repos/api")]);
-    expect(plan).toEqual({ add: [], duplicates: [], present: [], ok: false });
+    expect(plan).toEqual({ add: [], duplicates: [], redundant: [], present: [], ok: false });
   });
 
   it("never writes", () => {
     readFileSync.mockReturnValue('{ "folders": [] }');
     planWorkspaceMerge("/ws/t.code-workspace", [cand("api", "/repos/api")]);
     expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("skips a candidate nested inside a parent-directory root", () => {
+    // The root is the repos parent, so no name matches — only containment can see this.
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/Users/me/projects" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [
+      cand("centaur", "/Users/me/projects/centaur/.claude/worktrees/ASM-1"),
+    ]);
+    expect(plan.redundant.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.add).toEqual([]);
+    expect(plan.duplicates).toEqual([]);
+  });
+
+  it("skips a candidate nested inside a root the user renamed", () => {
+    readFileSync.mockReturnValue(
+      '{ "folders": [{ "name": "monorepo", "path": "/Users/me/projects" }] }',
+    );
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [
+      cand("centaur", "/Users/me/projects/centaur"),
+    ]);
+    expect(plan.redundant.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.add).toEqual([]);
+  });
+
+  it("keeps name precedence: a worktree of a same-named root is still a duplicate", () => {
+    // Regression guard on the precedence decision. This candidate satisfies BOTH rules;
+    // moving it to `redundant` would change the launch toast's wording.
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [
+      cand("centaur", "/repos/centaur/.claude/worktrees/ASM-1"),
+    ]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.redundant).toEqual([]);
+  });
+
+  it("keeps an exact root match in present, not redundant", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("centaur", "/repos/centaur")]);
+    expect(plan.present.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.redundant).toEqual([]);
+  });
+
+  it("still adds a repo that is inside no root and shares no name", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [
+      cand("infra", "/elsewhere/infra/.claude/worktrees/ASM-1"),
+    ]);
+    expect(plan.add.map((c) => c.repoName)).toEqual(["infra"]);
+    expect(plan.redundant).toEqual([]);
+  });
+
+  it("leaves redundant empty when the file cannot be parsed", () => {
+    readFileSync.mockReturnValue("{ not json");
+    const plan = planWorkspaceMerge("/ws/broken.code-workspace", [cand("api", "/repos/api")]);
+    expect(plan.ok).toBe(false);
+    expect(plan.redundant).toEqual([]);
+    expect(plan.add).toEqual([]);
   });
 });
 
