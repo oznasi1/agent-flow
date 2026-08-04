@@ -14,9 +14,17 @@ vi.mock("../../src/engine/workspace", () => ({
   openWorkspace: vi.fn(),
   listWorkspaceFiles: vi.fn(() => []),
   workspaceFolderPaths: vi.fn(() => []),
-  planWorkspaceMerge: vi.fn(() => ({ add: [], duplicates: [], present: [], ok: true })),
+  planWorkspaceMerge: vi.fn(() => ({ add: [], duplicates: [], redundant: [], present: [], ok: true })),
 }));
-vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn((s: unknown) => s) }));
+// repoRootOfWorktree is a pure path function (no fs/git side effects) — keep the real one
+// so the derivation tests exercise the genuine convention, and stub only createWorktrees,
+// the entry point that shells out to git. Same reasoning as the batchWorkspace mock below.
+vi.mock("../../src/engine/worktree", async () => {
+  const actual = await vi.importActual<typeof import("../../src/engine/worktree")>(
+    "../../src/engine/worktree",
+  );
+  return { ...actual, createWorktrees: vi.fn((s: unknown) => s) };
+});
 // folderName is a pure function (no vscode/fs side effects) — keep the real one so
 // batch's dedup candidates carry genuine key-qualified labels, and only stub the
 // window-opening entrypoint the tests actually drive. This runs the real batchWorkspace
@@ -1612,6 +1620,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
         duplicates: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1630,6 +1639,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [{ label: "infra", repoName: "infra", path: "/repos/infra" }],
         duplicates: [],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1650,6 +1660,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [{ label: "infra", repoName: "infra", path: "/repos/infra" }],
         duplicates: [],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1668,6 +1679,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [{ label: "infra", repoName: "infra", path: "/repos/infra" }],
         duplicates: [],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1696,6 +1708,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
         duplicates: [],
+        redundant: [],
         present: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service" }],
         ok: true,
       });
@@ -1721,6 +1734,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [{ label: "infra", repoName: "infra", path: "/repos/infra" }],
         duplicates: [],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1737,7 +1751,7 @@ describe("takeTask", () => {
 
     it("does not prompt when the workspace file can't be parsed", async () => {
       pickExisting();
-      vi.mocked(planWorkspaceMerge).mockReturnValue({ add: [], duplicates: [], present: [], ok: false });
+      vi.mocked(planWorkspaceMerge).mockReturnValue({ add: [], duplicates: [], redundant: [], present: [], ok: false });
       vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
@@ -1752,6 +1766,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
         duplicates: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1791,6 +1806,7 @@ describe("takeTask", () => {
           { label: "tooling", repoName: "tooling", path: "/repos/tooling" },
         ],
         duplicates: [],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1822,6 +1838,7 @@ describe("takeTask", () => {
           { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/ASM-1" },
           { label: "web", repoName: "web", path: "/repos/web/.claude/worktrees/ASM-1" },
         ],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -2689,6 +2706,39 @@ describe("takeBatch", () => {
     expect(toast.message).toContain("couldn't be parsed");
   });
 
+  it("names a redundant repo in the already-in-the-workspace clause", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({
+      target: { kind: "existing", file: "/ws/team.code-workspace" },
+    } as never);
+    // mockReturnValueOnce, not mockReturnValue: vitest's clearMocks resets call history but
+    // keeps implementations, so a permanent override would leak into later tests.
+    vi.mocked(planWorkspaceMerge).mockReturnValueOnce({
+      add: [],
+      duplicates: [],
+      redundant: [
+        { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/ASM-1" },
+      ],
+      present: [],
+      ok: true,
+    });
+    vi.mocked(openSharedWorkspace).mockResolvedValue({
+      workspaceFile: "/ws/team.code-workspace",
+      opened: true,
+      briefs: [],
+      seeded: 2,
+    });
+
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).toContain("api already in the workspace");
+    // No add-prompt: `add` was empty, so the only quick pick was the destination.
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+  });
+
   it("fails every resolved task when the shared window itself throws", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
@@ -2722,6 +2772,7 @@ describe("takeBatch", () => {
     vi.mocked(planWorkspaceMerge).mockReturnValue({
       add: [],
       duplicates: [{ label: "ASM-1-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+      redundant: [],
       present: [],
       ok: true,
     });
@@ -2757,6 +2808,7 @@ describe("takeBatch", () => {
         { label: "ASM-2-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-2" },
       ],
       duplicates: [],
+      redundant: [],
       present: [],
       ok: true,
     });
@@ -2790,6 +2842,7 @@ describe("takeBatch", () => {
     vi.mocked(planWorkspaceMerge).mockReturnValue({
       add: [{ label: "ASM-1-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
       duplicates: [],
+      redundant: [],
       present: [],
       ok: true,
     });
@@ -2933,6 +2986,95 @@ describe("explore — open target", () => {
         services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
       }),
     );
+  });
+
+  it("derives the repo, not a phantom, from a workspace folder that is a worktree", async () => {
+    // A folder left behind by an older version points at .../worktrees/ASM-5111, whose
+    // basename is a ticket key. Taken at face value it becomes a phantom repo — and since a
+    // worktree's .git is a pointer FILE it even passes the isGit check, so the next
+    // createWorktrees would nest a worktree inside that worktree.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
+    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur/.claude/worktrees/ASM-5111"]);
+    vi.mocked(listWorkspaceFiles).mockReturnValue([
+      { file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 },
+    ]);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
+      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+
+    await runExplore();
+
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
+      }),
+    );
+  });
+
+  it("collapses a repo and a worktree of that repo to one service", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
+    vi.mocked(workspaceFolderPaths).mockReturnValue([
+      "/repos/centaur",
+      "/repos/centaur/.claude/worktrees/ASM-5885",
+    ]);
+    vi.mocked(listWorkspaceFiles).mockReturnValue([
+      { file: "/ws/team.code-workspace", folders: 2, mtimeMs: 1 },
+    ]);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
+      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+
+    await runExplore();
+
+    const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
+    expect(services.map((s) => s.path)).toEqual(["/repos/centaur"]);
+  });
+
+  it("collapses two different worktrees of the same repo to one service", async () => {
+    // Each worktree's root is independently unwound and (per the fix) canon()'d before
+    // the dedup map keys on it — two distinct ticket keys must still land on one entry.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
+    vi.mocked(workspaceFolderPaths).mockReturnValue([
+      "/repos/centaur/.claude/worktrees/ASM-1111",
+      "/repos/centaur/.claude/worktrees/ASM-2222",
+    ]);
+    vi.mocked(listWorkspaceFiles).mockReturnValue([
+      { file: "/ws/team.code-workspace", folders: 2, mtimeMs: 1 },
+    ]);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
+      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+
+    await runExplore();
+
+    const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
+    expect(services).toEqual([expect.objectContaining({ name: "centaur", path: "/repos/centaur", isGit: true })]);
+  });
+
+  it("collapses a live-folder destination pointed at a worktree to its owning repo", async () => {
+    // per-window tracking takes open windows directly at worktree paths, and window
+    // presence records that path, so a live folder pointing at .../worktrees/<KEY> is the
+    // highest-traffic instance of the unwind — pin it so it can't regress.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
+    vi.mocked(readLiveWindows).mockReturnValue([
+      { pid: 1, identity: "/repos/centaur/.claude/worktrees/ASM-5885", kind: "folder", label: "ASM-5885", folders: 1, updatedAt: 9 },
+    ]);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("poke around");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/centaur/.claude/worktrees/ASM-5885" } } as never) // open where (first)
+      .mockResolvedValueOnce([{ repo: mkRepos(["centaur"])[0] }] as never);                                                    // repos (last)
+
+    await runExplore();
+
+    const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
+    expect(services.map((s) => s.path)).toEqual(["/repos/centaur"]);
   });
 
   it("aborts an Explore into an existing workspace that resolves to no repos", async () => {

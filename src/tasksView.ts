@@ -20,7 +20,7 @@ import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, type MergeCandidate } from "./engine/workspace";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, PresenceRecord } from "./engine/presence";
-import { createWorktrees } from "./engine/worktree";
+import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
@@ -952,15 +952,32 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return new Set();
   }
 
-  /** Repos already in an existing / live-folder destination, as ServiceRefs — the set
-   * used when we skip the picker for such destinations. Matches discovered repos by
-   * canonical path where possible; otherwise builds one from the folder path, so
-   * workspace folders outside reposRoot are honored too. */
+  /** Repos already in an existing / live-folder destination, as ServiceRefs — the set used
+   *  when we skip the picker for such destinations. Matches discovered repos by canonical
+   *  path where possible; otherwise builds one from the folder path, so workspace folders
+   *  outside reposRoot are honored too.
+   *
+   *  A folder that is one of OUR worktrees is unwound to the repo it belongs to first. Its
+   *  basename is a ticket key, so taking it at face value invents a phantom repo — and
+   *  because a worktree's `.git` is a pointer FILE, it even passes the isGit check, so the
+   *  next createWorktrees would nest a worktree inside that worktree. Deduped by path, so a
+   *  workspace declaring both a repo and a worktree of it yields one service. */
   private servicesFromExistingDestination(target: OpenTarget, repos: ServiceRef[]): ServiceRef[] {
     const byPath = new Map(repos.map((r) => [canon(r.path), r]));
-    return [...this.prefillPathsForTarget(target)].map(
-      (p) => byPath.get(p) ?? { name: path.basename(p), path: p, isGit: fs.existsSync(path.join(p, ".git")) },
-    );
+    const out = new Map<string, ServiceRef>();
+    for (const folder of this.prefillPathsForTarget(target)) {
+      // A folder that exists is already canonical (prefillPathsForTarget resolved it), but
+      // an unwound root might not — canon() falls back to the raw path when realpathSync
+      // throws, exactly what happens for a stale root whose worktree is gone.
+      const un = repoRootOfWorktree(folder);
+      const p = un ? canon(un) : folder;
+      if (out.has(p)) continue;
+      out.set(
+        p,
+        byPath.get(p) ?? { name: path.basename(p), path: p, isGit: fs.existsSync(path.join(p, ".git")) },
+      );
+    }
+    return [...out.values()];
   }
 
   /** Whether this launch offers Claude Code's Remote Control. Resolved once per launch
@@ -1004,7 +1021,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // Two batch tasks in one not-yet-added repo both land in `add` under distinct
     // key-qualified labels but share a repoName — dedup here (both this bucket and the
     // display names below) so neither the toast nor the prompt copy repeats a name.
-    const skipped = [...new Set(plan.duplicates.map((c) => c.repoName))];
+    // `redundant` joins `duplicates`: "already in the workspace" is true of both, so one
+    // clause covers them and no new copy is needed.
+    const skipped = [
+      ...new Set([...plan.duplicates, ...plan.redundant].map((c) => c.repoName)),
+    ];
     // ok:false → nothing can be added safely; openWorkspace reports mergeFailed.
     if (!plan.ok || !plan.add.length) return { foldersToAdd: [], skipped, declined: false };
 

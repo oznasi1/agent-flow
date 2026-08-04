@@ -316,7 +316,7 @@ export function mergeReposIntoWorkspace(
   }
   const errors: ParseError[] = [];
   const doc = jsoncParse(text, errors, { allowTrailingComma: true }) as
-    | { folders?: { path?: string }[] }
+    | { folders?: { name?: string; path?: string }[] }
     | undefined;
   if (
     errors.length ||
@@ -329,13 +329,16 @@ export function mergeReposIntoWorkspace(
   }
 
   const wsDir = path.dirname(file);
-  const present = new Set(
-    (Array.isArray(doc.folders) ? doc.folders : [])
-      .map((f) => f?.path)
-      .filter((p): p is string => typeof p === "string")
-      .map((p) => canon(path.resolve(wsDir, p))),
-  );
-  const missing = repos.filter((r) => !present.has(canon(r.path)));
+  // Resolved against the file's directory and canonicalized, exactly as workspaceFolders
+  // does — a raw relative "centaur" would contain nothing. Only the path is needed here,
+  // so the `name` field is not carried across.
+  const roots: WorkspaceFolder[] = (Array.isArray(doc.folders) ? doc.folders : [])
+    .map((f) => f?.path)
+    .filter((p): p is string => typeof p === "string")
+    .map((p) => ({ path: canon(path.resolve(wsDir, p)) }));
+  // containingRoot covers path-equality too, so this subsumes the old exact-path check:
+  // a folder already declared, or already inside something declared, is not written.
+  const missing = repos.filter((r) => !containingRoot(roots, r.path));
   if (!missing.length) return { added: [], ok: true };
 
   const startIdx = Array.isArray(doc.folders) ? doc.folders.length : 0;
@@ -423,6 +426,11 @@ export interface WorkspaceMergePlan {
    *  asking: two roots by one name are indistinguishable in the explorer and make
    *  `@name/…` ambiguous, which is the harm this whole change exists to prevent. */
   duplicates: MergeCandidate[];
+  /** Inside a declared root, so already reachable and visible beneath it. Skipped without
+   *  asking — adding it would nest a root inside a root and buy nothing. Distinct from
+   *  `duplicates` because the containing root's name may match nothing about this repo:
+   *  a workspace rooted at the repos parent directory, or a root the user renamed. */
+  redundant: MergeCandidate[];
   /** Already a declared folder by canonical path — nothing to do, nothing to report. */
   present: MergeCandidate[];
   /** false when the file can't be read or safely parsed; every bucket is empty. */
@@ -434,10 +442,12 @@ export interface WorkspaceMergePlan {
  *  Name comparison is case-insensitive and covers BOTH a folder's `name` field and its
  *  path's basename: servicesFromExistingDestination derives an unmatched folder's
  *  service name from the basename, so comparing only `name` would let a custom `name`
- *  field defeat the rule against the service derived from that very folder. */
+ *  field defeat the rule against the service derived from that very folder.
+ *  A candidate already inside one of the declared roots is `redundant` — reachable and
+ *  visible there already, so a root of its own would nest a root inside a root. */
 export function planWorkspaceMerge(file: string, candidates: MergeCandidate[]): WorkspaceMergePlan {
   const folders = workspaceFolders(file);
-  if (!folders) return { add: [], duplicates: [], present: [], ok: false };
+  if (!folders) return { add: [], duplicates: [], redundant: [], present: [], ok: false };
 
   const paths = new Set(folders.map((f) => f.path));
   const names = new Set(
@@ -447,13 +457,34 @@ export function planWorkspaceMerge(file: string, candidates: MergeCandidate[]): 
       .map((n) => n.toLowerCase()),
   );
 
-  const plan: WorkspaceMergePlan = { add: [], duplicates: [], present: [], ok: true };
+  const plan: WorkspaceMergePlan = { add: [], duplicates: [], redundant: [], present: [], ok: true };
   for (const c of candidates) {
     if (paths.has(canon(c.path))) plan.present.push(c);
     else if (names.has(c.repoName.toLowerCase())) plan.duplicates.push(c);
+    else if (containingRoot(folders, c.path)) plan.redundant.push(c);
     else plan.add.push(c);
   }
   return plan;
+}
+
+/** The declared root that contains `target` — path-equal, or `target` nested beneath it.
+ *  Deepest root wins, matching VS Code's most-specific-root resolution. The `+ path.sep`
+ *  guard keeps /repos/api from swallowing the sibling /repos/api-gateway. `undefined` when
+ *  `target` is inside no root.
+ *
+ *  Single reader for "is this path already reachable from a root this workspace has", so
+ *  merge planning, the write layer and mention rendering cannot disagree on the answer —
+ *  the same reasoning that makes `workspaceFolders` the single reader for the folder list.
+ *  `roots` must carry canonical paths (`workspaceFolders` returns them); `target` is
+ *  canonicalized here. */
+export function containingRoot(
+  roots: WorkspaceFolder[],
+  target: string,
+): WorkspaceFolder | undefined {
+  const t = canon(target);
+  return roots
+    .filter((r) => r.path === t || t.startsWith(r.path + path.sep))
+    .sort((a, b) => b.path.length - a.path.length)[0];
 }
 
 /** The `@mention` for `rel` (relative to the repo at `repoPath`) in a window whose roots
@@ -467,14 +498,9 @@ export function mentionInWorkspace(
   repoPath: string,
   rel: string,
 ): string | undefined {
-  const target = canon(repoPath);
-  // Deepest root wins, matching VS Code's most-specific-root resolution. The `+ sep`
-  // guard keeps /repos/api from swallowing the sibling /repos/api-gateway.
-  const root = roots
-    .filter((r) => r.path === target || target.startsWith(r.path + path.sep))
-    .sort((a, b) => b.path.length - a.path.length)[0];
+  const root = containingRoot(roots, repoPath);
   if (!root) return undefined;
-  const inner = path.relative(root.path, target);
+  const inner = path.relative(root.path, canon(repoPath));
   return mention("multiroot", root.name ?? path.basename(root.path), inner ? `${inner}/${rel}` : rel);
 }
 

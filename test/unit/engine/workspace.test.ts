@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
+import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
 import { commands, env, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -752,6 +752,35 @@ describe("mergeReposIntoWorkspace", () => {
     expect(res).toEqual({ added: [], ok: false });
     expect(writeFileSync).not.toHaveBeenCalled();
   });
+
+  it("refuses a folder nested inside an existing root, even when handed one directly", () => {
+    // The write layer is the last line of defense: a caller that skips planWorkspaceMerge
+    // must still not be able to nest a root inside a root.
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/Users/me/projects" }] }');
+    const res = mergeReposIntoWorkspace("/ws/t.code-workspace", [
+      { name: "centaur", path: "/Users/me/projects/centaur/.claude/worktrees/ASM-1" },
+    ]);
+    expect(res).toEqual({ added: [], ok: true });
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("still writes a folder that is inside no existing root", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/Users/me/projects" }] }');
+    const res = mergeReposIntoWorkspace("/ws/t.code-workspace", [
+      { name: "infra", path: "/elsewhere/infra" },
+    ]);
+    expect(res).toEqual({ added: ["infra"], ok: true });
+    const written = String(writeFileSync.mock.calls[0][1]);
+    expect(written).toContain("/elsewhere/infra");
+  });
+
+  it("does not let a root swallow a sibling sharing its prefix", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/api" }] }');
+    const res = mergeReposIntoWorkspace("/ws/t.code-workspace", [
+      { name: "api-gateway", path: "/repos/api-gateway" },
+    ]);
+    expect(res).toEqual({ added: ["api-gateway"], ok: true });
+  });
 });
 
 describe("openWorkspace — existing workspace", () => {
@@ -1119,13 +1148,70 @@ describe("planWorkspaceMerge", () => {
   it("reports ok:false with empty buckets when the file is unparseable", () => {
     readFileSync.mockReturnValue("{ broken");
     const plan = planWorkspaceMerge("/ws/bad.code-workspace", [cand("api", "/repos/api")]);
-    expect(plan).toEqual({ add: [], duplicates: [], present: [], ok: false });
+    expect(plan).toEqual({ add: [], duplicates: [], redundant: [], present: [], ok: false });
   });
 
   it("never writes", () => {
     readFileSync.mockReturnValue('{ "folders": [] }');
     planWorkspaceMerge("/ws/t.code-workspace", [cand("api", "/repos/api")]);
     expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("skips a candidate nested inside a parent-directory root", () => {
+    // The root is the repos parent, so no name matches — only containment can see this.
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/Users/me/projects" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [
+      cand("centaur", "/Users/me/projects/centaur/.claude/worktrees/ASM-1"),
+    ]);
+    expect(plan.redundant.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.add).toEqual([]);
+    expect(plan.duplicates).toEqual([]);
+  });
+
+  it("skips a candidate nested inside a root the user renamed", () => {
+    readFileSync.mockReturnValue(
+      '{ "folders": [{ "name": "monorepo", "path": "/Users/me/projects" }] }',
+    );
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [
+      cand("centaur", "/Users/me/projects/centaur"),
+    ]);
+    expect(plan.redundant.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.add).toEqual([]);
+  });
+
+  it("keeps name precedence: a worktree of a same-named root is still a duplicate", () => {
+    // Regression guard on the precedence decision. This candidate satisfies BOTH rules;
+    // moving it to `redundant` would change the launch toast's wording.
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [
+      cand("centaur", "/repos/centaur/.claude/worktrees/ASM-1"),
+    ]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.redundant).toEqual([]);
+  });
+
+  it("keeps an exact root match in present, not redundant", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("centaur", "/repos/centaur")]);
+    expect(plan.present.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.redundant).toEqual([]);
+  });
+
+  it("still adds a repo that is inside no root and shares no name", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [
+      cand("infra", "/elsewhere/infra/.claude/worktrees/ASM-1"),
+    ]);
+    expect(plan.add.map((c) => c.repoName)).toEqual(["infra"]);
+    expect(plan.redundant).toEqual([]);
+  });
+
+  it("leaves redundant empty when the file cannot be parsed", () => {
+    readFileSync.mockReturnValue("{ not json");
+    const plan = planWorkspaceMerge("/ws/broken.code-workspace", [cand("api", "/repos/api")]);
+    expect(plan.ok).toBe(false);
+    expect(plan.redundant).toEqual([]);
+    expect(plan.add).toEqual([]);
   });
 });
 
@@ -1150,6 +1236,43 @@ describe("workspaceFolderPaths", () => {
   it("returns [] when folders is missing or not an array", () => {
     readFileSync.mockReturnValue('{ "settings": {} }');
     expect(workspaceFolderPaths("/ws/nofolders.code-workspace")).toEqual([]);
+  });
+});
+
+describe("containingRoot", () => {
+  const roots = (...paths: string[]) => paths.map((p) => ({ path: p }));
+
+  it("matches a root exactly", () => {
+    expect(containingRoot(roots("/repos/api"), "/repos/api")?.path).toBe("/repos/api");
+  });
+
+  it("matches a path nested one level under a root", () => {
+    expect(containingRoot(roots("/repos/api"), "/repos/api/src")?.path).toBe("/repos/api");
+  });
+
+  it("matches a worktree several levels under a root", () => {
+    expect(
+      containingRoot(roots("/repos/api"), "/repos/api/.claude/worktrees/ASM-1")?.path,
+    ).toBe("/repos/api");
+  });
+
+  it("picks the deepest of two containing roots", () => {
+    // VS Code resolves a path against its most specific root; so must we, or a mention
+    // would name the outer root and point at the wrong tree.
+    const found = containingRoot(roots("/repos", "/repos/api"), "/repos/api/src/x.ts");
+    expect(found?.path).toBe("/repos/api");
+  });
+
+  it("does not let a root swallow a sibling that shares its prefix", () => {
+    expect(containingRoot(roots("/repos/api"), "/repos/api-gateway")).toBeUndefined();
+  });
+
+  it("returns undefined for a path inside no root", () => {
+    expect(containingRoot(roots("/repos/api"), "/elsewhere/web")).toBeUndefined();
+  });
+
+  it("returns undefined when there are no roots", () => {
+    expect(containingRoot([], "/repos/api")).toBeUndefined();
   });
 });
 
