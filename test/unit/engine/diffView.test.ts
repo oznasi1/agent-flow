@@ -1,12 +1,17 @@
-import { describe, it, expect, vi } from "vitest";
-import { BASE_SCHEME, baseUri, TaskBaseContentProvider } from "../../../src/engine/diffView";
-import { Uri } from "../../_mocks/vscode";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { BASE_SCHEME, baseUri, openTaskDiff, TaskBaseContentProvider } from "../../../src/engine/diffView";
+import type { ChangedFile } from "../../../src/engine/git";
+import { commands, Uri } from "../../_mocks/vscode";
 
-const h = vi.hoisted(() => ({ showFileAtRef: vi.fn((_r: string, _ref: string, _f: string) => "") }));
+const h = vi.hoisted(() => ({
+  showFileAtRef: vi.fn((_r: string, _ref: string, _f: string) => ""),
+  taskDiffBase: vi.fn((_r: string) => "base-sha"),
+  taskChangedFiles: vi.fn((_r: string): ChangedFile[] => []),
+}));
 vi.mock("../../../src/engine/git", () => ({
   showFileAtRef: h.showFileAtRef,
-  taskDiffBase: vi.fn(() => "HEAD"),
-  taskChangedFiles: vi.fn(() => []),
+  taskDiffBase: h.taskDiffBase,
+  taskChangedFiles: h.taskChangedFiles,
 }));
 
 describe("baseUri", () => {
@@ -50,5 +55,93 @@ describe("baseUri", () => {
   it("serves empty for a URI it cannot decode instead of throwing", () => {
     const p = new TaskBaseContentProvider();
     expect(p.provideTextDocumentContent({ query: "not json" } as never)).toBe("");
+  });
+});
+
+describe("openTaskDiff", () => {
+  const svc = [{ name: "svc", path: "/r/svc" }];
+  const args = () => commands.executeCommand.mock.calls.at(-1)!;
+  const list = () => args()[2] as [{ fsPath: string }, unknown, unknown][];
+
+  beforeEach(() => {
+    h.taskDiffBase.mockReturnValue("base-sha");
+    h.taskChangedFiles.mockReturnValue([]);
+  });
+
+  it("reports empty and opens nothing when the task changed no files", async () => {
+    expect(await openTaskDiff("Changes in ASM-1", svc)).toBe("empty");
+    expect(commands.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("reports binary-only when every change was a binary file", async () => {
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "pic.bin", binary: true }]);
+    expect(await openTaskDiff("Changes in ASM-1", svc)).toBe("binary-only");
+    expect(commands.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("drops binary files but still opens the text ones", async () => {
+    h.taskChangedFiles.mockReturnValue([
+      { status: "M", path: "pic.bin", binary: true },
+      { status: "M", path: "a.ts", binary: false },
+    ]);
+    expect(await openTaskDiff("Changes in ASM-1", svc)).toBe("opened");
+    expect(list()).toHaveLength(1);
+    expect(list()[0][0].fsPath).toContain("a.ts");
+  });
+
+  it("runs the multi-file diff command with the run's key as the title", async () => {
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.ts", binary: false }]);
+    await openTaskDiff("Changes in ASM-1", svc);
+    expect(args()[0]).toBe("vscode.changes");
+    expect(args()[1]).toBe("Changes in ASM-1");
+  });
+
+  it("gives a modified file both sides", async () => {
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.ts", binary: false }]);
+    await openTaskDiff("t", svc);
+    const [resource, left, right] = list()[0];
+    expect(resource.fsPath).toBe("/r/svc/a.ts");
+    expect((left as { scheme: string }).scheme).toBe(BASE_SCHEME);
+    expect(right).toBe(resource);
+  });
+
+  it("gives an added file no left side", async () => {
+    h.taskChangedFiles.mockReturnValue([{ status: "A", path: "new.ts", binary: false }]);
+    await openTaskDiff("t", svc);
+    const [, left, right] = list()[0];
+    expect(left).toBeUndefined();
+    expect(right).toBeDefined();
+  });
+
+  it("gives a deleted file no right side", async () => {
+    h.taskChangedFiles.mockReturnValue([{ status: "D", path: "old.ts", binary: false }]);
+    await openTaskDiff("t", svc);
+    const [, left, right] = list()[0];
+    expect(left).toBeDefined();
+    expect(right).toBeUndefined();
+  });
+
+  it("points a rename's left side at the old path so it diffs as one change", async () => {
+    h.taskChangedFiles.mockReturnValue([
+      { status: "R", path: "new name.ts", oldPath: "old name.ts", binary: false },
+    ]);
+    await openTaskDiff("t", svc);
+    const [resource, left] = list()[0];
+    expect(resource.fsPath).toBe("/r/svc/new name.ts");
+    expect((left as { path: string }).path).toBe("/old name.ts");
+  });
+
+  it("lists every repo's files in one editor", async () => {
+    h.taskChangedFiles.mockImplementation((repo: string) =>
+      [{ status: "M" as const, path: repo === "/r/svc" ? "a.ts" : "b.ts", binary: false }]);
+    await openTaskDiff("t", [{ name: "svc", path: "/r/svc" }, { name: "web", path: "/r/web" }]);
+    expect(list().map((e) => e[0].fsPath).sort()).toEqual(["/r/svc/a.ts", "/r/web/b.ts"]);
+  });
+
+  it("reports unsupported when the editor has no such command", async () => {
+    // Cursor and other forks may not have registered vscode.changes.
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.ts", binary: false }]);
+    commands.executeCommand.mockRejectedValueOnce(new Error("command 'vscode.changes' not found"));
+    expect(await openTaskDiff("t", svc)).toBe("unsupported");
   });
 });
