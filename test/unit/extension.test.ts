@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { commands, window, setConfig } from "../_mocks/vscode";
+import { commands, window, workspace, setConfig } from "../_mocks/vscode";
 import { fakeContext } from "../_helpers/factories";
 
 const authStub = {
@@ -53,6 +53,7 @@ import { maybeSeedAgent, watchPlansAndSeed } from "../../src/engine/workspace";
 import { maybeRunSetup, runSetup } from "../../src/setup";
 import { windowIdentity, writePresence, removePresence } from "../../src/engine/presence";
 import { MarketplacePanel } from "../../src/marketplaceView";
+import { BASE_SCHEME } from "../../src/engine/diffView";
 
 const cmd = (id: string) =>
   vi.mocked(commands.registerCommand).mock.calls.find((c) => c[0] === id)?.[1] as
@@ -64,6 +65,16 @@ beforeEach(() => {
 });
 
 describe("activate", () => {
+  it("registers the diff base content provider so the Diff editor's left side resolves", () => {
+    const { context } = fakeContext();
+    activate(context);
+
+    expect(workspace.registerTextDocumentContentProvider).toHaveBeenCalledWith(
+      BASE_SCHEME,
+      expect.anything(),
+    );
+  });
+
   it("registers the webview provider, all commands, and seeds the agent", () => {
     const { context } = fakeContext();
     activate(context);

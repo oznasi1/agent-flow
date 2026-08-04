@@ -205,6 +205,7 @@ export const workspace = {
   workspaceFolders: undefined as { uri: { fsPath: string } }[] | undefined,
   getConfiguration: vi.fn((_section?: string) => makeConfig()),
   openTextDocument: vi.fn(async (_opts?: unknown): Promise<any> => ({})),
+  registerTextDocumentContentProvider: vi.fn((_scheme: string, _provider: unknown) => ({ dispose: vi.fn() })),
   onDidChangeConfiguration: vi.fn((cb: (e: { affectsConfiguration(section: string): boolean }) => void) => {
     configChangeCbs.push(cb);
     // Same reasoning as env.onDidChangeTelemetryEnabled above: dispose() must
@@ -220,6 +221,13 @@ export const Uri = {
     const joined = [base?.fsPath ?? String(base ?? ""), ...segs].join("/");
     return { toString: () => joined, scheme: "file", fsPath: joined };
   }),
+  from: vi.fn((c: { scheme: string; path?: string; query?: string }) => ({
+    scheme: c.scheme,
+    path: c.path ?? "",
+    query: c.query ?? "",
+    fsPath: c.path ?? "",
+    toString: () => `${c.scheme}:${c.path ?? ""}${c.query ? `?${c.query}` : ""}`,
+  })),
 };
 
 /** Reset every mock's call history + implementations and all mutable state back
@@ -264,10 +272,12 @@ export function resetVscodeMocks(): void {
   workspace.workspaceFolders = undefined;
   workspace.getConfiguration.mockReset().mockImplementation((_section?: string) => makeConfig());
   workspace.openTextDocument.mockReset().mockResolvedValue({});
+  workspace.registerTextDocumentContentProvider.mockReset().mockImplementation(() => ({ dispose: vi.fn() }));
   configChangeCbs = [];
   workspace.onDidChangeConfiguration.mockClear();
 
   Uri.parse.mockClear();
   Uri.file.mockClear();
   Uri.joinPath.mockClear();
+  Uri.from.mockClear();
 }
