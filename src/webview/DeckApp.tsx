@@ -323,8 +323,9 @@ export function DeckApp(): JSX.Element {
   const [, forceTick] = React.useState(0);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string; action?: { label: string; url: string } }[]>([]);
   const [busy, setBusy] = React.useState(false);
-  const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean; reviewWrites: boolean }>(
-    { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false },
+  const [reviewQueue, setReviewQueue] = React.useState(true);
+  const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean; reviewWrites: boolean; loading: boolean }>(
+    { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false, loading: false },
   );
   const [reviewsCollapsed, setReviewsCollapsed] = React.useState(false);
   const [expanded, setExpanded] = React.useState<string | null>(null);
@@ -365,6 +366,7 @@ export function DeckApp(): JSX.Element {
         setLive(m.liveSignal);
         setPrFacts(m.prFacts);
         setOpenAgents(m.openAgents);
+        setReviewQueue(m.reviewQueue);
         setGhNote(m.ghNote);
         setPrReviewStatus(m.prReviewStatus);
         setSyncedAt(Date.now());
@@ -380,7 +382,7 @@ export function DeckApp(): JSX.Element {
         // ever being hidden — which also means the collapse state is purely the user's,
         // with no seeded-once ref and no setState nested inside another's updater.
         setReviewsSeen(m.enabled);
-        setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale, reviewWrites: m.reviewWrites });
+        setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale, reviewWrites: m.reviewWrites, loading: m.loading });
       } else if (m.type === "deck:reviewDetail") {
         setDetails((d) => ({ ...d, [m.id]: m.detail }));
       } else if (m.type === "deck:reviewDraft") {
@@ -441,7 +443,13 @@ export function DeckApp(): JSX.Element {
           <div className={`stat ${needs > 0 ? "attn" : ""}`}><span className="n">{needs}</span><span className="l">Action required</span></div>
           <div className="stat"><span className="n">{runs.filter((r) => r.column === "review").length}</span><span className="l">In review</span></div>
           {reviewsSeen && (
-            <div className="stat"><span className="n">{reviews.issueCount}</span><span className="l">To review</span></div>
+            // A spinning glyph where the number goes, not "0": on a cold start the
+            // count is genuinely unknown for the few seconds the first `gh` search
+            // takes, and "0 To review" is a claim we cannot back yet.
+            <div className="stat">
+              <span className="n">{reviews.loading ? <span className="spin on" aria-label="checking">⟳</span> : reviews.issueCount}</span>
+              <span className="l">To review</span>
+            </div>
           )}
           <div className="stat"><span className="n">{runs.length}</span><span className="l">Total</span></div>
         </div>
@@ -464,6 +472,16 @@ export function DeckApp(): JSX.Element {
           >
             <span className="switch" />Open agents
           </button>
+          {/* Off stops the `gh` search outright — distinct from the strip's own
+              collapse caret, which only folds rows already fetched. */}
+          <button
+            type="button"
+            className={`ctl ${reviewQueue ? "on" : ""}`}
+            onClick={() => { const next = !reviewQueue; setReviewQueue(next); send({ type: "deck:setReviewQueue", on: next }); }}
+            title="Open PRs that ask for your review, read with the gh CLI. Off → no query, no queue."
+          >
+            <span className="switch" />Review queue
+          </button>
         </div>
         <button type="button" className="ctl" title="Re-read git, Jira and PR state now" onClick={() => send({ type: "deck:refresh" })}>
           <span className={`spin ${busy ? "on" : ""}`}>⟳</span>
@@ -476,6 +494,7 @@ export function DeckApp(): JSX.Element {
         issueCount={reviews.issueCount}
         sort={reviews.sort}
         stale={reviews.stale}
+        loading={reviews.loading}
         collapsed={reviewsCollapsed}
         expanded={expanded}
         details={details}

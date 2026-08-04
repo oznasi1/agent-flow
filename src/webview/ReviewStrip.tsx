@@ -21,6 +21,10 @@ export interface ReviewStripProps {
   issueCount: number;
   sort: ReviewSort;
   stale: boolean;
+  /** A first search is in flight with nothing cached behind it. Renders the
+   * header plus skeleton rows instead of the queue — see the strip's own doc
+   * comment for why it renders at all with zero requests. */
+  loading: boolean;
   collapsed: boolean;
   expanded: string | null;
   // Absent: never fetched (or not yet expanded). `null`: the host tried and the
@@ -72,19 +76,27 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
     <div className={`rv-row ${expanded ? "open" : ""}`}>
       <button type="button" className="rv-line" onClick={() => onExpand(r.id)}>
         <span className="rv-caret">{expanded ? "▾" : "▸"}</span>
-        <span className="rv-repo">{r.repoName}</span>
+        {/* Fixed-width and ellipsised (see deckStyles) so every row's title starts
+            at the same x — repo names run from 7 to 20+ characters, and the ragged
+            left edge landed on the one field anybody actually reads. The title
+            attribute is what makes a truncated name recoverable. */}
+        <span className="rv-repo" title={r.repoName}>{r.repoName}</span>
         <span className="rv-num">#{r.number}</span>
         <span className="rv-title" title={r.title}>{r.title}</span>
         {r.runKey && <span className="rv-running">reviewing</span>}
         {r.isDraft && <span className="rv-draft">draft</span>}
         <span className={`rv-size s-${sizeBucket(linesChanged(r))}`}>{sizeBucket(linesChanged(r))}</span>
         {/* Three separate text nodes, not one interpolated string: each is then a
-            single queryable element, and the +/− keep the card chips' colours. */}
-        <span className="add">+{r.additions}</span>
-        <span className="del">−{r.deletions}</span>
+            single queryable element, and the +/− keep the card chips' colours. The
+            wrapper makes the pair one fixed-width column — sized individually they
+            were two ragged ones, since "+3923 −1998" and "+106 −0" share no width. */}
+        <span className="rv-diff">
+          <span className="add">+{r.additions}</span>
+          <span className="del">−{r.deletions}</span>
+        </span>
         <span className="rv-files">{r.changedFiles} files</span>
         <span className={`rv-ci ${ci.cls}`}>{ci.text}</span>
-        <span className="rv-author">@{r.author}</span>
+        <span className="rv-author" title={r.author}>@{r.author}</span>
         <span className="rv-age">{age(r.createdAt)}</span>
       </button>
       {expanded && (
@@ -173,29 +185,67 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
   );
 }
 
+/** Three skeleton rows, shaped like the real ones, while the first search runs.
+ * Rows rather than a bare header: the strip then claims its height up front, so
+ * the board settles once instead of being shoved down when the queue lands.
+ * Three is a guess at the count and will sometimes be wrong — being wrong by a
+ * row or two costs less than the full-height jump it avoids. */
+function Skeleton(): JSX.Element {
+  return (
+    <div className="rv-rows">
+      {[0, 1, 2].map((i) => (
+        <div className="rv-row" key={i} aria-hidden="true">
+          <div className="rv-line rv-skel">
+            <span className="rv-caret">▸</span>
+            <span className="sk sk-repo" />
+            <span className="sk sk-title" />
+            <span className="sk sk-meta" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** The queue of PRs waiting on you, above the board. Renders nothing at zero — an
  * empty rail over the columns is noise; the header's "To review" stat carries the
- * zero instead. */
+ * zero instead. Two exceptions, both of which have something to say that the stat
+ * tile cannot: `loading` (a first search is running, nothing cached behind it) and
+ * `stale` (a search failed with nothing cached, so "0" would be a lie). */
 export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
-  if (p.requests.length === 0) return null;
+  if (p.requests.length === 0 && !p.loading && !p.stale) return null;
   const shown = p.requests.length;
   return (
     <div className="rv-strip">
       <div className="rv-hd">
         <button type="button" className="rv-toggle" onClick={() => p.onCollapse(!p.collapsed)}>
-          {p.collapsed ? "▸" : "▾"} {p.issueCount} {p.issueCount === 1 ? "PR" : "PRs"} waiting on your review
+          {p.collapsed ? "▸" : "▾"}{" "}
+          {p.loading
+            ? "checking for PRs waiting on your review…"
+            // Stale with nothing to show is a failed *first* search — there is no
+            // count to state and no previous result to fall back on, so the count
+            // and the "showing the last result" note below would both be lies.
+            : p.stale && shown === 0
+              ? "couldn't check for PRs waiting on your review"
+              : `${p.issueCount} ${p.issueCount === 1 ? "PR" : "PRs"} waiting on your review`}
         </button>
+        {p.loading && <span className="spin on" aria-hidden="true">⟳</span>}
         {p.issueCount > shown && <span className="rv-note">showing {shown} of {p.issueCount}</span>}
-        {p.stale && <span className="rv-note warn">couldn't refresh — showing the last result</span>}
+        {p.stale && shown > 0 && <span className="rv-note warn">couldn't refresh — showing the last result</span>}
         <span className="sp" />
-        <span className="rv-sort">
-          sort:{" "}
-          <button type="button" className={p.sort === "oldest" ? "on" : ""} onClick={() => p.onSort("oldest")}>oldest</button>
-          <span className="rv-sep">·</span>
-          <button type="button" className={p.sort === "smallest" ? "on" : ""} onClick={() => p.onSort("smallest")}>smallest</button>
-        </span>
+        {/* No sort control while loading: there is nothing to sort, and a live
+            control over skeleton rows invites a click that changes nothing. */}
+        {!p.loading && (
+          <span className="rv-sort">
+            sort:{" "}
+            <button type="button" className={p.sort === "oldest" ? "on" : ""} onClick={() => p.onSort("oldest")}>oldest</button>
+            <span className="rv-sep">·</span>
+            <button type="button" className={p.sort === "smallest" ? "on" : ""} onClick={() => p.onSort("smallest")}>smallest</button>
+          </span>
+        )}
       </div>
-      {!p.collapsed && (
+      {p.loading && !p.collapsed && <Skeleton />}
+      {!p.loading && !p.collapsed && (
         <div className="rv-rows">
           {p.requests.map((r) => (
             <Row key={r.id} r={r} expanded={p.expanded === r.id} detail={p.details[r.id]}

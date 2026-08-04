@@ -350,7 +350,7 @@ export const DECK_CSS = `
      beside them are English, and stay in the UI font. */
   /* flex: none + nowrap so a long title absorbs the squeeze through its own ellipsis
      rather than these badges wrapping to a second line in a narrow panel. */
-  .rv-repo, .rv-num, .rv-size, .rv-line .add, .rv-line .del {
+  .rv-repo, .rv-num, .rv-size, .rv-diff, .rv-line .add, .rv-line .del {
     font-family: var(--mono); font-size: var(--t-data); flex: none; white-space: nowrap; }
   .rv-repo, .rv-num { color: var(--dim); }
   .rv-size { font-weight: 600; color: var(--dim); }
@@ -362,6 +362,57 @@ export const DECK_CSS = `
     border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0 4px; }
   .rv-files, .rv-author, .rv-age { flex: none; color: var(--dim); }
   .rv-running { flex: none; color: var(--c-progress); }
+
+  /* Fixed widths so the row's fields stack into real columns down the strip.
+     Sized naturally they were ragged — "+3923 −1998" and "+106 −0" share no
+     width, and neither do two repo names — so every line had to be re-parsed
+     from scratch. Widths are in ch on the mono fields, which makes them track
+     the editor font rather than a hardcoded pixel guess.
+
+     The repo is the one that truncates: names run past 18ch, but the alternative
+     is a ragged left edge on the title, which is the field that actually gets
+     read. Row markup carries a title attribute so a clipped name stays legible. */
+  .rv-repo   { width: 18ch; overflow: hidden; text-overflow: ellipsis; }
+  .rv-num    { width: 6ch; text-align: right; }
+  .rv-size   { width: 1.5ch; text-align: center; }
+  .rv-diff   { width: 12ch; display: inline-flex; justify-content: flex-end; gap: 5px; }
+  .rv-files  { width: 52px; text-align: right; }
+  /* The only one of these that had no flex rule of its own before — the mono
+     badges and the .rv-files/.rv-author/.rv-age group each already carry one. */
+  .rv-ci     { flex: none; width: 12px; text-align: center; }
+  .rv-author { width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rv-age    { width: 26px; text-align: right; }
+
+  /* Under ~860px the fixed columns plus a readable title no longer fit, and the
+     title — the only element that can shrink — would be squeezed to nothing while
+     the badges held their reserved width. Releasing them restores the pre-column
+     behaviour, where the title absorbs the squeeze through its own ellipsis. */
+  @media (max-width: 860px) {
+    .rv-repo, .rv-num, .rv-size, .rv-diff, .rv-files, .rv-ci, .rv-author, .rv-age { width: auto; }
+  }
+
+  /* Placeholder rows while the first search runs. No hover and no pointer: they
+     are not rows you can open. The shimmer is animation-only, so BASE_CSS's
+     reduced-motion rule flattens it to a static bar without anything here — this
+     sheet must not restate that query (tokens.test.ts enforces it). */
+  /* align-items: center, not the row's usual baseline — these bars have no text,
+     so there is no baseline to sit on and they would hang off the top of the line. */
+  .rv-line.rv-skel { cursor: default; align-items: center; }
+  .rv-line.rv-skel:hover { background: none; }
+  .sk { display: inline-block; height: 9px; border-radius: 3px;
+    background: linear-gradient(90deg,
+      color-mix(in srgb, var(--vscode-foreground) 7%, transparent) 25%,
+      color-mix(in srgb, var(--vscode-foreground) 14%, transparent) 50%,
+      color-mix(in srgb, var(--vscode-foreground) 7%, transparent) 75%);
+    background-size: 200% 100%; animation: shimmer 1.4s linear infinite; }
+  @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .sk-repo { flex: none; width: 110px; }
+  /* Staggered so three identical bars don't read as a table that failed to load.
+     :nth-child on .rv-row, not .sk — every skeleton line has the same structure. */
+  .rv-row:nth-child(2) .sk-title { max-width: 55%; }
+  .rv-row:nth-child(3) .sk-title { max-width: 78%; }
+  .sk-title { flex: 1; min-width: 0; }
+  .sk-meta { flex: none; width: 120px; }
 
   .rv-detail { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 12px;
     padding: 2px 12px 9px 29px; font-size: var(--t-body); }

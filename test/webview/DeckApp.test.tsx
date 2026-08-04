@@ -35,7 +35,7 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
 });
 
 const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated"): OutboundMessage =>
-  ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, ghNote: null, prReviewStatus });
+  ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: null, prReviewStatus });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
@@ -514,9 +514,27 @@ describe("DeckApp PR-facts chrome", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:setOpenAgents", on: false });
   });
 
+  it("posts deck:setReviewQueue when the toggle is clicked", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByRole("button", { name: /review queue/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:setReviewQueue", on: false });
+  });
+
+  // The host owns this flag — it is seeded from the setting, so a panel opened with
+  // reviewRequests already false must show the pill off rather than defaulting to on
+  // and lying about it until the user clicks.
+  it("reflects the host's review-queue state on the pill", () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([mkStatus()]), reviewQueue: false } as OutboundMessage);
+    expect(screen.getByRole("button", { name: /review queue/i }).className).not.toMatch(/\bon\b/);
+    host(runsMsg([mkStatus()]));
+    expect(screen.getByRole("button", { name: /review queue/i }).className).toMatch(/\bon\b/);
+  });
+
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated" });
+    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 
@@ -585,7 +603,7 @@ describe("DeckApp PR-facts chrome", () => {
 });
 
 const reviewsMsg = (requests: ReviewRequest[], issueCount = requests.length): OutboundMessage =>
-  ({ type: "deck:reviews", requests, issueCount, sort: "oldest", stale: false, reviewWrites: false, enabled: true });
+  ({ type: "deck:reviews", requests, issueCount, sort: "oldest", stale: false, reviewWrites: false, enabled: true, loading: false });
 
 const mkReview = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
   id: "o/r#1", repo: "o/r", repoName: "r", number: 1, title: "a small fix", url: "https://gh/o/r/pull/1",
@@ -711,6 +729,30 @@ describe("DeckApp review strip", () => {
 
     expect(screen.queryByText("check-a")).not.toBeInTheDocument();
     expect(screen.getByText("check-b")).toBeInTheDocument();
+  });
+
+  // Cold start. The tile has to say *something* — it is the only part of the
+  // header that survives the strip being empty — but "0" is a claim about a
+  // search that has not come back yet.
+  it("spins the To review tile instead of counting zero while loading", () => {
+    const { container } = render(<DeckApp />);
+    host({ ...reviewsMsg([], 0), loading: true } as OutboundMessage);
+    expect(screen.getByText("To review")).toBeInTheDocument();
+    expect(container.querySelector(".stat .spin")).toBeInTheDocument();
+  });
+
+  it("swaps the spinner for the real count once the search lands", () => {
+    const { container } = render(<DeckApp />);
+    host({ ...reviewsMsg([], 0), loading: true } as OutboundMessage);
+    host(reviewsMsg([mkReview(), mkReview({ id: "o/r#2", number: 2 })]));
+    expect(container.querySelector(".stat .spin")).not.toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
+  it("passes the loading flag through to the strip", () => {
+    render(<DeckApp />);
+    host({ ...reviewsMsg([], 0), loading: true } as OutboundMessage);
+    expect(screen.getByText(/checking for PRs waiting on your review/i)).toBeInTheDocument();
   });
 });
 
