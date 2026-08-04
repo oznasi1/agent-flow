@@ -36,7 +36,7 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
 
 const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated",
                  grouping: "agents" | "workspaces" = "agents"): OutboundMessage =>
-  ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: null, prReviewStatus, grouping });
+  ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: null, prReviewStatus, grouping, staleCount: 0 });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
@@ -535,7 +535,7 @@ describe("DeckApp PR-facts chrome", () => {
 
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", grouping: "agents" });
+    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", grouping: "agents", staleCount: 0 });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 
@@ -1108,6 +1108,15 @@ describe("Agents view", () => {
     const tiles = Array.from(document.querySelectorAll(".stat")).map((s) => [s.querySelector(".l")!.textContent, s.querySelector(".n")!.textContent]);
     expect(tiles).toContainEqual(["In progress", "2"]);
     expect(tiles).toContainEqual(["Total", "2"]);
+  });
+
+  it("offers Clear stale only when something is actually stale", () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([mkStatus()]), staleCount: 0 } as OutboundMessage);
+    expect(screen.queryByRole("button", { name: /clear stale/i })).not.toBeInTheDocument();
+    host({ ...runsMsg([mkStatus()]), staleCount: 2 } as OutboundMessage);
+    fireEvent.click(screen.getByRole("button", { name: /clear stale \(2\)/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:clearStale" });
   });
 
   it("asks the host to persist the grouping when the control is clicked", () => {

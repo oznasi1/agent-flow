@@ -908,6 +908,71 @@ describe("board grouping", () => {
   });
 });
 
+describe("Clear stale", () => {
+  const lastRunsPost = () => posts(lastPanel()).filter((m) => m.type === "deck:runs").at(-1)!;
+  /** A landed run the automatic sweep will only stamp: its window is far off. */
+  const landedRun = (key: string) => {
+    setConfig({ retireFinishedAfterHours: 999 });
+    h.runs = [mkRun({ key })];
+    h.getStatus.mockResolvedValue({ status: "Done", category: "done" });
+  };
+
+  it("counts runs that would retire if both windows were ignored", async () => {
+    landedRun("ASM-DONE");
+    show(true);
+    await settled();
+    expect(lastRunsPost().staleCount).toBe(1);
+    expect(h.removeRun).not.toHaveBeenCalled(); // counted, not cleared
+  });
+
+  it("clears them on request, after the user confirms", async () => {
+    landedRun("ASM-DONE");
+    show(true);
+    await settled();
+    const p = lastPanel();
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce("Clear 1");
+    await p._fire({ type: "deck:clearStale" });
+    await settled();
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "ASM-DONE");
+  });
+
+  it("clears nothing when the user declines", async () => {
+    landedRun("ASM-DONE");
+    show(true);
+    await settled();
+    const p = lastPanel();
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);
+    await p._fire({ type: "deck:clearStale" });
+    await settled();
+    expect(h.removeRun).not.toHaveBeenCalled();
+  });
+
+  it("still respects the veto — dirty work is never cleared in bulk", async () => {
+    landedRun("ASM-DIRTY");
+    h.buildRunStatus.mockImplementation((i: { run: Run; jira: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.jira?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "b", dirty: true, ahead: 0, added: 1, removed: 0, files: 1 }],
+    }));
+    show(true);
+    await settled();
+    expect(lastRunsPost().staleCount).toBe(0);
+    const p = lastPanel();
+    await p._fire({ type: "deck:clearStale" });
+    await settled();
+    expect(h.removeRun).not.toHaveBeenCalled();
+  });
+
+  it("counts a review run nobody is in, which has no card to clear it from", async () => {
+    // Young enough that the automatic sweep leaves it alone — only the
+    // gate-ignoring pass reaches it, which is the whole point of the count.
+    h.runs = [mkRun({ key: "review-svc-9", kind: "review", url: "https://github.com/o/r/pull/9" })];
+    show(true);
+    await settled();
+    expect(lastRunsPost().staleCount).toBe(1);
+    expect(h.removeRun).not.toHaveBeenCalled();
+  });
+});
+
 describe("DeckPanel local cards", () => {
   it("makes a card for a place no tracked run owns", async () => {
     h.runs = [];

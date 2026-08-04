@@ -331,6 +331,7 @@ export type InboundMessage =
   | { type: "deck:setOpenAgents"; on: boolean }
   | { type: "deck:setReviewQueue"; on: boolean }
   | { type: "deck:setGrouping"; grouping: "agents" | "workspaces" }
+  | { type: "deck:clearStale" }
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
   | { type: "deck:forget"; key: string }
   | { type: "deck:track"; key: string }
@@ -386,7 +387,10 @@ export type OutboundMessage =
   | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; reviewQueue: boolean; ghNote: string | null; prReviewStatus: string;
       // Which lens to render. Echoed on every post rather than sent once, so a
       // reload or a settings-page edit lands without a separate message.
-      grouping: "agents" | "workspaces" }
+      grouping: "agents" | "workspaces";
+      // How many runs would retire right now if both retirement windows were
+      // ignored. Drives the Clear stale button, which is hidden at zero.
+      staleCount: number }
   | { type: "deck:loading"; loading: boolean }
   | {
       type: "deck:reviews";

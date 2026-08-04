@@ -342,6 +342,7 @@ export function DeckApp(): JSX.Element {
   const [busy, setBusy] = React.useState(false);
   const [reviewQueue, setReviewQueue] = React.useState(true);
   const [grouping, setGrouping] = React.useState<"agents" | "workspaces">("agents");
+  const [staleCount, setStaleCount] = React.useState(0);
   const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean; reviewWrites: boolean; loading: boolean }>(
     { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false, loading: false },
   );
@@ -386,6 +387,7 @@ export function DeckApp(): JSX.Element {
         setOpenAgents(m.openAgents);
         setReviewQueue(m.reviewQueue);
         setGrouping(m.grouping);
+        setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
         setPrReviewStatus(m.prReviewStatus);
         setSyncedAt(Date.now());
@@ -525,6 +527,16 @@ export function DeckApp(): JSX.Element {
             </button>
           ))}
         </div>
+        {staleCount > 0 && (
+          <button
+            type="button"
+            className="ctl"
+            title="Retire run records that are only waiting out their window. Worktrees, branches and commits are left untouched."
+            onClick={() => send({ type: "deck:clearStale" })}
+          >
+            Clear stale ({staleCount})
+          </button>
+        )}
         <button type="button" className="ctl" title="Re-read git, Jira and PR state now" onClick={() => send({ type: "deck:refresh" })}>
           <span className={`spin ${busy ? "on" : ""}`}>⟳</span>
           <span className="synced">{busy ? "syncing…" : syncedAt ? `synced ${timeAgo(syncedAt)}` : "refresh"}</span>

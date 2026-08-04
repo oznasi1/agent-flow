@@ -94,6 +94,9 @@ export class DeckPanel {
   /** Bumped when a run is forgotten, so a fetch still in flight for the old
    * incarnation cannot recreate the cache file we just deleted. */
   private readonly prEpoch = new Map<string, number>();
+  /** How many run records `Clear stale` would take right now — the sweep's own
+   * verdict with both time gates ignored. Recomputed on every `buildAll`. */
+  private staleCount = 0;
   /** Bumped when a refresh starts, so an older pass that finishes after a newer one
    * began does not post. Its snapshot predates whatever the newer pass read: a poll
    * that listed the runs directory before `deck:forget` removed a file would
@@ -656,6 +659,7 @@ export class DeckPanel {
       all.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(ticketKeyFor(run)) : null)),
     );
     const out: RunStatus[] = [];
+    let stale = 0;
     for (const [i, run] of all.entries()) {
       const jira = jiras[i];
       const stored = this.prFacts ? readPrEntries(defaultPrFactsDir(), run.key) : {};
@@ -689,9 +693,15 @@ export class DeckPanel {
         out.push(status);
         continue;
       }
-      if (!this.applyVerdict(run, this.verdictFor(status, livePlaces, now))) out.push(status);
+      if (this.applyVerdict(run, this.verdictFor(status, livePlaces, now))) continue;
+      // Counted, not cleared: this is exactly what Clear stale would take. The
+      // second call is free of side effects — `verdictFor` is pure, and only
+      // `applyVerdict` ever writes.
+      if (this.verdictFor(status, livePlaces, now, true).action === "retire") stale++;
+      out.push(status);
     }
-    this.sweepReviewRuns(livePlaces, now);
+    this.sweepReviewRuns(livePlaces, now, false, () => stale++);
+    this.staleCount = stale;
     return out;
   }
 
@@ -717,6 +727,33 @@ export class DeckPanel {
       default:
         return false;
     }
+  }
+
+  /**
+   * Retire everything that is only waiting out a window. Rules and vetoes are
+   * exactly the sweep's — the *only* difference is that both time gates are
+   * ignored — so nothing with uncommitted or unpushed work can be cleared here
+   * either. Modal-gated, unlike per-card Forget: a bulk delete earns a
+   * confirmation.
+   */
+  private async clearStale(): Promise<void> {
+    const n = this.staleCount;
+    if (n === 0) return;
+    const label = `Clear ${n}`;
+    const answer = await vscode.window.showWarningMessage(
+      `Retire ${n} stale run record${n === 1 ? "" : "s"}? Worktrees, branches and commits are left untouched.`,
+      { modal: true },
+      label,
+    );
+    if (answer !== label) return;
+    const nowMs = Date.now();
+    const livePlaces = new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys());
+    for (const status of await this.buildAll()) {
+      if (runKind(status.run) === "local") continue;
+      this.applyVerdict(status.run, this.verdictFor(status, livePlaces, nowMs, true));
+    }
+    this.sweepReviewRuns(livePlaces, nowMs, true);
+    await this.refreshBusy();
   }
 
   /** The verdict for one run. `overrideGates` ignores both time windows — that is
@@ -750,12 +787,18 @@ export class DeckPanel {
    * a way it would not be for a tracked run: the map is *structurally* empty for
    * a review run, not merely unfetched, so rule 3's "no PR" test is sound.
    */
-  private sweepReviewRuns(livePlaces: ReadonlySet<string>, nowMs: number, overrideGates = false): void {
+  private sweepReviewRuns(
+    livePlaces: ReadonlySet<string>,
+    nowMs: number,
+    overrideGates = false,
+    onStale?: () => void,
+  ): void {
     for (const run of readRuns(defaultRunsDir()).filter((r) => runKind(r) === "review")) {
       // Computed once and passed in: the counting pass in Clear stale asks for a
       // second verdict on the same run, and git state cannot change between them.
       const repos = run.repos.map((r) => gitState(r.name, r.path));
-      this.applyVerdict(run, this.reviewVerdictFor(run, repos, livePlaces, nowMs, overrideGates));
+      if (this.applyVerdict(run, this.reviewVerdictFor(run, repos, livePlaces, nowMs, overrideGates))) continue;
+      if (onStale && this.reviewVerdictFor(run, repos, livePlaces, nowMs, true).action === "retire") onStale();
     }
   }
 
@@ -800,6 +843,7 @@ export class DeckPanel {
         // enough that this is the whole of "keep it live".
         prReviewStatus: getConfig().prReviewStatus,
         grouping: getConfig().deckGrouping,
+        staleCount: this.staleCount,
       });
       // The disabled branch posts its own "cleared" state directly — enqueueReviews
       // only ever posts once a search settles or is already fresh, neither of
@@ -856,6 +900,9 @@ export class DeckPanel {
       case "deck:setOpenAgents":
         this.openAgents = m.on;
         await this.refreshBusy();
+        break;
+      case "deck:clearStale":
+        await this.clearStale();
         break;
       case "deck:setGrouping":
         // Persisted, unlike the three trust toggles beside it: a view preference
