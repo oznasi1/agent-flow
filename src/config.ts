@@ -213,6 +213,17 @@ export interface AgentFlowConfig {
   // the card that owns their directory, and as a card of its own for a place
   // Agent Flow Deck never launched. Read from ~/.claude/sessions; off = today's board.
   openAgents: boolean;
+  // Which lens the Deck's In-flight board opens in: one card per Claude Code
+  // agent ("agents"), or today's one card per launched run with its agents
+  // nested ("workspaces"). Written by the board's own segmented control.
+  deckGrouping: "agents" | "workspaces";
+  // How long a landed run (every PR merged, or Jira done with no PR open) stays
+  // on the board with no agent in it before its record is retired. 0 = retire as
+  // soon as it lands.
+  retireFinishedAfterHours: number;
+  // How long an abandoned run (no ticket, no PR, nothing uncommitted) may sit
+  // untouched before its record is retired. 0 = never.
+  retireAbandonedAfterDays: number;
   // Show the Deck's review-requests strip: open PRs that ask for your review.
   reviewRequests: boolean;
   // How stale the cached review queue may be before a refetch. Floored at 60s —
@@ -393,6 +404,12 @@ export function getConfig(): AgentFlowConfig {
     prFacts: c.get<boolean>("prFacts") ?? true,
     prFactsTtlSeconds: Math.max(30, c.get<number>("prFactsTtlSeconds") ?? 120),
     openAgents: c.get<boolean>("openAgents") ?? true,
+    deckGrouping: c.get<string>("deckGrouping") === "workspaces" ? "workspaces" : "agents",
+    // Floored, not defaulted: 0 is meaningful (disable the window) and must
+    // survive, while a negative value is a typo that would retire on a clock
+    // running backwards.
+    retireFinishedAfterHours: Math.max(0, c.get<number>("retireFinishedAfterHours") ?? 24),
+    retireAbandonedAfterDays: Math.max(0, c.get<number>("retireAbandonedAfterDays") ?? 7),
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,

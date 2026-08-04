@@ -630,6 +630,43 @@ describe("review-request settings", () => {
   });
 });
 
+describe("deck grouping and retirement settings", () => {
+  it("defaults to the Agents view, a 24h finished window and a 7-day abandoned window", () => {
+    const c = getConfig();
+    expect(c.deckGrouping).toBe("agents");
+    expect(c.retireFinishedAfterHours).toBe(24);
+    expect(c.retireAbandonedAfterDays).toBe(7);
+  });
+
+  it("honours the workspaces grouping", () => {
+    setConfig({ deckGrouping: "workspaces" });
+    expect(getConfig().deckGrouping).toBe("workspaces");
+  });
+
+  it("falls back to agents for an unknown grouping value", () => {
+    setConfig({ deckGrouping: "sideways" });
+    expect(getConfig().deckGrouping).toBe("agents");
+  });
+
+  it("honours custom retirement windows", () => {
+    setConfig({ retireFinishedAfterHours: 2, retireAbandonedAfterDays: 30 });
+    expect(getConfig().retireFinishedAfterHours).toBe(2);
+    expect(getConfig().retireAbandonedAfterDays).toBe(30);
+  });
+
+  it("keeps zero as zero — it is the documented way to disable each window", () => {
+    setConfig({ retireFinishedAfterHours: 0, retireAbandonedAfterDays: 0 });
+    expect(getConfig().retireFinishedAfterHours).toBe(0);
+    expect(getConfig().retireAbandonedAfterDays).toBe(0);
+  });
+
+  it("floors a negative window at zero rather than retiring on a clock that runs backwards", () => {
+    setConfig({ retireFinishedAfterHours: -5, retireAbandonedAfterDays: -1 });
+    expect(getConfig().retireFinishedAfterHours).toBe(0);
+    expect(getConfig().retireAbandonedAfterDays).toBe(0);
+  });
+});
+
 describe("package.json ⇄ config constants", () => {
   const props = (pkg.contributes.configuration.properties as Record<string, { default?: unknown }>);
 
@@ -693,6 +730,18 @@ describe("package.json ⇄ config constants", () => {
   // every one of getConfig()'s own tests green.
   it("declares reviewWrites defaulting to false — the only setting that writes to GitHub", () => {
     expect(props["agentFlow.reviewWrites"].default).toBe(false);
+  });
+
+  it("declares deckGrouping defaulting to agents, and both retirement windows", () => {
+    const g = props["agentFlow.deckGrouping"] as { default?: unknown; enum?: unknown };
+    expect(g.default).toBe("agents");
+    expect(g.enum).toEqual(["agents", "workspaces"]);
+    const fin = props["agentFlow.retireFinishedAfterHours"] as { default?: unknown; minimum?: unknown };
+    expect(fin.default).toBe(24);
+    expect(fin.minimum).toBe(0);
+    const ab = props["agentFlow.retireAbandonedAfterDays"] as { default?: unknown; minimum?: unknown };
+    expect(ab.default).toBe(7);
+    expect(ab.minimum).toBe(0);
   });
 
   it("declares reviewRequests defaulting to true — the review strip is on unless turned off", () => {

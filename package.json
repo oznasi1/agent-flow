@@ -472,6 +472,28 @@
           "default": true,
           "markdownDescription": "Show every Claude Code session open on this machine on the Deck — as agents on the card that owns their directory, and as a card of its own for a place Agent Flow Deck never launched. Read from `~/.claude/sessions`. Off = only the tasks Agent Flow Deck launched."
         },
+        "agentFlow.deckGrouping": {
+          "type": "string",
+          "enum": ["agents", "workspaces"],
+          "enumDescriptions": [
+            "One card per Claude Code agent, with the repo, ticket and PR it belongs to on the card",
+            "One card per launched task, with every agent open in its directories nested underneath"
+          ],
+          "default": "agents",
+          "markdownDescription": "Which lens the Deck's In-flight board opens in. The board's own **Agents / Workspaces** control writes this setting, so whichever you pick sticks."
+        },
+        "agentFlow.retireFinishedAfterHours": {
+          "type": "number",
+          "default": 24,
+          "minimum": 0,
+          "markdownDescription": "How long landed work stays on the Deck after its last agent closes — every pull request merged, or the Jira issue done with no PR still open. When the window elapses the run record is deleted (never the worktree, branch, or commits). `0` retires it as soon as it lands."
+        },
+        "agentFlow.retireAbandonedAfterDays": {
+          "type": "number",
+          "default": 7,
+          "minimum": 0,
+          "markdownDescription": "How long a run with no Jira ticket, no pull request and nothing uncommitted may sit untouched before its record is deleted (never the worktree, branch, or commits). `0` disables this cleanup."
+        },
         "agentFlow.prFactsTtlSeconds": {
           "type": "number",
           "default": 120,
