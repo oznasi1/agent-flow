@@ -2652,6 +2652,39 @@ describe("takeBatch", () => {
     expect(toast.message).toContain("couldn't be parsed");
   });
 
+  it("names a redundant repo in the already-in-the-workspace clause", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({
+      target: { kind: "existing", file: "/ws/team.code-workspace" },
+    } as never);
+    // mockReturnValueOnce, not mockReturnValue: vitest's clearMocks resets call history but
+    // keeps implementations, so a permanent override would leak into later tests.
+    vi.mocked(planWorkspaceMerge).mockReturnValueOnce({
+      add: [],
+      duplicates: [],
+      redundant: [
+        { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/ASM-1" },
+      ],
+      present: [],
+      ok: true,
+    });
+    vi.mocked(openSharedWorkspace).mockResolvedValue({
+      workspaceFile: "/ws/team.code-workspace",
+      opened: true,
+      briefs: [],
+      seeded: 2,
+    });
+
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+
+    const toast = posted().find((m) => m.type === "toast") as { message: string };
+    expect(toast.message).toContain("api already in the workspace");
+    // No add-prompt: `add` was empty, so the only quick pick was the destination.
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+  });
+
   it("fails every resolved task when the shared window itself throws", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
@@ -2899,6 +2932,52 @@ describe("explore — open target", () => {
         services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
       }),
     );
+  });
+
+  it("derives the repo, not a phantom, from a workspace folder that is a worktree", async () => {
+    // A folder left behind by an older version points at .../worktrees/ASM-5111, whose
+    // basename is a ticket key. Taken at face value it becomes a phantom repo — and since a
+    // worktree's .git is a pointer FILE it even passes the isGit check, so the next
+    // createWorktrees would nest a worktree inside that worktree.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
+    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur/.claude/worktrees/ASM-5111"]);
+    vi.mocked(listWorkspaceFiles).mockReturnValue([
+      { file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 },
+    ]);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
+      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+
+    await runExplore();
+
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
+      }),
+    );
+  });
+
+  it("collapses a repo and a worktree of that repo to one service", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
+    vi.mocked(workspaceFolderPaths).mockReturnValue([
+      "/repos/centaur",
+      "/repos/centaur/.claude/worktrees/ASM-5885",
+    ]);
+    vi.mocked(listWorkspaceFiles).mockReturnValue([
+      { file: "/ws/team.code-workspace", folders: 2, mtimeMs: 1 },
+    ]);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
+      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+
+    await runExplore();
+
+    const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
+    expect(services.map((s) => s.path)).toEqual(["/repos/centaur"]);
   });
 
   it("aborts an Explore into an existing workspace that resolves to no repos", async () => {
