@@ -4,6 +4,7 @@ import { TasksViewProvider } from "./tasksView";
 import { DeckPanel } from "./deckView";
 import { MarketplacePanel } from "./marketplaceView";
 import { maybeSeedAgent, watchPlansAndSeed } from "./engine/workspace";
+import { BASE_SCHEME, TaskBaseContentProvider } from "./engine/diffView";
 import { windowIdentity, writePresence, removePresence, defaultWindowsDir } from "./engine/presence";
 import { getConfig } from "./config";
 import { maybeRunSetup, runSetup } from "./setup";
@@ -57,6 +58,7 @@ export function activate(context: vscode.ExtensionContext): void {
   }
 
   context.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(BASE_SCHEME, new TaskBaseContentProvider()),
     output,
     vscode.window.registerWebviewViewProvider(TasksViewProvider.viewType, provider),
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { window, ViewColumn, env, workspace, setConfig, ConfigurationTarget } from "../_mocks/vscode";
+import { window, ViewColumn, env, workspace, commands, setConfig, ConfigurationTarget } from "../_mocks/vscode";
 import { fakeAuth, fakeContext } from "../_helpers/factories";
+import type { ChangedFile } from "../../src/engine/git";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 
@@ -13,6 +14,8 @@ const h = vi.hoisted(() => ({
   prReviewPrompt: "Assess the PR for {key}.{files}" as string,
   prReviewAutoFix: false as boolean,
   taskDiff: vi.fn((_p: string) => ""),
+  taskDiffBase: vi.fn((_p: string) => "base-sha"),
+  taskChangedFiles: vi.fn((_p: string): ChangedFile[] => []),
   buildRunStatus: vi.fn(),
   removeRun: vi.fn(),
   writeRun: vi.fn(),
@@ -120,6 +123,8 @@ vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn() }));
 // a test that wants the veto to bite steers h.gitState.
 vi.mock("../../src/engine/git", () => ({
   taskDiff: h.taskDiff,
+  taskDiffBase: h.taskDiffBase,
+  taskChangedFiles: h.taskChangedFiles,
   repoRoot: (p: string) => p,
   currentBranch: (p: string) => (p === "/r/centaur" ? h.branch : "main"),
   prEligible: (r: { isGit: boolean; branch?: string }) => r.isGit && !!r.branch && r.branch !== "master",
@@ -295,6 +300,8 @@ beforeEach(() => {
   h.prReviewAutoFix = false;
   h.seedAgent = true;
   h.taskDiff.mockClear().mockReturnValue("");
+  h.taskDiffBase.mockClear().mockReturnValue("base-sha");
+  h.taskChangedFiles.mockClear().mockReturnValue([]);
   // Threads the Jira answer through the way the real buildRunStatus does. The
   // retire sweep reads `status.jiraCategory`, so a stub that dropped it would
   // make "this ticket is done" untestable from the outside.
@@ -446,30 +453,82 @@ describe("DeckPanel", () => {
     expect(workspace.openTextDocument).not.toHaveBeenCalled();
   });
 
-  it("inspect diff opens the task's whole diff as a read-only diff document", async () => {
-    // Not `git diff HEAD`: committed work counts, or a run with a PR shows nothing.
-    h.taskDiff.mockReturnValue("diff --git a/a.txt b/a.txt\n+committed\n");
+  it("inspect diff opens the native multi-file editor titled with the run key", async () => {
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     show();
     const p = lastPanel();
     await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
-    expect(h.taskDiff).toHaveBeenCalledWith("/r/svc");
+    const call = commands.executeCommand.mock.calls.at(-1)!;
+    expect(call[0]).toBe("vscode.changes");
+    expect(call[1]).toBe("Changes in ASM-1");
+    expect(workspace.openTextDocument).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the flat patch document when the editor has no such command", async () => {
+    // Cursor and other forks may not have registered vscode.changes. Losing the
+    // Diff button entirely there would be worse than the old rendering.
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
+    h.taskDiff.mockReturnValue("diff --git a/a.txt b/a.txt\n+committed\n");
+    commands.executeCommand.mockRejectedValueOnce(new Error("no such command"));
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
     expect(workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("+committed"), language: "diff" }),
     );
   });
 
-  it("labels each repo's chunk when a run spans more than one", async () => {
+  it("labels each repo's chunk in the fallback document when a run spans more than one", async () => {
     h.runs = [mkRun({ repos: [
       { name: "svc", path: "/r/svc", isGit: true, branch: "b" },
       { name: "web", path: "/r/web", isGit: true, branch: "b" },
     ] })];
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     h.taskDiff.mockReturnValue("diff --git a/a.txt b/a.txt\n+x\n");
+    commands.executeCommand.mockRejectedValueOnce(new Error("no such command"));
     show();
     const p = lastPanel();
     await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
     const arg = workspace.openTextDocument.mock.calls.at(-1)![0] as { content: string };
     expect(arg.content).toContain("# svc");
     expect(arg.content).toContain("# web");
+  });
+
+  it("toasts instead of opening a blank fallback document when the patch comes back empty", async () => {
+    // The changed-file list and the patch are two separate git reads; if they ever
+    // disagree, an empty document is the one outcome worse than a toast.
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
+    h.taskDiff.mockReturnValue("");
+    commands.executeCommand.mockRejectedValueOnce(new Error("no such command"));
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    const toast = posts(p).find((m) => m.type === "toast");
+    expect(toast.message).toMatch(/No changes to show/i);
+    expect(workspace.openTextDocument).not.toHaveBeenCalled();
+  });
+
+  it("toasts rather than opening an empty editor when only binaries changed", async () => {
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "pic.bin", binary: true }]);
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    const toast = posts(p).find((m) => m.type === "toast");
+    expect(toast.message).toMatch(/binary/i);
+    expect(commands.executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("diffs only the named repo when a card acts on one", async () => {
+    h.runs = [mkRun({ repos: [
+      { name: "svc", path: "/r/svc", isGit: true, branch: "b" },
+      { name: "web", path: "/r/web", isGit: true, branch: "b" },
+    ] })];
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff", repo: "web" });
+    expect(h.taskChangedFiles).toHaveBeenCalledWith("/r/web");
+    expect(h.taskChangedFiles).not.toHaveBeenCalledWith("/r/svc");
   });
 
   it("toasts an error when inspecting an unknown run", async () => {

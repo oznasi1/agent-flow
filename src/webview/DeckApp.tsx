@@ -307,7 +307,10 @@ function Card({ r, live, prReviewStatus, onForget, agent, column }: {
           >
             Open
           </button>
-          <button className="act" title="Show everything this task changed, as a diff" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff", ...(agent?.repo ? { repo: agent.repo } : {}) })}>Diff</button>
+          {/* main's multi-file diff editor, still scoped to this agent's own repo:
+              dropping the spread would silently send an agent card's Diff to the
+              run's first repo. */}
+          <button className="act" title="Show everything this task changed, file by file" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff", ...(agent?.repo ? { repo: agent.repo } : {}) })}>Diff</button>
           <span className="more-wrap">
             <button className="more" title="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>⋯</button>
             {menuOpen && (

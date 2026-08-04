@@ -244,9 +244,9 @@ export function taskChangedFiles(repoPath: string): ChangedFile[] {
     const filePath = isMove ? records[i + 2] : records[i + 1];
     i += isMove ? 3 : 2;
     if (!filePath) break;
-    // C (copy) is only ever emitted with --find-copies, which this does not pass,
-    // but it shares the three-record shape so it is parsed and then treated as the
-    // add it effectively is.
+    // C (copy) shares the rename's three-record shape and shows up whenever a
+    // contributor's gitconfig sets diff.renames=copies, so it has to be parsed or
+    // the records fall out of step. It is then treated as the add it effectively is.
     const status: ChangedFile["status"] =
       code === "A" || code === "C" ? "A" : code === "D" ? "D" : code === "R" ? "R" : "M";
     out.push({

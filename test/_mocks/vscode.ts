@@ -205,6 +205,7 @@ export const workspace = {
   workspaceFolders: undefined as { uri: { fsPath: string } }[] | undefined,
   getConfiguration: vi.fn((_section?: string) => makeConfig()),
   openTextDocument: vi.fn(async (_opts?: unknown): Promise<any> => ({})),
+  registerTextDocumentContentProvider: vi.fn((_scheme: string, _provider: unknown) => ({ dispose: vi.fn() })),
   onDidChangeConfiguration: vi.fn((cb: (e: { affectsConfiguration(section: string): boolean }) => void) => {
     configChangeCbs.push(cb);
     // Same reasoning as env.onDidChangeTelemetryEnabled above: dispose() must
@@ -213,12 +214,45 @@ export const workspace = {
   }),
 };
 
+// Real VS Code's `Uri.toString()` percent-encodes aggressively so the result "can
+// be safely used with `Uri.parse()`" (see the @types/vscode doc comment on
+// `Uri.toString`) — that guarantee is what makes it safe for production code to
+// stuff a raw JSON blob into `query`, since URIs get serialized to a plain string
+// and reparsed as they pass through the editor (webview messages, document
+// opens). Escaping the raw `%` first is what keeps the two functions inverses of
+// each other — it stops a literal `%` already in the text from being misread as
+// the start of one of `#`/`?`'s own escape sequences after a decode.
+function encodeUriPart(s: string): string {
+  return s.replace(/%/g, "%25").replace(/#/g, "%23").replace(/\?/g, "%3F");
+}
+function decodeUriPart(s: string): string {
+  return s.replace(/%3F/g, "?").replace(/%23/g, "#").replace(/%25/g, "%");
+}
+
 export const Uri = {
-  parse: vi.fn((s: string) => ({ toString: () => s, scheme: s.split(":")[0], fsPath: s })),
+  parse: vi.fn((s: string) => {
+    const scheme = s.split(":")[0];
+    const rest = s.slice(scheme.length + 1);
+    const sep = rest.indexOf("?");
+    const path = decodeUriPart(sep === -1 ? rest : rest.slice(0, sep));
+    const query = sep === -1 ? "" : decodeUriPart(rest.slice(sep + 1));
+    return { toString: () => s, scheme, fsPath: s, path, query };
+  }),
   file: vi.fn((p: string) => ({ toString: () => p, scheme: "file", fsPath: p })),
   joinPath: vi.fn((base: any, ...segs: string[]) => {
     const joined = [base?.fsPath ?? String(base ?? ""), ...segs].join("/");
     return { toString: () => joined, scheme: "file", fsPath: joined };
+  }),
+  from: vi.fn((c: { scheme: string; path?: string; query?: string }) => {
+    const path = c.path ?? "";
+    const query = c.query ?? "";
+    return {
+      scheme: c.scheme,
+      path,
+      query,
+      fsPath: path,
+      toString: () => `${c.scheme}:${encodeUriPart(path)}${query ? `?${encodeUriPart(query)}` : ""}`,
+    };
   }),
 };
 
@@ -264,10 +298,12 @@ export function resetVscodeMocks(): void {
   workspace.workspaceFolders = undefined;
   workspace.getConfiguration.mockReset().mockImplementation((_section?: string) => makeConfig());
   workspace.openTextDocument.mockReset().mockResolvedValue({});
+  workspace.registerTextDocumentContentProvider.mockReset().mockImplementation(() => ({ dispose: vi.fn() }));
   configChangeCbs = [];
   workspace.onDidChangeConfiguration.mockClear();
 
   Uri.parse.mockClear();
   Uri.file.mockClear();
   Uri.joinPath.mockClear();
+  Uri.from.mockClear();
 }

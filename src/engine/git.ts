@@ -19,6 +19,19 @@ function git(repoPath: string, args: string[]): string {
   }
 }
 
+/** Like `git`, but untrimmed — for file *contents*, where the trailing newline is
+ * part of the data and stripping it shows a phantom change on the last line. */
+function gitRaw(repoPath: string, args: string[]): string {
+  try {
+    return execFileSync("git", ["-C", repoPath, ...args], {
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 32 * 1024 * 1024,
+    }).toString();
+  } catch {
+    return "";
+  }
+}
+
 /**
  * The reliable backbone of a run's status: branch, working-tree diff vs HEAD
  * (uncommitted work the agent produced), commits ahead of upstream, and dirtiness.
@@ -72,9 +85,71 @@ function defaultRemoteRef(repoPath: string): string {
  * base to find, and on a run still sitting on the default branch merge-base *is*
  * HEAD, so the two are the same command. */
 export function taskDiff(repoPath: string): string {
+  return git(repoPath, ["diff", taskDiffBase(repoPath)]);
+}
+
+/** The commit a task's work is measured from: where its branch left the default
+ * branch. "HEAD" when there is no resolvable base — a local-only checkout, or a
+ * run still sitting on the default branch, where merge-base *is* HEAD anyway. A
+ * ref rather than "" so every caller has something it can hand to `git show`. */
+export function taskDiffBase(repoPath: string): string {
   const base = defaultRemoteRef(repoPath);
-  const from = base ? git(repoPath, ["merge-base", "HEAD", base]) : "";
-  return git(repoPath, ["diff", from || "HEAD"]);
+  return (base && git(repoPath, ["merge-base", "HEAD", base])) || "HEAD";
+}
+
+/** One entry per file a task touched, with renames kept whole. */
+export type ChangedFile = {
+  status: "A" | "M" | "D" | "R";
+  path: string;
+  oldPath?: string;
+  binary: boolean;
+};
+
+/** Every file this task changed since its base, for driving the multi-file diff
+ * editor. `-z` is not optional: a path may contain a space, and without it a
+ * rename's two paths cannot be told apart.
+ *
+ * Binary-ness comes from a second pass, read positionally. `--numstat` emits its
+ * rows in the same order as `--name-status` and marks a binary with "-" in both
+ * count columns, so matching by line index means never parsing numstat's paths —
+ * which is what makes the awkward `{old => new}` rename form a non-problem. */
+export function taskChangedFiles(repoPath: string): ChangedFile[] {
+  const base = taskDiffBase(repoPath);
+  const binary = git(repoPath, ["diff", "--numstat", "-M", base])
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.startsWith("-\t-\t"));
+
+  const records = git(repoPath, ["diff", "--name-status", "-M", "-z", base]).split("\0");
+  const out: ChangedFile[] = [];
+  for (let i = 0; i < records.length; ) {
+    const raw = records[i];
+    if (!raw) break;
+    const code = raw[0];
+    const isMove = code === "R" || code === "C";
+    const oldPath = isMove ? records[i + 1] : undefined;
+    const filePath = isMove ? records[i + 2] : records[i + 1];
+    i += isMove ? 3 : 2;
+    if (!filePath) break;
+    // C (copy) shares the rename's three-record shape and shows up whenever a
+    // contributor's gitconfig sets diff.renames=copies, so it has to be parsed or
+    // the records fall out of step. It is then treated as the add it effectively is.
+    const status: ChangedFile["status"] =
+      code === "A" || code === "C" ? "A" : code === "D" ? "D" : code === "R" ? "R" : "M";
+    out.push({
+      status,
+      path: filePath,
+      ...(status === "R" ? { oldPath } : {}),
+      binary: binary[out.length] ?? false,
+    });
+  }
+  return out;
+}
+
+/** A file's content at a ref, for the left-hand side of a diff. "" when the file
+ * did not exist there, which the caller reads as "nothing to compare against". */
+export function showFileAtRef(repoPath: string, ref: string, file: string): string {
+  return gitRaw(repoPath, ["show", `${ref}:${file}`]);
 }
 
 // Memoized per path for the life of the extension host. A directory does not

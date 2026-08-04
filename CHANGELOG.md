@@ -24,6 +24,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a branch, or a commit. **Clear stale** in the header does it on demand
   (`src/engine/retire.ts`, `src/deckView.ts`).
 
+## [0.1.59] — 2026-08-04
+
+### Changed
+
+- **A card's Diff button opens the editor's own multi-file diff view.** It used to
+  concatenate every repo's patch into one read-only text document — searchable, but with
+  no file tree, no per-file navigation, and no way to fix a typo you spotted while
+  reading. Now each changed file is a real diff editor with the merge-base on the left and
+  the live worktree file on the right, so edits save straight into the run. Renames diff as
+  one change rather than an add plus a delete, and a multi-repo run groups by repo root.
+  Binary files are left out: their "before" side would arrive through a text provider and
+  render as mojibake. The flat patch survives as a fallback for editors that never
+  registered `vscode.changes`, and a run whose only changes are binary says so instead of
+  opening an empty editor.
+
+### Fixed
+
+- **The Marketplace listing has a Changelog tab again.** Releases are packaged by
+  `scripts/pack-vsix.sh`, not `vsce` — the hand-rolled zip exists so publishing does not
+  need npm — and it staged the extension by copying a literal list of files that never
+  included `CHANGELOG.md`, nor declared the `Content.Changelog` asset the gallery reads to
+  render the tab. So the notes were written for every version and shipped with none of
+  them. `LICENSE` was missing for the same reason, and the manifest hardcoded an empty
+  `Tags`, `Categories = Other` — dropping the `SCM Providers` listing — and a description
+  that had drifted from `package.json`'s. All four now come from `package.json` or the
+  repo, so there is nothing left to keep in sync by hand (`scripts/pack-vsix.sh`).
+- **The plugin browser's script is in the vsix.** The same literal list named three
+  bundles; `src/marketplaceView.ts` loads a fourth, `dist/marketplace.js`, so the view
+  shipped without the script that draws it. This is the second time the list has lost a
+  bundle — `fix: package the deck bundle and PNG icon in the vsix` was the first — so it
+  is now a `dist/*.js` glob, which picks up the next bundle on its own and still skips the
+  sourcemaps and the test helper (`scripts/pack-vsix.sh`).
+
 ## [0.1.57] — 2026-08-04
 
 ### Added

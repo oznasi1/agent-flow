@@ -1063,6 +1063,16 @@ describe("Agents view", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "ASM-1", action: "open", repo: "web" });
   });
 
+  it("sends the agent's own repo with Diff too, so the diff editor opens that directory", () => {
+    // The Diff line is shared ground with the multi-file diff editor work: that
+    // change rewrote it without the repo argument, and losing the argument here
+    // un-scopes an agent card's Diff to the run's first repo with nothing failing.
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ agents: [{ ...mkAgent("a1", "working", 100), repo: "web" }] })]));
+    fireEvent.click(screen.getByRole("button", { name: "Diff" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "ASM-1", action: "diff", repo: "web" });
+  });
+
   it("renders one parked card with no agent name for an agentless run", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null } })]));
