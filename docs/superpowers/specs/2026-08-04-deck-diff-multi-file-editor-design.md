@@ -74,8 +74,9 @@ content provider is read-only by construction, so the left side cannot be edited
 it away. Two additions expose what the multi-diff editor needs:
 
 - **`taskDiffBase(repoPath): string`** — the merge-base sha `taskDiff` already resolves via
-  `defaultRemoteRef`, or `""` when there is no base to find. `taskDiff` is refactored to call it, so
-  the two cannot drift.
+  `defaultRemoteRef`, or `"HEAD"` when there is no base to find. `taskDiff` is refactored to call
+  it, so the two cannot drift. It returns a usable ref rather than `""` so every caller has
+  something it can hand straight to `git show`.
 - **`taskChangedFiles(repoPath): ChangedFile[]`** — `git diff --name-status -M <base>` parsed into
   `{ status, path, oldPath? }`. `-M` matters: without it a rename arrives as an unrelated add plus
   delete, which reads as two changes in the file tree instead of one.
@@ -125,10 +126,10 @@ in the run, the toast says so rather than opening an empty editor.
 **No changes.** Unchanged from today: the `No changes to show for <key>.` info toast at
 [deckView.ts:827](../../../src/deckView.ts#L827).
 
-**No merge-base.** `taskDiffBase` returns `""` on a repo with no resolvable default remote ref, the
-same degradation `taskDiff` already makes. The left side then reads from `HEAD`, so uncommitted work
-still diffs correctly and committed work reads as unchanged — matching the existing documented
-behavior rather than inventing a new one.
+**No merge-base.** `taskDiffBase` returns `"HEAD"` on a repo with no resolvable default remote ref,
+the same degradation `taskDiff` already makes with its `from || "HEAD"`. The left side then reads
+from `HEAD`, so uncommitted work still diffs correctly and committed work reads as unchanged —
+matching the existing documented behavior rather than inventing a new one.
 
 ## Testing
 
