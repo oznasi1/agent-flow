@@ -1,8 +1,9 @@
 <div align="center">
 
-<img src="media/icon.png" alt="" width="72" height="72" />
-
-<h1 style="letter-spacing:.13em;font-weight:550">AGENT FLOW DECK</h1>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="media/logo.svg">
+  <img src="media/logo-light.svg" alt="Agent Flow Deck" width="280">
+</picture>
 
 <p><strong>A task pool in your sidebar.</strong> Take a Jira ticket and it opens the repos
 that ticket touches, with a Claude Code agent already briefed.</p>
@@ -11,7 +12,7 @@ that ticket touches, with a Claude Code agent already briefed.</p>
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![VS Code ^1.90.0](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC?logo=visualstudiocode&logoColor=white)
 
-<img src="media/screenshot.png" alt="The Agent Flow Deck task pool in the VS Code sidebar — filter tabs, size and status lenses, a repo multiselect and a fuzzy title search, and per-card Take / Address PR actions" width="420" />
+<img src="media/screenshot.png" alt="The Agent Flow Deck task pool in the VS Code sidebar — segmented task, size and status lenses, a repo multiselect and a fuzzy title search, and per-card Take / Address PR actions" width="420" />
 
 </div>
 

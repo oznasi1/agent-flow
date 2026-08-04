@@ -61,7 +61,7 @@
 | `src/tasksView.ts` | `liveWindows()` helper shared by `postState` and `liveWindowItems()`. |
 | `test/webview/App.test.tsx` | The header assertion at line 46 stops matching the clipboard emoji. |
 | `test/webview/helpers.test.ts` | `prioClass` tests replaced. |
-| `media/icon-src.svg`, `icon-store-src.svg`, `icon.png`, `icon-store.png`, `logo.svg` | Recolored to the brand; PNGs re-rendered at 256×256. |
+| `media/icon-src.svg`, `icon-store-src.svg`, `icon.png`, `icon-store.png`, `logo.svg`, `logo-light.svg` | Recolored to the brand; PNGs re-rendered at 256×256. The wordmark ships as a dark- and a light-background SVG (Ruled 2026-08-04), not one `currentColor` file. |
 | `README.md`, `package.json` | Lockup hero, refreshed screenshots, listing copy. |
 
 **Task-to-commit mapping.** The spec settled four commits; this plan splits them into seven tasks so a reviewer can reject one without rejecting its neighbor. Order is preserved: spec commit 1 = Task 1; commit 2 = Tasks 2–3; commit 3 = Tasks 4–6; commit 4 = Task 7.
@@ -1461,6 +1461,7 @@ No tests — these are binary assets and prose. The gate is visual review plus `
 
 **Files:**
 - Modify: `media/icon-src.svg`, `media/icon-store-src.svg`, `media/icon.png`, `media/icon-store.png`, `media/logo.svg`
+- Create: `media/logo-light.svg` (the light-background wordmark variant, alongside `logo.svg`'s dark one)
 - Modify: `media/screenshot.png`, `media/deck.png`, `media/marketplace.png`
 - Modify: `README.md:1-16`, `package.json` (`description`)
 
@@ -1492,11 +1493,19 @@ node -e 'for(const f of ["media/icon.png","media/icon-store.png"]){const b=requi
 
 Expected output: both `256x256`. Then view both at thumbnail size and confirm the dots stay distinct.
 
-- [ ] **Step 3: Re-ring the wordmark**
+- [ ] **Step 3: Re-ring the wordmark, as a two-file lockup**
 
-In `media/logo.svg`: change the group `fill="#ffffff"` to `fill="currentColor"` so the word takes the host's ink, and replace the dot-cluster paths with the brand ring in `#2AA79B`, keeping the existing letterform paths untouched.
+`media/logo.svg` is the dark-background variant: keep the existing letterform paths untouched, set their fill to the literal `#F0F2F4`, and replace the dot-cluster paths with the brand ring in `#2AA79B`.
 
-Do **not** attempt to re-set the word in uppercase with .13em tracking. The letterforms are outlines, and outlining new text needs a font tool this repo does not have — the spec records this as a known limitation, and the tracked lockup lives in CSS instead.
+Add `media/logo-light.svg`: identical geometry, ring `#157F76` (the light-theme accent — `#2AA79B` measures only 2.96:1 on white), word ink `#16191C`.
+
+Two files, not a `currentColor` fill and not a styled `<h1>`, for two reasons (Ruled 2026-08-04):
+- an `<img>`-loaded SVG resolves `currentColor` to black, not the embedding page's ink — the browser treats it as its own document;
+- GitHub strips inline `style` attributes from Markdown-embedded HTML, so a tracked `<h1 style="letter-spacing:…">` silently renders as a plain heading.
+
+The README hero (Step 4) serves the two SVGs through a `<picture>` keyed on `prefers-color-scheme` instead.
+
+Do **not** attempt to re-set the word in uppercase with .13em tracking as new outlined text. The letterforms are outlines, and outlining new text needs a font tool this repo does not have — a real tracked SVG wordmark is a separate task needing a font pipeline.
 
 - [ ] **Step 4: Rewrite the listing copy**
 
@@ -1506,14 +1515,17 @@ Do **not** attempt to re-set the word in uppercase with .13em tracking. The lett
   "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a Claude Code agent already briefed.",
 ```
 
-`README.md:1-16` — replace the bare `<img src="media/icon.png">` hero with the lockup (mark plus tracked wordmark as live HTML, which is where the tracking can live), and keep the badges and the screenshot below it:
+`README.md:1-16` — replace the bare `<img src="media/icon.png">` hero with the two-file lockup from
+Step 3, served by `<picture>` so each GitHub theme gets its matching variant, and keep the badges and
+the screenshot below it:
 
 ```html
 <div align="center">
 
-<img src="media/icon.png" alt="" width="72" height="72" />
-
-<h1 style="letter-spacing:.13em;font-weight:550">AGENT FLOW DECK</h1>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="media/logo.svg">
+  <img src="media/logo-light.svg" alt="Agent Flow Deck" width="280">
+</picture>
 
 <p><strong>A task pool in your sidebar.</strong> Take a Jira ticket and it opens the repos
 that ticket touches, with a Claude Code agent already briefed.</p>
@@ -1558,7 +1570,7 @@ Run: `npm run typecheck && npm test && npm run test:cov && npm run build`
 
 ```bash
 git add media/icon-src.svg media/icon-store-src.svg media/icon.png media/icon-store.png \
-        media/logo.svg media/screenshot.png media/deck.png media/marketplace.png \
+        media/logo.svg media/logo-light.svg media/screenshot.png media/deck.png media/marketplace.png \
         README.md package.json
 git commit -m "feat(brand): teal mark, new lockup, refreshed listing and screenshots
 

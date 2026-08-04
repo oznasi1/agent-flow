@@ -230,9 +230,22 @@ Code's floor) and 256×256 `icon-store.png`.
 **Wordmark, with a stated limitation.** [`media/logo.svg`](../../../media/logo.svg) is traced
 outlines, which is why it renders identically on GitHub. It can be recolored and its dot cluster
 replaced with the teal ring. It **cannot** be re-set in uppercase with .13em tracking — outlining new
-text needs a font tool this repo does not have. So `logo.svg` keeps its existing letterforms with the
-new ring and color, and the tracked uppercase lockup lives where CSS can set it: in-product and in
-the README. A real tracked SVG wordmark is a separate task needing a font pipeline.
+text needs a font tool this repo does not have. A real tracked SVG wordmark is a separate task
+needing a font pipeline.
+
+**Two files, not `currentColor` and not a styled heading (Ruled 2026-08-04).** The original plan
+was one `currentColor`-filled word plus a CSS-tracked `<h1>` in the README. Both fail for a README
+image, one reason each:
+- an `<img>`-loaded SVG resolves `currentColor` to black — the browser renders it as its own
+  document, not something that inherits the embedding page's ink;
+- GitHub strips inline `style` attributes from Markdown-embedded HTML, so a tracked
+  `<h1 style="letter-spacing:…">` silently renders as a plain heading.
+
+So the lockup ships as two SVGs, letterforms untouched in both: `logo.svg` is the dark-background
+variant (ring `#2AA79B`, word `#F0F2F4`) and
+[`media/logo-light.svg`](../../../media/logo-light.svg) is the light one (ring `#157F76` —
+`#2AA79B` measures only 2.96:1 on white — word `#16191C`). The README hero serves them through a
+`<picture>` keyed on `prefers-color-scheme`, with the product name carried in the `<img>` `alt`.
 
 **README and screenshots.** The lockup replaces the bare icon at the top. `screenshot.png` reshot
 after the sidebar port lands; `deck.png` and `marketplace.png` refreshed through the existing harness
