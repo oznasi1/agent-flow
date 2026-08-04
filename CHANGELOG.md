@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.55] — 2026-08-04
+
 ### Fixed
 
 - **A landed PR no longer reads `merge unknown` on its card.** GitHub only computes
