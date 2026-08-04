@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="media/logo.svg">
-  <img src="media/logo-light.svg" alt="Agent Flow Deck" width="280">
+  <source media="(prefers-color-scheme: light)" srcset="media/logo-light.png">
+  <img src="media/logo.png" alt="Agent Flow Deck" width="280">
 </picture>
 
 <p><strong>A task pool in your sidebar.</strong> Take a Jira ticket and it opens the repos
