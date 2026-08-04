@@ -2980,6 +2980,49 @@ describe("explore — open target", () => {
     expect(services.map((s) => s.path)).toEqual(["/repos/centaur"]);
   });
 
+  it("collapses two different worktrees of the same repo to one service", async () => {
+    // Each worktree's root is independently unwound and (per the fix) canon()'d before
+    // the dedup map keys on it — two distinct ticket keys must still land on one entry.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
+    vi.mocked(workspaceFolderPaths).mockReturnValue([
+      "/repos/centaur/.claude/worktrees/ASM-1111",
+      "/repos/centaur/.claude/worktrees/ASM-2222",
+    ]);
+    vi.mocked(listWorkspaceFiles).mockReturnValue([
+      { file: "/ws/team.code-workspace", folders: 2, mtimeMs: 1 },
+    ]);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
+      .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+
+    await runExplore();
+
+    const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
+    expect(services).toEqual([expect.objectContaining({ name: "centaur", path: "/repos/centaur", isGit: true })]);
+  });
+
+  it("collapses a live-folder destination pointed at a worktree to its owning repo", async () => {
+    // per-window tracking takes open windows directly at worktree paths, and window
+    // presence records that path, so a live folder pointing at .../worktrees/<KEY> is the
+    // highest-traffic instance of the unwind — pin it so it can't regress.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
+    vi.mocked(readLiveWindows).mockReturnValue([
+      { pid: 1, identity: "/repos/centaur/.claude/worktrees/ASM-5885", kind: "folder", label: "ASM-5885", folders: 1, updatedAt: 9 },
+    ]);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("poke around");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/centaur/.claude/worktrees/ASM-5885" } } as never) // open where (first)
+      .mockResolvedValueOnce([{ repo: mkRepos(["centaur"])[0] }] as never);                                                    // repos (last)
+
+    await runExplore();
+
+    const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
+    expect(services.map((s) => s.path)).toEqual(["/repos/centaur"]);
+  });
+
   it("aborts an Explore into an existing workspace that resolves to no repos", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "pick-existing", exploreMode: "knowledge" });
     vi.mocked(workspaceFolderPaths).mockReturnValue([]);

@@ -963,9 +963,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const byPath = new Map(repos.map((r) => [canon(r.path), r]));
     const out = new Map<string, ServiceRef>();
     for (const folder of this.prefillPathsForTarget(target)) {
-      // prefillPathsForTarget yields canonical paths, and every prefix of a fully resolved
-      // path is itself resolved — so the unwound repo root needs no second canon().
-      const p = repoRootOfWorktree(folder) ?? folder;
+      // A folder that exists is already canonical (prefillPathsForTarget resolved it), but
+      // an unwound root might not — canon() falls back to the raw path when realpathSync
+      // throws, exactly what happens for a stale root whose worktree is gone.
+      const un = repoRootOfWorktree(folder);
+      const p = un ? canon(un) : folder;
       if (out.has(p)) continue;
       out.set(
         p,
