@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.57] — 2026-08-04
+
+### Added
+
+- **A Review queue toggle in the Deck's header.** The review-requests strip could only
+  be silenced from Settings — a trip out of the panel to quiet a rail sitting above the
+  board. It now has a control beside Live signal, PR facts and Open agents, session-scoped
+  like all three: `agentFlow.reviewRequests` stays the persistent seed and the pill is the
+  per-session override. Off stops the `gh` search outright, which is what distinguishes it
+  from the strip's own collapse caret (`src/deckView.ts`, `src/webview/DeckApp.tsx`).
+
+### Changed
+
+- **The review rows read as columns.** Every field the row carried is still there, but the
+  trailing cluster was sized naturally, so no two rows lined up and each line had to be
+  re-parsed from scratch. The fields now take fixed widths, the `+`/`−` pair shares one
+  column, and the repo ellipsises so every title starts at the same x — with the full name
+  on its `title` attribute. Below 860px the widths are released and the row behaves exactly
+  as it did before (`src/webview/ReviewStrip.tsx`, `src/webview/deckStyles.ts`).
+
+### Fixed
+
+- **The review queue no longer appears out of nowhere after the board.** `refresh()` only
+  reached the queue after `buildAll()` had finished — git per repo and Jira per run — so a
+  queue already cached on disk waited out the entire board for no reason, then landed and
+  shoved it down. `deck:ready` now posts the cache before the build starts, so a warm
+  machine has the strip on first paint (`src/deckView.ts`).
+- **A cold start says it is working, instead of showing nothing.** With no cache to fall
+  back on, the strip used to render nothing at all for the seconds the first `gh` search
+  took. It now shows its header with a spinner and three skeleton rows, and the "To review"
+  tile spins rather than claiming a count it does not have yet. A first search that fails
+  reads as "couldn't check" rather than shimmering forever waiting on a search that already
+  gave up (`src/webview/ReviewStrip.tsx`, `src/webview/DeckApp.tsx`).
+
 ## [0.1.56] — 2026-08-04
 
 ### Fixed
