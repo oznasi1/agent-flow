@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.53] — 2026-08-04
+
 ### Changed
 
 - **The mark's non-brand dots are near-white instead of dark grey.** They sat at 26%
