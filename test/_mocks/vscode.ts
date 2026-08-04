@@ -214,20 +214,46 @@ export const workspace = {
   }),
 };
 
+// Real VS Code's `Uri.toString()` percent-encodes aggressively so the result "can
+// be safely used with `Uri.parse()`" (see the @types/vscode doc comment on
+// `Uri.toString`) — that guarantee is what makes it safe for production code to
+// stuff a raw JSON blob into `query`, since URIs get serialized to a plain string
+// and reparsed as they pass through the editor (webview messages, document
+// opens). Escaping the raw `%` first is what keeps the two functions inverses of
+// each other — it stops a literal `%` already in the text from being misread as
+// the start of one of `#`/`?`'s own escape sequences after a decode.
+function encodeUriPart(s: string): string {
+  return s.replace(/%/g, "%25").replace(/#/g, "%23").replace(/\?/g, "%3F");
+}
+function decodeUriPart(s: string): string {
+  return s.replace(/%3F/g, "?").replace(/%23/g, "#").replace(/%25/g, "%");
+}
+
 export const Uri = {
-  parse: vi.fn((s: string) => ({ toString: () => s, scheme: s.split(":")[0], fsPath: s })),
+  parse: vi.fn((s: string) => {
+    const scheme = s.split(":")[0];
+    const rest = s.slice(scheme.length + 1);
+    const sep = rest.indexOf("?");
+    const path = decodeUriPart(sep === -1 ? rest : rest.slice(0, sep));
+    const query = sep === -1 ? "" : decodeUriPart(rest.slice(sep + 1));
+    return { toString: () => s, scheme, fsPath: s, path, query };
+  }),
   file: vi.fn((p: string) => ({ toString: () => p, scheme: "file", fsPath: p })),
   joinPath: vi.fn((base: any, ...segs: string[]) => {
     const joined = [base?.fsPath ?? String(base ?? ""), ...segs].join("/");
     return { toString: () => joined, scheme: "file", fsPath: joined };
   }),
-  from: vi.fn((c: { scheme: string; path?: string; query?: string }) => ({
-    scheme: c.scheme,
-    path: c.path ?? "",
-    query: c.query ?? "",
-    fsPath: c.path ?? "",
-    toString: () => `${c.scheme}:${c.path ?? ""}${c.query ? `?${c.query}` : ""}`,
-  })),
+  from: vi.fn((c: { scheme: string; path?: string; query?: string }) => {
+    const path = c.path ?? "";
+    const query = c.query ?? "";
+    return {
+      scheme: c.scheme,
+      path,
+      query,
+      fsPath: path,
+      toString: () => `${c.scheme}:${encodeUriPart(path)}${query ? `?${encodeUriPart(query)}` : ""}`,
+    };
+  }),
 };
 
 /** Reset every mock's call history + implementations and all mutable state back
