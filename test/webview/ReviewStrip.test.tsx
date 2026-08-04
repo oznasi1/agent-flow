@@ -16,7 +16,7 @@ const mk = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
 });
 
 const props = (over: Partial<React.ComponentProps<typeof ReviewStrip>> = {}) => ({
-  requests: [mk()], issueCount: 1, sort: "oldest" as const, stale: false,
+  requests: [mk()], issueCount: 1, sort: "oldest" as const, stale: false, loading: false,
   expanded: null, details: {}, onExpand: vi.fn(), onSort: vi.fn(), onOpen: vi.fn(),
   collapsed: false, onCollapse: vi.fn(), onLaunch: vi.fn(), onLoadDraft: vi.fn(),
   reviewWrites: false, bodies: {}, onBody: vi.fn(), onSubmit: vi.fn(),
@@ -349,5 +349,83 @@ describe("ReviewStrip", () => {
       submitFailed: { "CyberJackGit/aws-ops#8491": true },
     })} />);
     expect(screen.queryByText(/check the pr before trying again/i)).not.toBeInTheDocument();
+  });
+
+  // The row's fields only stack into columns if each one is a single element with a
+  // width. The +/− pair is the one that needed a wrapper — sized individually they
+  // stayed ragged — and it has to keep both halves independently queryable, since
+  // that is what proves the colours are still on the right numbers.
+  it("wraps the additions and deletions in one diff column, both still their own element", () => {
+    const { container } = render(<ReviewStrip {...props()} />);
+    const diff = container.querySelector(".rv-diff")!;
+    expect(diff).toBeInTheDocument();
+    expect(diff.querySelector(".add")!.textContent).toBe("+350");
+    expect(diff.querySelector(".del")!.textContent).toBe("−4");
+  });
+
+  it("keeps a truncatable repo and author recoverable through their titles", () => {
+    const { container } = render(<ReviewStrip {...props()} />);
+    expect(container.querySelector(".rv-repo")!.getAttribute("title")).toBe("aws-ops");
+    expect(container.querySelector(".rv-author")!.getAttribute("title")).toBe("einavsaad");
+  });
+
+  describe("while the first search is running", () => {
+    const loading = (over = {}) => props({ requests: [], issueCount: 0, loading: true, ...over });
+
+    // The whole point of the pending state: at zero requests the strip normally
+    // renders nothing at all, which is what left a cold start with no indication
+    // that a queue was even coming.
+    it("renders instead of collapsing to nothing", () => {
+      render(<ReviewStrip {...loading()} />);
+      expect(screen.getByText(/checking for PRs waiting on your review/i)).toBeInTheDocument();
+    });
+
+    it("never claims a count it does not have", () => {
+      render(<ReviewStrip {...loading()} />);
+      expect(screen.queryByText(/0 PRs waiting/i)).not.toBeInTheDocument();
+    });
+
+    it("stands in three skeleton rows so the board settles once", () => {
+      const { container } = render(<ReviewStrip {...loading()} />);
+      expect(container.querySelectorAll(".rv-skel")).toHaveLength(3);
+    });
+
+    // A live sort control over placeholder rows invites a click that changes nothing.
+    it("offers no sort control", () => {
+      render(<ReviewStrip {...loading()} />);
+      expect(screen.queryByText("oldest")).not.toBeInTheDocument();
+      expect(screen.queryByText("smallest")).not.toBeInTheDocument();
+    });
+
+    it("keeps the header but drops the skeletons while collapsed", () => {
+      const { container } = render(<ReviewStrip {...loading({ collapsed: true })} />);
+      expect(screen.getByText(/checking for PRs waiting on your review/i)).toBeInTheDocument();
+      expect(container.querySelectorAll(".rv-skel")).toHaveLength(0);
+    });
+  });
+
+  // A first search that fails leaves the host with a null cache and `stale` set.
+  // Shimmering forever would promise a result that is never coming, and the usual
+  // "showing the last result" note would point at a result that never existed.
+  describe("when the first search failed", () => {
+    const failed = props({ requests: [], issueCount: 0, loading: false, stale: true });
+
+    it("says it could not check, rather than counting zero", () => {
+      render(<ReviewStrip {...failed} />);
+      expect(screen.getByText(/couldn't check for PRs waiting on your review/i)).toBeInTheDocument();
+      expect(screen.queryByText(/0 PRs waiting/i)).not.toBeInTheDocument();
+    });
+
+    it("shows no skeletons and no stale-result note", () => {
+      const { container } = render(<ReviewStrip {...failed} />);
+      expect(container.querySelectorAll(".rv-skel")).toHaveLength(0);
+      expect(screen.queryByText(/showing the last result/i)).not.toBeInTheDocument();
+    });
+
+    it("still says it is showing the last result when there is one", () => {
+      render(<ReviewStrip {...props({ stale: true })} />);
+      expect(screen.getByText(/showing the last result/i)).toBeInTheDocument();
+      expect(screen.getByText(/1 PR waiting on your review/i)).toBeInTheDocument();
+    });
   });
 });

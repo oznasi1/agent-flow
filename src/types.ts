@@ -316,6 +316,7 @@ export type InboundMessage =
   | { type: "deck:setLive"; on: boolean }
   | { type: "deck:setPrFacts"; on: boolean }
   | { type: "deck:setOpenAgents"; on: boolean }
+  | { type: "deck:setReviewQueue"; on: boolean }
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
   | { type: "deck:forget"; key: string }
   | { type: "deck:track"; key: string }
@@ -368,7 +369,7 @@ export type OutboundMessage =
   | { type: "error"; message: string; canRetry: boolean; canRunDoctor?: boolean }
   | { type: "loading"; loading: boolean }
   // The Deck
-  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; ghNote: string | null; prReviewStatus: string }
+  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; reviewQueue: boolean; ghNote: string | null; prReviewStatus: string }
   | { type: "deck:loading"; loading: boolean }
   | {
       type: "deck:reviews";
@@ -383,6 +384,12 @@ export type OutboundMessage =
       // and actively clears any rows it was rendering rather than leaving them
       // frozen (and their write buttons clickable) with nothing ever told to stop.
       enabled: boolean;
+      // The strip is on and a first search is still in flight, with nothing cached
+      // to render in the meantime. Distinct from `enabled: true` with an empty
+      // `requests` — that is a genuinely empty queue, and says so. Only ever true
+      // on a cold start: a machine with a cache on disk posts that instead, from
+      // `deck:ready`, before the board build has even begun.
+      loading: boolean;
     }
   // `detail: null` means the per-PR detail call itself failed (not "no failing
   // checks and unknown thread count", which is what an empty-but-successful

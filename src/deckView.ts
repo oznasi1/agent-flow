@@ -63,6 +63,7 @@ export class DeckPanel {
   private readonly localRuns = new Map<string, Run>();
   private prFacts: boolean; // seeded from config in the constructor; the only writer after that is deck:setPrFacts
   private openAgents: boolean; // seeded from config in the constructor; the only writer after that is deck:setOpenAgents
+  private reviewQueue: boolean; // seeded from config in the constructor; the only writer after that is deck:setReviewQueue
   private readonly prQueue = new RefreshQueue();
   private readonly pr: PrProvider = new GhProvider();
   private readonly reviewProvider: ReviewProvider = new GhReviewProvider();
@@ -128,6 +129,7 @@ export class DeckPanel {
     // user's in-session toggle by re-reading config on every tick.
     this.prFacts = getConfig().prFacts;
     this.openAgents = getConfig().openAgents;
+    this.reviewQueue = getConfig().reviewRequests;
     this.panel.webview.html = this.html(this.panel.webview);
     this.panel.webview.onDidReceiveMessage((m: InboundMessage) => this.onMessage(m), null, this.disposables);
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
@@ -231,12 +233,14 @@ export class DeckPanel {
     });
   }
 
-  /** Is the review strip live? Two gates, not three: the persistent
-   * `reviewRequests` setting, and `ghReady()` — which already folds the session
-   * PR-facts toggle and a usable gh together, so there is no condition here
-   * that varies independently of PR facts. */
+  /** Is the review strip live? Two gates, not three: the session's own Review
+   * queue toggle (seeded from the persistent `reviewRequests` setting, then
+   * owned by `deck:setReviewQueue` — re-reading config here would stomp the
+   * toggle on every poll tick), and `ghReady()` — which already folds the
+   * session PR-facts toggle and a usable gh together, so there is no condition
+   * here that varies independently of PR facts. */
   private reviewsEnabled(): boolean {
-    return getConfig().reviewRequests && this.ghReady();
+    return this.reviewQueue && this.ghReady();
   }
 
   /** Queue a search when the cache has aged out. Never awaited — a hanging `gh`
@@ -317,6 +321,18 @@ export class DeckPanel {
     });
   }
 
+  /** Post whatever the strip can show *right now*, without waiting on anything.
+   * Loads the on-disk cache first if it has not been read yet — the same read
+   * `enqueueReviews` does, hoisted so the queue does not sit behind a board
+   * build that has nothing to do with it. Never starts a search: the refresh
+   * that follows owns that, and its own post supersedes this one. */
+  private postCachedReviews(): void {
+    if (this.reviewsEnabled() && this.reviewCache === null) {
+      this.reviewCache = readReviewCache(defaultReviewsFile());
+    }
+    this.postReviews();
+  }
+
   private postReviews(): void {
     if (!this.reviewsEnabled()) {
       // The strip just went off (reviewRequests, PR facts, or gh going
@@ -328,11 +344,26 @@ export class DeckPanel {
       // review" stat tile instead of showing a hollow "0 To review".
       this.post({
         type: "deck:reviews", requests: [], issueCount: 0, sort: this.reviewSort,
-        stale: false, reviewWrites: getConfig().reviewWrites, enabled: false,
+        stale: false, reviewWrites: getConfig().reviewWrites, enabled: false, loading: false,
       });
       return;
     }
-    if (!this.reviewCache) return;
+    if (!this.reviewCache) {
+      // Cold start: no cache on disk, so a first search is either in flight or
+      // about to be queued. This used to return silently, which left the webview
+      // with nothing to render and no reason to think anything was coming — the
+      // strip simply appeared several seconds later and shoved the board down.
+      // `stale` is what tells the two null-cache cases apart: a *failed* first
+      // search leaves the cache null and sets it, and must read as "couldn't
+      // check" rather than shimmer forever waiting for a search that already
+      // gave up.
+      this.post({
+        type: "deck:reviews", requests: [], issueCount: 0, sort: this.reviewSort,
+        stale: this.reviewStale, reviewWrites: getConfig().reviewWrites,
+        enabled: true, loading: !this.reviewStale,
+      });
+      return;
+    }
     this.post({
       type: "deck:reviews",
       requests: sortRequests(this.decorateReviews(this.reviewCache.requests), this.reviewSort),
@@ -341,6 +372,7 @@ export class DeckPanel {
       stale: this.reviewStale,
       reviewWrites: getConfig().reviewWrites,
       enabled: true,
+      loading: false,
     });
   }
 
@@ -660,6 +692,7 @@ export class DeckPanel {
         liveSignal: this.liveSignal,
         prFacts: this.prFacts,
         openAgents: this.openAgents,
+        reviewQueue: this.reviewQueue,
         ghNote: this.prFacts && this.ghGap ? GH_NOTES[this.ghGap.kind] : null,
         // Read fresh on every post rather than cached in a field: it is a plain
         // string setting a user can edit mid-session, and the board re-posts often
@@ -692,6 +725,16 @@ export class DeckPanel {
   private async onMessage(m: InboundMessage): Promise<void> {
     switch (m.type) {
       case "deck:ready":
+        // Before the board build, not after it. `refresh()` only reaches
+        // `enqueueReviews` once `buildAll()` has finished — git per repo and Jira
+        // per run — so a queue already sitting on disk used to wait out the whole
+        // board for no reason. Posting it here costs one file read and puts the
+        // strip on screen with the first paint; with no cache to post, the same
+        // call posts `loading: true`, so the strip still has something to say
+        // while the first search runs.
+        this.postCachedReviews();
+        await this.refreshBusy();
+        break;
       case "deck:refresh":
         await this.refreshBusy();
         break;
@@ -710,6 +753,15 @@ export class DeckPanel {
         break;
       case "deck:setOpenAgents":
         this.openAgents = m.on;
+        await this.refreshBusy();
+        break;
+      case "deck:setReviewQueue":
+        this.reviewQueue = m.on;
+        // Post before the refresh, not only through it: switching *off* must
+        // clear the rows now rather than after a full board rebuild, and
+        // switching back on should put the cached queue (or the pending state)
+        // up immediately for the same reason `deck:ready` does.
+        this.postCachedReviews();
         await this.refreshBusy();
         break;
       case "deck:inspect":

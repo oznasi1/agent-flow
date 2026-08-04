@@ -1343,6 +1343,102 @@ describe("DeckPanel review strip", () => {
     expect(posts(p).find((m) => m.type === "deck:reviews")).toMatchObject({ enabled: true });
   });
 
+  it("carries the review-queue toggle on deck:runs so the webview can render its pill", async () => {
+    const p = await showAndWarm();
+    expect(posts(p).find((m) => m.type === "deck:runs")).toMatchObject({ reviewQueue: true });
+    await p._fire({ type: "deck:setReviewQueue", on: false });
+    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)).toMatchObject({ reviewQueue: false });
+  });
+
+  it("stops searching and clears the strip when the review queue is toggled off", async () => {
+    const p = await showAndWarm();
+    expect(h.reviewSearch).toHaveBeenCalledTimes(1);
+
+    await p._fire({ type: "deck:setReviewQueue", on: false });
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({
+      requests: [], issueCount: 0, enabled: false,
+    });
+    expect(h.reviewSearch).toHaveBeenCalledTimes(1);
+  });
+
+  // The regression this guards: reading `getConfig().reviewRequests` inside
+  // reviewsEnabled() rather than the session field. The setting stays true here,
+  // so a config read would quietly re-enable the strip on the very next poll and
+  // the toggle would appear to do nothing.
+  it("keeps the toggle's answer across a refresh, rather than re-reading the setting", async () => {
+    h.reviewRequests = true;
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:setReviewQueue", on: false });
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({ enabled: false });
+    expect(h.reviewSearch).toHaveBeenCalledTimes(1);
+  });
+
+  // Back on puts the queue up again from cache rather than re-running the search:
+  // `reviewLastAttemptAt` still holds from before the toggle, and the attempt
+  // clock is deliberately independent of the strip being switched off and on —
+  // flipping the pill twice is not a reason to spend another `gh api graphql`.
+  it("restores the queue from cache when toggled back on, without a fresh search", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:setReviewQueue", on: false });
+    await p._fire({ type: "deck:setReviewQueue", on: true });
+    await settled();
+    expect(h.reviewSearch).toHaveBeenCalledTimes(1);
+    const last = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
+    expect(last).toMatchObject({ enabled: true, loading: false });
+    expect(last.requests).toHaveLength(1);
+  });
+
+  // The point of the whole cache-first path: `refresh()` only reaches
+  // enqueueReviews after `buildAll()` — git per repo and Jira per run — so a
+  // queue already on disk used to wait out the entire board for no reason.
+  // Asserted without settling: postCachedReviews runs before onMessage's first
+  // await, so at this instant a board post cannot have happened yet.
+  it("posts the cached queue on deck:ready without waiting for the board build", async () => {
+    // Fresh on disk, so no search is even queued — the cache alone is what the
+    // strip should be showing.
+    h.reviewCache = { fetchedAt: Date.now(), issueCount: 1, requests: [reviewFixture()] };
+    show();
+    await settled(); // let the gh probe resolve; without it the strip reads as off
+    const p = lastPanel();
+    p.webview.postMessage.mockClear();
+    const ready = p._fire({ type: "deck:ready" });
+
+    const early = posts(p);
+    expect(early.find((m) => m.type === "deck:reviews")).toMatchObject({ enabled: true, loading: false });
+    expect(early.find((m) => m.type === "deck:reviews").requests).toHaveLength(1);
+    expect(early.find((m) => m.type === "deck:runs")).toBeUndefined();
+
+    await ready;
+    await settled();
+  });
+
+  it("says it is still checking when there is nothing cached to show yet", async () => {
+    h.reviewCache = null;
+    h.reviewSearch.mockImplementation(() => new Promise(() => {})); // never settles
+    show();
+    await settled();
+    const p = lastPanel();
+    await p._fire({ type: "deck:ready" });
+    await settled();
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({
+      requests: [], issueCount: 0, enabled: true, loading: true, stale: false,
+    });
+  });
+
+  // A first search that fails leaves the cache null and `stale` set. That pair
+  // must read as "couldn't check", not as a search still running — the webview
+  // would otherwise shimmer forever waiting on something that already gave up.
+  it("stops claiming to be loading once the first search has failed", async () => {
+    h.reviewCache = null;
+    h.reviewSearch.mockResolvedValue(null);
+    const p = await showAndWarm();
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({
+      requests: [], enabled: true, loading: false, stale: true,
+    });
+  });
+
   // Task 2 (blocking): toggling PR facts off while the Deck is open used to
   // leave the webview's last-posted rows exactly as they were — frozen, but
   // with Approve/Comment/Request changes still clickable, since nothing ever
