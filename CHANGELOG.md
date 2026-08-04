@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Opening a task into a saved workspace could add a folder the workspace already
+  reached.** The guard compared repo **names**, which cannot see a candidate nested
+  inside a root whose name matches nothing — a workspace rooted at the repos' parent
+  directory, or a root you renamed. A worktree path is never name-equal to its repo's
+  root in that setup, so each launch appended another root; one real workspace grew
+  from 2 folders to 5, with a single repo appearing three times. This is prevention
+  only — it does not repair a workspace file an older version already polluted, so if
+  yours has grown this way you'll need to remove the extra roots yourself.
+- **A workspace folder pointing at one of our git-worktree folders
+  (`<repo>/.claude/worktrees/<TICKET-KEY>`) was mistaken for a repo of its own,** and the
+  next launch then created a worktree *inside* that worktree — compounding with every
+  task after. The folder's basename is a ticket key and its `.git` is a pointer **file**
+  rather than a directory, which was enough to pass the is-this-a-git-repo check. As
+  with the fix above, this prevents new phantom-repo folders from being added; a
+  workspace file that already has one still needs a manual edit.
+
 ## [0.1.50] — 2026-08-03
 
 ### Fixed
