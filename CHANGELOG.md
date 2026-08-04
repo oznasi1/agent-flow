@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Deck: one card per agent.** The In-flight board now opens with a card per
+  Claude Code session, showing the repo, ticket and PR it belongs to, and bucketed
+  by that session's own state — two agents in one worktree can sit in two
+  different columns. **Open** and **Diff** act on the agent's own directory. The
+  old per-workspace grouping is still there behind the header's **Workspaces**
+  control, and your choice persists (`agentFlow.deckGrouping`,
+  `src/webview/deckCards.ts`, `src/webview/DeckApp.tsx`).
+- **Deck: runs retire themselves.** A record is deleted once its directories are
+  gone, once it has been landed for `agentFlow.retireFinishedAfterHours` with no
+  agent in it, or once an untracked session passes
+  `agentFlow.retireAbandonedAfterDays`. Uncommitted or unpushed work always
+  blocks it, and only Agent Flow's own pointer is ever deleted — never a worktree,
+  a branch, or a commit. **Clear stale** in the header does it on demand
+  (`src/engine/retire.ts`, `src/deckView.ts`).
+
 ## [0.1.57] — 2026-08-04
 
 ### Added
