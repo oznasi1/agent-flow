@@ -7,7 +7,7 @@
 
 The Deck card's **Diff** button ([DeckApp.tsx:293](../../../src/webview/DeckApp.tsx#L293)) sends
 `deck:inspect` with `action: "diff"`. The host handler
-([deckView.ts:802-832](../../../src/deckView.ts#L802-L832)) concatenates `taskDiff()` across every
+([deckView.ts:854-884](../../../src/deckView.ts#L854-L884)) concatenates `taskDiff()` across every
 repo in the run and opens the result as one untitled text document with `language: "diff"`.
 
 That gives a single flat wall of unified patch. There is no file list, no side-by-side view, no way
@@ -78,8 +78,9 @@ it away. Two additions expose what the multi-diff editor needs:
   it, so the two cannot drift. It returns a usable ref rather than `""` so every caller has
   something it can hand straight to `git show`.
 - **`taskChangedFiles(repoPath): ChangedFile[]`** — `git diff --name-status -M <base>` parsed into
-  `{ status, path, oldPath? }`. `-M` matters: without it a rename arrives as an unrelated add plus
-  delete, which reads as two changes in the file tree instead of one.
+  `{ status, path, oldPath?, binary }`. `-M` matters: without it a rename arrives as an unrelated
+  add plus delete, which reads as two changes in the file tree instead of one. `binary` comes from a
+  second `--numstat` pass read positionally, since both commands emit their rows in the same order.
 
 ### Status to tuple
 
@@ -124,7 +125,7 @@ the left side, so binaries are filtered out of the resource list. If binaries we
 in the run, the toast says so rather than opening an empty editor.
 
 **No changes.** Unchanged from today: the `No changes to show for <key>.` info toast at
-[deckView.ts:827](../../../src/deckView.ts#L827).
+[deckView.ts:879](../../../src/deckView.ts#L879).
 
 **No merge-base.** `taskDiffBase` returns `"HEAD"` on a repo with no resolvable default remote ref,
 the same degradation `taskDiff` already makes with its `from || "HEAD"`. The left side then reads
@@ -140,7 +141,7 @@ lines 90.
 - **[test/unit/engine/git.test.ts](../../../test/unit/engine/git.test.ts)** — `taskChangedFiles`
   against temp repos covering add, delete, modify, and rename; the committed-work case `taskDiff`
   already guards; and the no-merge-base degradation. `taskDiffBase` returning a sha and returning
-  `""`.
+  `"HEAD"`.
 - **[test/unit/deckView.test.ts](../../../test/unit/deckView.test.ts)** — `inspect(key, "diff")`
   invokes `executeCommand("vscode.changes", …)` with the expected title and tuple shape; falls back
   to `openTextDocument` when the command rejects; toasts when there is nothing to show; toasts when

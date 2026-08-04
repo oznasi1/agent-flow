@@ -27,7 +27,7 @@
 | File | Responsibility |
 | --- | --- |
 | `src/engine/git.ts` (modify) | All git shelling. Gains `taskDiffBase`, `taskChangedFiles`, `showFileAtRef`, and an untrimmed `gitRaw`. |
-| `src/engine/diffView.ts` (create) | Everything VS Code-facing about the diff: the URI scheme, the content provider, and `openTaskDiff`. Kept out of `deckView.ts`, which is already 961 lines. |
+| `src/engine/diffView.ts` (create) | Everything VS Code-facing about the diff: the URI scheme, the content provider, and `openTaskDiff`. Kept out of `deckView.ts`, which is already 1013 lines. |
 | `src/extension.ts` (modify) | Registers the content provider as a disposable. |
 | `src/deckView.ts` (modify) | `inspect()` calls `openTaskDiff` and maps its outcome to a toast or the fallback document. |
 | `test/_mocks/vscode.ts` (modify) | Gains `Uri.from` and `workspace.registerTextDocumentContentProvider`. |
@@ -706,9 +706,9 @@ git commit -m "feat(deck): assemble a task's changes for the multi-file diff edi
 ### Task 4: Wire the Deck's Diff button to it
 
 **Files:**
-- Modify: `src/deckView.ts` — the `inspect` method at lines 802-832, and the import at line 13
+- Modify: `src/deckView.ts` — the `inspect` method at lines 854-884, and the import at line 13
 - Modify: `src/webview/DeckApp.tsx:293` — the button tooltip
-- Test: `test/unit/deckView.test.ts` — the three existing diff tests at lines 409-442, plus new ones
+- Test: `test/unit/deckView.test.ts` — the three existing diff tests (search for `inspect diff`), plus new ones
 
 **Interfaces:**
 - Consumes: `openTaskDiff` and `DiffOutcome` from Task 3; the existing `taskDiff` from `./engine/git`.
@@ -716,15 +716,15 @@ git commit -m "feat(deck): assemble a task's changes for the multi-file diff edi
 
 **Background the implementer needs:**
 
-`inspect()` handles both the `open` and `diff` actions. Only the `diff` half changes — everything from the `// diff —` comment at line 818 to the end of the method.
+`inspect()` handles both the `open` and `diff` actions. Only the `diff` half changes — everything from the `// diff —` comment at line 870 to the end of the method.
 
 The flat-patch document is *kept*, but only as the `unsupported` fallback. It is not exposed in the UI: one button, one behavior, with the old rendering appearing only where the new one cannot run.
 
 Three existing tests in `test/unit/deckView.test.ts` assert the old behavior and must be reworked rather than deleted — the fallback path still needs coverage:
 
-- `"inspect diff on a repo with no changes toasts instead of opening a doc"` (line 409) still holds, but the reason it passes changes: `openTaskDiff` returns `"empty"` because the mocked `taskChangedFiles` returns nothing.
-- `"inspect diff opens the task's whole diff as a read-only diff document"` (line 418) becomes the fallback test — force `commands.executeCommand` to reject, then assert the document still opens.
-- `"labels each repo's chunk when a run spans more than one"` (line 429) is about the flat document's `# reponame` headers, which now only exist in the fallback. Force the rejection there too.
+- `"inspect diff on a repo with no changes toasts instead of opening a doc"` still holds, but the reason it passes changes: `openTaskDiff` returns `"empty"` because the mocked `taskChangedFiles` returns nothing.
+- `"inspect diff opens the task's whole diff as a read-only diff document"` becomes the fallback test — force `commands.executeCommand` to reject, then assert the document still opens.
+- `"labels each repo's chunk when a run spans more than one"` is about the flat document's `# reponame` headers, which now only exist in the fallback. Force the rejection there too.
 
 The suite's hoisted mock block (`const h = vi.hoisted(...)` near the top) already stubs `taskDiff`; add `taskChangedFiles` and `taskDiffBase` beside it and include them in whichever `vi.mock("../../src/engine/git", ...)` factory the file already declares.
 
@@ -739,7 +739,7 @@ Add `taskChangedFiles` and `taskDiffBase` to the hoisted block in `test/unit/dec
 
 with `import type { ChangedFile } from "../../src/engine/git";` added to the imports, `commands` added to the `../_mocks/vscode` import, and both names added to the existing `vi.mock` factory for `../../src/engine/git`.
 
-Replace the two tests at lines 418-442 and add the rest:
+Replace those last two tests and add the rest:
 
 ```ts
   it("inspect diff opens the native multi-file editor titled with the run key", async () => {
@@ -821,7 +821,7 @@ import { currentBranch, prEligible, repoRoot, taskDiff } from "./engine/git";
 import { openTaskDiff } from "./engine/diffView";
 ```
 
-Replace everything from line 818 (`// diff — ...`) to line 832 (the closing `}` of `inspect`) with:
+Replace everything from line 870 (`// diff — ...`) to line 884 (the closing `}` of `inspect`) with:
 
 ```ts
     // diff — everything this task changed, committed work included, in the editor's
