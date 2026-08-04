@@ -70,8 +70,17 @@ const h = vi.hoisted(() => ({
     ok: true,
     runKey: "review-aws-ops-8491",
   })),
-  existsSync: vi.fn((_p: string) => false),
+  // True by default, unlike every other stub here: the retire sweep asks
+  // existsSync whether a run's repo directories are still on disk, and a blanket
+  // false would make every fixture run "unreachable" — retiring the very cards
+  // these tests assert on. A test that needs a path *missing* says so per case.
+  existsSync: vi.fn((_p: string) => true),
   readFileSync: vi.fn((_p: string, _e?: string) => ""),
+  // Per-repo git state for the review-run sweep. Clean and pushed, so the veto
+  // stays out of the way unless a test asks for it.
+  gitState: vi.fn((name: string, path: string) => ({
+    name, path, branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0,
+  })),
   // Local cards (Task 11): the branch `currentBranch` reports for /r/centaur —
   // steerable per test, unlike repoRoot below, because the branch is exactly the
   // thing a local card's ticket inference and "no card twice" tests need to vary.
@@ -105,11 +114,16 @@ vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn() }));
 // prEligible: a faithful-enough stand-in for the real branch-vs-origin/HEAD
 // check (Task 2) — "master" plays the role of "this repo's default branch" so
 // a test can choose the answer just by naming a branch, without a real repo.
+// gitState: the review-run sweep's only source of the dirty/unpushed veto. This
+// mock replaces engine/git wholesale, so an unstubbed gitState would be
+// `undefined` at runtime the moment the sweep calls it. Clean by default —
+// a test that wants the veto to bite steers h.gitState.
 vi.mock("../../src/engine/git", () => ({
   taskDiff: h.taskDiff,
   repoRoot: (p: string) => p,
   currentBranch: (p: string) => (p === "/r/centaur" ? h.branch : "main"),
   prEligible: (r: { isGit: boolean; branch?: string }) => r.isGit && !!r.branch && r.branch !== "master",
+  gitState: (name: string, path: string) => h.gitState(name, path),
 }));
 // groupByPlace and canon stay real — only the two functions that touch the real
 // filesystem (~/.claude/sessions) are replaced.
@@ -188,6 +202,12 @@ vi.mock("../../src/config", async (importActual) => {
       // reviewRequestModes / reviewRequestMode }) actually reaches launchReviewFor.
       reviewRequestModes: actual.getConfig().reviewRequestModes,
       reviewRequestMode: actual.getConfig().reviewRequestMode,
+      // Same reason: the retire sweep reads both windows, and the grouping is a
+      // persisted setting — a test steers all three through setConfig, so they
+      // must come from the real getConfig() rather than being frozen here.
+      deckGrouping: actual.getConfig().deckGrouping,
+      retireFinishedAfterHours: actual.getConfig().retireFinishedAfterHours,
+      retireAbandonedAfterDays: actual.getConfig().retireAbandonedAfterDays,
     }),
   };
 });
@@ -210,12 +230,15 @@ import { DeckPanel } from "../../src/deckView";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
 import { JiraAuthError } from "../../src/jira/client";
 
+// createdAt is *now*, not the epoch: a run minted in 1970 is older than any
+// abandonment window, so the retire sweep would carry off every fixture that
+// has no ticket. A test about an old run gives its own createdAt.
 const mkRun = (over: Partial<Run> = {}): Run => ({
-  key: "ASM-1", summary: "do it", url: "https://jira/ASM-1", createdAt: 1, mode: "per-window",
+  key: "ASM-1", summary: "do it", url: "https://jira/ASM-1", createdAt: Date.now(), mode: "per-window",
   repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }], briefPaths: [], ...over,
 });
-const statusFor = (run: Run): RunStatus => ({
-  run, column: "progress", jiraStatus: null, jiraCategory: null, repos: [],
+const statusFor = (run: Run, jiraCategory: string | null = null): RunStatus => ({
+  run, column: "progress", jiraStatus: null, jiraCategory, repos: [],
   agent: { state: "unknown", lastActivityMs: null, slug: null }, windowOpen: false, prs: {}, agents: [],
 });
 const reviewFixture = (): ReviewRequest => ({
@@ -272,7 +295,12 @@ beforeEach(() => {
   h.prReviewAutoFix = false;
   h.seedAgent = true;
   h.taskDiff.mockClear().mockReturnValue("");
-  h.buildRunStatus.mockReset().mockImplementation((i: { run: Run }) => statusFor(i.run));
+  // Threads the Jira answer through the way the real buildRunStatus does. The
+  // retire sweep reads `status.jiraCategory`, so a stub that dropped it would
+  // make "this ticket is done" untestable from the outside.
+  h.buildRunStatus.mockReset().mockImplementation(
+    (i: { run: Run; jira: { category: string | null } | null }) => statusFor(i.run, i.jira?.category ?? null),
+  );
   h.removeRun.mockClear();
   h.writeRun.mockClear();
   h.getStatus.mockClear().mockResolvedValue({ status: "In Review", category: "indeterminate" });
@@ -293,8 +321,11 @@ beforeEach(() => {
   h.openSessions = [];
   h.sessionActivity.mockClear().mockReturnValue({ state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" });
   h.launchReview.mockClear().mockResolvedValue({ ok: true, runKey: "review-aws-ops-8491" });
-  h.existsSync.mockClear().mockReturnValue(false);
+  h.existsSync.mockClear().mockReturnValue(true);
   h.readFileSync.mockClear().mockReturnValue("");
+  h.gitState.mockClear().mockImplementation((name: string, path: string) => ({
+    name, path, branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0,
+  }));
   h.reviewWrites = false;
   h.stampLabelOnWrite = true;
   h.reviewSubmit.mockClear().mockResolvedValue({ ok: true });
@@ -764,6 +795,93 @@ describe("DeckPanel open agents", () => {
     await settled();
     const built = builtLocal();
     expect(built.agents.map((a) => a.repo)).toEqual([built.run.repos[0].name]);
+  });
+});
+
+describe("retire sweep", () => {
+  /** The cards on the last board the panel posted. */
+  const lastRuns = (): { run: Run }[] =>
+    posts(lastPanel()).filter((m) => m.type === "deck:runs").at(-1)!.runs;
+  /** Authed, so a ticket's Jira category actually reaches the sweep. */
+  const sweep = async () => {
+    show(true);
+    await settled();
+  };
+
+  it("drops an unreachable run from the board and deletes its record and PR cache", async () => {
+    h.runs = [mkRun({ key: "ASM-GONE", repos: [{ name: "api", path: "/gone/api", isGit: true, branch: "b" }] })];
+    h.existsSync.mockImplementation((p: string) => !p.startsWith("/gone"));
+    await sweep();
+    expect(lastRuns().map((r) => r.run.key)).not.toContain("ASM-GONE");
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "ASM-GONE");
+    expect(h.removePrEntries).toHaveBeenCalledWith(expect.any(String), "ASM-GONE");
+  });
+
+  it("stamps a landed run, keeps rendering it, and does not delete it", async () => {
+    h.runs = [mkRun({ key: "ASM-DONE" })];
+    h.getStatus.mockResolvedValue({ status: "Done", category: "done" });
+    await sweep();
+    expect(h.writeRun).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ key: "ASM-DONE", finishedAt: expect.any(Number) }),
+    );
+    expect(h.removeRun).not.toHaveBeenCalled();
+    expect(lastRuns().map((r) => r.run.key)).toContain("ASM-DONE");
+  });
+
+  it("retires a landed run once its stamp is older than the window", async () => {
+    setConfig({ retireFinishedAfterHours: 1 });
+    h.runs = [mkRun({ key: "ASM-OLD", finishedAt: Date.now() - 2 * 3_600_000 })];
+    h.getStatus.mockResolvedValue({ status: "Done", category: "done" });
+    await sweep();
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "ASM-OLD");
+    expect(lastRuns().map((r) => r.run.key)).not.toContain("ASM-OLD");
+  });
+
+  it("clears the stamp when a run stops being finished", async () => {
+    h.runs = [mkRun({ key: "ASM-BACK", finishedAt: Date.now() - 3_600_000 })];
+    await sweep();
+    const written = h.writeRun.mock.calls.at(-1)![1] as Run;
+    expect(written.key).toBe("ASM-BACK");
+    expect("finishedAt" in written).toBe(false);
+    expect(h.removeRun).not.toHaveBeenCalled();
+  });
+
+  it("still sees open sessions with the Open agents toggle off, so it cannot retire live work", async () => {
+    h.openAgents = false;
+    h.runs = [mkRun({ key: "ASM-LIVE", repos: [{ name: "api", path: "/repos/api", isGit: true, branch: "b" }] })];
+    h.openSessions = [sess({ pid: 3, sessionId: "s1", cwd: "/repos/api", startedAt: 1, name: "api-1a" })];
+    h.existsSync.mockReturnValue(false); // rule 1 would fire but for the live session
+    await sweep();
+    expect(h.removeRun).not.toHaveBeenCalled();
+    // The toggle still does its own job: no agents are attached to the card.
+    expect(builtFor("ASM-LIVE").agents).toEqual([]);
+  });
+
+  it("never writes a record for a local card, which has none on disk", async () => {
+    h.runs = [];
+    h.openSessions = [sess({ pid: 4, sessionId: "s2", cwd: "/r/loose", startedAt: 1, name: "loose-1a" })];
+    await sweep();
+    expect(h.writeRun).not.toHaveBeenCalled();
+    expect(h.removeRun).not.toHaveBeenCalled();
+  });
+
+  it("sweeps review runs, which never render as cards", async () => {
+    h.runs = [mkRun({ key: "review-svc-1", kind: "review", url: "https://github.com/o/r/pull/1",
+      repos: [{ name: "svc", path: "/gone/svc", isGit: true, branch: "b" }] })];
+    h.existsSync.mockReturnValue(false);
+    await sweep();
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "review-svc-1");
+  });
+
+  it("spares a review run whose worktree still holds unpushed commits", async () => {
+    h.runs = [mkRun({ key: "review-svc-2", kind: "review", url: "https://github.com/o/r/pull/2",
+      createdAt: 1, repos: [{ name: "svc", path: "/r/review-svc-2", isGit: true, branch: "b" }] })];
+    h.gitState.mockImplementation((name: string, path: string) => ({
+      name, path, branch: "b", dirty: false, ahead: 2, added: 0, removed: 0, files: 0,
+    }));
+    await sweep();
+    expect(h.removeRun).not.toHaveBeenCalled();
   });
 });
 

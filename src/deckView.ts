@@ -10,7 +10,8 @@ import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
 import { createWorktrees } from "./engine/worktree";
-import { currentBranch, prEligible, repoRoot, taskDiff } from "./engine/git";
+import { currentBranch, gitState, prEligible, repoRoot, taskDiff } from "./engine/git";
+import { RetireVerdict, retireVerdict } from "./engine/retire";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
@@ -24,7 +25,7 @@ import { inferTicket, localRunFor } from "./engine/localRuns";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity, UNKNOWN_ACTIVITY } from "./engine/transcript";
 import { canon } from "./engine/paths";
-import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PrEntry, PrEntryMap, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
+import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PrEntry, PrEntryMap, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
 
 const POLL_MS = 6000;
 const JIRA_TTL_MS = 30_000;
@@ -591,9 +592,12 @@ export class DeckPanel {
     // Every Claude Code session open on this machine, grouped by the directory it
     // runs in. A place is claimed by at most one tracked run; Task 11 turns what
     // is left into cards of its own.
-    const places = this.openAgents
-      ? groupByPlace(readOpenSessions(defaultSessionsDir()))
-      : new Map<string, OpenSession[]>();
+    // Read unconditionally: `openAgents` is a *display* toggle, but the retire
+    // sweep must never mistake "not showing agents" for "no agent is running" —
+    // that would retire a run with somebody actively working in it.
+    const allPlaces = groupByPlace(readOpenSessions(defaultSessionsDir()));
+    const places = this.openAgents ? allPlaces : new Map<string, OpenSession[]>();
+    const livePlaces = new Set(allPlaces.keys());
     const claimed = new Set<string>();
     const agentsByKey = new Map<string, CardAgent[]>();
     for (const run of tracked) {
@@ -674,13 +678,108 @@ export class DeckPanel {
           }
         }
       }
-      out.push(buildRunStatus({
+      const status = buildRunStatus({
         run, jira, projectsRoot, nowMs: now,
         liveSignal: this.liveSignal, openIdentities, prs,
         agents: agentsByKey.get(run.key) ?? [],
-      }));
+      });
+      // A local card has no record on disk — `removeRun` would be a no-op but
+      // `writeRun` would *create* one, promoting a card the user never tracked.
+      if (runKind(run) === "local") {
+        out.push(status);
+        continue;
+      }
+      if (!this.applyVerdict(run, this.verdictFor(status, livePlaces, now))) out.push(status);
     }
+    this.sweepReviewRuns(livePlaces, now);
     return out;
+  }
+
+  /** Apply one verdict. Returns true when the run should leave the board. */
+  private applyVerdict(run: Run, v: RetireVerdict): boolean {
+    const dir = defaultRunsDir();
+    switch (v.action) {
+      case "retire":
+        removeRun(dir, run.key);
+        removePrEntries(defaultPrFactsDir(), run.key);
+        // Any fetch already in flight belongs to the incarnation just deleted.
+        this.prEpoch.set(run.key, (this.prEpoch.get(run.key) ?? 0) + 1);
+        this.log(`deck: retired ${run.key} (${v.reason})`);
+        return true;
+      case "stamp":
+        writeRun(dir, { ...run, finishedAt: v.finishedAt });
+        return false;
+      case "unstamp": {
+        const { finishedAt: _dropped, ...rest } = run;
+        writeRun(dir, rest);
+        return false;
+      }
+      default:
+        return false;
+    }
+  }
+
+  /** The verdict for one run. `overrideGates` ignores both time windows — that is
+   * what Clear stale means, and the counting pass uses it too. */
+  private verdictFor(
+    s: RunStatus,
+    livePlaces: ReadonlySet<string>,
+    nowMs: number,
+    overrideGates = false,
+  ): RetireVerdict {
+    const cfg = getConfig();
+    return retireVerdict({
+      run: s.run,
+      repos: s.repos,
+      jiraCategory: s.jiraCategory,
+      prs: s.prs,
+      hasLiveSession: s.run.repos.some((r) => livePlaces.has(canon(r.path))),
+      prsAuthoritative: this.prFacts,
+      finishedAfterMs: overrideGates ? 0 : cfg.retireFinishedAfterHours * 3_600_000,
+      abandonedAfterMs: overrideGates ? 1 : cfg.retireAbandonedAfterDays * 86_400_000,
+      nowMs,
+      exists: (p) => fs.existsSync(p),
+    });
+  }
+
+  /**
+   * Review runs never render as cards, so they never get a `RunStatus` — but they
+   * still pile up in the store. Sweep them with the same rules against a
+   * git-only status: no Jira (a review run's url is a PR's) and no PR facts,
+   * which are never fetched for them. `prsAuthoritative: true` is honest here in
+   * a way it would not be for a tracked run: the map is *structurally* empty for
+   * a review run, not merely unfetched, so rule 3's "no PR" test is sound.
+   */
+  private sweepReviewRuns(livePlaces: ReadonlySet<string>, nowMs: number, overrideGates = false): void {
+    for (const run of readRuns(defaultRunsDir()).filter((r) => runKind(r) === "review")) {
+      // Computed once and passed in: the counting pass in Clear stale asks for a
+      // second verdict on the same run, and git state cannot change between them.
+      const repos = run.repos.map((r) => gitState(r.name, r.path));
+      this.applyVerdict(run, this.reviewVerdictFor(run, repos, livePlaces, nowMs, overrideGates));
+    }
+  }
+
+  /** One review run's verdict, against a git-only picture. */
+  private reviewVerdictFor(
+    run: Run,
+    repos: RepoGit[],
+    livePlaces: ReadonlySet<string>,
+    nowMs: number,
+    overrideGates: boolean,
+  ): RetireVerdict {
+    const cfg = getConfig();
+    return retireVerdict({
+      run,
+      repos,
+      jiraCategory: null,
+      prs: {},
+      hasLiveSession: run.repos.some((r) => livePlaces.has(canon(r.path))),
+      prsAuthoritative: true,
+      finishedAfterMs: overrideGates ? 0 : cfg.retireFinishedAfterHours * 3_600_000,
+      abandonedAfterMs: overrideGates ? 1 : cfg.retireAbandonedAfterDays * 86_400_000,
+      nowMs,
+      exists: (p) => fs.existsSync(p),
+    });
   }
 
   private async refresh(): Promise<void> {
