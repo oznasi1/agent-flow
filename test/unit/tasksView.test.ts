@@ -14,9 +14,17 @@ vi.mock("../../src/engine/workspace", () => ({
   openWorkspace: vi.fn(),
   listWorkspaceFiles: vi.fn(() => []),
   workspaceFolderPaths: vi.fn(() => []),
-  planWorkspaceMerge: vi.fn(() => ({ add: [], duplicates: [], present: [], ok: true })),
+  planWorkspaceMerge: vi.fn(() => ({ add: [], duplicates: [], redundant: [], present: [], ok: true })),
 }));
-vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn((s: unknown) => s) }));
+// repoRootOfWorktree is a pure path function (no fs/git side effects) — keep the real one
+// so the derivation tests exercise the genuine convention, and stub only createWorktrees,
+// the entry point that shells out to git. Same reasoning as the batchWorkspace mock below.
+vi.mock("../../src/engine/worktree", async () => {
+  const actual = await vi.importActual<typeof import("../../src/engine/worktree")>(
+    "../../src/engine/worktree",
+  );
+  return { ...actual, createWorktrees: vi.fn((s: unknown) => s) };
+});
 // folderName is a pure function (no vscode/fs side effects) — keep the real one so
 // batch's dedup candidates carry genuine key-qualified labels, and only stub the
 // window-opening entrypoint the tests actually drive. This runs the real batchWorkspace
@@ -1558,6 +1566,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
         duplicates: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1576,6 +1585,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [{ label: "infra", repoName: "infra", path: "/repos/infra" }],
         duplicates: [],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1596,6 +1606,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [{ label: "infra", repoName: "infra", path: "/repos/infra" }],
         duplicates: [],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1614,6 +1625,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [{ label: "infra", repoName: "infra", path: "/repos/infra" }],
         duplicates: [],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1642,6 +1654,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
         duplicates: [],
+        redundant: [],
         present: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service" }],
         ok: true,
       });
@@ -1667,6 +1680,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [{ label: "infra", repoName: "infra", path: "/repos/infra" }],
         duplicates: [],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1683,7 +1697,7 @@ describe("takeTask", () => {
 
     it("does not prompt when the workspace file can't be parsed", async () => {
       pickExisting();
-      vi.mocked(planWorkspaceMerge).mockReturnValue({ add: [], duplicates: [], present: [], ok: false });
+      vi.mocked(planWorkspaceMerge).mockReturnValue({ add: [], duplicates: [], redundant: [], present: [], ok: false });
       vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
@@ -1698,6 +1712,7 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
         duplicates: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1737,6 +1752,7 @@ describe("takeTask", () => {
           { label: "tooling", repoName: "tooling", path: "/repos/tooling" },
         ],
         duplicates: [],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -1768,6 +1784,7 @@ describe("takeTask", () => {
           { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/ASM-1" },
           { label: "web", repoName: "web", path: "/repos/web/.claude/worktrees/ASM-1" },
         ],
+        redundant: [],
         present: [],
         ok: true,
       });
@@ -2668,6 +2685,7 @@ describe("takeBatch", () => {
     vi.mocked(planWorkspaceMerge).mockReturnValue({
       add: [],
       duplicates: [{ label: "ASM-1-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+      redundant: [],
       present: [],
       ok: true,
     });
@@ -2703,6 +2721,7 @@ describe("takeBatch", () => {
         { label: "ASM-2-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-2" },
       ],
       duplicates: [],
+      redundant: [],
       present: [],
       ok: true,
     });
@@ -2736,6 +2755,7 @@ describe("takeBatch", () => {
     vi.mocked(planWorkspaceMerge).mockReturnValue({
       add: [{ label: "ASM-1-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
       duplicates: [],
+      redundant: [],
       present: [],
       ok: true,
     });
