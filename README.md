@@ -39,8 +39,10 @@ orchestrate, not ready to set up.
   `<KEY>.code-workspace` (or one window per repo, or a per-task git worktree), and pre-fills
   the Claude Code panel with your chosen prompt mode (you press Enter to start).
 - **Address PR** — once a task reaches your PR-review status (default `PR initiated`), an
-  **Address PR** button appears on the card. It kicks off an agent **in a worktree** that finds
-  the task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
+  **Address PR** button appears on the card. From the sidebar's task card it kicks off an agent
+  **in a fresh worktree**; from a Deck card it re-seeds the workspace that run already has
+  instead, asking nothing, since the run was launched with one. Either way the agent finds the
+  task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
   for your fixes — then, by default, starts implementing the requested changes (toggle with
   `agentFlow.prReviewAutoFix`).
 - **Review queue** — a strip on the Deck lists every open PR that asks for *your* review,
@@ -275,7 +277,7 @@ repo, so they never get committed.
 | `agentFlow.reviewRequests` | `true` | Show the Deck's review-requests strip: open GitHub PRs that ask for your review. |
 | `agentFlow.reviewRequestsTtlSeconds` | `300` | How stale the cached review queue may be before a refetch (minimum 60). |
 | `agentFlow.reviewWrites` | `false` | Allow submitting approve / comment / request changes to GitHub from the Deck. |
-| `agentFlow.reviewRequestModes` | *(one built-in mode)* | Seed modes offered by **Review with agent**. Add your own — e.g. separate backend and frontend review modes — and clicking asks which to use. |
+| `agentFlow.reviewRequestModes` | *(one built-in mode)* | Seed modes offered by **Review with agent**, layered over the built-in one. Add your own — e.g. separate backend and frontend review modes — and clicking asks which to use. |
 | `agentFlow.reviewRequestMode` | `ask` | Pin one review mode by `id` to skip the question. |
 | `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow Deck opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
 | `agentFlow.environments` | `["dev", "staging", "production"]` | Environments offered by the **Verify on an environment** Explore action. The picker also offers **Custom…** for a one-off. |
@@ -284,18 +286,23 @@ Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
 `agentFlow.exploreMode`, `agentFlow.explorePrompts.*`, `agentFlow.prReviewPrompt`, and
 `agentFlow.worktree` — see the Settings UI. Taking a task asks how the agent should
 start: **Plan first**, **Implementation**, **Test-driven**, **Investigate &
-root-cause**, **Orchestrator**, or **Refine the ticket**. Edit those prompts, or add
-your own mode, under `agentFlow.promptModes`; pin one with `agentFlow.taskMode` to skip
-the question. **Explore** asks what kind of session to start: **Open a Jira ticket**, **Enhance
+root-cause**, **Orchestrator**, or **Refine the ticket**. Edit those prompts, or add your own mode, under
+`agentFlow.promptModes`; pin one with `agentFlow.taskMode` to skip the question.
+Your entries layer over the built-in modes rather than replacing them — reuse a
+built-in `id` to override just the fields you set, and add `"hidden": true` to an
+entry to drop that built-in — so modes added in a later release still reach you. **Explore** asks what kind of session to start: **Open a Jira ticket**, **Enhance
 knowledge / flow**, **Debug**, **General**, or **Verify on an environment**. Verify also
 asks which environment to check the repos you picked against — from
 `agentFlow.environments`, or a one-off you type — and seeds a read-only prompt that
 inspects their logs, error rates, metrics and traces, and deployed version there. Edit any Explore prompt
 under `agentFlow.explorePrompts.*`, or pin one action with `agentFlow.exploreMode`.
 **Review with agent** works the same way on its own list: one **Full review** mode ships,
-and once you add a second — a backend-services reviewer and a frontend one, say — clicking
-asks which to seed. Pin one with `agentFlow.reviewRequestMode`. The **Address PR** kick-off
-always runs in a worktree. Per-task worktrees are created inside each repo at
+and once you add one of your own — a backend-services reviewer, say — clicking asks which to
+seed, since your entry joins **Full review** rather than replacing it. Pin one with
+`agentFlow.reviewRequestMode`. The sidebar's **Address PR**
+kick-off always runs in a fresh worktree; a Deck card's re-seeds that run's existing workspace
+in place instead — whatever `agentFlow.worktree` gave it when it was
+launched. Per-task worktrees are created inside each repo at
 `.claude/worktrees/<KEY>` (and git-excluded automatically).
 
 **Remote Control.** With `agentFlow.remoteControl` set to `on` or `ask`, the Claude Code

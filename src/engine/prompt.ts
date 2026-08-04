@@ -36,6 +36,21 @@ export function injectSlackDm(template: string, enabled: boolean): string {
   return enabled ? insertBeforeFiles(template, " " + SLACK_DM_SENTENCE) : template;
 }
 
+/** Appended to the PR-review prompt (just before {files}) when prReviewAutoFix is on. */
+export const PR_REVIEW_AUTOFIX_CLAUSE =
+  "If it's ready, go ahead and implement the requested changes on this branch so it's ready for me to review — " +
+  "do not push or merge without me.";
+
+/** Assemble the Address PR prompt: the configured base, with the auto-fix clause
+ * inserted just before the trailing {files} block when prReviewAutoFix is on. Lives
+ * here rather than in a view because two callers now need it — the sidebar's ticket
+ * kick-off and the Deck's re-seed of an already-launched run — and because the clause
+ * is the same kind of thing as SLACK_DM_SENTENCE above: a fragment the code appends,
+ * not a setting default. */
+export function prReviewTemplate(prompt: string, autoFix: boolean): string {
+  return autoFix ? insertBeforeFiles(prompt, " " + PR_REVIEW_AUTOFIX_CLAUSE) : prompt;
+}
+
 /** Fill the Explore-only placeholders in a seeded template: `{services}` (the repos
  * picked for the session) and `{env}` (the environment, for actions that ask for
  * one). Substituted here rather than in renderPrompt so no other prompt path has to

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.51] — 2026-08-04
+
 ### Added
 
 - **The sidebar header mark doubles as a live gauge.** The dot-ring lights one outer
@@ -35,6 +37,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sidebar's and the Deck's control language.
 - **New store tile and wordmark.** The README leads with the new lockup and shows
   the branded UI throughout.
+
+## [0.1.50] — 2026-08-03
+
+### Fixed
+
+- `agentFlow.promptModes` and `agentFlow.reviewRequestModes` now **layer over**
+  the built-in modes instead of replacing them. A customized list used to freeze
+  at the modes that shipped the day it was written, so every mode added later —
+  **Test-driven**, **Investigate & root-cause**, **Orchestrator**, **Refine the
+  ticket** — was invisible, with nothing in the UI to suggest one was missing.
+  Reuse a built-in `id` to override only the fields you set, use a new `id` to
+  add a mode of your own, and `{"id": "tdd", "hidden": true}` to drop a built-in.
+  Modes you don't list are appended, so future built-ins reach you too. If your
+  list omitted built-ins, a one-time notification offers to hide the newcomers
+  and keep the picker you had. If your `reviewRequestModes` held a single mode,
+  **Review with agent** now asks which mode to use, because the built-in
+  **Full review** is offered alongside yours — **Hide the new ones** (or a
+  `hidden: true` entry) restores the single-click launch.
+
+## [0.1.49] — 2026-08-03
+
+### Added
+
+- **Address PR now appears on Deck cards too.** Once a card's Jira status matches
+  `agentFlow.prReviewStatus`, an **Address PR** button shows up next to Open, the same
+  as the sidebar's task card. The sidebar's version acts on a bare ticket — nothing is
+  on disk yet, so it has to read Jira, ask where to open, ask which repos, and make a
+  worktree. A Deck card already has all three: its own repos, its own workspace, its
+  own brief. So its Address PR asks nothing and just re-seeds the workspace you already
+  have with the PR-review prompt, in place.
 
 ## [0.1.48] — 2026-08-03
 

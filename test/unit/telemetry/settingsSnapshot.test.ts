@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { AgentFlowConfig, DEFAULT_REVIEW_REQUEST_MODES, getConfig } from "../../../src/config";
+import { AgentFlowConfig, DEFAULT_PROMPT_MODES, DEFAULT_REVIEW_REQUEST_MODES, getConfig } from "../../../src/config";
 import {
   DEFAULT_FILTER_VALUES, EXPLORE_MODES, OPEN_IN_MODES, REMOTE_CONTROL_MODES,
   settingsSnapshot, WORKSPACE_MODES, WORKTREE_MODES,
 } from "../../../src/telemetry/settingsSnapshot";
 import { STOCK_REVIEW_MODES } from "../../../src/telemetry/events";
+import { setConfig } from "../../_mocks/vscode";
 import pkg from "../../../package.json";
 
 describe("settingsSnapshot", () => {
@@ -18,7 +19,9 @@ describe("settingsSnapshot", () => {
     expect(s.default_filter).toBe("mysprint");
     expect(s.task_mode).toBe("ask");
     expect(s.prompt_modes_count).toBe(6);
-    expect(s.prompt_modes_customized).toBe(false);
+    expect(s.prompt_modes_overridden).toBe(0);
+    expect(s.prompt_modes_custom).toBe(0);
+    expect(s.prompt_modes_hidden).toBe(0);
     expect(s.explore_prompts_customized).toBe(false);
     expect(s.pr_review_prompt_customized).toBe(false);
     expect(s.open_agents).toBe(true);
@@ -26,7 +29,9 @@ describe("settingsSnapshot", () => {
     expect(s.repo_blocklist_count).toBe(0);
     expect(s.review_mode).toBe("ask");
     expect(s.review_modes_count).toBe(1);
-    expect(s.review_modes_customized).toBe(false);
+    expect(s.review_modes_overridden).toBe(0);
+    expect(s.review_modes_custom).toBe(0);
+    expect(s.review_modes_hidden).toBe(0);
   });
 
   it("collapses a user-authored taskMode id to 'custom'", () => {
@@ -50,7 +55,7 @@ describe("settingsSnapshot", () => {
     expect(settingsSnapshot({ ...getConfig(), reviewRequestMode: "full" }).review_mode).toBe("stock");
   });
 
-  it("flags customized review modes without revealing them", () => {
+  it("counts customized review modes without revealing them", () => {
     const cfg = {
       ...getConfig(),
       reviewRequestModes: [
@@ -59,15 +64,29 @@ describe("settingsSnapshot", () => {
       ],
     };
     const s = settingsSnapshot(cfg);
-    expect(s.review_modes_customized).toBe(true);
+    expect(s.review_modes_custom).toBe(2);
+    expect(s.review_modes_overridden).toBe(0);
+    // This cfg is hand-built, bypassing resolveModes — the real resolver would
+    // append the missing "full" built-in rather than list only these two
+    // customs, so "hidden: 1" alongside a resolved length of 2 is a state it
+    // could never actually produce. This pins modeCounts in isolation, not a
+    // reachable resolved list.
+    expect(s.review_modes_hidden).toBe(1);
     expect(s.review_modes_count).toBe(2);
     expect(JSON.stringify(s)).not.toContain("acme-");
   });
 
-  it("flags customized prompt modes without revealing them", () => {
+  it("counts customized prompt modes without revealing them", () => {
     const cfg = { ...getConfig(), promptModes: [{ id: "mine", label: "L", detail: "D", prompt: "P" }] };
     const s = settingsSnapshot(cfg);
-    expect(s.prompt_modes_customized).toBe(true);
+    expect(s.prompt_modes_custom).toBe(1);
+    expect(s.prompt_modes_overridden).toBe(0);
+    // Same as the review-modes case above: this hand-built cfg bypasses
+    // resolveModes, so "hidden: 6" (every built-in) alongside a resolved
+    // length of 1 is a state the real resolver could never produce — an
+    // all-hidden list falls back to the built-ins there. This pins modeCounts
+    // in isolation, not a reachable resolved list.
+    expect(s.prompt_modes_hidden).toBe(DEFAULT_PROMPT_MODES.length);
     expect(s.prompt_modes_count).toBe(1);
     expect(JSON.stringify(s)).not.toContain("mine");
   });
@@ -218,11 +237,69 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
 describe("events.ts ⇄ config.ts stock review mode ids", () => {
   // events.ts deliberately does not import config.ts (it must stay importable in
   // isolation — see its module doc comment), so STOCK_REVIEW_MODES is hand-
-  // duplicated there instead of derived from DEFAULT_REVIEW_REQUEST_MODES like
-  // STOCK_REVIEW_MODE_IDS is here. Nothing else catches the two drifting apart:
-  // if a second stock mode ships, an unpinned STOCK_REVIEW_MODES would still
-  // report "custom" for it. This test is that pin.
+  // duplicated there instead of derived from DEFAULT_REVIEW_REQUEST_MODES.
+  // Nothing else catches the two drifting apart: if a second stock mode ships,
+  // an unpinned STOCK_REVIEW_MODES would still report "custom" for it. This
+  // test is that pin.
   it("keeps STOCK_REVIEW_MODES equal to DEFAULT_REVIEW_REQUEST_MODES' ids", () => {
     expect([...STOCK_REVIEW_MODES]).toEqual(DEFAULT_REVIEW_REQUEST_MODES.map((m) => m.id));
+  });
+});
+
+describe("settingsSnapshot — mode counts", () => {
+  it("reports zeros for an untouched install", () => {
+    const s = settingsSnapshot(getConfig());
+    expect(s.prompt_modes_count).toBe(DEFAULT_PROMPT_MODES.length);
+    expect(s.prompt_modes_overridden).toBe(0);
+    expect(s.prompt_modes_custom).toBe(0);
+    expect(s.prompt_modes_hidden).toBe(0);
+    expect(s.review_modes_overridden).toBe(0);
+    expect(s.review_modes_custom).toBe(0);
+    expect(s.review_modes_hidden).toBe(0);
+  });
+
+  it("counts an overridden built-in, a custom mode and a hidden built-in", () => {
+    setConfig({
+      promptModes: [
+        { id: "plan", prompt: "mine {key}" },
+        { id: "spike", label: "Spike", prompt: "spike {key}" },
+        { id: "tdd", hidden: true },
+      ],
+    });
+    const s = settingsSnapshot(getConfig());
+    expect(s.prompt_modes_overridden).toBe(1);
+    expect(s.prompt_modes_custom).toBe(1);
+    expect(s.prompt_modes_hidden).toBe(1);
+    expect(s.prompt_modes_count).toBe(DEFAULT_PROMPT_MODES.length);
+  });
+
+  it("does not count a built-in restated verbatim as overridden", () => {
+    setConfig({ promptModes: [{ ...DEFAULT_PROMPT_MODES[0] }] });
+    const s = settingsSnapshot(getConfig());
+    expect(s.prompt_modes_overridden).toBe(0);
+    expect(s.prompt_modes_custom).toBe(0);
+  });
+
+  it("counts a detail-only override", () => {
+    setConfig({ promptModes: [{ id: "plan", detail: "my own hint" }] });
+    expect(settingsSnapshot(getConfig()).prompt_modes_overridden).toBe(1);
+  });
+
+  it("counts the review side independently", () => {
+    setConfig({
+      reviewRequestModes: [
+        { id: "backend", label: "Backend", prompt: "BE {number}" },
+        { id: "full", hidden: true },
+      ],
+    });
+    const s = settingsSnapshot(getConfig());
+    expect(s.review_modes_custom).toBe(1);
+    expect(s.review_modes_hidden).toBe(1);
+    expect(s.review_modes_overridden).toBe(0);
+  });
+
+  it("carries no label, detail or prompt text", () => {
+    setConfig({ promptModes: [{ id: "spike", label: "SECRET", detail: "SECRET", prompt: "SECRET" }] });
+    expect(JSON.stringify(settingsSnapshot(getConfig()))).not.toContain("SECRET");
   });
 });
