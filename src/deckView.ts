@@ -11,6 +11,7 @@ import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
 import { createWorktrees } from "./engine/worktree";
 import { currentBranch, prEligible, repoRoot, taskDiff } from "./engine/git";
+import { openTaskDiff } from "./engine/diffView";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
@@ -867,9 +868,22 @@ export class DeckPanel {
       if (!ok) this.toast("error", `Couldn't open ${key}.`);
       return;
     }
-    // diff — everything this task changed, committed work included, as a read-only
-    // diff document.
+    // diff — everything this task changed, committed work included, in the editor's
+    // own multi-file diff view.
     const repos = repoName ? run.repos.filter((r) => r.name === repoName) : run.repos;
+    const outcome = await openTaskDiff(`Changes in ${run.key}`, repos);
+    if (outcome === "opened") return;
+    if (outcome === "empty") {
+      this.toast("info", `No changes to show for ${key}.`);
+      return;
+    }
+    if (outcome === "binary-only") {
+      this.toast("info", `Only binary files changed for ${key}.`);
+      return;
+    }
+    // unsupported — `vscode.changes` is a built-in command rather than a typed API,
+    // so an editor that forked VS Code may not have it. The flat patch this used to
+    // always produce is a worse read, but it is far better than a dead button.
     const chunks: string[] = [];
     for (const r of repos) {
       const d = taskDiff(r.path);
