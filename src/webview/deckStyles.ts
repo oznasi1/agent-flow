@@ -51,6 +51,9 @@ export const DECK_CSS = `
   .ctls { display: inline-flex; flex: none; border: 1px solid var(--edge); border-radius: var(--r-ctl); overflow: hidden; }
   .ctls .ctl { border: 0; border-radius: 0; }
   .ctls .ctl + .ctl { box-shadow: inset 1px 0 0 var(--edge); }
+  /* .ctls clips its children against its own radius, which also clips an outward
+     focus ring drawn by :focus-visible. Draw it inside instead. */
+  .ctls .ctl:focus-visible { outline-offset: -2px; }
   .ctl { display: inline-flex; align-items: center; gap: 7px; height: 26px; cursor: pointer; user-select: none;
     font-size: var(--t-body); padding: 0 10px; border-radius: var(--r-ctl); white-space: nowrap;
     border: 1px solid var(--edge); background: transparent; color: var(--dim);
@@ -205,15 +208,21 @@ export const DECK_CSS = `
     background: color-mix(in srgb, var(--brand) 13%, transparent);
     border-color: color-mix(in srgb, var(--brand) 52%, transparent);
     color: color-mix(in srgb, var(--brand) 72%, var(--vscode-foreground)); }
-  .act.primary:hover { background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-    border-color: var(--vscode-button-background); }
+  /* Same hue, more of it — matching how .take and .btn.pri escalate on hover. The
+     ordinary primary stays teal under the pointer instead of swapping to the
+     theme's own button blue. */
+  .act.primary:hover { background: color-mix(in srgb, var(--brand) 22%, transparent);
+    border-color: color-mix(in srgb, var(--brand) 68%, transparent);
+    color: color-mix(in srgb, var(--brand) 84%, var(--vscode-foreground)); }
   /* The board's only colored call to action, on the only card that is asking for one.
      Outlined rather than filled on purpose: a theme owns charts.orange, and it ranges
      from pale amber to burnt sienna, so no fixed ink is legible on all of them. Mixing
      the label toward the theme's own foreground self-corrects — it darkens the orange on
-     a light theme and lightens it on a dark one, clearing 5:1 either way. Hover is
-     deliberately not overridden: every primary on the board fills with the theme's
-     button colors, so the attn card differs only at rest. */
+     a light theme and lightens it on a dark one, clearing 5:1 either way. This rule has
+     no :hover of its own, and its selector out-specifies .act.primary:hover (four class
+     steps against three), so hovering an attn card's primary keeps these rest colors
+     rather than picking up the ordinary primary's teal escalation — attn and ordinary
+     differ in hue, hovered or not. */
   .card.attn .act.primary { background: color-mix(in srgb, var(--c-attn) 12%, transparent);
     border-color: color-mix(in srgb, var(--c-attn) 60%, transparent);
     color: color-mix(in srgb, var(--c-attn) 78%, var(--vscode-foreground)); }

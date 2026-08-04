@@ -16,10 +16,11 @@ const INNER: [number, number][] = [
 const STATIC_LIT = 6;
 
 /**
- * The mark, doubling as a gauge. `live` is the number of Agent Flow windows open
- * right now; omit it (the host omits it when trackOpenWindows is off) to get the
- * static lockup. It never animates: the sidebar has no turn state, so a pulse
- * would imply activity this component cannot see.
+ * The mark, doubling as a gauge. `live` is the number of Agent Flow windows open,
+ * as of the host's last `state` or `tasks` post — it updates whenever the pool
+ * refreshes, not just at mount. Omit it (the host omits it when trackOpenWindows
+ * is off) to get the static lockup. It never animates: the sidebar has no turn
+ * state, so a pulse would imply activity this component cannot see.
  */
 export function GaugeMark({ live, size = 15 }: { live?: number; size?: number }): JSX.Element {
   const known = live !== undefined;

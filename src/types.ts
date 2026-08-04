@@ -340,7 +340,10 @@ export type OutboundMessage =
   // liveCount is absent when trackOpenWindows is off: the sidebar then shows the
   // static mark rather than claiming zero windows are open.
   | { type: "state"; authed: boolean; configured: boolean; project: string; me: string | null; prReviewStatus: string; filters: FilterVisibility; liveCount?: number }
-  | { type: "tasks"; filter: Filter; tasks: JiraTask[] }
+  // Recomputed on every pool refresh (same trackOpenWindows gate and liveWindows()
+  // source as `state`'s liveCount), so the header gauge doesn't go stale between
+  // `state` posts — it was previously a mount-time snapshot only.
+  | { type: "tasks"; filter: Filter; tasks: JiraTask[]; liveCount?: number }
   | { type: "detail"; key: string; descriptionText: string; inferred: string[]; repos: string[];
       // The components actually on the issue, spelled as Jira spells them, and the
       // repo → component map for every discovered repo. Together with `inferred`

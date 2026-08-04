@@ -202,6 +202,7 @@ export function App(): JSX.Element {
           setError(null);
           setFilter(m.filter);
           setTasks(m.tasks);
+          setLiveCount(m.liveCount);
           setExpanded(new Set());
           setBatchSelected(new Set());
           // Drop status selections that no longer exist in the fresh pool — otherwise

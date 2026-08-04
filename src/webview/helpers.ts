@@ -54,7 +54,7 @@ export function isPrReviewStatus(status: string, configured: string): boolean {
  * same visual position meant two things across two surfaces. Jira's statusCategory
  * is the only status axis the sidebar receives, so there are exactly three hues.
  */
-export function railClass(statusCategory: string | undefined): string {
+export function railClass(statusCategory: string | undefined): "s-new" | "s-progress" | "s-done" {
   if (statusCategory === "indeterminate") return "s-progress";
   if (statusCategory === "done") return "s-done";
   return "s-new";

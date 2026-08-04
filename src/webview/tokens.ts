@@ -51,10 +51,10 @@ export const TOKENS_CSS = `
 
   /* VS Code stamps the theme kind onto <body>, so the swap needs no JavaScript. */
   body.vscode-light { --brand: #157F76; --brand-ink: #ffffff; }
-  /* No high-contrast override: the CSS current-color keyword, used outside the
-     color property itself, would resolve a filled button's background to its
-     own label color. The hue already measures 7.10:1 on #000000 and 4.85:1 on
-     #ffffff, so it needs no opt-out. */
+  /* No high-contrast override: currentColor, used outside the color property
+     itself, would resolve a filled button's background to its own label color.
+     The hue already measures 7.10:1 on #000000 and 4.85:1 on #ffffff, so it
+     needs no opt-out. */
 `;
 
 // box-sizing and the reduced-motion query were common to all three surfaces;
@@ -78,6 +78,10 @@ export const BASE_CSS = `
 // signal nothing, and a filled pill next to a teal Take reads as two primaries.
 export const CONTROLS_CSS = `
   .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--edge); border-radius: var(--r-ctl); overflow: hidden; }
+  /* A real border, not the inset-shadow separator .ctl uses: that separator strands
+     itself at the start of a wrapped row (nothing to sit against), where a border
+     just doesn't render on an edge that isn't there. */
+  .seg > button:not(:first-child) { border-left: 1px solid var(--edge); }
   .seg > button { font: inherit; font-size: var(--t-body); height: 24px; padding: 0 10px;
     border: 0; border-radius: 0; background: transparent; color: var(--dim);
     cursor: pointer; white-space: nowrap;
@@ -85,5 +89,8 @@ export const CONTROLS_CSS = `
   .seg > button:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
   .seg > button[aria-pressed="true"] { color: var(--vscode-foreground); font-weight: 600;
     background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
+  /* .seg clips its children against its own radius, which also clips an outward
+     focus ring. Draw it inside instead — an invisible focus ring is not a focus ring. */
+  .seg > button:focus-visible { outline-offset: -2px; }
   .seg-label { font-size: var(--t-micro); color: var(--dim); margin-right: 2px; }
 `;

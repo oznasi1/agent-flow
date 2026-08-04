@@ -246,7 +246,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             }
             outgoing = sortBySavedOrder(tasks, this.savedOrder());
           }
-          this.post({ type: "tasks", filter: m.filter, tasks: outgoing });
+          this.post({ type: "tasks", filter: m.filter, tasks: outgoing,
+            liveCount: cfg.trackOpenWindows ? this.liveWindows().length : undefined });
           this.post({ type: "loading", loading: false });
           break;
         }

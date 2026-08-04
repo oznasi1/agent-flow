@@ -38,14 +38,15 @@ export const MARKETPLACE_CSS = `
   .pill { cursor: pointer; font-family: inherit; font-size: var(--t-body); padding: 4px 10px;
     border-radius: var(--r-ctl); border: 1px solid var(--edge); background: transparent; color: var(--dim); }
   .pill:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
-  .pill.on { color: var(--vscode-foreground); font-weight: 600; }
+  .pill.on { color: var(--vscode-foreground); font-weight: 600;
+    background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
   .pill .n { margin-left: 5px; font-family: var(--mono); font-size: var(--t-micro); color: var(--dim); }
   .pill.on .n { color: var(--vscode-foreground); }
 
   .srcs { display: flex; gap: 5px; flex-wrap: wrap; }
   .tag { font-size: 10px; padding: 1px 7px; border-radius: 20px; border: 1px solid var(--hair);
     color: var(--vscode-descriptionForeground); white-space: nowrap; }
-  .tag.ok { color: var(--vscode-charts-green, #4ac26b); }
+  .tag.ok { color: var(--c-done); }
   .tag.off { text-decoration: line-through; }
   .tag.bad { color: var(--vscode-errorForeground); border-color: var(--vscode-errorForeground); }
   .tag.dim { opacity: .8; }
@@ -141,7 +142,7 @@ export const MARKETPLACE_CSS = `
   .toasts { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; }
   .toast { padding: 8px 14px; border-radius: 6px; font-size: 12px; border: 1px solid var(--hair);
     background: var(--vscode-editorWidget-background); }
-  .toast.success { border-color: var(--vscode-charts-green, #4ac26b); }
+  .toast.success { border-color: var(--c-done); }
   .toast.error { border-color: var(--vscode-errorForeground); }
 
   .results::-webkit-scrollbar, .detail::-webkit-scrollbar { width: 9px; }

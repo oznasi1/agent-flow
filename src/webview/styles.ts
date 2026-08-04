@@ -9,7 +9,7 @@ export const CSS = `
   #root { padding: 8px 8px 20px; }
 
   .header { display: flex; align-items: center; gap: 8px; padding: 4px 4px 10px; }
-  .header .title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; }
+  .header .title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: var(--t-title); }
   .header .me { color: var(--vscode-descriptionForeground); font-size: 11px; margin-left: 8px; }
 
   /* The mark is the sidebar's status display: lit dots are open Agent Flow
@@ -20,14 +20,8 @@ export const CSS = `
   .gauge .unlit { fill: currentColor; opacity: .26; }
   .gauge .tex { fill: currentColor; opacity: .4; }
   /* The pool's one filled control is Take. Explore is the way out when no ticket
-     fits — useful, not primary — so it takes the secondary language. */
-  .explore { display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
-    font-size: var(--t-body); font-weight: 500; height: 24px; padding: 0 10px;
-    border-radius: var(--r-ctl); cursor: pointer;
-    border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
-    transition: background-color .12s ease, border-color .12s ease; }
-  .explore:hover { background: var(--vscode-toolbar-hoverBackground);
-    border-color: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); }
+     fits — useful, not primary — so it shares the secondary action language below
+     with Address PR and the sprint actions, rather than repeating it. */
   .explore svg { display: block; }
 
   .lenses { display: flex; flex-direction: column; gap: 6px; margin: 0 2px 10px; }
@@ -135,7 +129,7 @@ export const CSS = `
      means exactly one thing, and it is the Highest chip. */
   .status--new, .status--indeterminate, .status--done { color: var(--dim); }
   .spacer { flex: 1; }
-  .take { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+  .take { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-body); font-weight: 600;
     padding: 3px 11px 3px 9px; border-radius: var(--r-ctl); cursor: pointer; border: none;
     background: var(--brand); color: var(--brand-ink);
     transition: background .12s ease; }
@@ -145,15 +139,20 @@ export const CSS = `
   /* Right-aligned action cluster; wraps together to its own line if the row is tight */
   .card-actions { display: inline-flex; align-items: center; gap: 7px; margin-left: auto; }
 
-  /* Address PR gives up its green: green means Done on the Deck, and a PR waiting
-     on you is the opposite of done. */
-  .address-pr, .sprint-add, .sprint-remove {
+  /* One quiet secondary language for every non-Take action: Explore (the pool's
+     escape hatch), Address PR (which gives up its green — green means Done on the
+     Deck, and a PR waiting on you is the opposite of done) and the sprint actions.
+     Explore is the only one pushed to the row's far side; the other three are the
+     only ones that must never wrap their own label. */
+  .explore, .address-pr, .sprint-add, .sprint-remove {
     display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-body); font-weight: 500;
-    height: 24px; padding: 0 10px; border-radius: var(--r-ctl); cursor: pointer; white-space: nowrap;
+    height: 24px; padding: 0 10px; border-radius: var(--r-ctl); cursor: pointer;
     border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
     transition: background-color .12s ease, border-color .12s ease; }
+  .explore { margin-left: auto; }
+  .address-pr, .sprint-add, .sprint-remove { white-space: nowrap; }
   .sprint-remove { color: var(--dim); }
-  .address-pr:hover, .sprint-add:hover, .sprint-remove:hover {
+  .explore:hover, .address-pr:hover, .sprint-add:hover, .sprint-remove:hover {
     background: var(--vscode-toolbar-hoverBackground);
     border-color: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); }
   /* Icon-only: a square of the same height, so the row reads as one set of controls. */
@@ -223,14 +222,16 @@ export const CSS = `
      italics, matching the Deck's ~inferred convention. */
   .svc { font-family: var(--mono); font-size: var(--t-data); padding: 1px 6px;
     border-radius: var(--r-chip); border: 1px solid var(--hair); color: var(--dim); }
-  .svc.guess { font-style: normal; opacity: .8; }
+  .svc.guess { opacity: .8; }
 
   .empty, .gate { text-align: center; color: var(--vscode-descriptionForeground);
     padding: 28px 12px; font-size: 12px; }
+  /* Sign in to Jira / Run setup — the one action the gate screen offers, so it is
+     a primary verb the same way Take is. */
   .gate .btn { margin-top: 12px; padding: 6px 16px; border: none; border-radius: 4px;
-    background: var(--vscode-button-background); color: var(--vscode-button-foreground);
+    background: var(--brand); color: var(--brand-ink);
     cursor: pointer; font-size: 12px; }
-  .gate .btn:hover { background: var(--vscode-button-hoverBackground); }
+  .gate .btn:hover { background: color-mix(in srgb, var(--brand) 84%, var(--vscode-foreground)); }
   .gate .gate-error { color: var(--vscode-errorForeground); line-height: 1.5; }
   .loading { color: var(--vscode-descriptionForeground); font-size: 12px; padding: 12px 4px; }
 
@@ -268,8 +269,10 @@ export const CSS = `
   .batch-count { font-size: 11px; color: var(--vscode-descriptionForeground); }
   .batch-selectall, .batch-clear { background: none; border: none; cursor: pointer; padding: 0;
     font-size: 11px; color: var(--vscode-textLink-foreground); }
+  /* The sticky bar's one action, directly beneath a column of teal Take buttons —
+     the same verb, so the same fill. */
   .batch-launch { margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
     font-size: 12px; padding: 4px 12px; border-radius: 8px; border: none; cursor: pointer;
-    background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-  .batch-launch:hover { background: var(--vscode-button-hoverBackground); }
+    background: var(--brand); color: var(--brand-ink); }
+  .batch-launch:hover { background: color-mix(in srgb, var(--brand) 84%, var(--vscode-foreground)); }
 `;
