@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.52] — 2026-08-04
+
 ### Fixed
 
 - **Opening a task into a saved workspace could add a folder the workspace already
