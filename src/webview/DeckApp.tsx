@@ -92,12 +92,19 @@ function PrBlock({ repo, f, showRepo }: { repo: string; f: PrFacts; showRepo: bo
           {REVIEW_TEXT[f.review]}{f.unresolved !== null && f.unresolved > 0 ? ` · ${f.unresolved} open` : ""}
         </span>
       </div>
-      <div className="pr-line">
-        <span className="pr-lbl">merge</span>
-        <span className={f.mergeable === "conflicting" ? "pr-warn" : f.mergeable === "clean" ? "pr-ok" : ""}>
-          {f.mergeable === "conflicting" ? "conflicts" : f.mergeable}
-        </span>
-      </div>
+      {/* Only an open PR has mergeability: GitHub stops computing it once the PR
+        * merges or closes, handing back UNKNOWN for both fields it derives from.
+        * The row could then only read "unknown" — a stale question, not a fact,
+        * on the very cards whose header already says "merged". `ci` and `review`
+        * keep their meaning after the merge, so they stay. */}
+      {f.state === "OPEN" && (
+        <div className="pr-line">
+          <span className="pr-lbl">merge</span>
+          <span className={f.mergeable === "conflicting" ? "pr-warn" : f.mergeable === "clean" ? "pr-ok" : ""}>
+            {f.mergeable === "conflicting" ? "conflicts" : f.mergeable}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

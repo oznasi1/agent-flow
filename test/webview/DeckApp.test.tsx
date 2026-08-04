@@ -398,6 +398,26 @@ describe("DeckApp PR block", () => {
     expect(screen.getByText("blocked")).toBeTruthy();
   });
 
+  it("keeps the merge row while the PR is open", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ mergeable: "behind" }), fetchedAt: 1 } } })]));
+    expect(screen.getByText("merge", { selector: ".pr-lbl" })).toBeTruthy();
+    expect(screen.getByText("behind")).toBeTruthy();
+  });
+
+  it.each(["MERGED", "CLOSED"] as const)("drops the merge row on a %s PR", (state) => {
+    // GitHub stops computing mergeability the moment a PR leaves OPEN: `mergeable`
+    // and `mergeStateStatus` both come back UNKNOWN, so `mapMergeable` can only
+    // say "unknown". Rendering that asks "can this merge?" about a question that
+    // no longer has an answer — the rows that kept their meaning stay.
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ state, mergeable: "unknown" }), fetchedAt: 1 } } })]));
+    expect(screen.queryByText("merge", { selector: ".pr-lbl" })).toBeNull();
+    expect(screen.queryByText("unknown")).toBeNull();
+    expect(screen.getByText("#4821")).toBeTruthy();
+    expect(screen.getByText(/6 passing/)).toBeTruthy();
+  });
+
   it("omits the thread count when unresolved is null", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ review: "changes_requested", unresolved: null }), fetchedAt: 1 } } })]));

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A landed PR no longer reads `merge unknown` on its card.** GitHub only computes
+  mergeability for an open PR: once one merges or closes, both `mergeable` and
+  `mergeStateStatus` come back `UNKNOWN`, so `mapMergeable` had nothing to go on and
+  every merged card ended on a `merge unknown` line — a question with no answer left,
+  directly under a header already reading "merged". The row now renders only while the
+  PR is open (`src/webview/DeckApp.tsx`). `pr`, `ci` and `review` still carry real
+  values after a merge, so they stay.
+
 ## [0.1.54] — 2026-08-04
 
 ### Changed
