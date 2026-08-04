@@ -1182,6 +1182,135 @@ secondary actions share one button language."
 
 ---
 
+## Task 5b: Sidebar polish — three things only rendering revealed
+
+Tasks 4 and 5 were both spec-compliant and both reviews were clean. Rendering the result on
+both themes then showed three problems the diffs could not: they are gaps in this plan, not in
+the implementations. Approved 2026-08-04.
+
+**Files:**
+- Modify: `src/webview/styles.ts:22-29` (`.explore`), `:133-135` (status hues)
+- Modify: `src/webview/App.tsx:778-786` (the `Remove` button)
+- Modify: `test/webview/App.test.tsx` (the `Remove` query, which loses its visible label)
+
+**Interfaces:** none new.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `test/webview/App.test.tsx`:
+
+```tsx
+  it("keeps Remove reachable by name once its label goes", () => {
+    render(<App />);
+    authed();
+    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "ASM-1", summary: "In sprint" })] });
+    const remove = screen.getByRole("button", { name: /Remove ASM-1 from your active sprint/i });
+    expect(remove).toBeInTheDocument();
+    expect(remove).toHaveTextContent("");
+  });
+```
+
+Check how the neighbouring sprint tests make `onRemoveFromSprint` available — the button only
+renders for a task in the active sprint — and follow that setup rather than inventing one.
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `npx vitest run test/webview/App.test.tsx -t "reachable by name"`
+Expected: FAIL — the accessible name currently comes from the `title`, but the button still has
+the visible text `Remove`, so `toHaveTextContent("")` fails.
+
+- [ ] **Step 3: `Explore` becomes a neutral outlined action**
+
+Replace `styles.ts:22-29`. The pool has one verb, and it is `Take`; `Explore` is the escape hatch
+for when no ticket fits. It gets the same language as the card's secondary actions, including
+losing the `translateY` bounce that no other control has any more:
+
+```css
+  /* The pool's one filled control is Take. Explore is the way out when no ticket
+     fits — useful, not primary — so it takes the secondary language. */
+  .explore { display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
+    font-size: var(--t-body); font-weight: 500; height: 24px; padding: 0 10px;
+    border-radius: var(--r-ctl); cursor: pointer;
+    border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
+    transition: background-color .12s ease, border-color .12s ease; }
+  .explore:hover { background: var(--vscode-toolbar-hoverBackground);
+    border-color: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); }
+  .explore svg { display: block; }
+```
+
+- [ ] **Step 4: The status chip drops its hue**
+
+Replace `styles.ts:133-135`. The rail already carries `statusCategory`, so the chip was encoding
+the same fact a second time — and its amber was indistinguishable from the `Highest` chip's, which
+is the one thing on a card that has to stand out:
+
+```css
+  /* No hue: the rail already says where this ticket is in the flow. Amber on a card
+     means exactly one thing, and it is the Highest chip. */
+  .status--new, .status--indeterminate, .status--done { color: var(--dim); }
+```
+
+- [ ] **Step 5: `Remove` becomes icon-only**
+
+At `App.tsx:778-786`, drop the visible label so three actions fit one row at sidebar widths. The
+`title` already carries the full sentence; add `aria-label` so the name does not depend on tooltip
+behaviour:
+
+```tsx
+            {onRemoveFromSprint && (
+              <button
+                className="sprint-remove icon-only"
+                onClick={(e) => { e.stopPropagation(); onRemoveFromSprint(); }}
+                title={`Remove ${task.key} from your active sprint (move it to the backlog)`}
+                aria-label={`Remove ${task.key} from your active sprint (move it to the backlog)`}
+              >
+                <SprintRemoveIcon />
+              </button>
+            )}
+```
+
+Add the square variant beside the shared action rule in `styles.ts`:
+
+```css
+  /* Icon-only: a square of the same height, so the row reads as one set of controls. */
+  .sprint-remove.icon-only { width: 24px; padding: 0; justify-content: center; }
+```
+
+- [ ] **Step 6: Run the tests**
+
+Run: `npx vitest run test/webview/App.test.tsx`
+Expected: PASS. Any other test that clicked `Remove` by its visible text now needs the accessible
+name instead — fix the query, and say so in the report.
+
+- [ ] **Step 7: Look at it**
+
+```bash
+npm run build
+node preview/shoot-surface.js preview/head.html dist/webview.js preview/_5b-dark.png 420
+node preview/shoot-surface.js preview/head.html dist/webview.js preview/_5b-light.png 420 light
+```
+
+Confirm all three: `Take` is the only filled control on the panel, `Highest` is the only amber
+thing on any card, and no card's action row wraps. Nothing under `media/` may change.
+
+- [ ] **Step 8: Run the full gates**
+
+Run: `npm run typecheck && npm test && npm run test:cov && npm run build`
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src/webview/styles.ts src/webview/App.tsx test/webview/App.test.tsx
+git commit -m "fix(sidebar): one fill, one amber, one action row
+
+Rendering the ported sidebar showed three things the diffs could not. Explore was
+still a blue slab and outshouted Take, which is the pool's only verb. The status
+chip repeated what the rail already says, in an amber indistinguishable from the
+Highest chip. And a three-action card wrapped its buttons, leaving a hole."
+```
+
+---
+
 ## Task 6: Marketplace deltas
 
 **Files:**
