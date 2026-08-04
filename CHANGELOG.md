@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.54] — 2026-08-04
+
 ### Changed
 
 - **The README lockup carries the real mark instead of a one-colour stand-in.** The
