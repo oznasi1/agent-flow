@@ -290,7 +290,7 @@ function Card({ r, live, prReviewStatus, onForget }: { r: RunStatus; live: boole
           >
             Open
           </button>
-          <button className="act" title="Show everything this task changed, as a diff" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff" })}>Diff</button>
+          <button className="act" title="Show everything this task changed, file by file" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff" })}>Diff</button>
           <span className="more-wrap">
             <button className="more" title="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>⋯</button>
             {menuOpen && (
