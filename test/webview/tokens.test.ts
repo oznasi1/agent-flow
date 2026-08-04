@@ -18,6 +18,7 @@ const SURFACES: [string, string][] = [
   ["sidebar", CSS],
   ["deck", DECK_CSS],
   ["marketplace", MARKETPLACE_CSS],
+  ["controls", CONTROLS_CSS],
 ];
 
 // Comments are prose, not CSS: deckStyles.ts has one that reads "...--c-attn, not
@@ -25,11 +26,24 @@ const SURFACES: [string, string][] = [
 // misread that colon as a declaration. Strip comments first so only real rules count.
 const stripComments = (sheet: string): string => sheet.replace(/\/\*[\s\S]*?\*\//g, "");
 
+// @keyframes bodies nest a brace inside a brace (each one is written on a single
+// line in these sheets), which would break the flat selector/body parser below.
+// None of them ever reference --brand or font-size, so dropping the whole line
+// is safe for every scan that uses it.
+const stripKeyframes = (sheet: string): string => sheet.replace(/^.*@keyframes.*$/gm, "");
+
 const declarationsIn = (sheet: string): string[] =>
   [...stripComments(sheet).matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]);
 
 const usagesIn = (sheet: string): string[] =>
   [...stripComments(sheet).matchAll(/var\(\s*(--[a-z0-9-]+)/g)].map((m) => m[1]);
+
+/** Every flat `selector { declarations }` block in a sheet. */
+const ruleBlocks = (sheet: string): { selector: string; body: string }[] =>
+  [...stripKeyframes(stripComments(sheet)).matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+    selector: m[1].trim().replace(/\s+/g, " "),
+    body: m[2],
+  }));
 
 // Set per-card as an inline style in DeckApp.tsx (a computed value, not a shared
 // token), so it never appears as a declaration in any stylesheet's own text —
@@ -84,8 +98,10 @@ describe("brand accent", () => {
   // Regression guard. currentColor in any property other than `color` resolves to
   // that element's own color, so `background: var(--brand)` on a filled button
   // would equal its label color and the text would disappear. This nearly shipped.
+  // Comments are stripped first so a comment merely discussing the keyword (as
+  // tokens.ts's own high-contrast note does) can't trip this scan.
   it("never resolves the accent to currentColor", () => {
-    expect(TOKENS_CSS).not.toContain("currentColor");
+    expect(stripComments(TOKENS_CSS)).not.toContain("currentColor");
   });
 
   // The board's rule: one card at a time gets to be loud, and the loud one is
@@ -97,9 +113,76 @@ describe("brand accent", () => {
     expect(attnBlocks.filter((b) => b.includes("--brand"))).toEqual([]);
   });
 
-  it("is spent on exactly the three agreed surfaces", () => {
-    const users = SURFACES.filter(([, sheet]) => sheet.includes("var(--brand"));
-    expect(users.map(([name]) => name).sort()).toEqual(["deck", "marketplace", "sidebar"]);
+  // A "does this sheet mention --brand at all" check would pass with the accent on
+  // twenty selectors. This asserts the exact selector list per surface — derived
+  // from what actually ships (the plan's own three-place prose went stale the
+  // moment .btn.pri and the final-review's .batch-launch / .gate .btn landed).
+  const PERMITTED_BRAND_SELECTORS: Record<string, string[]> = {
+    sidebar: [
+      ".gauge .lit",
+      ".take", ".take:hover",
+      ".gate .btn", ".gate .btn:hover",
+      ".batch-launch", ".batch-launch:hover",
+    ],
+    deck: [".act.primary", ".act.primary:hover"],
+    marketplace: [".btn.pri", ".btn.pri:hover"],
+    controls: [],
+  };
+
+  it.each(SURFACES)("%s spends --brand on exactly its agreed selectors", (name, sheet) => {
+    const actual = new Set(
+      ruleBlocks(sheet).filter((r) => r.body.includes("--brand")).map((r) => r.selector),
+    );
+    const allowed = new Set(PERMITTED_BRAND_SELECTORS[name] ?? []);
+    // Each string below names the offending selector directly, so a failure reads
+    // as actionable rather than just a red boolean.
+    const problems = [
+      ...[...actual].filter((s) => !allowed.has(s)).map((s) => `unexpected --brand on "${s}"`),
+      ...[...allowed].filter((s) => !actual.has(s)).map((s) => `"${s}" no longer spends --brand`),
+    ];
+    expect(problems).toEqual([]);
+  });
+});
+
+describe("no raw hex colour", () => {
+  // tokens.ts (TOKENS_CSS) owns the brand triplet's literal hexes and every
+  // --c-*/--k-* fallback; it is the token module, not a surface, and isn't part
+  // of SURFACES, so it is deliberately not scanned here. A surface sheet should
+  // only ever reach a colour through a token or a --vscode-* variable — the
+  // exact drift the token module exists to prevent.
+  it.each(SURFACES)("%s carries no hardcoded hex", (_name, sheet) => {
+    const hexes = [...stripComments(sheet).matchAll(/#[0-9a-fA-F]{3,8}\b/g)].map((m) => m[0]);
+    expect(hexes).toEqual([]);
+  });
+});
+
+describe("type scale", () => {
+  // Global Constraints closes the type scale for styles.ts (the sidebar) and, by
+  // construction, CONTROLS_CSS (new, and already 100% on-token). Deck and
+  // Marketplace carry a much larger set of literals that predate the token
+  // module entirely and that no task in this plan touches — migrating the
+  // Deck's own control language and closing the sidebar's remaining literals are
+  // both explicitly out of scope (see the plan). Scanning those two sheets here
+  // would fail on legacy code, not on new drift.
+  const SCALE_CLOSED: [string, string][] = [["sidebar", CSS], ["controls", CONTROLS_CSS]];
+
+  // The four token steps' own values, plus the 15px surface header Global
+  // Constraints also names, plus the six off-scale literals that section
+  // grandfathers into styles.ts specifically (8, 9, 11.5, 12, 12.5, 14 — styles.ts
+  // predates the token module, and converting untouched rules is its own
+  // follow-up, not this guard's job). Anything outside this set is new drift.
+  const ON_SCALE_LITERALS = [
+    "8px", "9px", "10px", "10.5px", "11px", "11.5px", "12px", "12.5px", "13px", "14px", "15px",
+  ];
+
+  const fontSizeValuesIn = (sheet: string): string[] =>
+    [...stripKeyframes(stripComments(sheet)).matchAll(/font-size:\s*([^;]+);/g)].map((m) => m[1].trim());
+
+  it.each(SCALE_CLOSED)("%s: every font-size is a token or an allowlisted legacy literal", (_name, sheet) => {
+    const offenders = fontSizeValuesIn(sheet).filter(
+      (v) => !v.startsWith("var(--t-") && !v.startsWith("var(--vscode-") && !ON_SCALE_LITERALS.includes(v),
+    );
+    expect(offenders).toEqual([]);
   });
 });
 

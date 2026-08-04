@@ -337,6 +337,24 @@ describe("fetch", () => {
     await send({ type: "fetch", filter: "mysprint", size: "s" });
     expect(workspaceState.update).not.toHaveBeenCalled();
   });
+
+  it("carries liveCount on tasks too, from the same source as state's, so the gauge is not a mount-time snapshot", async () => {
+    vi.mocked(readLiveWindows).mockReturnValue([
+      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, updatedAt: 9 },
+    ]);
+    const { send, posted } = setup();
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    const tasksMsg = posted().find((m) => m.type === "tasks");
+    expect(tasksMsg).toEqual(expect.objectContaining({ liveCount: 1 }));
+  });
+
+  it("omits liveCount from tasks when window tracking is off, same as state's", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, trackOpenWindows: false });
+    const { send, posted } = setup();
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    const tasksMsg = posted().find((m) => m.type === "tasks") as { liveCount?: number };
+    expect(tasksMsg.liveCount).toBeUndefined();
+  });
 });
 
 describe("reorder", () => {
