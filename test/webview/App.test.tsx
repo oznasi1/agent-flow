@@ -700,6 +700,15 @@ describe("task card actions", () => {
     expect(sent).toHaveBeenCalledWith({ type: "removeFromSprint", key: "ASM-1", size: "any" });
   });
 
+  it("keeps Remove reachable by name once its label goes", () => {
+    render(<App />);
+    authed();
+    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "ASM-1", summary: "In sprint" })] });
+    const remove = screen.getByRole("button", { name: /Remove ASM-1 from your active sprint/i });
+    expect(remove).toBeInTheDocument();
+    expect(remove).toHaveTextContent("");
+  });
+
   it("does not show Remove on other tabs", () => {
     render(<App />);
     authed();

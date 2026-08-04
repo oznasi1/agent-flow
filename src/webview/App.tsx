@@ -777,11 +777,12 @@ function TaskCard(props: {
             )}
             {onRemoveFromSprint && (
               <button
-                className="sprint-remove"
+                className="sprint-remove icon-only"
                 onClick={(e) => { e.stopPropagation(); onRemoveFromSprint(); }}
                 title={`Remove ${task.key} from your active sprint (move it to the backlog)`}
+                aria-label={`Remove ${task.key} from your active sprint (move it to the backlog)`}
               >
-                <SprintRemoveIcon /> Remove
+                <SprintRemoveIcon />
               </button>
             )}
             {canAddressPr && (

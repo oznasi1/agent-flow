@@ -19,13 +19,15 @@ export const CSS = `
   .gauge .lit { fill: var(--brand); }
   .gauge .unlit { fill: currentColor; opacity: .26; }
   .gauge .tex { fill: currentColor; opacity: .4; }
+  /* The pool's one filled control is Take. Explore is the way out when no ticket
+     fits — useful, not primary — so it takes the secondary language. */
   .explore { display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
-    font-size: 11px; font-weight: 500; padding: 3px 11px 3px 9px; border-radius: 14px;
-    cursor: pointer; border: none;
-    background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-    transition: transform .08s ease, background .12s ease; }
-  .explore:hover { background: var(--vscode-button-hoverBackground); transform: translateY(-1px); }
-  .explore:active { transform: translateY(0); }
+    font-size: var(--t-body); font-weight: 500; height: 24px; padding: 0 10px;
+    border-radius: var(--r-ctl); cursor: pointer;
+    border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
+    transition: background-color .12s ease, border-color .12s ease; }
+  .explore:hover { background: var(--vscode-toolbar-hoverBackground);
+    border-color: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); }
   .explore svg { display: block; }
 
   .lenses { display: flex; flex-direction: column; gap: 6px; margin: 0 2px 10px; }
@@ -129,10 +131,9 @@ export const CSS = `
   .status-btn:hover { color: var(--vscode-foreground); border-color: var(--vscode-focusBorder); }
   .status-caret { font-size: 8px; opacity: .6; }
   .status-btn:hover .status-caret { opacity: 1; }
-  /* Colour per status category */
-  .status--new { color: var(--vscode-descriptionForeground); }
-  .status--indeterminate { color: var(--c-idle); }
-  .status--done { color: var(--c-done); }
+  /* No hue: the rail already says where this ticket is in the flow. Amber on a card
+     means exactly one thing, and it is the Highest chip. */
+  .status--new, .status--indeterminate, .status--done { color: var(--dim); }
   .spacer { flex: 1; }
   .take { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
     padding: 3px 11px 3px 9px; border-radius: var(--r-ctl); cursor: pointer; border: none;
@@ -155,6 +156,8 @@ export const CSS = `
   .address-pr:hover, .sprint-add:hover, .sprint-remove:hover {
     background: var(--vscode-toolbar-hoverBackground);
     border-color: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); }
+  /* Icon-only: a square of the same height, so the row reads as one set of controls. */
+  .sprint-remove.icon-only { width: 24px; padding: 0; justify-content: center; }
 
   .detail { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
   .detail-loading { font-size: 11px; color: var(--vscode-descriptionForeground); }
