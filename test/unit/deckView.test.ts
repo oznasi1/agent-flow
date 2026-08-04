@@ -736,6 +736,35 @@ describe("DeckPanel open agents", () => {
     const run = posts(lastPanel()).filter((m) => m.type === "deck:runs").at(-1)!;
     expect(run.openAgents).toBe(false);
   });
+
+  it("tags each agent with the run repo whose directory it runs in", async () => {
+    h.runs = [mkRun({
+      key: "ASM-9",
+      repos: [
+        { name: "api", path: "/repos/api", isGit: true, branch: "ASM-9-x" },
+        { name: "web", path: "/repos/web", isGit: true, branch: "ASM-9-x" },
+      ],
+    })];
+    h.openSessions = [
+      sess({ pid: 11, sessionId: "s-api", cwd: "/repos/api", startedAt: 1, name: "api-1a" }),
+      sess({ pid: 12, sessionId: "s-web", cwd: "/repos/web", startedAt: 2, name: "web-2b" }),
+    ];
+    show();
+    await settled();
+    expect(builtFor("ASM-9").agents.map((a) => [a.session.sessionId, a.repo])).toEqual([
+      ["s-api", "api"],
+      ["s-web", "web"],
+    ]);
+  });
+
+  it("tags a local card's agent with the synthetic run's only repo name", async () => {
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show();
+    await settled();
+    const built = builtLocal();
+    expect(built.agents.map((a) => a.repo)).toEqual([built.run.repos[0].name]);
+  });
 });
 
 describe("DeckPanel local cards", () => {

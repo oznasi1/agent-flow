@@ -74,6 +74,13 @@ export interface Run {
   workspaceFile?: string; // multi-root .code-workspace, when mode === "multiroot"
   repos: { name: string; path: string; isGit: boolean; branch?: string }[];
   briefPaths: string[];
+  /** When this run was first observed to have landed — every PR merged, or Jira
+   * done with no PR open — and no agent left in it. Stamped by the Deck's retire
+   * sweep, not by any launch, and cleared again if the run stops satisfying that
+   * condition. It exists because `createdAt` cannot time the grace window: a
+   * three-week task would retire the instant it landed. Absent on every record
+   * written before this field existed, and on every run still in flight. */
+  finishedAt?: number;
 }
 
 const RUN_KINDS = new Set(["task", "explore", "review", "local"]);
@@ -145,6 +152,12 @@ export interface AgentActivity {
 export interface CardAgent {
   session: OpenSession;
   activity: AgentActivity;
+  /** The `run.repos[].name` whose directory this session runs in. Set host-side,
+   * where the session was matched against that repo's path in the first place —
+   * the webview only has a `cwd`, and an agent card's Open and Diff must act on
+   * the directory its own agent is in, not the run's first repo. Absent on a
+   * local card's agents, which have exactly one repo to act on anyway. */
+  repo?: string;
 }
 
 /** A run reconciled with all observable sources — what a card renders. */

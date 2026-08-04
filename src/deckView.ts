@@ -609,6 +609,7 @@ export class DeckPanel {
             // Addressed by sessionId, so two sessions in one worktree report
             // their own states rather than sharing the newest transcript's.
             activity: this.liveSignal ? readSessionActivity(projectsRoot, s.cwd, s.sessionId, now) : UNKNOWN_ACTIVITY,
+            repo: repo.name,
           });
         }
       }
@@ -632,6 +633,7 @@ export class DeckPanel {
         sessions.map((s) => ({
           session: s,
           activity: this.liveSignal ? readSessionActivity(projectsRoot, s.cwd, s.sessionId, now) : UNKNOWN_ACTIVITY,
+          repo: run.repos[0]?.name,
         })),
       );
       locals.push(run);
