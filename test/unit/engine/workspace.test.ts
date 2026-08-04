@@ -752,6 +752,35 @@ describe("mergeReposIntoWorkspace", () => {
     expect(res).toEqual({ added: [], ok: false });
     expect(writeFileSync).not.toHaveBeenCalled();
   });
+
+  it("refuses a folder nested inside an existing root, even when handed one directly", () => {
+    // The write layer is the last line of defense: a caller that skips planWorkspaceMerge
+    // must still not be able to nest a root inside a root.
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/Users/me/projects" }] }');
+    const res = mergeReposIntoWorkspace("/ws/t.code-workspace", [
+      { name: "centaur", path: "/Users/me/projects/centaur/.claude/worktrees/ASM-1" },
+    ]);
+    expect(res).toEqual({ added: [], ok: true });
+    expect(writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("still writes a folder that is inside no existing root", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/Users/me/projects" }] }');
+    const res = mergeReposIntoWorkspace("/ws/t.code-workspace", [
+      { name: "infra", path: "/elsewhere/infra" },
+    ]);
+    expect(res).toEqual({ added: ["infra"], ok: true });
+    const written = String(writeFileSync.mock.calls[0][1]);
+    expect(written).toContain("/elsewhere/infra");
+  });
+
+  it("does not let a root swallow a sibling sharing its prefix", () => {
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/api" }] }');
+    const res = mergeReposIntoWorkspace("/ws/t.code-workspace", [
+      { name: "api-gateway", path: "/repos/api-gateway" },
+    ]);
+    expect(res).toEqual({ added: ["api-gateway"], ok: true });
+  });
 });
 
 describe("openWorkspace — existing workspace", () => {

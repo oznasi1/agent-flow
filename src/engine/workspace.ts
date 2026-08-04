@@ -316,7 +316,7 @@ export function mergeReposIntoWorkspace(
   }
   const errors: ParseError[] = [];
   const doc = jsoncParse(text, errors, { allowTrailingComma: true }) as
-    | { folders?: { path?: string }[] }
+    | { folders?: { name?: string; path?: string }[] }
     | undefined;
   if (
     errors.length ||
@@ -329,13 +329,16 @@ export function mergeReposIntoWorkspace(
   }
 
   const wsDir = path.dirname(file);
-  const present = new Set(
-    (Array.isArray(doc.folders) ? doc.folders : [])
-      .map((f) => f?.path)
-      .filter((p): p is string => typeof p === "string")
-      .map((p) => canon(path.resolve(wsDir, p))),
-  );
-  const missing = repos.filter((r) => !present.has(canon(r.path)));
+  // Resolved against the file's directory and canonicalized, exactly as workspaceFolders
+  // does — a raw relative "centaur" would contain nothing. Only the path is needed here,
+  // so the `name` field is not carried across.
+  const roots: WorkspaceFolder[] = (Array.isArray(doc.folders) ? doc.folders : [])
+    .map((f) => f?.path)
+    .filter((p): p is string => typeof p === "string")
+    .map((p) => ({ path: canon(path.resolve(wsDir, p)) }));
+  // containingRoot covers path-equality too, so this subsumes the old exact-path check:
+  // a folder already declared, or already inside something declared, is not written.
+  const missing = repos.filter((r) => !containingRoot(roots, r.path));
   if (!missing.length) return { added: [], ok: true };
 
   const startIdx = Array.isArray(doc.folders) ? doc.folders.length : 0;
