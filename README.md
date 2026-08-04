@@ -75,6 +75,21 @@ to git + Jira only. **Open** focuses the window if it's already open (never a du
 opens it fresh otherwise; **Diff** shows the working diff; **⋯** offers *Open in Jira* and
 *Forget*.
 
+The board opens with **one card per Claude Code agent** — its live state and
+session name lead, and the repo, branch, Jira key and pull request it belongs to
+sit underneath, so two agents in one worktree read as two different pieces of
+work, in whichever columns their own states put them. **Open** and **Diff** on
+such a card act on that agent's own directory. Switch the header control to
+**Workspaces** for one card per launched task with its agents nested instead;
+whichever you pick sticks.
+
+Run records retire themselves once a task is provably over: its directories are
+gone, it landed a day ago with no agent left in it, or it is an old session with
+no ticket, no PR and nothing uncommitted. Uncommitted or unpushed work always
+stops a record being retired, and retirement only ever deletes Agent Flow's own
+pointer — never a worktree, a branch, or a commit. **Clear stale** appears in the
+header when records are only waiting out their window, and takes them on the spot.
+
 The Deck also shows **every Claude Code session open on this machine**, not only
 the ones it launched — read from `~/.claude/sessions`, the registry Claude Code
 keeps of its running sessions. Sessions attach to the card that owns their
@@ -272,6 +287,9 @@ repo, so they never get committed.
 | `agentFlow.prFacts` | `true` | Read each in-flight task's PR state from GitHub via the `gh` CLI and show it on the Deck's cards. |
 | `agentFlow.openAgents` | `true` | Show every Claude Code session open on this machine on the Deck: as agents on the card that owns their directory, and as a `local` card of its own for a place Agent Flow Deck never launched. Read from `~/.claude/sessions`. |
 | `agentFlow.prFactsTtlSeconds` | `120` | How stale a cached PR fact may be before the Deck re-fetches it (minimum 30). Only fetched while the Deck is open. |
+| `agentFlow.deckGrouping` | `agents` | One card per agent, or per launched task (`workspaces`). |
+| `agentFlow.retireFinishedAfterHours` | `24` | How long landed work stays on the board after its last agent closes. `0` retires on sight. |
+| `agentFlow.retireAbandonedAfterDays` | `7` | How long a ticketless, PR-less, clean run may sit before its record is deleted. `0` disables it. |
 | `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on a card. |
 | `agentFlow.prReviewAutoFix` | `true` | After the PR-review agent assesses the PR, let it implement the requested changes (off = assess only). |
 | `agentFlow.reviewRequests` | `true` | Show the Deck's review-requests strip: open GitHub PRs that ask for your review. |

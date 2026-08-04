@@ -74,6 +74,13 @@ export interface Run {
   workspaceFile?: string; // multi-root .code-workspace, when mode === "multiroot"
   repos: { name: string; path: string; isGit: boolean; branch?: string }[];
   briefPaths: string[];
+  /** When this run was first observed to have landed — every PR merged, or Jira
+   * done with no PR open — and no agent left in it. Stamped by the Deck's retire
+   * sweep, not by any launch, and cleared again if the run stops satisfying that
+   * condition. It exists because `createdAt` cannot time the grace window: a
+   * three-week task would retire the instant it landed. Absent on every record
+   * written before this field existed, and on every run still in flight. */
+  finishedAt?: number;
 }
 
 const RUN_KINDS = new Set(["task", "explore", "review", "local"]);
@@ -145,6 +152,12 @@ export interface AgentActivity {
 export interface CardAgent {
   session: OpenSession;
   activity: AgentActivity;
+  /** The `run.repos[].name` whose directory this session runs in. Set host-side,
+   * where the session was matched against that repo's path in the first place —
+   * the webview only has a `cwd`, and an agent card's Open and Diff must act on
+   * the directory its own agent is in, not the run's first repo. Absent on a
+   * local card's agents, which have exactly one repo to act on anyway. */
+  repo?: string;
 }
 
 /** A run reconciled with all observable sources — what a card renders. */
@@ -317,6 +330,8 @@ export type InboundMessage =
   | { type: "deck:setPrFacts"; on: boolean }
   | { type: "deck:setOpenAgents"; on: boolean }
   | { type: "deck:setReviewQueue"; on: boolean }
+  | { type: "deck:setGrouping"; grouping: "agents" | "workspaces" }
+  | { type: "deck:clearStale" }
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
   | { type: "deck:forget"; key: string }
   | { type: "deck:track"; key: string }
@@ -369,7 +384,13 @@ export type OutboundMessage =
   | { type: "error"; message: string; canRetry: boolean; canRunDoctor?: boolean }
   | { type: "loading"; loading: boolean }
   // The Deck
-  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; reviewQueue: boolean; ghNote: string | null; prReviewStatus: string }
+  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; reviewQueue: boolean; ghNote: string | null; prReviewStatus: string;
+      // Which lens to render. Echoed on every post rather than sent once, so a
+      // reload or a settings-page edit lands without a separate message.
+      grouping: "agents" | "workspaces";
+      // How many runs would retire right now if both retirement windows were
+      // ignored. Drives the Clear stale button, which is hidden at zero.
+      staleCount: number }
   | { type: "deck:loading"; loading: boolean }
   | {
       type: "deck:reviews";

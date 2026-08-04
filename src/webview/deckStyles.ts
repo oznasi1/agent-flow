@@ -72,6 +72,9 @@ export const DECK_CSS = `
      state rather than diluting the one-primary-per-surface rule. */
   .ctl.on .switch { background: var(--brand); border-color: var(--brand); }
   .ctl.on .switch::after { transform: translateX(10px); background: var(--brand-ink); }
+  /* A segmented control, not a switch: .ctls already draws the joined frame, so
+     the active side only needs to read as pressed. No .switch inside these. */
+  .ctls.seg .ctl.on { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
   /* tabular-nums, not mono: "synced 4s ago" is a sentence, but its number ticks every
      second and must not reflow the control while it does. */
   .synced { font-size: var(--t-body); font-variant-numeric: tabular-nums; }
@@ -119,7 +122,10 @@ export const DECK_CSS = `
   .card:focus-within { border-color: var(--vscode-focusBorder); }
 
   /* State leads every card from the same x, so a column scans as one strip of status. */
-  .c-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  /* Wraps for the agent name only: state and ticket always share line one, and
+     the name drops beneath the ticket when the column is too narrow for three —
+     which beats ellipsizing an identifier, and costs no height when it fits. */
+  .c-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; row-gap: 2px; min-width: 0; }
   .status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto;
     font-size: var(--t-body); color: var(--dim); font-variant-numeric: tabular-nums;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -139,6 +145,16 @@ export const DECK_CSS = `
   .chip { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 3px;
     border: 1px solid var(--vscode-panel-border, var(--dim)); color: var(--dim);
     font-size: var(--t-data); opacity: .8; vertical-align: baseline; }
+  /* An agent's name is an identifier, so it earns the mono treatment. Sits with
+     the key at the trailing edge, so the state dot stays at one x down the
+     whole column. */
+  /* An agent's name is an identifier, so it earns the mono treatment. Ordered
+     last so it trails the ticket it belongs to, and so it is the one item that
+     wraps: state and ticket keep their places, and the dot stays at one x down
+     the whole column whichever way the name falls. */
+  .c-agent { order: 3; margin-left: auto; flex: 0 1 auto; min-width: 0; max-width: 100%;
+    font-family: var(--mono); color: var(--vscode-foreground); font-size: var(--t-data);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .key-wrap { margin-left: auto; display: flex; align-items: baseline; gap: 4px; min-width: 0; }
   .key-wrap .key { margin-left: 0; }
   .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }

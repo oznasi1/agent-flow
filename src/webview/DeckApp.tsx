@@ -1,6 +1,7 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
 import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind, ticketKeyFor } from "../types";
+import { DeckCard, projectCards } from "./deckCards";
 import { ReviewStrip } from "./ReviewStrip";
 import { isPrReviewStatus } from "./helpers";
 
@@ -171,10 +172,19 @@ function AgentsRow({ agents }: { agents: CardAgent[] }): JSX.Element | null {
   );
 }
 
-function Card({ r, live, prReviewStatus, onForget }: { r: RunStatus; live: boolean; prReviewStatus: string; onForget: (key: string) => void }): JSX.Element {
-  const col = COLUMNS.find((c) => c.id === r.column)!;
+function Card({ r, live, prReviewStatus, onForget, agent, column }: {
+  r: RunStatus; live: boolean; prReviewStatus: string; onForget: (key: string) => void;
+  /** Non-null on the Agents board: this card is that one session, and its state
+   * line, name and action target come from the agent rather than the run. */
+  agent: CardAgent | null;
+  column: DeckColumn;
+}): JSX.Element {
+  const col = COLUMNS.find((c) => c.id === column)!;
   const accent = `var(${col.varName})`;
-  const sv = stateView(r, live);
+  // The agent's own activity when this card is an agent; the run's reduction
+  // otherwise. `column` is threaded in rather than read off `r` for the same
+  // reason: on the Agents board both are per-session.
+  const sv = stateView({ ...r, agent: agent ? agent.activity : r.agent, column }, live);
   // A ticketless run has no Jira issue behind it: the key is a local slug, and
   // openExternal("") is a button that does nothing.
   const tracked = isTicketRun(r.run);
@@ -210,7 +220,7 @@ function Card({ r, live, prReviewStatus, onForget }: { r: RunStatus; live: boole
   }, [menuOpen]);
 
   return (
-    <div className={`card ${r.column === "needs" ? "attn" : ""}`} style={{ ["--accent" as any]: accent }}>
+    <div className={`card ${column === "needs" ? "attn" : ""}`} style={{ ["--accent" as any]: accent }}>
       {/* State leads, identity trails: the dot sits at the same x on every card, so a column
           scans top-to-bottom as one strip of "who needs me". */}
       <div className="c-top">
@@ -218,6 +228,11 @@ function Card({ r, live, prReviewStatus, onForget }: { r: RunStatus; live: boole
           <span className={`sdot tone-${sv.tone} ${sv.tone === "working" ? "pulse" : ""}`} />
           {sv.text}
         </span>
+        {agent && (
+          <span className="c-agent" title={`Claude Code session in ${agent.repo ?? r.run.repos[0]?.name ?? "this run"}`}>
+            {agent.session.name ?? agent.session.sessionId.slice(0, 8)}
+          </span>
+        )}
         {inferredKey ? (
           <span className="key-wrap">
             <span className="chip" title="Read from the branch name — Agent Flow Deck did not launch this">~inferred</span>
@@ -265,7 +280,9 @@ function Card({ r, live, prReviewStatus, onForget }: { r: RunStatus; live: boole
         ));
       })()}
 
-      <AgentsRow agents={r.agents} />
+      {/* An agent card IS one of those rows — nesting the whole list inside every
+          sibling card would say the same thing four times. */}
+      {agent === null && <AgentsRow agents={r.agents} />}
 
       <div className="c-foot">
         {r.jiraStatus && <span className="pill" title={`Jira status: ${r.jiraStatus}`}>{r.jiraStatus}</span>}
@@ -286,11 +303,14 @@ function Card({ r, live, prReviewStatus, onForget }: { r: RunStatus; live: boole
           <button
             className={`act primary ${r.windowOpen ? "live" : ""}`}
             title={r.windowOpen ? "Open now — Open focuses the window already running this task" : "Open this task's workspace"}
-            onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open" })}
+            onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open", ...(agent?.repo ? { repo: agent.repo } : {}) })}
           >
             Open
           </button>
-          <button className="act" title="Show everything this task changed, file by file" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff" })}>Diff</button>
+          {/* main's multi-file diff editor, still scoped to this agent's own repo:
+              dropping the spread would silently send an agent card's Diff to the
+              run's first repo. */}
+          <button className="act" title="Show everything this task changed, file by file" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff", ...(agent?.repo ? { repo: agent.repo } : {}) })}>Diff</button>
           <span className="more-wrap">
             <button className="more" title="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>⋯</button>
             {menuOpen && (
@@ -324,6 +344,8 @@ export function DeckApp(): JSX.Element {
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string; action?: { label: string; url: string } }[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [reviewQueue, setReviewQueue] = React.useState(true);
+  const [grouping, setGrouping] = React.useState<"agents" | "workspaces">("agents");
+  const [staleCount, setStaleCount] = React.useState(0);
   const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean; reviewWrites: boolean; loading: boolean }>(
     { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false, loading: false },
   );
@@ -367,6 +389,8 @@ export function DeckApp(): JSX.Element {
         setPrFacts(m.prFacts);
         setOpenAgents(m.openAgents);
         setReviewQueue(m.reviewQueue);
+        setGrouping(m.grouping);
+        setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
         setPrReviewStatus(m.prReviewStatus);
         setSyncedAt(Date.now());
@@ -419,7 +443,13 @@ export function DeckApp(): JSX.Element {
     };
   }, []);
 
-  const needs = runs.filter((r) => r.column === "needs").length;
+  // One list either way, so the columns, counts, stat tiles and sort all read
+  // from the same shape. Workspaces mode is today's board exactly: one card per
+  // run, agent nested, bucketed by the run's own column.
+  const cards: DeckCard[] = grouping === "agents"
+    ? projectCards(runs)
+    : runs.map((r) => ({ id: `w:${r.run.key}`, status: r, agent: null, column: r.column }));
+  const needs = cards.filter((c) => c.column === "needs").length;
   const toggleLive = () => {
     const next = !live;
     setLive(next);
@@ -439,9 +469,9 @@ export function DeckApp(): JSX.Element {
       <div className="hd">
         <div className="title">In-flight<span className="sub">everything you've launched</span></div>
         <div className="stats">
-          <div className="stat"><span className="n">{runs.filter((r) => r.column === "progress").length}</span><span className="l">In progress</span></div>
+          <div className="stat"><span className="n">{cards.filter((c) => c.column === "progress").length}</span><span className="l">In progress</span></div>
           <div className={`stat ${needs > 0 ? "attn" : ""}`}><span className="n">{needs}</span><span className="l">Action required</span></div>
-          <div className="stat"><span className="n">{runs.filter((r) => r.column === "review").length}</span><span className="l">In review</span></div>
+          <div className="stat"><span className="n">{cards.filter((c) => c.column === "review").length}</span><span className="l">In review</span></div>
           {reviewsSeen && (
             // A spinning glyph where the number goes, not "0": on a cold start the
             // count is genuinely unknown for the few seconds the first `gh` search
@@ -451,7 +481,7 @@ export function DeckApp(): JSX.Element {
               <span className="l">To review</span>
             </div>
           )}
-          <div className="stat"><span className="n">{runs.length}</span><span className="l">Total</span></div>
+          <div className="stat"><span className="n">{cards.length}</span><span className="l">Total</span></div>
         </div>
         <div className="sp" />
         {/* Both toggles answer the same question — how much should the board trust? —
@@ -483,6 +513,33 @@ export function DeckApp(): JSX.Element {
             <span className="switch" />Review queue
           </button>
         </div>
+        {/* A lens, not a trust toggle: both sides show everything, one card per
+            agent or one per launched task. Persisted, so it survives a reload. */}
+        <div className="ctls seg">
+          {(["agents", "workspaces"] as const).map((g) => (
+            <button
+              key={g}
+              type="button"
+              className={`ctl ${grouping === g ? "on" : ""}`}
+              title={g === "agents"
+                ? "One card per Claude Code agent, with the repo, ticket and PR it belongs to"
+                : "One card per launched task, with its agents nested underneath"}
+              onClick={() => { setGrouping(g); send({ type: "deck:setGrouping", grouping: g }); }}
+            >
+              {g === "agents" ? "Agents" : "Workspaces"}
+            </button>
+          ))}
+        </div>
+        {staleCount > 0 && (
+          <button
+            type="button"
+            className="ctl"
+            title="Retire run records that are only waiting out their window. Worktrees, branches and commits are left untouched."
+            onClick={() => send({ type: "deck:clearStale" })}
+          >
+            Clear stale ({staleCount})
+          </button>
+        )}
         <button type="button" className="ctl" title="Re-read git, Jira and PR state now" onClick={() => send({ type: "deck:refresh" })}>
           <span className={`spin ${busy ? "on" : ""}`}>⟳</span>
           <span className="synced">{busy ? "syncing…" : syncedAt ? `synced ${timeAgo(syncedAt)}` : "refresh"}</span>
@@ -534,20 +591,29 @@ export function DeckApp(): JSX.Element {
         </div>
       ) : (
         <div className="board">
-          {COLUMNS.map((c) => {
-            const list = runs
-              .filter((r) => r.column === c.id)
-              .sort((a, b) => (b.agent.lastActivityMs ?? 0) - (a.agent.lastActivityMs ?? 0) || b.run.createdAt - a.run.createdAt);
+          {COLUMNS.map((col) => {
+            // Sorting reads the agent's own activity on an agent card and the run's
+            // reduction on a parked one, so a column still orders by "most
+            // recently alive" whichever lens is up.
+            const list = cards
+              .filter((c) => c.column === col.id)
+              .sort((a, b) =>
+                ((b.agent?.activity ?? b.status.agent).lastActivityMs ?? 0) -
+                ((a.agent?.activity ?? a.status.agent).lastActivityMs ?? 0) ||
+                b.status.run.createdAt - a.status.run.createdAt);
             return (
-              <section className="col" key={c.id}>
+              <section className="col" key={col.id}>
                 <div className="col-hd">
-                  <span className="dot" style={{ background: `var(${c.varName})` }} />
-                  <span className="nm">{c.label}</span>
+                  <span className="dot" style={{ background: `var(${col.varName})` }} />
+                  <span className="nm">{col.label}</span>
                   <span className="ct">{list.length}</span>
                   <span className="rule" />
                 </div>
                 <div className="col-body">
-                  {list.map((r) => <Card key={r.run.key} r={r} live={live} prReviewStatus={prReviewStatus} onForget={forget} />)}
+                  {list.map((c) => (
+                    <Card key={c.id} r={c.status} live={live} prReviewStatus={prReviewStatus}
+                      onForget={forget} agent={c.agent} column={c.column} />
+                  ))}
                 </div>
               </section>
             );
