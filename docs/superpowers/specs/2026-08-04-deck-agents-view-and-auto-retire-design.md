@@ -19,15 +19,17 @@ key, PR) stated on the card. Today's grouping stays, one click away, as the
 **2. Runs retire themselves.** Nothing prunes `~/.agentflow/runs` today, and
 per-card `Forget` is the only removal path — so a record whose worktrees were
 deleted weeks ago still renders a card and still costs a Jira poll every 30s. A
-sweep retires a run once it is provably over, with uncommitted or unpushed work
-as an absolute veto.
+sweep retires a run once it is provably over — unreachable, landed a day ago, or
+abandoned — with uncommitted or unpushed work as an absolute veto. A card lives
+exactly as long as its record, so the board is never showing something the store
+has given up on, or hiding something it still pays for.
 
 ## Decisions
 
 | Question | Decision |
 |----------|----------|
 | What is a card in the new view? | One per `CardAgent`. Two agents in one worktree → two cards. |
-| A run whose agent has exited? | Still one card (grey, `no agent · git + Jira only`) **while unfinished**. Finished-and-agentless work is retired by the sweep in the same pass, so it is never rendered — the board rule and the retire rule are one mechanism, not two. |
+| A run whose agent has exited? | Still one card (grey, `no agent · git + Jira only`). Once the work lands it stays for a **24h grace window**, then the sweep retires the record and the card goes with it. The board never hides a record it still holds — card lifetime and record lifetime are one thing. |
 | Card anatomy | Agent leads: state + agent name on the top line; ticket, repos, branch and PR trail below. |
 | Board arrangement | Today's four columns, unchanged. A session card is bucketed by *its own* state. |
 | Where derivation lives | Webview-side projection of the `RunStatus[]` the host already posts. |
@@ -77,12 +79,17 @@ For each `RunStatus` in the posted list:
 
 Keys are prefixed so an agent card and a parked card can never collide.
 
-There is **no separate "hide finished parked runs" filter**. A finished run with
-no live session is retired by Part 2's sweep during the same `buildAll` pass, so
-it is simply absent from the posted list — the decision "parked cards only while
-unfinished" is *implemented by* retirement. One consequence worth naming: the
-**Done** column now holds only work that finished while an agent is still open in
-it. Merged work with nobody in it is gone, not archived.
+There is **no separate "hide finished parked runs" filter**, and the board never
+hides a record it still holds. A card exists exactly as long as its record does;
+what bounds the **Done** column is Part 2's 24h grace window on rule 2, not a
+render-time rule. So Done shows the last day of landings — enough to see work
+land, not enough to accumulate — and everything older is gone from disk, not
+merely hidden.
+
+This is the property the earlier draft of this spec got wrong by retiring finished
+runs immediately *and* hiding them: two mechanisms that had to be kept in step,
+plus a week-long window where a record was invisible but still cost a git spawn
+per tick and a Jira poll per 30s.
 
 The unchanged ladder is deliberate: `needs-you` outranks `working`, which
 outranks the review stage, so an agent addressing PR feedback still reads *In
@@ -157,10 +164,10 @@ opens is a daily papercut.
 
 Workspaces mode keeps today's grouping, card layout and `AgentsRow` unchanged.
 The one behavioural difference from what ships today is inherited, not chosen: the
-retire sweep applies in both views, so finished-and-agentless runs stop appearing
-there too. The two views must agree on *which runs exist* and differ only in how
-they group them — a card that vanishes when you switch view would be a worse bug
-than an empty Done column.
+retire sweep applies in both views, so a landed run leaves both a day after it
+lands. The two views must agree on *which runs exist* and differ only in how they
+group them — a card that vanishes when you switch view would be a worse bug than
+anything the sweep does.
 
 ## Part 2 — auto-retiring stale runs
 
@@ -190,8 +197,15 @@ because rules 2 and 3 read `dirty` / `ahead` from the `gitState` that
 from the list `refresh` posts, so the board and the store never disagree.
 
 **Every rule requires no live session on the run** (see "Reading sessions for the
-sweep" below). New setting **`agentFlow.retireAfterDays`**, default `7`, which
-gates **rule 3 only**; `0` disables rule 3.
+sweep" below). Two new settings, one per timescale — landed work is over in hours,
+an abandoned session takes days before you can be sure:
+
+| setting | default | gates | `0` means |
+|---|---|---|---|
+| `agentFlow.retireFinishedAfterHours` | `24` | rule 2 | retire as soon as it lands |
+| `agentFlow.retireAbandonedAfterDays` | `7` | rule 3 | disable rule 3 |
+
+Rule 1 has no gate at all.
 
 1. **Unreachable** — `run.repos.length > 0` and every repo path is gone from
    disk. Immediate: no age gate and no dependence on any feature toggle, because
@@ -200,20 +214,45 @@ gates **rule 3 only**; `0` disables rule 3.
    share one `.code-workspace`, so its existence says nothing about any single
    run. → retires `ASM-5809`.
 2. **Finished** — either every PR-bearing repo has merged, or `jiraCategory ===
-   "done"` and **no entry in `prs` has `state === "OPEN"`**. Immediate, no age
-   gate: this is the rule that implements "merged-and-agentless work drops off the
-   board". Deliberately *not* `prSignals(prs).open`, which excludes drafts — a
-   draft PR is unmerged work, and its worktree must keep its pointer. The
-   no-open-PR clause matters at all because a ticket closed while its PR is still
-   in review must not delete the pointer to the worktree that PR came from.
-   → retires `ASM-5111` once its ticket closes and its PR lands.
-3. **Abandoned** — age ≥ `retireAfterDays`, `!isTicketRun(run)`,
+   "done"` and **no entry in `prs` has `state === "OPEN"`** — and that has been
+   true for ≥ `retireFinishedAfterHours`. Deliberately *not*
+   `prSignals(prs).open`, which excludes drafts: a draft PR is unmerged work, and
+   its worktree must keep its pointer. The no-open-PR clause matters at all
+   because a ticket closed while its PR is still in review must not delete the
+   pointer to the worktree that PR came from. → retires `ASM-5111` a day after its
+   ticket closes and its PR lands.
+3. **Abandoned** — age ≥ `retireAbandonedAfterDays`, `!isTicketRun(run)`,
    `Object.keys(prs).length === 0`, and every repo clean. **Skipped entirely when
    `prFacts` is off**, since an empty `prs` map would otherwise be
    indistinguishable from "this run has no PR". → retires
    `explore-make-verify-feature-command-generic`.
 
-"Age" throughout means `nowMs - run.createdAt`.
+### Timing rule 2's window
+
+Rule 3's clock is `nowMs - run.createdAt` — the record already carries what it
+needs. Rule 2's clock cannot be: `createdAt` is when the run was *launched*, so a
+long task would retire the instant it landed while a same-day one would linger.
+
+Nothing on disk records *when* a run finished, so the sweep stamps it: on the
+first pass that sees a run satisfy rule 2's condition, it writes
+**`finishedAt: number`** onto the record and retires nothing. A later pass with
+`nowMs - finishedAt ≥ retireFinishedAfterHours` retires it. A run that stops
+satisfying the condition — a PR reopened, a ticket moved back out of Done — has
+`finishedAt` cleared, so its window restarts rather than resuming mid-count.
+
+`finishedAt` is optional on `Run`, so every existing record stays valid and the
+`Run` shape gains one nullable field. It is a *derived* stamp, not user data: a
+hand-deleted one costs at most one extra grace window.
+
+It has to live on disk rather than in a `DeckPanel` field. An in-memory stamp
+restarts every time the panel opens, so a 24h window would only ever elapse if you
+left the Deck open for a whole day — merged work would effectively never retire,
+which is the bug this part exists to fix.
+
+Rule 2 needs **positive** evidence of landing, so it fails closed: signed out of
+Jira and with `prFacts` off, `jiraCategory` is null and `prs` is empty, neither
+branch of the condition holds, and nothing is stamped or retired. A missing data
+source can only ever make the sweep too conservative.
 
 **The veto:** any repo with `dirty === true` or `ahead > 0` blocks rules 2 and 3.
 The record is the only pointer back to that worktree, and unpushed work is
@@ -242,14 +281,14 @@ to read.
 
 ### `Clear stale`
 
-A header action applying **rule 3 with its age gate ignored** — the vetoes still
-hold. Rules 1 and 2 are immediate and need no manual trigger, so there is nothing
-for a button to hurry along there; what a user can want sooner is clearing
-abandoned explore sessions without waiting out `retireAfterDays`.
+A header action applying **rules 2 and 3 with their time gates ignored** — every
+veto still holds, and rule 1 needs no help since it is already immediate. It is
+the escape hatch for both waits: clearing today's landings now rather than
+tomorrow, and clearing an abandoned explore session without sitting out
+`retireAbandonedAfterDays`.
 
-Named `Clear stale`, not `Clear finished`: with rule 2 immediate, finished runs
-are already gone by the time anyone could press it, and a button whose label
-described work that can never be under it would be a lie.
+Named `Clear stale` rather than `Clear finished` because it covers both rules, not
+just landed work.
 
 Behind a modal naming the count, unlike per-card `Forget` — a bulk delete earns a
 confirmation. Hidden when the count is zero.
@@ -260,11 +299,11 @@ confirmation. Hidden when the count is zero.
 |---|---|
 | `src/engine/bucket.ts` | **new** — `deriveBucket`, `prSignals`, `mostActive`, `BucketInput`, moved verbatim |
 | `src/engine/status.ts` | import + re-export from `bucket.ts`; `buildRunStatus` unchanged |
-| `src/engine/retire.ts` | **new** — the three rules and the veto, pure |
-| `src/types.ts` | `CardAgent.repo?`; `deck:setGrouping` and `deck:clearStale` inbound; `grouping` and `staleCount` on `deck:runs` |
-| `src/config.ts` | `deckGrouping`, `retireAfterDays` |
-| `package.json` | declare both settings |
-| `src/deckView.ts` | fill `CardAgent.repo`; read sessions unconditionally; retire sweep in `buildAll`; handle `deck:setGrouping` + `deck:clearStale` |
+| `src/engine/retire.ts` | **new** — the three rules, the veto, and the `finishedAt` stamp decision, pure |
+| `src/types.ts` | `Run.finishedAt?`; `CardAgent.repo?`; `deck:setGrouping` and `deck:clearStale` inbound; `grouping` and `staleCount` on `deck:runs` |
+| `src/config.ts` | `deckGrouping`, `retireFinishedAfterHours`, `retireAbandonedAfterDays` |
+| `package.json` | declare all three settings |
+| `src/deckView.ts` | fill `CardAgent.repo`; read sessions unconditionally; retire sweep + `finishedAt` stamping in `buildAll`; handle `deck:setGrouping` + `deck:clearStale` |
 | `src/webview/DeckApp.tsx` | card projection, `AgentCard`, the segmented control, `Clear stale` |
 | `src/webview/deckStyles.ts` | parked tone, segmented control, agent-card spacing |
 
@@ -273,12 +312,17 @@ confirmation. Hidden when the count is zero.
 - `test/unit/engine/bucket.test.ts` — moved cases, behaviour unchanged.
 - `test/unit/engine/retire.test.ts` — each rule fires; each veto blocks; a live
   session blocks every rule; rule 1 ignores `workspaceFile` and a zero-repo run;
-  rule 2 spares a Jira-done run with an open PR; `retireAfterDays: 0` disables
-  rule 3; `prFacts` off skips rule 3; review-kind runs are swept.
+  rule 2 spares a Jira-done run with an open PR **and one with a draft PR**; rule 2
+  stamps rather than retires on first sight, retires once the window elapses, and
+  clears `finishedAt` when the condition stops holding; rule 2 fails closed with no
+  Jira and no PR facts; `retireFinishedAfterHours: 0` retires on the stamping pass;
+  `retireAbandonedAfterDays: 0` disables rule 3; `prFacts` off skips rule 3;
+  review-kind runs are swept.
 - `test/unit/deckView.test.ts` — retired runs are absent from the posted list; the
-  sweep deletes record + PR cache and bumps `prEpoch`; **the sweep still sees
-  sessions with `openAgents` off**; `deck:setGrouping` persists globally;
-  `deck:clearStale` confirms then deletes; `CardAgent.repo` is filled.
+  sweep deletes record + PR cache and bumps `prEpoch`; a stamped run is written back
+  to disk and still rendered; **the sweep still sees sessions with `openAgents`
+  off**; `deck:setGrouping` persists globally; `deck:clearStale` confirms then
+  deletes and ignores both time gates; `CardAgent.repo` is filled.
 - `test/webview/DeckApp.test.tsx` — two agents of one run split across columns; the parked card; `Open`/`Diff` carry the session's repo; `Open agents` off collapses to one card per run; toggling modes.
 
 Gates before any commit: `npm run typecheck`, `npm test`, `npm run test:cov`
