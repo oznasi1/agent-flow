@@ -21,6 +21,24 @@
 - **Retirement deletes only the run record and its PR-facts cache.** It must never touch a worktree, branch, or commit.
 - **Default for `agentFlow.deckGrouping` is `"agents"`.**
 
+## Coordination with the in-flight diff-editor plan
+
+[2026-08-04-deck-diff-multi-file-editor.md](2026-08-04-deck-diff-multi-file-editor.md)
+rewrites the same Diff button this plan touches — its own Task edits
+`DeckApp.tsx:293`, replacing that `<button className="act" … action: "diff" …>`
+line wholesale with a new tooltip and **no `repo` argument**.
+
+Whichever plan lands second must not clobber the other. The merged line carries
+both changes:
+
+```tsx
+          <button className="act" title="Show everything this task changed, file by file" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff", ...(agent?.repo ? { repo: agent.repo } : {}) })}>Diff</button>
+```
+
+Dropping the spread silently un-scopes Diff on an agent card back to the run's
+first repo — a regression no test in that plan would catch, since its own suite
+fires `deck:inspect` messages directly rather than clicking the button.
+
 ---
 
 ## File Structure
@@ -1289,8 +1307,12 @@ In `test/webview/DeckApp.test.tsx` — note `runsMsg` must be extended with `gro
 const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated",
                 grouping: "agents" | "workspaces" = "agents"): OutboundMessage =>
   ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true,
-     ghNote: null, prReviewStatus, grouping });
+     reviewQueue: true, ghNote: null, prReviewStatus, grouping });
 ```
+
+`reviewQueue` is not yours — it arrived with the Review queue toggle in `2ce0996`.
+Keep whatever fields the helper has when you get there and only add `grouping`;
+if the helper has drifted again, follow the current shape rather than this snippet.
 
 Then add:
 
@@ -1375,10 +1397,12 @@ In `src/types.ts`, add to `InboundMessage` beside the other `deck:` entries:
   | { type: "deck:setGrouping"; grouping: "agents" | "workspaces" }
 ```
 
-And add the field to `deck:runs`:
+And add the field to `deck:runs` — append to whatever the union member holds when
+you get there rather than retyping this line, which was accurate at
+`0c35f56` and gains a field every few releases:
 
 ```ts
-  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; ghNote: string | null; prReviewStatus: string;
+  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; reviewQueue: boolean; ghNote: string | null; prReviewStatus: string;
       // Which lens to render. Echoed on every post rather than sent once, so a
       // reload or a settings-page edit lands without a separate message.
       grouping: "agents" | "workspaces" }
