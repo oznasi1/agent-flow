@@ -1,7 +1,7 @@
 {
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
-  "description": "Grab a Jira task and spin up its workspace — a task pool in your sidebar that opens the right repos and pre-seeds a Claude Code agent.",
+  "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a Claude Code agent already briefed.",
   "version": "0.1.48",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",

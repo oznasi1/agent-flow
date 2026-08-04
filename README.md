@@ -1,11 +1,11 @@
 <div align="center">
 
-<img src="media/icon.png" alt="Agent Flow Deck logo" width="96" height="96" />
+<img src="media/icon.png" alt="" width="72" height="72" />
 
-# Agent Flow Deck
+<h1 style="letter-spacing:.13em;font-weight:550">AGENT FLOW DECK</h1>
 
-**Grab a Jira task and spin up its workspace** — a task pool in your VS Code / Cursor
-sidebar that opens the right repos and pre-seeds a Claude Code agent.
+<p><strong>A task pool in your sidebar.</strong> Take a Jira ticket and it opens the repos
+that ticket touches, with a Claude Code agent already briefed.</p>
 
 [![CI](https://github.com/oznasi1/agent-flow/actions/workflows/ci.yml/badge.svg)](https://github.com/oznasi1/agent-flow/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
