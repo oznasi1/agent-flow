@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give Agent Flow Deck one visual identity — a single teal accent spent in three places and the ring mark reused as a live gauge — by promoting the Deck panel's design grammar into a shared token module that the sidebar and Marketplace also consume.
+**Goal:** Give Agent Flow Deck one visual identity — a single teal accent spent sparingly (see Global Constraints for the exact, corrected count) and the ring mark reused as a live gauge — by promoting the Deck panel's design grammar into a shared token module that the sidebar and Marketplace also consume.
 
-**Architecture:** A new `src/webview/tokens.ts` owns every design token and the shared reset; the three webview entry points (`index.tsx`, `deck.tsx`, `marketplace.tsx`) append it before their own sheet. The brand hue is a CSS variable with `body.vscode-light` and `body.vscode-high-contrast` overrides, so the theme swap needs no JavaScript. The gauge is a small presentational component fed one new optional integer on the state message the sidebar host already sends.
+**Architecture:** A new `src/webview/tokens.ts` owns every design token and the shared reset; the three webview entry points (`index.tsx`, `deck.tsx`, `marketplace.tsx`) append it before their own sheet. The brand hue is a CSS variable with a `body.vscode-light` override, so the theme swap needs no JavaScript — high contrast deliberately gets no override at all (see Global Constraints) and so keeps the same real accent. The gauge is a small presentational component fed one new optional integer on the state message the sidebar host already sends, recomputed on every pool refresh (see Group B's B3 fix).
 
 **Tech Stack:** TypeScript, React 18 (`createRoot`), esbuild, Vitest + Testing Library (jsdom), plain CSS-in-template-string sheets injected via `<style>`. No new dependencies.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - **Accent tokens, exact values.** `--brand: #2AA79B` / `--brand-ink: #04211E` in `:root`; `--brand: #157F76` / `--brand-ink: #ffffff` under `body.vscode-light`. **No high-contrast override** — high contrast gets the real accent. An earlier version of this constraint set `--brand: currentColor` there; that resolves a filled button's `background` to its own `color` (`--brand-ink`), making the label invisible. The hue needs no opt-out: 7.10:1 on `#000000`, 4.85:1 on `#ffffff`, fills at 5.72 and 4.85. Ruled 2026-08-03.
-- **The accent may appear in exactly three places:** the sidebar header gauge, the sidebar `Take` button (filled), and the Deck's ordinary `.act.primary` (tinted outline). Nowhere else — never on the Deck's `.card.attn` in any form, never on a status dot, rail, chip, link, or Marketplace kind color.
+- **The accent may appear in exactly six places:** the sidebar header gauge, the sidebar `Take` button (filled), the sidebar's sticky `.batch-launch` bar, the sidebar's `.gate .btn` (`Sign in to Jira` / `Run setup`), the Deck's ordinary `.act.primary` (tinted outline), and the Marketplace's `Open file` (`.btn.pri`, filled). This list was originally "three places" and omitted `.btn.pri` from day one — a plan defect, not a drift, caught by the final whole-branch review; `.batch-launch` and `.gate .btn` were added by that same review's ruling. Nowhere else — never on the Deck's `.card.attn` in any form, never on a status dot, rail, chip, link, or Marketplace kind color.
 - **No new dependencies and no new typefaces.** Fonts stay `var(--vscode-font-family)` and `var(--vscode-editor-font-family)`.
 - **Mono is for identifiers and counts only.** Prose is always the UI font.
 - **Type scale:** `--t-micro: 10px`, `--t-data: 10.5px`, `--t-body: 11px`, `--t-title: 13px`, plus the 15px surface header. **No task may introduce a new size, and every rule a task rewrites must use a token.** The scale is not yet closed across `styles.ts`, which predates it: these literals live in rules no task in this plan touches, and they stay for now rather than silently resizing text a user reads every day —
@@ -1560,7 +1560,7 @@ Compare each new PNG against the one it replaces before staging: same framing an
 
 - [ ] **Step 6: High-contrast check**
 
-Launch the extension (`F5`), switch VS Code to **Dark High Contrast**, and open both the sidebar and the Deck. Expected: no teal anywhere — `--brand` resolves to `currentColor`, so `Take` renders as a foreground-ink button. If teal survives, a rule hardcoded the hex instead of the token.
+Launch the extension (`F5`), switch VS Code to **Dark High Contrast**, and open both the sidebar and the Deck. Expected: the accent stays teal — there is no high-contrast override (a later ruling reversed an earlier draft's `currentColor` opt-out, which made filled buttons illegible; see Global Constraints). `Take`, `Open file` and the Deck's ordinary primary should all read as legible teal, measuring 7.10:1 on `#000000` and 4.85:1 on `#ffffff`. If a control renders as foreground-ink instead of teal, a rule regressed to the old opt-out.
 
 - [ ] **Step 7: Run the full gates**
 

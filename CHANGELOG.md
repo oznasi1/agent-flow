@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The sidebar header mark doubles as a live gauge.** The dot-ring lights one outer
+  dot per Agent Flow window currently open, up to eight, and relights whenever the
+  task pool refreshes rather than only once at panel load. With window tracking off
+  it falls back to its static ring instead of claiming a count it doesn't have.
+
+### Changed
+
+- **A single teal accent, spent in exactly six places**: the sidebar's header gauge,
+  its `Take` button, its sticky batch-launch bar, and its sign-in/setup button; the
+  Deck's ordinary primary action; and the Marketplace's `Open file`. Everything
+  else — status dots, rails, chips, links — stays monochrome, on purpose.
+- **The sidebar's task, size and status filters read as grouped, segmented
+  controls**, matching the Deck's — not three separate rows of blue-filled pills.
+  The active choice is announced to assistive tech, not only drawn.
+- **A card's left rail now means "where is this ticket in the flow"** (not started,
+  in progress, or done) instead of priority. Urgency moved to a small `Highest` chip
+  shown only for the highest-priority tickets, so an urgent ticket no longer looks
+  identical to a broken one — both used to be red.
+- **`Address PR` gave up its green.** Green means done on the Deck, and a pull
+  request waiting on you is the opposite of done; the action now reads as a quiet
+  secondary control like the row's other actions.
+- **The Marketplace's filter pills became segmented controls too**, sharing the
+  sidebar's and the Deck's control language.
+- **New store tile and wordmark.** The README leads with the new lockup and shows
+  the branded UI throughout.
+
 ## [0.1.48] — 2026-08-03
 
 ### Changed
