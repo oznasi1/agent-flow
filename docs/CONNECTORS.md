@@ -227,10 +227,23 @@ export interface TaskConnector {
 2. Put both under their own directory: `src/tasks/<id>/`.
 3. Register one line in `src/tasks/registry.ts`'s `CONNECTORS` map:
    `<id>: makeYourConnector`.
-4. Add your own settings under `agentFlow.<id>.*` in `package.json`, read
-   through `getConfig()` in `src/config.ts` — never inlined (see the
-   compatibility rules, and `CONTRIBUTING.md`'s "No hardcoded organization
-   values" convention).
+4. Add your own settings under `agentFlow.<id>.*` in `package.json` — but
+   that alone does not make them reach your connector. There is no
+   per-connector settings bag: `AgentFlowConfig` (`src/config.ts:190-195`) is
+   one flat interface shared by every connector, and `getConfig()` populates
+   it by hand, field by field (e.g. `config.ts:389-390`:
+   `baseUrl: c.get<string>("jira.baseUrl")…`, `project: c.get<string>("jira.project")…`).
+   You must add your own fields to `AgentFlowConfig` **and** wire them up
+   inside `getConfig()`'s return object yourself — this is an edit to a
+   shared file, not something registering your connector gets you for free.
+   **Naming trap:** `AgentFlowConfig.baseUrl` and `.project` read like
+   generic per-connector fields but are **Jira's**, not a shape every
+   connector fills in. Don't reach for them from view code — the
+   source-agnostic equivalents are `SourceInfo.endpoint` and `.scopeValue`,
+   which every connector computes in its own `info()` (see §4). Read your
+   own settings through whatever fields you add to `AgentFlowConfig`, never
+   by inlining a setting id (see the compatibility rules, and
+   `CONTRIBUTING.md`'s "No hardcoded organization values" convention).
 5. Add your id to **both** the `agentFlow.taskSource` `enum` **and**
    `enumDescriptions` arrays in `package.json`. **Both, not just one** — a
    registry entry with no manifest `enum` entry makes the setting
@@ -264,7 +277,7 @@ export interface TaskConnector {
 
 ## 7. The inherited assumptions
 
-Two things a connector author will hit that the seam does not (yet) make
+Three things a connector author will hit that the seam does not (yet) make
 source-agnostic:
 
 - **`estimateSeconds` is rendered against an 8-hour workday.**
@@ -297,6 +310,31 @@ source-agnostic:
   but nobody has designed it against a real second branch convention yet.
   Connector #2's author is the first person with a real case in hand, and
   should design it then rather than have it guessed at here.
+
+- **Config is one shared, hand-written surface — and two of its fields are
+  Jira's despite their generic names.** There is no `AgentFlowConfig.<id>`
+  sub-object per connector. `AgentFlowConfig` (`src/config.ts:190-195`) is a
+  single flat interface every connector's fields live in side by side, and
+  `getConfig()` fills each field in by hand — for Jira, `config.ts:389-390`:
+
+  ```ts
+  baseUrl: (c.get<string>("jira.baseUrl") || "").replace(/\/+$/, ""),
+  project: c.get<string>("jira.project") || "",
+  ```
+
+  Adding a connector means adding your own fields to `AgentFlowConfig` and
+  populating them in `getConfig()` yourself — declaring `agentFlow.<id>.*`
+  settings in `package.json` does not wire them into anything by itself.
+
+  The trap: `baseUrl` and `project` are named as if they were generic
+  per-connector concepts, but they are Jira's two settings, hand-wired to
+  exactly the Jira connector's config keys above. A view or a new connector
+  reaching for `getConfig().baseUrl` expecting "the current source's
+  endpoint" would silently read Jira's — including when Jira isn't even the
+  active source. The genuinely source-agnostic equivalents already exist:
+  `SourceInfo.endpoint` and `SourceInfo.scopeValue`, both computed per
+  connector inside its own `info()` (§4). Read those from view code; read
+  your own `AgentFlowConfig` fields only from inside your own connector.
 
 ## 8. The minimal example
 
