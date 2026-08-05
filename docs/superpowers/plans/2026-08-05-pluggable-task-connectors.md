@@ -845,6 +845,32 @@ describe("JiraProvider", () => {
     ]);
   });
 
+  // The bug this guards: `resolution` is not in the transition's screen metadata,
+  // so a moveTo that re-derived its prompts from that metadata would drop the
+  // answer and POST the retry without it — asking the user for a Resolution and
+  // then failing for the same reason. Asserting the retryWith SHAPE is not
+  // enough; the value has to survive the round trip to the wire.
+  it("sends the synthesized Resolution on the retry, not just in retryWith", async () => {
+    const transition = vi.fn()
+      .mockRejectedValueOnce(new JiraApiError(400, "x", {}, ["Resolution is required."]))
+      .mockResolvedValueOnce(undefined);
+    const c = client({
+      transition,
+      getTransitions: vi.fn(async () => [{ id: "31", name: "Go", toName: "Go", toCategory: "", fields: {} }]),
+      listResolutions: vi.fn(async () => [{ id: "5", name: "Done" }]),
+    });
+    const p = new JiraProvider(c);
+    await p.statusTargets("A-1");
+
+    const err = (await p.moveTo("A-1", "31", {}).catch((e: unknown) => e)) as TaskWriteError;
+    expect(err.retryWith[0]).toMatchObject({ id: "resolution", kind: "pick" });
+
+    // The view now re-prompts and retries with the collected answer.
+    await p.moveTo("A-1", "31", { resolution: "Done" });
+    expect(transition).toHaveBeenCalledTimes(2);
+    expect(transition.mock.calls[1][2]).toEqual({ resolution: { id: "5" } });
+  });
+
   it("assigns via the resolved account id", async () => {
     const assignIssue = vi.fn(async () => undefined);
     await new JiraProvider(client({ assignIssue })).assignToMe("A-1");
@@ -893,10 +919,29 @@ const ALL_FILTERS: readonly Filter[] = [
  * asserting exactly what it asserted before the seam existed. */
 export class JiraProvider implements TaskProvider {
   /** Screen-field metadata from the last statusTargets() call, per transition id.
-   * moveTo() needs it twice — to map answers to Jira's shape, and to work out
-   * what a rejection is complaining about — and re-fetching would cost a second
-   * round-trip for data we just had. */
-  private fieldsByTarget = new Map<string, Record<string, TransitionFieldMeta>>();
+   * Used to work out what a rejection is complaining about, without paying a
+   * second round-trip for data we just had. */
+  private metaByTarget = new Map<string, Record<string, TransitionFieldMeta>>();
+
+  /** The prompts actually ISSUED for a transition, by field id.
+   *
+   * This deliberately is not re-derived from `metaByTarget` at write time, and
+   * that is the whole point: the Resolution fallback in `retryPrompts` synthesizes
+   * a prompt for a field the transition screen never declared. `promptableFields`
+   * filters its `only` list with `id in fields`, so re-deriving would silently
+   * drop that synthesized field — the user would be asked for a Resolution and
+   * the retry would POST without it, earning the same refusal again. Remembering
+   * what we asked for is the only thing that closes that hole. */
+  private promptsByTarget = new Map<string, Map<string, FieldPrompt>>();
+
+  /** Record prompts we are about to put in front of the user, so `toWire` can map
+   * their answers back. Merges rather than replaces: a recovery round adds to
+   * what the first round already asked. */
+  private rememberPrompts(targetId: string, prompts: FieldPrompt[]): void {
+    const known = this.promptsByTarget.get(targetId) ?? new Map<string, FieldPrompt>();
+    for (const p of prompts) known.set(p.id, p);
+    this.promptsByTarget.set(targetId, known);
+  }
 
   constructor(private readonly client: JiraClient) {}
 
@@ -939,20 +984,25 @@ export class JiraProvider implements TaskProvider {
   async assignToMe(key: string): Promise<void> {
     const me = await this.client.getMyself();
     // Never call assignIssue with a blank id: Jira reads that as "unassign",
-    // which is the opposite of what this method promises.
+    // which is the opposite of what this method promises. `getMyself()` returns
+    // `{ accountId, displayName }` — there is no `id` field on it, so read
+    // `accountId` directly rather than coalescing over a property that does not
+    // exist. (The seam's `me()` renames it to `id`; the client does not.)
     if (!me) throw new Error("Couldn't resolve your Jira account.");
-    await this.client.assignIssue(key, me.id ?? me.accountId);
+    await this.client.assignIssue(key, me.accountId);
   }
 
   async statusTargets(key: string): Promise<StatusTarget[]> {
     const transitions = await this.client.getTransitions(key);
-    this.fieldsByTarget.clear();
+    this.metaByTarget.clear();
+    this.promptsByTarget.clear();
     return transitions.map((t: TransitionOption) => {
       // `fields` is absent on anything that didn't come from an expanded
       // getTransitions — the metadata is Jira's JSON, not a guarantee.
       const meta = t.fields ?? {};
-      this.fieldsByTarget.set(t.id, meta);
+      this.metaByTarget.set(t.id, meta);
       const { prompts } = promptableFields(meta);
+      this.rememberPrompts(t.id, prompts);
       return {
         id: t.id,
         toName: t.toName,
@@ -968,14 +1018,14 @@ export class JiraProvider implements TaskProvider {
     targetId: string,
     values: Record<string, string | string[]>,
   ): Promise<void> {
-    const meta = this.fieldsByTarget.get(targetId) ?? {};
+    const meta = this.metaByTarget.get(targetId) ?? {};
     try {
-      await this.client.transition(key, targetId, this.toWire(meta, values));
+      await this.client.transition(key, targetId, this.toWire(targetId, values));
     } catch (e) {
       if (!(e instanceof JiraApiError)) throw e;
       throw new TaskWriteError(
         describeJiraError(e, fieldDisplayNames(meta)),
-        await this.retryPrompts(meta, e),
+        await this.retryPrompts(targetId, meta, e),
       );
     }
   }
@@ -984,13 +1034,17 @@ export class JiraProvider implements TaskProvider {
    * An id with no screen metadata is dropped rather than guessed at — Jira
    * would reject the write anyway, and less informatively. */
   private toWire(
-    meta: Record<string, TransitionFieldMeta>,
+    targetId: string,
     values: Record<string, string | string[]>,
   ): Record<string, unknown> {
-    const byId = new Map(promptableFields(meta, { only: Object.keys(values) }).prompts.map((p) => [p.id, p]));
+    const known = this.promptsByTarget.get(targetId);
     const out: Record<string, unknown> = {};
     for (const [id, raw] of Object.entries(values)) {
-      const prompt = byId.get(id);
+      const prompt = known?.get(id);
+      // An id we never prompted for is dropped rather than guessed at: without a
+      // FieldPrompt there is no way to know whether Jira wants a bare string, an
+      // {id} reference or an array, and a wrong shape earns a less informative
+      // refusal than sending nothing.
       if (prompt) out[id] = toJiraValue(prompt, raw);
     }
     return out;
@@ -1000,20 +1054,31 @@ export class JiraProvider implements TaskProvider {
    * metadata cannot see custom workflow validators, so the rejection itself is
    * the only place some requirements are ever stated. */
   private async retryPrompts(
+    targetId: string,
     meta: Record<string, TransitionFieldMeta>,
     err: JiraApiError,
   ): Promise<FieldPrompt[]> {
     const ids = missingFieldIds(meta, err);
     if (ids.length) {
       const { prompts } = promptableFields(meta, { only: ids });
-      if (prompts.length) return prompts;
+      if (prompts.length) {
+        this.rememberPrompts(targetId, prompts);
+        return prompts;
+      }
     }
     if (mentionsResolution(err)) {
       // Swallowed on purpose: failing to fetch the list only costs us the
       // recovery attempt, and the original refusal is still reported.
       const resolutions = await this.client.listResolutions().catch(() => []);
       if (resolutions.length) {
-        return [{ kind: "pick", id: "resolution", name: "Resolution", choices: resolutions }];
+        // `resolution` is NOT in `meta` — that is precisely why this fallback
+        // exists. It must be remembered, or toWire cannot map the answer and the
+        // retry silently POSTs without the field we just asked the user for.
+        const synthesized: FieldPrompt[] = [
+          { kind: "pick", id: "resolution", name: "Resolution", choices: resolutions },
+        ];
+        this.rememberPrompts(targetId, synthesized);
+        return synthesized;
       }
     }
     return [];
