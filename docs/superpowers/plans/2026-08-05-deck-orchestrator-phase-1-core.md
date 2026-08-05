@@ -19,6 +19,10 @@
 - **Do not touch** the `version` field in `package.json`, any version field in `package-lock.json`, or `CHANGELOG.md`. The orchestrator session owns those.
 - Work in a git worktree, never the main checkout — `vsce package` packages the working directory, so a stray file there ships inside the extension.
 - Conventional commits, scoped `orchestrator`: `feat(orchestrator): …`.
+- **`main` moves fast — re-check it before starting.** `docs/superpowers/specs/2026-08-05-pluggable-task-connectors-design.md` landed alongside this one and renames `RunStatus.jiraCategory` → `ticketCategory` (and `JiraTask` → `Task`). `conditions.ts` reads `status.jiraCategory` and `status.jiraStatus`, so:
+  - If the connectors work has already landed, read `status.ticketCategory` instead and update the two fixtures in `conditions.test.ts`. Nothing else in this plan is affected.
+  - If it has not, write `jiraCategory` as this plan does; it is one more call site for that rename to sweep.
+  - Either way the **condition kinds stay `ticket-done` / `ticket-status-is`** — deliberately connector-neutral, because a condition kind is persisted inside a saved flow and renaming one later would need a migration of every user's flow files.
 
 ## File Structure
 
@@ -183,13 +187,13 @@ export type CondKind =
   | "tree-clean"
   | "has-uncommitted"
   | "nothing-to-push"
-  | "jira-done";
+  | "ticket-done";
 
 /** Parameterised where it has to be, a bare kind everywhere else. */
 export type Condition =
   | { kind: CondKind }
   | { kind: "agent-idle-over"; minutes: number }
-  | { kind: "jira-status-is"; status: string };
+  | { kind: "ticket-status-is"; status: string };
 
 /** What an edge does when its condition is met. `launch` starts a planned node;
  * `seed` opens another agent in a place that already exists; `notify` only tells
@@ -465,16 +469,16 @@ describe("evalCond — git", () => {
 });
 
 describe("evalCond — Jira", () => {
-  it("jira-done reads the category", () => {
-    expect(met({ kind: "jira-done" }, ctx({ jiraCategory: "done" }))).toBe(true);
-    expect(met({ kind: "jira-done" }, ctx({ jiraCategory: "indeterminate" }))).toBe(false);
-    expect(met({ kind: "jira-done" }, ctx({ jiraCategory: null }))).toBe(false);
+  it("ticket-done reads the category", () => {
+    expect(met({ kind: "ticket-done" }, ctx({ jiraCategory: "done" }))).toBe(true);
+    expect(met({ kind: "ticket-done" }, ctx({ jiraCategory: "indeterminate" }))).toBe(false);
+    expect(met({ kind: "ticket-done" }, ctx({ jiraCategory: null }))).toBe(false);
   });
 
-  it("jira-status-is matches the exact status", () => {
-    expect(met({ kind: "jira-status-is", status: "PR initiated" }, ctx({ jiraStatus: "PR initiated" }))).toBe(true);
-    expect(met({ kind: "jira-status-is", status: "PR initiated" }, ctx({ jiraStatus: "In Progress" }))).toBe(false);
-    expect(met({ kind: "jira-status-is", status: "PR initiated" }, ctx({ jiraStatus: null }))).toBe(false);
+  it("ticket-status-is matches the exact status", () => {
+    expect(met({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: "PR initiated" }))).toBe(true);
+    expect(met({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: "In Progress" }))).toBe(false);
+    expect(met({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: null }))).toBe(false);
   });
 });
 ```
@@ -574,9 +578,9 @@ export function evalCond(cond: Condition, c: CondContext): boolean {
       // at all. The condition is named for what it can actually prove.
       return !!g && g.ahead === 0;
     }
-    case "jira-done":
+    case "ticket-done":
       return c.status.jiraCategory === "done";
-    case "jira-status-is":
+    case "ticket-status-is":
       return c.status.jiraStatus === cond.status;
   }
 }
@@ -681,9 +685,9 @@ describe("describeCond", () => {
   });
 
   it("describes Jira", () => {
-    expect(describeCond({ kind: "jira-done" }, ctx({ jiraStatus: "In Progress" }))).toBe("In Progress");
-    expect(describeCond({ kind: "jira-status-is", status: "PR initiated" }, ctx({ jiraStatus: "In Progress" }))).toBe("In Progress");
-    expect(describeCond({ kind: "jira-done" }, ctx({ jiraStatus: null }))).toBe("no Jira status");
+    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: "In Progress" }))).toBe("In Progress");
+    expect(describeCond({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: "In Progress" }))).toBe("In Progress");
+    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: null }))).toBe("no Jira status");
   });
 });
 ```
@@ -772,8 +776,8 @@ export function describeCond(cond: Condition, c: CondContext): string {
       if (!g) return "repo not found";
       return g.ahead === 0 ? "nothing to push" : `${g.ahead} to push`;
     }
-    case "jira-done":
-    case "jira-status-is":
+    case "ticket-done":
+    case "ticket-status-is":
       return c.status.jiraStatus ?? "no Jira status";
   }
 }

@@ -72,9 +72,9 @@ export type Condition =
   | { kind: "pr-merged" | "ci-passed" | "ci-failed" | "review-approved"
         | "changes-requested" | "threads-resolved" | "pr-conflicting"
         | "agent-ended-turn" | "no-agent-left" | "tree-clean"
-        | "has-uncommitted" | "nothing-to-push" | "jira-done" }
+        | "has-uncommitted" | "nothing-to-push" | "ticket-done" }
   | { kind: "agent-idle-over"; minutes: number }
-  | { kind: "jira-status-is"; status: string };
+  | { kind: "ticket-status-is"; status: string };
 
 export interface FlowEdge {
   id: string;
@@ -130,6 +130,11 @@ never be met again.
 Every predicate is a pure function of one `RunStatus` (plus the node's `repo`), so the whole
 vocabulary is table-testable against fixtures with no I/O.
 
+The two ticket conditions are named `ticket-*`, not `jira-*`, even though Jira is the only
+source today: a condition kind is persisted inside a saved flow, and the pluggable-connectors
+work renames the field they read. Naming them neutrally now costs nothing and avoids
+migrating every user's flow files later.
+
 | Condition | Reads |
 |---|---|
 | `pr-merged` | `prs[repo].facts.state === "MERGED"` |
@@ -145,8 +150,8 @@ vocabulary is table-testable against fixtures with no I/O.
 | `tree-clean` | `!repo.dirty` |
 | `has-uncommitted` | `repo.dirty` |
 | `nothing-to-push` | `repo.ahead === 0` |
-| `jira-done` | `jiraCategory === "done"` |
-| `jira-status-is` | `jiraStatus === param` |
+| `ticket-done` | `jiraCategory === "done"` — the field the connectors spec renames to `ticketCategory` |
+| `ticket-status-is` | `jiraStatus === param` |
 
 Two honest limitations to state in the UI, not hide:
 
