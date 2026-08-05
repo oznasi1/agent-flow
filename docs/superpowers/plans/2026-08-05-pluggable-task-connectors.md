@@ -2102,27 +2102,18 @@ mis-parsed."
 - Consumes: `TaskConnector` (Task 6).
 - Produces: `defaultDeps(connector: TaskConnector, log): DoctorDeps`; `DoctorDeps.probe: () => Promise<{auth?: AuthProbe; scope?: ProjectProbe}>` replacing `probeMyself` and `getProject`; `DoctorInputs` gains `sourceLabel`, `scopeNoun`, `endpointSetting`, `scopeSetting` and renames `baseUrl`→`endpoint`, `project`→`scope`.
 
-**Two test doubles must be fixed before you retarget anything, and the second hides a live bug.**
+**Corrected guidance on the test doubles — an earlier revision of this brief got this wrong, so read this instead.**
 
-`test/unit/doctorView.deps.test.ts:20-26` hand-rolls both error classes:
-```ts
-JiraAuthError: class JiraAuthError extends Error { … },
-JiraApiError: class JiraApiError extends Error {},   // <-- no `status` at all
-```
+I previously claimed the 404 → `not-found` branch was probably untested. **It is not.** `test/unit/doctorView.test.ts:4` imports the **real** `JiraAuthError` and `JiraApiError` from `src/tasks/jira/client` with no mock, and `:95-103` genuinely exercises the classification by throwing a real `JiraApiError(404, …)` and asserting `{ ok: false, reason: "not-found", … }`. That branch is properly covered today. Do not go looking for a bug there.
 
-`src/doctorView.ts:85` predicates on `e instanceof JiraApiError && e.status === 404` to produce the
-`not-found` verdict — the row that tells a user their project key is wrong, as distinct from a network
-failure. The double carries **no `status` property**, so `e.status === 404` is `undefined === 404`: that
-branch is very likely already untested today. Check whether it is, and say so in your report. Then
-retargeting to `TaskApiError` would cement it — a wrong project key would silently report as a generic
-error and send the user hunting for a network problem.
+`test/unit/doctorView.deps.test.ts:13-27` *does* hand-roll both error classes, including `JiraApiError: class JiraApiError extends Error {}` with no `status` field. But every test in that file is about **wiring** — "delegates getProject to the client with the key it was given", "builds the client from the configured site and project for probeMyself" — and none of them exercises the classification. So its doubles are harmless for the 404 path specifically.
 
-Fix both doubles with the `importActual` spread pattern from `test/unit/tasks/jira/connector.test.ts:14-19`
-so the real classes (and their real `status` field) are what `instanceof` sees, **then** add a test that
-genuinely exercises the 404 → `not-found` path with a real `JiraApiError(404, …)`, **then** retarget.
-Verify by mutation that flipping the `404` check breaks that test.
+**The actual risk in this task is different, and it is a deletion risk.** `collectInputs` stops classifying anything: the `instanceof JiraAuthError` / `instanceof JiraApiError && status === 404` logic moves behind `connector.probe()`, which Task 6 already implemented. That means:
 
+- `doctorView.test.ts:95-103`'s 404 test loses its subject — `collectInputs` no longer classifies, it just forwards `d.probe()`. **Do not simply delete that test.** First confirm the equivalent coverage exists in `test/unit/tasks/jira/connector.test.ts`, where Task 6 added probe tests including 404 → `not-found` and other-`JiraApiError` → `error`. Name the specific test you are relying on in your report. If the connector's version is weaker than the one you are removing — for instance if it asserts the `reason` but not the `message` that `describeJiraError` produces — strengthen it before removing this one, so no coverage is lost in the handover.
+- `doctorView.deps.test.ts`'s `probeMyself` and `getProject` wiring tests lose their subjects too, since those deps collapse into a single `probe` dep. Replace them with a test that `defaultDeps` wires `probe` to `connector.probe()`, and delete the doubles that are no longer referenced rather than leaving orphans.
 
+**Verify by mutation, in both directions:** break the 404 check inside `JiraConnector.probe()` and confirm a test fails; then break `engine/doctor.ts`'s rendering of `reason: "not-found"` and confirm a different test fails. The first proves the classification is still pinned after the move; the second proves the row a user reads is still pinned.
 
 - [ ] **Step 1: Write the failing test**
 
