@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Deck: agent chip shows the workspace name, not the first repo.** A multi-repo
+  run whose session couldn't be matched to one specific repo used to fall back to
+  `repos[0]`'s name on hover, no matter how many repos the run actually had. It now
+  shows the run's `.code-workspace` file name instead (`src/webview/DeckApp.tsx`).
+
+### Added
+
+- **Deck: agent tooltips show what a session is doing.** Hovering an agent's
+  codename (top-right of its card, and each row of an expanded agent list) now
+  leads with Claude Code's own transcript-derived session title when one is known,
+  instead of just naming the repo (`src/webview/DeckApp.tsx`).
+
 ## [0.2.0] — 2026-08-04
 
 ### Added
