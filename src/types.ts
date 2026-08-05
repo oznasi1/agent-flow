@@ -1,6 +1,9 @@
 // Shared types across the extension host and webview.
+// Type-only: src/tasks/provider.ts imports Filter/JiraTask/Size from here, so a
+// value import would be a runtime cycle. `import type` is erased at build time.
+import type { SerializedCaps } from "./tasks/provider";
 
-export type Filter = "unassigned" | "mine" | "mysprint" | "sprint" | "backlog" | "all";
+export type Filter ="unassigned" | "mine" | "mysprint" | "sprint" | "backlog" | "all";
 export type Size = "any" | "s" | "m" | "l"; // by original time estimate
 
 /** Which secondary filter controls the task-pool sidebar shows. Each defaults to
@@ -356,7 +359,14 @@ export type OutboundMessage =
   // blank/loading panel.
   // liveCount is absent when trackOpenWindows is off: the sidebar then shows the
   // static mark rather than claiming zero windows are open.
-  | { type: "state"; authed: boolean; configured: boolean; project: string; me: string | null; prReviewStatus: string; filters: FilterVisibility; liveCount?: number }
+  | { type: "state"; authed: boolean; configured: boolean; project: string; me: string | null;
+      prReviewStatus: string; filters: FilterVisibility; liveCount?: number;
+      /** The task source's user-facing name — every "Sign in to X" string reads
+       * this rather than hardcoding a tracker. */
+      sourceLabel: string;
+      /** Which optional affordances to render. Flat booleans: the capability
+       * objects on TaskProvider cannot be structured-cloned. */
+      caps: SerializedCaps }
   // Recomputed on every pool refresh (same trackOpenWindows gate and liveWindows()
   // source as `state`'s liveCount), so the header gauge doesn't go stale between
   // `state` posts — it was previously a mount-time snapshot only.
@@ -367,7 +377,7 @@ export type OutboundMessage =
       // these classify each chip: on the issue, pushable, or local-only. `mappable`
       // is `null` when the project's component list itself couldn't be read — a
       // distinct case from "maps to nothing", and one no chip state can be claimed for.
-      jiraComponents: string[]; mappable: Record<string, string> | null }
+      sourceComponents: string[]; mappable: Record<string, string> | null }
   | { type: "statusChanged"; key: string; status: string; category: string; removed: boolean }
   | { type: "movedToSprint"; key: string; assignee: string; removed: boolean }
   | { type: "removedFromSprint"; key: string }

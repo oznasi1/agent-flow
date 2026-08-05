@@ -1,4 +1,25 @@
-import { JiraTask } from "../types";
+import { Filter, JiraTask } from "../types";
+
+/** The lens to actually use, given what the user configured and what the source can
+ * answer. `agentFlow.defaultFilter` ships as "mysprint" and four of the six filters
+ * are inherently sprint-scoped, so a source without sprints supports neither the
+ * shipped default nor most of the alternatives — asking it for one would fetch an
+ * unanswerable lens and render a tab bar with no active tab.
+ *
+ * The shipped default is preferred over `supported[0]` for an unrecognized setting on
+ * a source that supports it, because that is exactly where the pre-capability code
+ * landed (`(cfg.defaultFilter as Filter) || "mysprint"`) and an already-configured
+ * user's opening lens must not move. The last fallback covers a source declaring no
+ * filters at all: it can answer nothing either way, so the only obligation left is
+ * that the return stays a `Filter`.
+ *
+ * Pure — no DOM, no React — so the extension host imports it too rather than keeping
+ * a second copy that could drift from what the webview renders. */
+export function effectiveFilter(configured: string, supported: readonly Filter[]): Filter {
+  if (supported.includes(configured as Filter)) return configured as Filter;
+  if (supported.includes("mysprint")) return "mysprint";
+  return supported[0] ?? "mysprint";
+}
 
 /** Format an original-estimate in seconds as a compact "3h" / "1.5d" (8h workday). Pure. */
 export function fmtEst(sec: number): string {

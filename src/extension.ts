@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { ApiTokenAuth } from "./tasks/jira/auth";
+import { resolveConnector } from "./tasks/registry";
 import { TasksViewProvider } from "./tasksView";
 import { DeckPanel } from "./deckView";
 import { MarketplacePanel } from "./marketplaceView";
@@ -44,7 +45,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const auth = new ApiTokenAuth(context.secrets);
   const output = vscode.window.createOutputChannel("Agent Flow Deck");
   const log = (m: string) => output.appendLine(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
-  const provider = new TasksViewProvider(context, auth, log);
+  // The task panel reads its source through the connector seam. `auth` stays for the
+  // consumers not yet migrated (Deck, Doctor, setup, the sign-in commands); both read
+  // the same SecretStorage keys, so there is no state to diverge.
+  const provider = new TasksViewProvider(context, resolveConnector(context, log), log);
   log("Agent Flow Deck activated");
 
   // Telemetry must come up before the commands below so `command_invoked` can

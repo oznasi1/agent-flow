@@ -63,15 +63,18 @@ vi.mock("../../src/engine/sessions", async () => {
   return { ...actual, readOpenSessions: vi.fn(() => []), defaultSessionsDir: vi.fn(() => "/sessions") };
 });
 // This file mocks the client wholesale, so `JiraApiError` would be undefined inside
-// tasksView and every `instanceof` check would throw. Re-export the genuine class so
-// the real parseJiraError produces instances the production code recognises.
+// the Jira provider and every `instanceof` check would throw. Re-export the genuine
+// class so the real parseJiraError produces instances the production code recognises.
 vi.mock("../../src/tasks/jira/client", async () => {
   const errors = await vi.importActual<typeof import("../../src/tasks/jira/errors")>("../../src/tasks/jira/errors");
-  // Mirrors the real class's constructor (src/tasks/jira/client.ts): classifyFailure
-  // (telemetry/events.ts) checks `e.name === "JiraAuthError"`, and a bare
-  // `extends Error {}` here would leave `.name` as the inherited "Error",
-  // silently failing that check for every test in this file.
-  class JiraAuthError extends Error {
+  const seam = await vi.importActual<typeof import("../../src/tasks/provider")>("../../src/tasks/provider");
+  // Mirrors the real class exactly (src/tasks/jira/client.ts): it extends the seam's
+  // TaskAuthError, which is what the view now branches on to re-gate the panel — a
+  // bare `extends Error` here would make every re-gate test pass a value production
+  // code cannot recognise. `.name` is set for the same reason it is set there:
+  // classifyFailure (telemetry/events.ts) checks `e.name === "JiraAuthError"`, and
+  // the inherited name would be the base's "TaskAuthError".
+  class JiraAuthError extends seam.TaskAuthError {
     constructor(message: string) {
       super(message);
       this.name = "JiraAuthError";
@@ -94,7 +97,12 @@ import { readLiveWindows, windowIdentity } from "../../src/engine/presence";
 import { readRuns } from "../../src/engine/runs";
 import { readOpenSessions } from "../../src/engine/sessions";
 import { JiraClient, JiraAuthError } from "../../src/tasks/jira/client";
-import { markTaskNetworkFailure } from "../../src/tasks/provider";
+import { JiraProvider } from "../../src/tasks/jira/provider";
+import {
+  markTaskNetworkFailure, SerializedCaps, TaskConnector, TaskProvider, TaskWriteError,
+} from "../../src/tasks/provider";
+import type { JiraAuth } from "../../src/tasks/jira/auth";
+import { makeFixtureConnector } from "../_helpers/fixtureConnector";
 import { TasksViewProvider } from "../../src/tasksView";
 import type { TakeSource } from "../../src/telemetry/events";
 import type { InboundMessage, OutboundMessage } from "../../src/types";
@@ -153,7 +161,6 @@ let clientStub: Record<string, ReturnType<typeof vi.fn>>;
 
 function makeClient() {
   return {
-    currentUserName: vi.fn(async () => "Jane"),
     getMyself: vi.fn(async () => ({ accountId: "a1", displayName: "Jane" })),
     fetchTasks: vi.fn(async () => []),
     getDetail: vi.fn(async (key: string) => ({
@@ -201,12 +208,72 @@ beforeEach(() => {
   });
 });
 
+/** What `serializeCaps` makes of the Jira provider's capabilities. Every `state` post
+ * carries them now, so they appear in each exact-match state assertion below. Spelled
+ * out rather than derived from JiraProvider, so a capability quietly disappearing from
+ * the shipped Jira path fails here rather than being echoed back as "correct". */
+const JIRA_CAPS: SerializedCaps = {
+  supportedFilters: ["unassigned", "mine", "mysprint", "sprint", "backlog", "all"],
+  sizes: true,
+  labels: true,
+  sprints: true,
+  components: true,
+};
+
+/** A TaskConnector over the mocked JiraClient. `provider()` returns the REAL
+ * JiraProvider adapting `clientStub`, and that is the whole point: every assertion in
+ * this file about what Jira is asked for — transition bodies, sprint ids, component
+ * spellings — stays an assertion about the shipped Jira path rather than about a
+ * hand-written double that could drift from it.
+ *
+ * `info()` / `isConfigured()` / `taskUrl()` mirror src/tasks/jira/connector.ts,
+ * reading the same stubbed getConfig(), so the panel's user-facing strings are
+ * asserted against the values a real install would produce. */
+function jiraConnector(auth: JiraAuth): TaskConnector {
+  return {
+    id: "jira",
+    setupSteps: 2,
+    info: () => {
+      const cfg = getConfig();
+      return {
+        label: "Jira",
+        scopeNoun: "project",
+        scopeValue: cfg.project,
+        endpoint: cfg.baseUrl,
+        exampleKey: `${cfg.project || "ABC"}-1234`,
+        endpointSetting: "agentFlow.jira.baseUrl",
+        scopeSetting: "agentFlow.jira.project",
+      };
+    },
+    isConfigured: () => {
+      const cfg = getConfig();
+      return !!cfg.baseUrl.trim() && !!cfg.project.trim();
+    },
+    configure: async () => true,
+    // Delegated, not copied: tests reach for `auth.isAuthenticated` to make the
+    // credential read itself reject, and that must still reach the view.
+    isAuthenticated: () => auth.isAuthenticated(),
+    signIn: () => auth.signIn(),
+    signOut: () => auth.signOut(),
+    provider: () => new JiraProvider(clientStub as unknown as JiraClient),
+    probe: async () => ({}),
+    taskUrl: (key) => `${getConfig().baseUrl}/browse/${key}`,
+    keyFromUrl: () => null,
+  };
+}
+
 /** Instantiate the provider and capture its webview message handler + post spy. */
-function setup(opts: { authed?: boolean; workspaceState?: Record<string, unknown> } = {}) {
+function setup(opts: { authed?: boolean; workspaceState?: Record<string, unknown>; connector?: TaskConnector } = {}) {
   const { context, workspaceState, globalState } = fakeContext({ workspaceState: opts.workspaceState });
   const auth = fakeAuth({ authed: opts.authed ?? true });
-  const provider = new TasksViewProvider(context, auth);
-  const post = vi.fn();
+  const connector = opts.connector ?? jiraConnector(auth);
+  const provider = new TasksViewProvider(context, connector);
+  // A live array as well as the spy: the capability tests below read messages after
+  // driving an action, which a snapshot taken at mount time could not show.
+  const messages: OutboundMessage[] = [];
+  const post = vi.fn((m: OutboundMessage) => {
+    messages.push(m);
+  });
   let handler: (m: InboundMessage) => Promise<void> = async () => {};
   const view = {
     webview: {
@@ -224,21 +291,68 @@ function setup(opts: { authed?: boolean; workspaceState?: Record<string, unknown
   provider.resolveWebviewView(view as never);
   const send = (m: InboundMessage) => handler(m);
   const posted = () => post.mock.calls.map((c) => c[0] as OutboundMessage);
-  return { provider, post, send, posted, auth, workspaceState, globalState };
+  return { provider, post, send, posted, messages, auth, connector, workspaceState, globalState };
 }
+
+/** Mount the panel on a given connector and let it establish its state, the way the
+ * webview's `ready` does. `posted` is the live message array, so a test reads it after
+ * driving an action. */
+async function mountWith(connector: TaskConnector) {
+  const s = setup({ connector });
+  await s.send({ type: "ready" });
+  return { view: s.provider, posted: s.messages, send: s.send };
+}
+
+/** The fixture connector with individual provider members swapped. Used where the
+ * interesting behaviour is what the view does with what a connector throws, not which
+ * source threw it — the fixture declares no labels, sprints or components, so these
+ * also prove the generic path never depends on an optional capability. */
+function withProvider(overrides: Partial<TaskProvider>): TaskConnector {
+  const base = makeFixtureConnector();
+  return { ...base, provider: () => Object.assign(base.provider(), overrides) };
+}
+
+/** Answer the next `showInputBox` calls in order, then undefined (cancelled). */
+function stubInputBox(...answers: (string | undefined)[]) {
+  const box = vi.mocked(window.showInputBox);
+  box.mockReset();
+  for (const a of answers) box.mockResolvedValueOnce(a as never);
+  box.mockResolvedValue(undefined as never);
+}
+
+/** Answer a QuickPick with the first item the view actually offered — never a
+ * hand-written stand-in. For the status picker that matters: the item's `t` has to be
+ * the StatusTarget the provider produced, so a view that stopped passing one through
+ * fails here instead of quietly picking a fabricated object out of the test. */
+const pickFirst = (items: unknown[]) => items[0];
+
+/** Answer the QuickPicks of one flow in order: for `changeStatus` the status picker
+ * first, then one answer per field prompt. A function answer receives the items the
+ * view offered and returns one of them (see `pickFirst`); any other value is returned
+ * as-is. Anything past the listed answers reads as cancelled. */
+const answerPicks = (...answers: unknown[]) => {
+  const pick = vi.mocked(window.showQuickPick);
+  pick.mockReset();
+  for (const a of answers) {
+    pick.mockImplementationOnce(async (items?: unknown) =>
+      typeof a === "function" ? (a as (i: unknown[]) => unknown)((await items) as unknown[]) : a,
+    );
+  }
+  pick.mockResolvedValue(undefined as never);
+};
 
 describe("ready", () => {
   it("reports authed state with the current user and auto-fetches", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
 
   it("reports unauthed state and does not fetch", async () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
   });
 
@@ -246,16 +360,16 @@ describe("ready", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, baseUrl: "", project: "" });
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: false, project: "", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: false, project: "", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
   });
 
   it("posts state up-front and still loads tasks when the display-name lookup fails", async () => {
-    clientStub.currentUserName.mockRejectedValue(new Error("myself 500"));
+    clientStub.getMyself.mockRejectedValue(new Error("myself 500"));
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
     // A state is posted before (and regardless of) the /myself round-trip…
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     // …and the task list — the real payload — still loads.
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
@@ -263,7 +377,7 @@ describe("ready", () => {
   it("re-establishes state and fetches on retry", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "retry" });
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
 
@@ -303,7 +417,7 @@ describe("state — liveCount", () => {
     ]);
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane",
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane",
       prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true } });
     const stateMsg = posted().find((m) => m.type === "state") as { liveCount?: number };
     expect(stateMsg.liveCount).toBeUndefined();
@@ -315,7 +429,7 @@ describe("fetch", () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "fetch", filter: "mine", size: "any" });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
-    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
   });
 
   it("toggles loading and posts tasks with a services guess", async () => {
@@ -324,7 +438,7 @@ describe("fetch", () => {
     ]);
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mine", size: "any" });
-    expect(clientStub.fetchTasks).toHaveBeenCalledWith("mine", "any");
+    expect(clientStub.fetchTasks).toHaveBeenCalledWith("mine", "any", 50);
     const tasksMsg = posted().find((m) => m.type === "tasks");
     expect(tasksMsg).toBeTruthy();
     expect((tasksMsg as { tasks: { services?: string[] }[] }).tasks[0].services).toBeDefined();
@@ -395,7 +509,7 @@ describe("resetOrder", () => {
     const { send, workspaceState } = setup({ workspaceState: { "agentFlow.sprintOrder": ["A", "B"] } });
     await send({ type: "resetOrder", size: "any" });
     expect(workspaceState.update).toHaveBeenCalledWith("agentFlow.sprintOrder", []);
-    expect(clientStub.fetchTasks).toHaveBeenCalledWith("mysprint", "any");
+    expect(clientStub.fetchTasks).toHaveBeenCalledWith("mysprint", "any", 50);
   });
 });
 
@@ -422,9 +536,7 @@ describe("changeStatus", () => {
     clientStub.getTransitions.mockResolvedValue([
       { id: "41", name: "Resolve", toName: "Done", toCategory: "done" },
     ]);
-    vi.mocked(window.showQuickPick).mockResolvedValue({
-      t: { id: "41", name: "Resolve", toName: "Done", toCategory: "done" },
-    } as never);
+    answerPicks(pickFirst);
     const { provider, posted } = setup();
     await provider.changeStatus("ASM-1");
     expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "41", {});
@@ -443,9 +555,7 @@ describe("changeStatus", () => {
     clientStub.getTransitions.mockResolvedValue([
       { id: "31", name: "Start", toName: "In Progress", toCategory: "indeterminate" },
     ]);
-    vi.mocked(window.showQuickPick).mockResolvedValue({
-      t: { id: "31", name: "Start", toName: "In Progress", toCategory: "indeterminate" },
-    } as never);
+    answerPicks(pickFirst);
     const { provider } = setup();
     await provider.changeStatus("ASM-1");
     expect(clientStub.addLabel).not.toHaveBeenCalled();
@@ -456,9 +566,7 @@ describe("changeStatus", () => {
       { id: "31", name: "Start", toName: "In Progress", toCategory: "indeterminate" },
     ]);
     clientStub.addLabel.mockRejectedValue(new Error("label denied"));
-    vi.mocked(window.showQuickPick).mockResolvedValue({
-      t: { id: "31", name: "Start", toName: "In Progress", toCategory: "indeterminate" },
-    } as never);
+    answerPicks(pickFirst);
     const { provider, posted } = setup();
     await provider.changeStatus("ASM-1");
     expect(posted()).toContainEqual(expect.objectContaining({ type: "statusChanged", key: "ASM-1" }));
@@ -480,17 +588,9 @@ describe("changeStatus", () => {
     },
   };
 
-  /** The status QuickPick answers first, then one answer per field prompt. */
-  const answerPicks = (...answers: unknown[]) => {
-    const pick = vi.mocked(window.showQuickPick);
-    pick.mockReset();
-    for (const a of answers) pick.mockResolvedValueOnce(a as never);
-    pick.mockResolvedValue(undefined as never);
-  };
-
   it("prompts for a required resolution and sends it with the transition", async () => {
     clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
-    answerPicks({ t: DONE_WITH_RESOLUTION }, { label: "Won't Do" });
+    answerPicks(pickFirst, { label: "Won't Do" });
     const { provider } = setup();
     await provider.changeStatus("ASM-1");
     expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "41", { resolution: { id: "10001" } });
@@ -498,7 +598,7 @@ describe("changeStatus", () => {
 
   it("writes nothing when the field prompt is cancelled", async () => {
     clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
-    answerPicks({ t: DONE_WITH_RESOLUTION }, undefined);
+    answerPicks(pickFirst, undefined);
     const { provider, posted } = setup();
     await provider.changeStatus("ASM-1");
     expect(clientStub.transition).not.toHaveBeenCalled();
@@ -514,7 +614,7 @@ describe("changeStatus", () => {
       fields: { customfield_1: { required: true, name: "Reason", schema: { type: "string" } } },
     };
     clientStub.getTransitions.mockResolvedValue([t]);
-    answerPicks({ t });
+    answerPicks(pickFirst);
     vi.mocked(window.showInputBox).mockResolvedValue("shipped in 0.1.36" as never);
     const { provider } = setup();
     await provider.changeStatus("ASM-1");
@@ -530,7 +630,7 @@ describe("changeStatus", () => {
       fields: { assignee: { required: true, name: "Assignee", schema: { type: "user", system: "assignee" } } },
     };
     clientStub.getTransitions.mockResolvedValue([t]);
-    answerPicks({ t });
+    answerPicks(pickFirst);
     const { provider } = setup();
     await provider.changeStatus("ASM-1");
     expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "61", {});
@@ -545,7 +645,7 @@ describe("changeStatus", () => {
       fields: { comment: { required: false, name: "Comment", schema: { type: "string" } } },
     };
     clientStub.getTransitions.mockResolvedValue([t]);
-    answerPicks({ t });
+    answerPicks(pickFirst);
     const { provider } = setup();
     await provider.changeStatus("ASM-1");
     expect(window.showInputBox).not.toHaveBeenCalled();
@@ -563,7 +663,7 @@ describe("changeStatus", () => {
       .mockRejectedValueOnce(apiError(["Ticket cannot be closed unless Resolution will be provided"]))
       .mockResolvedValueOnce(undefined);
     // The upfront pass already asks for Resolution, so answer it twice.
-    answerPicks({ t: DONE_WITH_RESOLUTION }, { label: "Done" }, { label: "Won't Do" });
+    answerPicks(pickFirst, { label: "Done" }, { label: "Won't Do" });
     const { provider, posted } = setup();
     await provider.changeStatus("ASM-1");
     expect(clientStub.transition).toHaveBeenCalledTimes(2);
@@ -590,7 +690,7 @@ describe("changeStatus", () => {
     clientStub.transition
       .mockRejectedValueOnce(apiError([], { customfield_1: "Field is required" }))
       .mockResolvedValueOnce(undefined);
-    answerPicks({ t }, { label: "Config drift" });
+    answerPicks(pickFirst, { label: "Config drift" });
     const { provider } = setup();
     await provider.changeStatus("ASM-1");
     expect(clientStub.transition).toHaveBeenLastCalledWith("ASM-1", "41", { customfield_1: { id: "9" } });
@@ -603,7 +703,7 @@ describe("changeStatus", () => {
     clientStub.transition
       .mockRejectedValueOnce(apiError(["Ticket cannot be closed unless Resolution will be provided"]))
       .mockResolvedValueOnce(undefined);
-    answerPicks({ t }, { label: "Done" });
+    answerPicks(pickFirst, { label: "Done" });
     const { provider } = setup();
     await provider.changeStatus("ASM-1");
     expect(clientStub.listResolutions).toHaveBeenCalled();
@@ -614,7 +714,7 @@ describe("changeStatus", () => {
     const t = { id: "41", name: "Resolve", toName: "Done", toCategory: "done", fields: {} };
     clientStub.getTransitions.mockResolvedValue([t]);
     clientStub.transition.mockRejectedValue(apiError(["Transition is not valid"]));
-    answerPicks({ t });
+    answerPicks(pickFirst);
     const { provider, posted } = setup();
     await provider.changeStatus("ASM-1");
     expect(clientStub.transition).toHaveBeenCalledTimes(1);
@@ -637,7 +737,7 @@ describe("changeStatus", () => {
     };
     clientStub.getTransitions.mockResolvedValue([t]);
     clientStub.transition.mockRejectedValue(apiError([], { customfield_1: "Field is required" }));
-    answerPicks({ t });
+    answerPicks(pickFirst);
     const { provider, posted } = setup();
     await provider.changeStatus("ASM-1");
     expect(posted()).toContainEqual(
@@ -648,7 +748,7 @@ describe("changeStatus", () => {
   it("does not retry a second time", async () => {
     clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
     clientStub.transition.mockRejectedValue(apiError(["Ticket cannot be closed unless Resolution will be provided"]));
-    answerPicks({ t: DONE_WITH_RESOLUTION }, { label: "Done" }, { label: "Done" });
+    answerPicks(pickFirst, { label: "Done" }, { label: "Done" });
     const { provider, posted } = setup();
     await provider.changeStatus("ASM-1");
     expect(clientStub.transition).toHaveBeenCalledTimes(2);
@@ -658,7 +758,7 @@ describe("changeStatus", () => {
   it("stays silent when the recovery prompt is cancelled", async () => {
     clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
     clientStub.transition.mockRejectedValue(apiError(["Ticket cannot be closed unless Resolution will be provided"]));
-    answerPicks({ t: DONE_WITH_RESOLUTION }, { label: "Done" }, undefined);
+    answerPicks(pickFirst, { label: "Done" }, undefined);
     const { provider, posted } = setup();
     await provider.changeStatus("ASM-1");
     expect(clientStub.transition).toHaveBeenCalledTimes(1);
@@ -766,7 +866,7 @@ describe("detail", () => {
       // account-service from the component, centaur from the label
       inferred: ["account-service", "centaur"],
       repos: ["account-service", "centaur"],
-      jiraComponents: ["account-service"],
+      sourceComponents: ["account-service"],
       // "centaur" is a discovered repo but not a component of ASM → absent
       mappable: { "account-service": "account-service" },
     });
@@ -777,7 +877,7 @@ describe("detail", () => {
     const { send, posted } = setup();
     await send({ type: "detail", key: "ASM-1" });
     expect(clientStub.listComponents).not.toHaveBeenCalled();
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false }));
   });
 
   it("reports every chip as local-only when the project defines no components", async () => {
@@ -871,7 +971,7 @@ describe("setComponent", () => {
     const { send, posted } = setup();
     await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false }));
     // Re-gating to the sign-in screen is itself the indication — a toast on top
     // would be noise, and the panel is already replaced.
     expect(posted().filter((p) => p.type === "toast")).toEqual([]);
@@ -921,7 +1021,7 @@ describe("setComponent", () => {
     await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
     expect(clientStub.updateComponents).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false }));
   });
 
   // The invariant the whole optimistic-edit design rests on: a SecretStorage
@@ -1423,7 +1523,7 @@ describe("error handling", () => {
     clientStub.fetchTasks.mockRejectedValue(new JiraAuthError("expired"));
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mine", size: "any" });
-    expect(posted()).toContainEqual({ type: "state", authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
     expect(posted()).toContainEqual({ type: "loading", loading: false });
     // Auth errors re-gate (no persistent error banner — the sign-in screen is the cue).
@@ -3413,5 +3513,168 @@ describe("remote control", () => {
     const toast = posted().find((m) => m.type === "toast") as { message: string };
     expect(toast.message).not.toContain("Remote Control skipped");
     vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+});
+
+// ── capability gating ───────────────────────────────────────────────────────
+// Everything above drives the shipped Jira connector, which declares every optional
+// capability. These drive the Task 7 fixture connector, which declares none — so a
+// view that reaches for sprints, components, labels, estimates or an unsupported
+// filter fails here instead of shipping. FX-2 is assigned to "Me" with
+// `inOpenSprint: false`, which is exactly the case a missing sprint gate springs.
+
+describe("a source with no optional capabilities", () => {
+  it("posts only the filters that source supports", async () => {
+    const { posted } = await mountWith(makeFixtureConnector());
+    const state = posted.find((m) => m.type === "state") as { caps: SerializedCaps; sourceLabel: string };
+    expect(state.caps.supportedFilters).toEqual(["mine", "all"]);
+    expect(state.caps.sprints).toBe(false);
+    expect(state.caps.components).toBe(false);
+    expect(state.caps.labels).toBe(false);
+    expect(state.caps.sizes).toBe(false);
+    expect(state.sourceLabel).toBe("Fixture");
+  });
+
+  it("refuses a sprint write instead of throwing", async () => {
+    const { view, posted } = await mountWith(makeFixtureConnector());
+    await view.addToMySprint("FX-1");
+    expect(posted.some((m) => m.type === "movedToSprint")).toBe(false);
+    const toast = posted.find((m) => m.type === "toast" && m.level === "error") as { message: string };
+    expect(toast.message).toMatch(/Fixture/);
+  });
+
+  it("refuses a sprint removal the same way, and never posts removedFromSprint", async () => {
+    const { view, posted } = await mountWith(makeFixtureConnector());
+    await view.removeFromSprint("FX-1", "any");
+    expect(posted.some((m) => m.type === "removedFromSprint")).toBe(false);
+    expect(posted.find((m) => m.type === "toast" && m.level === "error")).toBeDefined();
+    // No native Undo notification either — there is nothing to undo.
+    expect(window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it("refuses a component sync but still releases the webview's optimistic edit", async () => {
+    const { view, posted } = await mountWith(makeFixtureConnector());
+    await view.setComponent("FX-1", "account-service", true, true);
+    // ok:false is what undoes the held chip edit; a silent return would strand it.
+    expect(posted).toContainEqual(
+      expect.objectContaining({ type: "componentsChanged", key: "FX-1", ok: false }),
+    );
+    const toast = posted.find((m) => m.type === "toast" && m.level === "error") as { message: string };
+    expect(toast.message).toMatch(/Fixture/);
+  });
+
+  it("treats stampLabelOnWrite as a silent no-op, not a crash", async () => {
+    // stampLabelOnWrite defaults true (CFG sets it); a label-less source must still complete.
+    const { view, posted } = await mountWith(makeFixtureConnector());
+    answerPicks(pickFirst);
+    await view.changeStatus("FX-1");
+    expect(posted.some((m) => m.type === "statusChanged")).toBe(true);
+    expect(posted.filter((m) => m.type === "toast").every((t) => t.level !== "error")).toBe(true);
+  });
+
+  it("changes status with no field prompts", async () => {
+    const { view, posted } = await mountWith(makeFixtureConnector());
+    answerPicks(pickFirst);
+    await view.changeStatus("FX-1");
+    expect(window.showInputBox).not.toHaveBeenCalled();
+    // The fixture's first target is Open (category "new") — not a retirement.
+    expect(posted).toContainEqual({
+      type: "statusChanged", key: "FX-1", status: "Open", category: "new", removed: false,
+    });
+  });
+
+  it("never asks the source for the shipped default lens it cannot answer", async () => {
+    // agentFlow.defaultFilter ships as "mysprint", and this source has no sprints.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, defaultFilter: "mysprint" });
+    const list = vi.fn(async () => []);
+    await mountWith(withProvider({ list }));
+    expect(list).toHaveBeenCalledWith("mine", "any");
+    expect(list.mock.calls.some((c) => (c as unknown[])[0] === "mysprint")).toBe(false);
+  });
+
+  it("clamps an inbound fetch carrying a filter the source no longer supports", async () => {
+    // A webview left open across an agentFlow.taskSource change sends the old lens.
+    const list = vi.fn(async () => []);
+    const { send, posted } = setup({ connector: withProvider({ list }) });
+    await send({ type: "fetch", filter: "sprint", size: "any" });
+    expect(list).toHaveBeenCalledWith("mine", "any");
+    // The posted lens is the one actually fetched, so the tab bar cannot highlight a
+    // tab whose contents were never requested.
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "tasks", filter: "mine" }));
+  });
+});
+
+describe("a refused write that names fields to retry", () => {
+  it("re-prompts exactly the fields the connector asked for, then retries once", async () => {
+    const moveTo = vi.fn()
+      .mockRejectedValueOnce(new TaskWriteError("needs Impact", [
+        { kind: "text", id: "customfield_1", name: "Impact" },
+      ]))
+      .mockResolvedValueOnce(undefined);
+    const connector = withProvider({ moveTo });
+    stubInputBox("high"); // the re-prompt answer
+    const { view, posted } = await mountWith(connector);
+    answerPicks(pickFirst);
+    await view.changeStatus("FX-1");
+    expect(moveTo).toHaveBeenCalledTimes(2);
+    expect(moveTo.mock.calls[1][2]).toEqual({ customfield_1: "high" });
+    expect(posted.some((m) => m.type === "statusChanged")).toBe(true);
+  });
+
+  it("asks for nothing but the named fields", async () => {
+    const moveTo = vi.fn()
+      .mockRejectedValueOnce(new TaskWriteError("needs Impact", [
+        { kind: "text", id: "customfield_1", name: "Impact" },
+      ]))
+      .mockResolvedValueOnce(undefined);
+    stubInputBox("high");
+    const { view } = await mountWith(withProvider({ moveTo }));
+    answerPicks(pickFirst);
+    await view.changeStatus("FX-1");
+    expect(vi.mocked(window.showInputBox).mock.calls).toHaveLength(1);
+    expect(vi.mocked(window.showInputBox).mock.calls[0][0]).toEqual(
+      expect.objectContaining({ prompt: "Impact" }),
+    );
+  });
+
+  it("stays silent and writes nothing more when the re-prompt is cancelled", async () => {
+    const moveTo = vi.fn().mockRejectedValue(new TaskWriteError("needs Impact", [
+      { kind: "text", id: "customfield_1", name: "Impact" },
+    ]));
+    stubInputBox(undefined);
+    const { view, posted } = await mountWith(withProvider({ moveTo }));
+    answerPicks(pickFirst);
+    await view.changeStatus("FX-1");
+    expect(moveTo).toHaveBeenCalledTimes(1);
+    expect(posted.filter((m) => m.type === "toast")).toEqual([]);
+    expect(posted.some((m) => m.type === "statusChanged")).toBe(false);
+  });
+
+  it("reports and stops when retryWith is empty", async () => {
+    const moveTo = vi.fn().mockRejectedValue(new TaskWriteError("no permission", []));
+    const { view, posted } = await mountWith(withProvider({ moveTo }));
+    answerPicks(pickFirst);
+    await view.changeStatus("FX-1");
+    expect(moveTo).toHaveBeenCalledTimes(1);
+    const toast = posted.find((m) => m.type === "toast" && m.level === "error") as
+      { message: string; action: { label: string; url: string } };
+    expect(toast.message).toContain("no permission");
+    expect(toast.action.label).toMatch(/^Open in /);
+    expect(toast.action.url).toBe("https://fixture.test/t/FX-1");
+    // A refused write keeps the list on screen — it never re-gates the panel.
+    expect(posted.some((m) => m.type === "error")).toBe(false);
+  });
+
+  it("reports the second refusal rather than retrying forever", async () => {
+    const moveTo = vi.fn().mockRejectedValue(new TaskWriteError("still refused", [
+      { kind: "text", id: "customfield_1", name: "Impact" },
+    ]));
+    stubInputBox("high");
+    const { view, posted } = await mountWith(withProvider({ moveTo }));
+    answerPicks(pickFirst);
+    await view.changeStatus("FX-1");
+    expect(moveTo).toHaveBeenCalledTimes(2);
+    expect(posted.find((m) => m.type === "toast" && m.level === "error")).toBeDefined();
+    expect(posted.some((m) => m.type === "statusChanged")).toBe(false);
   });
 });

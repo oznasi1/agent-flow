@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { addOnce, deriveStatuses, fmtEst, isPrReviewStatus, isTopPriority, matchesStatus, moveKey, railClass } from "../../src/webview/helpers";
+import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, matchesStatus, moveKey, railClass } from "../../src/webview/helpers";
+import type { Filter } from "../../src/types";
 import { mkTask } from "../_helpers/factories";
 
 const tasks = (...keys: string[]) => keys.map((k) => mkTask({ key: k }));
@@ -157,5 +158,34 @@ describe("addOnce", () => {
   it("returns the same array reference when the value is already present", () => {
     const xs = ["a", "b"];
     expect(addOnce(xs, "a")).toBe(xs);
+  });
+});
+
+describe("effectiveFilter", () => {
+  const ALL: Filter[] = ["unassigned", "mine", "mysprint", "sprint", "backlog", "all"];
+
+  it("keeps a configured lens the source supports", () => {
+    expect(effectiveFilter("mysprint", ALL)).toBe("mysprint");
+    expect(effectiveFilter("backlog", ALL)).toBe("backlog");
+    expect(effectiveFilter("mine", ["mine", "all"])).toBe("mine");
+  });
+
+  // The pre-capability code was `(cfg.defaultFilter as Filter) || "mysprint"`, so an
+  // unrecognized or empty setting on a source that supports the shipped default must
+  // still land on it — an already-configured user's opening lens does not move.
+  it("falls back to the shipped default when the setting is unrecognized", () => {
+    expect(effectiveFilter("", ALL)).toBe("mysprint");
+    expect(effectiveFilter("nonsense", ALL)).toBe("mysprint");
+  });
+
+  it("falls back to the source's first lens when it has no sprints", () => {
+    // Four of the six filters are sprint-scoped, including the shipped default.
+    expect(effectiveFilter("mysprint", ["mine", "all"])).toBe("mine");
+    expect(effectiveFilter("sprint", ["all", "mine"])).toBe("all");
+  });
+
+  it("still returns a Filter for a source that declares none", () => {
+    // It can answer nothing either way; the only obligation is the return type.
+    expect(effectiveFilter("mine", [])).toBe("mysprint");
   });
 });

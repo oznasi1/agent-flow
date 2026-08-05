@@ -8,6 +8,7 @@ vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 import { App } from "../../src/webview/App";
 import { send } from "../../src/webview/vscodeApi";
 import type { OutboundMessage } from "../../src/types";
+import type { SerializedCaps } from "../../src/tasks/provider";
 import { mkTask } from "../_helpers/factories";
 
 const sent = vi.mocked(send);
@@ -20,8 +21,16 @@ function host(msg: OutboundMessage) {
 }
 
 const ALL_FILTERS = { size: true, status: true, repo: true, search: true };
+// `state` carries the source's label and capabilities since the panel moved onto the
+// connector seam. These are what the shipped Jira connector reports — the webview
+// renders every optional affordance under them, so a fixture that understated them
+// would hide controls these tests then couldn't find.
+const JIRA_CAPS: SerializedCaps = {
+  supportedFilters: ["unassigned", "mine", "mysprint", "sprint", "backlog", "all"],
+  sizes: true, labels: true, sprints: true, components: true,
+};
 const authed = (prReviewStatus = "PR initiated", filters = ALL_FILTERS) =>
-  host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus, filters });
+  host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus, filters });
 
 beforeEach(() => sent.mockClear());
 
@@ -33,7 +42,7 @@ describe("mount + auth gate", () => {
 
   it("shows the sign-in gate and wires the button when unauthenticated", () => {
     render(<App />);
-    host({ type: "state", authed: false, configured: true, project: "", me: null, prReviewStatus: "PR initiated", filters: ALL_FILTERS });
+    host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false, configured: true, project: "", me: null, prReviewStatus: "PR initiated", filters: ALL_FILTERS });
     const button = screen.getByRole("button", { name: /Sign in to Jira/i });
     fireEvent.click(button);
     expect(sent).toHaveBeenCalledWith({ type: "signIn" });
@@ -51,7 +60,7 @@ describe("mount + auth gate", () => {
 
   it("reports open windows on the header gauge", () => {
     render(<App />);
-    host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane",
+    host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane",
            prReviewStatus: "PR initiated", filters: ALL_FILTERS, liveCount: 2 });
     expect(screen.getByRole("img", { name: "2 Agent Flow windows open" })).toBeInTheDocument();
   });
@@ -71,7 +80,7 @@ describe("problem indication", () => {
 
   it("shows a Run setup call-to-action when not configured", () => {
     render(<App />);
-    host({ type: "state", authed: false, configured: false, project: "", me: null, prReviewStatus: "PR initiated", filters: ALL_FILTERS });
+    host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false, configured: false, project: "", me: null, prReviewStatus: "PR initiated", filters: ALL_FILTERS });
     expect(screen.queryByText(/Sign in to Jira/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Run setup/i }));
     expect(sent).toHaveBeenCalledWith({ type: "runSetup" });
@@ -89,7 +98,7 @@ describe("problem indication", () => {
     render(<App />);
     host({ type: "error", message: "boom", canRetry: true });
     expect(screen.getByText(/boom/)).toBeInTheDocument();
-    host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS });
+    host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS });
     expect(screen.queryByText(/boom/)).not.toBeInTheDocument();
   });
 
@@ -770,16 +779,16 @@ describe("task card actions", () => {
   it("shows ticket detail once it arrives", () => {
     withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
     fireEvent.click(screen.getByText("Fix bug"));
-    host({ type: "detail", key: "ASM-1", descriptionText: "The full description", inferred: [], repos: ["centaur"], jiraComponents: [], mappable: {} });
+    host({ type: "detail", key: "ASM-1", descriptionText: "The full description", inferred: [], repos: ["centaur"], sourceComponents: [], mappable: {} });
     expect(screen.getByText("The full description")).toBeInTheDocument();
   });
 
-  /** Expand ASM-1 and deliver a detail. `jiraComponents` / `mappable` decide the
+  /** Expand ASM-1 and deliver a detail. `sourceComponents` / `mappable` decide the
    *  chip states: account-service is on the ticket (A), pricing-api maps but is not
    *  on it (B), scratch-tool maps to nothing (C). `mappable` is checked for
    *  presence, not just truthiness — an explicit `null` (the unreadable-list case)
    *  must not fall back to the default map the way an omitted override would. */
-  const withChips = (over: Partial<{ inferred: string[]; jiraComponents: string[]; mappable: Record<string, string> | null }> = {}) => {
+  const withChips = (over: Partial<{ inferred: string[]; sourceComponents: string[]; mappable: Record<string, string> | null }> = {}) => {
     withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
     fireEvent.click(screen.getByText("Fix bug"));
     host({
@@ -788,7 +797,7 @@ describe("task card actions", () => {
       descriptionText: "desc",
       repos: ["account-service", "pricing-api", "scratch-tool", "centaur"],
       inferred: over.inferred ?? ["account-service", "pricing-api", "scratch-tool"],
-      jiraComponents: over.jiraComponents ?? ["Account-Service"],
+      sourceComponents: over.sourceComponents ?? ["Account-Service"],
       mappable:
         "mappable" in over
           ? over.mappable ?? null

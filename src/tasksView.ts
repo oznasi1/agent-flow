@@ -2,19 +2,22 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import { getConfig, AgentFlowConfig, ExploreAction } from "./config";
-import { JiraAuth } from "./tasks/jira/auth";
-import { JiraClient, JiraAuthError, JiraApiError, JiraDetail, TransitionOption } from "./tasks/jira/client";
-import { describeJiraError } from "./tasks/jira/errors";
-import { isTaskNetworkError } from "./tasks/provider";
 import {
-  promptableFields,
-  toJiraValue,
-  validateFieldInput,
-  missingFieldIds,
-  mentionsResolution,
-  fieldDisplayNames,
+  isTaskNetworkError,
+  serializeCaps,
+  TaskApiError,
+  TaskAuthError,
+  TaskWriteError,
   type FieldPrompt,
-} from "./tasks/jira/transitionFields";
+  type TaskConnector,
+  type TaskDetail,
+  type TaskProvider,
+} from "./tasks/provider";
+// The one Jira-directory import left in this file, and it is a pure function over
+// the seam's own prompt vocabulary (`FieldPrompt`) rather than anything Jira —
+// it only lives there because that is where the vocabulary was first declared.
+import { validateFieldInput } from "./tasks/jira/transitionFields";
+import { effectiveFilter } from "./webview/helpers";
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
@@ -33,8 +36,12 @@ import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, P
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 
 /** Which engine operation a webview message represents, for operation_failed.
- * Messages absent from this map report as "jira_fetch" only if they read Jira;
- * anything genuinely unclassifiable is left out and reports nothing. */
+ * Messages absent from this map report as "jira_fetch" only if they read the task
+ * source; anything genuinely unclassifiable is left out and reports nothing.
+ *
+ * The `jira_*` values are TRANSMITTED analytics strings, frozen by
+ * test/unit/compat.test.ts — the code around them is source-agnostic now, the wire
+ * values are not. Renaming one breaks a live series. */
 const MESSAGE_OPS: Partial<Record<InboundMessage["type"], Op>> = {
   ready: "jira_fetch",
   retry: "jira_fetch",
@@ -51,10 +58,10 @@ const MESSAGE_OPS: Partial<Record<InboundMessage["type"], Op>> = {
   runDoctor: "jira_fetch",
 };
 
-/** Message types whose Jira interaction is itself a write — the rest that read
- * Jira at all (including `take`/`takeBatch`/`addressPr`, whose primary MESSAGE_OPS
- * entry is a non-Jira op) are reads. Used only by resolveOp() below. */
-const JIRA_WRITE_MESSAGES: ReadonlySet<InboundMessage["type"]> = new Set([
+/** Message types whose task-source interaction is itself a write — the rest that
+ * read the source at all (including `take`/`takeBatch`/`addressPr`, whose primary
+ * MESSAGE_OPS entry is a non-source op) are reads. Used only by resolveOp() below. */
+const SOURCE_WRITE_MESSAGES: ReadonlySet<InboundMessage["type"]> = new Set([
   "changeStatus",
   "addToMySprint",
   "removeFromSprint",
@@ -64,15 +71,15 @@ const JIRA_WRITE_MESSAGES: ReadonlySet<InboundMessage["type"]> = new Set([
 /** MESSAGE_OPS attributes a failure to a message's own primary purpose — `take` is
  * "workspace_write" because opening/seeding a workspace is what it mostly does.
  * But `take`, `takeBatch`, and `addressPr` all read a ticket via resolveKickoff()
- * before ever touching a workspace, and that Jira read has no try/catch of its
- * own — it is the single most failure-prone step in the flow, and MESSAGE_OPS
+ * before ever touching a workspace, and that task-source read has no try/catch of
+ * its own — it is the single most failure-prone step in the flow, and MESSAGE_OPS
  * alone would mislabel its failure a workspace_write / pr_lookup. When the
- * thrown error is identifiably from the Jira client — JiraAuthError, JiraApiError,
- * or a network-level failure inside request() (unreachable host, DNS, timeout;
- * see isTaskNetworkError, src/tasks/provider.ts) — that origin is trusted over the
- * message-type default: jira_write for the message types whose own Jira
- * interaction is a write, jira_fetch for everything else that reads Jira at all.
- * The network-level case matters most in practice: an unreachable Jira (VPN off,
+ * thrown error is identifiably from the task source — TaskAuthError, TaskApiError,
+ * or a network-level failure inside the connector's transport (unreachable host,
+ * DNS, timeout; see isTaskNetworkError, src/tasks/provider.ts) — that origin is
+ * trusted over the message-type default: jira_write for the message types whose own
+ * source interaction is a write, jira_fetch for everything else that reads it at all.
+ * The network-level case matters most in practice: an unreachable source (VPN off,
  * bad site URL, firewall) is the single most common real-world failure this
  * extension sees, and it is exactly what Doctor exists to diagnose — misattributing
  * it to workspace_write/pr_lookup would send debugging effort at the wrong
@@ -86,8 +93,8 @@ const JIRA_WRITE_MESSAGES: ReadonlySet<InboundMessage["type"]> = new Set([
 function resolveOp(m: InboundMessage, e: unknown): Op | undefined {
   const messageOp = MESSAGE_OPS[m.type];
   if (!messageOp) return undefined;
-  if (e instanceof JiraAuthError || e instanceof JiraApiError || isTaskNetworkError(e)) {
-    return JIRA_WRITE_MESSAGES.has(m.type) ? "jira_write" : "jira_fetch";
+  if (e instanceof TaskAuthError || e instanceof TaskApiError || isTaskNetworkError(e)) {
+    return SOURCE_WRITE_MESSAGES.has(m.type) ? "jira_write" : "jira_fetch";
   }
   return messageOp;
 }
@@ -123,7 +130,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly context: vscode.ExtensionContext,
-    private readonly auth: JiraAuth,
+    private readonly connector: TaskConnector,
     private readonly log: (m: string) => void = () => {},
   ) {}
 
@@ -142,11 +149,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Post the panel's `state`, folding in the config-derived fields the webview needs
-   * (project name, and the PR-review status string that gates the "Address PR" action). */
+   * (the source's scope name, and the PR-review status string that gates the
+   * "Address PR" action) plus what the source can and cannot do — `sourceLabel` so
+   * no string in the webview has to name a tracker, and the serialized capabilities
+   * so it renders only affordances this source can honour. */
   private postState(authed: boolean, configured: boolean, me: string | null): void {
     const cfg = getConfig();
-    this.post({ type: "state", authed, configured, project: cfg.project, me,
+    const info = this.connector.info();
+    this.post({ type: "state", authed, configured, project: info.scopeValue, me,
       prReviewStatus: cfg.prReviewStatus, filters: cfg.filters,
+      sourceLabel: info.label, caps: serializeCaps(this.provider().caps),
       liveCount: cfg.trackOpenWindows ? this.liveWindows().length : undefined });
   }
 
@@ -158,9 +170,43 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.post({ type: "toast", level, message, ...(action ? { action } : {}) });
   }
 
-  private client(): JiraClient {
+  /** Built from current settings, per operation — exactly as `client()` did, and for
+   * the same reason: a settings edit must take effect without a window reload.
+   *
+   * Call it ONCE per operation and pass the result around. A provider may hold
+   * per-operation state — JiraProvider remembers the field prompts it issued so it
+   * can map the answers back — and a second instance would not have it. */
+  private provider(): TaskProvider {
+    return this.connector.provider();
+  }
+
+  /** The sprint operations, or null with the user told why. A source without sprints
+   * should never have surfaced the affordance — the webview hides it on
+   * `caps.sprints` — so this is the backstop for a stale webview or a command
+   * invoked from the palette. Reporting beats throwing: the list on screen is still
+   * valid, and an unsupported action is not a failure to diagnose. */
+  private sprints(provider: TaskProvider): NonNullable<TaskProvider["caps"]["sprints"]> | null {
+    const ops = provider.caps.sprints;
+    if (!ops) {
+      this.toast("error", `${this.connector.info().label} doesn't have sprints.`);
+      return null;
+    }
+    return ops;
+  }
+
+  /** Stamp the provenance label, when the source has labels at all and the user
+   * wants it. A source without them is a silent no-op, never an error: the write
+   * that mattered already succeeded, and failing the whole operation over
+   * unavailable provenance stamping would be the wrong trade. */
+  private async stampProvenance(key: string): Promise<void> {
     const cfg = getConfig();
-    return new JiraClient(cfg.baseUrl, cfg.project, this.auth);
+    const labels = this.provider().caps.labels;
+    if (!cfg.stampLabelOnWrite || !labels) return;
+    try {
+      await labels.add(key, cfg.provenanceLabel);
+    } catch (e) {
+      this.log(`label stamp failed for ${key}: ${e}`);
+    }
   }
 
   private savedOrder(): string[] {
@@ -182,26 +228,33 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * a slow or unreachable `/myself` never delays (or blocks) the UI. */
   private async postInitialState(): Promise<void> {
     const cfg = getConfig();
-    const configured = !!cfg.baseUrl && !!cfg.project;
+    const configured = this.connector.isConfigured();
     let authed = false;
     try {
-      authed = await this.auth.isAuthenticated();
+      authed = await this.connector.isAuthenticated();
     } catch {
       authed = false;
     }
     this.postState(authed, configured, null);
     if (!configured || !authed) return;
 
+    const provider = this.provider();
     await Promise.all([
-      this.client()
-        .currentUserName()
+      provider
+        .me()
         .then((me) => {
-          if (me) this.postState(true, configured, me);
+          if (me?.displayName) this.postState(true, configured, me.displayName);
         })
         .catch(() => {
           /* display name is best-effort — the task list is the real payload */
         }),
-      this.onMessage({ type: "fetch", filter: (cfg.defaultFilter as Filter) || "mysprint", size: "any" }),
+      // The configured lens goes through unclamped ON PURPOSE: the `fetch` case is
+      // the single choke point where a filter reaches a provider, and it clamps
+      // there — see `effectiveFilter` in that handler. A second clamp here would be
+      // unreachable by any test, since the first thing this value meets is that one.
+      // (It matters that it IS clamped: `agentFlow.defaultFilter` ships as
+      // "mysprint", which a source without sprints cannot answer.)
+      this.onMessage({ type: "fetch", filter: cfg.defaultFilter as Filter, size: "any" }),
     ]);
   }
 
@@ -232,46 +285,56 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "fetch": {
-          if (!(await this.auth.isAuthenticated())) {
-            this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
+          if (!(await this.connector.isAuthenticated())) {
+            this.postState(false, this.connector.isConfigured(), null);
             return;
           }
           this.post({ type: "loading", loading: true });
-          this.lastFilter = m.filter;
-          const tasks = await this.client().fetchTasks(m.filter, m.size);
+          const provider = this.provider();
+          // A webview left open across a `taskSource` change can send a filter the
+          // current source no longer supports — clamp rather than ask for it. Both
+          // `lastFilter` and the posted `filter` carry the clamped lens, so the tab
+          // the webview highlights is the one that was actually fetched.
+          const lens = effectiveFilter(m.filter, provider.caps.supportedFilters);
+          this.lastFilter = lens;
+          const tasks = await provider.list(lens, m.size);
           const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
           for (const t of tasks) t.services = this.guessServices(t, repos);
           let outgoing = tasks;
-          if (m.filter === "mysprint") {
+          if (lens === "mysprint") {
             if (m.size === "any") {
               // Full sprint view: prune keys that have left the sprint.
               await this.saveOrder(pruneOrder(this.savedOrder(), tasks.map((t) => t.key)));
             }
             outgoing = sortBySavedOrder(tasks, this.savedOrder());
           }
-          this.post({ type: "tasks", filter: m.filter, tasks: outgoing,
+          this.post({ type: "tasks", filter: lens, tasks: outgoing,
             liveCount: cfg.trackOpenWindows ? this.liveWindows().length : undefined });
           this.post({ type: "loading", loading: false });
           break;
         }
         case "detail": {
-          if (!(await this.auth.isAuthenticated())) return;
-          const client = this.client();
-          const detail = await client.getDetail(m.key);
+          if (!(await this.connector.isAuthenticated())) return;
+          const provider = this.provider();
+          const info = this.connector.info();
+          const detail = await provider.detail(m.key);
           const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
           const inferred = inferServices(
             { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
             repos,
           ).map((r) => r.service.name);
-          // After the issue read, never before: listComponents swallows every
+          // After the issue read, never before: the component list swallows every
           // failure including a 401, so the detail read is what lets a dead token
-          // reach the catch below and re-gate the panel.
-          const projectComponents = await client.listComponents();
+          // reach the catch below and re-gate the panel. A source with no components
+          // at all reads as the same `null` — nothing can be claimed about any chip
+          // either way, which is exactly what `mappable: null` means.
+          const components = provider.caps.components;
+          const projectComponents = components ? await components.list() : null;
           if (projectComponents === null) {
-            // Not toasted: a card expand happening to land while Jira's endpoint is
-            // down would toast on every expand. The chips render "unknown" instead;
+            // Not toasted: a card expand happening to land while the source's endpoint
+            // is down would toast on every expand. The chips render "unknown" instead;
             // this line is only for tracing it after the fact.
-            this.log(`detail ${m.key}: ${cfg.project} component list unavailable`);
+            this.log(`detail ${m.key}: ${info.scopeValue} component list unavailable`);
           }
           const names = repos.map((r) => r.name);
           this.post({
@@ -280,7 +343,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             descriptionText: detail.descriptionText,
             inferred,
             repos: names,
-            jiraComponents: detail.components,
+            sourceComponents: detail.components,
             mappable: projectComponents === null ? null : mapRepoComponents(names, projectComponents),
           });
           break;
@@ -341,9 +404,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       }
       this.post({ type: "loading", loading: false });
       const msg = e instanceof Error ? e.message : String(e);
-      if (e instanceof JiraAuthError) {
+      if (e instanceof TaskAuthError) {
         // Auth failures re-gate to the sign-in screen, which is itself the indication.
-        this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
+        this.postState(false, this.connector.isConfigured(), null);
       } else if (m.type === "ready" || m.type === "retry" || m.type === "fetch") {
         // Only the messages that populate the panel may replace it: if the list
         // never loaded there is nothing to preserve. A failed write keeps its
@@ -356,75 +419,80 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** Change a ticket's status via a menu of its valid workflow transitions (a Jira WRITE). */
+  /** Change a task's status via a menu of the moves its source allows (a source WRITE). */
   public async changeStatus(key: string): Promise<void> {
-    const cfg = getConfig();
     this.log(`changeStatus ${key}: start`);
-    if (!(await this.auth.isAuthenticated())) {
+    if (!(await this.connector.isAuthenticated())) {
       this.log(`changeStatus ${key}: not authenticated`);
-      this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
+      this.postState(false, this.connector.isConfigured(), null);
       return;
     }
-    const client = this.client();
-    const transitions = await client.getTransitions(key);
-    this.log(`changeStatus ${key}: ${transitions.length} transitions`);
-    if (transitions.length === 0) {
+    // One provider for the whole operation: it is what remembers the prompts it
+    // issued for this target, and moveTo needs that to map the answers back.
+    const provider = this.provider();
+    const targets = await provider.statusTargets(key);
+    this.log(`changeStatus ${key}: ${targets.length} targets`);
+    if (targets.length === 0) {
       this.toast("info", `No status transitions available for ${key}.`);
       return;
     }
     const pick = await vscode.window.showQuickPick(
-      transitions.map((t) => ({
+      targets.map((t) => ({
         label: `$(arrow-small-right) ${t.toName}`,
-        description: t.name !== t.toName ? `via "${t.name}"` : "",
+        description: t.via ? `via "${t.via}"` : "",
         t,
       })),
       { title: `${key} — change status to…`, placeHolder: "Pick a status", ignoreFocusOut: true },
     );
     this.log(`changeStatus ${key}: picked ${pick ? pick.t.toName : "(cancelled)"}`);
     if (!pick) return;
-    const target: TransitionOption = pick.t;
+    const target = pick.t;
 
-    // `fields` is absent on anything that didn't come from an expanded
-    // getTransitions — the metadata is Jira's JSON, not a guarantee.
-    const { prompts, skipped } = promptableFields(target.fields ?? {});
-    if (skipped.length) {
-      this.log(`changeStatus ${key}: can't fill ${skipped.join(", ")} here — letting Jira decide`);
-    }
-    const fields = await this.collectFields(key, target.toName, prompts);
-    if (fields === undefined) {
+    const values = await this.collectFields(key, target.toName, target.fields);
+    if (values === undefined) {
       this.log(`changeStatus ${key}: cancelled at a field prompt`);
       return;
     }
 
     try {
-      await client.transition(key, target.id, fields);
+      await provider.moveTo(key, target.id, values);
     } catch (e) {
-      if (!(e instanceof JiraApiError)) throw e;
-      const recovered = await this.recoverTransition(client, key, target, e, fields);
-      if (!recovered) return; // already reported, or the user backed out
-    }
-    this.log(`changeStatus ${key}: transition POST ok → ${target.toName}`);
-    if (cfg.stampLabelOnWrite) {
+      if (!(e instanceof TaskWriteError)) throw e;
+      // One rescue attempt, and only when the connector named something to ask
+      // for. Anything else is reported in place — a refused write leaves the
+      // list valid, so it never re-gates the panel.
+      if (!e.retryWith.length) {
+        this.reportWriteFailure(key, e.message);
+        return;
+      }
+      this.log(`changeStatus ${key}: rejected — re-prompting ${e.retryWith.map((p) => p.name).join(", ")}`);
+      const extra = await this.collectFields(key, target.toName, e.retryWith);
+      if (extra === undefined) return;
       try {
-        await client.addLabel(key, cfg.provenanceLabel);
-      } catch (e) {
-        this.log(`label stamp failed for ${key}: ${e}`);
+        await provider.moveTo(key, target.id, { ...values, ...extra });
+      } catch (e2) {
+        if (!(e2 instanceof TaskWriteError)) throw e2;
+        this.reportWriteFailure(key, e2.message);
+        return;
       }
     }
+    this.log(`changeStatus ${key}: move ok → ${target.toName}`);
+    await this.stampProvenance(key);
     const removed = target.toCategory === "done";
     this.post({ type: "statusChanged", key, status: target.toName, category: target.toCategory, removed });
     this.toast("success", `${key} → ${target.toName}`);
   }
 
-  /** Run one prompt per field, in order. Returns the collected `fields` payload,
-   *  or undefined when the user escaped — a half-filled transition is never worth
-   *  writing, so cancelling any prompt cancels the whole thing. */
+  /** Run one prompt per field, in order. Returns the user's RAW answers — the
+   *  connector maps them to its own wire shape — or undefined when the user
+   *  escaped: a half-filled move is never worth writing, so cancelling any prompt
+   *  cancels the whole thing. */
   private async collectFields(
     key: string,
     toName: string,
     prompts: FieldPrompt[],
-  ): Promise<Record<string, unknown> | undefined> {
-    const out: Record<string, unknown> = {};
+  ): Promise<Record<string, string | string[]> | undefined> {
+    const out: Record<string, string | string[]> = {};
     for (const p of prompts) {
       const title = `${key} → ${toName}`;
       // The two QuickPick calls are kept separate on purpose: `canPickMany` only
@@ -435,14 +503,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           { title, placeHolder: `Pick ${p.name}`, canPickMany: true, ignoreFocusOut: true },
         );
         if (!picked || picked.length === 0) return undefined;
-        out[p.id] = toJiraValue(p, picked.map((i) => i.label));
+        out[p.id] = picked.map((i) => i.label);
       } else if (p.kind === "pick") {
         const picked = await vscode.window.showQuickPick(
           p.choices.map((c) => ({ label: c.name })),
           { title, placeHolder: `Pick ${p.name}`, ignoreFocusOut: true },
         );
         if (!picked) return undefined;
-        out[p.id] = toJiraValue(p, picked.label);
+        out[p.id] = picked.label;
       } else {
         const raw = await vscode.window.showInputBox({
           title,
@@ -452,115 +520,70 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           validateInput: (v: string) => validateFieldInput(p, v),
         });
         if (raw === undefined) return undefined;
-        out[p.id] = toJiraValue(p, raw);
+        out[p.id] = raw;
       }
     }
     return out;
   }
 
-  /** One rescue attempt after Jira refuses a transition. Screen metadata can't see
-   *  custom workflow validators, so the rejection itself is the only place some
-   *  requirements are ever stated. Returns true when the retry succeeded. */
-  private async recoverTransition(
-    client: JiraClient,
-    key: string,
-    target: TransitionOption,
-    err: JiraApiError,
-    already: Record<string, unknown>,
-  ): Promise<boolean> {
-    const meta = target.fields ?? {};
-    const names = fieldDisplayNames(meta);
-    const ids = missingFieldIds(meta, err);
-    let prompts: FieldPrompt[] = ids.length ? promptableFields(meta, { only: ids }).prompts : [];
-
-    if (!prompts.length && mentionsResolution(err)) {
-      const resolutions = await client.listResolutions().catch(() => []);
-      if (resolutions.length) {
-        prompts = [{ kind: "pick", id: "resolution", name: "Resolution", choices: resolutions }];
-      }
-    }
-    if (!prompts.length) {
-      this.reportWriteFailure(key, err, names);
-      return false;
-    }
-
-    this.log(`changeStatus ${key}: rejected — re-prompting ${prompts.map((p) => p.name).join(", ")}`);
-    const extra = await this.collectFields(key, target.toName, prompts);
-    if (extra === undefined) return false;
-    try {
-      await client.transition(key, target.id, { ...already, ...extra });
-      return true;
-    } catch (e) {
-      if (!(e instanceof JiraApiError)) throw e;
-      this.reportWriteFailure(key, e, names);
-      return false;
-    }
-  }
-
   /** A refused write leaves the list valid, so it gets a toast — never the gate —
-   *  with a way out to the ticket itself. */
-  private reportWriteFailure(key: string, err: JiraApiError, names: Record<string, string>): void {
-    const cfg = getConfig();
-    const message = `Couldn't update ${key}. ${describeJiraError(err, names)}`;
-    this.log(`changeStatus ${key}: ${err.status} — ${message}`);
-    this.toast("error", message, { label: "Open in Jira", url: `${cfg.baseUrl}/browse/${key}` });
+   *  with a way out to the task itself. The message is the connector's own: it knows
+   *  what its refusal meant, and re-phrasing it here would only lose detail. */
+  private reportWriteFailure(key: string, message: string): void {
+    const info = this.connector.info();
+    const text = `Couldn't update ${key}. ${message}`;
+    this.log(`changeStatus ${key}: ${text}`);
+    this.toast("error", text, {
+      label: `Open in ${info.label}`,
+      url: this.connector.taskUrl(key),
+    });
   }
 
-  /** Add a ticket to the active sprint and assign it to the current user — the two
+  /** Add a task to the active sprint and assign it to the current user — the two
    * writes that make it show up in the "My sprint" lens. Stamps the provenance label. */
   public async addToMySprint(key: string): Promise<void> {
-    const cfg = getConfig();
     this.log(`addToMySprint ${key}: start`);
-    if (!(await this.auth.isAuthenticated())) {
-      this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
+    if (!(await this.connector.isAuthenticated())) {
+      this.postState(false, this.connector.isConfigured(), null);
       return;
     }
-    const client = this.client();
-    const me = await client.getMyself();
+    const provider = this.provider();
+    const ops = this.sprints(provider);
+    if (!ops) return;
+    const info = this.connector.info();
+    const me = await provider.me();
     if (!me) {
-      this.toast("error", "Couldn't resolve your Jira account.");
+      this.toast("error", `Couldn't resolve your ${info.label} account.`);
       return;
     }
-    const sprintId = await client.getActiveSprintId();
+    const sprintId = await ops.activeId();
     if (sprintId == null) {
-      this.toast("error", `No active sprint on the ${cfg.project} board.`);
+      this.toast("error", `No active sprint on the ${info.scopeValue} board.`);
       return;
     }
-    await client.addIssueToSprint(sprintId, key);
-    await client.assignIssue(key, me.accountId);
+    await ops.add(sprintId, key);
+    await provider.assignToMe(key);
     this.log(`addToMySprint ${key}: sprint ${sprintId} + assigned to ${me.displayName}`);
-    if (cfg.stampLabelOnWrite) {
-      try {
-        await client.addLabel(key, cfg.provenanceLabel);
-      } catch (e) {
-        this.log(`label stamp failed for ${key}: ${e}`);
-      }
-    }
+    await this.stampProvenance(key);
     // No longer matches the "unassigned" or "backlog" lenses once it's mine + in a sprint.
     const removed = this.lastFilter === "unassigned" || this.lastFilter === "backlog";
     this.post({ type: "movedToSprint", key, assignee: me.displayName, removed });
     this.toast("success", `${key} → your sprint`);
   }
 
-  /** Remove a ticket from the active sprint by moving it to the backlog. Leaves
+  /** Remove a task from the active sprint by moving it to the backlog. Leaves
    * assignee and status untouched. Offers a one-click Undo via a native notification. */
   public async removeFromSprint(key: string, size: Size): Promise<void> {
-    const cfg = getConfig();
     this.log(`removeFromSprint ${key}: start`);
-    if (!(await this.auth.isAuthenticated())) {
-      this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
+    if (!(await this.connector.isAuthenticated())) {
+      this.postState(false, this.connector.isConfigured(), null);
       return;
     }
-    const client = this.client();
-    await client.removeIssueFromSprint(key);
+    const ops = this.sprints(this.provider());
+    if (!ops) return;
+    await ops.remove(key);
     this.log(`removeFromSprint ${key}: moved to backlog`);
-    if (cfg.stampLabelOnWrite) {
-      try {
-        await client.addLabel(key, cfg.provenanceLabel);
-      } catch (e) {
-        this.log(`label stamp failed for ${key}: ${e}`);
-      }
-    }
+    await this.stampProvenance(key);
     // Drop it from the saved manual order so no ghost rank lingers.
     const saved = this.savedOrder();
     if (saved.includes(key)) await this.saveOrder(saved.filter((k) => k !== key));
@@ -569,22 +592,21 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // Undo: put it back into the active sprint and refetch so the card returns.
     const choice = await vscode.window.showInformationMessage(`${key} removed from your sprint`, "Undo");
     if (choice !== "Undo") return;
-    const sprintId = await client.getActiveSprintId();
+    const sprintId = await ops.activeId();
     if (sprintId == null) {
-      this.toast("error", `No active sprint on the ${cfg.project} board.`);
+      this.toast("error", `No active sprint on the ${this.connector.info().scopeValue} board.`);
       return;
     }
-    await client.addIssueToSprint(sprintId, key);
+    await ops.add(sprintId, key);
     this.log(`removeFromSprint ${key}: undo → sprint ${sprintId}`);
     await this.onMessage({ type: "fetch", filter: "mysprint", size });
   }
 
-  /** Add or remove one component on a ticket, mirroring one chip in the card (a Jira
+  /** Add or remove one component on a task, mirroring one chip in the card (a source
    * WRITE). Reports its own failures and never throws, so `onMessage`'s catch cannot
    * double-toast; every call posts exactly one `componentsChanged`, which is the
    * webview's cue to keep or undo its optimistic update. */
   public async setComponent(key: string, repo: string, on: boolean, movedChip: boolean): Promise<void> {
-    const cfg = getConfig();
     // Exactly one verdict per call, structurally: the webview holds an optimistic
     // edit until it hears back, so zero echoes strand it wrong for the life of the
     // window, and two would double-apply the undo.
@@ -595,51 +617,55 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       this.post({ type: "componentsChanged", key, repo, on, movedChip, ok });
     };
     try {
-      if (!(await this.auth.isAuthenticated())) {
-        this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
+      if (!(await this.connector.isAuthenticated())) {
+        this.postState(false, this.connector.isConfigured(), null);
         echo(false);
         return;
       }
-      const client = this.client();
-      const projectComponents = await client.listComponents();
+      const info = this.connector.info();
+      // The webview hides the chips on `caps.components`; this is the backstop for a
+      // stale webview. `ok: false` is what releases its held optimistic edit — a
+      // silent return would strand the chip for the life of the window.
+      const components = this.provider().caps.components;
+      if (!components) {
+        this.log(`setComponent ${key}: ${info.label} doesn't have components`);
+        echo(false);
+        this.toast("error", `${info.label} doesn't have components.`);
+        return;
+      }
+      const projectComponents = await components.list();
       if (projectComponents === null) {
         // The read failed — that is not the same claim as "no such component", and
         // blaming the repo name would send the user looking in the wrong place.
-        this.log(`setComponent ${key}: ${cfg.project} component list unavailable`);
+        this.log(`setComponent ${key}: ${info.scopeValue} component list unavailable`);
         echo(false);
-        this.toast("error", `Couldn't read ${cfg.project}'s components from Jira. Check the connection and try again.`);
+        this.toast("error", `Couldn't read ${info.scopeValue}'s components from ${info.label}. Check the connection and try again.`);
         return;
       }
       const name = resolveComponent(repo, projectComponents);
       if (!name) {
         // The webview only sends repos it believes are components, so the list moved
         // under us. Nothing was written.
-        this.log(`setComponent ${key}: no ${cfg.project} component named ${repo}`);
+        this.log(`setComponent ${key}: no ${info.scopeValue} component named ${repo}`);
         echo(false);
-        this.toast("error", `${cfg.project} has no component named “${repo}”.`);
+        this.toast("error", `${info.scopeValue} has no component named “${repo}”.`);
         return;
       }
       try {
-        await client.updateComponents(key, on ? { add: [name] } : { remove: [name] });
+        await components.update(key, on ? { add: [name] } : { remove: [name] });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         this.log(`setComponent ${key}: ${on ? "add" : "remove"} ${name} failed — ${msg}`);
         echo(false);
-        if (e instanceof JiraAuthError) {
-          this.postState(false, !!cfg.baseUrl && !!cfg.project, null);
+        if (e instanceof TaskAuthError) {
+          this.postState(false, this.connector.isConfigured(), null);
           return;
         }
-        this.toast("error", msg, { label: "Open in Jira", url: `${cfg.baseUrl}/browse/${key}` });
+        this.toast("error", msg, { label: `Open in ${info.label}`, url: this.connector.taskUrl(key) });
         return;
       }
       this.log(`setComponent ${key}: ${on ? "add" : "remove"} ${name} ok`);
-      if (cfg.stampLabelOnWrite) {
-        try {
-          await client.addLabel(key, cfg.provenanceLabel);
-        } catch (e) {
-          this.log(`label stamp failed for ${key}: ${e}`);
-        }
-      }
+      await this.stampProvenance(key);
       echo(true);
       this.toast("success", on ? `Added ${name} to ${key}` : `Removed ${name} from ${key}`);
     } catch (e) {
@@ -843,16 +869,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     key: string,
     preselected?: string[],
     flow?: Flow,
-  ): Promise<{ detail: JiraDetail; services: ServiceRef[]; target: OpenTarget } | undefined> {
+  ): Promise<{ detail: TaskDetail; services: ServiceRef[]; target: OpenTarget } | undefined> {
     const cfg = getConfig();
-    if (!(await this.auth.isAuthenticated())) {
+    if (!(await this.connector.isAuthenticated())) {
       const ok = await vscode.commands.executeCommand<boolean>("agentFlow.signIn");
       if (!ok) return undefined;
     }
 
     const detail = await vscode.window.withProgress(
       { location: { viewId: TasksViewProvider.viewType }, title: `Reading ${key}…` },
-      () => this.client().getDetail(key),
+      () => this.provider().detail(key),
     );
 
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
@@ -1106,7 +1132,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * write), and a throw discards the return value. Called at most once, as soon as
    * the decision is settled and before it is acted on. */
   private async launch(
-    detail: JiraDetail,
+    detail: TaskDetail,
     services: ServiceRef[],
     promptTemplate: string,
     forceWorktree: boolean,
@@ -1276,7 +1302,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const cfg = getConfig();
     if (!keys.length) return;
 
-    if (!(await this.auth.isAuthenticated())) {
+    if (!(await this.connector.isAuthenticated())) {
       const ok = await vscode.commands.executeCommand<boolean>("agentFlow.signIn");
       if (!ok) return;
     }
@@ -1327,7 +1353,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const failed: string[] = [];
     for (const key of keys) {
       try {
-        const detail = await this.client().getDetail(key);
+        const detail = await this.provider().detail(key);
         const wanted = this.reposForTask(detail, filterSet);
         const services = createWorktrees(wanted, detail.key, detail.summary, this.log);
         // A worktree is mandatory: two tasks sharing a checkout would clobber each
@@ -1479,7 +1505,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** The repos a batched task opens: its inferred repos narrowed to the filtered set,
    * falling back to the whole set when inference finds nothing there — a task must
    * never launch with no repo at all. */
-  private reposForTask(detail: JiraDetail, filterSet: ServiceRef[]): ServiceRef[] {
+  private reposForTask(detail: TaskDetail, filterSet: ServiceRef[]): ServiceRef[] {
     const inferred = new Set(
       inferServices(
         { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },

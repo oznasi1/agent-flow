@@ -222,7 +222,7 @@ export function App(): JSX.Element {
               descriptionText: m.descriptionText,
               repos: m.repos,
               selected: m.inferred,
-              jira: m.jiraComponents,
+              jira: m.sourceComponents,
               mappable: m.mappable,
             },
           }));
