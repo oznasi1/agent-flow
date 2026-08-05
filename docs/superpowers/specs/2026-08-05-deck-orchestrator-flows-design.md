@@ -252,6 +252,29 @@ node 1 of 3` — and only while a flow exists. No persistent hint lines.
 **Toast.** `Ship the migration launched ASM-12 in bite-me — CI passed on ASM-2.` Every
 autonomous action reports what it did and why, with an **Open** action.
 
+## What Phase 1 forced into Phase 2's contract
+
+Three requirements the review of the built core surfaced. They are binding on Phase 2, not
+optional polish.
+
+- **Flow ids must match `/^[A-Za-z0-9_-]+$/`.** `store.ts` builds a filename from the id, so
+  an unvalidated id read back from a hand-edited file was an arbitrary-path write and unlink
+  (`"id": "../../../../.zshrc"` resolved to `/.zshrc.json`). The store now rejects such a
+  record on read and throws on write. A name-slug id scheme — spaces, dots, non-ASCII —
+  therefore breaks; `randomUUID()` and `Date.now().toString(36)` both pass.
+- **The runner computes "stalled" itself, from `flow.edges.some(e => e.error)`.** An errored
+  `all` junction deliberately returns `fired: []`, `blocked: []`, `deferred: 0` — the
+  `blocked` channel is typed for *nodes* whose observation is impossible, and an errored edge
+  already carries its own `error` string for the drawer to render per-edge. Nothing else
+  explains why an armed flow stopped advancing, so without this the shipped failure mode is a
+  flow that quietly stops and says nothing.
+- **A place's agent state is never the run's aggregate on a multi-repo run.** `RunStatus.agent`
+  is `mostActive()` over every agent in every repo, so falling back to it for a place with no
+  agent of its own reported a *different* repo's agent as that place's — which fired a paid
+  launch because an unrelated worktree's agent ended its turn. `placeActivity` now falls back
+  only when the run has one repo, and returns unknown otherwise. Any new code asking "what is
+  this place's agent doing" must call `placeActivity`, never read `status.agent` directly.
+
 ## Build order
 
 This is more than one sitting's work, so the plan stages it. Each phase leaves the
