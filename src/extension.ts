@@ -45,8 +45,8 @@ export function activate(context: vscode.ExtensionContext): void {
   const auth = new ApiTokenAuth(context.secrets);
   const output = vscode.window.createOutputChannel("Agent Flow Deck");
   const log = (m: string) => output.appendLine(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
-  // The task panel and the Deck both read their source through the connector seam.
-  // `auth` stays for the consumers not yet migrated (Doctor, setup, the sign-in
+  // The task panel, the Deck and Doctor all read their source through the connector
+  // seam now. `auth` stays for the consumers not yet migrated (setup, the sign-in
   // commands); all of them read the same SecretStorage keys, so there is no state to
   // diverge between `auth` and whatever `connector` wraps it in.
   const connector = resolveConnector(context, log);
@@ -103,7 +103,7 @@ export function activate(context: vscode.ExtensionContext): void {
       runSetup(context, auth, log, () => provider.refresh()),
     ),
 
-    registerTracked("agentFlow.doctor", () => showDoctor(defaultDeps(auth, log))),
+    registerTracked("agentFlow.doctor", () => showDoctor(defaultDeps(connector, log))),
   );
 
   // Best-effort niceties, all of them optional. A failure here must NEVER propagate out

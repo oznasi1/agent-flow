@@ -12,7 +12,12 @@ export const CLAUDE_CODE_FLOOR = "2.1.220";
  *  reader may want to question, whereas a pass needs no attention at all. */
 export type CheckStatus = "fail" | "warn" | "skip" | "ok";
 
-export type DoctorGroup = "Jira" | "Local" | "GitHub" | "Claude Code" | "State";
+/** `"source"` is a placeholder a connector's own label stands in for at render
+ *  time (see `formatReport`'s `sourceLabel` parameter and `doctorView.ts`'s use
+ *  of `DoctorInputs.sourceLabel`) — so a Jira user still reads "Jira" while this
+ *  module, and the literal union below, stay free of any one source's name. The
+ *  other four groups are fixed: every source shares them. */
+export type DoctorGroup = "source" | "Local" | "GitHub" | "Claude Code" | "State";
 
 /** What fixes a failing check. Resolved by the view — this module names the intent
  *  and never touches `vscode`. */
@@ -45,8 +50,17 @@ export type ProjectProbe =
 /** Everything the caller probed. `undefined` on an optional member means the probe
  *  was deliberately not run, which becomes a `skip` rather than a silent pass. */
 export interface DoctorInputs {
-  baseUrl: string;
-  project: string;
+  /** The connector's `info().label`, e.g. "Jira" — stands in for the `"source"`
+   *  group placeholder wherever it is rendered as text. */
+  sourceLabel: string;
+  /** The connector's own name for its scope, e.g. "project" — capitalized to
+   *  build the "X configured"/"X resolves" row labels below. */
+  scopeNoun: string;
+  endpoint: string;
+  scope: string;
+  /** Setting ids to name in a row's detail when `endpoint`/`scope` is empty. */
+  endpointSetting: string;
+  scopeSetting: string;
   hasCredentials: boolean;
   authProbe?: AuthProbe;
   projectProbe?: ProjectProbe;
@@ -68,7 +82,7 @@ const RANK: Record<CheckStatus, number> = { fail: 0, warn: 1, skip: 2, ok: 3 };
 
 /** Every check, most decisive first, so the QuickPick opens on the thing to fix. */
 export function runChecks(i: DoctorInputs): Check[] {
-  const checks: Check[] = [...jiraChecks(i), ...localChecks(i), ...ghChecks(i), ...claudeChecks(i), ...stateChecks(i)];
+  const checks: Check[] = [...sourceChecks(i), ...localChecks(i), ...ghChecks(i), ...claudeChecks(i), ...stateChecks(i)];
   // A stable sort keeps the authored group order inside one status, so the report
   // reads top-to-bottom the way the check set is documented.
   return checks
@@ -77,32 +91,39 @@ export function runChecks(i: DoctorInputs): Check[] {
     .map(({ c }) => c);
 }
 
-function jiraChecks(i: DoctorInputs): Check[] {
-  const out: Check[] = [];
+/** Capitalizes a connector's own noun for its scope ("project" → "Project") to
+ *  build a row label without hardcoding any one source's vocabulary. */
+const Noun = (n: string) => n.charAt(0).toUpperCase() + n.slice(1);
 
-  const siteOk = /^https:\/\/.+/.test(i.baseUrl);
+function sourceChecks(i: DoctorInputs): Check[] {
+  const out: Check[] = [];
+  const scopeLabel = Noun(i.scopeNoun);
+
+  // "Site configured" stays as-is: every source has an endpoint, whatever its
+  // scope is called.
+  const siteOk = /^https:\/\/.+/.test(i.endpoint);
   out.push({
-    group: "Jira",
+    group: "source",
     label: "Site configured",
     status: siteOk ? "ok" : "fail",
-    detail: i.baseUrl
+    detail: i.endpoint
       ? siteOk
-        ? i.baseUrl
-        : `${i.baseUrl} — needs to be an https URL`
-      : "agentFlow.jira.baseUrl is empty",
+        ? i.endpoint
+        : `${i.endpoint} — needs to be an https URL`
+      : `${i.endpointSetting} is empty`,
     ...(siteOk ? {} : { action: SETUP }),
   });
 
   out.push({
-    group: "Jira",
-    label: "Project configured",
-    status: i.project ? "ok" : "fail",
-    detail: i.project || "agentFlow.jira.project is empty",
-    ...(i.project ? {} : { action: SETUP }),
+    group: "source",
+    label: `${scopeLabel} configured`,
+    status: i.scope ? "ok" : "fail",
+    detail: i.scope || `${i.scopeSetting} is empty`,
+    ...(i.scope ? {} : { action: SETUP }),
   });
 
   out.push({
-    group: "Jira",
+    group: "source",
     label: "Credentials stored",
     status: i.hasCredentials ? "ok" : "fail",
     detail: i.hasCredentials ? "email and API token in SecretStorage" : "no email or API token stored",
@@ -114,37 +135,37 @@ function jiraChecks(i: DoctorInputs): Check[] {
   out.push(
     !i.authProbe
       ? {
-          group: "Jira",
+          group: "source",
           label: "Credentials valid",
           status: "skip",
           detail: "not probed — no credentials to probe with",
         }
       : i.authProbe.ok
-        ? { group: "Jira", label: "Credentials valid", status: "ok", detail: `signed in as ${i.authProbe.displayName}` }
+        ? { group: "source", label: "Credentials valid", status: "ok", detail: `signed in as ${i.authProbe.displayName}` }
         : i.authProbe.reason === "auth"
-          ? { group: "Jira", label: "Credentials valid", status: "fail", detail: i.authProbe.message, action: SIGN_IN }
-          : { group: "Jira", label: "Credentials valid", status: "warn", detail: i.authProbe.message },
+          ? { group: "source", label: "Credentials valid", status: "fail", detail: i.authProbe.message, action: SIGN_IN }
+          : { group: "source", label: "Credentials valid", status: "warn", detail: i.authProbe.message },
   );
 
   out.push(
     !i.projectProbe
       ? {
-          group: "Jira",
-          label: "Project resolves",
+          group: "source",
+          label: `${scopeLabel} resolves`,
           status: "skip",
           detail: "not probed — credentials are missing or rejected",
         }
       : i.projectProbe.ok
-        ? { group: "Jira", label: "Project resolves", status: "ok", detail: i.projectProbe.name }
+        ? { group: "source", label: `${scopeLabel} resolves`, status: "ok", detail: i.projectProbe.name }
         : i.projectProbe.reason === "not-found"
           ? {
-              group: "Jira",
-              label: "Project resolves",
+              group: "source",
+              label: `${scopeLabel} resolves`,
               status: "fail",
-              detail: `${i.project} not found, or not visible to you`,
+              detail: `${i.scope} not found, or not visible to you`,
               action: SETUP,
             }
-          : { group: "Jira", label: "Project resolves", status: "warn", detail: i.projectProbe.message },
+          : { group: "source", label: `${scopeLabel} resolves`, status: "warn", detail: i.projectProbe.message },
   );
 
   return out;
@@ -292,14 +313,16 @@ export function summarize(checks: Check[]): string {
 }
 
 /** Plain text for the clipboard — pasteable into a ticket or a Slack thread, so no
- *  codicons and no markup. */
-export function formatReport(checks: Check[]): string {
+ *  codicons and no markup. `sourceLabel` is the one place this module accepts a
+ *  source's own text: the `"source"` group placeholder renders as this string,
+ *  so a Jira user reads "Jira:" exactly as before the group's name went generic. */
+export function formatReport(checks: Check[], sourceLabel: string): string {
   const lines = [`Agent Flow Deck Doctor — ${summarize(checks)}`, ""];
   let group: DoctorGroup | null = null;
   for (const c of [...checks].sort((a, b) => groupOrder(a.group) - groupOrder(b.group))) {
     if (c.group !== group) {
       group = c.group;
-      lines.push(`${group}:`);
+      lines.push(`${group === "source" ? sourceLabel : group}:`);
     }
     lines.push(`  [${c.status}] ${c.label} — ${c.detail}`);
   }
@@ -307,5 +330,5 @@ export function formatReport(checks: Check[]): string {
 }
 
 function groupOrder(g: DoctorGroup): number {
-  return ["Jira", "Local", "GitHub", "Claude Code", "State"].indexOf(g);
+  return ["source", "Local", "GitHub", "Claude Code", "State"].indexOf(g);
 }

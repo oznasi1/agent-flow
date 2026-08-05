@@ -3,88 +3,91 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
-// The injected-deps tests cover the classifying; this file covers the wiring those
-// deliberately bypass — the filesystem probe and what defaultDeps actually calls.
+// The injected-deps tests (doctorView.test.ts) cover collectInputs' own logic;
+// this file covers the wiring those deliberately bypass — the filesystem probe
+// and what defaultDeps actually calls on the connector and on getConfig().
 vi.mock("../../src/config", () => ({ getConfig: vi.fn() }));
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn(() => []) }));
 vi.mock("../../src/engine/pr/provider", () => ({ probeGh: vi.fn(async () => null) }));
 vi.mock("../../src/engine/pr/which", () => ({ resolveBin: vi.fn(() => null) }));
 vi.mock("../../src/engine/runs", () => ({ defaultRunsDir: vi.fn(() => "/runs"), readRuns: vi.fn(() => []) }));
-vi.mock("../../src/tasks/jira/client", () => ({
-  JiraClient: vi.fn(),
-  // Mirrors the real class's constructor (src/tasks/jira/client.ts), which sets
-  // `this.name` explicitly so classifyFailure's `e.name === "JiraAuthError"`
-  // check survives production minification. A bare `extends Error {}` here
-  // would leave `.name` as the inherited "Error", silently diverging from the
-  // real class for any test that asserts on it.
-  JiraAuthError: class JiraAuthError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = "JiraAuthError";
-    }
-  },
-  JiraApiError: class JiraApiError extends Error {},
-}));
 
 import { getConfig } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
 import { probeGh } from "../../src/engine/pr/provider";
 import { resolveBin } from "../../src/engine/pr/which";
 import { readRuns } from "../../src/engine/runs";
-import { JiraClient } from "../../src/tasks/jira/client";
 import { defaultDeps } from "../../src/doctorView";
-import type { JiraAuth } from "../../src/tasks/jira/auth";
+import type { TaskConnector } from "../../src/tasks/provider";
+import type { AuthProbe } from "../../src/engine/doctor";
 
+// The settings defaultDeps still reads off getConfig() directly — reposRoot,
+// workspaceDir, repoBlocklist, prFacts. The source-facing fields (label, scope,
+// endpoint, setting ids) come from the connector's info() instead; see
+// fakeConnector below.
 const CFG = {
-  baseUrl: "https://jira.test",
-  project: "ASM",
   reposRoot: "/repos",
   workspaceDir: "/ws",
   repoBlocklist: ["skipme"],
   prFacts: true,
 };
 
-const fakeAuth = (authed = true): JiraAuth =>
+const fakeConnector = (over: Partial<TaskConnector> = {}): TaskConnector =>
   ({
-    isAuthenticated: vi.fn(async () => authed),
-    getAuthHeader: vi.fn(async () => "Basic x"),
+    id: "jira",
+    info: vi.fn(() => ({
+      label: "Jira",
+      scopeNoun: "project",
+      scopeValue: "ASM",
+      endpoint: "https://jira.test",
+      exampleKey: "ASM-1234",
+      endpointSetting: "agentFlow.jira.baseUrl",
+      scopeSetting: "agentFlow.jira.project",
+    })),
+    isConfigured: () => true,
+    configure: async () => true,
+    setupSteps: 2,
+    isAuthenticated: vi.fn(async () => true),
     signIn: vi.fn(async () => true),
     signOut: vi.fn(async () => undefined),
-  }) as unknown as JiraAuth;
+    provider: () => ({}) as never,
+    probe: vi.fn(async () => ({})),
+    taskUrl: () => "",
+    keyFromUrl: () => null,
+    ...over,
+  }) as TaskConnector;
 
 beforeEach(() => vi.mocked(getConfig).mockReturnValue(CFG as never));
 
 describe("defaultDeps — the config slice", () => {
-  it("passes only the settings Doctor reads", () => {
-    expect(defaultDeps(fakeAuth(), () => undefined).config()).toEqual(CFG);
+  it("builds config from the connector's info() plus the local settings", () => {
+    const connector = fakeConnector();
+    expect(defaultDeps(connector, () => undefined).config()).toEqual({
+      sourceLabel: "Jira",
+      scopeNoun: "project",
+      endpoint: "https://jira.test",
+      scope: "ASM",
+      endpointSetting: "agentFlow.jira.baseUrl",
+      scopeSetting: "agentFlow.jira.project",
+      ...CFG,
+    });
   });
 });
 
 describe("defaultDeps — delegation", () => {
-  const deps = () => defaultDeps(fakeAuth(), () => undefined);
+  const deps = () => defaultDeps(fakeConnector(), () => undefined);
 
-  it("asks the auth object whether credentials are stored", async () => {
-    const auth = fakeAuth(false);
-    expect(await defaultDeps(auth, () => undefined).hasCredentials()).toBe(false);
-    expect(auth.isAuthenticated).toHaveBeenCalled();
+  it("asks the connector whether it is authenticated", async () => {
+    const connector = fakeConnector({ isAuthenticated: vi.fn(async () => false) });
+    expect(await defaultDeps(connector, () => undefined).hasCredentials()).toBe(false);
+    expect(connector.isAuthenticated).toHaveBeenCalled();
   });
 
-  it("builds the client from the configured site and project for probeMyself", async () => {
-    const probeMyself = vi.fn(async () => ({ accountId: "a1", displayName: "Jane" }));
-    vi.mocked(JiraClient).mockImplementation(() => ({ probeMyself }) as never);
-    const auth = fakeAuth();
-    await expect(defaultDeps(auth, () => undefined).probeMyself()).resolves.toEqual({
-      accountId: "a1",
-      displayName: "Jane",
-    });
-    expect(JiraClient).toHaveBeenCalledWith("https://jira.test", "ASM", auth);
-  });
-
-  it("delegates getProject to the client with the key it was given", async () => {
-    const getProject = vi.fn(async () => ({ id: "1", key: "ASM", name: "Assembly" }));
-    vi.mocked(JiraClient).mockImplementation(() => ({ getProject }) as never);
-    await deps().getProject("ASM");
-    expect(getProject).toHaveBeenCalledWith("ASM");
+  it("wires probe to connector.probe(), unmodified", async () => {
+    const probeResult = { auth: { ok: true, displayName: "Jane" } as AuthProbe };
+    const connector = fakeConnector({ probe: vi.fn(async () => probeResult) });
+    await expect(defaultDeps(connector, () => undefined).probe()).resolves.toBe(probeResult);
+    expect(connector.probe).toHaveBeenCalled();
   });
 
   it("resolves binaries through resolveBin, which looks beyond PATH", () => {
@@ -114,7 +117,7 @@ describe("defaultDeps — delegation", () => {
 
   it("passes the log function straight through", () => {
     const log = vi.fn();
-    defaultDeps(fakeAuth(), log).log("hello");
+    defaultDeps(fakeConnector(), log).log("hello");
     expect(log).toHaveBeenCalledWith("hello");
   });
 
@@ -139,7 +142,7 @@ describe("defaultDeps — statDir against a real filesystem", () => {
     }
   });
 
-  const statDir = (p: string) => defaultDeps(fakeAuth(), () => undefined).statDir(p);
+  const statDir = (p: string) => defaultDeps(fakeConnector(), () => undefined).statDir(p);
 
   it("reports an existing writable directory", () => {
     expect(statDir(tmp)).toEqual({ exists: true, writable: true });

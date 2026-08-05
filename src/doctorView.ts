@@ -3,9 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { getConfig } from "./config";
-import { JiraAuth } from "./tasks/jira/auth";
-import { JiraClient, JiraAuthError, JiraApiError } from "./tasks/jira/client";
-import { describeJiraError } from "./tasks/jira/errors";
+import type { TaskConnector } from "./tasks/provider";
 import { discoverRepos } from "./engine/repos";
 import { probeGh } from "./engine/pr/provider";
 import { resolveBin } from "./engine/pr/which";
@@ -23,11 +21,16 @@ import {
 
 export const CLAUDE_CODE_ID = "anthropic.claude-code";
 
-/** The settings Doctor reads. A narrow slice of the config so the probes can be
- *  driven from a literal in tests. */
+/** The settings Doctor reads. A narrow slice of the config — the source-facing
+ *  fields come from `connector.info()`, the rest from `getConfig()` — so the
+ *  probes can be driven from a literal in tests. */
 export interface DoctorConfig {
-  baseUrl: string;
-  project: string;
+  sourceLabel: string;
+  scopeNoun: string;
+  endpoint: string;
+  scope: string;
+  endpointSetting: string;
+  scopeSetting: string;
   reposRoot: string;
   workspaceDir: string;
   repoBlocklist: string[];
@@ -35,13 +38,14 @@ export interface DoctorConfig {
 }
 
 /** Every outside-world touch Doctor makes, injected. `collectInputs` is then pure
- *  orchestration — which is what makes the classification testable without a Jira
- *  site, a filesystem or a `gh` binary. */
+ *  orchestration — which is what makes it testable without a Jira site, a
+ *  filesystem or a `gh` binary. The source's own error classification now lives
+ *  behind `probe()`, on the connector (Task 6) — this module no longer knows
+ *  what a `JiraAuthError` or a 404 is. */
 export interface DoctorDeps {
   config: () => DoctorConfig;
   hasCredentials: () => Promise<boolean>;
-  probeMyself: () => Promise<{ accountId: string; displayName: string }>;
-  getProject: (key: string) => Promise<{ id: string; key: string; name: string }>;
+  probe: () => Promise<{ auth?: AuthProbe; scope?: ProjectProbe }>;
   which: (bin: string) => string | null;
   gh: () => Promise<{ kind: "missing" | "signed-out"; detail: string } | null>;
   statDir: (p: string) => { exists: boolean; writable: boolean };
@@ -52,46 +56,30 @@ export interface DoctorDeps {
   log: (message: string) => void;
 }
 
-/** Probe the world, classify the failures, hand the verdict to the pure module.
- *
- *  The ordering matters: each Jira probe is skipped when the one before it failed,
- *  because the answer would be meaningless and the call cannot succeed. A signed-out
- *  user should see one problem, not a cascade of three. */
+/** Probe the world, hand the verdict to the pure module. The classification that
+ *  used to live here — `instanceof JiraAuthError`, a 404 read as `not-found` —
+ *  moved behind `d.probe()` on the connector (Task 6); this function is now pure
+ *  forwarding plus the one gate below. */
 export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
   const cfg = d.config();
   const hasCredentials = await d.hasCredentials();
 
-  let authProbe: AuthProbe | undefined;
-  if (hasCredentials) {
-    try {
-      const me = await d.probeMyself();
-      authProbe = { ok: true, displayName: me.displayName || me.accountId };
-    } catch (e) {
-      // JiraAuthError is the credentials; anything else is reaching Jira at all.
-      // request() already phrases both well, so Doctor invents no wording.
-      authProbe = e instanceof JiraAuthError
-        ? { ok: false, reason: "auth", message: e.message }
-        : { ok: false, reason: "network", message: e instanceof Error ? e.message : String(e) };
-    }
-  }
-
-  let projectProbe: ProjectProbe | undefined;
-  if (cfg.project && authProbe?.ok) {
-    try {
-      const p = await d.getProject(cfg.project);
-      projectProbe = { ok: true, name: p.name || p.key };
-    } catch (e) {
-      const message = e instanceof JiraApiError ? describeJiraError(e) : e instanceof Error ? e.message : String(e);
-      projectProbe = e instanceof JiraApiError && e.status === 404
-        ? { ok: false, reason: "not-found", message }
-        : { ok: false, reason: "error", message };
-    }
-  }
+  // No casts: TaskConnector.probe() returns AuthProbe/ProjectProbe directly, so
+  // a connector that classifies a failure into the wrong shape is a compile
+  // error here rather than a Doctor row that quietly reports the wrong thing.
+  // Gating on `hasCredentials` here is redundant with `probe()`'s own gate on
+  // `isAuthenticated()` — kept anyway so a never-signed-in user gets a `skip`
+  // even from a connector that forgot its own gate.
+  const { auth: authProbe, scope: projectProbe } = hasCredentials ? await d.probe() : {};
 
   const repos = d.repos();
   return {
-    baseUrl: cfg.baseUrl,
-    project: cfg.project,
+    sourceLabel: cfg.sourceLabel,
+    scopeNoun: cfg.scopeNoun,
+    endpoint: cfg.endpoint,
+    scope: cfg.scope,
+    endpointSetting: cfg.endpointSetting,
+    scopeSetting: cfg.scopeSetting,
     hasCredentials,
     authProbe,
     projectProbe,
@@ -167,7 +155,7 @@ export async function showDoctor(d: DoctorDeps): Promise<void> {
   });
   if (!picked) return;
   if (picked.copy) {
-    await vscode.env.clipboard.writeText(formatReport(checks));
+    await vscode.env.clipboard.writeText(formatReport(checks, inputs.sourceLabel));
     return;
   }
   if (picked.check?.action) await applyAction(picked.check.action);
@@ -197,27 +185,27 @@ function statDir(p: string): { exists: boolean; writable: boolean } {
 
 /** The real wiring. Kept separate from `showDoctor` so the command is one line and
  *  the tests never touch the network or the filesystem. */
-export function defaultDeps(auth: JiraAuth, log: (message: string) => void): DoctorDeps {
+export function defaultDeps(connector: TaskConnector, log: (message: string) => void): DoctorDeps {
   const cfg = (): DoctorConfig => {
     const c = getConfig();
+    const info = connector.info();
     return {
-      baseUrl: c.baseUrl,
-      project: c.project,
+      sourceLabel: info.label,
+      scopeNoun: info.scopeNoun,
+      endpoint: info.endpoint,
+      scope: info.scopeValue,
+      endpointSetting: info.endpointSetting,
+      scopeSetting: info.scopeSetting,
       reposRoot: c.reposRoot,
       workspaceDir: c.workspaceDir,
       repoBlocklist: c.repoBlocklist,
       prFacts: c.prFacts,
     };
   };
-  const client = () => {
-    const c = cfg();
-    return new JiraClient(c.baseUrl, c.project, auth);
-  };
   return {
     config: cfg,
-    hasCredentials: () => auth.isAuthenticated(),
-    probeMyself: () => client().probeMyself(),
-    getProject: (key) => client().getProject(key),
+    hasCredentials: () => connector.isAuthenticated(),
+    probe: () => connector.probe(),
     which: (bin) => resolveBin(bin),
     gh: () => probeGh(),
     statDir,

@@ -1,22 +1,27 @@
 import { describe, it, expect, vi } from "vitest";
 import { commands, env, extensions, window, Uri } from "../_mocks/vscode";
 import { collectInputs, showDoctor, probeClaudeExtension, type DoctorDeps } from "../../src/doctorView";
-import { JiraAuthError, JiraApiError } from "../../src/tasks/jira/client";
 import { formatReport, runChecks } from "../../src/engine/doctor";
 
 /** Every seam healthy. Each test spoils exactly one. */
 const deps = (over: Partial<DoctorDeps> = {}): DoctorDeps => ({
   config: () => ({
-    baseUrl: "https://jira.test",
-    project: "ASM",
+    sourceLabel: "Jira",
+    scopeNoun: "project",
+    endpoint: "https://jira.test",
+    scope: "ASM",
+    endpointSetting: "agentFlow.jira.baseUrl",
+    scopeSetting: "agentFlow.jira.project",
     reposRoot: "/repos",
     workspaceDir: "/ws",
     repoBlocklist: [],
     prFacts: true,
   }),
   hasCredentials: async () => true,
-  probeMyself: async () => ({ accountId: "a1", displayName: "Jane Doe" }),
-  getProject: async () => ({ id: "1", key: "ASM", name: "Assembly" }),
+  probe: async () => ({
+    auth: { ok: true, displayName: "Jane Doe" },
+    scope: { ok: true, name: "Assembly" },
+  }),
   which: (bin) => `/usr/bin/${bin}`,
   gh: async () => null,
   statDir: () => ({ exists: true, writable: true }),
@@ -28,94 +33,36 @@ const deps = (over: Partial<DoctorDeps> = {}): DoctorDeps => ({
   ...over,
 });
 
-describe("collectInputs — Jira probes", () => {
-  it("records a successful probe with the display name", async () => {
+// The classification that used to be tested here — instanceof JiraAuthError, a
+// 404 read as "not-found" — moved behind the connector's own probe() (Task 6);
+// see test/unit/tasks/jira/connector.test.ts's "JiraConnector — probe()" suite
+// for that coverage now. What's left for collectInputs is: does it forward
+// probe()'s verdict verbatim, and does its own hasCredentials gate still hold.
+describe("collectInputs — probing the source", () => {
+  it("forwards probe()'s auth and scope verdicts verbatim", async () => {
     const i = await collectInputs(deps());
     expect(i.authProbe).toEqual({ ok: true, displayName: "Jane Doe" });
     expect(i.projectProbe).toEqual({ ok: true, name: "Assembly" });
   });
 
-  it("classifies a JiraAuthError as the credentials' fault", async () => {
+  it("reports whatever shape probe() hands back, unmodified", async () => {
     const i = await collectInputs(
       deps({
-        probeMyself: async () => {
-          throw new JiraAuthError("Jira auth failed (401). Sign in again.");
-        },
+        probe: async () => ({
+          auth: { ok: false, reason: "auth", message: "Jira auth failed (401). Sign in again." },
+        }),
       }),
     );
     expect(i.authProbe).toEqual({ ok: false, reason: "auth", message: "Jira auth failed (401). Sign in again." });
+    expect(i.projectProbe).toBeUndefined();
   });
 
-  it("classifies any other error as a reachability problem, verbatim", async () => {
-    const i = await collectInputs(
-      deps({
-        probeMyself: async () => {
-          throw new Error("Jira didn't respond within 15s (https://jira.test).");
-        },
-      }),
-    );
-    expect(i.authProbe).toEqual({
-      ok: false,
-      reason: "network",
-      message: "Jira didn't respond within 15s (https://jira.test).",
-    });
-  });
-
-  it("does not probe at all when there are no stored credentials", async () => {
-    const probeMyself = vi.fn();
-    const getProject = vi.fn();
-    const i = await collectInputs(deps({ hasCredentials: async () => false, probeMyself, getProject }));
-    expect(probeMyself).not.toHaveBeenCalled();
-    expect(getProject).not.toHaveBeenCalled();
+  it("does not call probe() when there are no stored credentials", async () => {
+    const probe = vi.fn();
+    const i = await collectInputs(deps({ hasCredentials: async () => false, probe }));
+    expect(probe).not.toHaveBeenCalled();
     expect(i.authProbe).toBeUndefined();
     expect(i.projectProbe).toBeUndefined();
-  });
-
-  it("skips the project lookup when the credentials were rejected — it cannot succeed", async () => {
-    const getProject = vi.fn();
-    const i = await collectInputs(
-      deps({
-        probeMyself: async () => {
-          throw new JiraAuthError("nope");
-        },
-        getProject,
-      }),
-    );
-    expect(getProject).not.toHaveBeenCalled();
-    expect(i.projectProbe).toBeUndefined();
-  });
-
-  it("skips the project lookup when no project is configured", async () => {
-    const getProject = vi.fn();
-    const cfg = deps().config;
-    await collectInputs(deps({ config: () => ({ ...cfg(), project: "" }), getProject }));
-    expect(getProject).not.toHaveBeenCalled();
-  });
-
-  it("reads a 404 as a key that isn't there, through describeJiraError", async () => {
-    const i = await collectInputs(
-      deps({
-        getProject: async () => {
-          throw new JiraApiError(404, "No project could be found.", {}, ["No project could be found"]);
-        },
-      }),
-    );
-    expect(i.projectProbe).toEqual({ ok: false, reason: "not-found", message: "No project could be found." });
-  });
-
-  it("reads any other project failure as an error, not a missing key", async () => {
-    const i = await collectInputs(
-      deps({
-        getProject: async () => {
-          throw new Error("Couldn't reach Jira at https://jira.test");
-        },
-      }),
-    );
-    expect(i.projectProbe).toEqual({
-      ok: false,
-      reason: "error",
-      message: "Couldn't reach Jira at https://jira.test",
-    });
   });
 });
 
@@ -176,7 +123,8 @@ describe("showDoctor — the QuickPick", () => {
     const d = deps();
     window.showQuickPick.mockImplementation(async (items: any) => items[items.length - 1]);
     await showDoctor(d);
-    const expected = formatReport(runChecks(await collectInputs(d)));
+    const inputs = await collectInputs(d);
+    const expected = formatReport(runChecks(inputs), inputs.sourceLabel);
     expect(env.clipboard.writeText).toHaveBeenCalledWith(expected);
   });
 

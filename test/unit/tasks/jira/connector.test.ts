@@ -181,4 +181,24 @@ describe("JiraConnector — probe()", () => {
       message: "Jira is having trouble (500) — try again shortly.",
     });
   });
+
+  // A non-JiraApiError failure on the project lookup — a timeout, a DNS miss —
+  // takes the other arm of the same ternary the 404 test above pins: no status
+  // to read, so the message passes through verbatim instead of through
+  // describeJiraError. Doctor used to test this branch directly (it was the
+  // last thing collectInputs still classified); now that classification lives
+  // here, this is the branch's only coverage.
+  it("classifies a plain network error on the project lookup the same way as the auth probe does", async () => {
+    const probeMyself = vi.fn(async () => ({ accountId: "a1", displayName: "Jane" }));
+    const getProject = vi.fn(async () => {
+      throw new Error("Couldn't reach Jira at https://x.atlassian.net");
+    });
+    vi.mocked(JiraClient).mockImplementation(() => ({ probeMyself, getProject }) as never);
+    const result = await makeJiraConnector(authedCtx()).probe();
+    expect(result.scope).toEqual({
+      ok: false,
+      reason: "error",
+      message: "Couldn't reach Jira at https://x.atlassian.net",
+    });
+  });
 });

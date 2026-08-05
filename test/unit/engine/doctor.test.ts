@@ -3,8 +3,12 @@ import { runChecks, summarize, formatReport, CLAUDE_CODE_FLOOR, type DoctorInput
 
 /** A wholly healthy machine. Each test spoils exactly one thing. */
 const healthy = (): DoctorInputs => ({
-  baseUrl: "https://jira.test",
-  project: "ASM",
+  sourceLabel: "Jira",
+  scopeNoun: "project",
+  endpoint: "https://jira.test",
+  scope: "ASM",
+  endpointSetting: "agentFlow.jira.baseUrl",
+  scopeSetting: "agentFlow.jira.project",
   hasCredentials: true,
   authProbe: { ok: true, displayName: "Jane Doe" },
   projectProbe: { ok: true, name: "Assembly" },
@@ -33,7 +37,7 @@ describe("runChecks — a healthy machine", () => {
 
   it("covers every group", () => {
     expect(new Set(runChecks(healthy()).map((c) => c.group))).toEqual(
-      new Set(["Jira", "Local", "GitHub", "Claude Code", "State"]),
+      new Set(["source", "Local", "GitHub", "Claude Code", "State"]),
     );
   });
 
@@ -52,17 +56,17 @@ describe("runChecks — a healthy machine", () => {
 
 describe("runChecks — Jira", () => {
   it("fails an empty site URL", () => {
-    const c = find({ ...healthy(), baseUrl: "" }, "Site configured");
+    const c = find({ ...healthy(), endpoint: "" }, "Site configured");
     expect(c.status).toBe("fail");
     expect(c.action).toEqual({ kind: "command", command: "agentFlow.setup", label: "Run Setup" });
   });
 
   it("fails a site URL that isn't https", () => {
-    expect(find({ ...healthy(), baseUrl: "http://jira.test" }, "Site configured").status).toBe("fail");
+    expect(find({ ...healthy(), endpoint: "http://jira.test" }, "Site configured").status).toBe("fail");
   });
 
   it("fails an empty project key", () => {
-    expect(find({ ...healthy(), project: "" }, "Project configured").status).toBe("fail");
+    expect(find({ ...healthy(), scope: "" }, "Project configured").status).toBe("fail");
   });
 
   it("fails when no credentials are stored, and offers sign-in", () => {
@@ -251,7 +255,7 @@ describe("ordering", () => {
   });
 
   it("keeps a stable group order inside one status", () => {
-    const checks = runChecks({ ...healthy(), baseUrl: "", gitOnPath: false });
+    const checks = runChecks({ ...healthy(), endpoint: "", gitOnPath: false });
     const fails = checks.filter((c) => c.status === "fail").map((c) => c.label);
     expect(fails).toEqual(["Site configured", "git on PATH"]);
   });
@@ -259,12 +263,12 @@ describe("ordering", () => {
 
 describe("summarize", () => {
   it("counts problems and warnings", () => {
-    const checks = runChecks({ ...healthy(), baseUrl: "", gitOnPath: false, claudeProjectsReadable: false });
+    const checks = runChecks({ ...healthy(), endpoint: "", gitOnPath: false, claudeProjectsReadable: false });
     expect(summarize(checks)).toBe("2 problems · 1 warning");
   });
 
   it("uses the singular for one of each", () => {
-    expect(summarize(runChecks({ ...healthy(), baseUrl: "", claudeProjectsReadable: false })))
+    expect(summarize(runChecks({ ...healthy(), endpoint: "", claudeProjectsReadable: false })))
       .toBe("1 problem · 1 warning");
   });
 
@@ -273,20 +277,54 @@ describe("summarize", () => {
   });
 
   it("omits the warning half when there are none", () => {
-    expect(summarize(runChecks({ ...healthy(), baseUrl: "" }))).toBe("1 problem");
+    expect(summarize(runChecks({ ...healthy(), endpoint: "" }))).toBe("1 problem");
   });
 });
 
 describe("formatReport", () => {
   it("writes one line per check, grouped, with a summary header", () => {
-    const report = formatReport(runChecks({ ...healthy(), baseUrl: "" }));
+    const report = formatReport(runChecks({ ...healthy(), endpoint: "" }), "Jira");
     expect(report).toContain("Agent Flow Deck Doctor");
     expect(report).toContain("1 problem");
     expect(report).toContain("[fail] Site configured");
     expect(report).toContain("Jira");
   });
 
+  it("labels the source group with the connector's own label, not the placeholder", () => {
+    const report = formatReport(runChecks(healthy()), "Fixture");
+    expect(report).toContain("Fixture:");
+    expect(report).not.toContain("source:");
+  });
+
   it("is plain text with no VS Code markup, so it can be pasted anywhere", () => {
-    expect(formatReport(runChecks(healthy()))).not.toMatch(/\$\(|<[a-z]/);
+    expect(formatReport(runChecks(healthy()), "Jira")).not.toMatch(/\$\(|<[a-z]/);
+  });
+});
+
+describe("runChecks — source-agnostic rows", () => {
+  it("labels the source rows from the connector, not from Jira", () => {
+    const checks = runChecks({
+      ...healthy(),
+      sourceLabel: "Fixture",
+      scopeNoun: "board",
+      endpoint: "https://fixture.test",
+      scope: "FX",
+      endpointSetting: "agentFlow.fixture.endpoint",
+      scopeSetting: "agentFlow.fixture.board",
+    }).filter((c) => c.group === "source");
+    expect(checks.map((c) => c.label)).toContain("Board configured");
+    expect(checks.some((c) => c.detail.includes("agentFlow.jira"))).toBe(false);
+  });
+
+  it("names the missing setting when the scope is empty", () => {
+    const c = find({ ...healthy(), scope: "" }, "Project configured");
+    expect(c.status).toBe("fail");
+    expect(c.detail).toBe("agentFlow.jira.project is empty");
+  });
+
+  it("names the missing setting when the endpoint is empty", () => {
+    const c = find({ ...healthy(), endpoint: "" }, "Site configured");
+    expect(c.status).toBe("fail");
+    expect(c.detail).toBe("agentFlow.jira.baseUrl is empty");
   });
 });
