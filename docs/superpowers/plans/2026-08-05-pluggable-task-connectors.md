@@ -2498,16 +2498,26 @@ export function visibleFilters(supported: readonly Filter[]): Filter[] {
   return shown.length ? shown : [...FILTER_ORDER];
 }
 
-/** The filter to actually use, given what the user configured and what the source
- * can answer. `agentFlow.defaultFilter` ships as `"mysprint"`, and four of the six
- * filters are inherently sprint-scoped — so a source without sprints supports
- * neither the shipped default nor most of the alternatives. Without this, the host
- * requests a filter the source cannot answer and the tab bar renders with no tab
- * in the active state, because the selected id matches none of the rendered ones. */
-export function effectiveFilter(configured: string, supported: readonly Filter[]): Filter {
-  const shown = visibleFilters(supported);
-  return shown.includes(configured as Filter) ? (configured as Filter) : shown[0];
-}
+// effectiveFilter ALREADY EXISTS — Task 8 added it, because the host needed it
+// first. It is deliberately NOT the version this plan originally sketched here,
+// and the shipped one is better: where the sketch fell back to
+// `visibleFilters(supported)[0]`, the shipped version prefers "mysprint" when the
+// configured value is unrecognized but the source supports it.
+//
+//   export function effectiveFilter(configured: string, supported: readonly Filter[]): Filter {
+//     if (supported.includes(configured as Filter)) return configured as Filter;
+//     if (supported.includes("mysprint")) return "mysprint";
+//     return supported[0] ?? "mysprint";
+//   }
+//
+// The reason is compatibility. The pre-capability code was
+// `(cfg.defaultFilter as Filter) || "mysprint"`, so an existing user with an
+// unrecognized agentFlow.defaultFilter opened on mysprint. The sketch would have
+// moved their opening lens to whatever sorted first. DO NOT rewrite it, and do not
+// couple it to visibleFilters — it does not need to, and coupling them would
+// reintroduce that regression.
+//
+// You are adding the two helpers below, which do not exist yet.
 
 /** Every gate-screen string, with the source named. Pure so the copy is testable
  * without mounting the app. */
