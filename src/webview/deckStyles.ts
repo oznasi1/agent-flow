@@ -31,8 +31,13 @@ export const DECK_CSS = `
 
   .hd { flex: none; display: flex; align-items: center; gap: 14px;
     padding: 13px 20px; border-bottom: 1px solid var(--hair); }
-  .hd .title { font-size: 15px; font-weight: 600; letter-spacing: -.012em; white-space: nowrap; }
-  .hd .title .sub { color: var(--dim); font-weight: 400; margin-left: 7px; font-size: 12px; letter-spacing: 0; }
+  /* The gloss sits under the label, not beside it: stacked, the two lines read as one
+     title block instead of a sentence that happens to change weight mid-way. Free
+     vertically — the stat tiles next to it already set the header's height. */
+  .hd .title { font-size: 15px; font-weight: 600; letter-spacing: -.012em; white-space: nowrap;
+    line-height: 1.3; }
+  .hd .title .sub { display: block; color: var(--dim); font-weight: 400; font-size: 12px;
+    letter-spacing: 0; line-height: 1.3; }
   .stats { display: flex; align-items: stretch; gap: 6px; }
   /* Sentence case, matching the column headers: these four tiles and those four
      headers name the same four things, and used to do it in two different cases. */

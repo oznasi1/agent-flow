@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Deck: the In-flight header stacks its gloss under the title.** "everything you've
+  launched" used to sit inline after "In-flight", reading as one sentence that changed
+  weight mid-way; it now sits on its own line beneath the label. The header is no taller
+  for it — the stat tiles beside it already set its height (`src/webview/deckStyles.ts`).
+
 ## [0.4.0] — 2026-08-05
 
 ### Added

@@ -186,6 +186,20 @@ describe("type scale", () => {
   });
 });
 
+describe("surface header", () => {
+  // The Deck's gloss sits on its own line under "In-flight". It is a block for that
+  // reason alone, so the obvious "tidy-up" — folding it back to an inline span with a
+  // margin, the way it used to read — is a regression, not a simplification. Asserting
+  // the absence of margin-left too: with display:block the margin is dead weight that
+  // would silently indent the second line if anyone restored it.
+  it("stacks the Deck's gloss under the title rather than beside it", () => {
+    const sub = ruleBlocks(DECK_CSS).find((r) => r.selector === ".hd .title .sub");
+    expect(sub).toBeDefined();
+    expect(sub!.body).toMatch(/display:\s*block/);
+    expect(sub!.body).not.toMatch(/margin-left/);
+  });
+});
+
 describe("CONTROLS_CSS", () => {
   it("defines the segmented control and declares no tokens of its own", () => {
     expect(CONTROLS_CSS).toContain(".seg");
