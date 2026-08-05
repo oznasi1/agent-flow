@@ -3,6 +3,8 @@ import {
   TaskApiError, TaskAuthError, TaskWriteError,
   isTaskNetworkError, markTaskNetworkFailure, serializeCaps,
 } from "../../../src/tasks/provider";
+import type { TaskConnector } from "../../../src/tasks/provider";
+import type { AuthProbe, ProjectProbe } from "../../../src/engine/doctor";
 
 describe("task errors", () => {
   it("carries a minification-proof name on every class", () => {
@@ -44,5 +46,27 @@ describe("serializeCaps", () => {
       labels: { add: async () => undefined },
     };
     expect(serializeCaps(caps).labels).toBe(true);
+  });
+});
+
+describe("TaskConnector.probe() contract", () => {
+  // Compile-time assertion as much as a runtime one: if `probe()`'s return type
+  // ever drifts back to `unknown`, or engine/doctor.ts's AuthProbe/ProjectProbe
+  // shapes change underneath it, these literals stop satisfying `TaskConnector["probe"]`
+  // and this file fails to typecheck.
+  it("accepts every ok/not-ok variant of AuthProbe and ProjectProbe", async () => {
+    const authOk: AuthProbe = { ok: true, displayName: "Ada" };
+    const authFail: AuthProbe = { ok: false, reason: "auth", message: "no credentials" };
+    const scopeOk: ProjectProbe = { ok: true, name: "ABC" };
+    const scopeFail: ProjectProbe = { ok: false, reason: "not-found", message: "no such project" };
+
+    const bothOk: TaskConnector["probe"] = async () => ({ auth: authOk, scope: scopeOk });
+    const bothFail: TaskConnector["probe"] = async () => ({ auth: authFail, scope: scopeFail });
+    // `undefined` on either member is the "deliberately not run" case Doctor renders as `skip`.
+    const neitherRun: TaskConnector["probe"] = async () => ({});
+
+    expect(await bothOk()).toEqual({ auth: authOk, scope: scopeOk });
+    expect(await bothFail()).toEqual({ auth: authFail, scope: scopeFail });
+    expect(await neitherRun()).toEqual({});
   });
 });
