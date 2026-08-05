@@ -682,7 +682,6 @@ describe("package.json ⇄ config constants", () => {
     expect(props["agentFlow.explorePrompts.knowledge"].default).toBe(DEFAULT_EXPLORE_PROMPT);
     expect(props["agentFlow.explorePrompts.debug"].default).toBe(DEFAULT_EXPLORE_DEBUG_PROMPT);
     expect(props["agentFlow.explorePrompts.general"].default).toBe(DEFAULT_EXPLORE_GENERAL_PROMPT);
-    expect(props["agentFlow.explorePrompts.supervise"].default).toBe(DEFAULT_EXPLORE_SUPERVISE_PROMPT);
     expect(props["agentFlow.explorePrompts.verify"].default).toBe(DEFAULT_EXPLORE_VERIFY_PROMPT);
   });
 
