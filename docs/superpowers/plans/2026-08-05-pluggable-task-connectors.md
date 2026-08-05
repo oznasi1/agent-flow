@@ -263,8 +263,14 @@ Expected: FAIL — `Cannot find module '../../../src/tasks/provider'`.
 // The seam between Agent Flow and wherever its tickets come from. Deliberately
 // free of `vscode` imports so it stays testable in isolation; anything needing
 // the editor API belongs in a connector.
-import { Filter, JiraDetail as TaskDetail, JiraTask as Task, Size } from "../types";
-import { FieldPrompt } from "./jira/transitionFields";
+import { Filter, JiraTask as Task, Size } from "../types";
+// `import type` on both of these deliberately: client.ts imports auth.ts, which
+// imports `vscode`. A value import would drag the editor API into a module that
+// must stay loadable in isolation; a type-only import is erased at build time.
+// The paths are the PRE-move ones (src/jira/…) because Task 3 has not run yet —
+// Task 3's sweep rewrites them to ./jira/… along with everything else.
+import type { JiraDetail as TaskDetail } from "../jira/client";
+import type { FieldPrompt } from "../jira/transitionFields";
 
 export type { FieldPrompt, Task, TaskDetail };
 
@@ -488,7 +494,10 @@ Depth changes by one level for sources (`../types` → `../../types`) and by one
 sed -i '' 's|from "\.\./types"|from "../../types"|g' src/tasks/jira/*.ts
 # Consumers at src/ root.
 sed -i '' 's|from "\./jira/|from "./tasks/jira/|g' src/*.ts
-# provider.ts already points at ./jira/transitionFields — correct, leave it.
+# src/tasks/provider.ts pointed at the pre-move ../jira/… (Task 2 wrote it that
+# way because the move had not happened). Now that jira/ is its sibling, the
+# correct path is ./jira/… — this line is what makes Task 2's imports resolve.
+sed -i '' 's|from "\.\./jira/|from "./jira/|g' src/tasks/provider.ts
 # Moved tests are one directory deeper.
 sed -i '' 's|from "\.\./\.\./src/jira/|from "../../../src/tasks/jira/|g' test/unit/tasks/jira/*.ts
 # The compat test's ApiTokenAuth import.
