@@ -2006,6 +2006,30 @@ cannot do."
 - Consumes: `TaskConnector` (Task 6).
 - Produces: `ticketKeyFor(run: Run, connector: Pick<TaskConnector, "keyFromUrl">): string`; `DeckPanel.show(context, connector, log)`.
 
+**Before you retarget any `instanceof`, fix the test double — it will otherwise lie to you.**
+`test/unit/deckView.test.ts:225-230` hand-rolls `JiraAuthError` as `class JiraAuthError extends Error`.
+Production currently imports `JiraAuthError` from that same mocked module, so identity matches today and
+the test at `test/unit/deckView.test.ts:636` ("degrades to the git backbone on a Jira auth error") is
+sound. The instant `src/deckView.ts:580` becomes `instanceof TaskAuthError`, the hand-rolled double stops
+matching, the branch stops being entered, and that test keeps passing while testing nothing.
+
+Fix it first, with the pattern already used at `test/unit/tasks/jira/connector.test.ts:14-19`:
+
+```ts
+vi.mock("../../src/tasks/jira/client", async () => {
+  const actual = await vi.importActual<typeof import("../../src/tasks/jira/client")>(
+    "../../src/tasks/jira/client",
+  );
+  return { ...actual, JiraClient: class { getStatus = h.getStatus; } };
+});
+```
+
+Keeping the real error classes means the real hierarchy is what `instanceof` sees. **Verify by mutation:**
+after retargeting, break the branch and confirm that test fails. If it still passes, the double is still
+lying.
+
+
+
 - [ ] **Step 1: Extend the compat test for the new signature**
 
 ```ts
@@ -2077,6 +2101,28 @@ mis-parsed."
 **Interfaces:**
 - Consumes: `TaskConnector` (Task 6).
 - Produces: `defaultDeps(connector: TaskConnector, log): DoctorDeps`; `DoctorDeps.probe: () => Promise<{auth?: AuthProbe; scope?: ProjectProbe}>` replacing `probeMyself` and `getProject`; `DoctorInputs` gains `sourceLabel`, `scopeNoun`, `endpointSetting`, `scopeSetting` and renames `baseUrl`→`endpoint`, `project`→`scope`.
+
+**Two test doubles must be fixed before you retarget anything, and the second hides a live bug.**
+
+`test/unit/doctorView.deps.test.ts:20-26` hand-rolls both error classes:
+```ts
+JiraAuthError: class JiraAuthError extends Error { … },
+JiraApiError: class JiraApiError extends Error {},   // <-- no `status` at all
+```
+
+`src/doctorView.ts:85` predicates on `e instanceof JiraApiError && e.status === 404` to produce the
+`not-found` verdict — the row that tells a user their project key is wrong, as distinct from a network
+failure. The double carries **no `status` property**, so `e.status === 404` is `undefined === 404`: that
+branch is very likely already untested today. Check whether it is, and say so in your report. Then
+retargeting to `TaskApiError` would cement it — a wrong project key would silently report as a generic
+error and send the user hunting for a network problem.
+
+Fix both doubles with the `importActual` spread pattern from `test/unit/tasks/jira/connector.test.ts:14-19`
+so the real classes (and their real `status` field) are what `instanceof` sees, **then** add a test that
+genuinely exercises the 404 → `not-found` path with a real `JiraApiError(404, …)`, **then** retarget.
+Verify by mutation that flipping the `404` check breaks that test.
+
+
 
 - [ ] **Step 1: Write the failing test**
 
