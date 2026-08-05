@@ -3,8 +3,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { getConfig, AgentFlowConfig, ExploreAction } from "./config";
 import { JiraAuth } from "./tasks/jira/auth";
-import { JiraClient, JiraAuthError, JiraApiError, JiraDetail, TransitionOption, isJiraNetworkError } from "./tasks/jira/client";
+import { JiraClient, JiraAuthError, JiraApiError, JiraDetail, TransitionOption } from "./tasks/jira/client";
 import { describeJiraError } from "./tasks/jira/errors";
+import { isTaskNetworkError } from "./tasks/provider";
 import {
   promptableFields,
   toJiraValue,
@@ -68,7 +69,7 @@ const JIRA_WRITE_MESSAGES: ReadonlySet<InboundMessage["type"]> = new Set([
  * alone would mislabel its failure a workspace_write / pr_lookup. When the
  * thrown error is identifiably from the Jira client — JiraAuthError, JiraApiError,
  * or a network-level failure inside request() (unreachable host, DNS, timeout;
- * see isJiraNetworkError, src/tasks/jira/client.ts) — that origin is trusted over the
+ * see isTaskNetworkError, src/tasks/provider.ts) — that origin is trusted over the
  * message-type default: jira_write for the message types whose own Jira
  * interaction is a write, jira_fetch for everything else that reads Jira at all.
  * The network-level case matters most in practice: an unreachable Jira (VPN off,
@@ -85,7 +86,7 @@ const JIRA_WRITE_MESSAGES: ReadonlySet<InboundMessage["type"]> = new Set([
 function resolveOp(m: InboundMessage, e: unknown): Op | undefined {
   const messageOp = MESSAGE_OPS[m.type];
   if (!messageOp) return undefined;
-  if (e instanceof JiraAuthError || e instanceof JiraApiError || isJiraNetworkError(e)) {
+  if (e instanceof JiraAuthError || e instanceof JiraApiError || isTaskNetworkError(e)) {
     return JIRA_WRITE_MESSAGES.has(m.type) ? "jira_write" : "jira_fetch";
   }
   return messageOp;

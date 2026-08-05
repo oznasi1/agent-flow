@@ -1,14 +1,20 @@
+import { TaskApiError } from "../provider";
+
 /** A non-2xx response from Jira. Keeps the error envelope intact so callers can
  *  react to the failing fields structurally instead of matching on prose — the
- *  transition flow uses `fieldErrors` to decide what to re-prompt for. */
-export class JiraApiError extends Error {
+ *  transition flow uses `fieldErrors` to decide what to re-prompt for.
+ *  `status`/`fieldErrors`/`messages` are declared without `readonly` here — the
+ *  base class (TaskApiError, src/tasks/provider.ts) already declares them
+ *  `readonly`; re-declaring would shadow the base's own properties instead of
+ *  setting them. */
+export class JiraApiError extends TaskApiError {
   constructor(
-    readonly status: number,
+    status: number,
     message: string,
-    readonly fieldErrors: Record<string, string>,
-    readonly messages: string[],
+    fieldErrors: Record<string, string>,
+    messages: string[],
   ) {
-    super(message);
+    super(status, message, fieldErrors, messages);
     this.name = "JiraApiError";
   }
 }

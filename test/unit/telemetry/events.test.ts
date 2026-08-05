@@ -114,6 +114,19 @@ describe("classifyFailure", () => {
     expect(classifyFailure(e)).toBe("auth");
   });
 
+  it("classifies both the task and jira auth error names as auth", () => {
+    // Real Error objects, like the AbortError case above — classifyFailure only
+    // reads `.name` off an `instanceof Error` (see its own doc comment), so a
+    // plain `{ name: "TaskAuthError" }` object literal would never reach that
+    // branch regardless of the string comparison being tested here.
+    const taskAuth = new Error("token expired");
+    taskAuth.name = "TaskAuthError";
+    const jiraAuth = new Error("token expired");
+    jiraAuth.name = "JiraAuthError";
+    expect(classifyFailure(taskAuth)).toBe("auth");
+    expect(classifyFailure(jiraAuth)).toBe("auth");
+  });
+
   it("classifies auth by well-known 401/403 codes", () => {
     expect(classifyFailure({ code: "401" })).toBe("auth");
     expect(classifyFailure({ code: "403" })).toBe("auth");

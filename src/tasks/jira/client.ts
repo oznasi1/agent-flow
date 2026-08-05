@@ -3,16 +3,16 @@ import { buildJql, stripSprint } from "./jql";
 import { parseJiraError } from "./errors";
 import { TransitionFieldMeta } from "./transitionFields";
 import { Filter, JiraTask, Size } from "../../types";
+import { markTaskNetworkFailure, TaskAuthError } from "../provider";
 
-export class JiraAuthError extends Error {
+export class JiraAuthError extends TaskAuthError {
   constructor(message: string) {
     super(message);
-    // Explicit, like JiraApiError (jira/errors.ts) — a bare `extends Error` with no
-    // constructor override inherits `.name` from Error.prototype ("Error"), and the
-    // class identifier itself isn't a safe substitute: esbuild's production build
-    // (esbuild.js, minify:true, no keepNames) renames it. classifyFailure
-    // (telemetry/events.ts) checks `e.name === "JiraAuthError"` and needs this to
-    // survive minification; a string literal does.
+    // Still explicit, still a literal — the base sets "TaskAuthError" and this
+    // must win, and esbuild's minifier makes the class identifier unusable.
+    // classifyFailure (telemetry/events.ts) checks `e.name === "JiraAuthError"`
+    // (alongside the base's own "TaskAuthError") and needs this to survive
+    // minification; a string literal does.
     this.name = "JiraAuthError";
   }
 }
@@ -21,29 +21,6 @@ export class JiraAuthError extends Error {
 // this and JiraAuthError, and they mean different things — auth re-gates the panel,
 // an API error is reported in place.
 export { JiraApiError } from "./errors";
-
-/** Tag a plain Error thrown by request()'s network-level catch (unreachable host,
- * DNS failure, or a request that hit REQUEST_TIMEOUT_MS) as Jira-origin — see the
- * two call sites below. The thrown value stays an ordinary Error on purpose:
- * doctorView, deckView, and tasksView all branch on `instanceof JiraApiError` /
- * `instanceof JiraAuthError` elsewhere, and turning a network failure into one of
- * those types would give a false positive there, with real behavioural fallout.
- * `code` doubles as the exact field classifyFailure (telemetry/events.ts) already
- * reads for its network/timeout classification — no change needed there, these
- * errors were just missing the field. Exported (with isJiraNetworkError below) so
- * tests can build a faithful fixture without hand-rolling the marker shape. */
-export function markJiraNetworkFailure(e: Error, code: "ETIMEDOUT" | "ENOTFOUND"): Error {
-  return Object.assign(e, { code, jiraOrigin: true });
-}
-
-/** True for an Error tagged by markJiraNetworkFailure() above — a JiraClient
- * network-level failure (unreachable host, DNS, timeout), as opposed to a
- * JiraApiError/JiraAuthError (Jira answered, just unfavourably). Exported so
- * operation_failed's op attribution (tasksView.ts's resolveOp) can recognize a
- * Jira-origin failure without depending on this module's internal marker shape. */
-export function isJiraNetworkError(e: unknown): boolean {
-  return typeof e === "object" && e !== null && (e as { jiraOrigin?: unknown }).jiraOrigin === true;
-}
 
 /** How long a single Jira request may run before we give up. Without this a wrong
  * base URL or an unreachable site (VPN off, DNS, firewall) hangs `fetch` forever,
@@ -112,7 +89,7 @@ export class JiraClient {
       });
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") {
-        throw markJiraNetworkFailure(
+        throw markTaskNetworkFailure(
           new Error(
             `Jira didn't respond within ${REQUEST_TIMEOUT_MS / 1000}s (${this.baseUrl}). ` +
               "Check agentFlow.jira.baseUrl and your network/VPN.",
@@ -120,7 +97,7 @@ export class JiraClient {
           "ETIMEDOUT",
         );
       }
-      throw markJiraNetworkFailure(
+      throw markTaskNetworkFailure(
         new Error(`Couldn't reach Jira at ${this.baseUrl}: ${e instanceof Error ? e.message : String(e)}`),
         "ENOTFOUND",
       );

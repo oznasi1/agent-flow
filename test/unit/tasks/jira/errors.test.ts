@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { JiraApiError, parseJiraError, describeJiraError } from "../../../../src/tasks/jira/errors";
+import { TaskApiError, TaskAuthError } from "../../../../src/tasks/provider";
+import { JiraAuthError } from "../../../../src/tasks/jira/client";
 
 const envelope = (messages: string[], errors: Record<string, string> = {}) =>
   JSON.stringify({ errorMessages: messages, errors });
@@ -69,5 +71,22 @@ describe("describeJiraError", () => {
 
   it("falls back to the status sentence when there is nothing to describe", () => {
     expect(describeJiraError(parseJiraError(503, ""))).toBe("Jira is having trouble (503) — try again shortly.");
+  });
+});
+
+describe("jira errors are task errors", () => {
+  it("makes JiraApiError catchable as TaskApiError", () => {
+    const e = new JiraApiError(404, "gone", { f: "bad" }, ["m"]);
+    expect(e).toBeInstanceOf(TaskApiError);
+    expect(e.name).toBe("JiraApiError"); // its own name survives
+    expect(e.status).toBe(404);
+    expect(e.fieldErrors).toEqual({ f: "bad" });
+    expect(e.messages).toEqual(["m"]);
+  });
+
+  it("makes JiraAuthError catchable as TaskAuthError", () => {
+    const e = new JiraAuthError("nope");
+    expect(e).toBeInstanceOf(TaskAuthError);
+    expect(e.name).toBe("JiraAuthError");
   });
 });

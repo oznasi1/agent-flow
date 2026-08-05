@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fakeAuth, installFetch, jsonResponse, textResponse, emptyResponse } from "../../../_helpers/factories";
+import { isTaskNetworkError } from "../../../../src/tasks/provider";
 
 // The Sprint-field id is cached in a module-level variable; reset the whole module
 // between tests so the cache never leaks across cases.
@@ -88,14 +89,15 @@ describe("request — error & response mapping", () => {
   // a network-level failure as Jira-origin without it becoming a JiraApiError/
   // JiraAuthError (other code branches on those types by `instanceof`). These
   // confirm request() itself — not just a hand-built test fixture — tags both
-  // network-level failure shapes for isJiraNetworkError and classifyFailure alike.
+  // network-level failure shapes for isTaskNetworkError (src/tasks/provider.ts)
+  // and classifyFailure alike.
   it("marks an unreachable-host failure as a plain, Jira-origin-tagged Error (not JiraApiError/JiraAuthError)", async () => {
     installFetch([]); // the mocked fetch rejects — see installFetch's own doc comment
     const err = await client().getTransitions("ASM-1").catch((e) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(mod.JiraApiError);
     expect(err).not.toBeInstanceOf(mod.JiraAuthError);
-    expect(mod.isJiraNetworkError(err)).toBe(true);
+    expect(isTaskNetworkError(err)).toBe(true);
     expect(err.code).toBe("ENOTFOUND");
     expect(err.message).toMatch(/Couldn't reach Jira at/);
   });
@@ -106,7 +108,7 @@ describe("request — error & response mapping", () => {
     const err = await client().getTransitions("ASM-1").catch((e) => e);
     expect(err).not.toBeInstanceOf(mod.JiraApiError);
     expect(err).not.toBeInstanceOf(mod.JiraAuthError);
-    expect(mod.isJiraNetworkError(err)).toBe(true);
+    expect(isTaskNetworkError(err)).toBe(true);
     expect(err.code).toBe("ETIMEDOUT");
     expect(err.message).toMatch(/didn't respond within/);
   });

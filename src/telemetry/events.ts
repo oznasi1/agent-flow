@@ -30,24 +30,30 @@ export type FailureClass =
 /** Map a thrown value to a failure class. Reads only the error's `name` and
  * well-known `code` fields — never its `message`, which we do not send.
  *
- * Deliberately checks `.name`, not `instanceof JiraAuthError` — this module has
- * no dependency on jira/client.ts (which transitively imports `vscode` via
- * jira/auth.ts) and must stay that way, a leaf module importable in isolation.
- * That only works because `JiraAuthError`'s constructor explicitly sets
- * `this.name = "JiraAuthError"` (src/tasks/jira/client.ts), exactly like its sibling
- * `JiraApiError` (src/tasks/jira/errors.ts) already did. A bare `class X extends
- * Error {}` with no constructor override would inherit `.name` from
- * `Error.prototype` (`"Error"`), and the class identifier itself is not a safe
- * substitute for the same check: esbuild's production build (esbuild.js,
- * minify:true, no keepNames) renames it, so `e.constructor.name` would not
- * survive a real bundle either — verified against the actual minified
- * dist/extension.js. Native error types (AbortError as thrown by
- * fetch/AbortController, SyntaxError) set `.name` on their own, immune to both
- * of these problems, so no special casing is needed for those. */
+ * Deliberately checks `.name`, not `instanceof TaskAuthError` / `instanceof
+ * JiraAuthError` — this module has no dependency on tasks/provider.ts or
+ * jira/client.ts (which transitively imports `vscode` via jira/auth.ts) and
+ * must stay that way, a leaf module importable in isolation. That only works
+ * because every task-error constructor explicitly sets its own `.name` as a
+ * string literal — the base `TaskAuthError` sets `"TaskAuthError"`
+ * (src/tasks/provider.ts), and `JiraAuthError` overrides it with
+ * `"JiraAuthError"` after calling `super()` (src/tasks/jira/client.ts), exactly
+ * like its sibling `JiraApiError` (src/tasks/jira/errors.ts) already did. Both
+ * names are accepted here: a bare `TaskAuthError` (thrown by a future connector
+ * with no Jira-specific subclass) sets the base name, while Jira's own errors
+ * still set the Jira one. A bare `class X extends Error {}` with no constructor
+ * override would inherit `.name` from `Error.prototype` (`"Error"`), and the
+ * class identifier itself is not a safe substitute for the same check:
+ * esbuild's production build (esbuild.js, minify:true, no keepNames) renames
+ * it, so `e.constructor.name` would not survive a real bundle either —
+ * verified against the actual minified dist/extension.js. Native error types
+ * (AbortError as thrown by fetch/AbortController, SyntaxError) set `.name` on
+ * their own, immune to both of these problems, so no special casing is needed
+ * for those. */
 export function classifyFailure(e: unknown): FailureClass {
   const name = e instanceof Error ? e.name : "";
   const code = (e as { code?: string } | null)?.code ?? "";
-  if (name === "JiraAuthError" || code === "401" || code === "403") return "auth";
+  if (name === "TaskAuthError" || name === "JiraAuthError" || code === "401" || code === "403") return "auth";
   if (name === "AbortError" || code === "ETIMEDOUT") return "timeout";
   if (code === "ENOTFOUND" || code === "ECONNREFUSED" || code === "ENETUNREACH") return "network";
   if (code === "ENOENT") return "not_found";
