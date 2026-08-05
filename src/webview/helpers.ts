@@ -44,19 +44,35 @@ export function gateCopy(label: string): {
  * shipped default nor most of the alternatives — asking it for one would fetch an
  * unanswerable lens and render a tab bar with no active tab.
  *
- * The shipped default is preferred over `supported[0]` for an unrecognized setting on
- * a source that supports it, because that is exactly where the pre-capability code
- * landed (`(cfg.defaultFilter as Filter) || "mysprint"`) and an already-configured
- * user's opening lens must not move. The last fallback covers a source declaring no
- * filters at all: it can answer nothing either way, so the only obligation left is
- * that the return stays a `Filter`.
+ * The shipped default is preferred over the tail fallback for an unrecognized
+ * setting on a source that supports it, because that is exactly where the
+ * pre-capability code landed (`(cfg.defaultFilter as Filter) || "mysprint"`) and an
+ * already-configured user's opening lens must not move. Do NOT touch either of these
+ * first two branches or the literal `"mysprint"` inside them — that is the
+ * compatibility guarantee this function exists to protect, and it is independent of
+ * what follows.
+ *
+ * The tail fallback reads `visibleFilters(supported)[0]`, not `supported[0]` — the
+ * raw, connector-ordered array — because the return here must be a tab the tab bar
+ * actually renders, and `supported` alone doesn't guarantee that: `"all"` is a real
+ * `Filter` a connector can legitimately list, but no tab bar has ever rendered it
+ * (see `FILTER_ORDER`'s comment). `supported[0]` would return `"all"` whenever it
+ * sorts first in the connector's own array (e.g. `["all", "mine"]`), leaving the tab
+ * bar with nothing pressed. Routing through `visibleFilters` is safe here — unlike
+ * replacing the whole function with it, which would drop the `"mysprint"` preference
+ * above and move an existing user's opening lens — because it only touches the
+ * last-resort branch, which was already reading positionally off `supported`; it now
+ * reads positionally off the same set the tab bar renders instead. The final `??
+ * "mysprint"` covers a source declaring no filters at all (or declaring only ones no
+ * tab bar has ever shown): it can answer nothing either way, so the only obligation
+ * left is that the return stays a `Filter`.
  *
  * Pure — no DOM, no React — so the extension host imports it too rather than keeping
  * a second copy that could drift from what the webview renders. */
 export function effectiveFilter(configured: string, supported: readonly Filter[]): Filter {
   if (supported.includes(configured as Filter)) return configured as Filter;
   if (supported.includes("mysprint")) return "mysprint";
-  return supported[0] ?? "mysprint";
+  return visibleFilters(supported)[0] ?? "mysprint";
 }
 
 /** Format an original-estimate in seconds as a compact "3h" / "1.5d" (8h workday). Pure. */
