@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { ApiTokenAuth } from "../../src/jira/auth";
 import { SETUP_COMPLETE_KEY } from "../../src/setup";
 import { ticketKeyFor, Run, WorkspaceMode } from "../../src/types";
 import { fakeSecrets } from "../_helpers/factories";
+import { window } from "../_mocks/vscode";
 
 /** Helper to build a Run object with sensible defaults for testing. */
 function makeRun(overrides: Partial<Run> = {}): Run {
@@ -25,7 +26,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
  * wizard, or empties their board. If a refactor makes one of these fail, the
  * refactor is wrong — do not update the test. */
 describe("compatibility surface (frozen)", () => {
-  it("reads and writes exactly the two released SecretStorage keys", async () => {
+  it("reads the two released SecretStorage keys on getAuthHeader and deletes them on signOut", async () => {
     const secrets = fakeSecrets();
     const auth = new ApiTokenAuth(secrets as never);
 
@@ -37,6 +38,22 @@ describe("compatibility surface (frozen)", () => {
 
     await auth.signOut();
     expect(secrets.delete.mock.calls.map((c) => c[0]).sort()).toEqual([
+      "agentFlow.jira.email",
+      "agentFlow.jira.token",
+    ]);
+  });
+
+  it("writes the two released SecretStorage keys on signIn", async () => {
+    vi.mocked(window.showInputBox)
+      .mockResolvedValueOnce("user@example.com")
+      .mockResolvedValueOnce("apitoken123");
+    const secrets = fakeSecrets();
+    const auth = new ApiTokenAuth(secrets as never);
+
+    await auth.signIn();
+    // Assert on the exact key names passed to store — a future OAuth provider
+    // must not change these without updating this test, or existing users will be signed out.
+    expect(secrets.store.mock.calls.map((c) => c[0]).sort()).toEqual([
       "agentFlow.jira.email",
       "agentFlow.jira.token",
     ]);
@@ -100,7 +117,7 @@ describe("compatibility surface (frozen)", () => {
 
   it("keeps the transmitted telemetry wire values", () => {
     const src = fs.readFileSync(path.join(__dirname, "../../src/telemetry/events.ts"), "utf8");
-    for (const wire of ['"jira_fetch"', '"jira_write"', '"jira_auth"', "has_jira_auth"]) {
+    for (const wire of ['"jira_fetch"', '"jira_write"', '"jira_auth"', "has_jira_auth:"]) {
       expect(src).toContain(wire);
     }
   });
