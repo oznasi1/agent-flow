@@ -54,6 +54,14 @@ vi.mock("../../src/engine/presence", () => ({
   windowIdentity: vi.fn(() => undefined),
   defaultWindowsDir: vi.fn(() => "/win"),
 }));
+vi.mock("../../src/engine/runs", async () => {
+  const actual = await vi.importActual<typeof import("../../src/engine/runs")>("../../src/engine/runs");
+  return { ...actual, readRuns: vi.fn(() => []), defaultRunsDir: vi.fn(() => "/runs") };
+});
+vi.mock("../../src/engine/sessions", async () => {
+  const actual = await vi.importActual<typeof import("../../src/engine/sessions")>("../../src/engine/sessions");
+  return { ...actual, readOpenSessions: vi.fn(() => []), defaultSessionsDir: vi.fn(() => "/sessions") };
+});
 // This file mocks the client wholesale, so `JiraApiError` would be undefined inside
 // tasksView and every `instanceof` check would throw. Re-export the genuine class so
 // the real parseJiraError produces instances the production code recognises.
@@ -90,6 +98,8 @@ import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceM
 import { createWorktrees } from "../../src/engine/worktree";
 import { openSharedWorkspace } from "../../src/engine/batchWorkspace";
 import { readLiveWindows, windowIdentity } from "../../src/engine/presence";
+import { readRuns } from "../../src/engine/runs";
+import { readOpenSessions } from "../../src/engine/sessions";
 import { JiraClient, JiraAuthError, markJiraNetworkFailure } from "../../src/jira/client";
 import { TasksViewProvider } from "../../src/tasksView";
 import type { TakeSource } from "../../src/telemetry/events";
@@ -115,6 +125,7 @@ const CFG = {
     { id: "knowledge", label: "Enhance knowledge / flow", prompt: "Explore {summary}{files}", slackDm: false, needsEnv: false },
     { id: "debug", label: "Debug", prompt: "DBG {summary}{files}", slackDm: false, needsEnv: false },
     { id: "general", label: "General", prompt: "GEN {summary}{files}", slackDm: false, needsEnv: false },
+    { id: "supervise", label: "Supervise running tasks", prompt: "SUP {summary}{files}", slackDm: false, needsEnv: false },
     { id: "verify", label: "Verify on an environment", prompt: "VER {summary} on {env} for {services}{files}", slackDm: false, needsEnv: true },
   ],
   environments: ["dev", "staging", "production"],
@@ -1022,7 +1033,7 @@ describe("explore", () => {
     );
   });
 
-  it("offers all five configured actions, in order, from the exploreMode 'ask' picker", async () => {
+  it("offers all six configured actions, in order, from the exploreMode 'ask' picker", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "ask" });
     const repos = mkRepos(["account-service"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
@@ -1033,7 +1044,7 @@ describe("explore", () => {
     const { send } = setup();
     await send({ type: "explore" });
     const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string }[];
-    expect(items).toHaveLength(5);
+    expect(items).toHaveLength(6);
     expect(items.map((i) => i.label)).toEqual(CFG.exploreActions.map((a) => a.label));
   });
 
@@ -1274,6 +1285,85 @@ describe("explore", () => {
       expect.objectContaining({
         promptTemplate: "DBG {summary}{files}",
         ticket: expect.objectContaining({ key: "explore-focus", summary: "focus" }),
+      }),
+    );
+  });
+
+  it("uses supervise-specific topic-box copy and a supervise-specific fallback when left blank", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "supervise" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    const opts = vi.mocked(window.showInputBox).mock.calls[0][0] as { title: string };
+    expect(opts.title).toBe("Supervise — anything specific to prioritize?");
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ticket: expect.objectContaining({ key: "explore-check-on-active-tasks", summary: "Check on active tasks" }),
+      }),
+    );
+  });
+
+  it("folds the other active tasks into planMd for the supervise action", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "supervise" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(readRuns).mockReturnValue([
+      {
+        key: "ASM-9",
+        summary: "Fix retry bug",
+        url: "https://jira/ASM-9",
+        createdAt: 1,
+        mode: "per-window",
+        repos: [{ name: "svc", path: "/repos/svc", isGit: true, branch: "fix/retry" }],
+        briefPaths: [],
+        kind: "task",
+      },
+    ]);
+    vi.mocked(readOpenSessions).mockReturnValue([]);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planMd: expect.stringContaining(
+          "- **ASM-9** (task) — Fix retry bug — `/repos/svc` (branch: fix/retry) — idle, no agent attached",
+        ),
+      }),
+    );
+  });
+
+  it("regression: leaves the generic-Explore planMd unchanged for a non-supervise action", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "knowledge" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry logic");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planMd: "## Exploration: retry logic\n\n_No Jira ticket yet — a knowledge/exploration session. If it turns into work, open a ticket afterwards._",
+      }),
+    );
+  });
+
+  it("regression: leaves the Verify planMd unchanged", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "staging", env: "staging" } as never)
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planMd: "## Verify: retry banner on staging\n\n_Verification session — environment: staging. Services in scope: account-service._",
       }),
     );
   });
