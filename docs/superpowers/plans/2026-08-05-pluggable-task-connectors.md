@@ -539,15 +539,31 @@ sed -i '' 's|"\.\./jira/|"./jira/|g' src/tasks/provider.ts
 - [ ] **Step 3: Prove nothing still points at the old location**
 
 ```bash
-# Any hit here is a straggler. Expect none.
-grep -rn '"\./jira/\|"\.\./jira/\|src/jira/' src/ test/
-# The moved tests must be four levels up, never three.
-grep -rn '\.\./\.\./\.\./src/tasks/jira/' test/unit/tasks/jira/
+# 3a. Any hit here is a straggler pointing at the vanished location. Expect none.
+#     Note `"./jira/` is NOT in this pattern: after the move, src/tasks/provider.ts
+#     imports its sibling as "./jira/client", which is correct — including it here
+#     would flag the right answer as a failure.
+grep -rn '"\.\./jira/\|src/jira/' src/ test/
+
+# 3b. The moved tests must reach src/ four levels up, never three. Print the
+#     distinct prefixes rather than grepping for the wrong one: `../../../` is a
+#     substring of `../../../../`, so a naive grep for the three-level form
+#     matches every correct four-level path and can never pass.
+grep -rhoE '"(\.\./)+src/tasks/jira/' test/unit/tasks/jira/*.ts | sort -u
+# Expect exactly one line: "../../../../src/tasks/jira/
+
+# 3c. Shared test helpers have no `jira` segment in their paths, so none of the
+#     Step 2 substitutions touched them — but the moved tests got one level
+#     deeper, so their reach into test/_mocks and test/_helpers grew too. This is
+#     the one thing the segment-matching approach structurally cannot catch.
+grep -rn '"\.\./\.\./_mocks/\|"\.\./\.\./_helpers/' test/unit/tasks/jira/*.ts
+# Expect none. Any hit needs ../../ → ../../../ by hand.
+
 npm run typecheck
 ```
 
-Expect: no grep output from either, and a clean typecheck. A surviving
-`../../../src/tasks/jira/` in a moved test means 2c ran before 2b.
+Expect: no output from 3a or 3c, exactly one prefix from 3b, and a clean
+typecheck. A three-level prefix in 3b's output means 2c ran before 2b.
 
 - [ ] **Step 4: Run the whole suite — behaviour must be identical**
 
