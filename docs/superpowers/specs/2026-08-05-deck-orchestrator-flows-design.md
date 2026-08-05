@@ -55,10 +55,16 @@ export interface Flow {
  *  the target rather than the edge because it is a property of the meeting point. */
 interface NodeBase { id: string; x: number; y: number; join: "any" | "all" }
 
+/** Where an autonomous launch puts the work. The flow's own vocabulary, not
+ *  `WorkspaceMode` — that type is only "multiroot" | "per-window" and cannot
+ *  express the worktree choice a Take offers. The runner maps these onto the take
+ *  path's arguments. */
+export type LaunchDest = "worktree" | "new-window" | "current-window";
+
 export type FlowNode =
   | (NodeBase & { kind: "place";   runKey: string; repo: string })
   | (NodeBase & { kind: "planned"; ticketKey: string; repos: string[];
-                  mode: string; dest: WorkspaceMode })
+                  mode: string; dest: LaunchDest })
   | (NodeBase & { kind: "notify";  message: string });
 
 /** Parameterised where it has to be, a bare kind everywhere else. */
