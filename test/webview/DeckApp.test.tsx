@@ -299,6 +299,10 @@ describe("DeckApp", () => {
     run: { key: "local-centaur-1a2b3c4d", summary: "team table new design",
       url: "https://jira/browse/ASM-5641", createdAt: 1, kind: "local", mode: "per-window",
       repos: [{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-5641-team-table" }], briefPaths: [] },
+    // The host computes this from run.url through the connector (see
+    // src/deckView.ts's buildAll) — the webview only ever reads it off the
+    // wire, never parses a url itself.
+    inferredTicketKey: "ASM-5641",
     ...over,
   });
 
@@ -312,13 +316,27 @@ describe("DeckApp", () => {
 
   it("shows the place's name when nothing was inferred", () => {
     const { container } = render(<DeckApp />);
-    host(runsMsg([mkLocal({ run: { ...mkLocal().run, url: "", summary: "centaur" } })]));
+    // No inferredTicketKey on the wire — exactly what the host sends for a
+    // local card whose url resolved to nothing, or has none at all.
+    host(runsMsg([mkLocal({ run: { ...mkLocal().run, url: "", summary: "centaur" }, inferredTicketKey: undefined })]));
     expect(screen.queryByText("~inferred")).toBeNull();
     expect(screen.getByText("centaur")).toBeTruthy();
     // The requirement is that the key slot itself shows "local" — scope to
     // that element rather than screen.getByText("local"), which the
     // beside-summary chip would also satisfy in the inferred-key scenario.
     expect(container.querySelector(".key")?.textContent).toBe("local");
+  });
+
+  it("renders the inferred key strictly from the wire field, never by parsing the url itself", () => {
+    // The url still looks like a real ticket url (mkLocal's default), but the
+    // host declined to set inferredTicketKey. If the webview ever fell back to
+    // parsing r.run.url on its own — the exact coupling this field exists to
+    // remove — "ASM-5641" would render anyway. It must not: that parsing is the
+    // connector's job, host-side, and nowhere else.
+    render(<DeckApp />);
+    host(runsMsg([mkLocal({ inferredTicketKey: undefined })]));
+    expect(screen.queryByText("~inferred")).toBeNull();
+    expect(screen.queryByText("ASM-5641")).toBeNull();
   });
 
   it("offers Track it and no Forget", () => {

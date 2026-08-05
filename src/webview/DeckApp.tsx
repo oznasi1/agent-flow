@@ -1,25 +1,11 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "../types";
+import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
 import { DeckCard, projectCards } from "./deckCards";
 import { ReviewStrip } from "./ReviewStrip";
 import { isPrReviewStatus } from "./helpers";
 
 let toastSeq = 0;
-
-/** A local card's inferred ticket comes only from a Jira-shaped `/browse/` url
- * (see engine/localRuns.ts's `inferTicket`, which builds one off the branch name
- * regardless of which connector is configured) — the webview has no connector
- * instance of its own to ask, so this mirrors the one url shape a local card's
- * `url` can actually carry (the same parsing as JiraConnector.keyFromUrl). */
-const LOCAL_TICKET_CONNECTOR = {
-  keyFromUrl: (url: string): string | null => {
-    const i = url.indexOf("/browse/");
-    if (i < 0) return null;
-    const key = url.slice(i + "/browse/".length).trim();
-    return key || null;
-  },
-};
 
 // `needs` stays the column id — it is the engine's vocabulary (DeckColumn, deriveBucket)
 // and never reaches a user. "Action required" is what the board says, in the summary
@@ -228,8 +214,10 @@ function Card({ r, live, prReviewStatus, onForget, agent, column }: {
   const canAddressPr = !local && isPrReviewStatus(r.jiraStatus ?? "", prReviewStatus);
   // The key came from the branch, not from a launch. Say so: the branch could
   // name a ticket somebody else owns, and the Jira status on this card would
-  // then be theirs.
-  const inferredKey = local && r.run.url ? ticketKeyFor(r.run, LOCAL_TICKET_CONNECTOR) : "";
+  // then be theirs. Computed host-side (the webview has no connector to parse
+  // r.run.url with) and sent as `inferredTicketKey` — absent whenever the host
+  // found no ticket in the url, which for a non-local run is always.
+  const inferredKey = local ? (r.inferredTicketKey ?? "") : "";
   const [menuOpen, setMenuOpen] = React.useState(false);
   React.useEffect(() => {
     if (!menuOpen) return;

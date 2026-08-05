@@ -173,6 +173,14 @@ export interface RunStatus {
   windowOpen: boolean; // is this run's target window currently open? (from presence)
   prs: PrEntryMap; // repo name → observed PR state ({} when prFacts is off)
   agents: CardAgent[]; // every open session in this run's directories
+  /** A local card's ticket key, inferred from its branch name rather than from a
+   * launch — set only when the run is local and its url resolved to one. The
+   * branch could name a ticket somebody else owns, so the status shown on the
+   * card would then be theirs; the webview renders this key differently from a
+   * launched run's for exactly that reason. Computed host-side, through the
+   * connector (see `ticketKeyFor`), because the webview has no connector of its
+   * own to parse a url with — this is the one place that value crosses the wire. */
+  inferredTicketKey?: string;
 }
 
 // ── PR & CI observation ─────────────────────────────────────────────────────

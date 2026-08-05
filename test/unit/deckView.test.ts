@@ -308,6 +308,12 @@ const builtFor = (key: string) =>
 const builtLocal = () =>
   h.buildRunStatus.mock.calls.map((c) => c[0] as { run: Run; agents: CardAgent[] }).filter((i) => i.run.kind === "local").at(-1)!;
 
+/** The last `deck:runs` message actually posted to the webview — the real,
+ * host-computed output, as opposed to `builtLocal`/`builtFor` above, which only
+ * see what was *passed into* the mocked buildRunStatus. Anything deckView.ts
+ * layers on afterward (e.g. inferredTicketKey) only ever shows up here. */
+const lastRunsPost = () => posts(lastPanel()).filter((m) => m.type === "deck:runs").at(-1)!;
+
 const sess = (over: Partial<OpenSession> = {}): OpenSession => ({
   pid: 1, sessionId: "s1", cwd: "/r/svc", startedAt: 100, name: "svc-7e", ...over,
 });
@@ -999,7 +1005,6 @@ describe("board grouping", () => {
 });
 
 describe("Clear stale", () => {
-  const lastRunsPost = () => posts(lastPanel()).filter((m) => m.type === "deck:runs").at(-1)!;
   /** A landed run the automatic sweep will only stamp: its window is far off. */
   const landedRun = (key: string) => {
     setConfig({ retireFinishedAfterHours: 999 });
@@ -1093,6 +1098,25 @@ describe("DeckPanel local cards", () => {
     await settled();
     expect(builtLocal().run.url).toBe("");
     expect(h.getStatus).not.toHaveBeenCalled();
+  });
+
+  it("sends the inferred ticket key on the wire, so the webview never has to parse a url itself", async () => {
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show(true);
+    await settled();
+    const local = lastRunsPost().runs.find((r: RunStatus) => r.run.kind === "local")!;
+    expect(local.inferredTicketKey).toBe("ASM-5641");
+  });
+
+  it("omits the inferred ticket key when the branch names no ticket", async () => {
+    h.runs = [];
+    h.branch = "main";
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show(true);
+    await settled();
+    const local = lastRunsPost().runs.find((r: RunStatus) => r.run.kind === "local")!;
+    expect(local.inferredTicketKey).toBeUndefined();
   });
 
   it("does not make a second card for a place a tracked run already owns", async () => {

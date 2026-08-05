@@ -685,7 +685,11 @@ export class DeckPanel {
       // A local card has no record on disk — `removeRun` would be a no-op but
       // `writeRun` would *create* one, promoting a card the user never tracked.
       if (runKind(run) === "local") {
-        out.push(status);
+        // The webview has no connector of its own to parse run.url with, so the
+        // inferred key crosses the wire pre-computed — through the same
+        // connector and the same ticketKeyFor every other caller here uses,
+        // rather than a second parser living in the webview.
+        out.push(run.url ? { ...status, inferredTicketKey: ticketKeyFor(run, this.connector) } : status);
         continue;
       }
       if (this.applyVerdict(run, this.verdictFor(status, livePlaces, now))) continue;
