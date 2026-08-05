@@ -895,11 +895,13 @@ Expected: FAIL — module not found.
 
 ```ts
 // src/tasks/jira/provider.ts
-import { Filter, JiraDetail, JiraTask, Size } from "../../types";
+import { Filter, JiraTask, Size } from "../../types";
 import {
   Capabilities, StatusTarget, TaskProvider, TaskWriteError,
 } from "../provider";
-import { JiraClient, TransitionOption } from "./client";
+// JiraDetail is declared in client.ts, NOT in types.ts — types.ts has never
+// exported it, despite JiraTask living there. Same trap as Task 2 hit.
+import { JiraClient, JiraDetail, TransitionOption } from "./client";
 import { describeJiraError, JiraApiError } from "./errors";
 import {
   FieldPrompt, fieldDisplayNames, mentionsResolution, missingFieldIds,
