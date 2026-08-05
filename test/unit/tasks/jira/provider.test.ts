@@ -160,4 +160,51 @@ describe("JiraProvider", () => {
     await expect(p.assignToMe("A-1")).rejects.toThrow(/account/i);
     expect(assignIssue).not.toHaveBeenCalled();
   });
+
+  // Transition ids are scoped to a Jira *workflow*, not to an issue: two issues
+  // sharing a workflow have the identical id "31". A cache keyed by id alone
+  // would let A-1's cached allowedValues answer for B-2's moveTo, silently
+  // sending B-2 the wrong wire id for "High" (A-1's "1" instead of B-2's "2").
+  // The two issues are given DIFFERENT ids for the same label on purpose: an
+  // id-only cache would produce a visibly wrong payload here, not merely an
+  // equal one, so a test that only compared shapes could pass under the bug.
+  it("does not build one issue's write from another issue's cached mapping on a shared workflow", async () => {
+    const transition = vi.fn(async () => undefined);
+    const getTransitions = vi.fn(async (key: string) => [
+      {
+        id: "31", name: "Go", toName: "Go", toCategory: "",
+        fields: {
+          priority: {
+            required: true, name: "Priority",
+            allowedValues: [{ id: key === "A-1" ? "1" : "2", name: "High" }],
+          },
+        },
+      },
+    ]);
+    const p = new JiraProvider(client({ getTransitions, transition }));
+
+    await p.statusTargets("A-1");
+    // B-2's own statusTargets() was never called on this instance. Whatever
+    // happens, it must not silently transition B-2 using A-1's id "1".
+    await expect(p.moveTo("B-2", "31", { priority: "High" })).rejects.toThrow();
+    expect(transition).not.toHaveBeenCalled();
+  });
+
+  it("throws, naming the issue and transition, when values are supplied but nothing was remembered for them", async () => {
+    const p = new JiraProvider(client());
+    await expect(p.moveTo("A-1", "31", { priority: "High" })).rejects.toThrow(/A-1/);
+    await expect(p.moveTo("A-1", "31", { priority: "High" })).rejects.toThrow(/31/);
+  });
+
+  it("succeeds silently on a fieldless transition called with no values", async () => {
+    const transition = vi.fn(async () => undefined);
+    const c = client({
+      transition,
+      getTransitions: vi.fn(async () => [{ id: "31", name: "Go", toName: "Go", toCategory: "", fields: {} }]),
+    });
+    const p = new JiraProvider(c);
+    await p.statusTargets("A-1");
+    await expect(p.moveTo("A-1", "31", {})).resolves.toBeUndefined();
+    expect(transition).toHaveBeenCalledWith("A-1", "31", {});
+  });
 });
