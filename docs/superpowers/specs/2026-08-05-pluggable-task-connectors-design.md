@@ -111,9 +111,11 @@ export interface Capabilities {
 ```ts
 export interface TaskConnector {
   readonly id: string;      // the agentFlow.taskSource value, e.g. "jira"
-  readonly label: string;   // user-facing, e.g. "Jira" — every UI string reads this
-  /** The noun this source uses for its scope: "project" for Jira. Doctor row labels. */
-  readonly scopeNoun: string;
+  /** Every display fact a UI string needs, in one call rather than five
+   *  accessors: label ("Jira"), scopeNoun ("project"), scopeValue ("ABC"),
+   *  endpoint, exampleKey ("ABC-1234"), and the two setting ids Doctor names
+   *  when endpoint/scope are empty. */
+  info(): SourceInfo;
 
   isConfigured(): boolean;
   /** The connector's own wizard steps. `from`/`total` keep the "(2/4)" numbering. */
@@ -240,6 +242,8 @@ Every row below was verified against `d9e36bd`, not recalled.
 | Prompt defaults | Every `DEFAULT_*_PROMPT` in `config.ts`, byte-identical, incl. the "Jira {key}" wording | Changes the seed prompt every uncustomized user's agent receives. |
 | Setting key | `agentFlow.explorePrompts.jiraTicket` | Renaming discards anyone's customization of it. |
 | New setting | `agentFlow.taskSource`, default `"jira"` | A user who never opens settings must resolve to Jira on the default alone. |
+| Telemetry wire values | `Op` members `"jira_fetch"` / `"jira_write"` / `"jira_auth"` (`events.ts:60`) | **Transmitted.** Renaming breaks the `operation_failed` analytics series. The surrounding code goes generic; these strings do not. |
+| Telemetry wire value | the `extension_activated` property `has_jira_auth` (`events.ts:161`) | **Transmitted.** Same reason. Sourced from `connector.isAuthenticated()`, name unchanged. |
 
 ### The run-url landmine
 
@@ -266,6 +270,16 @@ collapses anything unrecognized to the `"invalid"` sentinel. Adding
 `taskSource` to the snapshot with a literal list means **every contributor's
 connector reports as `"invalid"` forever, silently**. So the allowlist is
 derived from the registry:
+
+Note the trap has two directions, and an existing test only guards one of them.
+`settingsSnapshot.ts:31-37` documents a **manifest-parity test** already in
+`test/unit/telemetry/settingsSnapshot.test.ts` that asserts each hand-written
+list matches its `package.json` `enum` — so a manifest enum that grows without
+updating this file is already caught. What is *not* caught is the reverse: a
+contributor registering a connector in `CONNECTORS` and forgetting the manifest
+`enum`, which leaves the setting un-pickable in the settings UI while the
+registry happily accepts it. Deriving from the registry and asserting
+`package.json`'s `enum` equals `CONNECTOR_IDS` closes both directions.
 
 ```ts
 // registry.ts
