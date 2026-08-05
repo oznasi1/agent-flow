@@ -147,8 +147,7 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
             <button
               type="button"
               className="act primary"
-              disabled={!r.localPath}
-              title={r.localPath ? `Review in a worktree of ${r.repoName}` : `${r.repoName} is not checked out locally`}
+              title={r.localPath ? `Review in a worktree of ${r.repoName}` : `${r.repoName} isn't checked out under your repos root — clicking will explain what to do`}
               onClick={() => onLaunch(r.id)}
             >
               ▶ Review with agent
@@ -159,8 +158,7 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
             <button type="button" className="act" onClick={() => onOpen(r.url)}>Open PR</button>
             {reviewWrites && (() => {
               // Disabled now looks disabled (see deckStyles.ts), but a dimmed
-              // button alone doesn't say *why* — the same reasoning "Review with
-              // agent" above already gives a title for its own disabled state.
+              // button alone doesn't say *why* — hence the title alongside each one.
               const busyTitle = submitting ? "A submit for this PR is already in progress." : null;
               const emptyTitle = !body.trim() ? "Add a message first." : null;
               return (
