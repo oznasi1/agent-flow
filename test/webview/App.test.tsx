@@ -1050,12 +1050,21 @@ describe("capability gating", () => {
   });
 
   describe("tab bar", () => {
-    it("renders only the tabs the source supports, in the shipped order", () => {
+    // The fixture's own supportedFilters is ["mine", "all"] (test/_helpers/
+    // fixtureConnector.ts) — but "all" has never been a rendered tab (see
+    // FILTER_ORDER's comment in helpers.ts: it is the JQL fallback default, not a
+    // UI tab the pre-seam FILTERS array, agentFlow.defaultFilter's manifest enum,
+    // or DEFAULT_FILTER_VALUES ever exposed). So this renders as a single tab, and
+    // it must still be a genuinely usable one — active by default, and wired.
+    it("renders only the tabs the source supports and the UI has ever shown, never a tab for 'all'", () => {
       render(<App />);
       fixtureState();
       const group = document.querySelector('[role="group"][aria-label="Task filter"]') as HTMLElement;
-      const names = [...within(group).getAllByRole("button")].map((b) => b.textContent);
-      expect(names).toEqual(["Mine", "All"]);
+      const buttons = within(group).getAllByRole("button");
+      expect(buttons.map((b) => b.textContent)).toEqual(["Mine"]);
+      expect(buttons[0]).toHaveAttribute("aria-pressed", "true");
+      fireEvent.click(buttons[0]);
+      expect(sent).toHaveBeenCalledWith({ type: "fetch", filter: "mine", size: "any" });
     });
 
     it("highlights a supported tab as active even when the configured default (My sprint) is not supported", () => {

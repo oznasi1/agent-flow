@@ -3,11 +3,15 @@ import { Filter, Task } from "../types";
 /** The tab bar's shipped order — NOT `types.ts`'s declaration order for `Filter`,
  * and not a connector's `supportedFilters` array order either. This has been the
  * rendered order since the "reorder task filter tabs" change (My sprint, Mine,
- * Sprint, Backlog, Unassigned); "all" was never a rendered tab before capability
- * gating existed, so it is appended last rather than inserted among the other
- * five — the only new tab a Jira user sees, with everything else exactly where
- * it already was. */
-const FILTER_ORDER: Filter[] = ["mysprint", "mine", "sprint", "backlog", "unassigned", "all"];
+ * Sprint, Backlog, Unassigned), and it is the COMPLETE set of tabs the UI has
+ * ever rendered. `"all"` is deliberately absent: it is a real `Filter` — the JQL
+ * builder's fallback default, and `Jira`'s `supportedFilters` includes it — but no
+ * UI has ever surfaced it as a tab (the old hardcoded `FILTERS` array in `App.tsx`
+ * had exactly these same five entries, `agentFlow.defaultFilter`'s manifest `enum`
+ * and `DEFAULT_FILTER_VALUES` agree). A connector's `supportedFilters` says which
+ * of *these* tabs it can answer, never which tabs exist — so including `"all"`
+ * there must not add a sixth tab an existing Jira user has never seen. */
+const FILTER_ORDER: Filter[] = ["mysprint", "mine", "sprint", "backlog", "unassigned"];
 
 /** Which filter tabs render, in the shipped order. A connector's `supportedFilters`
  * says *which* tabs exist, never in what order — the array a connector returns is

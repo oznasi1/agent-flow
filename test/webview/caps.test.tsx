@@ -3,11 +3,17 @@ import { describe, expect, it } from "vitest";
 import { visibleFilters, gateCopy } from "../../src/webview/helpers";
 import type { Filter } from "../../src/types";
 
-const ALL: Filter[] = ["unassigned", "mine", "mysprint", "sprint", "backlog", "all"];
+// Every Filter the type permits, including "all" — the JQL builder's fallback
+// default, which Jira's own `supportedFilters` includes but which no UI has ever
+// rendered as a tab (the pre-seam `FILTERS` array in App.tsx had exactly the other
+// five; `agentFlow.defaultFilter`'s manifest `enum` and `DEFAULT_FILTER_VALUES`
+// in settingsSnapshot.ts agree). A connector declaring support for it must not
+// make it appear.
+const ALL_SIX: Filter[] = ["unassigned", "mine", "mysprint", "sprint", "backlog", "all"];
 
 describe("visibleFilters", () => {
   it("keeps the shipped tab order, not the connector's array order", () => {
-    expect(visibleFilters(["all", "mine"])).toEqual(["mine", "all"]);
+    expect(visibleFilters(["backlog", "mine"])).toEqual(["mine", "backlog"]);
   });
 
   it("drops tabs the source does not support", () => {
@@ -22,12 +28,13 @@ describe("visibleFilters", () => {
   // The brief's own FILTER_ORDER draft copied types.ts's declaration order
   // (unassigned, mine, mysprint, sprint, backlog, all), which is NOT the order the
   // tab bar has rendered since the "reorder task filter tabs" commit (My sprint,
-  // Mine, Sprint, Backlog, Unassigned). Wiring the draft verbatim would silently
-  // reorder Jira's existing five tabs on every user's very first paint after the
-  // update. Pin the real shipped order — "all" is the only genuinely new tab, so
-  // it is appended rather than inserted among the other five.
-  it("orders Jira's full filter set the same way the tab bar always has, appending the new 'all' tab last", () => {
-    expect(visibleFilters(ALL)).toEqual(["mysprint", "mine", "sprint", "backlog", "unassigned", "all"]);
+  // Mine, Sprint, Backlog, Unassigned) — and it included "all", which has never
+  // been a rendered tab at all. Wiring the draft verbatim would have both
+  // reordered Jira's existing five tabs AND added a sixth one, on every existing
+  // user's very next paint. Pin the real shipped order exactly, so a future
+  // addition to the `Filter` type cannot silently gain a tab the same way.
+  it("renders Jira's full capability set as exactly the five shipped tabs, in the shipped order — never a sixth 'all' tab", () => {
+    expect(visibleFilters(ALL_SIX)).toEqual(["mysprint", "mine", "sprint", "backlog", "unassigned"]);
   });
 });
 
