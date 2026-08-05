@@ -21,16 +21,18 @@ describe("connector docs", () => {
     expect(read("CONTRIBUTING.md")).toContain("docs/CONNECTORS.md");
   });
 
-  it("records the new setting under Unreleased", () => {
-    const changelog = read("CHANGELOG.md");
-    const start = changelog.indexOf("## [Unreleased]");
-    // To the NEXT version heading, whatever it is called — not to a hardcoded
-    // `## [0.4.2]`. Slicing to a named release makes this assertion stop testing
-    // anything the moment Unreleased is cut: the slice would then span the new
-    // (empty) Unreleased plus the shipped section that still contains the string,
-    // and it would hard-fail the day that heading is pruned from the file.
-    const next = changelog.indexOf("\n## [", start + 1);
-    const unreleased = changelog.slice(start, next === -1 ? undefined : next);
-    expect(unreleased).toContain("agentFlow.taskSource");
+  it("records the new setting in the changelog", () => {
+    // Deliberately unsliced — the whole file, not the Unreleased section.
+    //
+    // The property that outlives the release cycle is "the setting is documented in
+    // the changelog", not "it currently sits above the topmost version heading". Any
+    // slice couples this test to where the entry lives *today*, and this repo's
+    // release ritual moves it: `chore: release` inserts `## [0.X.Y] — date` directly
+    // below `## [Unreleased]` and leaves the entries beneath the new heading. A slice
+    // to a hardcoded `## [0.4.2]` then silently spans the new empty Unreleased plus
+    // the shipped section and stops asserting anything; a slice to the next `## [`
+    // is worse — it hard-fails inside the release commit itself, plausibly the very
+    // commit that ships this work. Do not reinstate either one.
+    expect(read("CHANGELOG.md")).toContain("agentFlow.taskSource");
   });
 });

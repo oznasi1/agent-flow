@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { ApiTokenAuth } from "../../src/tasks/jira/auth";
@@ -107,11 +107,16 @@ describe("compatibility surface (frozen)", () => {
     // inside configure(). Zero `update` calls is the only form of this assertion
     // that can fail for the right reason.
     const update = vi.fn(async () => undefined);
-    vi.mocked(workspace.getConfiguration).mockReturnValue({
-      get: vi.fn(() => ""),
-      update,
-      inspect: vi.fn(() => ({})),
-    } as never);
+    // Scoped with spyOn + onTestFinished, not a bare mockReturnValue: `clearMocks`
+    // clears call history but not implementations, so a replaced implementation is
+    // otherwise only un-leaked by `resetVscodeMocks()`'s per-test restore over in
+    // test/_setup.ts. Relying on that would make this file's isolation depend on a
+    // distant setup file; `onTestFinished` restores even when an assertion throws,
+    // so the stub cannot outlive this test by any path.
+    const configStub = vi
+      .spyOn(workspace, "getConfiguration")
+      .mockReturnValue({ get: vi.fn(() => ""), update, inspect: vi.fn(() => ({})) } as never);
+    onTestFinished(() => configStub.mockRestore());
     vi.mocked(window.showInputBox)
       .mockResolvedValueOnce("https://x.atlassian.net") // (1/3) site URL
       .mockResolvedValueOnce("ABC") // (2/3) project key
