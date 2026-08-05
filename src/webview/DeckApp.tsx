@@ -236,7 +236,7 @@ function Card({ r, live, prReviewStatus, onForget, agent, column }: {
           {sv.text}
         </span>
         {agent && (
-          <span className="c-agent" title={`Claude Code session in ${agent.repo ?? workspaceLabel(r.run) ?? r.run.repos[0]?.name ?? "this run"}`}>
+          <span className="c-agent" title={`${agent.activity.slug ? `${agent.activity.slug} — ` : ""}Claude Code session in ${agent.repo ?? workspaceLabel(r.run) ?? r.run.repos[0]?.name ?? "this run"}`}>
             {agent.session.name ?? agent.session.sessionId.slice(0, 8)}
           </span>
         )}

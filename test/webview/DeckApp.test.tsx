@@ -1152,6 +1152,22 @@ describe("Agents view", () => {
     expect(screen.queryByTitle(/Claude Code session in C:\\/)).not.toBeInTheDocument();
   });
 
+  it("leads the agent chip tooltip with the session slug when one is known", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      agents: [{ ...mkAgent("agent-flow-2e", "working", 100), activity: { state: "working", lastActivityMs: 100, slug: "export-streaming-fix" } }],
+    })]));
+    expect(screen.getByTitle(/^export-streaming-fix — Claude Code session in svc$/)).toBeInTheDocument();
+  });
+
+  it("keeps the repo-only tooltip when no slug is known yet", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      agents: [mkAgent("agent-flow-2e", "working", 100)],
+    })]));
+    expect(screen.getByTitle(/^Claude Code session in svc$/)).toBeInTheDocument();
+  });
+
   it("counts cards, not runs, in the stat tiles", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [
