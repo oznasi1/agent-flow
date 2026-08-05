@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { ApiTokenAuth } from "../../src/tasks/jira/auth";
+import { makeJiraConnector } from "../../src/tasks/jira/connector";
 import { SETUP_COMPLETE_KEY } from "../../src/setup";
 import { ticketKeyFor, Run, WorkspaceMode } from "../../src/types";
 import { fakeSecrets } from "../_helpers/factories";
@@ -77,15 +78,20 @@ describe("compatibility surface (frozen)", () => {
   });
 
   it("recovers a ticket key from a run url already on disk", () => {
-    const jira = { keyFromUrl: (u: string) => {
-      const i = u.indexOf("/browse/");
-      return i < 0 ? null : u.slice(i + 8) || null;
-    } };
+    // The real, shipped Jira connector — not a hand-rolled mirror of its
+    // /browse/ parsing. This file's charter is that a failure here means the
+    // refactor is wrong, and that promise only holds if it pins the actual
+    // parser: a mirror can drift from the release (e.g. a future connector
+    // change to the marker) without this test ever noticing.
+    const jira = makeJiraConnector({ secrets: fakeSecrets() } as never);
     expect(ticketKeyFor(makeRun({ key: "ABC-1", url: "https://x.atlassian.net/browse/ABC-1" }), jira)).toBe("ABC-1");
     expect(ticketKeyFor(makeRun({ key: "a1b2c3", url: "https://x.atlassian.net/browse/ABC-9" }), jira)).toBe("ABC-9");
     expect(ticketKeyFor(makeRun({ key: "explore-foo", url: "" }), jira)).toBe("explore-foo");
     // A record from a different source falls back to the record key.
     expect(ticketKeyFor(makeRun({ key: "FX-1", url: "https://fixture.test/t/FX-1" }), jira)).toBe("FX-1");
+    // Whitespace-only after the marker: the real parser trims and treats the
+    // empty result as "nothing found", falling back to the record key.
+    expect(ticketKeyFor(makeRun({ key: "ABC-2", url: "https://x.atlassian.net/browse/   " }), jira)).toBe("ABC-2");
   });
 
   it("keeps the released settings and command ids in the manifest", () => {
