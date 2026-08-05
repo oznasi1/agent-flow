@@ -127,6 +127,9 @@ export interface SettingsSnapshot {
   workspace_mode: "auto" | "multiroot" | "per-window" | "ask" | "invalid";
   open_in: "ask" | "new-window" | "this-window" | "pick-existing" | "invalid";
   explore_mode: "ask" | "jiraTicket" | "knowledge" | "debug" | "general" | "supervise" | "verify" | "invalid";
+  /** A registered connector id, or "invalid". Validated against the registry, so
+   * a contributor's connector is never silently reported as invalid. */
+  task_source: string;
   worktree: "ask" | "always" | "never" | "invalid";
   remote_control: "off" | "on" | "ask" | "invalid";
   default_filter: "unassigned" | "mysprint" | "mine" | "sprint" | "backlog" | "invalid";

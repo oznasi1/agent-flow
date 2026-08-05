@@ -112,6 +112,13 @@
     "configuration": {
       "title": "Agent Flow Deck",
       "properties": {
+        "agentFlow.taskSource": {
+          "type": "string",
+          "enum": ["jira"],
+          "enumDescriptions": ["Atlassian Jira Cloud"],
+          "default": "jira",
+          "description": "Where Agent Flow reads tasks from. Each source has its own settings under agentFlow.<source>.*."
+        },
         "agentFlow.jira.baseUrl": {
           "type": "string",
           "default": "",

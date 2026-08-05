@@ -101,6 +101,7 @@ import type { InboundMessage, OutboundMessage } from "../../src/types";
 import { SLACK_DM_SENTENCE, PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
 
 const CFG = {
+  taskSource: "jira",
   baseUrl: "https://jira",
   project: "ASM",
   reposRoot: "/repos",

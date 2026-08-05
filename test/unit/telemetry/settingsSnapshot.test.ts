@@ -5,6 +5,7 @@ import {
   settingsSnapshot, WORKSPACE_MODES, WORKTREE_MODES,
 } from "../../../src/telemetry/settingsSnapshot";
 import { STOCK_REVIEW_MODES } from "../../../src/telemetry/events";
+import { CONNECTOR_IDS } from "../../../src/tasks/registry";
 import { setConfig } from "../../_mocks/vscode";
 import pkg from "../../../package.json";
 
@@ -189,6 +190,11 @@ describe("settingsSnapshot", () => {
     const s = settingsSnapshot({ ...getConfig(), environments: ["production", "staging", "dev"] });
     expect(s.environments_customized).toBe(true);
   });
+
+  it("reports the task source, and collapses an unregistered one", () => {
+    expect(settingsSnapshot({ ...getConfig(), taskSource: "jira" }).task_source).toBe("jira");
+    expect(settingsSnapshot({ ...getConfig(), taskSource: "acme" }).task_source).toBe("invalid");
+  });
 });
 
 describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
@@ -235,6 +241,16 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
 
   it("keeps DEFAULT_FILTER_VALUES equal to agentFlow.defaultFilter's manifest enum", () => {
     expect([...DEFAULT_FILTER_VALUES]).toEqual(props["agentFlow.defaultFilter"].enum);
+  });
+
+  it("keeps CONNECTOR_IDS equal to agentFlow.taskSource's manifest enum", () => {
+    expect([...CONNECTOR_IDS]).toEqual(props["agentFlow.taskSource"].enum);
+  });
+
+  it("keeps agentFlow.taskSource's enum and enumDescriptions the same length", () => {
+    expect(props["agentFlow.taskSource"].enumDescriptions?.length).toBe(
+      props["agentFlow.taskSource"].enum?.length,
+    );
   });
 });
 

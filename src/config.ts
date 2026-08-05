@@ -188,6 +188,9 @@ export const DEFAULT_REVIEW_REQUEST_MODES: PromptMode[] = [
 ];
 
 export interface AgentFlowConfig {
+  // Which task source to read from — an id in src/tasks/registry.ts. An
+  // unregistered value resolves to Jira with a log line, never an empty board.
+  taskSource: string;
   baseUrl: string;
   project: string;
   reposRoot: string;
@@ -382,6 +385,7 @@ export function getConfig(): AgentFlowConfig {
     needsEnv: def.needsEnv === true,
   }));
   return {
+    taskSource: c.get<string>("taskSource") || "jira",
     baseUrl: (c.get<string>("jira.baseUrl") || "").replace(/\/+$/, ""),
     project: c.get<string>("jira.project") || "",
     reposRoot: expandHome(c.get<string>("reposRoot") || "~/projects"),
