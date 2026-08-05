@@ -92,6 +92,23 @@ describe("evaluateFlow — nodes it cannot evaluate", () => {
     expect(r.blocked).toEqual([{ nodeId: "a", reason: "agent-state-unknown" }]);
   });
 
+  it("blocks an agent condition when the place's own repo has no agent, even while a different repo's agent in the same run is live", () => {
+    // The guard must read the SAME per-place activity `evalCond` uses, not the
+    // unfiltered run aggregate — otherwise a live agent in a different repo
+    // masks the fact that this place's own repo has nothing readable, and the
+    // condition waits forever with no note explaining why.
+    const otherRepoAgent: CardAgent = {
+      session: { pid: 1, sessionId: "s-1", cwd: "/r/repo-other", startedAt: 1, name: "af-1" },
+      activity: { state: "working", lastActivityMs: NOW, slug: null },
+      repo: "repo-other",
+    };
+    const flow = flowWith([place("a", "ASM-1"), notify("z")],
+      [edge("e1", "a", "z", { cond: { kind: "agent-ended-turn" } })]);
+    const r = run(flow, [status("ASM-1", { unknownAgent: true, agents: [otherRepoAgent] })]);
+    expect(r.fired).toEqual([]);
+    expect(r.blocked).toEqual([{ nodeId: "a", reason: "agent-state-unknown" }]);
+  });
+
   it("does not block a non-agent condition when the agent state is unknown", () => {
     const flow = flowWith([place("a", "ASM-1"), notify("z")], [edge("e1", "a", "z")]);
     const r = run(flow, [status("ASM-1", { merged: true, unknownAgent: true })]);
@@ -131,11 +148,28 @@ describe("evaluateFlow — join", () => {
     expect(r.fired.map((f) => f.edge.id)).toEqual(["e1", "e2"]);
   });
 
-  it("with join all, an already-fired edge counts as met", () => {
+  it("with join all, an already-fired edge counts as met, and the first still-pending edge performs", () => {
     const flow = twoIn("all");
     flow.edges[0].firedAt = NOW - 1;
     const r = run(flow, [status("ASM-1", { merged: false }), status("ASM-2", { merged: true })]);
-    expect(r.fired.map((f) => f.edge.id)).toEqual(["e2"]);
+    // e1 is settled and cannot perform again; e2, the first still-pending edge,
+    // both fires and performs.
+    expect(r.fired.map((f) => ({ id: f.edge.id, perform: f.perform }))).toEqual([
+      { id: "e2", perform: true },
+    ]);
+  });
+
+  it("with join all, an error on any incoming edge stops the junction dead, with no blocked note from it", () => {
+    // "a" has no status at all, which would normally be a "gone" blocked note —
+    // but the errored edge must never even reach `met`, so no note appears, and
+    // the junction (including its non-errored sibling) fires nothing until the
+    // errored edge is reset. Otherwise the next-pending edge would quietly take
+    // over as performer, re-running the action under a different edge.
+    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2"), notify("z", "all")],
+      [edge("e1", "a", "z", { error: "worktree exists" }), edge("e2", "b", "z")]);
+    const r = run(flow, [status("ASM-2", { merged: true })]);
+    expect(r.fired).toEqual([]);
+    expect(r.blocked).toEqual([]);
   });
 
   it("with join all, the action performed is the first incoming edge's", () => {
@@ -210,10 +244,12 @@ describe("evaluateFlow — the launch cap", () => {
     expect(r.deferred).toBe(0);
   });
 
-  it("a deferred all-join performer still performs on the next pass", () => {
-    // The cap can strand a junction half-stamped: its performer is deferred while
-    // its siblings are stamped fired. That must resolve on a later pass, not leave
-    // a junction that is fully stamped and never acted on.
+  it("a cap-deferred all-join performer strands nothing: the junction fires as one unit or not at all", () => {
+    // A cap-deferred performer must not leave its siblings stamped `fired`: if
+    // the performer's condition then stops holding, a half-stamped junction
+    // would be stuck forever, with nothing reported. The junction's fate is
+    // decided before any of its edges enter `fired` — either all of them do,
+    // or none of them do, and only the whole junction counts as one deferred.
     const flow = flowWith(
       [place("a", "ASM-1"), planned("p", "any"),
        place("b", "ASM-2"), place("c", "ASM-3"), planned("z", "all")],
@@ -223,14 +259,20 @@ describe("evaluateFlow — the launch cap", () => {
     const statuses = [status("ASM-1", { merged: true }), status("ASM-2", { merged: true }), status("ASM-3", { merged: true })];
 
     const first = run(flow, statuses, 1);
-    expect(first.fired.filter((f) => f.perform).map((f) => f.edge.id)).toEqual(["e0"]);
+    // e0 takes the only slot. The junction's performer (e1) would be capped,
+    // so the whole junction — e1 AND e2 — contributes nothing to `fired`.
+    expect(first.fired.map((f) => f.edge.id)).toEqual(["e0"]);
     expect(first.deferred).toBe(1);
-    // e2 was stamped without performing; e1, the performer, was held back.
-    expect(first.fired.map((f) => f.edge.id)).toEqual(["e0", "e2"]);
 
-    // The runner stamps what fired. Next pass, with the slot free:
-    for (const id of ["e0", "e2"]) flow.edges.find((e) => e.id === id)!.firedAt = NOW;
+    // The runner stamps only what fired: e0.
+    flow.edges.find((e) => e.id === "e0")!.firedAt = NOW;
     const second = run(flow, statuses, 1);
-    expect(second.fired.map((f) => ({ id: f.edge.id, perform: f.perform }))).toEqual([{ id: "e1", perform: true }]);
+    // The slot is free; nothing was stamped last pass, so the junction
+    // re-decides from scratch and fires in full.
+    expect(second.fired.map((f) => ({ id: f.edge.id, perform: f.perform }))).toEqual([
+      { id: "e1", perform: true },
+      { id: "e2", perform: false },
+    ]);
+    expect(second.deferred).toBe(0);
   });
 });

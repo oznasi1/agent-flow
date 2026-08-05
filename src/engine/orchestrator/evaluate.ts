@@ -4,7 +4,7 @@
 // Keeping the decision separate from the action is what makes the latch, the join
 // and the cap testable without launching a window.
 import { RunStatus } from "../../types";
-import { CondContext, evalCond } from "./conditions";
+import { CondContext, evalCond, placeActivity } from "./conditions";
 import { Flow, FlowEdge, findNode, incomingEdges, isPlace } from "./model";
 
 /** How many acting edges (`launch` or `seed`) may fire in one pass. A badly wired
@@ -81,8 +81,11 @@ export function evaluateFlow(i: EvalInput): EvalResult {
       return undefined;
     }
     const c: CondContext = { status, repo: from.repo, nowMs: i.nowMs };
-    if (AGENT_CONDS.has(e.cond.kind) && status.agent.state === "unknown"
-        && status.agents.every((a) => a.activity.state === "unknown")) {
+    // Read the same per-place activity `evalCond` itself will use — not the
+    // unfiltered run aggregate. A place whose own repo has no readable agent
+    // must block even while a different repo's agent in the same run is live;
+    // reading the run-level aggregate here let that case slip through silently.
+    if (AGENT_CONDS.has(e.cond.kind) && placeActivity(c).state === "unknown") {
       note(from.id, "agent-state-unknown");
       return undefined;
     }
@@ -97,7 +100,17 @@ export function evaluateFlow(i: EvalInput): EvalResult {
     return metCache.get(e.id);
   };
 
-  const candidates: FiredEdge[] = [];
+  // A launch or seed is what costs something — a window, an agent session. A
+  // notify is a toast, never capped. Only ever asked of the edge that performs.
+  const costsSlot = (e: FlowEdge) => e.action === "launch" || e.action === "seed";
+
+  // Cap decisions are made in the same pass as candidate selection, in flow
+  // order, so an "all" junction can see how many slots are already spent by
+  // earlier edges before it decides its own fate — see below.
+  const cap = i.maxLaunches ?? MAX_LAUNCHES_PER_PASS;
+  const fired: FiredEdge[] = [];
+  let acting = 0;
+  let deferred = 0;
   const handledTargets = new Set<string>();
 
   for (const edge of i.flow.edges) {
@@ -109,36 +122,51 @@ export function evaluateFlow(i: EvalInput): EvalResult {
     const isAllJoin = target.join === "all" && incoming.length > 1;
 
     if (!isAllJoin) {
-      if (met(edge) === true) candidates.push({ edge, perform: true });
+      if (met(edge) !== true) continue;
+      if (costsSlot(edge) && acting >= cap) {
+        deferred++;
+        continue;
+      }
+      if (costsSlot(edge)) acting++;
+      fired.push({ edge, perform: true });
       continue;
     }
 
     // An "all" junction is decided once, for the whole junction.
     if (handledTargets.has(edge.to)) continue;
     handledTargets.add(edge.to);
-    // Already-fired siblings count as met: the junction closes over time, not in
-    // one instant, and a flow that forgot its earlier arrivals would never close.
-    const allMet = incoming.every((e) => e.firedAt !== undefined || met(e) === true);
-    if (!allMet) continue;
-    const pending = incoming.filter((e) => !settled(e));
-    // The first incoming edge in flow order performs; the rest are only stamped.
-    // Flow order is stable, which is what makes this deterministic.
-    pending.forEach((e, idx) => candidates.push({ edge: e, perform: idx === 0 }));
-  }
 
-  // Cap only what costs something. A notify is a toast; a launch is a window.
-  const cap = i.maxLaunches ?? MAX_LAUNCHES_PER_PASS;
-  const fired: FiredEdge[] = [];
-  let acting = 0;
-  let deferred = 0;
-  for (const c of candidates) {
-    const costs = c.perform && (c.edge.action === "launch" || c.edge.action === "seed");
-    if (costs && acting >= cap) {
+    // An error on any incoming edge stops the junction dead until that edge is
+    // reset. Without this, the settled performer's slot in `pending` opens up
+    // and a different sibling becomes the performer next pass — silently
+    // re-routing a failed action through a different edge. Bail before ever
+    // calling `met` on a sibling, too: an errored junction reports nothing,
+    // not even a stale "gone" note for whichever edge happened to error.
+    if (incoming.some((e) => e.error !== undefined)) continue;
+
+    // Already-settled siblings count as satisfied: the junction closes over
+    // time, not in one instant, and a flow that forgot its earlier arrivals
+    // would never close. `settled(e)` (not just `e.firedAt`) also means a
+    // settled edge is never handed to `met` again.
+    const allMet = incoming.every((e) => settled(e) || met(e) === true);
+    if (!allMet) continue;
+
+    // The first still-*pending* edge in flow order performs — a settled edge
+    // cannot perform again, which is why this is not simply "first incoming".
+    const pending = incoming.filter((e) => !settled(e));
+    const performer = pending[0];
+
+    // Decide the junction's fate BEFORE any of its edges enter `fired`. If the
+    // performer would be capped, fire NONE of them this pass: nothing gets
+    // stamped, so there is nothing to strand if the condition stops holding
+    // before a later pass frees a slot. The whole junction counts as one
+    // deferred unit, not one per stranded sibling.
+    if (costsSlot(performer) && acting >= cap) {
       deferred++;
       continue;
     }
-    if (costs) acting++;
-    fired.push(c);
+    if (costsSlot(performer)) acting++;
+    for (const e of pending) fired.push({ edge: e, perform: e === performer });
   }
 
   return { fired, blocked, deferred };

@@ -30,8 +30,12 @@ function agentsHere(c: CondContext) {
 
 /** Live state of this place, not of the whole run: a two-worktree run can have one
  * agent working and one waiting on you, and a rule about one must not read the
- * other. Falls back to the run-level aggregate when nothing is attached here. */
-function activity(c: CondContext): AgentActivity {
+ * other. Falls back to the run-level aggregate when nothing is attached here.
+ *
+ * Exported so `evaluate.ts`'s agent-state-unknown guard reads exactly this, not
+ * the unfiltered run aggregate — a place whose own repo has no agent while a
+ * different repo's agent is live must still read as unknown here. */
+export function placeActivity(c: CondContext): AgentActivity {
   const here = agentsHere(c);
   return here.length > 0 ? mostActive(here.map((a) => a.activity)) : c.status.agent;
 }
@@ -63,9 +67,9 @@ export function evalCond(cond: Condition, c: CondContext): boolean {
     case "pr-conflicting":
       return facts(c)?.mergeable === "conflicting";
     case "agent-ended-turn":
-      return activity(c).state === "needs-you";
+      return placeActivity(c).state === "needs-you";
     case "agent-idle-over": {
-      const a = activity(c);
+      const a = placeActivity(c);
       if (a.state !== "idle" || a.lastActivityMs === null) return false;
       return c.nowMs - a.lastActivityMs > cond.minutes * 60_000;
     }
@@ -137,12 +141,12 @@ export function describeCond(cond: Condition, c: CondContext): string {
       return f.mergeable === "conflicting" ? "conflicting" : `mergeable: ${f.mergeable}`;
     }
     case "agent-ended-turn": {
-      const a = activity(c);
+      const a = placeActivity(c);
       if (a.state === "unknown") return "agent state unknown";
       return a.state === "needs-you" ? "ended turn" : a.state;
     }
     case "agent-idle-over": {
-      const a = activity(c);
+      const a = placeActivity(c);
       if (a.state === "unknown") return "agent state unknown";
       if (a.lastActivityMs === null) return "last activity unknown";
       if (a.state !== "idle") return a.state === "needs-you" ? "ended turn" : a.state;
