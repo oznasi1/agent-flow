@@ -1336,8 +1336,18 @@ class JiraConnector implements TaskConnector {
 
   /** Ordered on purpose: the scope lookup is skipped when auth failed, because
    * its answer would be meaningless and the call cannot succeed. A signed-out
-   * user should see one problem, not a cascade of two. */
+   * user should see one problem, not a cascade of two.
+   *
+   * Returns `{}` when not authenticated, deliberately. A user who has never
+   * signed in has nothing to diagnose, and Doctor renders an absent probe as a
+   * neutral `skip` rather than a failure — without this gate, `probeMyself()`
+   * throws `JiraAuthError`, that classifies to `reason: "auth"`, and every
+   * never-signed-in user's Doctor report gains an alarming red row and a higher
+   * problem count than it has today. Self-gating rather than relying on the
+   * caller: Task 10's `collectInputs` also gates, but the connector should not
+   * depend on it remembering. */
   async probe(): Promise<{ auth?: AuthProbe; scope?: ProjectProbe }> {
+    if (!(await this.isAuthenticated())) return {};
     const cfg = getConfig();
     const client = new JiraClient(cfg.baseUrl, cfg.project, this.auth);
     let auth: AuthProbe;
