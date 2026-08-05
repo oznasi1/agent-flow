@@ -1,0 +1,322 @@
+# Deck Orchestrator — flows Design
+
+**Status:** approved 2026-08-05
+**Mockup:** `docs/mockups/2026-08-05-deck-orchestrator-drawer.html` (variant B is the one being built; A and C are kept as the rejected comparisons)
+
+## Goal
+
+Add an **Orchestrator** to the Deck: a right-side drawer where you attach the agents
+already on the board, wire them into a graph, and put a condition on each connection.
+Arm the graph and Agent Flow advances it for you — launching the next agent when a
+condition is met, or telling you when one trips.
+
+Today the Deck observes and you act. A flow lets you record the decision *once*, before
+the condition happens, and have it carried out while you are somewhere else.
+
+## The constraint everything is designed around
+
+**Agent Flow cannot type into a running Claude Code session.** It can launch a session
+with a prompt pre-filled (`seedClaudeCode`, `src/engine/workspace.ts`) and it can read any
+session's state, but there is no channel into an agent that is already running.
+
+So a flow never "instructs" an attached agent. Its actions are only ones the extension can
+actually perform: **launch** a new agent, **seed** another agent into an existing place, or
+**notify** you. This is a hard boundary, not a v1 simplification.
+
+## Decisions
+
+| Question | Decision |
+|---|---|
+| What fires? | Both: some edges launch an agent, some only notify. A rule engine in the extension, not a briefed supervising agent. |
+| What can be a node? | Cards on the board (dragged in) plus untaken Jira tickets (added from a picker in the drawer — the sidebar and the Deck are separate webviews and cannot share a drag). |
+| Condition vocabulary | All four families: PR/CI facts, agent live state, git state, Jira status. Every one reads the snapshot `buildRunStatus` already builds. |
+| Autonomy | Arm the whole flow. Inert while you build; once armed, launches fire without asking and a toast reports each one. |
+| Drawer shape | **Node canvas** with port-to-port wiring and a docked edge inspector. The rule-list shape was recommended and explicitly not chosen; the canvas cost is accepted. |
+| Evaluation lifetime | The Deck's poll keeps running while any flow is armed, even when the panel is hidden. Closing the panel warns first. |
+| Ship state | Off by default (`agentFlow.orchestrator`), like `reviewWrites`. |
+
+## Model
+
+Stored per machine, mirroring the runs store: one file per flow under
+`~/.agentflow/flows/<id>.json`.
+
+```ts
+export interface Flow {
+  id: string;
+  name: string;            // editable in place; names the header chip
+  armed: boolean;
+  createdAt: number;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+}
+
+/** Every node has a box and a join. `join` decides what several incoming edges
+ *  mean: "any" fires on the first one met, "all" waits for every one. It lives on
+ *  the target rather than the edge because it is a property of the meeting point. */
+interface NodeBase { id: string; x: number; y: number; join: "any" | "all" }
+
+export type FlowNode =
+  | (NodeBase & { kind: "place";   runKey: string; repo: string })
+  | (NodeBase & { kind: "planned"; ticketKey: string; repos: string[];
+                  mode: string; dest: WorkspaceMode })
+  | (NodeBase & { kind: "notify";  message: string });
+
+/** Parameterised where it has to be, a bare kind everywhere else. */
+export type Condition =
+  | { kind: "pr-merged" | "ci-passed" | "ci-failed" | "review-approved"
+        | "changes-requested" | "threads-resolved" | "pr-conflicting"
+        | "agent-ended-turn" | "no-agent-left" | "tree-clean"
+        | "has-uncommitted" | "nothing-to-push" | "jira-done" }
+  | { kind: "agent-idle-over"; minutes: number }
+  | { kind: "jira-status-is"; status: string };
+
+export interface FlowEdge {
+  id: string;
+  from: string;            // node id
+  to: string;              // node id
+  cond: Condition;
+  action: "launch" | "seed" | "notify";
+  mode?: string;           // prompt mode id, for launch and seed
+  firedAt?: number;
+  firedNote?: string;      // "opened bite-me-3a" — the receipt the drawer shows
+  error?: string;          // the action threw; never retried until Reset
+}
+```
+
+Three properties of this shape matter:
+
+- **A place node never stores a session.** It stores `runKey` + `repo`. Sessions come and
+  go inside a worktree; the worktree is what a rule can be about. Dragging an *agent* card
+  supplies both (`CardAgent.repo` is already resolved host-side). Dragging a *workspace*
+  card with several repos creates one node with a repo selector, defaulting to the first
+  repo that has a PR — so a node always resolves to exactly one repo and no condition is
+  ever ambiguous about which repo it means.
+- **A planned node carries its launch config.** An armed launch cannot stop to ask which
+  repo, which prompt mode or which destination, so those are chosen when you wire it.
+- **`join` lives on the target, not the edge.** "When *every* attached agent has merged,
+  tell me" is drawn as N edges into one node with `join: "all"`. That is how the canvas
+  expresses the any/every quantifier the rule-list shape had in a dropdown. It applies to
+  any node kind, not just notify — "when both PRs merge, launch the integration ticket" is
+  the same shape with a planned node at the end. A node with one incoming edge ignores it.
+
+### A planned node becomes a place once it launches
+
+This is what makes chains work. When a `launch` edge fires successfully, its planned target
+is **rewritten in place** to a `place` node bound to the run that was just created — same
+`id`, same `x`/`y`, same `join`, so every downstream edge keeps pointing at it and starts
+evaluating against the new run's `RunStatus` on the very next pass.
+
+Without this, `ASM-1 merged → launch ASM-12 → ASM-12's CI passes → launch ASM-15` could
+never advance past the second step: a planned node has no run to observe.
+
+The rewrite is part of the same store write that stamps `firedAt`, so a crash between the
+two cannot leave a launched ticket looking unlaunched.
+
+### Node states
+
+A node whose run has been forgotten or retired renders **gone** — struck through, with a
+yellow badge. Not red: nothing failed, the place simply is not there. An armed flow with a
+gone node **reports it in the footer** rather than silently waiting on a condition that can
+never be met again.
+
+## Conditions
+
+Every predicate is a pure function of one `RunStatus` (plus the node's `repo`), so the whole
+vocabulary is table-testable against fixtures with no I/O.
+
+| Condition | Reads |
+|---|---|
+| `pr-merged` | `prs[repo].facts.state === "MERGED"` |
+| `ci-passed` | `ci.failing.length === 0 && ci.pending === 0 && ci.passing > 0` |
+| `ci-failed` | `ci.failing.length > 0 && !ciAdvisory` — advisory-only failures do not fire it, because they do not block a merge |
+| `review-approved` | `facts.review === "approved"` |
+| `changes-requested` | `facts.review === "changes_requested"` |
+| `threads-resolved` | `facts.unresolved === 0` |
+| `pr-conflicting` | `facts.mergeable === "conflicting"` |
+| `agent-ended-turn` | `agent.state === "needs-you"` |
+| `agent-idle-over` | `agent.state === "idle" && now - lastActivityMs > minutes` (parameterised) |
+| `no-agent-left` | no entry in `agents[]` for this node's repo |
+| `tree-clean` | `!repo.dirty` |
+| `has-uncommitted` | `repo.dirty` |
+| `nothing-to-push` | `repo.ahead === 0` |
+| `jira-done` | `jiraCategory === "done"` |
+| `jira-status-is` | `jiraStatus === param` |
+
+Two honest limitations to state in the UI, not hide:
+
+- **`nothing-to-push` cannot distinguish "pushed" from "has no upstream"** — `RepoGit.ahead`
+  is 0 in both cases. The condition is labelled *nothing to push* rather than *pushed* for
+  exactly this reason.
+- **Agent conditions are best-effort and depend on the Live signal toggle.** With Live
+  signal off, `agent.state` is `unknown` and no agent condition can ever fire. An armed flow
+  that contains one while the toggle is off says so in the footer.
+
+## Actions
+
+| Action | Mechanism it reuses |
+|---|---|
+| `launch` | The take path that already opens a workspace and seeds an agent, driven from the planned node's stored config rather than from prompts. |
+| `seed` | The Address PR re-seed in `deckView.ts` — a new agent in a place that already exists. |
+| `notify` | A Deck toast plus the header chip's count. No writes anywhere. |
+
+## The latch
+
+This is the part that decides whether the feature is safe.
+
+- An armed edge is re-checked every poll. It fires when its condition holds **and**
+  `firedAt` is unset. Firing stamps `firedAt` and `firedNote`.
+- **A failed action stamps `error` and is never retried.** Retrying a launch that threw is
+  how you get twenty windows.
+- **Reset** clears `firedAt`, `firedNote` and `error` for one edge.
+- **At most 3 launches per evaluation pass.** A pass that wants more logs what it deferred;
+  the rest fire on the next pass. A cap that silently truncates would read as "nothing else
+  was ready".
+- Disarming does not clear latches. Re-arming resumes where the flow left off.
+
+## Evaluation lifetime
+
+`DeckViewProvider` starts and stops its poll on `onDidChangeViewState`. That changes in one
+place: **the poll keeps running while any flow is armed**, even when the panel is hidden.
+
+Closing the panel still ends evaluation, so closing with a flow armed asks first:
+
+> *Ship the migration is armed. Closing the Deck stops it advancing.* — **Disarm** ·
+> **Keep it open** · **Close anyway**
+
+Extracting the observation loop host-side so armed flows survive the Deck being closed is
+the correct end state and is **explicitly out of scope here** — it is a refactor of
+`deckView.ts`'s `buildAll()` at the project's coverage bar, and it is not needed to make the
+feature useful. Recorded as the follow-up.
+
+## UI
+
+All configuration lives in the drawer. Nothing about a flow is edited anywhere else.
+
+**Header chip.** `⚡ Orchestrator · 1 armed`. A chip, not a filled button — the board's
+primary verbs live on the cards, and a filled control in the header would outrank them. Only
+present when `agentFlow.orchestrator` is on.
+
+**Drawer.** Slides from the right, starting **below** the header so the chip you just pressed
+and the Live-signal / PR-facts toggles stay visible and reachable. Default 560px, resizable
+from its left edge (min 380px), and `⤢` expands it to the full panel for heavy wiring.
+**No scrim** — a modal veil would block the drag the drawer exists to receive, so the board
+stays fully live while it is open.
+
+Top to bottom: flow name (editable) and **Arm** · **Agents tray** · **Graph** · **edge
+inspector** · footer. The tray sits **above** the graph: attaching comes before wiring, and
+it matches the order the list shape used. The graph takes the remaining height and the
+inspector is docked under it — a canvas that scrolls the inspector out of view makes you
+scroll away from the thing you are editing.
+
+**Tray.** A wrapping row of chips, one per place or planned node, and the primary drop
+target. It is a view of the same node list, never a second store. Clicking a chip highlights
+its node on the canvas.
+
+**Graph.** Nodes are 168px — enough for a state dot, the ticket key, and the one fact the
+rules read. Drag a node to move it (snapped to an 8px grid); drag from its right port to
+another node to create an edge, and every legal target announces itself while you drag.
+Planned nodes are dashed, because the place does not exist until a rule launches it. Notify
+nodes are pill-shaped and have no outgoing port. **Tidy** re-runs the auto-layout, and a
+card dropped in is auto-placed — a drop never needs hand-positioning to be legible. No
+pan/zoom: Tidy and expand cover it.
+
+**Edges.** Bezier, labelled with the condition, the label sitting *above* the midpoint
+because a label as wide as the gap between two columns hides the connector it labels. Colour
+is state, not decoration: neutral while waiting, brand while selected, green once fired, and
+danger-tinted **only** when the condition is itself a failure (`ci-failed`,
+`changes-requested`, `pr-conflicting`).
+
+**Inspector.** `WHEN <condition>` / `THEN <action> <target>` / `USING <mode> in a <dest>`,
+plus the live state — `waiting · CI running, 4 of 7` or `fired 12:04 · opened bite-me-3a`
+with **Reset**. Three fixed-width keywords, so the rule reads as a sentence.
+
+**List view.** A button that renders the same graph as the WHEN/THEN/USING list from
+mockup variant A. This is the keyboard path — a canvas built from divs and pointer events
+has no usable keyboard story, and shipping the graph as the only way to edit a flow would
+make the feature unreachable without a mouse. Same store, no second model.
+
+**On the board.** A card wired into a flow carries one quiet line — `⚡ Ship the migration ·
+node 1 of 3` — and only while a flow exists. No persistent hint lines.
+
+**Toast.** `Ship the migration launched ASM-12 in bite-me — CI passed on ASM-2.` Every
+autonomous action reports what it did and why, with an **Open** action.
+
+## Build order
+
+This is more than one sitting's work, so the plan stages it. Each phase leaves the
+extension shippable.
+
+1. **The pure core** — `model.ts`, `store.ts`, `conditions.ts`, `evaluate.ts`, `layout.ts`.
+   No UI, no wiring, nothing user-visible. All of the risk in the condition semantics and
+   the latch lands here, where it is cheapest to test.
+2. **Notify-only, end to end** — the runner, the `agentFlow.orchestrator` setting, the poll
+   change and the close confirmation, and a drawer that can attach nodes and wire
+   notify edges. Arming now does something real, and nothing it does can launch anything.
+3. **Launch and seed** — the two acting verbs, the planned→place rewrite, the launch cap,
+   and the toasts. This is the phase that needs the most care in review.
+4. **The canvas proper** — port-to-port wiring, node dragging, Tidy, expand and resize,
+   plus the list view. Phase 2's drawer can be the list view first; the canvas replaces it
+   as the default once it works.
+
+## Multiple flows
+
+Several flows may exist and several may be armed at once; the header chip counts the armed
+ones. The same run may be a node in more than one flow — the card's wire line names the
+first and counts the others (`⚡ Ship the migration +1`).
+
+## Surfaces
+
+| File | Change |
+|---|---|
+| `src/engine/orchestrator/model.ts` | *(new)* types; no imports |
+| `src/engine/orchestrator/store.ts` | *(new)* flow persistence, pure over an injected reader/writer, mirroring `engine/runs.ts` |
+| `src/engine/orchestrator/conditions.ts` | *(new)* `evalCond()` + `describe()` |
+| `src/engine/orchestrator/evaluate.ts` | *(new)* `(flow, RunStatus[], now) → FiredEdge[]`, owns the latch and the cap |
+| `src/engine/orchestrator/layout.ts` | *(new)* `anchors()`, bezier path, `tidy()` — pure, so canvas geometry is testable without a DOM |
+| `src/orchestratorRunner.ts` | *(new)* the only impure piece: performs actions, stamps `firedAt`, posts toasts |
+| `src/webview/OrchestratorDrawer.tsx` | *(new)* tray, canvas, inspector, list view |
+| `src/webview/orchestratorStyles.ts` | *(new)* uses `TOKENS_CSS`; must not redeclare a token |
+| `src/deckView.ts` | poll survives hidden panel while armed; close confirmation; flow messages |
+| `src/webview/DeckApp.tsx` | header chip, drawer mount, card wire line, card drag source |
+| `src/types.ts` | flow message shapes on `InboundMessage` / `OutboundMessage` |
+| `src/config.ts` | `agentFlow.orchestrator`, default false |
+| `package.json` | the `contributes.configuration` entry only |
+| `README.md`, `docs/TELEMETRY.md` | document the drawer and the new events |
+
+## Testing
+
+- **conditions.ts** — table-driven over fixture `RunStatus`, every predicate in both
+  polarities, plus `ciAdvisory` not firing `ci-failed`, and `unknown` agent state firing no
+  agent condition.
+- **evaluate.ts** — fires once and not twice; a gone node reports instead of waiting; a
+  disarmed flow yields nothing; the 3-launch cap defers rather than drops; `join: "all"`
+  waits for every incoming edge while `"any"` does not; a node with one incoming edge is
+  unaffected by its `join`.
+- **planned→place rewrite** — a fired launch rewrites its target and leaves `id`, `x`, `y`
+  and `join` untouched; a downstream edge from that node evaluates against the new run on
+  the next pass; a launch that throws leaves the node planned.
+- **store.ts** — round-trip; a corrupt file yields no flows rather than throwing; unknown
+  fields survive a write.
+- **layout.ts** — anchors against known node boxes; `tidy()` assigns depth-major columns;
+  a cycle terminates.
+- **runner** — an injected launcher spy asserts the launch arguments; a throwing launcher
+  stamps `error` and is not called again on the next pass.
+- **deckView** — the poll keeps running when hidden with a flow armed, and stops when none
+  is; the close confirmation appears only when armed.
+
+Gates, restated because a plan's workers follow the plan and not `CONTRIBUTING.md`:
+`npx tsc --noEmit` clean, `npx vitest run` green, **≥95% coverage on changed files**, and
+the work happens in a worktree — never the main checkout, since `vsce package` packages the
+working directory. Do not touch the `version` field in `package.json`,
+`package-lock.json`, or `CHANGELOG.md`.
+
+## Non-goals
+
+- Prompting or steering a running agent. Impossible; see the constraint above.
+- Conditions on anything the Deck does not already observe (test output, coverage, logs).
+- Canvas pan and zoom.
+- Sharing or syncing a flow between machines or windows.
+- Extracting the observation loop host-side so armed flows advance with the Deck closed —
+  the recorded follow-up.
+- Touching the Take-flow "Orchestrator" *prompt mode* in `DEFAULT_PROMPT_MODES`. It shares
+  a word with this feature and nothing else; a flow is a board object, that is a prompt.
