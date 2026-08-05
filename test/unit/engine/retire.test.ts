@@ -23,7 +23,7 @@ const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
 const prs = (f: PrFacts | null): PrEntryMap => ({ api: { facts: f, fetchedAt: NOW } });
 
 const input = (over: Partial<RetireInput> = {}): RetireInput => ({
-  run: run(), repos: [repo()], jiraCategory: "indeterminate", prs: {},
+  run: run(), repos: [repo()], ticketCategory: "indeterminate", prs: {},
   hasLiveSession: false, prsAuthoritative: true,
   finishedAfterMs: 24 * HOUR, abandonedAfterMs: 7 * DAY, nowMs: NOW,
   exists: () => true, ...over,
@@ -82,26 +82,26 @@ describe("rule 2 — finished", () => {
   });
 
   it("counts a Jira-done run with no open PR as finished", () => {
-    expect(retireVerdict(input({ jiraCategory: "done", prs: {} })))
+    expect(retireVerdict(input({ ticketCategory: "done", prs: {} })))
       .toEqual({ action: "stamp", finishedAt: NOW });
   });
 
   it("spares a Jira-done run whose PR is still open", () => {
-    expect(retireVerdict(input({ jiraCategory: "done", prs: prs(facts()) })).action).toBe("keep");
+    expect(retireVerdict(input({ ticketCategory: "done", prs: prs(facts()) })).action).toBe("keep");
   });
 
   it("spares a Jira-done run whose PR is still a draft — a draft is unmerged work", () => {
-    expect(retireVerdict(input({ jiraCategory: "done", prs: prs(facts({ isDraft: true })) })).action).toBe("keep");
+    expect(retireVerdict(input({ ticketCategory: "done", prs: prs(facts({ isDraft: true })) })).action).toBe("keep");
   });
 
   it("clears the stamp when the run stops being finished", () => {
     const r = run({ finishedAt: NOW - 2 * HOUR });
-    expect(retireVerdict(input({ run: r, jiraCategory: "indeterminate", prs: prs(facts()) })))
+    expect(retireVerdict(input({ run: r, ticketCategory: "indeterminate", prs: prs(facts()) })))
       .toEqual({ action: "unstamp" });
   });
 
   it("fails closed with no Jira and no PR facts: nothing stamped, nothing retired", () => {
-    expect(retireVerdict(input({ jiraCategory: null, prs: {}, prsAuthoritative: false,
+    expect(retireVerdict(input({ ticketCategory: null, prs: {}, prsAuthoritative: false,
       run: run({ createdAt: NOW - DAY }) })).action).toBe("keep");
   });
 });
@@ -119,13 +119,13 @@ describe("the veto", () => {
 
   it("blocks an abandoned run with unpushed commits", () => {
     const r = run({ url: "", createdAt: NOW - 30 * DAY });
-    expect(retireVerdict(input({ run: r, repos: [repo({ ahead: 1 })], jiraCategory: null })).action).toBe("keep");
+    expect(retireVerdict(input({ run: r, repos: [repo({ ahead: 1 })], ticketCategory: null })).action).toBe("keep");
   });
 });
 
 describe("rule 3 — abandoned", () => {
   const abandoned = (over: Partial<RetireInput> = {}) =>
-    retireVerdict(input({ run: run({ url: "", createdAt: NOW - 30 * DAY }), jiraCategory: null, ...over }));
+    retireVerdict(input({ run: run({ url: "", createdAt: NOW - 30 * DAY }), ticketCategory: null, ...over }));
 
   it("retires a ticketless, PR-less, clean, old run", () => {
     expect(abandoned()).toEqual({ action: "retire", reason: "abandoned" });
@@ -144,7 +144,7 @@ describe("rule 3 — abandoned", () => {
   });
 
   it("spares a run that still has a ticket", () => {
-    expect(retireVerdict(input({ run: run({ createdAt: NOW - 30 * DAY }), jiraCategory: null })).action)
+    expect(retireVerdict(input({ run: run({ createdAt: NOW - 30 * DAY }), ticketCategory: null })).action)
       .toBe("keep");
   });
 

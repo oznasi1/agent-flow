@@ -2,7 +2,7 @@ import * as React from "react";
 import Fuse from "fuse.js";
 import { send } from "./vscodeApi";
 import { addOnce, deriveStatuses, fmtEst, isPrReviewStatus, isTopPriority, matchesStatus, moveKey, railClass } from "./helpers";
-import { Filter, FilterVisibility, JiraTask, OutboundMessage, Size } from "../types";
+import { Filter, FilterVisibility, Task, OutboundMessage, Size } from "../types";
 import { GaugeMark } from "./GaugeMark";
 
 let toastSeq = 0;
@@ -27,7 +27,7 @@ interface DetailState {
   descriptionText?: string;
   repos?: string[];
   selected?: string[];
-  jira?: string[]; // components on the ticket, spelled as Jira spells them
+  sourceComponents?: string[]; // components on the ticket, spelled as Jira spells them
   // repo name → canonical component name; `null` means the project's component
   // list couldn't be read, so no chip's state (on-ticket, pushable, local-only)
   // can be claimed.
@@ -136,7 +136,7 @@ export function App(): JSX.Element {
     });
   const clearBatch = () => setBatchSelected(new Set());
   const [textQuery, setTextQuery] = React.useState("");
-  const [tasks, setTasks] = React.useState<JiraTask[]>([]);
+  const [tasks, setTasks] = React.useState<Task[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [toasts, setToasts] = React.useState<
     { id: number; level: string; message: string; action?: { label: string; url: string } }[]
@@ -146,7 +146,7 @@ export function App(): JSX.Element {
   const [dragKey, setDragKey] = React.useState<string | null>(null);
   const [dropTarget, setDropTarget] = React.useState<{ key: string; pos: "before" | "after" } | null>(null);
   const dragKeyRef = React.useRef<string | null>(null);
-  const tasksRef = React.useRef<JiraTask[]>([]);
+  const tasksRef = React.useRef<Task[]>([]);
   React.useEffect(() => { tasksRef.current = tasks; }, [tasks]);
 
   const endDrag = () => { dragKeyRef.current = null; setDragKey(null); setDropTarget(null); };
@@ -222,7 +222,7 @@ export function App(): JSX.Element {
               descriptionText: m.descriptionText,
               repos: m.repos,
               selected: m.inferred,
-              jira: m.sourceComponents,
+              sourceComponents: m.sourceComponents,
               mappable: m.mappable,
             },
           }));
@@ -253,13 +253,13 @@ export function App(): JSX.Element {
             const d = prev[m.key];
             if (!d) return prev;
             const component = d.mappable?.[m.repo] ?? m.repo;
-            const jira = d.jira ?? [];
+            const sourceComponents = d.sourceComponents ?? [];
             const selected = d.selected ?? [];
             return {
               ...prev,
               [m.key]: {
                 ...d,
-                jira: m.on ? jira.filter((c) => c !== component) : addOnce(jira, component),
+                sourceComponents: m.on ? sourceComponents.filter((c) => c !== component) : addOnce(sourceComponents, component),
                 selected: !m.movedChip
                   ? selected
                   : m.on
@@ -332,20 +332,20 @@ export function App(): JSX.Element {
     const before = d?.selected ?? [];
     const added = selected.filter((s) => !before.includes(s));
     const removed = before.filter((s) => !selected.includes(s));
-    let jira = d?.jira ?? [];
+    let sourceComponents = d?.sourceComponents ?? [];
     for (const repo of added) {
       const component = mappable[repo];
       if (!component) continue;
       send({ type: "setComponent", key, repo, on: true, movedChip: true });
-      jira = addOnce(jira, component);
+      sourceComponents = addOnce(sourceComponents, component);
     }
     for (const repo of removed) {
       const component = mappable[repo];
-      if (!component || !jira.includes(component)) continue;
+      if (!component || !sourceComponents.includes(component)) continue;
       send({ type: "setComponent", key, repo, on: false, movedChip: true });
-      jira = jira.filter((c) => c !== component);
+      sourceComponents = sourceComponents.filter((c) => c !== component);
     }
-    setDetails((prev) => ({ ...prev, [key]: { ...prev[key], selected, jira } }));
+    setDetails((prev) => ({ ...prev, [key]: { ...prev[key], selected, sourceComponents } }));
   };
 
   /** `↑` on a chip whose component the ticket lacks: write it, and show it as
@@ -356,7 +356,7 @@ export function App(): JSX.Element {
     send({ type: "setComponent", key, repo, on: true, movedChip: false });
     setDetails((prev) => ({
       ...prev,
-      [key]: { ...prev[key], jira: addOnce(prev[key]?.jira ?? [], component) },
+      [key]: { ...prev[key], sourceComponents: addOnce(prev[key]?.sourceComponents ?? [], component) },
     }));
   };
 
@@ -662,7 +662,7 @@ function ToastStack({
 }
 
 function TaskCard(props: {
-  task: JiraTask;
+  task: Task;
   me: string | null;
   prReviewStatus: string;
   open: boolean;
@@ -832,7 +832,7 @@ function CardDetail(props: {
   if (!detail || detail.loading) return <div className="detail"><div className="detail-loading">Loading ticket…</div></div>;
 
   const selected = detail.selected ?? [];
-  const jira = detail.jira ?? [];
+  const sourceComponents = detail.sourceComponents ?? [];
   const mappable = detail.mappable;
   const unknown = mappable == null; // the project's component list couldn't be read
   const available = (detail.repos ?? []).filter((r) => !selected.includes(r));
@@ -852,7 +852,7 @@ function CardDetail(props: {
           // from Jira. When the list itself is unknown, none of the three can be
           // claimed, so the chip renders plain with no dash and no push.
           const component = unknown ? undefined : mappable![s];
-          const onTicket = !!component && jira.includes(component);
+          const onTicket = !!component && sourceComponents.includes(component);
           return (
             <span
               key={s}

@@ -1,8 +1,8 @@
-import { Filter, JiraTask, Size } from "../../types";
+import { Filter, Task, Size } from "../../types";
 import {
   Capabilities, StatusTarget, TaskProvider, TaskWriteError,
 } from "../provider";
-import { JiraClient, JiraDetail, TransitionOption } from "./client";
+import { JiraClient, TaskDetail, TransitionOption } from "./client";
 import { describeJiraError, JiraApiError } from "./errors";
 import {
   FieldPrompt, fieldDisplayNames, mentionsResolution, missingFieldIds,
@@ -81,11 +81,11 @@ export class JiraProvider implements TaskProvider {
     },
   };
 
-  list(lens: Filter, size: Size, max = 50): Promise<JiraTask[]> {
+  list(lens: Filter, size: Size, max = 50): Promise<Task[]> {
     return this.client.fetchTasks(lens, size, max);
   }
 
-  detail(key: string): Promise<JiraDetail> {
+  detail(key: string): Promise<TaskDetail> {
     return this.client.getDetail(key);
   }
 

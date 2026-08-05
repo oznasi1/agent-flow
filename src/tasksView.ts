@@ -29,7 +29,7 @@ import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/ses
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
-import { Filter, InboundMessage, JiraTask, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
+import { Filter, InboundMessage, Task, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
 import { track, trackError, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
 import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, PromptModeProp, RepoSource, TakeSource } from "./telemetry/events";
 
@@ -499,7 +499,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.log(`changeStatus ${key}: move ok → ${target.toName}`);
     await this.stampProvenance(provider, key);
     const removed = target.toCategory === "done";
-    this.post({ type: "statusChanged", key, status: target.toName, category: target.toCategory, removed });
+    // toCategory's "" (uncategorized destination) has no place in a Task's
+    // statusCategory, which always has one of the three — fold it into "new",
+    // same as an empty category already reads on a fetched task (deriveStatuses,
+    // railClass in webview/helpers.ts).
+    const category = target.toCategory || "new";
+    this.post({ type: "statusChanged", key, status: target.toName, category, removed });
     this.toast("success", `${key} → ${target.toName}`);
   }
 
@@ -883,7 +888,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return p?.mode;
   }
 
-  private guessServices(t: JiraTask, repos: ServiceRef[]): string[] {
+  private guessServices(t: Task, repos: ServiceRef[]): string[] {
     return inferServices(
       { summary: t.summary, labels: t.labels, components: t.components },
       repos,

@@ -43,8 +43,8 @@ export function projectCards(runs: RunStatus[]): DeckCard[] {
         status,
         agent,
         column: deriveBucket({
-          jiraCategory: status.jiraCategory,
-          jiraStatus: status.jiraStatus,
+          ticketCategory: status.ticketCategory,
+          ticketStatus: status.ticketStatus,
           agentState: agent.activity.state,
           prOpen: pr.open,
           prBlocked: pr.blocked,

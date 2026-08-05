@@ -1,5 +1,5 @@
 // Shared types across the extension host and webview.
-// Type-only: src/tasks/provider.ts imports Filter/JiraTask/Size from here, so a
+// Type-only: src/tasks/provider.ts imports Filter/Task/Size from here, so a
 // value import would be a runtime cycle. `import type` is erased at build time.
 import type { SerializedCaps, TaskConnector } from "./tasks/provider";
 
@@ -15,11 +15,11 @@ export interface FilterVisibility {
   search: boolean;
 }
 
-export interface JiraTask {
+export interface Task {
   key: string;
   summary: string;
   status: string;
-  statusCategory: string; // "new" | "indeterminate" | "done"
+  statusCategory: "new" | "indeterminate" | "done";
   priority: string;
   assignee: string; // display name, or "Unassigned"
   labels: string[];
@@ -166,8 +166,8 @@ export interface CardAgent {
 export interface RunStatus {
   run: Run;
   column: DeckColumn;
-  jiraStatus: string | null;
-  jiraCategory: string | null; // "new" | "indeterminate" | "done"
+  ticketStatus: string | null;
+  ticketCategory: string | null; // "new" | "indeterminate" | "done"
   repos: RepoGit[];
   agent: AgentActivity;
   windowOpen: boolean; // is this run's target window currently open? (from presence)
@@ -377,7 +377,7 @@ export type OutboundMessage =
   // Recomputed on every pool refresh (same trackOpenWindows gate and liveWindows()
   // source as `state`'s liveCount), so the header gauge doesn't go stale between
   // `state` posts — it was previously a mount-time snapshot only.
-  | { type: "tasks"; filter: Filter; tasks: JiraTask[]; liveCount?: number }
+  | { type: "tasks"; filter: Filter; tasks: Task[]; liveCount?: number }
   | { type: "detail"; key: string; descriptionText: string; inferred: string[]; repos: string[];
       // The components actually on the issue, spelled as Jira spells them, and the
       // repo → component map for every discovered repo. Together with `inferred`
@@ -385,7 +385,11 @@ export type OutboundMessage =
       // is `null` when the project's component list itself couldn't be read — a
       // distinct case from "maps to nothing", and one no chip state can be claimed for.
       sourceComponents: string[]; mappable: Record<string, string> | null }
-  | { type: "statusChanged"; key: string; status: string; category: string; removed: boolean }
+  // `category` is always one of Task's three — `StatusTarget.toCategory`'s fourth,
+  // uncategorized "" value is folded into "new" before this is posted (see
+  // tasksView.ts's changeStatus), the same fallback deriveStatuses/railClass already
+  // use for a task whose own category came back empty.
+  | { type: "statusChanged"; key: string; status: string; category: Task["statusCategory"]; removed: boolean }
   | { type: "movedToSprint"; key: string; assignee: string; removed: boolean }
   | { type: "removedFromSprint"; key: string }
   // The verdict on one `setComponent`: the request echoed back, plus whether it

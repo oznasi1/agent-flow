@@ -17,7 +17,7 @@ export interface RetireInput {
   /** Live git state per repo, as `buildRunStatus` already computed it. The
    * source of the veto, and the reason the sweep runs after statuses are built. */
   repos: RepoGit[];
-  jiraCategory: string | null;
+  ticketCategory: string | null;
   prs: PrEntryMap;
   /** Any Claude Code session open in one of this run's directories. */
   hasLiveSession: boolean;
@@ -44,7 +44,7 @@ function landed(i: RetireInput): boolean {
     .map((e) => e.facts)
     .filter((f): f is PrFacts => f !== null);
   if (all.length > 0 && all.every((f) => f.state === "MERGED")) return true;
-  return i.jiraCategory === "done" && !all.some((f) => f.state === "OPEN");
+  return i.ticketCategory === "done" && !all.some((f) => f.state === "OPEN");
 }
 
 /**

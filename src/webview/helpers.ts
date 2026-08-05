@@ -1,4 +1,4 @@
-import { Filter, JiraTask } from "../types";
+import { Filter, Task } from "../types";
 
 /** The lens to actually use, given what the user configured and what the source can
  * answer. `agentFlow.defaultFilter` ships as "mysprint" and four of the six filters
@@ -30,7 +30,7 @@ export function fmtEst(sec: number): string {
 }
 
 /** Move `fromKey` to sit before/after `toKey` within a task list. Pure. */
-export function moveKey(list: JiraTask[], fromKey: string, toKey: string, pos: "before" | "after"): JiraTask[] {
+export function moveKey(list: Task[], fromKey: string, toKey: string, pos: "before" | "after"): Task[] {
   if (fromKey === toKey) return list;
   const from = list.findIndex((t) => t.key === fromKey);
   if (from < 0) return list;
@@ -45,7 +45,7 @@ export function moveKey(list: JiraTask[], fromKey: string, toKey: string, pos: "
 /** Distinct statuses present in a task list, ordered by workflow category
  *  (To Do → In Progress → Done) then alphabetically. Statuses are project-specific,
  *  so the set is derived from the loaded pool rather than hardcoded. Pure. */
-export function deriveStatuses(tasks: JiraTask[]): { name: string; category: string }[] {
+export function deriveStatuses(tasks: Task[]): { name: string; category: string }[] {
   const seen = new Map<string, string>(); // status name → category (first occurrence wins)
   for (const t of tasks) {
     if (t.status && !seen.has(t.status)) seen.set(t.status, t.statusCategory || "new");
@@ -57,7 +57,7 @@ export function deriveStatuses(tasks: JiraTask[]): { name: string; category: str
 }
 
 /** Does a task pass the status filter? An empty selection means "all". Pure. */
-export function matchesStatus(task: JiraTask, selected: ReadonlySet<string>): boolean {
+export function matchesStatus(task: Task, selected: ReadonlySet<string>): boolean {
   return selected.size === 0 || selected.has(task.status);
 }
 

@@ -18,7 +18,7 @@ const prs = (f: PrFacts): PrEntryMap => ({ api: { facts: f, fetchedAt: 0 } });
 const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   run: { key: "ASM-1", summary: "s", url: "https://jira/browse/ASM-1", createdAt: 1,
     mode: "per-window", repos: [{ name: "api", path: "/r/api", isGit: true, branch: "b" }], briefPaths: [] },
-  column: "progress", jiraStatus: "In Progress", jiraCategory: "indeterminate",
+  column: "progress", ticketStatus: "In Progress", ticketCategory: "indeterminate",
   repos: [{ name: "api", path: "/r/api", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
   agent: { state: "unknown", lastActivityMs: null, slug: null },
   windowOpen: false, prs: {}, agents: [], ...over,

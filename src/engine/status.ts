@@ -21,7 +21,7 @@ export function mostActive(activities: AgentActivity[]): AgentActivity {
   })[0];
 }
 
-export interface JiraInfo {
+export interface TicketInfo {
   status: string | null;
   category: string | null;
 }
@@ -30,7 +30,7 @@ export interface JiraInfo {
  * from git, Jira, the transcript, PR facts, presence, and open sessions. */
 export interface BuildRunStatusInput {
   run: Run;
-  jira: JiraInfo | null;
+  ticket: TicketInfo | null;
   projectsRoot: string;
   nowMs: number;
   /** Off → no transcript is read and every agent reads as unknown. */
@@ -44,7 +44,7 @@ export interface BuildRunStatusInput {
 /** Reconcile a durable Run with every observable source into the status a card
  * renders. `liveSignal` off (or no transcript) leaves the git + Jira backbone. */
 export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
-  const { run, jira, projectsRoot, nowMs } = i;
+  const { run, ticket, projectsRoot, nowMs } = i;
   const liveSignal = i.liveSignal ?? true;
   const agents = i.agents ?? [];
   const prs = i.prs ?? {};
@@ -61,8 +61,8 @@ export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
     : UNKNOWN_ACTIVITY;
   const pr = prSignals(prs);
   const column = deriveBucket({
-    jiraCategory: jira?.category ?? null,
-    jiraStatus: jira?.status ?? null,
+    ticketCategory: ticket?.category ?? null,
+    ticketStatus: ticket?.status ?? null,
     agentState: agent.state,
     prOpen: pr.open,
     prBlocked: pr.blocked,
@@ -73,8 +73,8 @@ export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
   return {
     run,
     column,
-    jiraStatus: jira?.status ?? null,
-    jiraCategory: jira?.category ?? null,
+    ticketStatus: ticket?.status ?? null,
+    ticketCategory: ticket?.category ?? null,
     repos,
     agent,
     windowOpen,

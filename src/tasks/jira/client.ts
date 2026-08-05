@@ -2,7 +2,7 @@ import { JiraAuth } from "./auth";
 import { buildJql, stripSprint } from "./jql";
 import { parseJiraError } from "./errors";
 import { TransitionFieldMeta } from "./transitionFields";
-import { Filter, JiraTask, Size } from "../../types";
+import { Filter, Task, Size } from "../../types";
 import { markTaskNetworkFailure, TaskAuthError } from "../provider";
 
 export class JiraAuthError extends TaskAuthError {
@@ -49,7 +49,7 @@ export interface TransitionOption {
   fields: Record<string, TransitionFieldMeta>;
 }
 
-export interface JiraDetail {
+export interface TaskDetail {
   key: string;
   summary: string;
   descriptionText: string;
@@ -168,7 +168,7 @@ export class JiraClient {
     return resolved;
   }
 
-  async fetchTasks(filter: Filter, size: Size = "any", maxResults = 50): Promise<JiraTask[]> {
+  async fetchTasks(filter: Filter, size: Size = "any", maxResults = 50): Promise<Task[]> {
     // Degrade gracefully: full query → without sprint clause (no sprint board) →
     // without size clause (time-tracking disabled) → without either.
     const full = buildJql(this.project, filter, size);
@@ -204,7 +204,7 @@ export class JiraClient {
     });
   }
 
-  async getDetail(key: string): Promise<JiraDetail> {
+  async getDetail(key: string): Promise<TaskDetail> {
     const data = await this.request(
       `/rest/api/3/issue/${encodeURIComponent(key)}?fields=${DETAIL_FIELDS.join(",")}`,
     );
@@ -346,14 +346,18 @@ export class JiraClient {
     });
   }
 
-  private normalize(issue: any, sprintField: string | null): JiraTask {
+  private normalize(issue: any, sprintField: string | null): Task {
     const f = issue.fields ?? {};
     const { sprintName, inOpenSprint } = parseSprints(sprintField ? f[sprintField] : null);
     return {
       key: issue.key,
       summary: f.summary ?? "",
       status: f.status?.name ?? "",
-      statusCategory: f.status?.statusCategory?.key ?? "new",
+      // The one place Jira's untyped JSON enters the typed domain: `issue` is `any`,
+      // so nothing here forces this cast, but a real site's key is never guaranteed
+      // to be one of the three the union promises — this is the boundary that answers
+      // for it.
+      statusCategory: (f.status?.statusCategory?.key ?? "new") as Task["statusCategory"],
       priority: f.priority?.name ?? "",
       assignee: f.assignee?.displayName ?? "Unassigned",
       labels: f.labels ?? [],

@@ -211,7 +211,7 @@ function Card({ r, live, prReviewStatus, onForget, agent, column }: {
   // the status on it may belong to a ticket that is not ours — not something to seed an
   // agent against on one click. A run with no Jira status needs no separate guard;
   // isPrReviewStatus is false whenever either side is empty.
-  const canAddressPr = !local && isPrReviewStatus(r.jiraStatus ?? "", prReviewStatus);
+  const canAddressPr = !local && isPrReviewStatus(r.ticketStatus ?? "", prReviewStatus);
   // The key came from the branch, not from a launch. Say so: the branch could
   // name a ticket somebody else owns, and the Jira status on this card would
   // then be theirs. Computed host-side (the webview has no connector to parse
@@ -294,7 +294,7 @@ function Card({ r, live, prReviewStatus, onForget, agent, column }: {
       {agent === null && <AgentsRow agents={r.agents} />}
 
       <div className="c-foot">
-        {r.jiraStatus && <span className="pill" title={`Jira status: ${r.jiraStatus}`}>{r.jiraStatus}</span>}
+        {r.ticketStatus && <span className="pill" title={`Jira status: ${r.ticketStatus}`}>{r.ticketStatus}</span>}
         <div className="actions">
           {canAddressPr && (
             <button

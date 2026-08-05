@@ -2,18 +2,24 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { commands, window, workspace, setConfig } from "../_mocks/vscode";
 import { fakeContext } from "../_helpers/factories";
 
+// The connector's default answer, restored before every test (see beforeEach) so a
+// test that overrides it (e.g. "reads the connector's own label") can never leak its
+// custom shape into whatever runs after it. `clearMocks: true` (vitest.config.ts)
+// clears call history via `mockClear()` before each test but does NOT undo a
+// `mockReturnValue()` override — that needs its own reset.
+const DEFAULT_CONNECTOR_INFO = {
+  label: "Jira",
+  scopeNoun: "project",
+  scopeValue: "ABC",
+  endpoint: "https://x.atlassian.net",
+  exampleKey: "ABC-1234",
+  endpointSetting: "agentFlow.jira.baseUrl",
+  scopeSetting: "agentFlow.jira.project",
+};
 const connectorStub = {
   id: "jira",
   setupSteps: 2,
-  info: vi.fn(() => ({
-    label: "Jira",
-    scopeNoun: "project",
-    scopeValue: "ABC",
-    endpoint: "https://x.atlassian.net",
-    exampleKey: "ABC-1234",
-    endpointSetting: "agentFlow.jira.baseUrl",
-    scopeSetting: "agentFlow.jira.project",
-  })),
+  info: vi.fn(() => DEFAULT_CONNECTOR_INFO),
   isConfigured: vi.fn(() => true),
   configure: vi.fn(async () => true),
   isAuthenticated: vi.fn(async () => true),
@@ -88,6 +94,10 @@ beforeEach(() => {
   connectorStub.signIn.mockResolvedValue(true);
   connectorStub.isAuthenticated.mockResolvedValue(true);
   connectorStub.isConfigured.mockReturnValue(true);
+  // Re-establish the default every test starts from — see DEFAULT_CONNECTOR_INFO's
+  // comment. Without this, a test that calls `connectorStub.info.mockReturnValue(…)`
+  // would leak that override into every test that runs after it in this file.
+  connectorStub.info.mockReturnValue(DEFAULT_CONNECTOR_INFO);
 });
 
 describe("activate", () => {
@@ -236,6 +246,17 @@ describe("activate", () => {
     expect(window.showInputBox).toHaveBeenCalledWith(
       expect.objectContaining({ title: "Take a Acme task", prompt: "Ticket key (e.g. AT-99)" }),
     );
+  });
+
+  it("does not leak the previous test's connector label override", async () => {
+    // Regression probe for a leaking mock override: `connectorStub.info` above is
+    // switched with `mockReturnValue`, which `clearMocks` (vitest.config.ts) does not
+    // undo — only the beforeEach's explicit reset does. Without it this test would
+    // see "Acme" here instead of the connector's real default.
+    const { context } = fakeContext();
+    activate(context);
+    await cmd("agentFlow.signIn")!();
+    expect(window.showInformationMessage).toHaveBeenCalledWith("Agent Flow Deck: signed in to Jira.");
   });
 
   it("writes this window's presence on activation", () => {

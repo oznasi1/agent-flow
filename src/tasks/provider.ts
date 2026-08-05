@@ -1,13 +1,13 @@
 // The seam between Agent Flow and wherever its tickets come from. Deliberately
 // free of `vscode` imports so it stays testable in isolation; anything needing
 // the editor API belongs in a connector.
-import { Filter, JiraTask as Task, Size } from "../types";
+import { Filter, Task, Size } from "../types";
 // `import type` on both of these deliberately, and it is load-bearing rather
 // than stylistic: client.ts imports auth.ts, which imports `vscode`. A value
 // import would drag the editor API into this module, which is specified to load
 // without it. A type-only import is erased at build time, so the chain is never
 // followed at runtime.
-import type { JiraDetail as TaskDetail } from "./jira/client";
+import type { TaskDetail } from "./jira/client";
 import type { FieldPrompt } from "./jira/transitionFields";
 import type { AuthProbe, ProjectProbe } from "../engine/doctor";
 

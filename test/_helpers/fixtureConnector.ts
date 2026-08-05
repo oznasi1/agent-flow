@@ -6,7 +6,7 @@ import { Filter, Size } from "../../src/types";
 // fixture must NOT import anything from src/tasks/jira/ — it exists to prove the
 // seam can be satisfied by an implementation that knows nothing about Jira, and
 // reaching into the Jira connector for a type would quietly defeat that.
-// (JiraDetail is also not in types.ts at all — it is declared in jira/client.ts.)
+// (TaskDetail is also not in types.ts at all — it is declared in jira/client.ts.)
 
 /** A complete second connector over static data, declaring the bare minimum of
  * the seam. It exists so capability-gating is exercised rather than assumed: a

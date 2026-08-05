@@ -24,8 +24,8 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
     repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "ASM-1-x" }], briefPaths: [],
   },
   column: "progress",
-  jiraStatus: "In Progress",
-  jiraCategory: "indeterminate",
+  ticketStatus: "In Progress",
+  ticketCategory: "indeterminate",
   repos: [{ name: "svc", path: "/r/svc", branch: "ASM-1-x", dirty: true, ahead: 1, added: 12, removed: 2, files: 3 }],
   agent: { state: "working", lastActivityMs: 1_000, slug: "export-streaming" },
   windowOpen: false,
@@ -160,7 +160,7 @@ describe("DeckApp", () => {
 
   it("omits the Jira status pill when the run has no Jira status", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ jiraStatus: null })]));
+    host(runsMsg([mkStatus({ ticketStatus: null })]));
     expect(screen.getByText("Export fails on large accounts")).toBeInTheDocument();
     expect(screen.queryByText("—")).not.toBeInTheDocument();
   });
@@ -250,8 +250,8 @@ describe("DeckApp", () => {
     return {
       ...base,
       run: { ...base.run, key: "explore-retry-logic", summary: "how the aggregator retries", url: "" },
-      jiraStatus: null,
-      jiraCategory: null,
+      ticketStatus: null,
+      ticketCategory: null,
       ...over,
     };
   };
@@ -373,7 +373,7 @@ describe("DeckApp", () => {
         kind: "explore", mode: "per-window",
         repos: [{ name: "centaur", path: "/r/centaur", isGit: true }], briefPaths: [],
       },
-      jiraStatus: null, jiraCategory: null,
+      ticketStatus: null, ticketCategory: null,
     })]));
     expect(screen.getByText("explore")).toBeInTheDocument();
     expect(screen.queryByText("local-centaur-1a2b3c4d")).not.toBeInTheDocument();
@@ -1006,7 +1006,7 @@ describe("DeckApp review writes", () => {
 });
 
 describe("DeckApp — Address PR", () => {
-  const prCard = (over: Partial<RunStatus> = {}) => mkStatus({ jiraStatus: "PR initiated", ...over });
+  const prCard = (over: Partial<RunStatus> = {}) => mkStatus({ ticketStatus: "PR initiated", ...over });
 
   it("shows the button when the Jira status matches the configured one", () => {
     render(<DeckApp />);
@@ -1016,19 +1016,19 @@ describe("DeckApp — Address PR", () => {
 
   it("matches the status case-insensitively and ignores surrounding space", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard({ jiraStatus: "  pr initiated  " })]));
+    host(runsMsg([prCard({ ticketStatus: "  pr initiated  " })]));
     expect(screen.getByRole("button", { name: "Address PR" })).toBeInTheDocument();
   });
 
   it("hides the button on a card in any other status", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ jiraStatus: "In Progress" })]));
+    host(runsMsg([mkStatus({ ticketStatus: "In Progress" })]));
     expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
   });
 
   it("hides the button when the run has no Jira status at all", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ jiraStatus: null })]));
+    host(runsMsg([mkStatus({ ticketStatus: null })]));
     expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
   });
 

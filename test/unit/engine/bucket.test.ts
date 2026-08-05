@@ -22,19 +22,19 @@ describe("bucket.ts is webview-safe", () => {
 
 describe("deriveBucket", () => {
   it("puts a Jira-done ticket in Done even if the agent is working", () => {
-    expect(deriveBucket({ jiraCategory: "done", agentState: "working" })).toBe("done");
+    expect(deriveBucket({ ticketCategory: "done", agentState: "working" })).toBe("done");
   });
 
   it("surfaces a needs-you agent even while Jira is in progress", () => {
-    expect(deriveBucket({ jiraCategory: "indeterminate", agentState: "needs-you" })).toBe("needs");
+    expect(deriveBucket({ ticketCategory: "indeterminate", agentState: "needs-you" })).toBe("needs");
   });
 
   it("keeps a working agent in In-progress even in a review status (live beats review)", () => {
-    expect(deriveBucket({ jiraStatus: "In Review", agentState: "working" })).toBe("progress");
+    expect(deriveBucket({ ticketStatus: "In Review", agentState: "working" })).toBe("progress");
   });
 
   it("puts an idle agent in a review status into In review", () => {
-    expect(deriveBucket({ jiraStatus: "In Review", agentState: "idle" })).toBe("review");
+    expect(deriveBucket({ ticketStatus: "In Review", agentState: "idle" })).toBe("review");
   });
 
   it("treats an open PR as In review when the agent is idle", () => {
@@ -46,11 +46,11 @@ describe("deriveBucket", () => {
   });
 
   it("falls back to In-progress (in-flight) for an idle, plain in-progress task", () => {
-    expect(deriveBucket({ jiraCategory: "indeterminate", jiraStatus: "In Progress", agentState: "idle" })).toBe("progress");
+    expect(deriveBucket({ ticketCategory: "indeterminate", ticketStatus: "In Progress", agentState: "idle" })).toBe("progress");
   });
 
   it("falls back to In-progress for an unknown agent with nothing else", () => {
-    expect(deriveBucket({ jiraCategory: "new", agentState: "unknown" })).toBe("progress");
+    expect(deriveBucket({ ticketCategory: "new", agentState: "unknown" })).toBe("progress");
   });
 });
 
@@ -60,7 +60,7 @@ describe("deriveBucket with PR signals", () => {
   });
 
   it("puts a merged PR in Done even when Jira has not caught up", () => {
-    expect(deriveBucket({ jiraCategory: "indeterminate", prMerged: true })).toBe("done");
+    expect(deriveBucket({ ticketCategory: "indeterminate", prMerged: true })).toBe("done");
   });
 
   it("lets Done outrank a blocked PR", () => {

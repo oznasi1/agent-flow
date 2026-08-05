@@ -3653,6 +3653,22 @@ describe("a source with no optional capabilities", () => {
     });
   });
 
+  it("folds an uncategorized destination's \"\" toCategory into \"new\" on the wire", async () => {
+    // A connector may not be able to categorize every destination (toCategory: "").
+    // Task.statusCategory has no such member — a task always has one of the three —
+    // so the message this posts must not repeat the "" verbatim.
+    const statusTargets = vi.fn(async () => [
+      { id: "9", toName: "Somewhere", toCategory: "" as const, fields: [] },
+    ]);
+    const moveTo = vi.fn(async () => {});
+    const { view, posted } = await mountWith(withProvider({ statusTargets, moveTo }));
+    answerPicks(pickFirst);
+    await view.changeStatus("FX-1");
+    expect(posted).toContainEqual({
+      type: "statusChanged", key: "FX-1", status: "Somewhere", category: "new", removed: false,
+    });
+  });
+
   it("never asks the source for the shipped default lens it cannot answer", async () => {
     // agentFlow.defaultFilter ships as "mysprint", and this source has no sprints.
     vi.mocked(getConfig).mockReturnValue({ ...CFG, defaultFilter: "mysprint" });

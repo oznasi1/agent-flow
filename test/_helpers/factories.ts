@@ -1,13 +1,13 @@
 import { vi } from "vitest";
 import type * as vscode from "vscode";
 import { ExtensionMode } from "../_mocks/vscode";
-import type { JiraTask, ServiceRef } from "../../src/types";
+import type { Task, ServiceRef } from "../../src/types";
 import type { JiraAuth } from "../../src/tasks/jira/auth";
 
 // ── domain factories ────────────────────────────────────────────────────────
 
-/** A JiraTask with sensible defaults; override any field. */
-export function mkTask(overrides: Partial<JiraTask> = {}): JiraTask {
+/** A Task with sensible defaults; override any field. */
+export function mkTask(overrides: Partial<Task> = {}): Task {
   const key = overrides.key ?? "ASM-1";
   return {
     key,

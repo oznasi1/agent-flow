@@ -28,7 +28,7 @@ import { canon } from "./engine/paths";
 import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PrEntry, PrEntryMap, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
 
 const POLL_MS = 6000;
-const JIRA_TTL_MS = 30_000;
+const TICKET_TTL_MS = 30_000;
 
 /** The footer note per reason PR facts are off. Naming the actual gap matters:
  * `gh` living somewhere the extension host's PATH cannot see it is by far the
@@ -57,7 +57,7 @@ export class DeckPanel {
   private readonly disposables: vscode.Disposable[] = [];
   private timer: ReturnType<typeof setInterval> | undefined;
   private liveSignal = true;
-  private readonly jiraCache = new Map<string, { at: number; status: string | null; category: string | null }>();
+  private readonly ticketCache = new Map<string, { at: number; status: string | null; category: string | null }>();
   /** The last refresh's synthetic runs for places no tracked run claimed — cleared
    * and repopulated on every rebuild. A local card has no record on disk, so this
    * is the only place `run(key)` can resolve one for Open and Diff. */
@@ -563,16 +563,16 @@ export class DeckPanel {
     }
   }
 
-  private async jiraStatus(key: string): Promise<{ status: string | null; category: string | null } | null> {
-    const hit = this.jiraCache.get(key);
-    if (hit && Date.now() - hit.at < JIRA_TTL_MS) return { status: hit.status, category: hit.category };
+  private async ticketStatus(key: string): Promise<{ status: string | null; category: string | null } | null> {
+    const hit = this.ticketCache.get(key);
+    if (hit && Date.now() - hit.at < TICKET_TTL_MS) return { status: hit.status, category: hit.category };
     try {
       const s = await this.connector.provider().status(key);
-      this.jiraCache.set(key, { at: Date.now(), ...s });
+      this.ticketCache.set(key, { at: Date.now(), ...s });
       return s;
     } catch (e) {
       if (e instanceof TaskAuthError) return null; // git backbone still renders
-      this.log(`deck: jira status ${key} failed: ${e}`);
+      this.log(`deck: ticket status ${key} failed: ${e}`);
       return hit ? { status: hit.status, category: hit.category } : null;
     }
   }
@@ -644,19 +644,19 @@ export class DeckPanel {
     // One round trip per run, all at once. Serially this was the bulk of a cold
     // refresh, and back then every Forget waited on the whole pass before its card
     // left the board — the webview now drops that card optimistically, but the pass
-    // is still what the board's next authoritative state waits on. jiraStatus owns
+    // is still what the board's next authoritative state waits on. ticketStatus owns
     // its own errors, so this can never reject; run keys are unique, so concurrent
     // calls never duplicate a cache miss.
     // ticketKeyFor, not run.key: a run saved under its place-hash (Track it, when
     // the inferred key already belonged to another run) carries its ticket only
     // in its url — polling run.key there would 404 forever, every tick.
-    const jiras = await Promise.all(
-      all.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(ticketKeyFor(run, this.connector)) : null)),
+    const tickets = await Promise.all(
+      all.map((run) => (authed && isTicketRun(run) ? this.ticketStatus(ticketKeyFor(run, this.connector)) : null)),
     );
     const out: RunStatus[] = [];
     let stale = 0;
     for (const [i, run] of all.entries()) {
-      const jira = jiras[i];
+      const ticket = tickets[i];
       const stored = this.prFacts ? readPrEntries(defaultPrFactsDir(), run.key) : {};
       // A repo on its default branch is filtered out here as well as below, so a
       // stale entry written before this rule existed stays inert on disk rather
@@ -678,7 +678,7 @@ export class DeckPanel {
         }
       }
       const status = buildRunStatus({
-        run, jira, projectsRoot, nowMs: now,
+        run, ticket, projectsRoot, nowMs: now,
         liveSignal: this.liveSignal, openIdentities, prs,
         agents: agentsByKey.get(run.key) ?? [],
       });
@@ -767,7 +767,7 @@ export class DeckPanel {
     return retireVerdict({
       run: s.run,
       repos: s.repos,
-      jiraCategory: s.jiraCategory,
+      ticketCategory: s.ticketCategory,
       prs: s.prs,
       hasLiveSession: s.run.repos.some((r) => livePlaces.has(canon(r.path))),
       prsAuthoritative: this.prFacts,
@@ -813,7 +813,7 @@ export class DeckPanel {
     return retireVerdict({
       run,
       repos,
-      jiraCategory: null,
+      ticketCategory: null,
       prs: {},
       hasLiveSession: run.repos.some((r) => livePlaces.has(canon(r.path))),
       prsAuthoritative: true,

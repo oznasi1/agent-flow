@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, matchesStatus, moveKey, railClass } from "../../src/webview/helpers";
-import type { Filter } from "../../src/types";
+import type { Filter, Task } from "../../src/types";
 import { mkTask } from "../_helpers/factories";
 
 const tasks = (...keys: string[]) => keys.map((k) => mkTask({ key: k }));
@@ -54,7 +54,7 @@ describe("isTopPriority", () => {
 });
 
 describe("deriveStatuses", () => {
-  const s = (name: string, category: string) => mkTask({ status: name, statusCategory: category });
+  const s = (name: string, category: Task["statusCategory"]) => mkTask({ status: name, statusCategory: category });
 
   it("returns the distinct statuses present in the pool", () => {
     const got = deriveStatuses([s("To Do", "new"), s("To Do", "new"), s("In Progress", "indeterminate")]);

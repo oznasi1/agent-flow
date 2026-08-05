@@ -71,6 +71,10 @@ describe("runSetup", () => {
     expect(c.signIn).toHaveBeenCalledTimes(1);
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBe(true);
     expect(refresh).toHaveBeenCalledTimes(1);
+    // The diagnostic must still name the connector's scope (e.g. a Jira project
+    // key), not just the repos root — setup.ts no longer holds that value itself,
+    // so it has to come from the connector's own info().
+    expect(log).toHaveBeenCalledWith("setup: config saved (board FX, root ~/code)");
   });
 
   it("does not mark setup complete when the connector's configure is cancelled", async () => {

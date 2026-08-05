@@ -87,58 +87,58 @@ describe("buildRunStatus", () => {
   afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
   it("combines a live working agent + in-progress Jira into the In-progress column", () => {
-    const s = buildRunStatus({ run, jira: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW, liveSignal: true });
+    const s = buildRunStatus({ run, ticket: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW, liveSignal: true });
     expect(s.column).toBe("progress");
     expect(s.agent.state).toBe("working");
     expect(s.repos[0].dirty).toBe(true);
   });
 
   it("keeps the git backbone when the live signal is off (agent unknown)", () => {
-    const s = buildRunStatus({ run, jira: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW, liveSignal: false });
+    const s = buildRunStatus({ run, ticket: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW, liveSignal: false });
     expect(s.agent.state).toBe("unknown");
     expect(s.repos[0].dirty).toBe(true);
     expect(s.column).toBe("progress");
   });
 
   it("puts a Jira-done run in Done despite a working agent", () => {
-    const s = buildRunStatus({ run, jira: { status: "Done", category: "done" }, projectsRoot: projRoot, nowMs: NOW, liveSignal: true });
+    const s = buildRunStatus({ run, ticket: { status: "Done", category: "done" }, projectsRoot: projRoot, nowMs: NOW, liveSignal: true });
     expect(s.column).toBe("done");
   });
 
   it("still renders the backbone with no Jira info", () => {
-    const s = buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true });
+    const s = buildRunStatus({ run, ticket: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true });
     expect(s.repos[0].name).toBe("repo");
-    expect(s.jiraStatus).toBeNull();
+    expect(s.ticketStatus).toBeNull();
   });
 
   it("marks windowOpen when the run's target is an open window identity", () => {
     const ids = new Set([fs.realpathSync(repoPath)]);
-    const s = buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true, openIdentities: ids });
+    const s = buildRunStatus({ run, ticket: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true, openIdentities: ids });
     expect(s.windowOpen).toBe(true);
   });
 
   it("leaves windowOpen false when no identity matches", () => {
-    const s = buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true, openIdentities: new Set(["/somewhere/else"]) });
+    const s = buildRunStatus({ run, ticket: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true, openIdentities: new Set(["/somewhere/else"]) });
     expect(s.windowOpen).toBe(false);
   });
 
   it("defaults windowOpen to false when no identities are passed", () => {
-    expect(buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true }).windowOpen).toBe(false);
+    expect(buildRunStatus({ run, ticket: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true }).windowOpen).toBe(false);
   });
 
   it("defaults prs to an empty map when none are passed", () => {
-    expect(buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true }).prs).toEqual({});
+    expect(buildRunStatus({ run, ticket: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true }).prs).toEqual({});
   });
 
   it("threads PR entries through onto the status", () => {
     const prs = entries(prFacts());
-    const s = buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true, openIdentities: new Set(), prs });
+    const s = buildRunStatus({ run, ticket: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: true, openIdentities: new Set(), prs });
     expect(s.prs).toBe(prs);
   });
 
   it("promotes a run with a conflicting PR into Needs you despite a working agent", () => {
     const s = buildRunStatus({
-      run, jira: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW,
+      run, ticket: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW,
       liveSignal: true, openIdentities: new Set(), prs: entries(prFacts({ mergeable: "conflicting" })),
     });
     expect(s.agent.state).toBe("working");
@@ -147,7 +147,7 @@ describe("buildRunStatus", () => {
 
   it("puts a run whose PR merged into Done even when Jira says in progress", () => {
     const s = buildRunStatus({
-      run, jira: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW,
+      run, ticket: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW,
       liveSignal: true, openIdentities: new Set(), prs: entries(prFacts({ state: "MERGED" })),
     });
     expect(s.column).toBe("done");
@@ -156,7 +156,7 @@ describe("buildRunStatus", () => {
   describe("buildRunStatus with open sessions", () => {
     it("is decided by the sessions, not by the newest transcript", () => {
       const s = buildRunStatus({
-        run, jira: null, projectsRoot: projRoot, nowMs: NOW,
+        run, ticket: null, projectsRoot: projRoot, nowMs: NOW,
         agents: [agent("working", NOW - 1_000), agent("needs-you", NOW - 60_000)],
       });
       expect(s.agent.state).toBe("needs-you");
@@ -166,14 +166,14 @@ describe("buildRunStatus", () => {
 
     it("keeps a card's per-repo state when no session is open for it", () => {
       // A tracked run whose agent has since exited must not drop to parked.
-      const s = buildRunStatus({ run, jira: null, projectsRoot: projRoot, nowMs: NOW, agents: [] });
+      const s = buildRunStatus({ run, ticket: null, projectsRoot: projRoot, nowMs: NOW, agents: [] });
       expect(s.agent.state).not.toBe("unknown");
       expect(s.agents).toEqual([]);
     });
 
     it("reports every session as unknown with the live signal off", () => {
       const s = buildRunStatus({
-        run, jira: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: false,
+        run, ticket: null, projectsRoot: projRoot, nowMs: NOW, liveSignal: false,
         agents: [agent("working", NOW - 1_000)],
       });
       expect(s.agent.state).toBe("unknown");
@@ -208,7 +208,7 @@ describe("buildRunStatus", () => {
         repos: [{ name: "repo", path: localRepo, isGit: true, branch: "main" }], briefPaths: [],
       };
       const s = buildRunStatus({
-        run: localRun, jira: null, projectsRoot: localProjRoot, nowMs: NOW,
+        run: localRun, ticket: null, projectsRoot: localProjRoot, nowMs: NOW,
         agents: [agent("idle", NOW - 5_000)],
       });
       // A "sessions-only when present" fallback would stop at the idle session

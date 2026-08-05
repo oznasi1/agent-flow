@@ -2,8 +2,8 @@ import { AgentState, DeckColumn, PrEntryMap } from "../types";
 
 /** Inputs to the column decision — every field observable, none required. */
 export interface BucketInput {
-  jiraCategory?: string | null; // "new" | "indeterminate" | "done"
-  jiraStatus?: string | null; // status name, e.g. "In Review"
+  ticketCategory?: string | null; // "new" | "indeterminate" | "done"
+  ticketStatus?: string | null; // status name, e.g. "In Review"
   agentState?: AgentState;
   prOpen?: boolean; // an open, non-draft PR exists
   prBlocked?: boolean; // a PR needs a human decision: CI, changes requested, or a conflict
@@ -32,10 +32,10 @@ function isReviewStatus(name?: string | null): boolean {
  * enforces it.
  */
 export function deriveBucket(i: BucketInput): DeckColumn {
-  if (i.prMerged || i.jiraCategory === "done") return "done";
+  if (i.prMerged || i.ticketCategory === "done") return "done";
   if (i.agentState === "needs-you" || i.prBlocked) return "needs";
   if (i.agentState === "working") return "progress";
-  if (i.prOpen || isReviewStatus(i.jiraStatus)) return "review";
+  if (i.prOpen || isReviewStatus(i.ticketStatus)) return "review";
   return "progress";
 }
 

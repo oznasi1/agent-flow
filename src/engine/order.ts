@@ -1,8 +1,8 @@
-import { JiraTask } from "../types";
+import { Task } from "../types";
 
 /** Order tasks so keys present in `saved` come first (in saved order),
  *  then any remaining tasks in their incoming (server) order. Pure. */
-export function sortBySavedOrder(tasks: JiraTask[], saved: string[]): JiraTask[] {
+export function sortBySavedOrder(tasks: Task[], saved: string[]): Task[] {
   const rank = new Map(saved.map((k, i) => [k, i] as const));
   const ranked = tasks
     .filter((t) => rank.has(t.key))

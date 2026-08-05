@@ -56,9 +56,13 @@ export async function runSetup(
   const cleanRoot = reposRoot.trim().replace(/\/+$/, "");
   await updateGlobal("reposRoot", cleanRoot);
   await updateGlobal("workspaceDir", cleanRoot);
-  log(`setup: config saved (root ${cleanRoot})`);
+  // `info()` re-reads settings, so this sees the scope connector.configure() just
+  // wrote (e.g. the Jira project key) — generic wording since this file no longer
+  // knows the source, but the value itself must survive the rename off `project`.
+  const info = connector.info();
+  log(`setup: config saved (${info.scopeNoun} ${info.scopeValue}, root ${cleanRoot})`);
 
-  const label = connector.info().label;
+  const label = info.label;
   if (!(await connector.signIn())) {
     vscode.window.showWarningMessage(
       `Agent Flow Deck: settings saved, but ${label} sign-in was cancelled. Use "Sign in to ${label}" to finish.`,

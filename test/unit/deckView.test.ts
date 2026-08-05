@@ -228,8 +228,8 @@ const mkRun = (over: Partial<Run> = {}): Run => ({
   key: "ASM-1", summary: "do it", url: "https://jira/ASM-1", createdAt: Date.now(), mode: "per-window",
   repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }], briefPaths: [], ...over,
 });
-const statusFor = (run: Run, jiraCategory: string | null = null): RunStatus => ({
-  run, column: "progress", jiraStatus: null, jiraCategory, repos: [],
+const statusFor = (run: Run, ticketCategory: string | null = null): RunStatus => ({
+  run, column: "progress", ticketStatus: null, ticketCategory, repos: [],
   agent: { state: "unknown", lastActivityMs: null, slug: null }, windowOpen: false, prs: {}, agents: [],
 });
 const reviewFixture = (): ReviewRequest => ({
@@ -329,10 +329,10 @@ beforeEach(() => {
   h.taskDiffBase.mockClear().mockReturnValue("base-sha");
   h.taskChangedFiles.mockClear().mockReturnValue([]);
   // Threads the Jira answer through the way the real buildRunStatus does. The
-  // retire sweep reads `status.jiraCategory`, so a stub that dropped it would
+  // retire sweep reads `status.ticketCategory`, so a stub that dropped it would
   // make "this ticket is done" untestable from the outside.
   h.buildRunStatus.mockReset().mockImplementation(
-    (i: { run: Run; jira: { category: string | null } | null }) => statusFor(i.run, i.jira?.category ?? null),
+    (i: { run: Run; ticket: { category: string | null } | null }) => statusFor(i.run, i.ticket?.category ?? null),
   );
   h.removeRun.mockClear();
   h.writeRun.mockClear();
@@ -434,7 +434,7 @@ describe("DeckPanel", () => {
     const runsPost = posts(p).reverse().find((m) => m.type === "deck:runs");
     expect(runsPost.liveSignal).toBe(false);
     expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({
-      jira: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
+      ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
       liveSignal: false, openIdentities: expect.any(Set), prs: {},
     }));
   });
@@ -590,7 +590,7 @@ describe("DeckPanel", () => {
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });
     // Asserted by argument, not by count: the constructor's unawaited first refresh
-    // races this one, and whether the second finds a warm jiraCache depends on
+    // races this one, and whether the second finds a warm ticketCache depends on
     // microtask ordering. Which keys are looked up at all is the actual contract.
     expect(h.getStatus).toHaveBeenCalledWith("ASM-1");
     expect(h.getStatus).not.toHaveBeenCalledWith("explore-retry-logic");
@@ -653,14 +653,14 @@ describe("DeckPanel", () => {
     await p._fire({ type: "deck:refresh" });
     expect(h.getStatus).toHaveBeenCalledWith("ASM-1");
     expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({
-      jira: { status: "In Review", category: "indeterminate" },
+      ticket: { status: "In Review", category: "indeterminate" },
       projectsRoot: expect.any(String), nowMs: expect.any(Number),
       liveSignal: true, openIdentities: expect.any(Set), prs: {},
     }));
   });
 
   it("degrades to the git backbone on a Jira auth error, without logging it as a failure", async () => {
-    // `jira: null` alone can't tell this branch apart from the generic catch
+    // `ticket: null` alone can't tell this branch apart from the generic catch
     // right below it: with no cache primed, that branch's own fallback
     // (`return hit ? … : null`) also lands on null, so the assertion below would
     // pass even if the `instanceof TaskAuthError` check were deleted outright.
@@ -675,10 +675,10 @@ describe("DeckPanel", () => {
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });
     expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({
-      jira: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
+      ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
       liveSignal: true, openIdentities: expect.any(Set), prs: {},
     }));
-    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("jira status"));
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("ticket status"));
   });
 
   it("keeps rendering when a Jira lookup fails for another reason", async () => {
@@ -1044,8 +1044,8 @@ describe("Clear stale", () => {
 
   it("still respects the veto — dirty work is never cleared in bulk", async () => {
     landedRun("ASM-DIRTY");
-    h.buildRunStatus.mockImplementation((i: { run: Run; jira: { category: string | null } | null }) => ({
-      ...statusFor(i.run, i.jira?.category ?? null),
+    h.buildRunStatus.mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
       repos: [{ name: "svc", path: "/r/svc", branch: "b", dirty: true, ahead: 0, added: 1, removed: 0, files: 1 }],
     }));
     show(true);
@@ -1263,10 +1263,10 @@ describe("DeckPanel PR facts", () => {
     show();
     await settled();
     expect(h.buildRunStatus).toHaveBeenCalledWith(
-      // `show()` defaults to unauthenticated, so jira is null here — `objectContaining`
+      // `show()` defaults to unauthenticated, so ticket is null here — `objectContaining`
       // still requires this key to match the literal value.
       expect.objectContaining({
-        jira: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
+        ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
         liveSignal: expect.any(Boolean), openIdentities: expect.any(Set), prs: h.prEntries,
       }),
     );
@@ -1404,11 +1404,11 @@ describe("DeckPanel PR facts", () => {
     expect(h.prFetch).not.toHaveBeenCalled();
     expect(h.probeGh).not.toHaveBeenCalled();
     expect(h.buildRunStatus).toHaveBeenCalledWith(
-      // `show()` defaults to unauthenticated, so jira is null here (see the
+      // `show()` defaults to unauthenticated, so ticket is null here (see the
       // "passes cached PR entries" test above for why `objectContaining`
       // still pins that key to the literal value).
       expect.objectContaining({
-        jira: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
+        ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
         liveSignal: expect.any(Boolean), openIdentities: expect.any(Set), prs: {},
       }),
     );
@@ -1525,7 +1525,7 @@ describe("DeckPanel PR facts", () => {
     await settled();
     expect(h.buildRunStatus).toHaveBeenCalledWith(
       expect.objectContaining({
-        jira: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
+        ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
         liveSignal: expect.any(Boolean), openIdentities: expect.any(Set), prs: { svc: svcEntry },
       }),
     );
