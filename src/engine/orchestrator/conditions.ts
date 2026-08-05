@@ -28,16 +28,27 @@ function agentsHere(c: CondContext) {
   return c.status.agents.filter((a) => a.repo === undefined || a.repo === c.repo);
 }
 
+/** Mirrors `transcript.ts`'s `UNKNOWN_ACTIVITY`. Not imported from there: that
+ * module reads transcripts off disk and imports `fs` to do it, and this module
+ * must stay I/O-free — pulling in that import for one constant would defeat the
+ * point. */
+const UNKNOWN_ACTIVITY: AgentActivity = { state: "unknown", lastActivityMs: null, slug: null };
+
 /** Live state of this place, not of the whole run: a two-worktree run can have one
  * agent working and one waiting on you, and a rule about one must not read the
- * other. Falls back to the run-level aggregate when nothing is attached here.
+ * other. Falls back to the run-level aggregate only when the run has a single
+ * repo — where that aggregate genuinely IS this place's state, because there is
+ * nowhere else for it to have come from. A run with more than one repo and
+ * nothing attached here reads as unknown instead: `status.agent` is `mostActive`
+ * over every repo in the run (`buildRunStatus`), so borrowing it would let a
+ * live agent in an unrelated repo answer for a place that has none.
  *
  * Exported so `evaluate.ts`'s agent-state-unknown guard reads exactly this, not
- * the unfiltered run aggregate — a place whose own repo has no agent while a
- * different repo's agent is live must still read as unknown here. */
+ * the unfiltered run aggregate. */
 export function placeActivity(c: CondContext): AgentActivity {
   const here = agentsHere(c);
-  return here.length > 0 ? mostActive(here.map((a) => a.activity)) : c.status.agent;
+  if (here.length > 0) return mostActive(here.map((a) => a.activity));
+  return c.status.run.repos.length <= 1 ? c.status.agent : UNKNOWN_ACTIVITY;
 }
 
 export function evalCond(cond: Condition, c: CondContext): boolean {
@@ -113,7 +124,15 @@ export function describeCond(cond: Condition, c: CondContext): string {
       const f = facts(c);
       if (!f) return "no PR yet";
       const { passing, pending, failing } = f.ci;
-      if (failing.length > 0) return `${failing.map((k) => k.name).join(", ")} failing`;
+      if (failing.length > 0) {
+        const names = failing.map((k) => k.name).join(", ");
+        // `ci-failed`'s predicate excludes advisory-only failures (see `evalCond`
+        // above) — say so, or the drawer shows "waiting · lint failing" beside a
+        // rule that will never fire on that basis. `ci-passed`'s wording is
+        // unaffected: it genuinely will not fire either way, so "X failing" is
+        // already the right answer for it.
+        return cond.kind === "ci-failed" && f.ciAdvisory ? `${names} failing (advisory)` : `${names} failing`;
+      }
       if (pending > 0) return `CI running, ${passing} of ${passing + pending}`;
       return passing > 0 ? `${passing} checks passing` : "no checks yet";
     }
@@ -168,7 +187,19 @@ export function describeCond(cond: Condition, c: CondContext): string {
       if (!g) return "repo not found";
       return g.ahead === 0 ? "nothing to push" : `${g.ahead} to push`;
     }
-    case "ticket-done":
+    case "ticket-done": {
+      // The predicate reads the category, not this status text (see `evalCond`
+      // above), and the two can disagree: a workflow's status can say "Done"
+      // under a category that is not `done` yet, or the category can already
+      // be `done` with no status text set at all. Reflect the category
+      // whenever the status text's own claim about "done-ness" does not match
+      // it, so the drawer never shows "Done" beside a rule that cannot fire —
+      // or the reverse.
+      const status = c.status.jiraStatus ?? "no Jira status";
+      const looksDone = /done/i.test(status);
+      const isDone = c.status.jiraCategory === "done";
+      return looksDone === isDone ? status : `${status} (${c.status.jiraCategory ?? "no category"})`;
+    }
     case "ticket-status-is":
       return c.status.jiraStatus ?? "no Jira status";
   }

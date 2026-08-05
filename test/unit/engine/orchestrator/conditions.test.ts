@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evalCond, CondContext, describeCond } from "../../../../src/engine/orchestrator/conditions";
+import { evalCond, CondContext, describeCond, placeActivity } from "../../../../src/engine/orchestrator/conditions";
 import { Condition } from "../../../../src/engine/orchestrator/model";
 import { AgentState, CardAgent, PrEntryMap, PrFacts, RepoGit, Run, RunStatus } from "../../../../src/types";
 
@@ -115,9 +115,37 @@ describe("evalCond — agent state", () => {
     expect(met({ kind: "agent-ended-turn" }, ctx({ agents: [cardAgent("needs-you", NOW, "elsewhere")] }))).toBe(false);
   });
 
-  it("falls back to the run-level state when no agent is attached to the place", () => {
+  it("falls back to the run-level state when no agent is attached to the place, for a single-repo run", () => {
     const c = ctx({ agents: [], agent: { state: "needs-you", lastActivityMs: NOW, slug: null } });
     expect(met({ kind: "agent-ended-turn" }, c)).toBe(true);
+  });
+
+  it("does NOT fall back to the run-level aggregate for a multi-repo run — that aggregate can be a different repo's agent entirely", () => {
+    // A two-repo run ("api", "web") with a live needs-you session in "web" only.
+    // The run-level aggregate (`status.agent`, `mostActive` over every repo —
+    // see `buildRunStatus`) reads "needs-you" because of the web agent, but a
+    // place node bound to "api" has nothing of its own and must read as
+    // unknown, not borrow web's state and fire an "api" launch.
+    const multiRepoRun: Run = {
+      ...run,
+      repos: [{ name: "api", path: "/r/api", isGit: true }, { name: "web", path: "/r/web", isGit: true }],
+    };
+    const c: CondContext = {
+      repo: "api",
+      nowMs: NOW,
+      status: {
+        run: multiRepoRun, column: "progress", jiraStatus: null, jiraCategory: null,
+        repos: [git({ name: "api" }), git({ name: "web" })],
+        agent: { state: "needs-you", lastActivityMs: NOW, slug: null }, // the web agent, aggregated
+        windowOpen: false, prs: {},
+        agents: [cardAgent("needs-you", NOW, "web")],
+      },
+    };
+    expect(met({ kind: "agent-ended-turn" }, c)).toBe(false);
+    expect(placeActivity(c).state).toBe("unknown");
+    // The same place simultaneously reads no-agent-left as true — consistent
+    // readings of one place, not two contradictory ones.
+    expect(met({ kind: "no-agent-left" }, c)).toBe(true);
   });
 
   it("agent-idle-over compares against the parameterised window", () => {
@@ -200,13 +228,45 @@ describe("describeCond", () => {
     expect(describeCond({ kind: "ci-failed" }, c)).toBe("build, lint failing");
   });
 
+  it("marks ci-failed's description advisory when that is the only reason it won't fire, but leaves ci-passed's wording alone", () => {
+    // Same fixture, both kinds: ci-failed's predicate is false here (advisory
+    // failures don't block a merge), and its description must say so or the
+    // drawer shows "waiting · lint failing" beside a rule that will never fire
+    // on that basis. ci-passed's predicate is also false here, for the same
+    // "X failing" reason either way, so its wording is correct unchanged.
+    const c = ctx({}, pr({ ci: { passing: 9, pending: 0, failing: [{ name: "flaky-e2e", url: "" }] }, ciAdvisory: true }));
+    expect(describeCond({ kind: "ci-failed" }, c)).toBe("flaky-e2e failing (advisory)");
+    expect(describeCond({ kind: "ci-passed" }, c)).toBe("flaky-e2e failing");
+  });
+
   it("counts passing checks when nothing is failing or pending", () => {
     expect(describeCond({ kind: "ci-passed" }, ctx({}, pr({ ci: { passing: 7, pending: 0, failing: [] } }))))
       .toBe("7 checks passing");
   });
 
+  it("says no checks yet when nothing has reported at all", () => {
+    const c = ctx({}, pr({ ci: { passing: 0, pending: 0, failing: [] } }));
+    expect(describeCond({ kind: "ci-passed" }, c)).toBe("no checks yet");
+    expect(describeCond({ kind: "ci-failed" }, c)).toBe("no checks yet");
+  });
+
   it("says so when there is no PR to describe", () => {
     expect(describeCond({ kind: "pr-merged" }, ctx())).toBe("no PR yet");
+  });
+
+  it("says so when there is no PR to describe, for every other PR-gated condition", () => {
+    expect(describeCond({ kind: "ci-passed" }, ctx())).toBe("no PR yet");
+    expect(describeCond({ kind: "review-approved" }, ctx())).toBe("no PR yet");
+    expect(describeCond({ kind: "threads-resolved" }, ctx())).toBe("no PR yet");
+    expect(describeCond({ kind: "pr-conflicting" }, ctx())).toBe("no PR yet");
+  });
+
+  it("describes a closed (not merged) PR", () => {
+    expect(describeCond({ kind: "pr-merged" }, ctx({}, pr({ state: "CLOSED" })))).toBe("PR closed");
+  });
+
+  it("describes a PR with no review activity yet", () => {
+    expect(describeCond({ kind: "review-approved" }, ctx({}, pr({ review: "none" })))).toBe("no review yet");
   });
 
   it("describes a PR's state and review", () => {
@@ -236,6 +296,18 @@ describe("describeCond", () => {
       .toBe("agent state unknown");
   });
 
+  it("describes agent-idle-over while the agent is still working, not idle", () => {
+    expect(describeCond({ kind: "agent-idle-over", minutes: 10 }, ctx({ agents: [cardAgent("working", NOW, REPO)] })))
+      .toBe("working");
+  });
+
+  it("describes agent-idle-over the same as agent-ended-turn for needs-you and unknown", () => {
+    expect(describeCond({ kind: "agent-idle-over", minutes: 10 }, ctx({ agents: [cardAgent("needs-you", NOW, REPO)] })))
+      .toBe("ended turn");
+    expect(describeCond({ kind: "agent-idle-over", minutes: 10 }, ctx({ agents: [cardAgent("unknown", null, REPO)] })))
+      .toBe("agent state unknown");
+  });
+
   it("describes how many agents are in the place", () => {
     expect(describeCond({ kind: "no-agent-left" }, ctx({ agents: [] }))).toBe("no agent");
     expect(describeCond({ kind: "no-agent-left" }, ctx({ agents: [cardAgent("idle", NOW, REPO)] }))).toBe("1 agent open");
@@ -250,11 +322,36 @@ describe("describeCond", () => {
     expect(describeCond({ kind: "nothing-to-push" }, ctx({ repos: [git({ ahead: 2 })] }))).toBe("2 to push");
     expect(describeCond({ kind: "nothing-to-push" }, ctx({ repos: [git({ ahead: 0 })] }))).toBe("nothing to push");
     expect(describeCond({ kind: "tree-clean" }, ctx({ repos: [git({ name: "elsewhere" })] }))).toBe("repo not found");
+    expect(describeCond({ kind: "nothing-to-push" }, ctx({ repos: [git({ name: "elsewhere" })] }))).toBe("repo not found");
   });
 
   it("describes Jira", () => {
     expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: "In Progress" }))).toBe("In Progress");
     expect(describeCond({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: "In Progress" }))).toBe("In Progress");
     expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: null }))).toBe("no Jira status");
+  });
+
+  it("ticket-done reflects the category when the status text disagrees with it — same class of bug as ci-failed/ci-passed above", () => {
+    // The predicate reads jiraCategory, not jiraStatus. A status literally
+    // named "Done" under a non-"done" category must not describe as plain
+    // "Done" (eval is false), and a "done" category with no status text must
+    // not describe as plain "no Jira status" (eval is true).
+    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: "Done", jiraCategory: "indeterminate" })))
+      .toBe("Done (indeterminate)");
+    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: null, jiraCategory: "done" })))
+      .toBe("no Jira status (done)");
+    // Agreement needs no adornment.
+    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: "In Progress", jiraCategory: "indeterminate" })))
+      .toBe("In Progress");
+    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: "Done", jiraCategory: "done" })))
+      .toBe("Done");
+    // A mismatch with no category at all still says so, rather than omitting it.
+    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: "Done", jiraCategory: null })))
+      .toBe("Done (no category)");
+  });
+
+  it("ticket-status-is falls back to 'no Jira status' too, same as ticket-done", () => {
+    expect(describeCond({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: null })))
+      .toBe("no Jira status");
   });
 });

@@ -135,4 +135,14 @@ describe("tidy", () => {
   it("is empty for an empty flow", () => {
     expect(tidy(flowWith([], []))).toEqual([]);
   });
+
+  it("ignores an edge referencing a node not in the flow, and still places the real nodes finitely", () => {
+    const out = tidy(flowWith([node("a"), node("b")],
+      [edge("e1", "a", "b"), edge("e2", "a", "ghost"), edge("e3", "ghost", "b")]));
+    expect(out).toHaveLength(2);
+    for (const n of out) {
+      expect(Number.isFinite(n.x)).toBe(true);
+      expect(Number.isFinite(n.y)).toBe(true);
+    }
+  });
 });

@@ -109,6 +109,31 @@ describe("evaluateFlow — nodes it cannot evaluate", () => {
     expect(r.blocked).toEqual([{ nodeId: "a", reason: "agent-state-unknown" }]);
   });
 
+  it("blocks an agent condition for a multi-repo run whose place has no agent, even when the run-level aggregate is a live needs-you from another repo", () => {
+    // The bug this pins: `status.agent` is `mostActive` over EVERY repo in the
+    // run (`buildRunStatus`). A two-repo run ("api", "web") with a live
+    // needs-you session in "web" only, and a place node bound to "api", must
+    // not fire "api"'s launch edge just because "web" ended its turn — that is
+    // a wrong, paid launch. It must block with `agent-state-unknown` instead.
+    const apiAgent: CardAgent = {
+      session: { pid: 1, sessionId: "s-web", cwd: "/r/web", startedAt: 1, name: "af-1" },
+      activity: { state: "needs-you", lastActivityMs: NOW, slug: null },
+      repo: "web",
+    };
+    const s = status("ASM-1");
+    const multiRepoStatus: RunStatus = {
+      ...s,
+      run: { ...s.run, repos: [{ name: "api", path: "/r/api", isGit: true }, { name: "web", path: "/r/web", isGit: true }] },
+      agent: { state: "needs-you", lastActivityMs: NOW, slug: null }, // web's activity, aggregated
+      agents: [apiAgent],
+    };
+    const flow = flowWith([{ ...place("a", "ASM-1"), repo: "api" }, notify("z")],
+      [edge("e1", "a", "z", { cond: { kind: "agent-ended-turn" }, action: "launch", mode: "tdd" })]);
+    const r = run(flow, [multiRepoStatus]);
+    expect(r.fired).toEqual([]);
+    expect(r.blocked).toEqual([{ nodeId: "a", reason: "agent-state-unknown" }]);
+  });
+
   it("does not block a non-agent condition when the agent state is unknown", () => {
     const flow = flowWith([place("a", "ASM-1"), notify("z")], [edge("e1", "a", "z")]);
     const r = run(flow, [status("ASM-1", { merged: true, unknownAgent: true })]);

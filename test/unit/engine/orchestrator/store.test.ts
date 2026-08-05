@@ -113,6 +113,45 @@ describe("readFlows — a store it cannot trust", () => {
     });
     expect(readFlows(io, DIR).map((f) => f.id)).toEqual(["b", "a"]);
   });
+
+  it("skips a record whose id would escape the store directory", () => {
+    // A hand-edited (or malicious) file can claim any id. `id` is turned
+    // straight into a path by `writeFlow`/`removeFlow`, so an id like
+    // "../../../../.zshrc" must be treated as malformed, exactly like any
+    // other bad record — not accepted and handed back to a caller that will
+    // eventually round-trip it through `fileFor`.
+    const { io } = fakeIo({
+      [path.join(DIR, "evil.json")]: JSON.stringify({ ...flow(), id: "../../../../.zshrc" }),
+      [path.join(DIR, "slash.json")]: JSON.stringify({ ...flow(), id: "a/b" }),
+      [path.join(DIR, "f1.json")]: JSON.stringify(flow()),
+    });
+    expect(readFlows(io, DIR).map((f) => f.id)).toEqual(["f1"]);
+  });
+
+  it("readFile throwing for one file (e.g. EACCES, or removed between readDir and readFile) still returns every other flow", () => {
+    const { io } = fakeIo({ [path.join(DIR, "f1.json")]: JSON.stringify(flow()) });
+    const original = io.readFile;
+    io.readFile = (p) => {
+      if (p.endsWith("bad.json")) throw new Error("EACCES");
+      return original(p);
+    };
+    // "bad.json" is in readDir's listing but throws on readFile.
+    const originalReadDir = io.readDir;
+    io.readDir = (dir) => [...originalReadDir(dir), "bad.json"];
+    expect(readFlows(io, DIR).map((f) => f.id)).toEqual(["f1"]);
+  });
+});
+
+describe("writeFlow / removeFlow — refuse an id that could escape the store directory", () => {
+  it("writeFlow throws rather than writing outside dir", () => {
+    const { io } = fakeIo();
+    expect(() => writeFlow(io, DIR, flow({ id: "../../../../.zshrc" }))).toThrow();
+  });
+
+  it("removeFlow throws rather than deleting outside dir", () => {
+    const { io } = fakeIo();
+    expect(() => removeFlow(io, DIR, "../../../../.zshrc")).toThrow();
+  });
 });
 
 describe("removeFlow", () => {

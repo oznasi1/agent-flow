@@ -5,7 +5,7 @@
 // and the cap testable without launching a window.
 import { RunStatus } from "../../types";
 import { CondContext, evalCond, placeActivity } from "./conditions";
-import { Flow, FlowEdge, findNode, incomingEdges, isPlace } from "./model";
+import { Condition, Flow, FlowEdge, findNode, incomingEdges, isPlace } from "./model";
 
 /** How many acting edges (`launch` or `seed`) may fire in one pass. A badly wired
  * graph should not be able to storm your window manager; the remainder is reported
@@ -17,7 +17,7 @@ export const MAX_LAUNCHES_PER_PASS = 3;
  * counts sessions in the registry, which is populated whether or not any transcript
  * is read — and it is exactly the condition that should fire when nothing is there,
  * so blocking it on an unknown state would invert it. */
-const AGENT_CONDS = new Set(["agent-ended-turn", "agent-idle-over"]);
+const AGENT_CONDS: Set<Condition["kind"]> = new Set(["agent-ended-turn", "agent-idle-over"]);
 
 export interface EvalInput {
   flow: Flow;
@@ -82,9 +82,11 @@ export function evaluateFlow(i: EvalInput): EvalResult {
     }
     const c: CondContext = { status, repo: from.repo, nowMs: i.nowMs };
     // Read the same per-place activity `evalCond` itself will use — not the
-    // unfiltered run aggregate. A place whose own repo has no readable agent
-    // must block even while a different repo's agent in the same run is live;
-    // reading the run-level aggregate here let that case slip through silently.
+    // unfiltered run aggregate. `placeActivity` only borrows the run aggregate
+    // for a single-repo run, where it genuinely IS this place's state; for any
+    // other run, a place whose own repo has no readable agent reads as unknown
+    // here even while a different repo's agent in the same run is live, and
+    // this guard blocks on exactly that.
     if (AGENT_CONDS.has(e.cond.kind) && placeActivity(c).state === "unknown") {
       note(from.id, "agent-state-unknown");
       return undefined;
