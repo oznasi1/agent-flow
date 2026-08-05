@@ -120,7 +120,7 @@ export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as c
 export interface SettingsSnapshot {
   workspace_mode: "auto" | "multiroot" | "per-window" | "ask" | "invalid";
   open_in: "ask" | "new-window" | "this-window" | "pick-existing" | "invalid";
-  explore_mode: "ask" | "jiraTicket" | "knowledge" | "debug" | "general" | "verify" | "invalid";
+  explore_mode: "ask" | "jiraTicket" | "knowledge" | "debug" | "general" | "supervise" | "verify" | "invalid";
   worktree: "ask" | "always" | "never" | "invalid";
   remote_control: "off" | "on" | "ask" | "invalid";
   default_filter: "unassigned" | "mysprint" | "mine" | "sprint" | "backlog" | "invalid";
