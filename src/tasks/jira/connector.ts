@@ -84,10 +84,20 @@ class JiraConnector implements TaskConnector {
     return new JiraProvider(new JiraClient(cfg.baseUrl, cfg.project, this.auth));
   }
 
-  /** Ordered on purpose: the scope lookup is skipped when auth failed, because
-   * its answer would be meaningless and the call cannot succeed. A signed-out
-   * user should see one problem, not a cascade of two. */
+  /** No stored credentials means nothing to diagnose: a user who has never
+   * signed in gets a neutral Doctor `skip` — see the `probe()` contract on
+   * `TaskConnector` (src/tasks/provider.ts) — not a manufactured auth failure.
+   * This gate is self-contained: it calls this connector's own
+   * `isAuthenticated()` rather than trusting a caller to check first, so `{}`
+   * (both members `undefined`, i.e. "not probed") stays reachable even if a
+   * future caller forgets to gate on `hasCredentials` before calling this.
+   *
+   * Beyond that: the scope lookup is skipped whenever auth failed or no project
+   * is configured, because its answer would be meaningless and the call cannot
+   * succeed. A signed-out (or half-configured) user should see one problem, not
+   * a cascade of two. */
   async probe(): Promise<{ auth?: AuthProbe; scope?: ProjectProbe }> {
+    if (!(await this.isAuthenticated())) return {};
     const cfg = getConfig();
     const client = new JiraClient(cfg.baseUrl, cfg.project, this.auth);
     let auth: AuthProbe;
