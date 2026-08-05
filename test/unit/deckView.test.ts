@@ -1024,7 +1024,10 @@ describe("Clear stale", () => {
   it("counts a review run nobody is in, which has no card to clear it from", async () => {
     // Young enough that the automatic sweep leaves it alone — only the
     // gate-ignoring pass reaches it, which is the whole point of the count.
-    h.runs = [mkRun({ key: "review-svc-9", kind: "review", url: "https://github.com/o/r/pull/9" })];
+    // Give it a createdAt slightly in the past to avoid timing-dependent test flake
+    // when the verdict is computed within 1ms of run creation.
+    const reviewRunCreatedAt = Date.now() - 10;
+    h.runs = [mkRun({ key: "review-svc-9", kind: "review", url: "https://github.com/o/r/pull/9", createdAt: reviewRunCreatedAt })];
     show(true);
     await settled();
     expect(lastRunsPost().staleCount).toBe(1);
