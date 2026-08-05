@@ -499,29 +499,55 @@ git mv test/unit/jira/auth.test.ts test/unit/jira/client.test.ts \
 rmdir src/jira test/unit/jira
 ```
 
-- [ ] **Step 2: Fix every import path**
+- [ ] **Step 2: Rewrite the paths — in this order, the order matters**
 
-Depth changes by one level for sources (`../types` → `../../types`) and by one for tests (`../../src/jira/x` → `../../../src/tasks/jira/x`).
+The old location is referenced in four different syntactic contexts, not just
+`from "…"`: **`vi.mock("…")`**, **`vi.importActual("…")`**, **`typeof
+import("…")`**, and prose inside comments. A sed that only matches `from "…"`
+leaves the `vi.mock` calls in `tasksView.test.ts`, `deckView.test.ts`,
+`doctorView.deps.test.ts` and `extension.test.ts` pointing at a module that no
+longer exists — which stops those mocks applying and sends the tests at the real
+Jira client. Match the **path segment**, not the import syntax.
 
 ```bash
-# Inside the moved sources: they are one directory deeper now.
+# 2a. The moved sources sit one level deeper, so their reach into src/ grows.
+#     Only ../types is affected — client.ts's ./auth ./jql ./errors
+#     ./transitionFields are siblings and stay correct, and auth.ts's "vscode"
+#     is a module id, not a path.
 sed -i '' 's|from "\.\./types"|from "../../types"|g' src/tasks/jira/*.ts
-# Consumers at src/ root.
-sed -i '' 's|from "\./jira/|from "./tasks/jira/|g' src/*.ts
-# src/tasks/provider.ts pointed at the pre-move ../jira/… (Task 2 wrote it that
-# way because the move had not happened). Now that jira/ is its sibling, the
-# correct path is ./jira/… — this line is what makes Task 2's imports resolve.
-sed -i '' 's|from "\.\./jira/|from "./jira/|g' src/tasks/provider.ts
-# Moved tests are one directory deeper.
-sed -i '' 's|from "\.\./\.\./src/jira/|from "../../../src/tasks/jira/|g' test/unit/tasks/jira/*.ts
-# The compat test's ApiTokenAuth import.
-sed -i '' 's|from "\.\./\.\./src/jira/auth"|from "../../src/tasks/jira/auth"|g' test/unit/compat.test.ts
+
+# 2b. The moved TESTS changed depth AND path in one step: test/unit/jira/ →
+#     test/unit/tasks/jira/ is one deeper, so ../../../ becomes ../../../../.
+#     Run this BEFORE 2c, or 2c rewrites the segment and leaves the depth wrong.
+sed -i '' 's|"\.\./\.\./\.\./src/jira/|"../../../../src/tasks/jira/|g' test/unit/tasks/jira/*.ts
+
+# 2c. Every other reference, in any context. Tests reach the module by a path
+#     containing the literal `src/jira/`, so one segment substitution covers
+#     from-imports, vi.mock, importActual, typeof import and comments alike.
+grep -rl 'src/jira/' src/ test/ | xargs sed -i '' 's|src/jira/|src/tasks/jira/|g'
+
+# 2d. Consumers at src/ root import by sibling-relative path, which has no
+#     `src/` in it, so 2c did not touch them.
+grep -rl '"\./jira/' src/*.ts | xargs sed -i '' 's|"\./jira/|"./tasks/jira/|g'
+
+# 2e. src/tasks/provider.ts reached UP to ../jira/ before the move. jira/ is now
+#     its sibling. This is what makes Task 2's deliberately pre-move imports
+#     resolve.
+sed -i '' 's|"\.\./jira/|"./jira/|g' src/tasks/provider.ts
 ```
 
-- [ ] **Step 3: Find any import the sed missed**
+- [ ] **Step 3: Prove nothing still points at the old location**
 
-Run: `grep -rn "src/jira\|\"\./jira/\|\"\.\./jira/" src/ test/ ; npm run typecheck`
-Expected: no grep hits; typecheck clean. Fix any straggler by hand — `test/_helpers/factories.ts` and `test/unit/telemetry/*` are the likely ones.
+```bash
+# Any hit here is a straggler. Expect none.
+grep -rn '"\./jira/\|"\.\./jira/\|src/jira/' src/ test/
+# The moved tests must be four levels up, never three.
+grep -rn '\.\./\.\./\.\./src/tasks/jira/' test/unit/tasks/jira/
+npm run typecheck
+```
+
+Expect: no grep output from either, and a clean typecheck. A surviving
+`../../../src/tasks/jira/` in a moved test means 2c ran before 2b.
 
 - [ ] **Step 4: Run the whole suite — behaviour must be identical**
 
