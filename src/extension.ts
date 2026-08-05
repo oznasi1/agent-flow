@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import { ApiTokenAuth } from "./tasks/jira/auth";
 import { resolveConnector } from "./tasks/registry";
 import { TasksViewProvider } from "./tasksView";
 import { DeckPanel } from "./deckView";
@@ -42,13 +41,13 @@ function registerTracked<T>(
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const auth = new ApiTokenAuth(context.secrets);
+  // Created before resolveConnector: the registry's unknown-id fallback logs
+  // through it.
   const output = vscode.window.createOutputChannel("Agent Flow Deck");
   const log = (m: string) => output.appendLine(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
-  // The task panel, the Deck and Doctor all read their source through the connector
-  // seam now. `auth` stays for the consumers not yet migrated (setup, the sign-in
-  // commands); all of them read the same SecretStorage keys, so there is no state to
-  // diverge between `auth` and whatever `connector` wraps it in.
+  // Every consumer — the task panel, the Deck, Doctor, setup, and the sign-in
+  // commands — reads its source through this one connector now; there is no
+  // separate `auth` object left to diverge from it.
   const connector = resolveConnector(context, log);
   const provider = new TasksViewProvider(context, connector, log);
   log("Agent Flow Deck activated");
@@ -71,24 +70,24 @@ export function activate(context: vscode.ExtensionContext): void {
     registerTracked("agentFlow.refresh", () => provider.refresh()),
 
     registerTracked("agentFlow.signIn", async () => {
-      const ok = await auth.signIn();
+      const ok = await connector.signIn();
       if (ok) {
-        vscode.window.showInformationMessage("Agent Flow Deck: signed in to Jira.");
+        vscode.window.showInformationMessage(`Agent Flow Deck: signed in to ${connector.info().label}.`);
         await provider.refresh();
       }
       return ok;
     }),
 
     registerTracked("agentFlow.signOut", async () => {
-      await auth.signOut();
-      vscode.window.showInformationMessage("Agent Flow Deck: signed out of Jira.");
+      await connector.signOut();
+      vscode.window.showInformationMessage(`Agent Flow Deck: signed out of ${connector.info().label}.`);
     }),
 
     registerTracked("agentFlow.takeTask", async () => {
-      const exampleKey = `${getConfig().project || "ABC"}-1234`;
+      const info = connector.info();
       const key = await vscode.window.showInputBox({
-        title: "Take a Jira task",
-        prompt: `Ticket key (e.g. ${exampleKey})`,
+        title: `Take a ${info.label} task`,
+        prompt: `Ticket key (e.g. ${info.exampleKey})`,
         ignoreFocusOut: true,
       });
       // Palette entry point — the only caller that knows this Take is a command.
@@ -100,7 +99,7 @@ export function activate(context: vscode.ExtensionContext): void {
     registerTracked("agentFlow.openMarketplace", () => MarketplacePanel.show(context, log)),
 
     registerTracked("agentFlow.setup", () =>
-      runSetup(context, auth, log, () => provider.refresh()),
+      runSetup(context, connector, log, () => provider.refresh()),
     ),
 
     registerTracked("agentFlow.doctor", () => showDoctor(defaultDeps(connector, log))),
@@ -112,7 +111,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Tasks panel. Guard them so the extension always comes up.
   try {
     // First-run: offer guided setup if the extension has never been configured.
-    void maybeRunSetup(context, auth, log, () => provider.refresh());
+    void maybeRunSetup(context, connector, log, () => provider.refresh());
     // If this window was opened by a recent "take", pre-seed its Claude Code agent…
     void maybeSeedAgent(context, log);
     // …and keep watching so an already-open window seeds when a task is taken later.
@@ -141,7 +140,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // failures here can no longer be caught by the try above, so guard them locally.
     // The rejection branch keeps a rejected isAuthenticated() from becoming an
     // unhandled promise rejection.
-    void auth.isAuthenticated().then(
+    void connector.isAuthenticated().then(
       (authed) => {
         try {
           const cfg = getConfig();
@@ -149,7 +148,7 @@ export function activate(context: vscode.ExtensionContext): void {
             name: "extension_activated",
             is_first_ever: isFirstEver,
             has_jira_auth: authed,
-            is_configured: !!cfg.baseUrl && !!cfg.project,
+            is_configured: connector.isConfigured(),
             ...settingsSnapshot(cfg),
           });
         } catch (e) {

@@ -1,13 +1,18 @@
 import { describe, it, expect, vi } from "vitest";
 import * as vscode from "../_mocks/vscode";
-import { setConfig } from "../_mocks/vscode";
 import { runSetup, maybeRunSetup, SETUP_COMPLETE_KEY } from "../../src/setup";
-import { fakeContext, fakeAuth } from "../_helpers/factories";
+import { fakeContext } from "../_helpers/factories";
+import { makeFixtureConnector } from "../_helpers/fixtureConnector";
+import type { TaskConnector } from "../../src/tasks/provider";
 
 const log = vi.fn();
 
-/** Queue the values the wizard's showInputBox steps should resolve to, in order. */
-function inputs(...vals: (string | undefined)[]): void {
+/** Queue the value(s) the wizard's own showInputBox step (repos root) should
+ * resolve to, in order. The connector's own settings (site URL, project key
+ * for Jira) are collected by `connector.configure()`, not by this file — that
+ * behaviour is the connector's, and lives in its own test (e.g.
+ * test/unit/tasks/jira/connector.test.ts). */
+function stubInputBox(...vals: (string | undefined)[]): void {
   const m = vi.mocked(vscode.window.showInputBox);
   for (const v of vals) m.mockResolvedValueOnce(v);
 }
@@ -17,141 +22,179 @@ function readCfg(key: string): unknown {
   return vscode.workspace.getConfiguration("agentFlow").get(key);
 }
 
-type Validator = (v: string) => string | undefined;
-function validatorFor(step: number): Validator {
-  const opts = vi.mocked(vscode.window.showInputBox).mock.calls[step][0] as {
-    validateInput: Validator;
+/** A fixture connector with `configure`/`signIn` wrapped as spies, so a test
+ * can assert on calls without redeclaring the connector's whole shape. Override
+ * any member per test. */
+function connector(over: Partial<TaskConnector> = {}): TaskConnector {
+  return {
+    ...makeFixtureConnector(),
+    configure: vi.fn(async () => true),
+    signIn: vi.fn(async () => true),
+    ...over,
   };
-  return opts.validateInput;
 }
 
 describe("runSetup", () => {
-  it("writes config, signs in, sets the flag, and refreshes on the happy path", async () => {
-    inputs("https://acme.atlassian.net/", "abc", "~/code/");
+  it("numbers the wizard across the connector's steps plus the repos root", async () => {
+    const configure = vi.fn(async () => true);
+    const c = connector({ setupSteps: 2, configure });
+    stubInputBox("~/projects");
+
+    await runSetup(fakeContext().context, c, log);
+
+    // 2 connector steps + 1 repos root = 3 total, connector starts at 1.
+    expect(configure).toHaveBeenCalledWith(1, 3);
+  });
+
+  it("titles the repos-root box with the same total it gave the connector", async () => {
+    const c = connector({ setupSteps: 2 });
+    stubInputBox("~/projects");
+
+    await runSetup(fakeContext().context, c, log);
+
+    const opts = vi.mocked(vscode.window.showInputBox).mock.calls[0][0] as { title: string };
+    expect(opts.title).toBe("Agent Flow Deck Setup (3/3)");
+  });
+
+  it("writes the repos root and workspace dir, signs in, sets the flag, and refreshes on the happy path", async () => {
+    const c = connector();
+    stubInputBox("~/code/");
     const { context, globalState } = fakeContext();
-    const auth = fakeAuth();
     const refresh = vi.fn();
 
-    const ok = await runSetup(context, auth, log, refresh);
+    const ok = await runSetup(context, c, log, refresh);
 
     expect(ok).toBe(true);
-    expect(readCfg("jira.baseUrl")).toBe("https://acme.atlassian.net"); // trailing slash trimmed
-    expect(readCfg("jira.project")).toBe("ABC"); // upper-cased
+    expect(c.configure).toHaveBeenCalledWith(1, 2); // fixture connector: setupSteps 1 + repos root
     expect(readCfg("reposRoot")).toBe("~/code"); // trailing slash trimmed
     expect(readCfg("workspaceDir")).toBe("~/code"); // derived from reposRoot
-    expect(auth.signIn).toHaveBeenCalledTimes(1);
+    expect(c.signIn).toHaveBeenCalledTimes(1);
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBe(true);
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("aborts and writes nothing when the site URL step is cancelled", async () => {
-    inputs(undefined);
+  it("does not mark setup complete when the connector's configure is cancelled", async () => {
+    const c = connector({ configure: vi.fn(async () => false) });
     const { context, globalState } = fakeContext();
-    const auth = fakeAuth();
 
-    const ok = await runSetup(context, auth, log);
+    const ok = await runSetup(context, c, log);
 
     expect(ok).toBe(false);
-    expect(readCfg("jira.baseUrl")).toBeUndefined();
-    expect(auth.signIn).not.toHaveBeenCalled();
-    expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined();
-  });
-
-  it("aborts when the project key step is cancelled", async () => {
-    inputs("https://acme.atlassian.net", undefined);
-    const { context, globalState } = fakeContext();
-    const auth = fakeAuth();
-
-    const ok = await runSetup(context, auth, log);
-
-    expect(ok).toBe(false);
-    expect(readCfg("jira.project")).toBeUndefined();
-    expect(readCfg("jira.baseUrl")).toBeUndefined(); // nothing persisted until all 3 collected
-    expect(auth.signIn).not.toHaveBeenCalled();
+    expect(vscode.window.showInputBox).not.toHaveBeenCalled(); // never reached the repos-root step
+    expect(c.signIn).not.toHaveBeenCalled();
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined();
   });
 
   it("aborts when the repos root step is cancelled", async () => {
-    inputs("https://acme.atlassian.net", "abc", undefined);
+    const c = connector();
+    stubInputBox(undefined);
     const { context, globalState } = fakeContext();
-    const auth = fakeAuth();
 
-    const ok = await runSetup(context, auth, log);
+    const ok = await runSetup(context, c, log);
 
     expect(ok).toBe(false);
     expect(readCfg("reposRoot")).toBeUndefined();
-    expect(auth.signIn).not.toHaveBeenCalled();
+    expect(c.signIn).not.toHaveBeenCalled();
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined();
   });
 
-  it("saves config but warns and does not complete when sign-in is cancelled", async () => {
-    inputs("https://acme.atlassian.net", "abc", "~/code");
+  it("saves the repos root but warns and does not complete when sign-in is cancelled", async () => {
+    const c = connector({ signIn: vi.fn(async () => false) });
+    stubInputBox("~/code");
     const { context, globalState } = fakeContext();
-    const auth = fakeAuth();
-    vi.mocked(auth.signIn).mockResolvedValue(false);
 
-    const ok = await runSetup(context, auth, log);
+    const ok = await runSetup(context, c, log);
 
     expect(ok).toBe(false);
-    expect(readCfg("jira.baseUrl")).toBe("https://acme.atlassian.net"); // config was saved
+    expect(readCfg("reposRoot")).toBe("~/code"); // config was saved
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined(); // but not marked complete
     expect(vscode.window.showWarningMessage).toHaveBeenCalled();
   });
 
-  it("validates the wizard inputs", async () => {
-    inputs("https://acme.atlassian.net", "abc", "~/code");
-    await runSetup(fakeContext().context, fakeAuth(), log);
+  it("names the connector's own label in the sign-in-cancelled warning", async () => {
+    const fixture = makeFixtureConnector();
+    const c = connector({
+      signIn: vi.fn(async () => false),
+      info: () => ({ ...fixture.info(), label: "Acme Tracker" }),
+    });
+    stubInputBox("~/code");
 
-    const url = validatorFor(0);
-    expect(url("")).toBeTruthy();
-    expect(url("not a url")).toBeTruthy();
-    expect(url("http://x.atlassian.net")).toBeTruthy(); // must be https
-    expect(url("https://x.atlassian.net")).toBeUndefined();
+    await runSetup(fakeContext().context, c, log);
 
-    const project = validatorFor(1);
-    expect(project("  ")).toBeTruthy();
-    expect(project("ABC")).toBeUndefined();
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      'Agent Flow Deck: settings saved, but Acme Tracker sign-in was cancelled. Use "Sign in to Acme Tracker" to finish.',
+    );
+  });
 
-    const root = validatorFor(2);
-    expect(root("")).toBeTruthy();
-    expect(root("~/x")).toBeUndefined();
+  it("validates the repos-root input", async () => {
+    const c = connector();
+    stubInputBox("~/code");
+
+    await runSetup(fakeContext().context, c, log);
+
+    const opts = vi.mocked(vscode.window.showInputBox).mock.calls[0][0] as {
+      validateInput: (v: string) => string | undefined;
+    };
+    expect(opts.validateInput("")).toBeTruthy();
+    expect(opts.validateInput("   ")).toBeTruthy();
+    expect(opts.validateInput("~/x")).toBeUndefined();
   });
 });
 
 describe("maybeRunSetup", () => {
   it("does nothing when setup is already complete", async () => {
     const { context } = fakeContext({ globalState: { [SETUP_COMPLETE_KEY]: true } });
-    await maybeRunSetup(context, fakeAuth(), log);
+
+    await maybeRunSetup(context, connector(), log);
+
     expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
-  it("marks complete without prompting when already configured via settings", async () => {
-    setConfig({ "jira.baseUrl": "https://acme.atlassian.net", "jira.project": "ABC" });
+  it("stays quiet when the connector reports itself already configured", async () => {
+    const c = connector({ isConfigured: () => true });
     const { context, globalState } = fakeContext();
 
-    await maybeRunSetup(context, fakeAuth(), log);
+    await maybeRunSetup(context, c, log);
 
     expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBe(true);
   });
 
+  it("welcomes the user by the connector's own label", async () => {
+    const fixture = makeFixtureConnector();
+    const c = connector({
+      isConfigured: () => false,
+      info: () => ({ ...fixture.info(), label: "Acme Tracker" }),
+    });
+    vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce("Later");
+
+    await maybeRunSetup(fakeContext().context, c, log);
+
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+      "Welcome to Agent Flow Deck — let's connect it to your Acme Tracker.",
+      "Set up",
+      "Later",
+    );
+  });
+
   it("runs the wizard when the user accepts the welcome prompt", async () => {
+    const c = connector({ isConfigured: () => false });
     vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce("Set up");
-    inputs("https://acme.atlassian.net", "abc", "~/code");
+    stubInputBox("~/code");
     const { context, globalState } = fakeContext();
-    const auth = fakeAuth();
 
-    await maybeRunSetup(context, auth, log, vi.fn());
+    await maybeRunSetup(context, c, log, vi.fn());
 
-    expect(auth.signIn).toHaveBeenCalled();
+    expect(c.signIn).toHaveBeenCalled();
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBe(true);
   });
 
   it("leaves setup pending when the user defers", async () => {
+    const c = connector({ isConfigured: () => false });
     vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce("Later");
     const { context, globalState } = fakeContext();
 
-    await maybeRunSetup(context, fakeAuth(), log);
+    await maybeRunSetup(context, c, log);
 
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined();
   });

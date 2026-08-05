@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { JiraAuth } from "./tasks/jira/auth";
+import { TaskConnector } from "./tasks/provider";
 
 /** globalState flag marking that first-run setup has been handled. */
 export const SETUP_COMPLETE_KEY = "agentFlow.setupComplete";
@@ -19,49 +19,30 @@ function abort(log: Log, reason: string): false {
 }
 
 /**
- * Guided first-run setup. Collects the org-specific Jira + repo settings, writes
- * them to the user's global settings, then delegates credential collection to the
- * existing sign-in flow (which stores to SecretStorage).
+ * Guided first-run setup. Delegates the source-specific settings to the
+ * connector's own `configure()` — which owns their input boxes, validation and
+ * writes — then collects the one setting every source needs (where repo
+ * checkouts live), then delegates credential collection to the existing
+ * sign-in flow (which stores to SecretStorage).
  *
  * Returns true only if setup ran to completion (config saved AND signed in).
  * Cancelling any step aborts without marking setup complete, so it can re-run.
  */
 export async function runSetup(
   context: vscode.ExtensionContext,
-  auth: JiraAuth,
+  connector: TaskConnector,
   log: Log,
   refresh?: Refresh,
 ): Promise<boolean> {
   log("setup: started");
 
-  const baseUrl = await vscode.window.showInputBox({
-    title: "Agent Flow Deck Setup (1/4)",
-    prompt: "Your Atlassian Jira Cloud site URL",
-    ignoreFocusOut: true,
-    placeHolder: "https://your-org.atlassian.net",
-    validateInput: (v) => {
-      const t = v.trim();
-      if (!t) return "Enter your Jira site URL";
-      try {
-        return new URL(t).protocol === "https:" ? undefined : "URL must start with https://";
-      } catch {
-        return "Enter a valid URL (e.g. https://your-org.atlassian.net)";
-      }
-    },
-  });
-  if (baseUrl === undefined) return abort(log, "cancelled at site URL");
-
-  const project = await vscode.window.showInputBox({
-    title: "Agent Flow Deck Setup (2/4)",
-    prompt: "Jira project key to pull tasks from",
-    ignoreFocusOut: true,
-    placeHolder: "ABC",
-    validateInput: (v) => (v.trim() ? undefined : "Enter a project key"),
-  });
-  if (project === undefined) return abort(log, "cancelled at project key");
+  const total = connector.setupSteps + 1; // + the repos root, which is ours not theirs
+  if (!(await connector.configure(1, total))) {
+    return abort(log, "cancelled at source configuration");
+  }
 
   const reposRoot = await vscode.window.showInputBox({
-    title: "Agent Flow Deck Setup (3/4)",
+    title: `Agent Flow Deck Setup (${total}/${total})`,
     prompt: "Directory where your repo checkouts live",
     ignoreFocusOut: true,
     value: "~/projects",
@@ -73,16 +54,14 @@ export async function runSetup(
   // reposRoot to keep the wizard short; it remains overridable. Per-task worktrees
   // live inside each repo (.claude/worktrees/<KEY>), so there's no root to configure.
   const cleanRoot = reposRoot.trim().replace(/\/+$/, "");
-  await updateGlobal("jira.baseUrl", baseUrl.trim().replace(/\/+$/, ""));
-  await updateGlobal("jira.project", project.trim().toUpperCase());
   await updateGlobal("reposRoot", cleanRoot);
   await updateGlobal("workspaceDir", cleanRoot);
-  log(`setup: config saved (project ${project.trim().toUpperCase()}, root ${cleanRoot})`);
+  log(`setup: config saved (root ${cleanRoot})`);
 
-  // Step 4/4: credentials, via the existing two-step sign-in.
-  if (!(await auth.signIn())) {
+  const label = connector.info().label;
+  if (!(await connector.signIn())) {
     vscode.window.showWarningMessage(
-      'Agent Flow Deck: settings saved, but Jira sign-in was cancelled. Use "Sign in to Jira" to finish.',
+      `Agent Flow Deck: settings saved, but ${label} sign-in was cancelled. Use "Sign in to ${label}" to finish.`,
     );
     return abort(log, "sign-in skipped (config saved)");
   }
@@ -101,28 +80,26 @@ export async function runSetup(
  */
 export async function maybeRunSetup(
   context: vscode.ExtensionContext,
-  auth: JiraAuth,
+  connector: TaskConnector,
   log: Log,
   refresh?: Refresh,
 ): Promise<void> {
   if (context.globalState.get<boolean>(SETUP_COMPLETE_KEY)) return;
 
-  const c = vscode.workspace.getConfiguration("agentFlow");
-  const configured =
-    !!(c.get<string>("jira.baseUrl") || "").trim() && !!(c.get<string>("jira.project") || "").trim();
-  if (configured) {
+  if (connector.isConfigured()) {
     // Already set up outside the wizard — remember and stay quiet.
     await context.globalState.update(SETUP_COMPLETE_KEY, true);
     return;
   }
 
+  const label = connector.info().label;
   const choice = await vscode.window.showInformationMessage(
-    "Welcome to Agent Flow Deck — let's connect it to your Jira.",
+    `Welcome to Agent Flow Deck — let's connect it to your ${label}.`,
     "Set up",
     "Later",
   );
   if (choice === "Set up") {
-    await runSetup(context, auth, log, refresh);
+    await runSetup(context, connector, log, refresh);
   } else {
     log("setup: deferred by user");
     // Leave the flag unset so setup is offered again next activation.

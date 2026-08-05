@@ -2,11 +2,27 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { commands, window, workspace, setConfig } from "../_mocks/vscode";
 import { fakeContext } from "../_helpers/factories";
 
-const authStub = {
-  getAuthHeader: vi.fn(async () => "Basic x"),
+const connectorStub = {
+  id: "jira",
+  setupSteps: 2,
+  info: vi.fn(() => ({
+    label: "Jira",
+    scopeNoun: "project",
+    scopeValue: "ABC",
+    endpoint: "https://x.atlassian.net",
+    exampleKey: "ABC-1234",
+    endpointSetting: "agentFlow.jira.baseUrl",
+    scopeSetting: "agentFlow.jira.project",
+  })),
+  isConfigured: vi.fn(() => true),
+  configure: vi.fn(async () => true),
   isAuthenticated: vi.fn(async () => true),
   signIn: vi.fn(async () => true),
   signOut: vi.fn(async () => undefined),
+  provider: vi.fn(() => ({})),
+  probe: vi.fn(async () => ({})),
+  taskUrl: vi.fn(() => ""),
+  keyFromUrl: vi.fn(() => null),
 };
 const providerStub = { refresh: vi.fn(async () => undefined), takeTask: vi.fn(async () => undefined) };
 
@@ -14,7 +30,14 @@ const trackSpy = vi.fn();
 const initSpy = vi.fn();
 const disposeSpy = vi.fn();
 
-vi.mock("../../src/tasks/jira/auth", () => ({ ApiTokenAuth: vi.fn(() => authStub) }));
+// Only `resolveConnector` is overridden — `CONNECTOR_IDS` stays real so
+// settingsSnapshot's task_source allow-list (which imports it independently)
+// keeps seeing the actual registered ids rather than `undefined`.
+vi.mock("../../src/tasks/registry", async () => {
+  const actual =
+    await vi.importActual<typeof import("../../src/tasks/registry")>("../../src/tasks/registry");
+  return { ...actual, resolveConnector: vi.fn(() => connectorStub) };
+});
 vi.mock("../../src/tasksView", () => ({
   TasksViewProvider: Object.assign(vi.fn(() => providerStub), { viewType: "agentFlow.tasks" }),
 }));
@@ -54,6 +77,7 @@ import { maybeRunSetup, runSetup } from "../../src/setup";
 import { windowIdentity, writePresence, removePresence } from "../../src/engine/presence";
 import { MarketplacePanel } from "../../src/marketplaceView";
 import { BASE_SCHEME } from "../../src/engine/diffView";
+import { resolveConnector } from "../../src/tasks/registry";
 
 const cmd = (id: string) =>
   vi.mocked(commands.registerCommand).mock.calls.find((c) => c[0] === id)?.[1] as
@@ -61,7 +85,9 @@ const cmd = (id: string) =>
     | undefined;
 
 beforeEach(() => {
-  authStub.signIn.mockResolvedValue(true);
+  connectorStub.signIn.mockResolvedValue(true);
+  connectorStub.isAuthenticated.mockResolvedValue(true);
+  connectorStub.isConfigured.mockReturnValue(true);
 });
 
 describe("activate", () => {
@@ -144,13 +170,13 @@ describe("activate", () => {
     activate(context);
     const ok = await cmd("agentFlow.signIn")!();
     expect(ok).toBe(true);
-    expect(authStub.signIn).toHaveBeenCalled();
+    expect(connectorStub.signIn).toHaveBeenCalled();
     expect(window.showInformationMessage).toHaveBeenCalled();
     expect(providerStub.refresh).toHaveBeenCalled();
   });
 
   it("signIn command does not refresh when sign-in is cancelled", async () => {
-    authStub.signIn.mockResolvedValue(false);
+    connectorStub.signIn.mockResolvedValue(false);
     const { context } = fakeContext();
     activate(context);
     const ok = await cmd("agentFlow.signIn")!();
@@ -163,7 +189,7 @@ describe("activate", () => {
     const { context } = fakeContext();
     activate(context);
     await cmd("agentFlow.signOut")!();
-    expect(authStub.signOut).toHaveBeenCalled();
+    expect(connectorStub.signOut).toHaveBeenCalled();
     expect(window.showInformationMessage).toHaveBeenCalled();
   });
 
@@ -184,6 +210,32 @@ describe("activate", () => {
     activate(context);
     await cmd("agentFlow.takeTask")!();
     expect(providerStub.takeTask).not.toHaveBeenCalled();
+  });
+
+  it("signIn/signOut toasts and the takeTask prompt read the connector's own label, not a hardcoded 'Jira'", async () => {
+    connectorStub.info.mockReturnValue({
+      label: "Acme",
+      scopeNoun: "board",
+      scopeValue: "AT",
+      endpoint: "https://acme.example",
+      exampleKey: "AT-99",
+      endpointSetting: "agentFlow.acme.baseUrl",
+      scopeSetting: "agentFlow.acme.board",
+    });
+    const { context } = fakeContext();
+    activate(context);
+
+    await cmd("agentFlow.signIn")!();
+    expect(window.showInformationMessage).toHaveBeenCalledWith("Agent Flow Deck: signed in to Acme.");
+
+    await cmd("agentFlow.signOut")!();
+    // Its own verb, not a copy-paste of the signIn toast's.
+    expect(window.showInformationMessage).toHaveBeenCalledWith("Agent Flow Deck: signed out of Acme.");
+
+    await cmd("agentFlow.takeTask")!();
+    expect(window.showInputBox).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Take a Acme task", prompt: "Ticket key (e.g. AT-99)" }),
+    );
   });
 
   it("writes this window's presence on activation", () => {
@@ -233,6 +285,14 @@ describe("activate", () => {
     expect(initOrder).toBeLessThan(firstRegisterOrder);
   });
 
+  it("creates the output channel before resolving the connector, since the registry's unknown-id fallback logs through it", () => {
+    const { context } = fakeContext();
+    activate(context);
+    const outputOrder = vi.mocked(window.createOutputChannel).mock.invocationCallOrder[0];
+    const connectorOrder = vi.mocked(resolveConnector).mock.invocationCallOrder[0];
+    expect(outputOrder).toBeLessThan(connectorOrder);
+  });
+
   it("reports extension_installed on the very first activation only", () => {
     const { context, globalState } = fakeContext();
     activate(context);
@@ -253,12 +313,28 @@ describe("activate", () => {
     const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "extension_activated") as any;
     expect(ev.is_first_ever).toBe(true);
     expect(ev.has_jira_auth).toBe(true);
+    // is_configured comes from connector.isConfigured() now, not a raw
+    // cfg.baseUrl/cfg.project check — the real (unmocked) getConfig() sees an
+    // empty baseUrl/project in this harness, so the old inline check would
+    // have reported false here even though the connector reports configured.
+    expect(ev.is_configured).toBe(true);
     expect(ev.workspace_mode).toBe("auto");
     expect(ev.prompt_modes_count).toBe(6);
   });
 
+  it("reports is_configured false when the connector says it isn't, regardless of raw settings", async () => {
+    connectorStub.isConfigured.mockReturnValue(false);
+    const { context } = fakeContext();
+    activate(context);
+    await vi.waitFor(() => {
+      expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "extension_activated")).toBe(true);
+    });
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "extension_activated") as any;
+    expect(ev.is_configured).toBe(false);
+  });
+
   it("does not throw an unhandled rejection when isAuthenticated() rejects", async () => {
-    authStub.isAuthenticated.mockRejectedValueOnce(new Error("network down"));
+    connectorStub.isAuthenticated.mockRejectedValueOnce(new Error("network down"));
     const { context } = fakeContext();
     expect(() => activate(context)).not.toThrow();
     // Give the rejected promise's handlers a chance to run; a missing rejection
@@ -328,7 +404,7 @@ describe("activate", () => {
     const ok = await cmd("agentFlow.signIn")!();
 
     expect(ok).toBe(true);
-    expect(authStub.signIn).toHaveBeenCalled();
+    expect(connectorStub.signIn).toHaveBeenCalled();
     expect(window.showInformationMessage).toHaveBeenCalled();
   });
 });

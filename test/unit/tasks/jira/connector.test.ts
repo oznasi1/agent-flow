@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import * as vscode from "../../../_mocks/vscode";
 import { makeJiraConnector } from "../../../../src/tasks/jira/connector";
 
 vi.mock("../../../../src/config", () => ({
@@ -200,5 +201,91 @@ describe("JiraConnector — probe()", () => {
       reason: "error",
       message: "Couldn't reach Jira at https://x.atlassian.net",
     });
+  });
+});
+
+// This connector's configure() is the ONLY place the baseUrl/project input
+// boxes, their validation and their writes exist post-Task-11 — setup.ts's
+// former copies were deleted, not kept as a second implementation. Pinning it
+// here is what keeps that deletion safe: a regression in the https-only
+// check, the trailing-slash strip, or the project-key uppercasing would
+// otherwise go completely untested.
+describe("JiraConnector — configure()", () => {
+  function stubInputBox(...vals: (string | undefined)[]): void {
+    const m = vi.mocked(vscode.window.showInputBox);
+    for (const v of vals) m.mockResolvedValueOnce(v);
+  }
+
+  /** Read an agentFlow setting back out of the mock config store. */
+  function readCfg(key: string): unknown {
+    return vscode.workspace.getConfiguration("agentFlow").get(key);
+  }
+
+  it("numbers its two boxes from and from+1 of the given total", async () => {
+    stubInputBox("https://acme.atlassian.net", "abc");
+    await makeJiraConnector(ctx).configure(2, 5);
+    const calls = vi.mocked(vscode.window.showInputBox).mock.calls;
+    expect((calls[0][0] as { title: string }).title).toBe("Agent Flow Deck Setup (2/5)");
+    expect((calls[1][0] as { title: string }).title).toBe("Agent Flow Deck Setup (3/5)");
+  });
+
+  it("writes the site url trailing-slash-stripped and the project key upper-cased, to Global", async () => {
+    stubInputBox("https://acme.atlassian.net/", "abc");
+
+    const ok = await makeJiraConnector(ctx).configure(1, 3);
+
+    expect(ok).toBe(true);
+    expect(readCfg("jira.baseUrl")).toBe("https://acme.atlassian.net");
+    expect(readCfg("jira.project")).toBe("ABC");
+    // The exact `getConfiguration("agentFlow")` handle configure() itself used —
+    // not a second, unrelated call from this test — so this also pins the
+    // target as Global, which `readCfg` alone cannot distinguish from Workspace.
+    const cfgInstance = vi.mocked(vscode.workspace.getConfiguration).mock.results[0].value;
+    expect(cfgInstance.update).toHaveBeenCalledWith(
+      "jira.baseUrl",
+      "https://acme.atlassian.net",
+      vscode.ConfigurationTarget.Global,
+    );
+    expect(cfgInstance.update).toHaveBeenCalledWith("jira.project", "ABC", vscode.ConfigurationTarget.Global);
+  });
+
+  it("returns false and writes nothing when the site url step is cancelled", async () => {
+    stubInputBox(undefined);
+
+    expect(await makeJiraConnector(ctx).configure(1, 3)).toBe(false);
+    expect(vscode.window.showInputBox).toHaveBeenCalledTimes(1); // never reached the project box
+    expect(readCfg("jira.baseUrl")).toBeUndefined();
+  });
+
+  it("returns false and writes nothing when the project key step is cancelled", async () => {
+    stubInputBox("https://acme.atlassian.net", undefined);
+
+    expect(await makeJiraConnector(ctx).configure(1, 3)).toBe(false);
+    expect(readCfg("jira.baseUrl")).toBeUndefined();
+    expect(readCfg("jira.project")).toBeUndefined();
+  });
+
+  it("rejects an empty, non-URL, or non-https site url; accepts https", async () => {
+    stubInputBox("https://acme.atlassian.net", "abc");
+    await makeJiraConnector(ctx).configure(1, 3);
+    const validate = (vi.mocked(vscode.window.showInputBox).mock.calls[0][0] as {
+      validateInput: (v: string) => string | undefined;
+    }).validateInput;
+
+    expect(validate("")).toBeTruthy();
+    expect(validate("not a url")).toBeTruthy();
+    expect(validate("http://acme.atlassian.net")).toBeTruthy(); // must be https
+    expect(validate("https://acme.atlassian.net")).toBeUndefined();
+  });
+
+  it("rejects an empty project key", async () => {
+    stubInputBox("https://acme.atlassian.net", "abc");
+    await makeJiraConnector(ctx).configure(1, 3);
+    const validate = (vi.mocked(vscode.window.showInputBox).mock.calls[1][0] as {
+      validateInput: (v: string) => string | undefined;
+    }).validateInput;
+
+    expect(validate("  ")).toBeTruthy();
+    expect(validate("ABC")).toBeUndefined();
   });
 });
