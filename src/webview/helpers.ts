@@ -1,5 +1,39 @@
 import { Filter, Task } from "../types";
 
+/** The tab bar's shipped order — NOT `types.ts`'s declaration order for `Filter`,
+ * and not a connector's `supportedFilters` array order either. This has been the
+ * rendered order since the "reorder task filter tabs" change (My sprint, Mine,
+ * Sprint, Backlog, Unassigned); "all" was never a rendered tab before capability
+ * gating existed, so it is appended last rather than inserted among the other
+ * five — the only new tab a Jira user sees, with everything else exactly where
+ * it already was. */
+const FILTER_ORDER: Filter[] = ["mysprint", "mine", "sprint", "backlog", "unassigned", "all"];
+
+/** Which filter tabs render, in the shipped order. A connector's `supportedFilters`
+ * says *which* tabs exist, never in what order — the array a connector returns is
+ * not meant to be rendered verbatim. */
+export function visibleFilters(supported: readonly Filter[]): Filter[] {
+  const allowed = new Set(supported);
+  const shown = FILTER_ORDER.filter((f) => allowed.has(f));
+  // An empty tab bar is a dead end with no in-product way out of it — the same
+  // reasoning as config.ts's resolveModes falling back to its built-ins.
+  return shown.length ? shown : [...FILTER_ORDER];
+}
+
+/** Every gate-screen string, with the source named. Pure so the copy is testable
+ * without mounting the app. */
+export function gateCopy(label: string): {
+  connecting: string; unconfigured: string; unauthed: string; signIn: string; openIn: string;
+} {
+  return {
+    connecting: `Connecting to ${label}…`,
+    unconfigured: `Agent Flow Deck isn't connected to ${label} yet — add your site URL and project to get started.`,
+    unauthed: `Connect Agent Flow Deck to your ${label} to see your task pool.`,
+    signIn: `Sign in to ${label}`,
+    openIn: `Open in ${label}`,
+  };
+}
+
 /** The lens to actually use, given what the user configured and what the source can
  * answer. `agentFlow.defaultFilter` ships as "mysprint" and four of the six filters
  * are inherently sprint-scoped, so a source without sprints supports neither the

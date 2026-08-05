@@ -29,6 +29,16 @@ const JIRA_CAPS: SerializedCaps = {
   supportedFilters: ["unassigned", "mine", "mysprint", "sprint", "backlog", "all"],
   sizes: true, labels: true, sprints: true, components: true,
 };
+// Shape of what test/_helpers/fixtureConnector.ts's FixtureProvider actually
+// serializes: no sprint-shaped lens, no per-task estimate, no labels/sprints/
+// components at all. Used to prove the webview gates on capability, not on the
+// source's name — the fixture's own FX-1 (Unassigned) and FX-2 (assigned to "Me",
+// not in the open sprint) are the two shapes that reach App.tsx:683's
+// `unassigned || (isMe && !task.inOpenSprint)`.
+const FIXTURE_CAPS: SerializedCaps = {
+  supportedFilters: ["mine", "all"],
+  sizes: false, labels: false, sprints: false, components: false,
+};
 const authed = (prReviewStatus = "PR initiated", filters = ALL_FILTERS) =>
   host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus, filters });
 
@@ -983,5 +993,107 @@ describe("drag-and-drop reorder", () => {
     // dragStart without a preceding grip mousedown → preventDefault, no begin
     fireEvent.dragStart(cardA, { dataTransfer });
     expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "reorder" }));
+  });
+});
+
+describe("capability gating", () => {
+  const fixtureState = (over: Partial<{ me: string | null; filters: typeof ALL_FILTERS }> = {}) =>
+    host({
+      type: "state", sourceLabel: "Fixture", caps: FIXTURE_CAPS, authed: true, configured: true,
+      project: "FX", me: over.me ?? "Me", prReviewStatus: "", filters: over.filters ?? ALL_FILTERS,
+    });
+
+  // `Task.inOpenSprint` is a required boolean, so a source with no sprint concept
+  // has to report `false` — which makes `unassigned || (isMe && !task.inOpenSprint)`
+  // (App.tsx:683) true and would render a button with no working action behind it.
+  // FX-2 (assigned to "Me", inOpenSprint: false) and FX-1 (Unassigned) are the two
+  // fixture tasks built to exercise exactly that, per test/_helpers/fixtureConnector.ts.
+  describe("sprint actions", () => {
+    it("shows no Add-to-my-sprint for a Me-assigned task not in the open sprint, on a source with no sprints (FX-2 shape)", () => {
+      render(<App />);
+      fixtureState();
+      host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "FX-2", summary: "Second fixture task", assignee: "Me", inOpenSprint: false })] });
+      expect(screen.queryByRole("button", { name: /Add to my sprint/i })).not.toBeInTheDocument();
+    });
+
+    it("shows no Add-to-my-sprint for an unassigned task either, on a source with no sprints (FX-1 shape)", () => {
+      render(<App />);
+      fixtureState();
+      host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "FX-1", summary: "First fixture task", assignee: "Unassigned" })] });
+      expect(screen.queryByRole("button", { name: /Add to my sprint/i })).not.toBeInTheDocument();
+    });
+
+    it("shows no Remove-from-sprint action on a source with no sprints, even on the mysprint lens", () => {
+      render(<App />);
+      fixtureState();
+      host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "FX-2", assignee: "Me", inOpenSprint: true })] });
+      expect(screen.queryByRole("button", { name: /Remove/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it("hides the Size control on a source that reports no per-task estimate", () => {
+    render(<App />);
+    fixtureState();
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "FX-2", assignee: "Me" })] });
+    expect(document.querySelector('[aria-label="Size"]')).toBeNull();
+  });
+
+  it("hides the 'Repos this task touches' block on a source with no components", () => {
+    render(<App />);
+    fixtureState();
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "FX-1", summary: "First fixture task" })] });
+    fireEvent.click(screen.getByText("First fixture task"));
+    host({ type: "detail", key: "FX-1", descriptionText: "A fixture task.", inferred: [], repos: ["centaur"], sourceComponents: [], mappable: null });
+    expect(screen.queryByText("Repos this task touches")).not.toBeInTheDocument();
+    expect(document.querySelector(".chips")).toBeNull();
+    expect(screen.queryByText(/add repo/i)).not.toBeInTheDocument();
+  });
+
+  describe("tab bar", () => {
+    it("renders only the tabs the source supports, in the shipped order", () => {
+      render(<App />);
+      fixtureState();
+      const group = document.querySelector('[role="group"][aria-label="Task filter"]') as HTMLElement;
+      const names = [...within(group).getAllByRole("button")].map((b) => b.textContent);
+      expect(names).toEqual(["Mine", "All"]);
+    });
+
+    it("highlights a supported tab as active even when the configured default (My sprint) is not supported", () => {
+      render(<App />);
+      fixtureState();
+      // No `tasks` message has arrived yet — this is the pre-fetch render, where
+      // `filter` state is still the hardcoded "mysprint" default. Without routing
+      // the active tab through `effectiveFilter`, no rendered tab would be pressed.
+      const mine = screen.getByRole("button", { name: "Mine" });
+      expect(mine).toHaveAttribute("aria-pressed", "true");
+    });
+  });
+
+  it("names the configured source on the ticket-open title and the off-ticket chip title, not Jira", () => {
+    render(<App />);
+    host({
+      type: "state", sourceLabel: "Acme", caps: JIRA_CAPS, authed: true, configured: true,
+      project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS,
+    });
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", summary: "Fix bug" })] });
+    expect(screen.getByText("ASM-1")).toHaveAttribute("title", "Open in Acme");
+    fireEvent.click(screen.getByText("Fix bug"));
+    host({
+      type: "detail", key: "ASM-1", descriptionText: "desc", repos: ["pricing-api"],
+      inferred: ["pricing-api"], sourceComponents: [], mappable: { "pricing-api": "Pricing-Api" },
+    });
+    const chip = [...document.querySelectorAll(".chips .chip")].find((c) => c.textContent?.startsWith("pricing-api")) as HTMLElement;
+    expect(chip).toHaveAttribute("title", "Not on ASM-1 in Acme — ↑ adds it");
+  });
+
+  it("names the configured source on every gate screen, not Jira", () => {
+    render(<App />);
+    host({ type: "state", sourceLabel: "Fixture", caps: FIXTURE_CAPS, authed: false, configured: false, project: "", me: null, prReviewStatus: "", filters: ALL_FILTERS });
+    expect(screen.getByText(
+      "Agent Flow Deck isn't connected to Fixture yet — add your site URL and project to get started.",
+    )).toBeInTheDocument();
+    host({ type: "state", sourceLabel: "Fixture", caps: FIXTURE_CAPS, authed: false, configured: true, project: "FX", me: null, prReviewStatus: "", filters: ALL_FILTERS });
+    expect(screen.getByText("Connect Agent Flow Deck to your Fixture to see your task pool.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in to Fixture" })).toBeInTheDocument();
   });
 });

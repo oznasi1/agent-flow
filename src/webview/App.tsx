@@ -1,19 +1,37 @@
 import * as React from "react";
 import Fuse from "fuse.js";
 import { send } from "./vscodeApi";
-import { addOnce, deriveStatuses, fmtEst, isPrReviewStatus, isTopPriority, matchesStatus, moveKey, railClass } from "./helpers";
+import {
+  addOnce, deriveStatuses, effectiveFilter, fmtEst, gateCopy, isPrReviewStatus, isTopPriority,
+  matchesStatus, moveKey, railClass, visibleFilters,
+} from "./helpers";
 import { Filter, FilterVisibility, Task, OutboundMessage, Size } from "../types";
+import type { SerializedCaps } from "../tasks/provider";
 import { GaugeMark } from "./GaugeMark";
 
 let toastSeq = 0;
 
-const FILTERS: { id: Filter; label: string }[] = [
-  { id: "mysprint", label: "My sprint" },
-  { id: "mine", label: "Mine" },
-  { id: "sprint", label: "Sprint" },
-  { id: "backlog", label: "Backlog" },
-  { id: "unassigned", label: "Unassigned" },
-];
+const FILTER_LABELS: Record<Filter, string> = {
+  mysprint: "My sprint",
+  mine: "Mine",
+  sprint: "Sprint",
+  backlog: "Backlog",
+  unassigned: "Unassigned",
+  all: "All",
+};
+
+// Everything on, and the shipped Jira label — what a first paint renders before
+// `state` arrives. `state` is asynchronous (a real round-trip through the
+// extension host), so there is always a gap between mount and the first message;
+// defaulting to the permissive end of both axes means that gap renders exactly
+// today's UI (every control visible, "Connecting to Jira…") rather than either a
+// stripped-down panel for a Jira user or a flash of a nameless source ("Connecting
+// to …") before the truth arrives a moment later.
+const DEFAULT_SOURCE_LABEL = "Jira";
+const DEFAULT_CAPS: SerializedCaps = {
+  supportedFilters: ["unassigned", "mine", "mysprint", "sprint", "backlog", "all"],
+  sizes: true, labels: true, sprints: true, components: true,
+};
 
 const SIZES: { id: Size; label: string; title: string }[] = [
   { id: "any", label: "Any", title: "Any estimate" },
@@ -109,6 +127,10 @@ export function App(): JSX.Element {
   const [me, setMe] = React.useState<string | null>(null);
   // The task status that reveals the "Address PR" card action (configurable; from the host).
   const [prReviewStatus, setPrReviewStatus] = React.useState("");
+  // The source's user-facing name and what it can do — see DEFAULT_SOURCE_LABEL/
+  // DEFAULT_CAPS for why the pre-`state` defaults are what they are.
+  const [sourceLabel, setSourceLabel] = React.useState(DEFAULT_SOURCE_LABEL);
+  const [caps, setCaps] = React.useState<SerializedCaps>(DEFAULT_CAPS);
   const [filter, setFilter] = React.useState<Filter>("mysprint");
   const [size, setSize] = React.useState<Size>("any");
   // Which secondary filter controls are shown (from settings, via the host). All
@@ -193,6 +215,8 @@ export function App(): JSX.Element {
           setPrReviewStatus(m.prReviewStatus);
           setFilters(m.filters);
           setLiveCount(m.liveCount);
+          setSourceLabel(m.sourceLabel);
+          setCaps(m.caps);
           break;
         case "error":
           setLoading(false);
@@ -399,8 +423,17 @@ export function App(): JSX.Element {
   // Only currently-visible tasks are launchable: a status/search filter that hides a
   // selected card silently drops it (state is untouched, just never launched).
   const selectedVisible = batchMode ? visibleTasks.filter((t) => batchSelected.has(t.key)) : [];
-  // Reorder only makes sense on the full My-sprint list, not a filtered subset.
-  const canReorder = filter === "mysprint" && selectedRepos.size === 0 && !q && statuses.size === 0;
+  // Reorder only makes sense on the full My-sprint list, not a filtered subset —
+  // and not at all on a source with no sprint concept, which the tab bar itself
+  // never leaves reachable, but a stale echo of an old `filter` state shouldn't
+  // resurrect the drag affordance either.
+  const canReorder = filter === "mysprint" && caps.sprints && selectedRepos.size === 0 && !q && statuses.size === 0;
+  // The tab the bar actually highlights — never the raw, possibly-unsupported
+  // `filter` state directly. Before the first `tasks` message lands, `filter` is
+  // still its hardcoded "mysprint" default; on a source without that lens (or any
+  // lens this source doesn't support after a live `taskSource` edit), rendering by
+  // raw `filter` would leave the whole tab bar unpressed.
+  const activeFilter = effectiveFilter(filter, caps.supportedFilters);
 
   // Toasts float over every state (gate or list), so keep them out of the branch bodies.
   const toastStack = <ToastStack toasts={toasts} onDismiss={(id) => setToasts((t) => t.filter((x) => x.id !== id))} />;
@@ -423,17 +456,19 @@ export function App(): JSX.Element {
     );
   }
 
+  const copy = gateCopy(sourceLabel);
+
   // Handshake in flight (or the host never replied — the watchdog turns this into an
   // error above). Never a blank panel.
   if (authed === null) {
-    return gate(<div className="gate"><div>Connecting to Jira…</div></div>);
+    return gate(<div className="gate"><div>{copy.connecting}</div></div>);
   }
 
-  // Never set up: no Jira site URL / project key yet.
+  // Never set up: no source site URL / project key yet.
   if (!configured) {
     return gate(
       <div className="gate">
-        <div>Agent Flow Deck isn't connected to Jira yet — add your site URL and project to get started.</div>
+        <div>{copy.unconfigured}</div>
         <button className="btn" onClick={() => send({ type: "runSetup" })}>Run setup</button>
       </div>,
     );
@@ -442,8 +477,8 @@ export function App(): JSX.Element {
   if (authed === false) {
     return gate(
       <div className="gate">
-        <div>Connect Agent Flow Deck to your Jira to see your task pool.</div>
-        <button className="btn" onClick={() => send({ type: "signIn" })}>Sign in to Jira</button>
+        <div>{copy.unauthed}</div>
+        <button className="btn" onClick={() => send({ type: "signIn" })}>{copy.signIn}</button>
       </div>,
     );
   }
@@ -465,19 +500,19 @@ export function App(): JSX.Element {
       <div className="lenses">
         <div className="lens">
           <div className="seg" role="group" aria-label="Task filter">
-            {FILTERS.map((f) => (
+            {visibleFilters(caps.supportedFilters).map((id) => (
               <button
-                key={f.id}
-                aria-pressed={filter === f.id}
-                onClick={() => refetch(f.id, size)}
+                key={id}
+                aria-pressed={activeFilter === id}
+                onClick={() => refetch(id, size)}
               >
-                {f.label}
+                {FILTER_LABELS[id]}
               </button>
             ))}
           </div>
         </div>
 
-        {filters.size && (
+        {caps.sizes && filters.size && (
           <div className="lens">
             <span className="seg-label">Size</span>
             <div className="seg" role="group" aria-label="Size">
@@ -544,7 +579,7 @@ export function App(): JSX.Element {
         </div>
       )}
 
-      {filter === "mysprint" && (
+      {filter === "mysprint" && caps.sprints && (
         <div className="reorder-bar">
           <button className="reset-order" title="Clear your manual order" onClick={() => send({ type: "resetOrder", size })}>
             Reset order
@@ -579,6 +614,8 @@ export function App(): JSX.Element {
             task={t}
             me={me}
             prReviewStatus={prReviewStatus}
+            sourceLabel={sourceLabel}
+            caps={caps}
             open={expanded.has(t.key)}
             detail={details[t.key]}
             project={project}
@@ -598,7 +635,9 @@ export function App(): JSX.Element {
                   }
                 : undefined
             }
-            onRemoveFromSprint={filter === "mysprint" ? () => send({ type: "removeFromSprint", key: t.key, size }) : undefined}
+            onRemoveFromSprint={
+              filter === "mysprint" && caps.sprints ? () => send({ type: "removeFromSprint", key: t.key, size }) : undefined
+            }
           />
         ))}
       </div>
@@ -665,6 +704,8 @@ function TaskCard(props: {
   task: Task;
   me: string | null;
   prReviewStatus: string;
+  sourceLabel: string;
+  caps: SerializedCaps;
   open: boolean;
   detail?: DetailState;
   project: string;
@@ -675,12 +716,16 @@ function TaskCard(props: {
   dnd?: CardDnd;
   onRemoveFromSprint?: () => void;
 }): JSX.Element {
-  const { task, me, prReviewStatus, open, detail, project, onToggle, onSelect, onPush, batch, dnd, onRemoveFromSprint } = props;
+  const { task, me, prReviewStatus, sourceLabel, caps, open, detail, project, onToggle, onSelect, onPush, batch, dnd, onRemoveFromSprint } = props;
   const unassigned = !task.assignee || task.assignee.toLowerCase() === "unassigned";
   const isMe = !!me && task.assignee === me;
   // Offer "add to my sprint" when it isn't already there: unassigned tasks, or tasks
-  // already assigned to me that aren't in the active sprint yet.
-  const showAddToSprint = unassigned || (isMe && !task.inOpenSprint);
+  // already assigned to me that aren't in the active sprint yet. Gated on
+  // `caps.sprints` FIRST — `Task.inOpenSprint` is a required boolean, so a source
+  // with no sprint concept at all still has to report `false`, which would
+  // otherwise make this true for both an unassigned task and one already assigned
+  // to the current user, and render a button with no working action behind it.
+  const showAddToSprint = caps.sprints && (unassigned || (isMe && !task.inOpenSprint));
   // Offer "Address PR" once the ticket reaches the configured PR-review status.
   const canAddressPr = isPrReviewStatus(task.status, prReviewStatus);
   const armed = React.useRef(false); // true only while a drag started from the grip
@@ -753,7 +798,7 @@ function TaskCard(props: {
           <a
             className="key"
             href={task.url}
-            title="Open in Jira"
+            title={gateCopy(sourceLabel).openIn}
             onClick={(e) => e.stopPropagation() /* don't toggle expand; global handler opens externally */}
           >{task.key}</a>
           {isTopPriority(task.priority) && <span className="p-top" title={`Priority: ${task.priority}`}>Highest</span>}
@@ -816,7 +861,17 @@ function TaskCard(props: {
         )}
       </div>
 
-      {open && <CardDetail taskKey={task.key} project={project} detail={detail} onSelect={onSelect} onPush={onPush} />}
+      {open && (
+        <CardDetail
+          taskKey={task.key}
+          project={project}
+          sourceLabel={sourceLabel}
+          componentsSupported={caps.components}
+          detail={detail}
+          onSelect={onSelect}
+          onPush={onPush}
+        />
+      )}
     </div>
   );
 }
@@ -824,11 +879,13 @@ function TaskCard(props: {
 function CardDetail(props: {
   taskKey: string;
   project: string;
+  sourceLabel: string;
+  componentsSupported: boolean;
   detail?: DetailState;
   onSelect: (s: string[]) => void;
   onPush: (repo: string) => void;
 }): JSX.Element {
-  const { taskKey, project, detail, onSelect, onPush } = props;
+  const { taskKey, project, sourceLabel, componentsSupported, detail, onSelect, onPush } = props;
   if (!detail || detail.loading) return <div className="detail"><div className="detail-loading">Loading ticket…</div></div>;
 
   const selected = detail.selected ?? [];
@@ -842,45 +899,51 @@ function CardDetail(props: {
   return (
     <div className="detail">
       <div className="desc">{detail.descriptionText?.trim() || "No description on the ticket."}</div>
-      <div className="sel-label">Repos this task touches</div>
-      <div className="chips">
-        {selected.length === 0 && <span className="chip-none">none selected</span>}
-        {selected.map((s) => {
-          // Three states when the component list is known: on the ticket (solid),
-          // a component the ticket lacks (dashed, with a push affordance), or no
-          // component at all (dashed, local-only). Only the first can be removed
-          // from Jira. When the list itself is unknown, none of the three can be
-          // claimed, so the chip renders plain with no dash and no push.
-          const component = unknown ? undefined : mappable![s];
-          const onTicket = !!component && sourceComponents.includes(component);
-          return (
-            <span
-              key={s}
-              className={`chip${unknown || onTicket ? "" : " off-ticket"}`}
-              title={
-                unknown
-                  ? `Couldn't read ${project}'s components — can't tell which are on ${taskKey}`
-                  : onTicket
-                    ? undefined
-                    : component
-                      ? `Not on ${taskKey} in Jira — ↑ adds it`
-                      : `No ${project} component named “${s}” — this selection stays local`
-              }
-            >
-              {s}
-              {!unknown && !onTicket && component && (
-                <span className="up" title={`Add ${component} to ${taskKey}`} onClick={() => onPush(s)}>↑</span>
-              )}
-              <span
-                className="x"
-                title={onTicket ? `Remove ${component} from ${taskKey}` : "Remove"}
-                onClick={() => remove(s)}
-              >×</span>
-            </span>
-          );
-        })}
-      </div>
-      <RepoPicker available={available} onAdd={add} />
+      {/* A source with no Components concept has nothing here to tag a repo onto
+       * or read a mapping from — see docs/CONNECTORS.md's capability table. */}
+      {componentsSupported && (
+        <>
+          <div className="sel-label">Repos this task touches</div>
+          <div className="chips">
+            {selected.length === 0 && <span className="chip-none">none selected</span>}
+            {selected.map((s) => {
+              // Three states when the component list is known: on the ticket (solid),
+              // a component the ticket lacks (dashed, with a push affordance), or no
+              // component at all (dashed, local-only). Only the first can be removed
+              // from the source. When the list itself is unknown, none of the three
+              // can be claimed, so the chip renders plain with no dash and no push.
+              const component = unknown ? undefined : mappable![s];
+              const onTicket = !!component && sourceComponents.includes(component);
+              return (
+                <span
+                  key={s}
+                  className={`chip${unknown || onTicket ? "" : " off-ticket"}`}
+                  title={
+                    unknown
+                      ? `Couldn't read ${project}'s components — can't tell which are on ${taskKey}`
+                      : onTicket
+                        ? undefined
+                        : component
+                          ? `Not on ${taskKey} in ${sourceLabel} — ↑ adds it`
+                          : `No ${project} component named “${s}” — this selection stays local`
+                  }
+                >
+                  {s}
+                  {!unknown && !onTicket && component && (
+                    <span className="up" title={`Add ${component} to ${taskKey}`} onClick={() => onPush(s)}>↑</span>
+                  )}
+                  <span
+                    className="x"
+                    title={onTicket ? `Remove ${component} from ${taskKey}` : "Remove"}
+                    onClick={() => remove(s)}
+                  >×</span>
+                </span>
+              );
+            })}
+          </div>
+          <RepoPicker available={available} onAdd={add} />
+        </>
+      )}
     </div>
   );
 }
