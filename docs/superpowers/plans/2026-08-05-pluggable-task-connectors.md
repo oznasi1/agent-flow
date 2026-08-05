@@ -568,7 +568,7 @@ typecheck. A three-level prefix in 3b's output means 2c ran before 2b.
 - [ ] **Step 4: Run the whole suite — behaviour must be identical**
 
 Run: `npm test`
-Expected: PASS, with the **same test count as the baseline: 72 files, 2121 tests**. A moved test that now fails means an import resolved to the wrong module.
+Expected: PASS, with **exactly the same file and test counts you measured before starting this task** — run `npm test` first and write the numbers down. Do not use a count copied from this plan: Tasks 1 and 2 each add tests, so any figure hardcoded here is stale by the time you read it (at the time of writing it was 74 files / 2137 tests, but measure rather than trust that). A *dropped* count means a moved test file is not being discovered at its new path; a *failing* test means an import resolved to the wrong module.
 
 - [ ] **Step 5: Commit**
 
