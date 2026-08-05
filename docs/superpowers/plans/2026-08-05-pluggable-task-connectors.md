@@ -2641,7 +2641,9 @@ It must contain, in this order:
 4. **`TaskConnector`, method by method**, including that `info()` feeds every user-facing string and `keyFromUrl` must return `null` for a url belonging to another source.
 5. **The checklist:** implement both interfaces → add your directory under `src/tasks/<id>/` → register one line in `src/tasks/registry.ts` → add your settings under `agentFlow.<id>.*` in `package.json` → add your id to the `agentFlow.taskSource` `enum` **and** `enumDescriptions` (a missing entry makes the setting un-pickable even though the registry accepts it; `test/unit/tasks/registry.test.ts` enforces the pair) → add tests.
 6. **The compatibility rules:** own your settings namespace `agentFlow.<id>.*`; own your SecretStorage keys; **never rename** either once released, because doing so silently signs every user out or strands their configuration.
-7. **The inherited assumption:** `estimateSeconds` is rendered against an 8-hour workday (`src/webview/helpers.ts`), so report it in seconds on that basis.
+7. **The inherited assumptions**, both of which a connector author will hit:
+   - `estimateSeconds` is rendered against an 8-hour workday (`src/webview/helpers.ts`), so report it in seconds on that basis.
+   - **Branch-name inference is still Jira-shaped and not behind the seam.** `engine/localRuns.ts:25`'s `inferTicket` matches a `PROJECT-123` branch and builds a `/browse/` url. It returns `null` when `agentFlow.jira.project` is unset, so your connector gets **no** inferred ticket on a local Deck card rather than a wrong one — safe, but that one feature is Jira-only until someone adds an `inferFromBranch` capability. State this plainly rather than letting an author discover it.
 8. **The minimal example** — a walkthrough of `test/_helpers/fixtureConnector.ts`, the capability-free reference implementation.
 
 - [ ] **Step 4: Update `CONTRIBUTING.md` and `CHANGELOG.md`**
