@@ -313,6 +313,7 @@
             "knowledge",
             "debug",
             "general",
+            "supervise",
             "verify"
           ],
           "enumDescriptions": [
@@ -321,6 +322,7 @@
             "Enhance knowledge / flow — map the code paths and explain how it works",
             "Debug — reproduce and root-cause a problem",
             "General — open-ended working session",
+            "Supervise running tasks — check on your other active tasks and help unblock or integrate them",
             "Verify on an environment — check a feature against a live env for the picked services"
           ],
           "default": "ask",
@@ -350,6 +352,12 @@
           "markdownDescription": "Prompt seeded for the **General** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
           "default": "Working session. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me make progress on this — ask what I need if it's unclear before diving in. Don't change code unless I ask.{files}"
         },
+        "agentFlow.explorePrompts.supervise": {
+          "type": "string",
+          "editPresentation": "multilineText",
+          "markdownDescription": "Prompt seeded for the **Supervise running tasks** Explore action. Placeholders: `{summary}` (optional priority), `{brief}` (includes a list of your other active tasks), `{files}`.",
+          "default": "Supervision session — checking on your other active Agent Flow tasks. A brief listing them, and whether each still has an agent attached, is at {brief}. Read it, judge which ones are stalled, blocked, or waiting on you, and tell me what needs attention. Where it's safe and unambiguous, help unblock or integrate one yourself; flag anything you're unsure about rather than guessing.{files}"
+        },
         "agentFlow.explorePrompts.verify": {
           "type": "string",
           "editPresentation": "multilineText",
@@ -376,6 +384,10 @@
               "type": "boolean",
               "description": "General"
             },
+            "supervise": {
+              "type": "boolean",
+              "description": "Supervise running tasks"
+            },
             "verify": {
               "type": "boolean",
               "description": "Verify on an environment"
@@ -389,6 +401,7 @@
             "knowledge": false,
             "debug": false,
             "general": false,
+            "supervise": false,
             "verify": false
           }
         },

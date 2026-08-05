@@ -37,7 +37,7 @@ function enumOrInvalid<T extends string>(value: string, allowed: readonly T[]): 
 // module surface otherwise.
 export const WORKSPACE_MODES = ["auto", "multiroot", "per-window", "ask"] as const;
 export const OPEN_IN_MODES = ["ask", "new-window", "this-window", "pick-existing"] as const;
-export const EXPLORE_MODES = ["ask", "jiraTicket", "knowledge", "debug", "general", "verify"] as const;
+export const EXPLORE_MODES = ["ask", "jiraTicket", "knowledge", "debug", "general", "supervise", "verify"] as const;
 export const WORKTREE_MODES = ["ask", "always", "never"] as const;
 export const REMOTE_CONTROL_MODES = ["off", "on", "ask"] as const;
 export const DEFAULT_FILTER_VALUES = ["unassigned", "mysprint", "mine", "sprint", "backlog"] as const;
