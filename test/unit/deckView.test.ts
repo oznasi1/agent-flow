@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { window, ViewColumn, env, workspace, commands, setConfig, ConfigurationTarget } from "../_mocks/vscode";
-import { fakeAuth, fakeContext } from "../_helpers/factories";
+import { fakeContext } from "../_helpers/factories";
 import type { ChangedFile } from "../../src/engine/git";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
+import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
 // builder, and a stubbed workspace opener.
@@ -216,24 +217,9 @@ vi.mock("../../src/config", async (importActual) => {
     }),
   };
 });
-vi.mock("../../src/tasks/jira/client", () => ({
-  // Mirrors the real class's constructor (src/tasks/jira/client.ts), which sets
-  // `this.name` explicitly so classifyFailure's `e.name === "JiraAuthError"`
-  // check survives production minification. A bare `extends Error {}` here
-  // would leave `.name` as the inherited "Error", silently diverging from the
-  // real class for any test that asserts on it.
-  JiraAuthError: class JiraAuthError extends Error {
-    constructor(message: string) {
-      super(message);
-      this.name = "JiraAuthError";
-    }
-  },
-  JiraClient: class { getStatus = h.getStatus; },
-}));
-
 import { DeckPanel } from "../../src/deckView";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
-import { JiraAuthError } from "../../src/tasks/jira/client";
+import { TaskAuthError } from "../../src/tasks/provider";
 
 // createdAt is *now*, not the epoch: a run minted in 1970 is older than any
 // abandonment window, so the retire sweep would carry off every fixture that
@@ -255,9 +241,43 @@ const reviewFixture = (): ReviewRequest => ({
   localPath: null, runKey: null, draftPath: null,
 });
 
+/** A TaskConnector standing in for Jira. The Deck's polling path only ever calls
+ * `provider().status(key)`, `isAuthenticated()`, and `keyFromUrl()` (through
+ * `ticketKeyFor`) — see src/deckView.ts — so nothing else here needs to do
+ * anything real. `keyFromUrl` mirrors the real Jira connector's own /browse/
+ * parsing (src/tasks/jira/connector.ts) rather than a stub that always answers
+ * null: several fixtures below (a local card's inferred ticket, a promoted
+ * local card's place-hash key) depend on that url shape actually resolving to
+ * a key, exactly as it does against the shipped Jira connector. */
+function fakeConnector(authed = false): TaskConnector {
+  const BROWSE = "/browse/";
+  return {
+    id: "jira",
+    setupSteps: 2,
+    info: () => ({
+      label: "Jira", scopeNoun: "project", scopeValue: "ASM", endpoint: "https://jira",
+      exampleKey: "ASM-1234", endpointSetting: "agentFlow.jira.baseUrl", scopeSetting: "agentFlow.jira.project",
+    }),
+    isConfigured: () => true,
+    configure: async () => true,
+    isAuthenticated: async () => authed,
+    signIn: async () => true,
+    signOut: async () => undefined,
+    provider: () => ({ status: h.getStatus }) as unknown as TaskProvider,
+    probe: async () => ({}),
+    taskUrl: (key: string) => `https://jira${BROWSE}${key}`,
+    keyFromUrl: (url: string) => {
+      const i = typeof url === "string" ? url.indexOf(BROWSE) : -1;
+      if (i < 0) return null;
+      const key = url.slice(i + BROWSE.length).trim();
+      return key || null;
+    },
+  };
+}
+
 const lastPanel = () => window.createWebviewPanel.mock.results.at(-1)!.value as ReturnType<typeof import("../_mocks/vscode").makeWebviewPanel>;
 const posts = (p: ReturnType<typeof lastPanel>) => p.webview.postMessage.mock.calls.map((c) => c[0] as any);
-const show = (authed = false) => DeckPanel.show(fakeContext().context as any, fakeAuth({ authed }), () => {});
+const show = (authed = false) => DeckPanel.show(fakeContext().context as any, fakeConnector(authed), () => {});
 const settled = () => new Promise<void>((r) => setTimeout(r, 0));
 
 /** The gh probe is kicked off inside the very tick that reads it, so it can
@@ -633,15 +653,26 @@ describe("DeckPanel", () => {
     }));
   });
 
-  it("degrades to the git backbone on a Jira auth error", async () => {
-    h.getStatus.mockRejectedValueOnce(new JiraAuthError("nope"));
-    show(true);
+  it("degrades to the git backbone on a Jira auth error, without logging it as a failure", async () => {
+    // `jira: null` alone can't tell this branch apart from the generic catch
+    // right below it: with no cache primed, that branch's own fallback
+    // (`return hit ? … : null`) also lands on null, so the assertion below would
+    // pass even if the `instanceof TaskAuthError` check were deleted outright.
+    // What genuinely distinguishes the two: the generic branch logs the failure
+    // before falling back, and this one is silent by design — an auth lapse is
+    // routine, not a failure worth a log line every 6s poll tick. Asserting on
+    // the log is what makes this test fail if that branch ever stops being
+    // entered.
+    h.getStatus.mockRejectedValueOnce(new TaskAuthError("nope"));
+    const log = vi.fn();
+    DeckPanel.show(fakeContext().context as any, fakeConnector(true), log);
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });
     expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({
       jira: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
       liveSignal: true, openIdentities: expect.any(Set), prs: {},
     }));
+    expect(log).not.toHaveBeenCalledWith(expect.stringContaining("jira status"));
   });
 
   it("keeps rendering when a Jira lookup fails for another reason", async () => {
@@ -1384,7 +1415,7 @@ describe("DeckPanel PR facts", () => {
     // nothing else records the path probed or the underlying spawn error.
     const log = vi.fn();
     h.probeGh.mockResolvedValue({ kind: "missing", detail: "gh auth status: spawn gh ENOENT" });
-    DeckPanel.show(fakeContext().context as any, fakeAuth({ authed: false }), log);
+    DeckPanel.show(fakeContext().context as any, fakeConnector(false), log);
     await settled();
     expect(log).toHaveBeenCalledWith(expect.stringContaining("spawn gh ENOENT"));
   });
@@ -1821,7 +1852,7 @@ describe("DeckPanel review detail", () => {
     // "loading…" forever; `detail: null` is what tells the webview to stop.
     h.reviewDetail.mockResolvedValueOnce(null);
     const log = vi.fn();
-    DeckPanel.show(fakeContext().context as any, fakeAuth({ authed: false }), log);
+    DeckPanel.show(fakeContext().context as any, fakeConnector(false), log);
     await settled();
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });
@@ -2398,7 +2429,7 @@ describe("DeckPanel review submit", () => {
     // straight into DeckPanel.show, rather than the show() helper's () => {}.
     h.reviewWrites = true;
     const log = vi.fn();
-    DeckPanel.show(fakeContext().context as any, fakeAuth({ authed: false }), log);
+    DeckPanel.show(fakeContext().context as any, fakeConnector(false), log);
     await settled();
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });

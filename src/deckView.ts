@@ -3,8 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { getConfig } from "./config";
-import { JiraAuth } from "./tasks/jira/auth";
-import { JiraClient, JiraAuthError } from "./tasks/jira/client";
+import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
@@ -108,7 +107,7 @@ export class DeckPanel {
    * overlapping refresh is still working. */
   private busyDepth = 0;
 
-  static show(context: vscode.ExtensionContext, auth: JiraAuth, log: (m: string) => void): void {
+  static show(context: vscode.ExtensionContext, connector: TaskConnector, log: (m: string) => void): void {
     if (DeckPanel.current) {
       DeckPanel.current.panel.reveal();
       return;
@@ -119,13 +118,13 @@ export class DeckPanel {
       vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] },
     );
-    DeckPanel.current = new DeckPanel(panel, context, auth, log);
+    DeckPanel.current = new DeckPanel(panel, context, connector, log);
   }
 
   private constructor(
     panel: vscode.WebviewPanel,
     private readonly context: vscode.ExtensionContext,
-    private readonly auth: JiraAuth,
+    private readonly connector: TaskConnector,
     private readonly log: (m: string) => void,
   ) {
     this.panel = panel;
@@ -161,11 +160,6 @@ export class DeckPanel {
 
   private toast(level: "success" | "error" | "info", message: string): void {
     this.post({ type: "toast", level, message });
-  }
-
-  private client(): JiraClient {
-    const cfg = getConfig();
-    return new JiraClient(cfg.baseUrl, cfg.project, this.auth);
   }
 
   private startPolling(): void {
@@ -573,11 +567,11 @@ export class DeckPanel {
     const hit = this.jiraCache.get(key);
     if (hit && Date.now() - hit.at < JIRA_TTL_MS) return { status: hit.status, category: hit.category };
     try {
-      const s = await this.client().getStatus(key);
+      const s = await this.connector.provider().status(key);
       this.jiraCache.set(key, { at: Date.now(), ...s });
       return s;
     } catch (e) {
-      if (e instanceof JiraAuthError) return null; // git backbone still renders
+      if (e instanceof TaskAuthError) return null; // git backbone still renders
       this.log(`deck: jira status ${key} failed: ${e}`);
       return hit ? { status: hit.status, category: hit.category } : null;
     }
@@ -589,7 +583,7 @@ export class DeckPanel {
     const tracked = readRuns(defaultRunsDir()).filter((r) => runKind(r) !== "review");
     const projectsRoot = path.join(os.homedir(), ".claude", "projects");
     const now = Date.now();
-    const authed = await this.auth.isAuthenticated();
+    const authed = await this.connector.isAuthenticated();
     const ghReady = this.ghReady();
     const openIdentities = new Set(readLiveWindows(defaultWindowsDir()).map((w) => w.identity));
 
@@ -657,7 +651,7 @@ export class DeckPanel {
     // the inferred key already belonged to another run) carries its ticket only
     // in its url — polling run.key there would 404 forever, every tick.
     const jiras = await Promise.all(
-      all.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(ticketKeyFor(run)) : null)),
+      all.map((run) => (authed && isTicketRun(run) ? this.jiraStatus(ticketKeyFor(run, this.connector)) : null)),
     );
     const out: RunStatus[] = [];
     let stale = 0;
@@ -679,7 +673,7 @@ export class DeckPanel {
         const ttlMs = getConfig().prFactsTtlSeconds * 1000;
         for (const repo of run.repos) {
           if (prEligible(repo) && isStale(prs[repo.name], ttlMs, now)) {
-            this.enqueuePr(run.key, ticketKeyFor(run), repo, repo.branch ?? null, prs[repo.name]);
+            this.enqueuePr(run.key, ticketKeyFor(run, this.connector), repo, repo.branch ?? null, prs[repo.name]);
           }
         }
       }
@@ -984,7 +978,7 @@ export class DeckPanel {
   private async track(key: string): Promise<void> {
     const local = this.localRuns.get(key);
     if (!local) return; // not a local card — nothing to promote
-    const inferredKey = local.url ? ticketKeyFor(local) : "";
+    const inferredKey = local.url ? ticketKeyFor(local, this.connector) : "";
     const taken = inferredKey ? readRuns(defaultRunsDir()).some((r) => r.key === inferredKey) : true;
     const run: Run = {
       ...local,
@@ -1101,7 +1095,7 @@ export class DeckPanel {
     // hash rather than a Jira key. The plan file's `key` names the same ticket
     // (it is what the on-disk filename and the seeded-session guard key off),
     // so it uses the same derivation rather than a second, disagreeing one.
-    const ticketKey = ticketKeyFor(run);
+    const ticketKey = ticketKeyFor(run, this.connector);
     const ticket = { key: ticketKey, summary: run.summary, url: run.url };
     // Mirror the shape this run was launched in — that is what its windows are. A
     // multiroot run is one window on the workspace file, rendered against the absolute

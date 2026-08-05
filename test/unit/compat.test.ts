@@ -77,13 +77,15 @@ describe("compatibility surface (frozen)", () => {
   });
 
   it("recovers a ticket key from a run url already on disk", () => {
-    expect(ticketKeyFor(makeRun({ key: "ABC-1", url: "https://x.atlassian.net/browse/ABC-1" })))
-      .toBe("ABC-1");
-    // A record whose key is a place-hash still resolves via its url.
-    expect(ticketKeyFor(makeRun({ key: "a1b2c3", url: "https://x.atlassian.net/browse/ABC-9" })))
-      .toBe("ABC-9");
-    // No url marker: fall back to the record key.
-    expect(ticketKeyFor(makeRun({ key: "explore-foo", url: "" }))).toBe("explore-foo");
+    const jira = { keyFromUrl: (u: string) => {
+      const i = u.indexOf("/browse/");
+      return i < 0 ? null : u.slice(i + 8) || null;
+    } };
+    expect(ticketKeyFor(makeRun({ key: "ABC-1", url: "https://x.atlassian.net/browse/ABC-1" }), jira)).toBe("ABC-1");
+    expect(ticketKeyFor(makeRun({ key: "a1b2c3", url: "https://x.atlassian.net/browse/ABC-9" }), jira)).toBe("ABC-9");
+    expect(ticketKeyFor(makeRun({ key: "explore-foo", url: "" }), jira)).toBe("explore-foo");
+    // A record from a different source falls back to the record key.
+    expect(ticketKeyFor(makeRun({ key: "FX-1", url: "https://fixture.test/t/FX-1" }), jira)).toBe("FX-1");
   });
 
   it("keeps the released settings and command ids in the manifest", () => {

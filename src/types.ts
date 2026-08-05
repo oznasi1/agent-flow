@@ -1,7 +1,7 @@
 // Shared types across the extension host and webview.
 // Type-only: src/tasks/provider.ts imports Filter/JiraTask/Size from here, so a
 // value import would be a runtime cycle. `import type` is erased at build time.
-import type { SerializedCaps } from "./tasks/provider";
+import type { SerializedCaps, TaskConnector } from "./tasks/provider";
 
 export type Filter = "unassigned" | "mine" | "mysprint" | "sprint" | "backlog" | "all";
 export type Size = "any" | "s" | "m" | "l"; // by original time estimate
@@ -118,16 +118,15 @@ export function isTicketRun(run: Run): boolean {
   return typeof run.url === "string" && run.url.trim().length > 0;
 }
 
-/** The Jira key to poll for a run. A task run's key IS its ticket, but a local
+/** The task key to poll for a run. A task run's key IS its ticket, but a local
  * card Track it saved under its place-hash — because a real run already owned
- * the inferred key — carries the ticket only in its url. Deriving from the url
- * covers both, and is what the record key already equals for every run Agent
- * Flow launched. */
-export function ticketKeyFor(run: Run): string {
+ * the inferred key — carries the ticket only in its url. The connector owns the
+ * url shape; a url it does not recognise (a record from another source, or an
+ * Explore run with none) falls back to the record key, which is what every run
+ * Agent Flow launched already equals. */
+export function ticketKeyFor(run: Run, connector: Pick<TaskConnector, "keyFromUrl">): string {
   const url = typeof run.url === "string" ? run.url : "";
-  const marker = "/browse/";
-  const i = url.indexOf(marker);
-  return i >= 0 ? url.slice(i + marker.length) : run.key;
+  return connector.keyFromUrl(url) ?? run.key;
 }
 
 /** Per-repo git state — the reliable backbone of a run's status. */

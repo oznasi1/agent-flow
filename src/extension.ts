@@ -45,10 +45,12 @@ export function activate(context: vscode.ExtensionContext): void {
   const auth = new ApiTokenAuth(context.secrets);
   const output = vscode.window.createOutputChannel("Agent Flow Deck");
   const log = (m: string) => output.appendLine(`[${new Date().toISOString().slice(11, 19)}] ${m}`);
-  // The task panel reads its source through the connector seam. `auth` stays for the
-  // consumers not yet migrated (Deck, Doctor, setup, the sign-in commands); both read
-  // the same SecretStorage keys, so there is no state to diverge.
-  const provider = new TasksViewProvider(context, resolveConnector(context, log), log);
+  // The task panel and the Deck both read their source through the connector seam.
+  // `auth` stays for the consumers not yet migrated (Doctor, setup, the sign-in
+  // commands); all of them read the same SecretStorage keys, so there is no state to
+  // diverge between `auth` and whatever `connector` wraps it in.
+  const connector = resolveConnector(context, log);
+  const provider = new TasksViewProvider(context, connector, log);
   log("Agent Flow Deck activated");
 
   // Telemetry must come up before the commands below so `command_invoked` can
@@ -93,7 +95,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (key) await provider.takeTask(key.trim().toUpperCase(), "command");
     }),
 
-    registerTracked("agentFlow.openDeck", () => DeckPanel.show(context, auth, log)),
+    registerTracked("agentFlow.openDeck", () => DeckPanel.show(context, connector, log)),
 
     registerTracked("agentFlow.openMarketplace", () => MarketplacePanel.show(context, log)),
 

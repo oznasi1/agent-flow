@@ -36,23 +36,36 @@ describe("isTicketRun", () => {
 });
 
 describe("ticketKeyFor", () => {
+  // ticketKeyFor's own job is only to defer to whichever connector's `keyFromUrl`
+  // it is given, and fall back to run.key when that returns null — the /browse/
+  // parsing itself now belongs to the Jira connector and is pinned there
+  // (tasks/jira/connector.test.ts). This fixture mirrors that parsing so these
+  // cases still read as "a task run whose url a connector recognises" rather
+  // than exercising a stub that always says no.
+  const jira = {
+    keyFromUrl: (u: string): string | null => {
+      const i = u.indexOf("/browse/");
+      return i < 0 ? null : u.slice(i + 8) || null;
+    },
+  };
+
   it("is a no-op for a normal task run — the key already equals the url tail", () => {
-    expect(ticketKeyFor(mkRun({ key: "ASM-1", url: "https://jira/browse/ASM-1" }))).toBe("ASM-1");
+    expect(ticketKeyFor(mkRun({ key: "ASM-1", url: "https://jira/browse/ASM-1" }), jira)).toBe("ASM-1");
   });
 
   it("derives the real ticket from the url when the record's own key is a place-hash", () => {
     // Exactly what Track it writes for case 3: a tracked run already owned the
     // inferred key, so the record is saved under its local place-hash instead —
     // the ticket survives only in the url.
-    expect(ticketKeyFor(mkRun({ key: "local-centaur-1a2b3c4d", url: "https://jira/browse/ASM-5641" }))).toBe("ASM-5641");
+    expect(ticketKeyFor(mkRun({ key: "local-centaur-1a2b3c4d", url: "https://jira/browse/ASM-5641" }), jira)).toBe("ASM-5641");
   });
 
   it("falls back to the key for an Explore run, which has no url", () => {
-    expect(ticketKeyFor(mkRun({ key: "explore-retry-logic", url: "" }))).toBe("explore-retry-logic");
+    expect(ticketKeyFor(mkRun({ key: "explore-retry-logic", url: "" }), jira)).toBe("explore-retry-logic");
   });
 
   it("falls back to the key for a review run's PR url — no /browse/ to find", () => {
-    expect(ticketKeyFor(mkRun({ key: "review-aws-ops-8491", url: "https://github.com/o/r/pull/8491", kind: "review" }))).toBe(
+    expect(ticketKeyFor(mkRun({ key: "review-aws-ops-8491", url: "https://github.com/o/r/pull/8491", kind: "review" }), jira)).toBe(
       "review-aws-ops-8491",
     );
   });
@@ -60,7 +73,14 @@ describe("ticketKeyFor", () => {
   it("survives a record with no url field at all", () => {
     const legacy = { ...mkRun() } as Partial<Run>;
     delete legacy.url;
-    expect(ticketKeyFor(legacy as Run)).toBe(legacy.key);
+    expect(ticketKeyFor(legacy as Run, jira)).toBe(legacy.key);
+  });
+
+  it("falls back to the record key for a run from a source the connector does not recognise", () => {
+    // A record another source wrote (or a connector switch since): the given
+    // connector's keyFromUrl finds nothing, so the record's own key — never
+    // mis-parsed against a foreign url shape — is what gets polled.
+    expect(ticketKeyFor(mkRun({ key: "FX-1", url: "https://fixture.test/t/FX-1" }), jira)).toBe("FX-1");
   });
 });
 
