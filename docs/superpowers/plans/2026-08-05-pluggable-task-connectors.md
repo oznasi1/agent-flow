@@ -503,7 +503,7 @@ Expected: no grep hits; typecheck clean. Fix any straggler by hand — `test/_he
 - [ ] **Step 4: Run the whole suite — behaviour must be identical**
 
 Run: `npm test`
-Expected: PASS, with the **same test count** as before the move. A moved test that now fails means an import resolved to the wrong module.
+Expected: PASS, with the **same test count as the baseline: 72 files, 2121 tests**. A moved test that now fails means an import resolved to the wrong module.
 
 - [ ] **Step 5: Commit**
 

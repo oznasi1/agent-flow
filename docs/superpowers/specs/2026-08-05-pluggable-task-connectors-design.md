@@ -1,7 +1,7 @@
 # Pluggable task connectors Design
 
 **Status:** approved 2026-08-05
-**Baseline:** `main` at `d9e36bd` (v0.4.2)
+**Baseline:** `main` at `c725d62` (v0.4.2) — 72 test files, 2121 tests, typecheck clean
 
 ## Goal
 
