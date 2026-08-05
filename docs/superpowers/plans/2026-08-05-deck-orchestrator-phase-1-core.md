@@ -821,7 +821,10 @@ The rules this function encodes, all of which the tests pin:
 3. An edge whose source is a planned node cannot be evaluated; there is no run to observe yet. Not blocked, just not ready.
 4. An edge whose source is a place node with no matching status is **blocked** (`gone`), so an armed flow reports it instead of waiting forever.
 5. An agent condition over a place whose agent state is `unknown` is **blocked** (`agent-state-unknown`) — it can never become true, and silence would look like patience.
-6. `join: "all"` on a target fires only when every incoming edge is met or already fired, and then performs the action of the **first incoming edge in flow order** while stamping all of them. `join: "any"`, or a target with one incoming edge, fires each met edge independently.
+6. `join: "all"` on a target fires only when every incoming edge is settled or met, and then performs the action of the **first still-pending edge in flow order** while stamping all the pending ones. A settled edge cannot perform again, which is why the performer is the first *pending* edge and not simply the first incoming one. Two corollaries the review of Task 4 forced out:
+   - **An `error` on any incoming edge stops the junction dead** until that edge is reset. Otherwise a failed performer's junction silently re-routes its action through a sibling, violating "a failed action is never retried until Reset".
+   - **A junction whose performer the cap would defer fires nothing at all**, and counts as one deferred. Stamping the siblings while holding the performer back strands the junction the moment its condition stops holding: the siblings stay stamped, the performer never runs, and nothing is reported.
+   `join: "any"`, or a target with one incoming edge, fires each met edge independently.
 7. At most `MAX_LAUNCHES_PER_PASS` acting edges (`launch` or `seed`) fire per pass, in flow order; the rest are counted in `deferred`. `notify` is never capped — it costs a toast.
 
 - [ ] **Step 1: Write the failing test**
