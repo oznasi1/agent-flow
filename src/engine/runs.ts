@@ -1,7 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { Run } from "../types";
+import { Run, runKind } from "../types";
+import { canon } from "./paths";
 
 // The Deck's durable source of truth: one file per launched task (no TTL — unlike
 // the transient ~/.agentflow/plans handshake that the agent-seed consumes).
@@ -48,4 +49,21 @@ export function removeRun(dir: string, key: string): void {
  * else the first repo. Undefined when a run somehow has neither. */
 export function runTarget(run: Run): string | undefined {
   return run.workspaceFile ?? run.repos[0]?.path;
+}
+
+/** One bullet per still-active run, for folding into a supervising session's
+ * brief.md via `planMd` — not a new prompt placeholder. `livePlaces` is the
+ * canonicalised repo-root set of directories with a live Claude Code session
+ * open right now: build it the same way `deckView.ts` already does for its
+ * own retire-sweep check — `new Set(groupByPlace(readOpenSessions(dir)).keys())`. */
+export function describeActiveTasks(runs: Run[], livePlaces: ReadonlySet<string>): string {
+  const active = runs.filter((r) => !r.finishedAt);
+  if (active.length === 0) return "_No other active tasks right now._";
+  const lines = active.map((r) => {
+    const live = r.repos.some((repo) => livePlaces.has(canon(repo.path)));
+    const first = r.repos[0];
+    const where = first ? `\`${first.path}\`${first.branch ? ` (branch: ${first.branch})` : ""}` : "unknown location";
+    return `- **${r.key}** (${runKind(r)}) — ${r.summary} — ${where} — ${live ? "agent open" : "idle, no agent attached"}`;
+  });
+  return `## Active tasks\n${lines.join("\n")}`;
 }
