@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] — 2026-08-06
+
+### Fixed
+
+- **README lockup broken on the Marketplace and Open VSX listings.** The
+  light-mode `<source srcset>` in the logo `<picture>` tag was left as a
+  repo-relative path; `vsce`/`ovsx` rewrite `<img src>` attributes in the
+  README to absolute GitHub URLs at publish time but not `<source srcset>`,
+  so it 404'd against each listing's own host. It's now a hardcoded absolute
+  URL, same as the existing rewritten fallback.
+
 ## [0.4.2] — 2026-08-05
 
 ### Fixed

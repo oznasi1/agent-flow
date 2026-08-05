@@ -1,7 +1,7 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: light)" srcset="media/logo-light.png">
+  <source media="(prefers-color-scheme: light)" srcset="https://github.com/oznasi1/agent-flow/raw/HEAD/media/logo-light.png">
   <img src="media/logo.png" alt="Agent Flow Deck" width="280">
 </picture>
 
