@@ -1135,6 +1135,23 @@ describe("Agents view", () => {
     expect(screen.getByTitle(/Claude Code session in svc/)).toBeInTheDocument();
   });
 
+  it("extracts workspace name from Windows-style paths", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      run: {
+        ...mkStatus().run,
+        mode: "multiroot",
+        workspaceFile: "C:\\Users\\x\\.agentflow\\workspaces\\WIN-1.code-workspace",
+        repos: [
+          { name: "svc-api", path: "C:\\r\\svc-api", isGit: true, branch: "WIN-1-x" },
+        ],
+      },
+      agents: [mkAgent("agent-flow-2e", "working", 100)],
+    })]));
+    expect(screen.getByTitle(/Claude Code session in WIN-1/)).toBeInTheDocument();
+    expect(screen.queryByTitle(/Claude Code session in C:\\/)).not.toBeInTheDocument();
+  });
+
   it("counts cards, not runs, in the stat tiles", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [

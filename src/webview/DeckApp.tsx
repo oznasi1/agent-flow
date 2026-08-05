@@ -176,7 +176,7 @@ function AgentsRow({ agents }: { agents: CardAgent[] }): JSX.Element | null {
  * "ASM-1+2.code-workspace" → "ASM-1+2". `undefined` for a single-repo
  * (per-window) run, which has no workspace file at all. */
 function workspaceLabel(run: Run): string | undefined {
-  return run.workspaceFile?.split("/").pop()?.replace(/\.code-workspace$/, "");
+  return run.workspaceFile?.split(/[\\/]/).pop()?.replace(/\.code-workspace$/, "");
 }
 
 function Card({ r, live, prReviewStatus, onForget, agent, column }: {
