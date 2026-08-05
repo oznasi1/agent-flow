@@ -322,7 +322,7 @@ and a log line.
 - `resolveOp` / the `catch` in `onMessage` → `TaskAuthError`, `TaskApiError`,
   `isTaskNetworkError`.
 - `reportWriteFailure`'s toast action label `"Open in Jira"` →
-  `` `Open in ${connector.label}` ``, url from `connector.taskUrl(key)`.
+  `` `Open in ${connector.info().label}` ``, url from `connector.taskUrl(key)`.
 - `postState` gains `sourceLabel` and the serialized `caps` (below).
 - `guessServices` and `reposForTask` are untouched — they already operate on
   the task/detail shape, not on Jira.
@@ -343,11 +343,11 @@ and noun so a Jira user still reads "Jira project".
 Flow's own, not the connector's), calls `connector.configure(1, total)`, keeps
 its `reposRoot` step, then `connector.signIn()`. `maybeRunSetup`'s inline
 `baseUrl && project` check → `connector.isConfigured()`. Its five hardcoded
-"Jira" strings come from `connector.label` — identical rendered text for Jira.
+"Jira" strings come from `connector.info().label` — identical rendered text for Jira.
 
 **`src/extension.ts`** — `new ApiTokenAuth(context.secrets)` →
 `resolveConnector(context, log)`; sign-in/out toasts and the
-`"Take a Jira task"` QuickPick title read `connector.label`.
+`"Take a Jira task"` QuickPick title read `connector.info().label`.
 
 **`src/engine/status.ts`, `src/engine/retire.ts`** — field renames only:
 `jira` → `ticket`, `jiraCategory` → `ticketCategory`, `jiraStatus` →
@@ -480,25 +480,36 @@ implementation is not written against `CONTRIBUTING.md` from memory.
 Test files move with their subjects: `test/unit/jira/*` →
 `test/unit/tasks/jira/*`.
 
-## 6. Sequencing: the Orchestrator collision
+## 6. Sequencing: the Orchestrator collision (resolved)
 
-`docs/superpowers/specs/2026-08-05-deck-orchestrator-flows-design.md` (approved
-the same day, not yet built) adds **two new Jira consumers**:
+`docs/superpowers/specs/2026-08-05-deck-orchestrator-flows-design.md`, approved
+the same day, adds two new ticket consumers: a picker for untaken tickets as
+flow nodes, and ticket status as one of its four condition families reading the
+`buildRunStatus` snapshot — i.e. the `jiraCategory` / `jiraStatus` fields this
+design renames.
 
-- flow nodes may be "untaken Jira tickets, added from a picker in the drawer";
-- **"Jira status" is one of its four condition families**, and every condition
-  "reads the snapshot `buildRunStatus` already builds" — i.e. exactly the
-  `jiraCategory` / `jiraStatus` fields this design renames.
+**This has since been resolved, and better than the ordering rule originally
+proposed here.** `035be55` renamed the orchestrator's persisted condition kinds
+from `jira-done` / `jira-status-is` to **`ticket-done` / `ticket-status-is`**,
+with the reasoning that a condition kind is stored inside every saved flow file,
+so the neutral name costs nothing now and avoids migrating users' flow files
+later. Its Phase 1 plan
+(`docs/superpowers/plans/2026-08-05-deck-orchestrator-phase-1-core.md`, lines
+22-25) then records the field-rename dependency **in both directions**, so
+either change can land first.
 
-**Recommendation: land this seam first.** Then the Orchestrator is written
-against `TaskProvider` from day one, its picker becomes "untaken tickets" via
-`provider.list()`, and its condition family is "ticket status" rather than a
-second hardcoded Jira dependency. The reverse order means writing Jira
-coupling that this design then has to unpick, and it grows both changes.
+So there is no longer an ordering requirement. What remains is one coordination
+obligation on whichever lands second:
 
-If the Orchestrator must go first, the minimum is to land this design's
-`types.ts` / `engine/status.ts` / `engine/retire.ts` renames ahead of it, so
-the Orchestrator's condition code is written against `ticketStatus`.
+- If the Orchestrator lands first, `src/engine/orchestrator/conditions.ts` will
+  read `status.jiraCategory` / `status.jiraStatus`. This design's rename sweep
+  must therefore cover **the whole `src/` tree**, not the enumerated file list
+  in §3 — `conditions.ts` did not exist when that list was written. The
+  implementation plan's rename task does this.
+- If this seam lands first, the Orchestrator plan already says to read
+  `status.ticketCategory` and fix its two condition fixtures.
+
+Either way the condition kinds stay `ticket-*` and no flow file needs migrating.
 
 ## 7. Out of scope
 
@@ -507,7 +518,7 @@ the Orchestrator's condition code is written against `ticketStatus`.
   is a genuine stress test for the capability model, but it is a real feature
   with a real support surface that nobody has asked for yet.
 - **Prompt wording.** `{tracker}` is added as an available placeholder resolving
-  to `connector.label`; no shipped default uses it. Rewriting the defaults is
+  to `connector.info().label`; no shipped default uses it. Rewriting the defaults is
   connector #2's job, with a real second case to write for.
 - **Command titles.** `Sign in to Jira` / `Sign out of Jira` stay literal;
   `package.json` titles cannot be templated. The honest fix is per-connector

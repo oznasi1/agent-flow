@@ -2137,16 +2137,26 @@ grep -rl "JiraDetail" src/ test/ | xargs sed -i '' 's/\bJiraDetail\b/TaskDetail/
 
 Then remove the now-redundant `JiraDetail as TaskDetail` / `JiraTask as Task` import aliases in `src/tasks/provider.ts` and `src/tasks/jira/provider.ts`.
 
-- [ ] **Step 2: Rename the status/retire fields**
+- [ ] **Step 2: Rename the status/retire fields — sweep the whole tree, not a file list**
+
+**Do not enumerate files here.** The Deck Orchestrator is being built in parallel and its `src/engine/orchestrator/conditions.ts` reads `status.jiraCategory` and `status.jiraStatus` (see its Phase 1 plan, lines 22-25). If it landed before this task, a hand-written file list silently misses it and the typecheck failure will point somewhere unhelpful. Sweep by content:
 
 ```bash
-sed -i '' 's/\bjiraCategory\b/ticketCategory/g; s/\bjiraStatus\b/ticketStatus/g' \
-  src/engine/status.ts src/engine/retire.ts src/deckView.ts src/types.ts \
-  test/unit/engine/status.test.ts test/unit/engine/retire.test.ts
-sed -i '' 's/\bJiraInfo\b/TicketInfo/g' src/engine/status.ts src/deckView.ts
+grep -rl "jiraCategory\|jiraStatus\|JiraInfo" src/ test/ \
+  | xargs sed -i '' 's/\bjiraCategory\b/ticketCategory/g; s/\bjiraStatus\b/ticketStatus/g; s/\bJiraInfo\b/TicketInfo/g'
+```
+
+Then confirm nothing was left behind, including in the parallel work:
+
+```bash
+grep -rn "jiraCategory\|jiraStatus\|JiraInfo" src/ test/ || echo "clean"
 ```
 
 In `src/engine/status.ts`, rename the `jira:` property on its inputs to `ticket:` and update `src/deckView.ts`'s call site. `retire.ts:47`'s `=== "done"` comparison is **unchanged**.
+
+If `src/engine/orchestrator/` exists, two extra things are true and neither is optional:
+- its condition **kinds** are already `ticket-done` / `ticket-status-is` and must **not** be touched — they are persisted inside users' saved flow files, and renaming one would need a migration;
+- its `conditions.test.ts` fixtures construct a `RunStatus` literal, so the sweep above updates them too. Re-run `npx vitest run test/unit/engine/orchestrator/` and expect PASS.
 
 - [ ] **Step 3: Rename the detail-message component field**
 
