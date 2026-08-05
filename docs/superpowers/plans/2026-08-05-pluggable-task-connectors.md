@@ -923,6 +923,11 @@ export class JiraProvider implements TaskProvider {
   /** Screen-field metadata from the last statusTargets() call, per transition id.
    * Used to work out what a rejection is complaining about, without paying a
    * second round-trip for data we just had. */
+  // Both caches are keyed by `${key}:${targetId}`, NOT by targetId alone. Jira
+  // transition ids belong to the workflow, not the issue, so two issues sharing a
+  // workflow have identical ids — an id-only key would let one issue's
+  // allowedValues mapping build another issue's payload, which is a wrong write
+  // rather than a dropped field, and it would not error.
   private metaByTarget = new Map<string, Record<string, TransitionFieldMeta>>();
 
   /** The prompts actually ISSUED for a transition, by field id.
