@@ -60,8 +60,14 @@ export function describeActiveTasks(runs: Run[], livePlaces: ReadonlySet<string>
   const active = runs.filter((r) => !r.finishedAt);
   if (active.length === 0) return "_No other active tasks right now._";
   const lines = active.map((r) => {
-    const live = r.repos.some((repo) => livePlaces.has(canon(repo.path)));
-    const first = r.repos[0];
+    // `r.repos` is guarded rather than trusted: readRuns only validates that a
+    // record has `.key` (see its own comment), so a hand-edited or legacy file
+    // can reach here with `repos` missing entirely. Degrading to "unknown
+    // location" / not-live is the same best-effort posture readRuns already
+    // takes with a corrupt file, rather than throwing mid-launch.
+    const repos = r.repos ?? [];
+    const live = repos.some((repo) => livePlaces.has(canon(repo.path)));
+    const first = repos[0];
     const where = first ? `\`${first.path}\`${first.branch ? ` (branch: ${first.branch})` : ""}` : "unknown location";
     return `- **${r.key}** (${runKind(r)}) — ${r.summary} — ${where} — ${live ? "agent open" : "idle, no agent attached"}`;
   });

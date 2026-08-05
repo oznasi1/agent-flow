@@ -124,6 +124,16 @@ describe("describeActiveTasks", () => {
     expect(describeActiveTasks([run], new Set())).toContain("unknown location");
   });
 
+  it("doesn't throw on a malformed run with repos missing entirely, and falls back to 'unknown location'", () => {
+    // readRuns only validates `.key` — a hand-edited or legacy record can reach
+    // here with no `repos` field at all (not just an empty array).
+    const { repos, ...rest } = mkRun("ASM-1", 100);
+    const malformed = rest as unknown as Run;
+    expect(() => describeActiveTasks([malformed], new Set())).not.toThrow();
+    expect(describeActiveTasks([malformed], new Set())).toContain("unknown location");
+    expect(describeActiveTasks([malformed], new Set())).toContain("idle, no agent attached");
+  });
+
   it("lists multiple active runs as separate bullets, newest first if readRuns already sorted them", () => {
     const a = mkRun("ASM-1", 100);
     const b = mkRun("ASM-2", 300);
