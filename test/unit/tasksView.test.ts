@@ -1367,6 +1367,20 @@ describe("explore", () => {
       }),
     );
   });
+
+  it("stamps kind: 'explore' on every Explore-launched run, regardless of which action was chosen", async () => {
+    // Every Explore action has no Jira ticket — kind distinguishes ticket-vs-no-ticket
+    // runs, not which of the six actions launched it. Without this, every run opened
+    // through Explore persists (and later renders) as kind "task".
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "supervise" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ kind: "explore" }));
+  });
 });
 
 describe("passthrough messages", () => {

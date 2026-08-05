@@ -792,6 +792,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       existingWorkspaceFile: args.existingWorkspaceFile,
       existingFolder: args.existingFolder,
       remoteControl: wantRemoteControl,
+      kind: "explore",
     });
 
     const where = result.workspaceFile
