@@ -1562,9 +1562,14 @@ Expected: FAIL — module not found.
 ```ts
 // test/_helpers/fixtureConnector.ts
 import {
-  Capabilities, SourceInfo, StatusTarget, TaskConnector, TaskProvider,
+  Capabilities, SourceInfo, StatusTarget, Task, TaskConnector, TaskDetail, TaskProvider,
 } from "../../src/tasks/provider";
-import { Filter, JiraDetail, JiraTask, Size } from "../../src/types";
+import { Filter, Size } from "../../src/types";
+// Task and TaskDetail come from the seam itself, which re-exports them. This
+// fixture must NOT import anything from src/tasks/jira/ — it exists to prove the
+// seam can be satisfied by an implementation that knows nothing about Jira, and
+// reaching into the Jira connector for a type would quietly defeat that.
+// (JiraDetail is also not in types.ts at all — it is declared in jira/client.ts.)
 
 /** A complete second connector over static data, declaring the bare minimum of
  * the seam. It exists so capability-gating is exercised rather than assumed: a
@@ -1575,7 +1580,7 @@ import { Filter, JiraDetail, JiraTask, Size } from "../../src/types";
  * not a shipped feature. */
 const MARKER = "/t/";
 
-export const FIXTURE_TASKS: JiraTask[] = [
+export const FIXTURE_TASKS: Task[] = [
   {
     key: "FX-1", summary: "First fixture task", status: "Open", statusCategory: "new",
     priority: "", assignee: "Unassigned", labels: [], components: [],
@@ -1593,11 +1598,11 @@ export const FIXTURE_TASKS: JiraTask[] = [
 export interface FixtureOptions {
   configured: boolean;
   authed: boolean;
-  tasks: JiraTask[];
+  tasks: Task[];
 }
 
 class FixtureProvider implements TaskProvider {
-  constructor(private readonly tasks: JiraTask[]) {}
+  constructor(private readonly tasks: Task[]) {}
 
   readonly caps: Capabilities = {
     // No sprint-shaped lens: this source has no sprints at all.
@@ -1606,11 +1611,11 @@ class FixtureProvider implements TaskProvider {
     // labels, sprints and components are absent, not false — see Capabilities.
   };
 
-  async list(lens: Filter, _size: Size): Promise<JiraTask[]> {
+  async list(lens: Filter, _size: Size): Promise<Task[]> {
     return lens === "mine" ? this.tasks.filter((t) => t.assignee === "Me") : this.tasks;
   }
 
-  async detail(key: string): Promise<JiraDetail> {
+  async detail(key: string): Promise<TaskDetail> {
     const t = this.tasks.find((x) => x.key === key);
     return {
       key, summary: t?.summary ?? "", descriptionText: "A fixture task.",
