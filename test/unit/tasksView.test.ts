@@ -267,7 +267,12 @@ function setup(opts: { authed?: boolean; workspaceState?: Record<string, unknown
   const { context, workspaceState, globalState } = fakeContext({ workspaceState: opts.workspaceState });
   const auth = fakeAuth({ authed: opts.authed ?? true });
   const connector = opts.connector ?? jiraConnector(auth);
-  const provider = new TasksViewProvider(context, connector);
+  // The output channel is captured, not discarded: two of this panel's diagnostics
+  // are the ONLY record of a deliberate decision it made (declining to prompt for an
+  // unfillable required field, and the transport status behind a refused write), so
+  // they are asserted rather than trusted.
+  const logged: string[] = [];
+  const provider = new TasksViewProvider(context, connector, (m) => logged.push(m));
   // A live array as well as the spy: the capability tests below read messages after
   // driving an action, which a snapshot taken at mount time could not show.
   const messages: OutboundMessage[] = [];
@@ -291,7 +296,7 @@ function setup(opts: { authed?: boolean; workspaceState?: Record<string, unknown
   provider.resolveWebviewView(view as never);
   const send = (m: InboundMessage) => handler(m);
   const posted = () => post.mock.calls.map((c) => c[0] as OutboundMessage);
-  return { provider, post, send, posted, messages, auth, connector, workspaceState, globalState };
+  return { provider, post, send, posted, messages, logged, auth, connector, workspaceState, globalState };
 }
 
 /** Mount the panel on a given connector and let it establish its state, the way the
@@ -300,7 +305,7 @@ function setup(opts: { authed?: boolean; workspaceState?: Record<string, unknown
 async function mountWith(connector: TaskConnector) {
   const s = setup({ connector });
   await s.send({ type: "ready" });
-  return { view: s.provider, posted: s.messages, send: s.send };
+  return { view: s.provider, posted: s.messages, send: s.send, logged: s.logged };
 }
 
 /** The fixture connector with individual provider members swapped. Used where the
@@ -755,6 +760,51 @@ describe("changeStatus", () => {
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
 
+  // Two log lines, no user-facing surface. Both were lost when this view stopped
+  // knowing about Jira transitions, and both are the only trace of something the user
+  // cannot otherwise find out — so they are pinned like behaviour.
+  it("records the required fields it deliberately did not prompt for", async () => {
+    // A rich-text required field: promptableFields cannot build a prompt for ADF, so
+    // the write is attempted without it and Jira decides. Nobody is asked, and without
+    // this line nobody can tell that was a choice.
+    const t = {
+      id: "81", name: "Close", toName: "Closed", toCategory: "done",
+      fields: {
+        description: { required: true, name: "Description", schema: { type: "string", system: "description" } },
+        environment: { required: true, name: "Environment", schema: { type: "string", system: "environment" } },
+      },
+    };
+    clientStub.getTransitions.mockResolvedValue([t]);
+    answerPicks(pickFirst);
+    const { provider, logged } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(logged).toContain("changeStatus ASM-1: can't fill Description, Environment here — letting Jira decide");
+    // Still attempted, exactly as before: refusing to try would be the worse failure.
+    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "81", {});
+  });
+
+  it("says nothing about unfillable fields when every field could be prompted", async () => {
+    clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
+    answerPicks(pickFirst, { label: "Done" });
+    const { provider, logged } = setup();
+    await provider.changeStatus("ASM-1");
+    expect(logged.some((l) => l.includes("can't fill"))).toBe(false);
+  });
+
+  it("records the transport status behind a refused write, and keeps it out of the toast", async () => {
+    const t = { id: "41", name: "Resolve", toName: "Done", toCategory: "done", fields: {} };
+    clientStub.getTransitions.mockResolvedValue([t]);
+    clientStub.transition.mockRejectedValue(apiError(["You do not have permission"]));
+    answerPicks(pickFirst);
+    const { provider, posted, logged } = setup();
+    await provider.changeStatus("ASM-1");
+    // 403-vs-400 is "you may not" vs "that was malformed"; the prose says neither.
+    expect(logged).toContain("changeStatus ASM-1: 400 — Couldn't update ASM-1. You do not have permission.");
+    const toast = posted().find((m) => m.type === "toast" && m.level === "error") as { message: string };
+    expect(toast.message).toBe("Couldn't update ASM-1. You do not have permission.");
+    expect(toast.message).not.toContain("400");
+  });
+
   it("stays silent when the recovery prompt is cancelled", async () => {
     clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
     clientStub.transition.mockRejectedValue(apiError(["Ticket cannot be closed unless Resolution will be provided"]));
@@ -1070,6 +1120,11 @@ describe("addToMySprint", () => {
     await provider.addToMySprint("ASM-1");
     expect(clientStub.addIssueToSprint).toHaveBeenCalledWith(42, "ASM-1");
     expect(clientStub.assignIssue).toHaveBeenCalledWith("ASM-1", "a1");
+    // ONE identity lookup for the pair, not one per write. Two would not merely cost a
+    // request: a second lookup answering null after the sprint-add succeeded would
+    // throw, leaving the task in the sprint and unassigned — a state one lookup makes
+    // unreachable.
+    expect(clientStub.getMyself).toHaveBeenCalledTimes(1);
     expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
     expect(posted()).toContainEqual({ type: "movedToSprint", key: "ASM-1", assignee: "Jane", removed: true });
   });
@@ -3561,6 +3616,21 @@ describe("a source with no optional capabilities", () => {
     );
     const toast = posted.find((m) => m.type === "toast" && m.level === "error") as { message: string };
     expect(toast.message).toMatch(/Fixture/);
+  });
+
+  it("classifies no chip at all, and blames no connection, when the source has no components", async () => {
+    const { send, posted, logged } = await mountWith(makeFixtureConnector());
+    await send({ type: "detail", key: "FX-1" });
+    const detail = posted.find((m) => m.type === "detail") as
+      { sourceComponents: string[]; mappable: Record<string, string> | null };
+    // `null`, not `{}`: nothing can be claimed about any chip either way.
+    expect(detail.mappable).toBeNull();
+    expect(detail.sourceComponents).toEqual([]);
+    // And the trace must not say a read failed — nothing was read. Blaming the
+    // connection for a capability the source never had sends the user looking in
+    // exactly the wrong place, which is why setComponent already words these apart.
+    expect(logged).toContain("detail FX-1: Fixture doesn't have components");
+    expect(logged.some((l) => l.includes("component list unavailable"))).toBe(false);
   });
 
   it("treats stampLabelOnWrite as a silent no-op, not a crash", async () => {

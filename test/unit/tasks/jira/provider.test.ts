@@ -154,6 +154,64 @@ describe("JiraProvider", () => {
     expect(assignIssue).toHaveBeenCalledWith("A-1", "acc");
   });
 
+  it("uses a caller's already-resolved id instead of looking the account up again", async () => {
+    const assignIssue = vi.fn(async () => undefined);
+    const getMyself = vi.fn(async () => ({ accountId: "acc", displayName: "Me" }));
+    await new JiraProvider(client({ assignIssue, getMyself })).assignToMe("A-1", "pre-resolved");
+    expect(assignIssue).toHaveBeenCalledWith("A-1", "pre-resolved");
+    // The point of the parameter: a caller that pairs this with another write must not
+    // be exposed to a second lookup answering differently from its first.
+    expect(getMyself).not.toHaveBeenCalled();
+  });
+
+  it("refuses a blank pre-resolved id rather than unassigning the issue", async () => {
+    // Jira reads an empty assignee as "unassign" — the opposite of this method's
+    // promise — so a caller's empty string must fail, not fall through to a lookup.
+    const assignIssue = vi.fn(async () => undefined);
+    const p = new JiraProvider(client({ assignIssue }));
+    await expect(p.assignToMe("A-1", "")).rejects.toThrow(/account/i);
+    expect(assignIssue).not.toHaveBeenCalled();
+  });
+
+  it("carries the required fields it could not turn into prompts, and omits the field when there are none", async () => {
+    const c = client({
+      getTransitions: vi.fn(async () => [
+        {
+          id: "81", name: "Close", toName: "Closed", toCategory: "done",
+          fields: {
+            description: { required: true, name: "Description", schema: { type: "string", system: "description" } },
+            resolution: { required: true, name: "Resolution", allowedValues: [{ id: "1", name: "Done" }] },
+          },
+        },
+        { id: "31", name: "Start", toName: "In Progress", toCategory: "indeterminate", fields: {} },
+      ]),
+    });
+    const [closed, start] = await new JiraProvider(c).statusTargets("A-1");
+    // Required, unpromptable (a rich-text system field) — declared so the view can log
+    // that nobody was asked before the write.
+    expect(closed.unfillable).toEqual(["Description"]);
+    // …and it is NOT double-counted as a prompt.
+    expect(closed.fields.map((f) => f.id)).toEqual(["resolution"]);
+    // Absent rather than [] when everything mapped, so the property means one thing.
+    expect(start.unfillable).toBeUndefined();
+  });
+
+  it("carries the refusal's transport status on the TaskWriteError", async () => {
+    const c = client({
+      getTransitions: vi.fn(async () => [
+        { id: "31", name: "Go", toName: "Go", toCategory: "", fields: {} },
+      ]),
+      transition: vi.fn(async () => {
+        throw new JiraApiError(403, "Forbidden", {}, ["You do not have permission"]);
+      }),
+    });
+    const p = new JiraProvider(c);
+    await p.statusTargets("A-1");
+    const err = (await p.moveTo("A-1", "31", {}).catch((e: unknown) => e)) as TaskWriteError;
+    // 403 vs 400 is "you may not" vs "that was malformed"; the prose says neither.
+    expect(err.status).toBe(403);
+  });
+
   it("refuses to assign when the account cannot be resolved", async () => {
     const assignIssue = vi.fn(async () => undefined);
     const p = new JiraProvider(client({ assignIssue, getMyself: vi.fn(async () => null) }));

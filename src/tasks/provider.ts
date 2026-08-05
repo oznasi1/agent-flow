@@ -28,6 +28,20 @@ export interface StatusTarget {
    * (Jira transitions are named separately from their target status). */
   via?: string;
   fields: FieldPrompt[];
+  /** Display names of fields the move REQUIRES but that could not be turned into a
+   * prompt — a rich-text/ADF body, an attachment, a picker this vocabulary has no
+   * shape for. The move is still attempted: the source may well accept it, and
+   * refusing to try would be worse than letting the source decide.
+   *
+   * Diagnostic only, and never shown to the user. It exists because this is the one
+   * place the extension makes a silent decision on the user's behalf: when the write
+   * is then refused for a field nobody was asked about, the log line built from this
+   * is the only way to learn the omission was deliberate rather than a bug.
+   *
+   * Optional so a source with nothing to declare (any source whose fields all map,
+   * including the test fixture) needs no field at all — absent and empty mean the
+   * same thing. */
+  unfillable?: string[];
 }
 
 /** Optional operations, held as objects rather than booleans so that "supported"
@@ -78,7 +92,13 @@ export interface TaskProvider {
   /** `values` are raw prompt answers; the connector maps them to its own wire
    * shape. Throws `TaskWriteError` on a refusal. */
   moveTo(key: string, targetId: string, values: Record<string, string | string[]>): Promise<void>;
-  assignToMe(key: string): Promise<void>;
+  /** Assign the task to the signed-in user. `meId` is an `id` from a `me()` the caller
+   * has ALREADY resolved: passing it saves a second identity round-trip, and — the
+   * reason it exists — removes a half-done state from any caller that pairs this with
+   * another write. A caller that resolves identity, writes, then calls this can
+   * otherwise have the second lookup answer differently from the first and strand the
+   * earlier write. Omitted means resolve it here, for callers with nothing in hand. */
+  assignToMe(key: string, meId?: string): Promise<void>;
   me(): Promise<{ id: string; displayName: string } | null>;
   readonly caps: Capabilities;
 }
@@ -163,9 +183,18 @@ export class TaskApiError extends Error {
 
 /** A refused write. `retryWith` is the connector saying "ask the user for these,
  * then try again" — the only recovery a view knows how to perform. Empty means
- * there is nothing left to try. */
+ * there is nothing left to try.
+ *
+ * `status` is the transport status when the source has one, for the log line only —
+ * 403-vs-400 is the difference between "you may not" and "that was malformed", and a
+ * refusal message often states neither. Optional because a source need not be HTTP;
+ * nothing user-facing may depend on it. */
 export class TaskWriteError extends Error {
-  constructor(message: string, readonly retryWith: FieldPrompt[] = []) {
+  constructor(
+    message: string,
+    readonly retryWith: FieldPrompt[] = [],
+    readonly status?: number,
+  ) {
     super(message);
     this.name = "TaskWriteError";
   }

@@ -197,10 +197,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** Stamp the provenance label, when the source has labels at all and the user
    * wants it. A source without them is a silent no-op, never an error: the write
    * that mattered already succeeded, and failing the whole operation over
-   * unavailable provenance stamping would be the wrong trade. */
-  private async stampProvenance(key: string): Promise<void> {
+   * unavailable provenance stamping would be the wrong trade.
+   *
+   * Takes the caller's provider rather than building its own, for the reason
+   * `provider()` gives: one provider per operation, so a stamp can never be issued
+   * by an instance that knows nothing about the write it is stamping. */
+  private async stampProvenance(provider: TaskProvider, key: string): Promise<void> {
     const cfg = getConfig();
-    const labels = this.provider().caps.labels;
+    const labels = provider.caps.labels;
     if (!cfg.stampLabelOnWrite || !labels) return;
     try {
       await labels.add(key, cfg.provenanceLabel);
@@ -326,14 +330,20 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           // After the issue read, never before: the component list swallows every
           // failure including a 401, so the detail read is what lets a dead token
           // reach the catch below and re-gate the panel. A source with no components
-          // at all reads as the same `null` — nothing can be claimed about any chip
-          // either way, which is exactly what `mappable: null` means.
+          // at all yields the same `null` — no chip can be classified either way,
+          // which is exactly what `mappable: null` means to the webview.
           const components = provider.caps.components;
           const projectComponents = components ? await components.list() : null;
-          if (projectComponents === null) {
-            // Not toasted: a card expand happening to land while the source's endpoint
-            // is down would toast on every expand. The chips render "unknown" instead;
-            // this line is only for tracing it after the fact.
+          // Not toasted: a card expand happening to land while the source's endpoint
+          // is down would toast on every expand. The chips render "unknown" instead;
+          // these lines are only for tracing it after the fact. The two cases get
+          // different wording on purpose, matching setComponent's: "unavailable"
+          // claims a read was attempted and failed, which is untrue of a source that
+          // has no components to read — and sending someone to check a connection
+          // over a capability the source never had is a wasted hour.
+          if (!components) {
+            this.log(`detail ${m.key}: ${info.label} doesn't have components`);
+          } else if (projectComponents === null) {
             this.log(`detail ${m.key}: ${info.scopeValue} component list unavailable`);
           }
           const names = repos.map((r) => r.name);
@@ -447,6 +457,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.log(`changeStatus ${key}: picked ${pick ? pick.t.toName : "(cancelled)"}`);
     if (!pick) return;
     const target = pick.t;
+    if (target.unfillable?.length) {
+      // The one place the extension silently decides for the user. When the write is
+      // refused for a field nobody was asked about, this line is the only way to
+      // learn the omission was deliberate. `info.label` rather than a literal, so the
+      // sentence stays true for a non-Jira source — for Jira it is the same words the
+      // pre-seam view logged.
+      this.log(
+        `changeStatus ${key}: can't fill ${target.unfillable.join(", ")} here — letting ${this.connector.info().label} decide`,
+      );
+    }
 
     const values = await this.collectFields(key, target.toName, target.fields);
     if (values === undefined) {
@@ -462,7 +482,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       // for. Anything else is reported in place — a refused write leaves the
       // list valid, so it never re-gates the panel.
       if (!e.retryWith.length) {
-        this.reportWriteFailure(key, e.message);
+        this.reportWriteFailure(key, e);
         return;
       }
       this.log(`changeStatus ${key}: rejected — re-prompting ${e.retryWith.map((p) => p.name).join(", ")}`);
@@ -472,12 +492,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         await provider.moveTo(key, target.id, { ...values, ...extra });
       } catch (e2) {
         if (!(e2 instanceof TaskWriteError)) throw e2;
-        this.reportWriteFailure(key, e2.message);
+        this.reportWriteFailure(key, e2);
         return;
       }
     }
     this.log(`changeStatus ${key}: move ok → ${target.toName}`);
-    await this.stampProvenance(key);
+    await this.stampProvenance(provider, key);
     const removed = target.toCategory === "done";
     this.post({ type: "statusChanged", key, status: target.toName, category: target.toCategory, removed });
     this.toast("success", `${key} → ${target.toName}`);
@@ -528,11 +548,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
   /** A refused write leaves the list valid, so it gets a toast — never the gate —
    *  with a way out to the task itself. The message is the connector's own: it knows
-   *  what its refusal meant, and re-phrasing it here would only lose detail. */
-  private reportWriteFailure(key: string, message: string): void {
+   *  what its refusal meant, and re-phrasing it here would only lose detail.
+   *
+   *  The transport status goes to the log and NOT to the toast: "403" tells a
+   *  maintainer reading the output channel whether the write was forbidden or merely
+   *  malformed, and tells a user nothing they can act on. Sources without one log the
+   *  message alone rather than an empty prefix. */
+  private reportWriteFailure(key: string, err: TaskWriteError): void {
     const info = this.connector.info();
-    const text = `Couldn't update ${key}. ${message}`;
-    this.log(`changeStatus ${key}: ${text}`);
+    const text = `Couldn't update ${key}. ${err.message}`;
+    this.log(`changeStatus ${key}: ${err.status === undefined ? "" : `${err.status} — `}${text}`);
     this.toast("error", text, {
       label: `Open in ${info.label}`,
       url: this.connector.taskUrl(key),
@@ -562,9 +587,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       return;
     }
     await ops.add(sprintId, key);
-    await provider.assignToMe(key);
+    // The id from the `me()` above, not a second lookup: one /myself per sprint-add,
+    // and — the part that matters — the sprint-add cannot be left standing with the
+    // assignment failing because a re-resolve answered differently.
+    await provider.assignToMe(key, me.id);
     this.log(`addToMySprint ${key}: sprint ${sprintId} + assigned to ${me.displayName}`);
-    await this.stampProvenance(key);
+    await this.stampProvenance(provider, key);
     // No longer matches the "unassigned" or "backlog" lenses once it's mine + in a sprint.
     const removed = this.lastFilter === "unassigned" || this.lastFilter === "backlog";
     this.post({ type: "movedToSprint", key, assignee: me.displayName, removed });
@@ -579,11 +607,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       this.postState(false, this.connector.isConfigured(), null);
       return;
     }
-    const ops = this.sprints(this.provider());
+    const provider = this.provider();
+    const ops = this.sprints(provider);
     if (!ops) return;
     await ops.remove(key);
     this.log(`removeFromSprint ${key}: moved to backlog`);
-    await this.stampProvenance(key);
+    await this.stampProvenance(provider, key);
     // Drop it from the saved manual order so no ghost rank lingers.
     const saved = this.savedOrder();
     if (saved.includes(key)) await this.saveOrder(saved.filter((k) => k !== key));
@@ -626,7 +655,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       // The webview hides the chips on `caps.components`; this is the backstop for a
       // stale webview. `ok: false` is what releases its held optimistic edit — a
       // silent return would strand the chip for the life of the window.
-      const components = this.provider().caps.components;
+      const provider = this.provider();
+      const components = provider.caps.components;
       if (!components) {
         this.log(`setComponent ${key}: ${info.label} doesn't have components`);
         echo(false);
@@ -665,7 +695,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         return;
       }
       this.log(`setComponent ${key}: ${on ? "add" : "remove"} ${name} ok`);
-      await this.stampProvenance(key);
+      await this.stampProvenance(provider, key);
       echo(true);
       this.toast("success", on ? `Added ${name} to ${key}` : `Removed ${name} from ${key}`);
     } catch (e) {

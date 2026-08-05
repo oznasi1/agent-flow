@@ -99,15 +99,18 @@ export class JiraProvider implements TaskProvider {
     );
   }
 
-  async assignToMe(key: string): Promise<void> {
-    const me = await this.client.getMyself();
-    // Never call assignIssue with a blank id: Jira reads that as "unassign",
-    // which is the opposite of what this method promises. `getMyself()` returns
-    // `{ accountId, displayName }` — there is no `id` field on it, so read
-    // `accountId` directly rather than coalescing over a property that does not
-    // exist. (The seam's `me()` renames it to `id`; the client does not.)
-    if (!me) throw new Error("Couldn't resolve your Jira account.");
-    await this.client.assignIssue(key, me.accountId);
+  async assignToMe(key: string, meId?: string): Promise<void> {
+    // A caller that already resolved `me()` passes its `id` — which IS the Jira
+    // accountId, renamed by the seam — so this makes no second /myself request.
+    // `getMyself()` returns `{ accountId, displayName }` with no `id` field, so the
+    // fallback reads `accountId` rather than coalescing over a property that does not
+    // exist on the client's shape.
+    const accountId = meId ?? (await this.client.getMyself())?.accountId;
+    // Never call assignIssue with a blank id: Jira reads that as "unassign", which is
+    // the opposite of what this method promises. Guards the passed-in id too — an
+    // empty string from a caller must fail here, not silently unassign.
+    if (!accountId) throw new Error("Couldn't resolve your Jira account.");
+    await this.client.assignIssue(key, accountId);
   }
 
   async statusTargets(key: string): Promise<StatusTarget[]> {
@@ -119,7 +122,11 @@ export class JiraProvider implements TaskProvider {
       // getTransitions — the metadata is Jira's JSON, not a guarantee.
       const meta = t.fields ?? {};
       this.metaByTarget.set(this.cacheKey(key, t.id), meta);
-      const { prompts } = promptableFields(meta);
+      // `skipped` is required-but-unpromptable — a rich-text body, an attachment.
+      // Carried on the target rather than dropped: the view logs it, which is the
+      // only trace that Agent Flow chose not to ask before a write Jira then refuses
+      // for exactly that field. Omitted when empty so the property means one thing.
+      const { prompts, skipped } = promptableFields(meta);
       this.rememberPrompts(key, t.id, prompts);
       return {
         id: t.id,
@@ -127,6 +134,7 @@ export class JiraProvider implements TaskProvider {
         toCategory: (t.toCategory || "") as StatusTarget["toCategory"],
         ...(t.name !== t.toName ? { via: t.name } : {}),
         fields: prompts,
+        ...(skipped.length ? { unfillable: skipped } : {}),
       };
     });
   }
@@ -144,6 +152,9 @@ export class JiraProvider implements TaskProvider {
       throw new TaskWriteError(
         describeJiraError(e, fieldDisplayNames(meta)),
         await this.retryPrompts(key, targetId, meta, e),
+        // For the view's log line: a field-scoped refusal's prose says nothing about
+        // whether Jira called it forbidden or malformed.
+        e.status,
       );
     }
   }

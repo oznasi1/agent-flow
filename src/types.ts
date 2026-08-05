@@ -3,7 +3,7 @@
 // value import would be a runtime cycle. `import type` is erased at build time.
 import type { SerializedCaps } from "./tasks/provider";
 
-export type Filter ="unassigned" | "mine" | "mysprint" | "sprint" | "backlog" | "all";
+export type Filter = "unassigned" | "mine" | "mysprint" | "sprint" | "backlog" | "all";
 export type Size = "any" | "s" | "m" | "l"; // by original time estimate
 
 /** Which secondary filter controls the task-pool sidebar shows. Each defaults to

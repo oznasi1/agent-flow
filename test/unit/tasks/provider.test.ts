@@ -36,6 +36,13 @@ describe("task errors", () => {
     expect(w.retryWith).toHaveLength(1);
   });
 
+  it("leaves TaskWriteError.status undefined for a source that has none", () => {
+    // Optional on purpose: a non-HTTP source has no status, and nothing user-facing
+    // may depend on one — it exists for the log line alone.
+    expect(new TaskWriteError("x").status).toBeUndefined();
+    expect(new TaskWriteError("x", [], 403).status).toBe(403);
+  });
+
   it("recognises only its own network markers", () => {
     expect(isTaskNetworkError(markTaskNetworkFailure(new Error("x"), "ETIMEDOUT"))).toBe(true);
     expect(isTaskNetworkError(new Error("x"))).toBe(false);
