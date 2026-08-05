@@ -93,6 +93,9 @@ export class JiraProvider implements TaskProvider {
     return this.client.getStatus(key);
   }
 
+  /** `id` is Jira's accountId, and can be `""` for a `/myself` that answered with a
+   * display name but no account id — the seam allows that (see `TaskProvider.me`),
+   * because the name alone still drives the header chip and the "mine" affordances. */
   me(): Promise<{ id: string; displayName: string } | null> {
     return this.client.getMyself().then((m) =>
       m ? { id: m.accountId, displayName: m.displayName } : null,

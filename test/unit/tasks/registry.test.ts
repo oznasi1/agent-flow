@@ -35,11 +35,23 @@ describe("resolveConnector", () => {
 });
 
 describe("the manifest and the registry agree", () => {
-  it("offers exactly the registered connectors in the taskSource enum", () => {
+  const taskSourceProp = () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../package.json"), "utf8"));
-    const prop = pkg.contributes.configuration.properties["agentFlow.taskSource"];
+    return pkg.contributes.configuration.properties["agentFlow.taskSource"];
+  };
+
+  it("offers exactly the registered connectors in the taskSource enum", () => {
+    const prop = taskSourceProp();
     expect(prop.default).toBe("jira");
     expect([...prop.enum].sort()).toEqual([...CONNECTOR_IDS].sort());
     expect(prop.enumDescriptions).toHaveLength(prop.enum.length);
+  });
+
+  it("tells the reader the setting needs a window reload", () => {
+    // Nothing listens for a change to this one: the connector is resolved once, at
+    // activation (`resolveConnector`), so editing the setting does nothing visible
+    // until the window reloads. The description is the only place a user can learn
+    // that, and without it the setting reads as broken.
+    expect(taskSourceProp().description).toMatch(/reload/i);
   });
 });

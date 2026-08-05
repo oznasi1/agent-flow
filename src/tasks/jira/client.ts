@@ -115,19 +115,19 @@ export class JiraClient {
     return text ? JSON.parse(text) : null; // transitions/edits return 204 No Content
   }
 
-  async currentUserName(): Promise<string | null> {
-    try {
-      const me = await this.request("/rest/api/3/myself");
-      return me?.displayName ?? null;
-    } catch {
-      return null;
-    }
-  }
-
+  /** Deliberately NOT gated on `accountId`: a `/myself` that answers with a display
+   * name but no account id (Jira Server/DC, or a field-stripping proxy) still names
+   * the signed-in user, and dropping the whole identity over the missing id took the
+   * header's name chip AND every "is this task mine?" affordance with it — including
+   * "Add to my sprint" on the user's own out-of-sprint tasks. The write side stays
+   * safe where it matters: `assignToMe` refuses an empty id rather than unassigning.
+   * Either field alone is an identity; neither means nobody, which is still `null`. */
   async getMyself(): Promise<{ accountId: string; displayName: string } | null> {
     try {
       const me = await this.request("/rest/api/3/myself");
-      return me?.accountId ? { accountId: me.accountId, displayName: me.displayName ?? "" } : null;
+      return me?.accountId || me?.displayName
+        ? { accountId: me.accountId ?? "", displayName: me.displayName ?? "" }
+        : null;
     } catch {
       return null;
     }

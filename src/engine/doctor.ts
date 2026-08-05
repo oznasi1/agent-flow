@@ -271,7 +271,7 @@ function claudeChecks(i: DoctorInputs): Check[] {
     status: i.claudeProjectsReadable ? "ok" : "warn",
     detail: i.claudeProjectsReadable
       ? "~/.claude/projects is readable"
-      : "~/.claude/projects is unreadable — the Deck's live signal falls back to git and Jira",
+      : `~/.claude/projects is unreadable — the Deck's live signal falls back to git and ${i.sourceLabel}`,
   });
 
   return out;

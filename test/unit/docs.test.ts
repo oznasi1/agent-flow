@@ -23,10 +23,14 @@ describe("connector docs", () => {
 
   it("records the new setting under Unreleased", () => {
     const changelog = read("CHANGELOG.md");
-    const unreleased = changelog.slice(
-      changelog.indexOf("## [Unreleased]"),
-      changelog.indexOf("## [0.4.2]"),
-    );
+    const start = changelog.indexOf("## [Unreleased]");
+    // To the NEXT version heading, whatever it is called — not to a hardcoded
+    // `## [0.4.2]`. Slicing to a named release makes this assertion stop testing
+    // anything the moment Unreleased is cut: the slice would then span the new
+    // (empty) Unreleased plus the shipped section that still contains the string,
+    // and it would hard-fail the day that heading is pruned from the file.
+    const next = changelog.indexOf("\n## [", start + 1);
+    const unreleased = changelog.slice(start, next === -1 ? undefined : next);
     expect(unreleased).toContain("agentFlow.taskSource");
   });
 });

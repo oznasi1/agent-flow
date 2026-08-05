@@ -13,10 +13,10 @@ import {
   type TaskDetail,
   type TaskProvider,
 } from "./tasks/provider";
-// The one Jira-directory import left in this file, and it is a pure function over
-// the seam's own prompt vocabulary (`FieldPrompt`) rather than anything Jira —
-// it only lives there because that is where the vocabulary was first declared.
-import { validateFieldInput } from "./tasks/jira/transitionFields";
+// A pure function over the seam's own prompt vocabulary (`FieldPrompt`), which is
+// why it lives beside the seam and not under any one source's directory — this
+// file reaches into no connector.
+import { validateFieldInput } from "./tasks/fields";
 import { effectiveFilter } from "./webview/helpers";
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
@@ -582,7 +582,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (!ops) return;
     const info = this.connector.info();
     const me = await provider.me();
-    if (!me) {
+    // `!me.id`, not just `!me`: a source may name the user without a usable id (see
+    // `TaskProvider.me`), and this method pairs a sprint-add with an assignment. An
+    // identity that can't be assigned to has to stop the pair BEFORE the first write,
+    // not fail at the second and leave the task in the sprint but unassigned.
+    if (!me?.id) {
       this.toast("error", `Couldn't resolve your ${info.label} account.`);
       return;
     }

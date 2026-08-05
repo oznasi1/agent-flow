@@ -219,6 +219,19 @@ describe("JiraProvider", () => {
     expect(assignIssue).not.toHaveBeenCalled();
   });
 
+  it("resolves an identity from a display name alone, and still refuses to assign with it", async () => {
+    // A /myself with a name but no accountId — Jira Server/DC, or a proxy that strips
+    // the field. The name is what the panel's header chip and the "is this mine?"
+    // affordances need, so it must survive; the write side is what has to refuse.
+    const assignIssue = vi.fn(async () => undefined);
+    const p = new JiraProvider(
+      client({ assignIssue, getMyself: vi.fn(async () => ({ accountId: "", displayName: "Jane" })) }),
+    );
+    expect(await p.me()).toEqual({ id: "", displayName: "Jane" });
+    await expect(p.assignToMe("A-1")).rejects.toThrow(/account/i);
+    expect(assignIssue).not.toHaveBeenCalled();
+  });
+
   // Transition ids are scoped to a Jira *workflow*, not to an issue: two issues
   // sharing a workflow have the identical id "31". A cache keyed by id alone
   // would let A-1's cached allowedValues answer for B-2's moveTo, silently

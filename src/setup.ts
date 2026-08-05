@@ -20,13 +20,20 @@ function abort(log: Log, reason: string): false {
 
 /**
  * Guided first-run setup. Delegates the source-specific settings to the
- * connector's own `configure()` — which owns their input boxes, validation and
- * writes — then collects the one setting every source needs (where repo
- * checkouts live), then delegates credential collection to the existing
- * sign-in flow (which stores to SecretStorage).
+ * connector's own `configure()` — which owns their input boxes and validation —
+ * then collects the one setting every source needs (where repo checkouts live),
+ * then delegates credential collection to the existing sign-in flow (which
+ * stores to SecretStorage).
  *
  * Returns true only if setup ran to completion (config saved AND signed in).
  * Cancelling any step aborts without marking setup complete, so it can re-run.
+ *
+ * Every setting is written in ONE block after the last cancellable step, which is
+ * the whole reason `configure()` returns a commit thunk instead of writing: an
+ * already-configured user who re-runs the wizard and presses Esc at the last box
+ * must be left with their previous settings intact. A connector that wrote inside
+ * `configure()` would already have overwritten their site URL and project key by
+ * then — no undo, no toast, and the log line still saying nothing happened.
  */
 export async function runSetup(
   context: vscode.ExtensionContext,
@@ -37,7 +44,10 @@ export async function runSetup(
   log("setup: started");
 
   const total = connector.setupSteps + 1; // + the repos root, which is ours not theirs
-  if (!(await connector.configure(1, total))) {
+  // Collected, not yet written: `null` means the user cancelled inside the
+  // connector's own steps, anything else is the write to perform below.
+  const commitSource = await connector.configure(1, total);
+  if (!commitSource) {
     return abort(log, "cancelled at source configuration");
   }
 
@@ -50,15 +60,19 @@ export async function runSetup(
   });
   if (reposRoot === undefined) return abort(log, "cancelled at repos root");
 
-  // Persist config (global) before credentials. workspaceDir is derived from
-  // reposRoot to keep the wizard short; it remains overridable. Per-task worktrees
-  // live inside each repo (.claude/worktrees/<KEY>), so there's no root to configure.
+  // Persist config (global) before credentials — the connector's settings and ours
+  // together, past the last point the user can back out. workspaceDir is derived
+  // from reposRoot to keep the wizard short; it remains overridable. Per-task
+  // worktrees live inside each repo (.claude/worktrees/<KEY>), so there's no root
+  // to configure.
   const cleanRoot = reposRoot.trim().replace(/\/+$/, "");
+  await commitSource();
   await updateGlobal("reposRoot", cleanRoot);
   await updateGlobal("workspaceDir", cleanRoot);
-  // `info()` re-reads settings, so this sees the scope connector.configure() just
-  // wrote (e.g. the Jira project key) — generic wording since this file no longer
-  // knows the source, but the value itself must survive the rename off `project`.
+  // `info()` re-reads settings, so this sees the scope the commit above just wrote
+  // (e.g. the Jira project key) — which is also why the commit runs first, not last:
+  // generic wording since this file no longer knows the source, but the value itself
+  // must survive the rename off `project`.
   const info = connector.info();
   log(`setup: config saved (${info.scopeNoun} ${info.scopeValue}, root ${cleanRoot})`);
 

@@ -114,24 +114,32 @@ describe("request — error & response mapping", () => {
   });
 });
 
-describe("currentUserName / getMyself", () => {
-  it("returns the display name", async () => {
-    installFetch([jsonResponse({ displayName: "Jane Doe" })]);
-    expect(await client().currentUserName()).toBe("Jane Doe");
-  });
-
-  it("returns null (swallowing errors) when the request fails", async () => {
-    installFetch([textResponse("", 500)]);
-    expect(await client().currentUserName()).toBeNull();
-  });
-
-  it("getMyself returns account id + display name", async () => {
+describe("getMyself", () => {
+  it("returns account id + display name", async () => {
     installFetch([jsonResponse({ accountId: "a-1", displayName: "Jane" })]);
     expect(await client().getMyself()).toEqual({ accountId: "a-1", displayName: "Jane" });
   });
 
-  it("getMyself returns null when there is no account id", async () => {
+  // Jira Server/DC, or a proxy that strips the field: the response still names the
+  // signed-in user, and that name is what the panel's header chip and every
+  // "is this mine?" affordance are built from. Returning null here would take both.
+  it("returns the display name even when the response carries no account id", async () => {
+    installFetch([jsonResponse({ displayName: "Jane Doe" })]);
+    expect(await client().getMyself()).toEqual({ accountId: "", displayName: "Jane Doe" });
+  });
+
+  it("returns the account id even when the response carries no display name", async () => {
+    installFetch([jsonResponse({ accountId: "a-1" })]);
+    expect(await client().getMyself()).toEqual({ accountId: "a-1", displayName: "" });
+  });
+
+  it("returns null when the response names nobody at all", async () => {
     installFetch([jsonResponse({})]);
+    expect(await client().getMyself()).toBeNull();
+  });
+
+  it("returns null (swallowing errors) when the request fails", async () => {
+    installFetch([textResponse("", 500)]);
     expect(await client().getMyself()).toBeNull();
   });
 });

@@ -13,8 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connector behind a `TaskProvider` / `TaskConnector` seam, selected by the new
   `agentFlow.taskSource` setting. Jira remains the default and the only shipped
   source, and every existing install keeps its settings, credentials and board
-  untouched — the setting defaults to `jira`. Adding a source is one directory
-  and one registry line; see [docs/CONNECTORS.md](docs/CONNECTORS.md)
+  untouched — the setting defaults to `jira`. A new source lives in its own
+  directory under `src/tasks/`; [docs/CONNECTORS.md](docs/CONNECTORS.md) is the
+  checklist for wiring one up, including the shared files it still has to touch
   (`src/tasks/`, `src/tasksView.ts`, `src/deckView.ts`, `src/doctorView.ts`).
 
 ### Changed

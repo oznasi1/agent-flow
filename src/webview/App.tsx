@@ -891,7 +891,11 @@ function CardDetail(props: {
   const selected = detail.selected ?? [];
   const sourceComponents = detail.sourceComponents ?? [];
   const mappable = detail.mappable;
-  const unknown = mappable == null; // the project's component list couldn't be read
+  // "The list couldn't be read" — only askable of a source that HAS components.
+  const unknown = componentsSupported && mappable == null;
+  // Nothing about the ticket can be claimed for a chip: either there is no component
+  // concept at all, or the list is unreadable. Both render the chip plain.
+  const plain = !componentsSupported || unknown;
   const available = (detail.repos ?? []).filter((r) => !selected.includes(r));
   const remove = (name: string) => onSelect(selected.filter((s) => s !== name));
   const add = (name: string) => { if (name) onSelect([...selected, name]); };
@@ -899,51 +903,56 @@ function CardDetail(props: {
   return (
     <div className="detail">
       <div className="desc">{detail.descriptionText?.trim() || "No description on the ticket."}</div>
-      {/* A source with no Components concept has nothing here to tag a repo onto
-       * or read a mapping from — see docs/CONNECTORS.md's capability table. */}
-      {componentsSupported && (
-        <>
-          <div className="sel-label">Repos this task touches</div>
-          <div className="chips">
-            {selected.length === 0 && <span className="chip-none">none selected</span>}
-            {selected.map((s) => {
-              // Three states when the component list is known: on the ticket (solid),
-              // a component the ticket lacks (dashed, with a push affordance), or no
-              // component at all (dashed, local-only). Only the first can be removed
-              // from the source. When the list itself is unknown, none of the three
-              // can be claimed, so the chip renders plain with no dash and no push.
-              const component = unknown ? undefined : mappable![s];
-              const onTicket = !!component && sourceComponents.includes(component);
-              return (
-                <span
-                  key={s}
-                  className={`chip${unknown || onTicket ? "" : " off-ticket"}`}
-                  title={
-                    unknown
-                      ? `Couldn't read ${project}'s components — can't tell which are on ${taskKey}`
-                      : onTicket
-                        ? undefined
-                        : component
-                          ? `Not on ${taskKey} in ${sourceLabel} — ↑ adds it`
-                          : `No ${project} component named “${s}” — this selection stays local`
-                  }
-                >
-                  {s}
-                  {!unknown && !onTicket && component && (
-                    <span className="up" title={`Add ${component} to ${taskKey}`} onClick={() => onPush(s)}>↑</span>
-                  )}
-                  <span
-                    className="x"
-                    title={onTicket ? `Remove ${component} from ${taskKey}` : "Remove"}
-                    onClick={() => remove(s)}
-                  >×</span>
-                </span>
-              );
-            })}
-          </div>
-          <RepoPicker available={available} onAdd={add} />
-        </>
-      )}
+      {/* Which repos a task touches is NOT a components capability: it is what `take`
+       * sends as `services`, and it is inferred from summary, description and labels
+       * as much as from components. So the selection and its picker render for every
+       * source; only the component-derived state on a chip needs the capability —
+       * see docs/CONNECTORS.md's capability table. */}
+      <div className="sel-label">Repos this task touches</div>
+      <div className="chips">
+        {selected.length === 0 && <span className="chip-none">none selected</span>}
+        {selected.map((s) => {
+          // Three states when the component list is known: on the ticket (solid),
+          // a component the ticket lacks (dashed, with a push affordance), or no
+          // component at all (dashed, local-only). Only the first can be removed
+          // from the source. When none of the three can be claimed — no components
+          // on this source, or a list that couldn't be read — the chip renders
+          // plain, with no dash and no push.
+          const component = plain ? undefined : mappable![s];
+          const onTicket = !!component && sourceComponents.includes(component);
+          return (
+            <span
+              key={s}
+              className={`chip${plain || onTicket ? "" : " off-ticket"}`}
+              title={
+                // A source with no components has nothing to explain: saying the list
+                // couldn't be read would blame a connection for a capability that was
+                // never there.
+                !componentsSupported
+                  ? undefined
+                  : unknown
+                    ? `Couldn't read ${project}'s components — can't tell which are on ${taskKey}`
+                    : onTicket
+                      ? undefined
+                      : component
+                        ? `Not on ${taskKey} in ${sourceLabel} — ↑ adds it`
+                        : `No ${project} component named “${s}” — this selection stays local`
+              }
+            >
+              {s}
+              {!onTicket && component && (
+                <span className="up" title={`Add ${component} to ${taskKey}`} onClick={() => onPush(s)}>↑</span>
+              )}
+              <span
+                className="x"
+                title={onTicket ? `Remove ${component} from ${taskKey}` : "Remove"}
+                onClick={() => remove(s)}
+              >×</span>
+            </span>
+          );
+        })}
+      </div>
+      <RepoPicker available={available} onAdd={add} />
     </div>
   );
 }

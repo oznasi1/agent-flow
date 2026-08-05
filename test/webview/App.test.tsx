@@ -1038,15 +1038,35 @@ describe("capability gating", () => {
     expect(document.querySelector('[aria-label="Size"]')).toBeNull();
   });
 
-  it("hides the 'Repos this task touches' block on a source with no components", () => {
+  // Which repos a task touches is what `take` sends as `services` — core function,
+  // and inferred from summary/description/labels as much as from components. It must
+  // survive a source with no components: the chips are the only place an expanded card
+  // shows the selection (the collapsed ~chips are hidden while open), and the picker is
+  // the only place it can be edited. Only the component-derived state on a chip needs
+  // the capability.
+  it("still shows the repo selection and its picker on a source with no components", () => {
     render(<App />);
     fixtureState();
     host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "FX-1", summary: "First fixture task" })] });
     fireEvent.click(screen.getByText("First fixture task"));
-    host({ type: "detail", key: "FX-1", descriptionText: "A fixture task.", inferred: [], repos: ["centaur"], sourceComponents: [], mappable: null });
-    expect(screen.queryByText("Repos this task touches")).not.toBeInTheDocument();
-    expect(document.querySelector(".chips")).toBeNull();
-    expect(screen.queryByText(/add repo/i)).not.toBeInTheDocument();
+    host({
+      type: "detail", key: "FX-1", descriptionText: "A fixture task.", inferred: ["centaur"],
+      repos: ["centaur", "pricing-api"], sourceComponents: [], mappable: null,
+    });
+
+    expect(screen.getByText("Repos this task touches")).toBeInTheDocument();
+    expect(screen.getByText(/add repo/i)).toBeInTheDocument();
+    const chip = [...document.querySelectorAll(".chips .chip")].find((c) => c.textContent?.startsWith("centaur")) as HTMLElement;
+    // Plain: no dashed "not on the ticket" state, no push affordance, and no title
+    // blaming an unreadable component list for a capability the source never had.
+    expect(chip.className).not.toContain("off-ticket");
+    expect(chip).not.toHaveAttribute("title");
+    expect(within(chip).queryByText("↑")).not.toBeInTheDocument();
+    // …and the selection is still editable: removing sends no component write.
+    sent.mockClear();
+    fireEvent.click(within(chip).getByTitle("Remove"));
+    expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "setComponent" }));
+    expect(document.querySelector(".chips .chip")).toBeNull();
   });
 
   describe("tab bar", () => {

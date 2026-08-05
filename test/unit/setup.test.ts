@@ -22,13 +22,20 @@ function readCfg(key: string): unknown {
   return vscode.workspace.getConfiguration("agentFlow").get(key);
 }
 
+/** A commit thunk for a connector that has settings of its own, so a test can
+ * assert WHEN the write happens rather than only that it did. `configure`
+ * resolving to one of these means "collected, cancel no longer possible". */
+function commitSpy(): ReturnType<typeof vi.fn> {
+  return vi.fn(async () => undefined);
+}
+
 /** A fixture connector with `configure`/`signIn` wrapped as spies, so a test
  * can assert on calls without redeclaring the connector's whole shape. Override
  * any member per test. */
 function connector(over: Partial<TaskConnector> = {}): TaskConnector {
   return {
     ...makeFixtureConnector(),
-    configure: vi.fn(async () => true),
+    configure: vi.fn(async () => async () => undefined),
     signIn: vi.fn(async () => true),
     ...over,
   };
@@ -36,7 +43,7 @@ function connector(over: Partial<TaskConnector> = {}): TaskConnector {
 
 describe("runSetup", () => {
   it("numbers the wizard across the connector's steps plus the repos root", async () => {
-    const configure = vi.fn(async () => true);
+    const configure = vi.fn(async () => async () => undefined);
     const c = connector({ setupSteps: 2, configure });
     stubInputBox("~/projects");
 
@@ -78,7 +85,7 @@ describe("runSetup", () => {
   });
 
   it("does not mark setup complete when the connector's configure is cancelled", async () => {
-    const c = connector({ configure: vi.fn(async () => false) });
+    const c = connector({ configure: vi.fn(async () => null) });
     const { context, globalState } = fakeContext();
 
     const ok = await runSetup(context, c, log);
@@ -89,17 +96,41 @@ describe("runSetup", () => {
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined();
   });
 
-  it("aborts when the repos root step is cancelled", async () => {
-    const c = connector();
+  it("aborts when the repos root step is cancelled, leaving the connector's own settings unwritten", async () => {
+    // The commit spy is the load-bearing assertion: `readCfg("reposRoot")` alone
+    // passes even against a connector that writes inside `configure()`, because the
+    // fixture has no settings of its own to write. Cancelling here has to leave the
+    // SOURCE's settings untouched too — that is what an existing, already-configured
+    // user re-running the wizard is promised. The same guarantee is pinned against
+    // the real Jira connector in test/unit/compat.test.ts.
+    const commit = commitSpy();
+    const c = connector({ configure: vi.fn(async () => commit) });
     stubInputBox(undefined);
     const { context, globalState } = fakeContext();
 
     const ok = await runSetup(context, c, log);
 
     expect(ok).toBe(false);
+    expect(commit).not.toHaveBeenCalled();
     expect(readCfg("reposRoot")).toBeUndefined();
+    expect(readCfg("workspaceDir")).toBeUndefined();
     expect(c.signIn).not.toHaveBeenCalled();
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined();
+  });
+
+  it("commits the connector's settings only after the repos-root step, in the same block as ours", async () => {
+    const commit = commitSpy();
+    const c = connector({ configure: vi.fn(async () => commit) });
+    stubInputBox("~/code");
+
+    await runSetup(fakeContext().context, c, log);
+
+    expect(commit).toHaveBeenCalledTimes(1);
+    // Ordering, not just occurrence: the write must follow the box it can abort at.
+    const [commitOrder] = commit.mock.invocationCallOrder;
+    const [boxOrder] = vi.mocked(vscode.window.showInputBox).mock.invocationCallOrder;
+    expect(commitOrder).toBeGreaterThan(boxOrder);
+    expect(readCfg("reposRoot")).toBe("~/code");
   });
 
   it("saves the repos root but warns and does not complete when sign-in is cancelled", async () => {

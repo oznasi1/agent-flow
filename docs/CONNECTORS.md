@@ -72,8 +72,10 @@ export interface TaskProvider {
 - **`statusTargets(key)`** — where a task can move to next, normalized to
   `StatusTarget[]`. Called before the "change status" QuickPick is shown.
   Every `fields` entry is already reduced to the generic prompt vocabulary
-  (`pick` / `multipick` / `text` / `number` / `date` / `datetime` / `labels`)
-  — no source-specific metadata escapes this method. A source with plain,
+  (`pick` / `multipick` / `text` / `number` / `date` / `datetime` / `labels` —
+  `FieldPrompt`, declared with its input validation in
+  [`src/tasks/fields.ts`](../src/tasks/fields.ts) and re-exported by
+  `provider.ts`) — no source-specific metadata escapes this method. A source with plain,
   unconditional statuses (open/in-progress/done, no screen fields) returns
   `fields: []` on every target — see the fixture connector — and gets the
   whole QuickPick-and-write interaction for free. A task with genuinely
@@ -103,6 +105,14 @@ export interface TaskProvider {
   `"Couldn't resolve your {label} account."` and stops. Don't throw here for
   an ordinary "not signed in" case; that's what `null` is for.
 
+  **`id` may be `""`** when your source can name the user but has no stable
+  identifier for them — enough to display, not enough to write with. Answer
+  with the name in that case rather than `null`: the name alone drives the
+  panel's header chip and every "is this task mine?" affordance in the card
+  list. Callers that pair this with a write check `id`, not just non-`null`
+  (see `addToMySprint` in `src/tasksView.ts`), so the half-done write that
+  would otherwise imply is already ruled out.
+
 - **`caps`** — see the capability table below.
 
 ## 3. The capability table
@@ -116,7 +126,7 @@ downstream can check one flag and reach for a differently-named method.
 | `supportedFilters` | Which of the task-pool's five tab-bar lenses (`mysprint`, `mine`, `sprint`, `backlog`, `unassigned`) render at all, via `visibleFilters()` in `src/webview/helpers.ts`. | Any tab you don't list simply never renders — no error, no disabled state. **This says which of the UI's five existing tabs you can answer, not which tabs exist.** `"all"` is a real `Filter` value (the JQL builder's fallback, and Jira declares it in `supportedFilters`) but no UI has ever shown it as a sixth tab — returning it does not add one. |
 | `sizes` | The size-filter control (`XS`/`S`/`M`/`L` chips) above the task list. | The control doesn't render at all (`caps.sizes && filters.size && …` in `App.tsx`). Every `Task.estimateSeconds` should be `null` if you don't set `sizes: true` — there's nothing to size by. |
 | `sprints` | The "add to my sprint" action, the "My sprint" tab's drag-to-reorder, and the "remove from sprint" (with Undo) action on a card. | All three disappear from the UI (`caps.sprints` gates each). Calling any of `TasksViewProvider`'s sprint handlers directly (e.g. from the command palette after a stale webview render) reports `"{label} doesn't have sprints."` rather than throwing — see `sprints()` in `src/tasksView.ts`. |
-| `components` | The component chip row on a task's detail panel, and the two-way sync that pushes a repo choice back as a component. | The chip row doesn't render (`componentsSupported={caps.components}` in `App.tsx`). |
+| `components` | The component-derived state on each repo chip in a task's detail panel — on-the-ticket (solid) vs. not (dashed, with a `↑` that pushes it) — and the two-way sync behind it. | The repo selection itself still renders, and is still editable: which repos a task touches is what `take` sends as `services`, and it is inferred from summary, description and labels as much as from components. Only the three-state classification goes: every chip renders plain, with no dash, no `↑`, and no title — there is nothing about the ticket to claim (`componentsSupported={caps.components}` in `App.tsx`; the same plain rendering also covers a components-having source whose list couldn't be read). |
 | `labels` | Provenance stamping — writing `agentFlow.provenanceLabel` onto a task after Agent Flow acts on it, when `agentFlow.stampLabelOnWrite` is on. | **A silent no-op**, not an error and not a toast: `stampProvenance()` in `src/tasksView.ts` returns immediately if `caps.labels` is absent. The write that mattered (the status change, the assignment) already succeeded; failing the whole operation over a label a source doesn't have would be the wrong trade. If you don't have labels, you don't need to do anything to make this safe — just don't declare the capability. |
 
 One more field degrades the same way but isn't a `caps` entry:
@@ -137,7 +147,7 @@ export interface TaskConnector {
   readonly id: string;
   info(): SourceInfo;
   isConfigured(): boolean;
-  configure(from: number, total: number): Promise<boolean>;
+  configure(from: number, total: number): Promise<(() => Promise<void>) | null>;
   readonly setupSteps: number;
   isAuthenticated(): Promise<boolean>;
   signIn(): Promise<boolean>;
@@ -179,13 +189,24 @@ export interface TaskConnector {
   should read as unconfigured, not as configured-but-broken.
 
 - **`configure(from, total)`** — run your own settings wizard steps (input
-  boxes, `showQuickPick`, whatever you need), writing to
-  `agentFlow.<id>.*` (global scope). `from`/`total` are the wizard's shared
-  step counter — title your boxes `` `Agent Flow Deck Setup (${from}/${total})` ``
-  so a multi-step connector numbers correctly alongside Agent Flow's own
-  `reposRoot` step, which always comes last. Return `false` if the user
-  cancels partway; `setup.ts` treats that as an abort, leaving first-run setup
-  un-marked-complete so it offers itself again next launch.
+  boxes, `showQuickPick`, whatever you need) and **collect, don't write**.
+  `from`/`total` are the wizard's shared step counter — title your boxes
+  `` `Agent Flow Deck Setup (${from}/${total})` `` so a multi-step connector
+  numbers correctly alongside Agent Flow's own `reposRoot` step, which always
+  comes last. Return `null` if the user cancels partway; `setup.ts` treats that
+  as an abort, leaving first-run setup un-marked-complete so it offers itself
+  again next launch.
+
+  Otherwise return a **commit thunk**: an `async () => { … }` that performs the
+  writes to `agentFlow.<id>.*` (global scope). `setup.ts` invokes it in a single
+  block after its own last cancellable step, alongside `reposRoot` /
+  `workspaceDir`. **Do not write inside `configure()` itself.** The wizard is
+  re-runnable from the command palette by an already-configured user, and its
+  promise is that cancelling leaves their configuration untouched — a connector
+  that writes as it collects would overwrite their endpoint and scope, with no
+  undo and no toast, whenever a later step is cancelled. `test/unit/compat.test.ts`
+  asserts zero setting writes for a cancel at the last step, driving the real
+  Jira connector.
 
 - **`setupSteps`** — how many boxes `configure` shows, so `setup.ts` can
   compute `total = connector.setupSteps + 1` (the `+1` is Agent Flow's own
@@ -359,10 +380,11 @@ has never heard of Jira.
 It exists to make capability-gating load-bearing rather than assumed. Tests
 in `test/unit/tasksView.test.ts`, `test/unit/setup.test.ts`, and
 `test/webview/App.test.tsx` drive the host and the webview with it and assert
-things like: only the two declared tabs render; the size control and sprint
-actions and component chips are all absent; `moveTo` with `fields: []`
-completes with no re-prompt; stamping a provenance label onto a
-labels-less connector is silently accepted rather than crashing.
+things like: only the two declared tabs render; the size control and the sprint
+actions are absent, while the repo picker — which is not a capability — is
+still there; `moveTo` with `fields: []` completes with no re-prompt; stamping a
+provenance label onto a labels-less connector is silently accepted rather than
+crashing.
 
 If you're starting connector #2, read `fixtureConnector.ts` top to bottom
 first — it is shorter than this document, and it is a working answer to

@@ -2,13 +2,13 @@
 // free of `vscode` imports so it stays testable in isolation; anything needing
 // the editor API belongs in a connector.
 import { Filter, Task, Size } from "../types";
-// `import type` on both of these deliberately, and it is load-bearing rather
-// than stylistic: client.ts imports auth.ts, which imports `vscode`. A value
-// import would drag the editor API into this module, which is specified to load
-// without it. A type-only import is erased at build time, so the chain is never
-// followed at runtime.
+// `import type` on TaskDetail deliberately, and it is load-bearing rather than
+// stylistic: client.ts imports auth.ts, which imports `vscode`. A value import
+// would drag the editor API into this module, which is specified to load without
+// it. A type-only import is erased at build time, so the chain is never followed
+// at runtime. (`./fields` needs no such care — it imports nothing.)
 import type { TaskDetail } from "./jira/client";
-import type { FieldPrompt } from "./jira/transitionFields";
+import type { FieldPrompt } from "./fields";
 import type { AuthProbe, ProjectProbe } from "../engine/doctor";
 
 export type { FieldPrompt, Task, TaskDetail };
@@ -99,6 +99,11 @@ export interface TaskProvider {
    * otherwise have the second lookup answer differently from the first and strand the
    * earlier write. Omitted means resolve it here, for callers with nothing in hand. */
   assignToMe(key: string, meId?: string): Promise<void>;
+  /** The signed-in identity, or `null` when the source names nobody. `id` may be
+   * empty on a source that can say who the user is but has no stable identifier for
+   * them — enough to display, not enough to write with. A caller that pairs this
+   * with a write must therefore check `id`, not merely non-`null` (see
+   * `addToMySprint` in src/tasksView.ts). */
   me(): Promise<{ id: string; displayName: string } | null>;
   readonly caps: Capabilities;
 }
@@ -127,9 +132,16 @@ export interface TaskConnector {
   info(): SourceInfo;
 
   isConfigured(): boolean;
-  /** Collect this connector's own settings. `from`/`total` keep the wizard's
-   * "(2/4)" numbering honest across connectors with different step counts. */
-  configure(from: number, total: number): Promise<boolean>;
+  /** Collect this connector's own settings — and do NOT write them. `from`/`total`
+   * keep the wizard's "(2/4)" numbering honest across connectors with different
+   * step counts.
+   *
+   * Returns a commit thunk that performs the writes, or `null` when the user
+   * cancelled partway. `setup.ts` invokes the thunk in one block after its own
+   * last cancellable step, so cancelling the wizard anywhere leaves every setting
+   * exactly as it was. Writing inside `configure()` instead would overwrite an
+   * already-configured user's settings before a later step can still abort. */
+  configure(from: number, total: number): Promise<(() => Promise<void>) | null>;
   readonly setupSteps: number;
 
   isAuthenticated(): Promise<boolean>;

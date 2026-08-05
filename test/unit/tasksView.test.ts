@@ -249,7 +249,7 @@ function jiraConnector(auth: JiraAuth): TaskConnector {
       const cfg = getConfig();
       return !!cfg.baseUrl.trim() && !!cfg.project.trim();
     },
-    configure: async () => true,
+    configure: async () => async () => undefined,
     // Delegated, not copied: tests reach for `auth.isAuthenticated` to make the
     // credential read itself reject, and that must still reach the view.
     isAuthenticated: () => auth.isAuthenticated(),
@@ -367,6 +367,17 @@ describe("ready", () => {
     await send({ type: "ready" });
     expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: false, project: "", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
+  });
+
+  it("still shows the signed-in name when the identity lookup returns no account id", async () => {
+    // Jira Server/DC, or a proxy that strips accountId. The name chip in the header —
+    // and, through `me`, every "is this task mine?" affordance in the card list,
+    // including "Add to my sprint" on the user's own out-of-sprint tasks — is built
+    // from this one string, and requiring an accountId for it took all of them away.
+    clientStub.getMyself.mockResolvedValue({ accountId: "", displayName: "Jane" });
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: true, me: "Jane" }));
   });
 
   it("posts state up-front and still loads tasks when the display-name lookup fails", async () => {
@@ -1104,6 +1115,18 @@ describe("addToMySprint", () => {
     await provider.addToMySprint("ASM-1");
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
     expect(clientStub.addIssueToSprint).not.toHaveBeenCalled();
+  });
+
+  it("errors before the sprint-add when the identity has no usable id", async () => {
+    // `me()` can now answer with a display name and no id (see JiraProvider.me). That
+    // is enough to render, not enough to assign with — so this pair has to stop at the
+    // toast rather than add to the sprint and then fail the assignment.
+    clientStub.getMyself.mockResolvedValue({ accountId: "", displayName: "Jane" });
+    const { provider, posted } = setup();
+    await provider.addToMySprint("ASM-1");
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+    expect(clientStub.addIssueToSprint).not.toHaveBeenCalled();
+    expect(clientStub.assignIssue).not.toHaveBeenCalled();
   });
 
   it("errors when there is no active sprint", async () => {

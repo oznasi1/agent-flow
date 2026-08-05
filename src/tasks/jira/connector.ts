@@ -41,8 +41,10 @@ class JiraConnector implements TaskConnector {
   }
 
   /** The site URL and project key, as steps `from` and `from + 1` of `total`.
-   * Writes to global settings, exactly as the pre-seam wizard did. */
-  async configure(from: number, total: number): Promise<boolean> {
+   * Collects only: the returned thunk writes both to global settings in one go,
+   * exactly as the pre-seam wizard did — after its last abort guard, so an Esc at
+   * a later step leaves an already-configured user's two settings untouched. */
+  async configure(from: number, total: number): Promise<(() => Promise<void>) | null> {
     const baseUrl = await vscode.window.showInputBox({
       title: `Agent Flow Deck Setup (${from}/${total})`,
       prompt: "Your Atlassian Jira Cloud site URL",
@@ -58,7 +60,7 @@ class JiraConnector implements TaskConnector {
         }
       },
     });
-    if (baseUrl === undefined) return false;
+    if (baseUrl === undefined) return null;
 
     const project = await vscode.window.showInputBox({
       title: `Agent Flow Deck Setup (${from + 1}/${total})`,
@@ -67,12 +69,16 @@ class JiraConnector implements TaskConnector {
       placeHolder: "ABC",
       validateInput: (v) => (v.trim() ? undefined : "Enter a project key"),
     });
-    if (project === undefined) return false;
+    if (project === undefined) return null;
 
-    const c = vscode.workspace.getConfiguration("agentFlow");
-    await c.update("jira.baseUrl", baseUrl.trim().replace(/\/+$/, ""), vscode.ConfigurationTarget.Global);
-    await c.update("jira.project", project.trim().toUpperCase(), vscode.ConfigurationTarget.Global);
-    return true;
+    // Normalized here, beside the input each value came from; the thunk only writes.
+    const cleanBaseUrl = baseUrl.trim().replace(/\/+$/, "");
+    const cleanProject = project.trim().toUpperCase();
+    return async () => {
+      const c = vscode.workspace.getConfiguration("agentFlow");
+      await c.update("jira.baseUrl", cleanBaseUrl, vscode.ConfigurationTarget.Global);
+      await c.update("jira.project", cleanProject, vscode.ConfigurationTarget.Global);
+    };
   }
 
   isAuthenticated(): Promise<boolean> { return this.auth.isAuthenticated(); }

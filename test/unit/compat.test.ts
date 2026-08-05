@@ -3,10 +3,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { ApiTokenAuth } from "../../src/tasks/jira/auth";
 import { makeJiraConnector } from "../../src/tasks/jira/connector";
-import { SETUP_COMPLETE_KEY } from "../../src/setup";
+import { runSetup, SETUP_COMPLETE_KEY } from "../../src/setup";
 import { ticketKeyFor, Run, WorkspaceMode } from "../../src/types";
-import { fakeSecrets } from "../_helpers/factories";
-import { window } from "../_mocks/vscode";
+import { fakeContext, fakeSecrets } from "../_helpers/factories";
+import { window, workspace } from "../_mocks/vscode";
 
 /** Helper to build a Run object with sensible defaults for testing. */
 function makeRun(overrides: Partial<Run> = {}): Run {
@@ -92,6 +92,39 @@ describe("compatibility surface (frozen)", () => {
     // Whitespace-only after the marker: the real parser trims and treats the
     // empty result as "nothing found", falling back to the record key.
     expect(ticketKeyFor(makeRun({ key: "ABC-2", url: "https://x.atlassian.net/browse/   " }), jira)).toBe("ABC-2");
+  });
+
+  it("writes NOTHING when the setup wizard is cancelled at its last step", async () => {
+    // The promise: cancelling setup leaves your configuration exactly as it was.
+    // An already-configured user who opens "Run Setup…" from the palette sees no
+    // prefilled value in either Jira box (placeHolder only), retypes both, then
+    // presses Esc at "(3/3) Directory where your repo checkouts live" — and must
+    // still have the site URL and project key they had before, with nothing to undo.
+    //
+    // This drives the REAL Jira connector, not the capability-free test fixture:
+    // the fixture has no settings of its own, so a fixture-only version of this
+    // assertion passes even while the shipped connector overwrites both settings
+    // inside configure(). Zero `update` calls is the only form of this assertion
+    // that can fail for the right reason.
+    const update = vi.fn(async () => undefined);
+    vi.mocked(workspace.getConfiguration).mockReturnValue({
+      get: vi.fn(() => ""),
+      update,
+      inspect: vi.fn(() => ({})),
+    } as never);
+    vi.mocked(window.showInputBox)
+      .mockResolvedValueOnce("https://x.atlassian.net") // (1/3) site URL
+      .mockResolvedValueOnce("ABC") // (2/3) project key
+      .mockResolvedValueOnce(undefined); // (3/3) repos root — Esc
+
+    const jira = makeJiraConnector({ secrets: fakeSecrets() } as never);
+    const { context, globalState } = fakeContext();
+    const ok = await runSetup(context, jira, () => {});
+
+    expect(ok).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+    // And nothing claims the wizard finished, so it can be re-run/re-offered.
+    expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined();
   });
 
   it("keeps the released settings and command ids in the manifest", () => {

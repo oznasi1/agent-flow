@@ -97,7 +97,10 @@ export function makeFixtureConnector(over: Partial<FixtureOptions> = {}): TaskCo
       };
     },
     isConfigured: () => opts.configured,
-    configure: async () => true,
+    // Collect-then-commit: `configure` hands back the thunk setup.ts invokes in its
+    // one atomic write block (null would mean the user cancelled). This fixture has
+    // no settings of its own, so its commit writes nothing.
+    configure: async () => async () => undefined,
     isAuthenticated: async () => opts.authed,
     signIn: async () => true,
     signOut: async () => undefined,

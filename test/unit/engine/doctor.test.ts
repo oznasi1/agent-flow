@@ -228,6 +228,15 @@ describe("runChecks — Claude Code", () => {
     const c = find({ ...healthy(), claudeProjectsReadable: false }, "Claude session files");
     expect(c.status).toBe("warn");
     expect(c.detail).toContain("git");
+    // Byte-identical to the pre-seam wording for a Jira user…
+    expect(c.detail).toBe("~/.claude/projects is unreadable — the Deck's live signal falls back to git and Jira");
+  });
+
+  it("names the configured source in the live-signal fallback, not Jira", () => {
+    // …and the last check detail in this module that still hardcoded a source name
+    // now reads the connector's own label, like its siblings' row labels do.
+    const c = find({ ...healthy(), sourceLabel: "Acme Tracker", claudeProjectsReadable: false }, "Claude session files");
+    expect(c.detail).toContain("git and Acme Tracker");
   });
 });
 

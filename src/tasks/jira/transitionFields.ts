@@ -1,3 +1,14 @@
+// The Jira-specific half of transition screens: reading Jira's field metadata,
+// turning it into the seam's prompt vocabulary, and mapping answers back onto
+// Jira's wire shape. The vocabulary itself (`FieldPrompt`) and its input
+// validation are source-agnostic and live in `src/tasks/fields.ts`; both are
+// re-exported here so this module stays the one import site for everything a
+// Jira transition needs.
+import type { FieldPrompt } from "../fields";
+
+export { validateFieldInput } from "../fields";
+export type { FieldPrompt };
+
 /** One field on a transition screen, as Jira describes it under
  *  `GET /transitions?expand=transitions.fields`. */
 export interface TransitionFieldMeta {
@@ -7,12 +18,6 @@ export interface TransitionFieldMeta {
   schema?: { type?: string; system?: string; custom?: string; items?: string };
   allowedValues?: { id?: string; name?: string; value?: string }[];
 }
-
-/** What we can ask a user for, and how. Anything Jira declares that doesn't map
- *  to one of these is skipped — see `promptableFields`. */
-export type FieldPrompt =
-  | { kind: "pick" | "multipick"; id: string; name: string; choices: { id?: string; name: string }[] }
-  | { kind: "text" | "number" | "date" | "datetime" | "labels"; id: string; name: string };
 
 /** Split a transition's fields into the prompts we can run and the display names
  *  we had to skip. Without `only`, considers required fields; with it, considers
@@ -89,18 +94,6 @@ export function toJiraValue(prompt: FieldPrompt, input: string | string[]): unkn
 function reference(choices: { id?: string; name: string }[], name: string): { id: string } | { value: string } {
   const hit = choices.find((c) => c.name === name);
   return hit?.id ? { id: hit.id } : { value: name };
-}
-
-/** Message for an invalid entry, or undefined when it's acceptable. Wired to the
- *  InputBox so bad input never costs a round-trip. */
-export function validateFieldInput(prompt: FieldPrompt, raw: string): string | undefined {
-  const v = raw.trim();
-  if (!v) return `${prompt.name} is required.`;
-  if (prompt.kind === "number" && !Number.isFinite(Number(v))) return "Enter a number.";
-  if ((prompt.kind === "date" || prompt.kind === "datetime") && !/^\d{4}-\d{2}-\d{2}$/.test(v)) {
-    return "Use the format YYYY-MM-DD.";
-  }
-  return undefined;
 }
 
 /** Which fields a rejection is pointing at. Explicit `errors` keys win; failing

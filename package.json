@@ -117,7 +117,7 @@
           "enum": ["jira"],
           "enumDescriptions": ["Atlassian Jira Cloud"],
           "default": "jira",
-          "description": "Where Agent Flow reads tasks from. Each source has its own settings under agentFlow.<source>.*."
+          "description": "Where Agent Flow reads tasks from. Each source has its own settings under agentFlow.<source>.*. Requires a window reload."
         },
         "agentFlow.jira.baseUrl": {
           "type": "string",

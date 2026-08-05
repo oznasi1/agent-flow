@@ -229,16 +229,29 @@ describe("JiraConnector — configure()", () => {
     expect((calls[1][0] as { title: string }).title).toBe("Agent Flow Deck Setup (3/5)");
   });
 
+  it("writes nothing until the returned commit thunk is invoked", async () => {
+    stubInputBox("https://acme.atlassian.net", "abc");
+
+    const commit = await makeJiraConnector(ctx).configure(1, 3);
+
+    // Both boxes answered, yet nothing is written — setup.ts still has a step the
+    // user can cancel at, and cancelling it must leave these two settings alone.
+    expect(commit).toBeTypeOf("function");
+    expect(vscode.workspace.getConfiguration).not.toHaveBeenCalled();
+    expect(readCfg("jira.baseUrl")).toBeUndefined();
+    expect(readCfg("jira.project")).toBeUndefined();
+  });
+
   it("writes the site url trailing-slash-stripped and the project key upper-cased, to Global", async () => {
     stubInputBox("https://acme.atlassian.net/", "abc");
 
-    const ok = await makeJiraConnector(ctx).configure(1, 3);
+    const commit = await makeJiraConnector(ctx).configure(1, 3);
+    await commit!();
 
-    expect(ok).toBe(true);
     expect(readCfg("jira.baseUrl")).toBe("https://acme.atlassian.net");
     expect(readCfg("jira.project")).toBe("ABC");
-    // The exact `getConfiguration("agentFlow")` handle configure() itself used —
-    // not a second, unrelated call from this test — so this also pins the
+    // The exact `getConfiguration("agentFlow")` handle the commit thunk itself used
+    // — not a second, unrelated call from this test — so this also pins the
     // target as Global, which `readCfg` alone cannot distinguish from Workspace.
     const cfgInstance = vi.mocked(vscode.workspace.getConfiguration).mock.results[0].value;
     expect(cfgInstance.update).toHaveBeenCalledWith(
@@ -249,18 +262,18 @@ describe("JiraConnector — configure()", () => {
     expect(cfgInstance.update).toHaveBeenCalledWith("jira.project", "ABC", vscode.ConfigurationTarget.Global);
   });
 
-  it("returns false and writes nothing when the site url step is cancelled", async () => {
+  it("returns null and writes nothing when the site url step is cancelled", async () => {
     stubInputBox(undefined);
 
-    expect(await makeJiraConnector(ctx).configure(1, 3)).toBe(false);
+    expect(await makeJiraConnector(ctx).configure(1, 3)).toBeNull();
     expect(vscode.window.showInputBox).toHaveBeenCalledTimes(1); // never reached the project box
     expect(readCfg("jira.baseUrl")).toBeUndefined();
   });
 
-  it("returns false and writes nothing when the project key step is cancelled", async () => {
+  it("returns null and writes nothing when the project key step is cancelled", async () => {
     stubInputBox("https://acme.atlassian.net", undefined);
 
-    expect(await makeJiraConnector(ctx).configure(1, 3)).toBe(false);
+    expect(await makeJiraConnector(ctx).configure(1, 3)).toBeNull();
     expect(readCfg("jira.baseUrl")).toBeUndefined();
     expect(readCfg("jira.project")).toBeUndefined();
   });

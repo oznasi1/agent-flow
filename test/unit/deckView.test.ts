@@ -259,7 +259,7 @@ function fakeConnector(authed = false, label = "Jira"): TaskConnector {
       exampleKey: "ASM-1234", endpointSetting: "agentFlow.jira.baseUrl", scopeSetting: "agentFlow.jira.project",
     }),
     isConfigured: () => true,
-    configure: async () => true,
+    configure: async () => async () => undefined,
     isAuthenticated: async () => authed,
     signIn: async () => true,
     signOut: async () => undefined,

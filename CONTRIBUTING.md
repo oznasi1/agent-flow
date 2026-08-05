@@ -39,6 +39,11 @@ complete the first-run setup wizard.
 - **Task sources are pluggable.** Jira is the default connector, not a hardwired
   dependency. Anything reading or writing tickets goes through `TaskProvider` /
   `TaskConnector` in `src/tasks/provider.ts` — never `src/tasks/jira/` directly.
+  Vocabulary the seam itself owns lives beside it, not in a source's directory
+  (e.g. `FieldPrompt` and `validateFieldInput` in `src/tasks/fields.ts`). The only
+  imports into a connector's directory are the seam's own wiring: `registry.ts`
+  reaches for each connector's factory, and `provider.ts` type-imports `TaskDetail`
+  from the Jira client that still declares it.
   To add a source, see [docs/CONNECTORS.md](docs/CONNECTORS.md).
 - **Tests.** Add or update tests for any behavior change; coverage thresholds are enforced by
   `npm run test:cov`. The `vscode` module is mocked in `test/_mocks/vscode.ts`.
