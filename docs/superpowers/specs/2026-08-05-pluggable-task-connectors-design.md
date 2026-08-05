@@ -1,6 +1,10 @@
 # Pluggable task connectors Design
 
-**Status:** approved 2026-08-05
+**Status:** approved 2026-08-05; **implemented** 2026-08-06. The interface snippets
+below were reconciled with the shipped code afterwards — each divergence from the
+approved sketch is annotated inline with the task that caused it.
+`docs/CONNECTORS.md` is written from the real code and is the authority for a
+connector author; this document records the design reasoning.
 **Baseline:** `main` at `c725d62` (v0.4.2) — 72 test files, 2121 tests, typecheck clean
 
 ## Goal
@@ -85,7 +89,10 @@ export interface TaskProvider {
   status(key: string): Promise<{ status: string | null; category: string | null }>;
   statusTargets(key: string): Promise<StatusTarget[]>;
   moveTo(key: string, targetId: string, values: Record<string, string | string[]>): Promise<void>;
-  assignToMe(key: string): Promise<void>;
+  /** `meId` is an `id` from a `me()` the caller has ALREADY resolved. Passing it
+   *  saves a second identity round-trip and removes a half-done state from a caller
+   *  that pairs this with another write. ADDED IN TASK 8. */
+  assignToMe(key: string, meId?: string): Promise<void>;
   me(): Promise<{ id: string; displayName: string } | null>;
 
   readonly caps: Capabilities;
@@ -188,12 +195,19 @@ export interface StatusTarget {
   toCategory: "new" | "indeterminate" | "done" | "";
   via?: string;           // Jira's transition name, when it differs from the target
   fields: FieldPrompt[];  // already normalized — no Jira metadata escapes
+  /** Display names of required fields that could not become a prompt (rich-text/ADF,
+   *  attachments). Diagnostic only, never shown to the user — the log line explaining
+   *  a deliberate omission is built from it. ADDED IN TASK 8, to restore a diagnostic
+   *  the seam had dropped. */
+  unfillable?: string[];
 }
 
 /** A refused write. `retryWith` is the connector saying "ask the user for these,
  *  then try again" — the only recovery the view knows how to perform. */
 export class TaskWriteError extends Error {
-  constructor(message: string, readonly retryWith: FieldPrompt[] = []) {
+  // `status` ADDED IN TASK 8: reportWriteFailure's log line carried the HTTP status
+  // before the seam existed, and the message text alone does not contain it.
+  constructor(message: string, readonly retryWith: FieldPrompt[] = [], readonly status?: number) {
     super(message);
     this.name = "TaskWriteError";
   }
