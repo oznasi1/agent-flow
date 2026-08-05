@@ -800,7 +800,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       : `${result.opened.length} window(s)`;
     const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
-    const what = env ? `to verify on ${env}` : "to explore";
+    const what = env
+      ? `to verify on ${env}`
+      : action.id === "supervise"
+        ? "to check on your other tasks"
+        : "to explore";
     this.toast("success", `Opened ${where} ${what}. Brief seeded in each repo.${seeded}${rcNote}`);
   }
 

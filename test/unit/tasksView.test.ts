@@ -1381,6 +1381,32 @@ describe("explore", () => {
     await send({ type: "explore" });
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ kind: "explore" }));
   });
+
+  it("gives the supervise action its own completion-toast phrase", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "supervise" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send, posted } = setup();
+    await send({ type: "explore" });
+    expect(posted()).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "success", message: expect.stringContaining("to check on your other tasks") }),
+    );
+  });
+
+  it("leaves the other actions' completion toast reading 'to explore'", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "knowledge" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send, posted } = setup();
+    await send({ type: "explore" });
+    expect(posted()).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "success", message: expect.stringContaining("to explore") }),
+    );
+  });
 });
 
 describe("passthrough messages", () => {
