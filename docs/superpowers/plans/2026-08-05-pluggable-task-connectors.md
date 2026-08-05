@@ -1821,6 +1821,18 @@ Import `SerializedCaps` from `./tasks/provider`.
 
 Then mechanically: `this.auth.isAuthenticated()` → `this.connector.isAuthenticated()`; `!!cfg.baseUrl && !!cfg.project` → `this.connector.isConfigured()`; `this.client()` → `this.provider()`; `client.fetchTasks(f, s)` → `provider.list(f, s)`; `client.getDetail` → `provider.detail`; `client.getMyself` → `provider.me`; `client.getStatus` → `provider.status`.
 
+**One non-mechanical change in the same step: never request a filter the source cannot answer.** `tasksView.ts:204` passes `cfg.defaultFilter` straight through, and the shipped default is `"mysprint"` — which a source without sprints does not support (four of the six filters are inherently sprint-scoped). Clamp it:
+
+```ts
+import { effectiveFilter } from "./webview/helpers";
+// …at every point a filter enters a provider call:
+const lens = effectiveFilter(cfg.defaultFilter, this.provider().caps.supportedFilters);
+```
+
+`effectiveFilter` is the pure helper Task 13 adds to `src/webview/helpers.ts`; it has no DOM or React dependency, so the host may import it. **If Task 13 has not run yet, add the helper there as part of this task** rather than inlining a second copy — Task 13's own tests will then find it already present.
+
+Apply the same clamp wherever an inbound `fetch` message carries a filter: a webview left open across a `taskSource` change can send one the current source no longer supports. Add a test driving the Task 7 fixture connector, whose `supportedFilters` is `["mine", "all"]`, asserting `list` receives `"mine"` and never `"mysprint"`.
+
 `postState` gains the two new fields:
 
 ```ts
