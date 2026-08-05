@@ -535,3 +535,19 @@ Either way the condition kinds stay `ticket-*` and no flow file needs migrating.
 - **`agentFlow.explorePrompts.jiraTicket`** keeps its setting key.
 - **Cross-connector boards.** One `taskSource` at a time. Merging two sources
   into one pool is a different feature.
+- **Inferring a task from a branch name.** `engine/localRuns.ts:25`'s
+  `inferTicket(branch, project, baseUrl)` matches a `PROJECT-123` branch pattern
+  and builds a `${baseUrl}/browse/${key}` url — both Jira-shaped, and neither
+  moved behind the seam. It is left alone deliberately, because it **degrades
+  safely rather than wrongly**: line 26 returns `null` when `project` is empty,
+  and `deckView.ts:630` passes `agentFlow.jira.project`, which a non-Jira
+  connector never sets. So a different source gets *no* inferred ticket on a
+  local Deck card, rather than a wrong one.
+
+  Moving it would mean a connector method along the lines of
+  `inferFromBranch(branch): { key, url, summary } | null`. That is the honest
+  long-term home for it — "given a branch name, which task does it name" is
+  connector knowledge — but it is a feature a second connector should design
+  with a real second branch convention in hand, not something to guess at now.
+  Recorded here and in `docs/CONNECTORS.md` so connector #2's author finds it
+  rather than discovering it.
