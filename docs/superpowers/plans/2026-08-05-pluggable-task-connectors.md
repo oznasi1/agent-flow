@@ -2579,6 +2579,69 @@ byte-identically to the pre-seam strings for Jira."
 
 ---
 
+## Task 13b: The Deck panel's copy
+
+Scope I missed. Task 13 capability-gated the **task-pool** webview (`App.tsx`) and
+took "Jira" out of its strings. The **Deck** panel is a separate webview with its own
+copy, and I never assigned it to a task. It still hardcodes "Jira" in roughly ten
+user-visible places.
+
+This matters because the spec's headline promise is that a contributor adds a
+connector "by writing one directory and registering one line, **without touching a
+view**". That is false while these strings are literal — connector #2's author would
+have to edit `DeckApp.tsx`. Zero impact for Jira users today, since the strings are
+correct for them.
+
+**Files:**
+- Modify: `src/webview/DeckApp.tsx`, `src/deckView.ts`, `src/types.ts`
+- Test: `test/webview/DeckApp.test.tsx`, `test/unit/deckView.test.ts`
+
+**Interfaces:**
+- Consumes: `SourceInfo.label` via the connector (Task 6); the `deck:runs` outbound message.
+- Produces: `sourceLabel` on the Deck's outbound message.
+
+- [ ] **Step 1: Plumb the label onto the Deck's wire message**
+
+`deckView.ts` already holds the connector. Add `sourceLabel: string` to the
+`deck:runs` outbound message in `src/types.ts`, populate it from
+`this.connector.info().label`, and default it in the webview the way Task 13
+defaulted `App.tsx`'s — the first paint must not flash wrong copy.
+
+- [ ] **Step 2: Template the ten strings**
+
+These are the user-visible ones, verified present at the time of writing:
+
+| Line | String |
+|---|---|
+| 47, 52 | `parked · git + Jira only` |
+| 250 | `Open ${inferredKey} in Jira` |
+| 257 | `Open ${r.run.key} in Jira` |
+| 297 | `Jira status: ${r.ticketStatus}` |
+| 328 | `Open in Jira` |
+| 500, 503 | `Off → git + Jira only.` |
+| 552 | `Re-read git, Jira and PR state now` |
+| 638 | `git + Jira backbone · best-effort live from …` |
+
+Four comments also say "Jira" (lines 195, 212, 216, 469). Update those that describe
+a *source-agnostic* concept; leave any that genuinely mean the Jira service.
+
+**Byte-identity for Jira is the bar**, same as Task 13: with `sourceLabel === "Jira"`
+every rendered string must be exactly what it is today. Assert full literals, not
+fragments — a `toContain` would pass on drifted wording.
+
+- [ ] **Step 3: Verify and commit**
+
+Run the affected test files, then `npm test`, `npm run typecheck`, `npm run build`.
+Verify by mutation that a non-Jira label actually reaches the rendered output — set
+the label to something else in a test and assert the strings change, so the plumbing
+is proven rather than assumed.
+
+```bash
+git add -A && git commit -m "feat(deck): take the source's name from the connector"
+```
+
+---
+
 ## Task 14: Docs
 
 **Files:**
