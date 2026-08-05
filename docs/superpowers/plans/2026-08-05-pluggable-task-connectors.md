@@ -1089,7 +1089,7 @@ export class JiraProvider implements TaskProvider {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npx vitest run test/unit/tasks/jira/provider.test.ts && npm run typecheck`
-Expected: PASS, typecheck clean. If `me.id ?? me.accountId` fails to typecheck, `getMyself` returns `{accountId, displayName}` — use `me.accountId` alone.
+Expected: PASS, typecheck clean. Note the two account-id shapes deliberately differ: `JiraClient.getMyself()` returns `{ accountId, displayName }`, while the seam's `TaskProvider.me()` renames it to `{ id, displayName }`. Inside this adapter, always read `accountId` from the client and only present `id` outward.
 
 - [ ] **Step 5: Commit**
 
