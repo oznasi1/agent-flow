@@ -134,6 +134,15 @@ describe("describeActiveTasks", () => {
     expect(describeActiveTasks([malformed], new Set())).toContain("idle, no agent attached");
   });
 
+  it("collapses an embedded newline in a run's summary so the bullet stays a single line", () => {
+    const run = { ...mkRun("ASM-1", 100), summary: "Fix the retry bug\nand the flaky test" };
+    const md = describeActiveTasks([run], new Set());
+    expect(md.split("\n")).toEqual([
+      "## Active tasks",
+      "- **ASM-1** (task) — Fix the retry bug and the flaky test — `/repos/svc` (branch: asm-1) — idle, no agent attached",
+    ]);
+  });
+
   it("lists multiple active runs as separate bullets, newest first if readRuns already sorted them", () => {
     const a = mkRun("ASM-1", 100);
     const b = mkRun("ASM-2", 300);

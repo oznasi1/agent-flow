@@ -69,7 +69,10 @@ export function describeActiveTasks(runs: Run[], livePlaces: ReadonlySet<string>
     const live = repos.some((repo) => livePlaces.has(canon(repo.path)));
     const first = repos[0];
     const where = first ? `\`${first.path}\`${first.branch ? ` (branch: ${first.branch})` : ""}` : "unknown location";
-    return `- **${r.key}** (${runKind(r)}) — ${r.summary} — ${where} — ${live ? "agent open" : "idle, no agent attached"}`;
+    // Collapse any embedded newline so one run's summary can't split a single
+    // bullet across multiple lines of the `## Active tasks` markdown list.
+    const summary = r.summary.replace(/\s*\n\s*/g, " ");
+    return `- **${r.key}** (${runKind(r)}) — ${summary} — ${where} — ${live ? "agent open" : "idle, no agent attached"}`;
   });
   return `## Active tasks\n${lines.join("\n")}`;
 }
