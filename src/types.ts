@@ -411,7 +411,12 @@ export type OutboundMessage =
       grouping: "agents" | "workspaces";
       // How many runs would retire right now if both retirement windows were
       // ignored. Drives the Clear stale button, which is hidden at zero.
-      staleCount: number }
+      staleCount: number;
+      /** The task source's user-facing name — every "Jira"-shaped string on the
+       * board reads this rather than hardcoding a tracker. Same field, same intent
+       * as `state`'s `sourceLabel` above; the Deck is a separate panel with its
+       * own outbound message, so it carries its own copy. */
+      sourceLabel: string }
   | { type: "deck:loading"; loading: boolean }
   | {
       type: "deck:reviews";

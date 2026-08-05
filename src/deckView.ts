@@ -843,6 +843,7 @@ export class DeckPanel {
         prReviewStatus: getConfig().prReviewStatus,
         grouping: getConfig().deckGrouping,
         staleCount: this.staleCount,
+        sourceLabel: this.connector.info().label,
       });
       // The disabled branch posts its own "cleared" state directly — enqueueReviews
       // only ever posts once a search settles or is already fresh, neither of

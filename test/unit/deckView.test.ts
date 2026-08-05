@@ -249,13 +249,13 @@ const reviewFixture = (): ReviewRequest => ({
  * null: several fixtures below (a local card's inferred ticket, a promoted
  * local card's place-hash key) depend on that url shape actually resolving to
  * a key, exactly as it does against the shipped Jira connector. */
-function fakeConnector(authed = false): TaskConnector {
+function fakeConnector(authed = false, label = "Jira"): TaskConnector {
   const BROWSE = "/browse/";
   return {
     id: "jira",
     setupSteps: 2,
     info: () => ({
-      label: "Jira", scopeNoun: "project", scopeValue: "ASM", endpoint: "https://jira",
+      label, scopeNoun: "project", scopeValue: "ASM", endpoint: "https://jira",
       exampleKey: "ASM-1234", endpointSetting: "agentFlow.jira.baseUrl", scopeSetting: "agentFlow.jira.project",
     }),
     isConfigured: () => true,
@@ -277,7 +277,7 @@ function fakeConnector(authed = false): TaskConnector {
 
 const lastPanel = () => window.createWebviewPanel.mock.results.at(-1)!.value as ReturnType<typeof import("../_mocks/vscode").makeWebviewPanel>;
 const posts = (p: ReturnType<typeof lastPanel>) => p.webview.postMessage.mock.calls.map((c) => c[0] as any);
-const show = (authed = false) => DeckPanel.show(fakeContext().context as any, fakeConnector(authed), () => {});
+const show = (authed = false, label = "Jira") => DeckPanel.show(fakeContext().context as any, fakeConnector(authed, label), () => {});
 const settled = () => new Promise<void>((r) => setTimeout(r, 0));
 
 /** The gh probe is kicked off inside the very tick that reads it, so it can
@@ -409,6 +409,18 @@ describe("DeckPanel", () => {
     await settled();
     const msg = posts(lastPanel()).find((m) => m.type === "deck:runs");
     expect(msg.prReviewStatus).toBe("PR initiated");
+  });
+
+  it("posts the connector's own label as sourceLabel on deck:runs", async () => {
+    show();
+    await settled();
+    expect(lastRunsPost().sourceLabel).toBe("Jira");
+  });
+
+  it("posts a different connector's label as sourceLabel, proving it is read off the connector rather than hardcoded", async () => {
+    show(true, "Acme");
+    await settled();
+    expect(lastRunsPost().sourceLabel).toBe("Acme");
   });
 
   it("keeps review runs off the board — only the ticket run reaches it", async () => {

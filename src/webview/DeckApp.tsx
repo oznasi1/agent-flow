@@ -7,6 +7,14 @@ import { isPrReviewStatus } from "./helpers";
 
 let toastSeq = 0;
 
+// Everything on, and the shipped Jira label — what a first paint renders before
+// `deck:runs` arrives. `deck:runs` is asynchronous (a real round-trip through the
+// extension host), so there is always a gap between mount and the first message;
+// defaulting to "Jira" means that gap renders exactly today's UI rather than a
+// flash of nameless copy ("parked · git + only") before the truth arrives a
+// moment later. Same reasoning, same default, as App.tsx's DEFAULT_SOURCE_LABEL.
+const DEFAULT_SOURCE_LABEL = "Jira";
+
 // `needs` stays the column id — it is the engine's vocabulary (DeckColumn, deriveBucket)
 // and never reaches a user. "Action required" is what the board says, in the summary
 // tile, the column header and the legend alike: one name for one thing.
@@ -42,14 +50,14 @@ function allMerged(prs: PrEntryMap): boolean {
   return facts.length > 0 && facts.every((f) => f.state === "MERGED");
 }
 
-function stateView(r: RunStatus, live: boolean): { text: string; tone: Tone } {
+function stateView(r: RunStatus, live: boolean, sourceLabel: string): { text: string; tone: Tone } {
   if (r.column === "done") return { text: allMerged(r.prs) ? "merged" : "done", tone: "merged" };
-  if (!live || r.agent.state === "unknown") return { text: "parked · git + Jira only", tone: "parked" };
+  if (!live || r.agent.state === "unknown") return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
     case "needs-you": return { text: `ended turn · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
     case "idle": return { text: `idle · ${timeAgo(r.agent.lastActivityMs)}`, tone: "idle" };
-    default: return { text: "parked · git + Jira only", tone: "parked" };
+    default: return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
   }
 }
 
@@ -179,20 +187,21 @@ function workspaceLabel(run: Run): string | undefined {
   return run.workspaceFile?.split(/[\\/]/).pop()?.replace(/\.code-workspace$/, "");
 }
 
-function Card({ r, live, prReviewStatus, onForget, agent, column }: {
+function Card({ r, live, prReviewStatus, onForget, agent, column, sourceLabel }: {
   r: RunStatus; live: boolean; prReviewStatus: string; onForget: (key: string) => void;
   /** Non-null on the Agents board: this card is that one session, and its state
    * line, name and action target come from the agent rather than the run. */
   agent: CardAgent | null;
   column: DeckColumn;
+  sourceLabel: string;
 }): JSX.Element {
   const col = COLUMNS.find((c) => c.id === column)!;
   const accent = `var(${col.varName})`;
   // The agent's own activity when this card is an agent; the run's reduction
   // otherwise. `column` is threaded in rather than read off `r` for the same
   // reason: on the Agents board both are per-session.
-  const sv = stateView({ ...r, agent: agent ? agent.activity : r.agent, column }, live);
-  // A ticketless run has no Jira issue behind it: the key is a local slug, and
+  const sv = stateView({ ...r, agent: agent ? agent.activity : r.agent, column }, live, sourceLabel);
+  // A ticketless run has no tracked issue behind it: the key is a local slug, and
   // openExternal("") is a button that does nothing.
   const tracked = isTicketRun(r.run);
   // The short label is only honest for a real Explore session. isTicketRun keys off
@@ -209,11 +218,11 @@ function Card({ r, live, prReviewStatus, onForget, agent, column }: {
   // Offer Address PR once the ticket reaches the configured PR-review status. Never on
   // a local card: its key is read off the branch name (see inferredKey just below), so
   // the status on it may belong to a ticket that is not ours — not something to seed an
-  // agent against on one click. A run with no Jira status needs no separate guard;
+  // agent against on one click. A run with no ticket status needs no separate guard;
   // isPrReviewStatus is false whenever either side is empty.
   const canAddressPr = !local && isPrReviewStatus(r.ticketStatus ?? "", prReviewStatus);
   // The key came from the branch, not from a launch. Say so: the branch could
-  // name a ticket somebody else owns, and the Jira status on this card would
+  // name a ticket somebody else owns, and the ticket status on this card would
   // then be theirs. Computed host-side (the webview has no connector to parse
   // r.run.url with) and sent as `inferredTicketKey` — absent whenever the host
   // found no ticket in the url, which for a non-local run is always.
@@ -247,14 +256,14 @@ function Card({ r, live, prReviewStatus, onForget, agent, column }: {
             <span className="chip" title="Read from the branch name — Agent Flow Deck did not launch this">~inferred</span>
             <button
               className="key"
-              title={`Open ${inferredKey} in Jira`}
+              title={`Open ${inferredKey} in ${sourceLabel}`}
               onClick={() => send({ type: "openExternal", url: r.run.url })}
             >
               {inferredKey}
             </button>
           </span>
         ) : tracked ? (
-          <button className="key" title={`Open ${r.run.key} in Jira`} onClick={() => send({ type: "openExternal", url: r.run.url })}>
+          <button className="key" title={`Open ${r.run.key} in ${sourceLabel}`} onClick={() => send({ type: "openExternal", url: r.run.url })}>
             {r.run.key}
           </button>
         ) : (
@@ -294,7 +303,7 @@ function Card({ r, live, prReviewStatus, onForget, agent, column }: {
       {agent === null && <AgentsRow agents={r.agents} />}
 
       <div className="c-foot">
-        {r.ticketStatus && <span className="pill" title={`Jira status: ${r.ticketStatus}`}>{r.ticketStatus}</span>}
+        {r.ticketStatus && <span className="pill" title={`${sourceLabel} status: ${r.ticketStatus}`}>{r.ticketStatus}</span>}
         <div className="actions">
           {canAddressPr && (
             <button
@@ -325,7 +334,7 @@ function Card({ r, live, prReviewStatus, onForget, agent, column }: {
             {menuOpen && (
               <div className="menu" onClick={(e) => e.stopPropagation()}>
                 {tracked && (
-                  <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "openExternal", url: r.run.url }); }}>Open in Jira</button>
+                  <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "openExternal", url: r.run.url }); }}>{`Open in ${sourceLabel}`}</button>
                 )}
                 {local ? (
                   <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "deck:track", key: r.run.key }); }}>Track it</button>
@@ -355,6 +364,8 @@ export function DeckApp(): JSX.Element {
   const [reviewQueue, setReviewQueue] = React.useState(true);
   const [grouping, setGrouping] = React.useState<"agents" | "workspaces">("agents");
   const [staleCount, setStaleCount] = React.useState(0);
+  // See DEFAULT_SOURCE_LABEL's own comment for why "Jira" rather than "".
+  const [sourceLabel, setSourceLabel] = React.useState(DEFAULT_SOURCE_LABEL);
   const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean; reviewWrites: boolean; loading: boolean }>(
     { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false, loading: false },
   );
@@ -402,6 +413,7 @@ export function DeckApp(): JSX.Element {
         setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
         setPrReviewStatus(m.prReviewStatus);
+        setSourceLabel(m.sourceLabel);
         setSyncedAt(Date.now());
       } else if (m.type === "toast") {
         const id = ++toastSeq;
@@ -466,7 +478,7 @@ export function DeckApp(): JSX.Element {
   };
 
   const forget = React.useCallback((key: string) => {
-    // Optimistic: the card leaves now rather than after a full refresh (a Jira
+    // Optimistic: the card leaves now rather than after a full refresh (a connector
     // round trip per run, plus git per repo). The next deck:runs post is
     // authoritative, so a delete that somehow failed brings the card straight back.
     setRuns((rs) => rs.filter((r) => r.run.key !== key));
@@ -497,10 +509,10 @@ export function DeckApp(): JSX.Element {
             so they read as one segmented control rather than two loose pills. Buttons,
             not divs: these are controls, and :focus-visible only reaches them here. */}
         <div className="ctls">
-          <button type="button" className={`ctl ${live ? "on" : ""}`} onClick={toggleLive} title="Best-effort live signal from Claude Code transcripts. Off → git + Jira only.">
+          <button type="button" className={`ctl ${live ? "on" : ""}`} onClick={toggleLive} title={`Best-effort live signal from Claude Code transcripts. Off → git + ${sourceLabel} only.`}>
             <span className="switch" />Live signal
           </button>
-          <button type="button" className={`ctl ${prFacts ? "on" : ""}`} onClick={() => { const next = !prFacts; setPrFacts(next); send({ type: "deck:setPrFacts", on: next }); }} title="Read each task's PR state from GitHub with the gh CLI. Off → git + Jira only.">
+          <button type="button" className={`ctl ${prFacts ? "on" : ""}`} onClick={() => { const next = !prFacts; setPrFacts(next); send({ type: "deck:setPrFacts", on: next }); }} title={`Read each task's PR state from GitHub with the gh CLI. Off → git + ${sourceLabel} only.`}>
             <span className="switch" />PR facts
           </button>
           <button
@@ -549,7 +561,7 @@ export function DeckApp(): JSX.Element {
             Clear stale ({staleCount})
           </button>
         )}
-        <button type="button" className="ctl" title="Re-read git, Jira and PR state now" onClick={() => send({ type: "deck:refresh" })}>
+        <button type="button" className="ctl" title={`Re-read git, ${sourceLabel} and PR state now`} onClick={() => send({ type: "deck:refresh" })}>
           <span className={`spin ${busy ? "on" : ""}`}>⟳</span>
           <span className="synced">{busy ? "syncing…" : syncedAt ? `synced ${timeAgo(syncedAt)}` : "refresh"}</span>
         </button>
@@ -621,7 +633,7 @@ export function DeckApp(): JSX.Element {
                 <div className="col-body">
                   {list.map((c) => (
                     <Card key={c.id} r={c.status} live={live} prReviewStatus={prReviewStatus}
-                      onForget={forget} agent={c.agent} column={c.column} />
+                      onForget={forget} agent={c.agent} column={c.column} sourceLabel={sourceLabel} />
                   ))}
                 </div>
               </section>
@@ -635,7 +647,7 @@ export function DeckApp(): JSX.Element {
           <span className="lg" key={c.id}><span className="dot" style={{ background: `var(${c.varName})` }} />{c.label}</span>
         ))}
         {ghNote && <span className="note warn">{ghNote}</span>}
-        <span className="note">git + Jira backbone · best-effort live from <span className="path">~/.claude/projects</span></span>
+        <span className="note">{`git + ${sourceLabel} backbone · best-effort live from `}<span className="path">~/.claude/projects</span></span>
       </div>
 
       <div className="toasts">

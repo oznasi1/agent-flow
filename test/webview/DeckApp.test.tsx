@@ -35,8 +35,8 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
 });
 
 const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated",
-                 grouping: "agents" | "workspaces" = "agents"): OutboundMessage =>
-  ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: null, prReviewStatus, grouping, staleCount: 0 });
+                 grouping: "agents" | "workspaces" = "agents", sourceLabel = "Jira"): OutboundMessage =>
+  ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: null, prReviewStatus, grouping, staleCount: 0, sourceLabel });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
@@ -553,7 +553,7 @@ describe("DeckApp PR-facts chrome", () => {
 
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", grouping: "agents", staleCount: 0 });
+    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", grouping: "agents", staleCount: 0, sourceLabel: "Jira" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 
@@ -1229,5 +1229,85 @@ describe("Agents view", () => {
     host(runsMsg([mkStatus()]));
     fireEvent.click(screen.getByRole("button", { name: "Workspaces" }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:setGrouping", grouping: "workspaces" });
+  });
+});
+
+// The Deck's own copy of Task 13's promise: every "Jira"-shaped string on the
+// board reads sourceLabel rather than hardcoding a tracker, so connector #2's
+// author never has to touch this file. Byte-identity for Jira (the default) is
+// the bar — full literals, not toContain fragments, which would pass on drifted
+// wording — plus a non-Jira mutation proving the label actually reaches render
+// rather than a hardcoded default silently surviving underneath it.
+describe("DeckApp — source label", () => {
+  const localCard = (): RunStatus => mkStatus({
+    run: {
+      key: "local-centaur-1a2b3c4d", summary: "team table new design",
+      url: "https://jira/browse/ASM-5641", createdAt: 1, kind: "local", mode: "per-window",
+      repos: [{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-5641-team-table" }], briefPaths: [],
+    },
+    inferredTicketKey: "ASM-5641",
+  });
+
+  it("renders the chrome's Jira strings byte-for-byte before any deck:runs arrives — the defaulted first paint", () => {
+    render(<DeckApp />);
+    expect(screen.getByTitle("Best-effort live signal from Claude Code transcripts. Off → git + Jira only.")).toBeInTheDocument();
+    expect(screen.getByTitle("Read each task's PR state from GitHub with the gh CLI. Off → git + Jira only.")).toBeInTheDocument();
+    expect(screen.getByTitle("Re-read git, Jira and PR state now")).toBeInTheDocument();
+    expect(document.querySelector(".note")!.textContent).toBe("git + Jira backbone · best-effort live from ~/.claude/projects");
+  });
+
+  it("renders the chrome's Jira strings byte-for-byte once a Jira-labeled deck:runs lands", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(screen.getByTitle("Best-effort live signal from Claude Code transcripts. Off → git + Jira only.")).toBeInTheDocument();
+    expect(screen.getByTitle("Read each task's PR state from GitHub with the gh CLI. Off → git + Jira only.")).toBeInTheDocument();
+    expect(screen.getByTitle("Re-read git, Jira and PR state now")).toBeInTheDocument();
+    expect(document.querySelector(".note")!.textContent).toBe("git + Jira backbone · best-effort live from ~/.claude/projects");
+  });
+
+  it("renders a tracked card's Jira strings byte-for-byte: key title, status pill title, overflow menu item", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(screen.getByTitle("Open ASM-1 in Jira")).toBeInTheDocument();
+    expect(screen.getByTitle("Jira status: In Progress")).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle(/more actions/i));
+    expect(screen.getByText("Open in Jira")).toBeInTheDocument();
+  });
+
+  it("renders a local/inferred card's key title with Jira byte-for-byte", () => {
+    render(<DeckApp />);
+    host(runsMsg([localCard()]));
+    expect(screen.getByTitle("Open ASM-5641 in Jira")).toBeInTheDocument();
+  });
+
+  it("renders the exact parked string with Jira when live signal is off", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByText(/Live signal/i));
+    expect(screen.getByText("parked · git + Jira only")).toBeInTheDocument();
+  });
+
+  it("templates every one of those strings off a non-Jira sourceLabel — proving the label actually reaches the render", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()], "PR initiated", "agents", "Acme"));
+    expect(screen.getByTitle("Best-effort live signal from Claude Code transcripts. Off → git + Acme only.")).toBeInTheDocument();
+    expect(screen.getByTitle("Read each task's PR state from GitHub with the gh CLI. Off → git + Acme only.")).toBeInTheDocument();
+    expect(screen.getByTitle("Re-read git, Acme and PR state now")).toBeInTheDocument();
+    expect(document.querySelector(".note")!.textContent).toBe("git + Acme backbone · best-effort live from ~/.claude/projects");
+    expect(screen.getByTitle("Open ASM-1 in Acme")).toBeInTheDocument();
+    expect(screen.getByTitle("Acme status: In Progress")).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle(/more actions/i));
+    expect(screen.getByText("Open in Acme")).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/Live signal/i));
+    expect(screen.getByText("parked · git + Acme only")).toBeInTheDocument();
+    // No trace of the shipped default anywhere on the rendered board.
+    expect(document.body.textContent).not.toMatch(/Jira/);
+  });
+
+  it("templates the inferred-key card title off a non-Jira sourceLabel too", () => {
+    render(<DeckApp />);
+    host(runsMsg([localCard()], "PR initiated", "agents", "Acme"));
+    expect(screen.getByTitle("Open ASM-5641 in Acme")).toBeInTheDocument();
+    expect(screen.queryByTitle(/in Jira/)).not.toBeInTheDocument();
   });
 });
