@@ -14,7 +14,7 @@ const trackSpy = vi.fn();
 const initSpy = vi.fn();
 const disposeSpy = vi.fn();
 
-vi.mock("../../src/jira/auth", () => ({ ApiTokenAuth: vi.fn(() => authStub) }));
+vi.mock("../../src/tasks/jira/auth", () => ({ ApiTokenAuth: vi.fn(() => authStub) }));
 vi.mock("../../src/tasksView", () => ({
   TasksViewProvider: Object.assign(vi.fn(() => providerStub), { viewType: "agentFlow.tasks" }),
 }));

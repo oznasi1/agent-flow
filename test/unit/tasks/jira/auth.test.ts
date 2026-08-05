@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { ApiTokenAuth } from "../../../src/jira/auth";
-import { window } from "../../_mocks/vscode";
-import { fakeSecrets } from "../../_helpers/factories";
+import { ApiTokenAuth } from "../../../../src/tasks/jira/auth";
+import { window } from "../../../_mocks/vscode";
+import { fakeSecrets } from "../../../_helpers/factories";
 
 const EMAIL_KEY = "agentFlow.jira.email";
 const TOKEN_KEY = "agentFlow.jira.token";

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { ApiTokenAuth } from "../../src/jira/auth";
+import { ApiTokenAuth } from "../../src/tasks/jira/auth";
 import { SETUP_COMPLETE_KEY } from "../../src/setup";
 import { ticketKeyFor, Run, WorkspaceMode } from "../../src/types";
 import { fakeSecrets } from "../_helpers/factories";

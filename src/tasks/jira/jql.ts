@@ -1,4 +1,4 @@
-import { Filter, Size } from "../types";
+import { Filter, Size } from "../../types";
 
 const ORDER = "ORDER BY priority DESC, updated DESC";
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { JiraApiError, parseJiraError, describeJiraError } from "../../../src/jira/errors";
+import { JiraApiError, parseJiraError, describeJiraError } from "../../../../src/tasks/jira/errors";
 
 const envelope = (messages: string[], errors: Record<string, string> = {}) =>
   JSON.stringify({ errorMessages: messages, errors });

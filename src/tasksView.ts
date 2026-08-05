@@ -2,9 +2,9 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import { getConfig, AgentFlowConfig, ExploreAction } from "./config";
-import { JiraAuth } from "./jira/auth";
-import { JiraClient, JiraAuthError, JiraApiError, JiraDetail, TransitionOption, isJiraNetworkError } from "./jira/client";
-import { describeJiraError } from "./jira/errors";
+import { JiraAuth } from "./tasks/jira/auth";
+import { JiraClient, JiraAuthError, JiraApiError, JiraDetail, TransitionOption, isJiraNetworkError } from "./tasks/jira/client";
+import { describeJiraError } from "./tasks/jira/errors";
 import {
   promptableFields,
   toJiraValue,
@@ -13,7 +13,7 @@ import {
   mentionsResolution,
   fieldDisplayNames,
   type FieldPrompt,
-} from "./jira/transitionFields";
+} from "./tasks/jira/transitionFields";
 import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
@@ -68,7 +68,7 @@ const JIRA_WRITE_MESSAGES: ReadonlySet<InboundMessage["type"]> = new Set([
  * alone would mislabel its failure a workspace_write / pr_lookup. When the
  * thrown error is identifiably from the Jira client — JiraAuthError, JiraApiError,
  * or a network-level failure inside request() (unreachable host, DNS, timeout;
- * see isJiraNetworkError, src/jira/client.ts) — that origin is trusted over the
+ * see isJiraNetworkError, src/tasks/jira/client.ts) — that origin is trusted over the
  * message-type default: jira_write for the message types whose own Jira
  * interaction is a write, jira_fetch for everything else that reads Jira at all.
  * The network-level case matters most in practice: an unreachable Jira (VPN off,

@@ -3,13 +3,13 @@ import {
   AnalyticsEvent, EventName, OPEN_STRING_PROPS, STOCK_PROMPT_MODES, classifyFailure, toPromptModeProp,
 } from "../../../src/telemetry/events";
 // The REAL class, not a local stand-in — classifyFailure relies on its constructor
-// setting `this.name` explicitly (src/jira/client.ts), and a hand-rolled stand-in
+// setting `this.name` explicitly (src/tasks/jira/client.ts), and a hand-rolled stand-in
 // declared locally in this file would keep passing even if that constructor
 // override were ever accidentally reverted. Safe to import here (unlike from
 // telemetry/events.ts itself): this test file, unlike that production module, is
 // allowed to depend on jira/client.ts's transitive `vscode` import, which
 // vitest.config.ts already aliases to test/_mocks/vscode.ts for every test file.
-import { JiraAuthError } from "../../../src/jira/client";
+import { JiraAuthError } from "../../../src/tasks/jira/client";
 
 /** One representative literal per Phase 1 event. The `Unsampled`/`AssertNever`
  * check below (after this array) is what actually forces a new event to be added

@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { ApiTokenAuth } from "./jira/auth";
+import { ApiTokenAuth } from "./tasks/jira/auth";
 import { TasksViewProvider } from "./tasksView";
 import { DeckPanel } from "./deckView";
 import { MarketplacePanel } from "./marketplaceView";

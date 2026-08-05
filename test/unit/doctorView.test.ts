@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { commands, env, extensions, window, Uri } from "../_mocks/vscode";
 import { collectInputs, showDoctor, probeClaudeExtension, type DoctorDeps } from "../../src/doctorView";
-import { JiraAuthError, JiraApiError } from "../../src/jira/client";
+import { JiraAuthError, JiraApiError } from "../../src/tasks/jira/client";
 import { formatReport, runChecks } from "../../src/engine/doctor";
 
 /** Every seam healthy. Each test spoils exactly one. */

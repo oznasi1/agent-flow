@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fakeAuth, installFetch, jsonResponse, textResponse, emptyResponse } from "../../_helpers/factories";
+import { fakeAuth, installFetch, jsonResponse, textResponse, emptyResponse } from "../../../_helpers/factories";
 
 // The Sprint-field id is cached in a module-level variable; reset the whole module
 // between tests so the cache never leaks across cases.
-let mod: typeof import("../../../src/jira/client");
+let mod: typeof import("../../../../src/tasks/jira/client");
 beforeEach(async () => {
   vi.resetModules();
-  mod = await import("../../../src/jira/client");
+  mod = await import("../../../../src/tasks/jira/client");
 });
 
 const BASE = "https://jira.test";

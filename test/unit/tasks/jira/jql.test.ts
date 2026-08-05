@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildJql, stripSprint } from "../../../src/jira/jql";
+import { buildJql, stripSprint } from "../../../../src/tasks/jira/jql";
 
 const ORDER = "ORDER BY priority DESC, updated DESC";
 

@@ -65,14 +65,14 @@ vi.mock("../../src/engine/sessions", async () => {
 // This file mocks the client wholesale, so `JiraApiError` would be undefined inside
 // tasksView and every `instanceof` check would throw. Re-export the genuine class so
 // the real parseJiraError produces instances the production code recognises.
-vi.mock("../../src/jira/client", async () => {
-  const errors = await vi.importActual<typeof import("../../src/jira/errors")>("../../src/jira/errors");
+vi.mock("../../src/tasks/jira/client", async () => {
+  const errors = await vi.importActual<typeof import("../../src/tasks/jira/errors")>("../../src/tasks/jira/errors");
   // The real module, for isJiraNetworkError/markJiraNetworkFailure only — these
   // are pure functions with no vscode-touching side effects at import time, so
   // there's no reason to hand-roll a stand-in the way JiraAuthError needs one
   // below; a duplicate here could silently drift from resolveOp's actual check.
-  const real = await vi.importActual<typeof import("../../src/jira/client")>("../../src/jira/client");
-  // Mirrors the real class's constructor (src/jira/client.ts): classifyFailure
+  const real = await vi.importActual<typeof import("../../src/tasks/jira/client")>("../../src/tasks/jira/client");
+  // Mirrors the real class's constructor (src/tasks/jira/client.ts): classifyFailure
   // (telemetry/events.ts) checks `e.name === "JiraAuthError"`, and a bare
   // `extends Error {}` here would leave `.name` as the inherited "Error",
   // silently failing that check for every test in this file.
@@ -91,7 +91,7 @@ vi.mock("../../src/jira/client", async () => {
   };
 });
 
-import { parseJiraError } from "../../src/jira/errors";
+import { parseJiraError } from "../../src/tasks/jira/errors";
 import { getConfig } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge } from "../../src/engine/workspace";
@@ -100,7 +100,7 @@ import { openSharedWorkspace } from "../../src/engine/batchWorkspace";
 import { readLiveWindows, windowIdentity } from "../../src/engine/presence";
 import { readRuns } from "../../src/engine/runs";
 import { readOpenSessions } from "../../src/engine/sessions";
-import { JiraClient, JiraAuthError, markJiraNetworkFailure } from "../../src/jira/client";
+import { JiraClient, JiraAuthError, markJiraNetworkFailure } from "../../src/tasks/jira/client";
 import { TasksViewProvider } from "../../src/tasksView";
 import type { TakeSource } from "../../src/telemetry/events";
 import type { InboundMessage, OutboundMessage } from "../../src/types";
@@ -557,7 +557,7 @@ describe("changeStatus", () => {
     expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "71", {});
   });
 
-  // `src/jira/client` is mocked in this file, but `src/jira/errors` is not — the
+  // `src/tasks/jira/client` is mocked in this file, but `src/tasks/jira/errors` is not — the
   // real parser gives the recovery path a faithful JiraApiError to react to.
   const apiError = (messages: string[], fieldErrors: Record<string, string> = {}) =>
     parseJiraError(400, JSON.stringify({ errorMessages: messages, errors: fieldErrors }));
@@ -2174,7 +2174,7 @@ describe("Take funnel", () => {
   });
 
   it("reports jira_fetch with failure_class network for an unreachable-host failure during take, and never leaks the site URL", async () => {
-    // request()'s network-level catch (src/jira/client.ts) throws a plain Error —
+    // request()'s network-level catch (src/tasks/jira/client.ts) throws a plain Error —
     // not JiraApiError/JiraAuthError — for an unreachable host, tagged via
     // markJiraNetworkFailure so resolveOp() and classifyFailure() both recognize
     // it. The message embeds the user's own Jira site URL; operation_failed must

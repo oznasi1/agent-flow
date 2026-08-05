@@ -2,7 +2,7 @@ import { vi } from "vitest";
 import type * as vscode from "vscode";
 import { ExtensionMode } from "../_mocks/vscode";
 import type { JiraTask, ServiceRef } from "../../src/types";
-import type { JiraAuth } from "../../src/jira/auth";
+import type { JiraAuth } from "../../src/tasks/jira/auth";
 
 // ── domain factories ────────────────────────────────────────────────────────
 

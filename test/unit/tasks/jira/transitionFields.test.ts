@@ -8,7 +8,7 @@ import {
   fieldDisplayNames,
   type FieldPrompt,
   type TransitionFieldMeta,
-} from "../../../src/jira/transitionFields";
+} from "../../../../src/tasks/jira/transitionFields";
 
 const RESOLUTION: TransitionFieldMeta = {
   required: true,

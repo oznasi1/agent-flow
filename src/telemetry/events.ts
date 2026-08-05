@@ -34,8 +34,8 @@ export type FailureClass =
  * no dependency on jira/client.ts (which transitively imports `vscode` via
  * jira/auth.ts) and must stay that way, a leaf module importable in isolation.
  * That only works because `JiraAuthError`'s constructor explicitly sets
- * `this.name = "JiraAuthError"` (src/jira/client.ts), exactly like its sibling
- * `JiraApiError` (src/jira/errors.ts) already did. A bare `class X extends
+ * `this.name = "JiraAuthError"` (src/tasks/jira/client.ts), exactly like its sibling
+ * `JiraApiError` (src/tasks/jira/errors.ts) already did. A bare `class X extends
  * Error {}` with no constructor override would inherit `.name` from
  * `Error.prototype` (`"Error"`), and the class identifier itself is not a safe
  * substitute for the same check: esbuild's production build (esbuild.js,

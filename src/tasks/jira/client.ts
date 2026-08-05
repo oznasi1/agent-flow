@@ -2,7 +2,7 @@ import { JiraAuth } from "./auth";
 import { buildJql, stripSprint } from "./jql";
 import { parseJiraError } from "./errors";
 import { TransitionFieldMeta } from "./transitionFields";
-import { Filter, JiraTask, Size } from "../types";
+import { Filter, JiraTask, Size } from "../../types";
 
 export class JiraAuthError extends Error {
   constructor(message: string) {

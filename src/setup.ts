@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { JiraAuth } from "./jira/auth";
+import { JiraAuth } from "./tasks/jira/auth";
 
 /** globalState flag marking that first-run setup has been handled. */
 export const SETUP_COMPLETE_KEY = "agentFlow.setupComplete";

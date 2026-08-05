@@ -216,8 +216,8 @@ vi.mock("../../src/config", async (importActual) => {
     }),
   };
 });
-vi.mock("../../src/jira/client", () => ({
-  // Mirrors the real class's constructor (src/jira/client.ts), which sets
+vi.mock("../../src/tasks/jira/client", () => ({
+  // Mirrors the real class's constructor (src/tasks/jira/client.ts), which sets
   // `this.name` explicitly so classifyFailure's `e.name === "JiraAuthError"`
   // check survives production minification. A bare `extends Error {}` here
   // would leave `.name` as the inherited "Error", silently diverging from the
@@ -233,7 +233,7 @@ vi.mock("../../src/jira/client", () => ({
 
 import { DeckPanel } from "../../src/deckView";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
-import { JiraAuthError } from "../../src/jira/client";
+import { JiraAuthError } from "../../src/tasks/jira/client";
 
 // createdAt is *now*, not the epoch: a run minted in 1970 is older than any
 // abandonment window, so the retire sweep would carry off every fixture that

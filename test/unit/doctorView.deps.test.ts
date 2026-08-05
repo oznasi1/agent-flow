@@ -10,9 +10,9 @@ vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn(() => []) }));
 vi.mock("../../src/engine/pr/provider", () => ({ probeGh: vi.fn(async () => null) }));
 vi.mock("../../src/engine/pr/which", () => ({ resolveBin: vi.fn(() => null) }));
 vi.mock("../../src/engine/runs", () => ({ defaultRunsDir: vi.fn(() => "/runs"), readRuns: vi.fn(() => []) }));
-vi.mock("../../src/jira/client", () => ({
+vi.mock("../../src/tasks/jira/client", () => ({
   JiraClient: vi.fn(),
-  // Mirrors the real class's constructor (src/jira/client.ts), which sets
+  // Mirrors the real class's constructor (src/tasks/jira/client.ts), which sets
   // `this.name` explicitly so classifyFailure's `e.name === "JiraAuthError"`
   // check survives production minification. A bare `extends Error {}` here
   // would leave `.name` as the inherited "Error", silently diverging from the
@@ -31,9 +31,9 @@ import { discoverRepos } from "../../src/engine/repos";
 import { probeGh } from "../../src/engine/pr/provider";
 import { resolveBin } from "../../src/engine/pr/which";
 import { readRuns } from "../../src/engine/runs";
-import { JiraClient } from "../../src/jira/client";
+import { JiraClient } from "../../src/tasks/jira/client";
 import { defaultDeps } from "../../src/doctorView";
-import type { JiraAuth } from "../../src/jira/auth";
+import type { JiraAuth } from "../../src/tasks/jira/auth";
 
 const CFG = {
   baseUrl: "https://jira.test",

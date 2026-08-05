@@ -5,10 +5,10 @@ import { Filter, JiraTask as Task, Size } from "../types";
 // `import type` on both of these deliberately: client.ts imports auth.ts, which
 // imports `vscode`. A value import would drag the editor API into a module that
 // must stay loadable in isolation; a type-only import is erased at build time.
-// The paths are the PRE-move ones (src/jira/…) because Task 3 has not run yet —
+// The paths are the PRE-move ones (src/tasks/jira/…) because Task 3 has not run yet —
 // Task 3's sweep rewrites them to ./jira/… along with everything else.
-import type { JiraDetail as TaskDetail } from "../jira/client";
-import type { FieldPrompt } from "../jira/transitionFields";
+import type { JiraDetail as TaskDetail } from "./jira/client";
+import type { FieldPrompt } from "./jira/transitionFields";
 import type { AuthProbe, ProjectProbe } from "../engine/doctor";
 
 export type { FieldPrompt, Task, TaskDetail };
