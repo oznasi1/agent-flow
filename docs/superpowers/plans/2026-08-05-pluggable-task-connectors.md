@@ -2456,7 +2456,16 @@ Store `sourceLabel` and `caps` from the `state` message in component state (defa
 - the four gate strings at lines ~429-446 read `gateCopy(sourceLabel)`;
 - the tab bar maps `visibleFilters(caps.supportedFilters)`;
 - the size control renders only when `caps.sizes && filters.size`;
-- the sprint card actions render only when `caps.sprints`;
+- the sprint card actions render only when `caps.sprints`. **The specific line is
+  `App.tsx:683`'s `const showAddToSprint = unassigned || (isMe && !task.inOpenSprint);`.**
+  This gate is load-bearing, not cosmetic: `Task.inOpenSprint` is a required
+  boolean, so a source with no sprint concept has to report `false`, which makes
+  that expression true and renders an "Add to sprint" button that cannot work.
+  The Task 7 fixture connector is deliberately built to expose this — its `FX-2`
+  task is assigned to `"Me"` with `inOpenSprint: false`, which is exactly the
+  `isMe && !inOpenSprint` case. Add a test asserting no sprint action renders for
+  it, and verify by mutation that removing the `caps.sprints` gate makes that test
+  fail. The same reasoning applies to the remove-from-sprint action;
 - the component chips block renders only when `caps.components`;
 - the `title="Open in Jira"` attribute reads `gateCopy(sourceLabel).openIn`;
 - `` `Not on ${taskKey} in Jira — ↑ adds it` `` reads
