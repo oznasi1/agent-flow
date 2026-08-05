@@ -180,6 +180,11 @@ parsing and the Resolution fallback. All of it moves behind the seam.
 export interface StatusTarget {
   id: string;
   toName: string;
+  /** `""` means the source could not categorize this destination — distinct
+   * from "done". Only `"done"` drives retirement, so an uncategorized target
+   * is treated as still-open. Note `Task.statusCategory` has NO `""` member:
+   * a task always has a category, a *destination* may not. Never compare the
+   * two with `===` without handling that. */
   toCategory: "new" | "indeterminate" | "done" | "";
   via?: string;           // Jira's transition name, when it differs from the target
   fields: FieldPrompt[];  // already normalized — no Jira metadata escapes

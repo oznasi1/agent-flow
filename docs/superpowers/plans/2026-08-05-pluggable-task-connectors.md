@@ -283,6 +283,11 @@ export type { FieldPrompt, Task, TaskDetail };
 export interface StatusTarget {
   id: string;
   toName: string;
+  /** `""` means the source could not categorize this destination — distinct
+   * from "done". Only `"done"` drives retirement, so an uncategorized target
+   * is treated as still-open. Note `Task.statusCategory` has NO `""` member:
+   * a task always has a category, a *destination* may not. Never compare the
+   * two with `===` without handling that. */
   toCategory: "new" | "indeterminate" | "done" | "";
   /** The source's own name for the move, when it differs from the destination
    * (Jira transitions are named separately from their target status). */
