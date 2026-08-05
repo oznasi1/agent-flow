@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Explore: Supervise running tasks.** A new Explore action seeds a session whose
+  brief lists Agent Flow's other active runs — task, explore, and review — and
+  whether each still has a live Claude Code agent attached, so you can check on
+  and unblock stalled or waiting work from a fresh session instead of hunting
+  through windows (`src/config.ts`, `src/engine/runs.ts`, `src/tasksView.ts`).
+
 ## [0.2.0] — 2026-08-04
 
 ### Added
