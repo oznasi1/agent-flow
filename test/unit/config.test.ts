@@ -9,6 +9,7 @@ import {
   DEFAULT_EXPLORE_JIRA_TICKET_PROMPT,
   DEFAULT_EXPLORE_DEBUG_PROMPT,
   DEFAULT_EXPLORE_GENERAL_PROMPT,
+  DEFAULT_EXPLORE_SUPERVISE_PROMPT,
   DEFAULT_EXPLORE_VERIFY_PROMPT,
   DEFAULT_PR_REVIEW_PROMPT,
   DEFAULT_REVIEW_REQUEST_PROMPT,
@@ -358,12 +359,13 @@ describe("getConfig — batch launch", () => {
 });
 
 describe("getConfig — explore actions", () => {
-  it("defaults to five actions with built-in labels and default prompts, all Slack-off", () => {
+  it("defaults to six actions with built-in labels and default prompts, all Slack-off", () => {
     expect(getConfig().exploreActions).toEqual([
       { id: "jiraTicket", label: "Open a Jira ticket", prompt: DEFAULT_EXPLORE_JIRA_TICKET_PROMPT, slackDm: false, needsEnv: false },
       { id: "knowledge", label: "Enhance knowledge / flow", prompt: DEFAULT_EXPLORE_PROMPT, slackDm: false, needsEnv: false },
       { id: "debug", label: "Debug", prompt: DEFAULT_EXPLORE_DEBUG_PROMPT, slackDm: false, needsEnv: false },
       { id: "general", label: "General", prompt: DEFAULT_EXPLORE_GENERAL_PROMPT, slackDm: false, needsEnv: false },
+      { id: "supervise", label: "Supervise running tasks", prompt: DEFAULT_EXPLORE_SUPERVISE_PROMPT, slackDm: false, needsEnv: false },
       { id: "verify", label: "Verify on an environment", prompt: DEFAULT_EXPLORE_VERIFY_PROMPT, slackDm: false, needsEnv: true },
     ]);
   });
@@ -376,6 +378,11 @@ describe("getConfig — explore actions", () => {
   it("uses a verify prompt override from settings", () => {
     setConfig({ "explorePrompts.verify": "check {summary} on {env}{files}" });
     expect(getConfig().exploreActions.find((x) => x.id === "verify")?.prompt).toBe("check {summary} on {env}{files}");
+  });
+
+  it("uses a supervise prompt override from settings", () => {
+    setConfig({ "explorePrompts.supervise": "watch {summary}{files}" });
+    expect(getConfig().exploreActions.find((x) => x.id === "supervise")?.prompt).toBe("watch {summary}{files}");
   });
 
   it("defaults exploreMode to 'ask' and honors a configured value", () => {
@@ -392,7 +399,7 @@ describe("getConfig — explore actions", () => {
   it("flips slackDm per action id and ignores non-boolean values", () => {
     setConfig({ exploreSlackDm: { jiraTicket: true, knowledge: "yes", debug: 1 } });
     const byId = Object.fromEntries(getConfig().exploreActions.map((x) => [x.id, x.slackDm]));
-    expect(byId).toEqual({ jiraTicket: true, knowledge: false, debug: false, general: false, verify: false });
+    expect(byId).toEqual({ jiraTicket: true, knowledge: false, debug: false, general: false, supervise: false, verify: false });
   });
 
   it("flips slackDm for the verify action too", () => {
@@ -675,6 +682,7 @@ describe("package.json ⇄ config constants", () => {
     expect(props["agentFlow.explorePrompts.knowledge"].default).toBe(DEFAULT_EXPLORE_PROMPT);
     expect(props["agentFlow.explorePrompts.debug"].default).toBe(DEFAULT_EXPLORE_DEBUG_PROMPT);
     expect(props["agentFlow.explorePrompts.general"].default).toBe(DEFAULT_EXPLORE_GENERAL_PROMPT);
+    expect(props["agentFlow.explorePrompts.supervise"].default).toBe(DEFAULT_EXPLORE_SUPERVISE_PROMPT);
     expect(props["agentFlow.explorePrompts.verify"].default).toBe(DEFAULT_EXPLORE_VERIFY_PROMPT);
   });
 
