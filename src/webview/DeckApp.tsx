@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind, ticketKeyFor } from "../types";
+import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "../types";
 import { DeckCard, projectCards } from "./deckCards";
 import { ReviewStrip } from "./ReviewStrip";
 import { isPrReviewStatus } from "./helpers";
@@ -172,6 +172,13 @@ function AgentsRow({ agents }: { agents: CardAgent[] }): JSX.Element | null {
   );
 }
 
+/** The run's `.code-workspace` file's name, extension stripped — e.g.
+ * "ASM-1+2.code-workspace" → "ASM-1+2". `undefined` for a single-repo
+ * (per-window) run, which has no workspace file at all. */
+function workspaceLabel(run: Run): string | undefined {
+  return run.workspaceFile?.split("/").pop()?.replace(/\.code-workspace$/, "");
+}
+
 function Card({ r, live, prReviewStatus, onForget, agent, column }: {
   r: RunStatus; live: boolean; prReviewStatus: string; onForget: (key: string) => void;
   /** Non-null on the Agents board: this card is that one session, and its state
@@ -229,7 +236,7 @@ function Card({ r, live, prReviewStatus, onForget, agent, column }: {
           {sv.text}
         </span>
         {agent && (
-          <span className="c-agent" title={`Claude Code session in ${agent.repo ?? r.run.repos[0]?.name ?? "this run"}`}>
+          <span className="c-agent" title={`Claude Code session in ${agent.repo ?? workspaceLabel(r.run) ?? r.run.repos[0]?.name ?? "this run"}`}>
             {agent.session.name ?? agent.session.sessionId.slice(0, 8)}
           </span>
         )}

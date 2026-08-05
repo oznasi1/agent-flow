@@ -1109,6 +1109,32 @@ describe("Agents view", () => {
     expect(columns.find((c) => c.name === "Action required")!.cards).toEqual(["a-ended"]);
   });
 
+  it("falls back to the workspace name, not the first repo, when an agent's repo is unresolved", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      run: {
+        ...mkStatus().run,
+        mode: "multiroot",
+        workspaceFile: "/Users/x/.agentflow/workspaces/ASM-1+2.code-workspace",
+        repos: [
+          { name: "svc-api", path: "/r/svc-api", isGit: true, branch: "ASM-1-x" },
+          { name: "svc-web", path: "/r/svc-web", isGit: true, branch: "ASM-1-x" },
+        ],
+      },
+      agents: [mkAgent("agent-flow-2e", "working", 100)],
+    })]));
+    expect(screen.getByTitle(/Claude Code session in ASM-1\+2/)).toBeInTheDocument();
+    expect(screen.queryByTitle(/Claude Code session in svc-api/)).not.toBeInTheDocument();
+  });
+
+  it("still falls back to the first repo when the run has no workspace file", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      agents: [mkAgent("agent-flow-2e", "working", 100)],
+    })]));
+    expect(screen.getByTitle(/Claude Code session in svc/)).toBeInTheDocument();
+  });
+
   it("counts cards, not runs, in the stat tiles", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [
