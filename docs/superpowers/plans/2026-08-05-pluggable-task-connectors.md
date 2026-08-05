@@ -526,7 +526,7 @@ contributor looks first, and it should say that Jira is one connector."
 
 **Interfaces:**
 - Consumes: `TaskApiError`, `TaskAuthError`, `markTaskNetworkFailure`, `isTaskNetworkError` from `src/tasks/provider.ts`.
-- Produces: `JiraApiError extends TaskApiError`, `JiraAuthError extends TaskAuthError`. Both keep their own `.name`. `isJiraNetworkError` is kept as a re-export of `isTaskNetworkError` so no call site changes yet.
+- Produces: `JiraApiError extends TaskApiError`, `JiraAuthError extends TaskAuthError`. Both keep their own `.name`. `markJiraNetworkFailure` and `isJiraNetworkError` are **deleted**, and all three of their call sites migrated to the `Task*` equivalents in this task — so Task 8 has no network-marker work left to do.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1806,7 +1806,7 @@ The component-sync handler guards the same way on `this.provider().caps.componen
 
 - [ ] **Step 7: Retarget the error handling**
 
-In the `onMessage` catch and in `resolveOp`, replace `JiraAuthError` → `TaskAuthError`, `JiraApiError` → `TaskApiError`, `isJiraNetworkError` → `isTaskNetworkError`. The `Op` values passed to `trackError` (`"jira_fetch"`, `"jira_write"`, `"jira_auth"`) **do not change** — they are transmitted telemetry.
+In the `onMessage` catch and in `resolveOp`, replace `JiraAuthError` → `TaskAuthError` and `JiraApiError` → `TaskApiError`. The network marker was already migrated in Task 4, so `isTaskNetworkError` should already be what this file imports — if you find `isJiraNetworkError` here, Task 4 was left incomplete; fix it rather than re-aliasing. The `Op` values passed to `trackError` (`"jira_fetch"`, `"jira_write"`, `"jira_auth"`) **do not change** — they are transmitted telemetry.
 
 - [ ] **Step 8: Run the tests to verify they pass**
 
