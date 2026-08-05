@@ -189,35 +189,35 @@ describe("effectiveFilter", () => {
     expect(effectiveFilter("sprint", ["all", "mine"])).toBe("mine");
   });
 
-  it("still returns a Filter for a source that declares none", () => {
-    // It can answer nothing either way; the only obligation is the return type.
-    expect(effectiveFilter("mine", [])).toBe("mysprint");
+  // "It can answer nothing either way" (the comment this test always carried) means
+  // the actual guarantee is membership, not one particular value — `visibleFilters`
+  // itself picks the fallback's order, and `effectiveFilter` owes agreement with
+  // that, not a specific literal. Before all three branches read the same computed
+  // `shown` set, this returned "mysprint" only as an accident of branch order (branch
+  // 1 missed on the raw empty array, branch 2 missed too, so the tail's positional
+  // read landed on FILTER_ORDER's first entry). Now branch 1 matches directly, since
+  // "mine" is one of the five tabs `visibleFilters([])` falls back to — an equally
+  // valid answer, reached more directly.
+  it("still returns a rendered Filter for a source that declares none", () => {
+    expect(visibleFilters([])).toContain(effectiveFilter("mine", []));
   });
 
-  // The narrower case that first exposed this: a single-element array containing
-  // only "all". `supported[0]` would return "all" directly; `visibleFilters(["all"])`
-  // renders nothing (FILTER_ORDER has no "all" entry) and falls back to all five real
-  // tabs, so the correct answer is the shipped default, which every one of those five
-  // includes.
+  // The narrower case that first exposed the tail-fallback bug: a single-element
+  // array containing only "all". Whatever it returns, it must never be "all" itself
+  // (never a rendered tab) — that is the actual guarantee; which of the five
+  // fallback tabs it lands on is not.
   it("does not return 'all' from a source that declares only 'all'", () => {
-    expect(effectiveFilter("mine", ["all"])).toBe("mysprint");
+    const result = effectiveFilter("mine", ["all"]);
+    expect(result).not.toBe("all");
+    expect(visibleFilters(["all"])).toContain(result);
   });
 
   // The property, not just instances of it: effectiveFilter must never hand back a
   // filter the tab bar doesn't render, whatever `supported` and `configured` are —
-  // otherwise the tab bar shows nothing pressed. Pinning this stops the tail
-  // fallback's class of bug (an unrendered filter reached positionally off the raw
-  // connector array) from recurring by any route through that branch.
-  //
-  // NOT exhaustive: `effectiveFilter("all", ["all", "unassigned"])` still returns
-  // "all" — unrendered — via the FIRST branch ("keeps a configured lens the source
-  // supports"), which returns `configured` verbatim whenever `supported` contains it
-  // literally, with no visibleFilters check at all. That branch is untouched by this
-  // fix round and predates it; it is reachable only via a hand-edited
-  // `agentFlow.defaultFilter` set to the literal string "all" (the setting's manifest
-  // `enum` never offers it), paired with a connector whose `supportedFilters`
-  // includes "all" — which Jira's always has. Deliberately excluded from the cases
-  // below rather than asserted as correct; see the Task 13 fix-round report.
+  // otherwise the tab bar shows nothing pressed. No carve-out: computing `shown`
+  // once and reading all three branches off it (rather than the first branch
+  // reading the raw `supported` array) closes every route to an unrendered result,
+  // including the two below, which used to violate this exact assertion.
   it("only ever returns a filter visibleFilters(supported) actually renders", () => {
     const cases: { configured: string; supported: Filter[] }[] = [
       { configured: "mysprint", supported: ALL },
@@ -226,6 +226,10 @@ describe("effectiveFilter", () => {
       { configured: "backlog", supported: [] },
       { configured: "nonsense", supported: ["backlog", "all"] },
       { configured: "all", supported: ["mine", "backlog"] },
+      // Previously violated via the FIRST branch: `supported` contains "all"
+      // literally, so the old `supported.includes(configured)` matched and returned
+      // it verbatim, with no check that it was ever a rendered tab.
+      { configured: "all", supported: ["all", "unassigned"] },
     ];
     for (const { configured, supported } of cases) {
       expect(visibleFilters(supported)).toContain(effectiveFilter(configured, supported));

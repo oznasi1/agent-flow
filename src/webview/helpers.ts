@@ -44,35 +44,55 @@ export function gateCopy(label: string): {
  * shipped default nor most of the alternatives — asking it for one would fetch an
  * unanswerable lens and render a tab bar with no active tab.
  *
- * The shipped default is preferred over the tail fallback for an unrecognized
- * setting on a source that supports it, because that is exactly where the
- * pre-capability code landed (`(cfg.defaultFilter as Filter) || "mysprint"`) and an
- * already-configured user's opening lens must not move. Do NOT touch either of these
- * first two branches or the literal `"mysprint"` inside them — that is the
- * compatibility guarantee this function exists to protect, and it is independent of
- * what follows.
+ * All three branches read off `shown = visibleFilters(supported)` — the rendered
+ * set — never the raw, connector-ordered `supported` array directly. That used to
+ * be true only of the tail; the first two branches read `supported` directly, and
+ * each independently let an unrendered filter through: `"all"` is a real `Filter` a
+ * connector can legitimately list (Jira's `supportedFilters` always has), but no tab
+ * bar has ever rendered it (see `FILTER_ORDER`'s comment) — the first branch would
+ * return it verbatim whenever `supported` contained it literally
+ * (`effectiveFilter("all", ["all", "unassigned"])` used to return `"all"`), and the
+ * tail would return it whenever it sorted first in the connector's own array
+ * (`["all", "mine"]`). Finding the same defect in two of three branches is what
+ * moved the fix here, to the one place `shown` is computed, rather than patched
+ * branch by branch again.
  *
- * The tail fallback reads `visibleFilters(supported)[0]`, not `supported[0]` — the
- * raw, connector-ordered array — because the return here must be a tab the tab bar
- * actually renders, and `supported` alone doesn't guarantee that: `"all"` is a real
- * `Filter` a connector can legitimately list, but no tab bar has ever rendered it
- * (see `FILTER_ORDER`'s comment). `supported[0]` would return `"all"` whenever it
- * sorts first in the connector's own array (e.g. `["all", "mine"]`), leaving the tab
- * bar with nothing pressed. Routing through `visibleFilters` is safe here — unlike
- * replacing the whole function with it, which would drop the `"mysprint"` preference
- * above and move an existing user's opening lens — because it only touches the
- * last-resort branch, which was already reading positionally off `supported`; it now
- * reads positionally off the same set the tab bar renders instead. The final `??
- * "mysprint"` covers a source declaring no filters at all (or declaring only ones no
- * tab bar has ever shown): it can answer nothing either way, so the only obligation
- * left is that the return stays a `Filter`.
+ * The property this function guarantees, unconditionally: `visibleFilters(supported)`
+ * always contains the return value. There is no carve-out — see
+ * `test/webview/helpers.test.ts`'s "only ever returns a filter visibleFilters(supported)
+ * actually renders" for every case that used to violate it.
+ *
+ * Compatibility, verified rather than assumed when this was consolidated: for Jira
+ * (`supported` is all six values, so `shown` is the five real tabs) a configured
+ * `"mysprint"` still returns `"mysprint"`, and an unrecognized configured value still
+ * returns `"mysprint"` rather than `shown[0]` — the behaviour that keeps an existing
+ * user's opening lens from moving, matching the pre-capability code's
+ * `(cfg.defaultFilter as Filter) || "mysprint"`. For the Task 7 fixture
+ * (`supported: ["mine", "all"]`, so `shown` is `["mine"]`) a configured `"mysprint"`
+ * still returns `"mine"`, unchanged. Both hold with `shown` in place of `supported`
+ * because `"mysprint"` and `"mine"` are real filters: if either is actually
+ * supported, it survives into `shown` in the same position `FILTER_ORDER` gives it.
+ *
+ * The middle branch (prefer `"mysprint"` over the tail) is currently provable dead
+ * code, not merely redundant-in-practice: `"mysprint"` is `FILTER_ORDER`'s first
+ * entry, so whenever it is in `shown` at all it is unconditionally `shown[0]`,
+ * making the tail return it anyway. Verified exhaustively (every subset of the six
+ * `Filter` values as `supported`, crossed with every `Filter` plus `""` and
+ * `"nonsense"` as `configured`) — removing this branch changes no output. Kept
+ * anyway: it states the "mysprint" preference as an explicit guarantee rather than
+ * an incidental consequence of `FILTER_ORDER` happening to list it first, so a
+ * future reorder of `FILTER_ORDER` (for cosmetic reasons, unrelated to this
+ * function) can't silently move an existing user's opening lens by ceasing to
+ * imply it. If `FILTER_ORDER` ever stops listing `"mysprint"` first, this branch
+ * stops being redundant and starts being the only thing protecting the preference.
  *
  * Pure — no DOM, no React — so the extension host imports it too rather than keeping
  * a second copy that could drift from what the webview renders. */
 export function effectiveFilter(configured: string, supported: readonly Filter[]): Filter {
-  if (supported.includes(configured as Filter)) return configured as Filter;
-  if (supported.includes("mysprint")) return "mysprint";
-  return visibleFilters(supported)[0] ?? "mysprint";
+  const shown = visibleFilters(supported);
+  if (shown.includes(configured as Filter)) return configured as Filter;
+  if (shown.includes("mysprint")) return "mysprint";
+  return shown[0] ?? "mysprint";
 }
 
 /** Format an original-estimate in seconds as a compact "3h" / "1.5d" (8h workday). Pure. */
