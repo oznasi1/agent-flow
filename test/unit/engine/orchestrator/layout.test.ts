@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   anchor, edgePath, labelPoint, snap, tidy, NODE_W, NODE_H, COL_GAP, ROW_GAP, GRID, Box,
 } from "../../../../src/engine/orchestrator/layout";
-import { Flow, FlowEdge, FlowNode, emptyFlow } from "../../../../src/engine/orchestrator/model";
+import { Flow, FlowEdge, FlowNode, emptyFlow, isPlanned } from "../../../../src/engine/orchestrator/model";
 
 const box = (x: number, y: number, w = NODE_W, h = NODE_H): Box => ({ x, y, w, h });
 
@@ -106,6 +106,30 @@ describe("tidy", () => {
   it("preserves every non-positional field", () => {
     const flow = flowWith([node("a", 5, 5)], []);
     expect(tidy(flow)[0]).toMatchObject({ id: "a", kind: "place", join: "any", runKey: "a", repo: "r" });
+  });
+
+  it("does not share mutable substructure (repos array) with the original", () => {
+    const plannedNode: FlowNode = {
+      id: "p",
+      kind: "planned",
+      x: 0,
+      y: 0,
+      join: "any",
+      ticketKey: "PROJ-1",
+      repos: ["repo1", "repo2"],
+      mode: "default",
+      dest: "worktree",
+    };
+    const flow = flowWith([plannedNode], []);
+    const out = tidy(flow);
+    expect(out[0]).not.toBe(flow.nodes[0]);
+    // Verify repos array is not shared
+    if (isPlanned(out[0]) && isPlanned(flow.nodes[0])) {
+      expect(out[0].repos).not.toBe(flow.nodes[0].repos);
+      // Mutate the tidied repos and verify the original is unchanged
+      out[0].repos.push("repo3");
+      expect(flow.nodes[0].repos).toEqual(["repo1", "repo2"]);
+    }
   });
 
   it("is empty for an empty flow", () => {

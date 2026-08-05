@@ -70,6 +70,9 @@ export function tidy(flow: Flow): FlowNode[] {
     const d = depth.get(n.id) ?? 0;
     const row = filled.get(d) ?? 0;
     filled.set(d, row + 1);
-    return { ...n, x: GRID * 3 + d * COL_GAP, y: GRID * 3 + row * ROW_GAP };
+    const clone = structuredClone(n);
+    clone.x = GRID * 3 + d * COL_GAP;
+    clone.y = GRID * 3 + row * ROW_GAP;
+    return clone;
   });
 }
