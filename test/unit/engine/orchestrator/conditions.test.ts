@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evalCond, CondContext } from "../../../../src/engine/orchestrator/conditions";
+import { evalCond, CondContext, describeCond } from "../../../../src/engine/orchestrator/conditions";
 import { Condition } from "../../../../src/engine/orchestrator/model";
 import { AgentState, CardAgent, PrEntryMap, PrFacts, RepoGit, Run, RunStatus } from "../../../../src/types";
 
@@ -186,5 +186,75 @@ describe("evalCond — Jira", () => {
     expect(met({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: "PR initiated" }))).toBe(true);
     expect(met({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: "In Progress" }))).toBe(false);
     expect(met({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: null }))).toBe(false);
+  });
+});
+
+describe("describeCond", () => {
+  it("describes CI progress rather than the condition's name", () => {
+    expect(describeCond({ kind: "ci-passed" }, ctx({}, pr({ ci: { passing: 4, pending: 3, failing: [] } }))))
+      .toBe("CI running, 4 of 7");
+  });
+
+  it("names the failing checks", () => {
+    const c = ctx({}, pr({ ci: { passing: 5, pending: 0, failing: [{ name: "build", url: "" }, { name: "lint", url: "" }] } }));
+    expect(describeCond({ kind: "ci-failed" }, c)).toBe("build, lint failing");
+  });
+
+  it("counts passing checks when nothing is failing or pending", () => {
+    expect(describeCond({ kind: "ci-passed" }, ctx({}, pr({ ci: { passing: 7, pending: 0, failing: [] } }))))
+      .toBe("7 checks passing");
+  });
+
+  it("says so when there is no PR to describe", () => {
+    expect(describeCond({ kind: "pr-merged" }, ctx())).toBe("no PR yet");
+  });
+
+  it("describes a PR's state and review", () => {
+    expect(describeCond({ kind: "pr-merged" }, ctx({}, pr({ state: "MERGED" })))).toBe("merged");
+    expect(describeCond({ kind: "pr-merged" }, ctx({}, pr({ state: "OPEN" })))).toBe("PR open");
+    expect(describeCond({ kind: "review-approved" }, ctx({}, pr({ review: "approved" })))).toBe("approved");
+    expect(describeCond({ kind: "review-approved" }, ctx({}, pr({ review: "review_required" })))).toBe("review required");
+    expect(describeCond({ kind: "changes-requested" }, ctx({}, pr({ review: "changes_requested" })))).toBe("changes requested");
+  });
+
+  it("describes threads and mergeability", () => {
+    expect(describeCond({ kind: "threads-resolved" }, ctx({}, pr({ unresolved: 2 })))).toBe("2 unresolved");
+    expect(describeCond({ kind: "threads-resolved" }, ctx({}, pr({ unresolved: 0 })))).toBe("no unresolved threads");
+    expect(describeCond({ kind: "threads-resolved" }, ctx({}, pr({ unresolved: null })))).toBe("threads not checked");
+    expect(describeCond({ kind: "pr-conflicting" }, ctx({}, pr({ mergeable: "conflicting" })))).toBe("conflicting");
+    expect(describeCond({ kind: "pr-conflicting" }, ctx({}, pr({ mergeable: "clean" })))).toBe("mergeable: clean");
+  });
+
+  it("describes agent state, and admits when it cannot see one", () => {
+    expect(describeCond({ kind: "agent-ended-turn" }, ctx({ agents: [cardAgent("working", NOW, REPO)] }))).toBe("working");
+    expect(describeCond({ kind: "agent-ended-turn" }, ctx({ agents: [cardAgent("needs-you", NOW, REPO)] }))).toBe("ended turn");
+    expect(describeCond({ kind: "agent-idle-over", minutes: 10 }, ctx({ agents: [cardAgent("idle", NOW - 4 * 60_000, REPO)] })))
+      .toBe("idle 4m of 10m");
+    expect(describeCond({ kind: "agent-idle-over", minutes: 10 }, ctx({ agents: [cardAgent("idle", null, REPO)] })))
+      .toBe("last activity unknown");
+    expect(describeCond({ kind: "agent-ended-turn" }, ctx({ agents: [cardAgent("unknown", null, REPO)] })))
+      .toBe("agent state unknown");
+  });
+
+  it("describes how many agents are in the place", () => {
+    expect(describeCond({ kind: "no-agent-left" }, ctx({ agents: [] }))).toBe("no agent");
+    expect(describeCond({ kind: "no-agent-left" }, ctx({ agents: [cardAgent("idle", NOW, REPO)] }))).toBe("1 agent open");
+    expect(describeCond({ kind: "no-agent-left" }, ctx({ agents: [cardAgent("idle", NOW, REPO), cardAgent("working", NOW, REPO)] })))
+      .toBe("2 agents open");
+  });
+
+  it("describes git state", () => {
+    expect(describeCond({ kind: "tree-clean" }, ctx({ repos: [git({ dirty: false })] }))).toBe("clean");
+    expect(describeCond({ kind: "has-uncommitted" }, ctx({ repos: [git({ dirty: true, added: 412, removed: 38, files: 9 })] })))
+      .toBe("+412 −38 · 9 files");
+    expect(describeCond({ kind: "nothing-to-push" }, ctx({ repos: [git({ ahead: 2 })] }))).toBe("2 to push");
+    expect(describeCond({ kind: "nothing-to-push" }, ctx({ repos: [git({ ahead: 0 })] }))).toBe("nothing to push");
+    expect(describeCond({ kind: "tree-clean" }, ctx({ repos: [git({ name: "elsewhere" })] }))).toBe("repo not found");
+  });
+
+  it("describes Jira", () => {
+    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: "In Progress" }))).toBe("In Progress");
+    expect(describeCond({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: "In Progress" }))).toBe("In Progress");
+    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: null }))).toBe("no Jira status");
   });
 });

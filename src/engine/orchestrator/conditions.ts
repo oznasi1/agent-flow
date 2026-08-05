@@ -89,3 +89,83 @@ export function evalCond(cond: Condition, c: CondContext): boolean {
       return c.status.jiraStatus === cond.status;
   }
 }
+
+/** What this place looks like with respect to this condition, right now. The
+ * drawer renders it after "waiting · ", so it describes the OBSERVATION, not the
+ * rule: "CI running, 4 of 7" tells you why nothing has fired, where "CI passed"
+ * would only repeat the condition back at you.
+ *
+ * Prose, not identifiers — the Deck sets English in the UI font and keeps
+ * monospace for keys, branches and counts. */
+export function describeCond(cond: Condition, c: CondContext): string {
+  switch (cond.kind) {
+    case "pr-merged": {
+      const f = facts(c);
+      if (!f) return "no PR yet";
+      return f.state === "MERGED" ? "merged" : f.state === "CLOSED" ? "PR closed" : "PR open";
+    }
+    case "ci-passed":
+    case "ci-failed": {
+      const f = facts(c);
+      if (!f) return "no PR yet";
+      const { passing, pending, failing } = f.ci;
+      if (failing.length > 0) return `${failing.map((k) => k.name).join(", ")} failing`;
+      if (pending > 0) return `CI running, ${passing} of ${passing + pending}`;
+      return passing > 0 ? `${passing} checks passing` : "no checks yet";
+    }
+    case "review-approved":
+    case "changes-requested": {
+      const f = facts(c);
+      if (!f) return "no PR yet";
+      const words: Record<PrFacts["review"], string> = {
+        approved: "approved",
+        changes_requested: "changes requested",
+        review_required: "review required",
+        none: "no review yet",
+      };
+      return words[f.review];
+    }
+    case "threads-resolved": {
+      const f = facts(c);
+      if (!f) return "no PR yet";
+      if (f.unresolved === null) return "threads not checked";
+      return f.unresolved === 0 ? "no unresolved threads" : `${f.unresolved} unresolved`;
+    }
+    case "pr-conflicting": {
+      const f = facts(c);
+      if (!f) return "no PR yet";
+      return f.mergeable === "conflicting" ? "conflicting" : `mergeable: ${f.mergeable}`;
+    }
+    case "agent-ended-turn": {
+      const a = activity(c);
+      if (a.state === "unknown") return "agent state unknown";
+      return a.state === "needs-you" ? "ended turn" : a.state;
+    }
+    case "agent-idle-over": {
+      const a = activity(c);
+      if (a.state === "unknown") return "agent state unknown";
+      if (a.lastActivityMs === null) return "last activity unknown";
+      if (a.state !== "idle") return a.state === "needs-you" ? "ended turn" : a.state;
+      return `idle ${Math.floor((c.nowMs - a.lastActivityMs) / 60_000)}m of ${cond.minutes}m`;
+    }
+    case "no-agent-left": {
+      const n = agentsHere(c).length;
+      return n === 0 ? "no agent" : n === 1 ? "1 agent open" : `${n} agents open`;
+    }
+    case "tree-clean":
+    case "has-uncommitted": {
+      const g = git(c);
+      if (!g) return "repo not found";
+      // The same minus sign the Deck's diff chips use, not a hyphen.
+      return g.dirty ? `+${g.added} −${g.removed} · ${g.files} files` : "clean";
+    }
+    case "nothing-to-push": {
+      const g = git(c);
+      if (!g) return "repo not found";
+      return g.ahead === 0 ? "nothing to push" : `${g.ahead} to push`;
+    }
+    case "ticket-done":
+    case "ticket-status-is":
+      return c.status.jiraStatus ?? "no Jira status";
+  }
+}
