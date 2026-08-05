@@ -44,55 +44,49 @@ export function gateCopy(label: string): {
  * shipped default nor most of the alternatives — asking it for one would fetch an
  * unanswerable lens and render a tab bar with no active tab.
  *
- * All three branches read off `shown = visibleFilters(supported)` — the rendered
- * set — never the raw, connector-ordered `supported` array directly. That used to
- * be true only of the tail; the first two branches read `supported` directly, and
- * each independently let an unrendered filter through: `"all"` is a real `Filter` a
- * connector can legitimately list (Jira's `supportedFilters` always has), but no tab
- * bar has ever rendered it (see `FILTER_ORDER`'s comment) — the first branch would
- * return it verbatim whenever `supported` contained it literally
- * (`effectiveFilter("all", ["all", "unassigned"])` used to return `"all"`), and the
- * tail would return it whenever it sorted first in the connector's own array
- * (`["all", "mine"]`). Finding the same defect in two of three branches is what
- * moved the fix here, to the one place `shown` is computed, rather than patched
- * branch by branch again.
+ * Both branches read off `shown = visibleFilters(supported)` — the rendered set —
+ * never the raw, connector-ordered `supported` array directly. `"all"` is a real
+ * `Filter` a connector can legitimately list (Jira's `supportedFilters` always has),
+ * but no tab bar has ever rendered it (see `FILTER_ORDER`'s comment); reading
+ * `supported` directly let it through twice, independently, before this settled
+ * here — once as a literal match (`effectiveFilter("all", ["all", "unassigned"])`
+ * used to return `"all"` verbatim) and once positionally (`["all", "mine"]` used to
+ * return `"all"` because it sorted first in the connector's own array). Finding the
+ * same defect in two different places is what moved the fix to the one spot `shown`
+ * is computed, rather than patching each occurrence separately.
  *
  * The property this function guarantees, unconditionally: `visibleFilters(supported)`
  * always contains the return value. There is no carve-out — see
  * `test/webview/helpers.test.ts`'s "only ever returns a filter visibleFilters(supported)
- * actually renders" for every case that used to violate it.
+ * actually renders" for every case that used to violate it. `shown[0]` alone is
+ * enough for the fallback, with no `?? "mysprint"`: `visibleFilters` always returns
+ * a non-empty array (its own empty-input case falls back to all of `FILTER_ORDER`,
+ * itself a non-empty constant), so `shown[0]` can never be `undefined`.
  *
- * Compatibility, verified rather than assumed when this was consolidated: for Jira
- * (`supported` is all six values, so `shown` is the five real tabs) a configured
- * `"mysprint"` still returns `"mysprint"`, and an unrecognized configured value still
- * returns `"mysprint"` rather than `shown[0]` — the behaviour that keeps an existing
- * user's opening lens from moving, matching the pre-capability code's
- * `(cfg.defaultFilter as Filter) || "mysprint"`. For the Task 7 fixture
- * (`supported: ["mine", "all"]`, so `shown` is `["mine"]`) a configured `"mysprint"`
- * still returns `"mine"`, unchanged. Both hold with `shown` in place of `supported`
- * because `"mysprint"` and `"mine"` are real filters: if either is actually
- * supported, it survives into `shown` in the same position `FILTER_ORDER` gives it.
- *
- * The middle branch (prefer `"mysprint"` over the tail) is currently provable dead
- * code, not merely redundant-in-practice: `"mysprint"` is `FILTER_ORDER`'s first
- * entry, so whenever it is in `shown` at all it is unconditionally `shown[0]`,
- * making the tail return it anyway. Verified exhaustively (every subset of the six
- * `Filter` values as `supported`, crossed with every `Filter` plus `""` and
- * `"nonsense"` as `configured`) — removing this branch changes no output. Kept
- * anyway: it states the "mysprint" preference as an explicit guarantee rather than
- * an incidental consequence of `FILTER_ORDER` happening to list it first, so a
- * future reorder of `FILTER_ORDER` (for cosmetic reasons, unrelated to this
- * function) can't silently move an existing user's opening lens by ceasing to
- * imply it. If `FILTER_ORDER` ever stops listing `"mysprint"` first, this branch
- * stops being redundant and starts being the only thing protecting the preference.
+ * The "mysprint" preference — that an UNRECOGNIZED configured value lands on the
+ * shipped default rather than whatever `shown[0]` happens to be, matching the
+ * pre-capability code's `(cfg.defaultFilter as Filter) || "mysprint"`, so an
+ * existing user's opening lens doesn't move — is no longer a separate branch. It
+ * holds ONLY because `"mysprint"` is `FILTER_ORDER`'s first entry: `shown` preserves
+ * `FILTER_ORDER`'s order, so whenever `"mysprint"` is supported at all it is
+ * `shown[0]`, and an unrecognized `configured` falls straight through to it. This
+ * used to be an explicit branch (`if (shown.includes("mysprint")) return
+ * "mysprint";`) — deleted once it was shown to be provably unreachable-differently
+ * (every `shown` that contains `"mysprint"` already has it at index 0, so the
+ * branch and the fallback could never disagree). The branch's own safety net was
+ * unfalsifiable — nothing could make it wrong, so nothing could catch a regression
+ * either. The real guard is `test/webview/helpers.test.ts`'s "falls back to the
+ * shipped default when the setting is unrecognized"
+ * (`effectiveFilter("nonsense", ALL)` → `"mysprint"`): reorder `FILTER_ORDER` so
+ * `"mysprint"` isn't first and THAT test fails, forcing a conscious decision about
+ * whether the tab order and this fallback preference should move together, rather
+ * than the deleted branch silently answering "no" forever.
  *
  * Pure — no DOM, no React — so the extension host imports it too rather than keeping
  * a second copy that could drift from what the webview renders. */
 export function effectiveFilter(configured: string, supported: readonly Filter[]): Filter {
   const shown = visibleFilters(supported);
-  if (shown.includes(configured as Filter)) return configured as Filter;
-  if (shown.includes("mysprint")) return "mysprint";
-  return shown[0] ?? "mysprint";
+  return shown.includes(configured as Filter) ? (configured as Filter) : shown[0];
 }
 
 /** Format an original-estimate in seconds as a compact "3h" / "1.5d" (8h workday). Pure. */
