@@ -2393,6 +2393,21 @@ describe("visibleFilters", () => {
   });
 });
 
+describe("effectiveFilter", () => {
+  it("keeps the configured filter when the source supports it", () => {
+    expect(effectiveFilter("mine", ["mine", "all"])).toBe("mine");
+  });
+
+  it("falls back to the first visible filter when the configured one is unsupported", () => {
+    // The shipped default is "mysprint", which a sprint-less source cannot answer.
+    expect(effectiveFilter("mysprint", ["mine", "all"])).toBe("mine");
+  });
+
+  it("never returns a filter outside the visible set", () => {
+    expect(visibleFilters(["mine", "all"])).toContain(effectiveFilter("backlog", ["mine", "all"]));
+  });
+});
+
 describe("gateCopy", () => {
   it("names the configured source", () => {
     expect(gateCopy("Fixture").connecting).toBe("Connecting to Fixture…");
@@ -2434,6 +2449,17 @@ export function visibleFilters(supported: readonly Filter[]): Filter[] {
   return shown.length ? shown : [...FILTER_ORDER];
 }
 
+/** The filter to actually use, given what the user configured and what the source
+ * can answer. `agentFlow.defaultFilter` ships as `"mysprint"`, and four of the six
+ * filters are inherently sprint-scoped — so a source without sprints supports
+ * neither the shipped default nor most of the alternatives. Without this, the host
+ * requests a filter the source cannot answer and the tab bar renders with no tab
+ * in the active state, because the selected id matches none of the rendered ones. */
+export function effectiveFilter(configured: string, supported: readonly Filter[]): Filter {
+  const shown = visibleFilters(supported);
+  return shown.includes(configured as Filter) ? (configured as Filter) : shown[0];
+}
+
 /** Every gate-screen string, with the source named. Pure so the copy is testable
  * without mounting the app. */
 export function gateCopy(label: string): {
@@ -2454,7 +2480,11 @@ export function gateCopy(label: string): {
 Store `sourceLabel` and `caps` from the `state` message in component state (default `sourceLabel` to `""` and `caps` to every capability on, so a first paint before `state` arrives renders today's UI). Then:
 
 - the four gate strings at lines ~429-446 read `gateCopy(sourceLabel)`;
-- the tab bar maps `visibleFilters(caps.supportedFilters)`;
+- the tab bar maps `visibleFilters(caps.supportedFilters)`, and the **selected**
+  filter is `effectiveFilter(filter, caps.supportedFilters)` so the active tab is
+  always one that actually renders. `App.tsx:112` hardcodes the initial state to
+  `"mysprint"` and `App.tsx:203` overwrites it with whatever the host echoes, so
+  without this a sprint-less source shows a tab bar with **no tab active at all**;
 - the size control renders only when `caps.sizes && filters.size`;
 - the sprint card actions render only when `caps.sprints`. **The specific line is
   `App.tsx:683`'s `const showAddToSprint = unassigned || (isMe && !task.inOpenSprint);`.**
