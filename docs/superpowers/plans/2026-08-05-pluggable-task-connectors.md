@@ -1131,6 +1131,7 @@ Expected: FAIL — modules not found, `task_source` not a property.
 // src/tasks/jira/connector.ts
 import * as vscode from "vscode";
 import { getConfig } from "../../config";
+import type { AuthProbe, ProjectProbe } from "../../engine/doctor";
 import { SourceInfo, TaskConnector, TaskProvider } from "../provider";
 import { ApiTokenAuth, JiraAuth } from "./auth";
 import { JiraClient, JiraAuthError } from "./client";
@@ -1217,20 +1218,22 @@ class JiraConnector implements TaskConnector {
   /** Ordered on purpose: the scope lookup is skipped when auth failed, because
    * its answer would be meaningless and the call cannot succeed. A signed-out
    * user should see one problem, not a cascade of two. */
-  async probe(): Promise<{ auth?: unknown; scope?: unknown }> {
+  async probe(): Promise<{ auth?: AuthProbe; scope?: ProjectProbe }> {
     const cfg = getConfig();
     const client = new JiraClient(cfg.baseUrl, cfg.project, this.auth);
-    let auth: unknown;
+    let auth: AuthProbe;
     try {
       const me = await client.probeMyself();
       auth = { ok: true, displayName: me.displayName || me.accountId };
     } catch (e) {
+      // JiraAuthError means the credentials; anything else means reaching Jira
+      // at all. request() already phrases both well, so invent no wording here.
       auth = e instanceof JiraAuthError
         ? { ok: false, reason: "auth", message: e.message }
         : { ok: false, reason: "network", message: e instanceof Error ? e.message : String(e) };
     }
-    if (!cfg.project || !(auth as { ok?: boolean }).ok) return { auth };
-    let scope: unknown;
+    if (!cfg.project || !auth.ok) return { auth };
+    let scope: ProjectProbe;
     try {
       const p = await client.getProject(cfg.project);
       scope = { ok: true, name: p.name || p.key };
@@ -1987,9 +1990,12 @@ label: `${Noun(i.scopeNoun)} resolves`,     // "Project resolves" for Jira
 In `src/doctorView.ts`, `DoctorDeps` loses `probeMyself` and `getProject` and gains `probe: () => Promise<{ auth?: AuthProbe; scope?: ProjectProbe }>`. `collectInputs` loses its two try/catch blocks entirely — the classification now lives in the connector — and becomes:
 
 ```ts
-  const { auth, scope } = await (hasCredentials ? d.probe() : Promise.resolve({}));
-  const authProbe = auth as AuthProbe | undefined;
-  const projectProbe = scope as ProjectProbe | undefined;
+  // No casts: TaskConnector.probe() returns AuthProbe/ProjectProbe directly, so
+  // a connector that classifies a failure into the wrong shape is a compile
+  // error here rather than a Doctor row that quietly reports the wrong thing.
+  const { auth: authProbe, scope: projectProbe } = hasCredentials
+    ? await d.probe()
+    : {};
 ```
 
 `defaultDeps(connector: TaskConnector, log)` builds `config()` from `connector.info()` and wires `probe: () => connector.probe()`. Drop the `JiraClient` / `JiraAuthError` / `JiraApiError` / `describeJiraError` imports from `doctorView.ts`.
