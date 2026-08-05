@@ -271,6 +271,10 @@ import { Filter, JiraTask as Task, Size } from "../types";
 // Task 3's sweep rewrites them to ./jira/… along with everything else.
 import type { JiraDetail as TaskDetail } from "../jira/client";
 import type { FieldPrompt } from "../jira/transitionFields";
+// engine/doctor.ts imports nothing at all, so this cannot cycle. Importing the
+// two probe verdict types is what stops a connector's probe() and Doctor's
+// consumption of it from silently disagreeing on a field name.
+import type { AuthProbe, ProjectProbe } from "../engine/doctor";
 
 export type { FieldPrompt, Task, TaskDetail };
 
@@ -375,10 +379,15 @@ export interface TaskConnector {
   /** Built from current settings, per operation — exactly as `client()` did. */
   provider(): TaskProvider;
 
-  /** Doctor's source-specific probes, already classified. Typed loosely here to
-   * avoid a cycle with engine/doctor.ts; the real shape is
-   * `{ auth?: AuthProbe; scope?: ProjectProbe }`. */
-  probe(): Promise<{ auth?: unknown; scope?: unknown }>;
+  /** Doctor's source-specific probes, already classified into the two verdict
+   * shapes Doctor renders. Genuinely typed, not `unknown`: this is the one place
+   * where the connector that *produces* a probe (Task 6) and Doctor, which
+   * *consumes* it (Task 10), agree on a field name — and a mismatch there
+   * misreports a user's credentials rather than failing loudly.
+   * `engine/doctor.ts` has no imports at all, so pulling its types in here
+   * cannot create a cycle. `undefined` means the probe was deliberately not run,
+   * which Doctor renders as `skip` rather than a silent pass. */
+  probe(): Promise<{ auth?: AuthProbe; scope?: ProjectProbe }>;
 
   taskUrl(key: string): string;
   /** Recover a task key from a url on an already-persisted run record. Returns
