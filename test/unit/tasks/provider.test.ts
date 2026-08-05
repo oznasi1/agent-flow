@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
 import {
   TaskApiError, TaskAuthError, TaskWriteError,
   isTaskNetworkError, markTaskNetworkFailure, serializeCaps,
@@ -11,6 +13,21 @@ describe("task errors", () => {
     expect(new TaskAuthError("x").name).toBe("TaskAuthError");
     expect(new TaskApiError(404, "x", {}, []).name).toBe("TaskApiError");
     expect(new TaskWriteError("x").name).toBe("TaskWriteError");
+  });
+
+  // The assertion above only proves the *value* is right today; it can't tell
+  // `this.name = "TaskAuthError"` (survives minification) apart from
+  // `this.name = this.constructor.name` (does not — esbuild.js runs with
+  // minify:true and no keepNames, so the class identifier is renamed in the
+  // real build, and vitest doesn't minify so both forms pass the test above
+  // identically). Read the source instead, the way test/unit/compat.test.ts
+  // pins values with no observable runtime surface (its SPRINT_ORDER_KEY and
+  // telemetry wire-value checks).
+  it("assigns .name from a quoted string literal, not the class identifier", () => {
+    const src = fs.readFileSync(path.join(__dirname, "../../../src/tasks/provider.ts"), "utf8");
+    expect(src).toContain('this.name = "TaskAuthError"');
+    expect(src).toContain('this.name = "TaskApiError"');
+    expect(src).toContain('this.name = "TaskWriteError"');
   });
 
   it("defaults TaskWriteError.retryWith to empty", () => {
@@ -50,10 +67,29 @@ describe("serializeCaps", () => {
 });
 
 describe("TaskConnector.probe() contract", () => {
-  // Compile-time assertion as much as a runtime one: if `probe()`'s return type
-  // ever drifts back to `unknown`, or engine/doctor.ts's AuthProbe/ProjectProbe
-  // shapes change underneath it, these literals stop satisfying `TaskConnector["probe"]`
-  // and this file fails to typecheck.
+  // A one-directional assertion here ("this concrete value satisfies the
+  // signature") is vacuous: any concrete type is assignable to a widened
+  // `{ auth?: unknown; scope?: unknown }` target, so it cannot fail even if
+  // `probe()` regresses to that. `Exact` demands *mutual* assignability —
+  // real type === expected type, not just real type ⊆ expected type — which
+  // is asymmetric exactly where `unknown` would break it: `unknown` is not
+  // assignable to `AuthProbe`, so a loosened signature fails the reverse leg
+  // and `Exact<..., ...>` collapses to `false`, which then fails to satisfy
+  // the `true`-typed binding below at compile time (verified by mutation —
+  // see task-2-report.md for the transcript reverting provider.ts and
+  // re-running `npm run typecheck`).
+  type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+  type ProbeResult = Awaited<ReturnType<TaskConnector["probe"]>>;
+  type ExpectedProbeResult = { auth?: AuthProbe; scope?: ProjectProbe };
+
+  it("pins probe()'s return type to the real AuthProbe/ProjectProbe shapes", () => {
+    // If ProbeResult ever widens (e.g. back to `{ auth?: unknown; scope?: unknown }`),
+    // Exact<...> becomes `false` and this line fails `npm run typecheck` with
+    // "Type 'true' is not assignable to type 'false'".
+    const shapeIsExact: Exact<ProbeResult, ExpectedProbeResult> = true;
+    expect(shapeIsExact).toBe(true);
+  });
+
   it("accepts every ok/not-ok variant of AuthProbe and ProjectProbe", async () => {
     const authOk: AuthProbe = { ok: true, displayName: "Ada" };
     const authFail: AuthProbe = { ok: false, reason: "auth", message: "no credentials" };
