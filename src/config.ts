@@ -90,6 +90,15 @@ export const DEFAULT_EXPLORE_GENERAL_PROMPT =
   "Help me make progress on this — ask what I need if it's unclear before diving in. " +
   "Don't change code unless I ask.{files}";
 
+/** Seed for the "Supervise running tasks" action — check on Agent Flow's other
+ * active runs rather than the current focus. Placeholders: {summary} (optional
+ * priority), {brief} (includes the active-tasks list), {files}. */
+export const DEFAULT_EXPLORE_SUPERVISE_PROMPT =
+  "Supervision session — checking on your other active Agent Flow tasks. A brief listing them, and whether each " +
+  "still has an agent attached, is at {brief}. Read it, judge which ones are stalled, blocked, or waiting on you, " +
+  "and tell me what needs attention. Where it's safe and unambiguous, help unblock or integrate one yourself; " +
+  "flag anything you're unsure about rather than guessing.{files}";
+
 /** Seed for the "Verify on an environment" action — check a feature against a live
  * environment for the picked services. Placeholders: {summary} (the feature), {env},
  * {services}, {brief}, {files}. Deliberately tool-agnostic: which observability tools
@@ -124,6 +133,7 @@ const EXPLORE_ACTION_DEFS: { id: string; label: string; settingKey: string; defa
   { id: "knowledge", label: "Enhance knowledge / flow", settingKey: "explorePrompts.knowledge", defaultPrompt: DEFAULT_EXPLORE_PROMPT },
   { id: "debug", label: "Debug", settingKey: "explorePrompts.debug", defaultPrompt: DEFAULT_EXPLORE_DEBUG_PROMPT },
   { id: "general", label: "General", settingKey: "explorePrompts.general", defaultPrompt: DEFAULT_EXPLORE_GENERAL_PROMPT },
+  { id: "supervise", label: "Supervise running tasks", settingKey: "explorePrompts.supervise", defaultPrompt: DEFAULT_EXPLORE_SUPERVISE_PROMPT },
   { id: "verify", label: "Verify on an environment", settingKey: "explorePrompts.verify", defaultPrompt: DEFAULT_EXPLORE_VERIFY_PROMPT, needsEnv: true },
 ];
 

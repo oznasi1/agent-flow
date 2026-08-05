@@ -171,6 +171,10 @@ describe("settingsSnapshot", () => {
     expect(settingsSnapshot({ ...getConfig(), exploreMode: "verify" }).explore_mode).toBe("verify");
   });
 
+  it("reports a supervise exploreMode as itself, not as invalid", () => {
+    expect(settingsSnapshot({ ...getConfig(), exploreMode: "supervise" }).explore_mode).toBe("supervise");
+  });
+
   it("does not flag the shipped environment list as customized", () => {
     expect(settingsSnapshot(getConfig()).environments_customized).toBe(false);
   });

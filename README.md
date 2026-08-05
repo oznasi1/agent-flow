@@ -309,7 +309,7 @@ root-cause**, **Orchestrator**, or **Refine the ticket**. Edit those prompts, or
 Your entries layer over the built-in modes rather than replacing them — reuse a
 built-in `id` to override just the fields you set, and add `"hidden": true` to an
 entry to drop that built-in — so modes added in a later release still reach you. **Explore** asks what kind of session to start: **Open a Jira ticket**, **Enhance
-knowledge / flow**, **Debug**, **General**, or **Verify on an environment**. Verify also
+knowledge / flow**, **Debug**, **General**, **Supervise running tasks**, or **Verify on an environment**. Verify also
 asks which environment to check the repos you picked against — from
 `agentFlow.environments`, or a one-off you type — and seeds a read-only prompt that
 inspects their logs, error rates, metrics and traces, and deployed version there. Edit any Explore prompt

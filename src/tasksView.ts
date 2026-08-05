@@ -20,6 +20,8 @@ import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, type MergeCandidate } from "./engine/workspace";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, PresenceRecord } from "./engine/presence";
+import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
+import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
@@ -705,15 +707,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             ignoreFocusOut: true,
             validateInput: (v) => (v.trim() ? undefined : "Name the feature or change to verify"),
           }
-        : {
-            title: "Explore — what do you want to dig into?",
-            prompt: "A focus for the session (optional). A Jira ticket can come later.",
-            placeHolder: "e.g. how the aggregator retries failed scans",
-            ignoreFocusOut: true,
-          },
+        : action.id === "supervise"
+          ? {
+              title: "Supervise — anything specific to prioritize?",
+              prompt: "Optional — a priority among your other active tasks. Leave blank to check on all of them.",
+              placeHolder: "e.g. the deck-agents-view task",
+              ignoreFocusOut: true,
+            }
+          : {
+              title: "Explore — what do you want to dig into?",
+              prompt: "A focus for the session (optional). A Jira ticket can come later.",
+              placeHolder: "e.g. how the aggregator retries failed scans",
+              ignoreFocusOut: true,
+            },
     );
     if (raw === undefined) return; // cancelled (empty is allowed → generic focus)
-    const topic = raw.trim() || "Codebase exploration";
+    const topic = raw.trim() || (action.id === "supervise" ? "Check on active tasks" : "Codebase exploration");
 
     // Verify needs to know where; the other actions never ask. Before the destination
     // step, so cancelling here has created and opened nothing.
@@ -764,7 +773,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const summary = env ? `${topic} on ${env}` : topic;
     const planMd = env
       ? `## Verify: ${topic} on ${env}\n\n_Verification session — environment: ${env}. Services in scope: ${serviceNames}._`
-      : `## Exploration: ${topic}\n\n_No Jira ticket yet — a knowledge/exploration session. If it turns into work, open a ticket afterwards._`;
+      : action.id === "supervise"
+        ? `## Supervise: ${topic}\n\n_No Jira ticket yet — a supervision session over your other active Agent Flow tasks._\n\n` +
+          describeActiveTasks(readRuns(defaultRunsDir()), new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys()))
+        : `## Exploration: ${topic}\n\n_No Jira ticket yet — a knowledge/exploration session. If it turns into work, open a ticket afterwards._`;
     const result = await openWorkspace({
       ticket: { key, summary, url: "" },
       planMd,
@@ -780,6 +792,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       existingWorkspaceFile: args.existingWorkspaceFile,
       existingFolder: args.existingFolder,
       remoteControl: wantRemoteControl,
+      kind: "explore",
     });
 
     const where = result.workspaceFile
@@ -787,7 +800,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       : `${result.opened.length} window(s)`;
     const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
-    const what = env ? `to verify on ${env}` : "to explore";
+    const what = env
+      ? `to verify on ${env}`
+      : action.id === "supervise"
+        ? "to check on your other tasks"
+        : "to explore";
     this.toast("success", `Opened ${where} ${what}. Brief seeded in each repo.${seeded}${rcNote}`);
   }
 
