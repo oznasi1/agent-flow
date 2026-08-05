@@ -21,7 +21,7 @@
 - `src/telemetry/events.ts` is a leaf module with **no imports from `src/tasks/`** (it must stay importable in isolation — see its own comment at lines 33-38). It checks error `.name` as string literals only.
 - Gates, all of which must pass: `npm run typecheck`, `npm test`, `npm run test:cov` (V8 thresholds **statements 90, branches 85, functions 85, lines 90**), `npm run build`. `src/types.ts` is coverage-excluded; `src/tasks/**` is **not** and must carry real tests.
 - `vscode` is mocked at `test/_mocks/vscode.ts`. No test may reach a real Jira site, filesystem, or `gh` binary.
-- Add a `## [Unreleased]` entry to `CHANGELOG.md` (Task 15) — `agentFlow.taskSource` is user-facing.
+- Add a `## [Unreleased]` entry to `CHANGELOG.md` (Task 14) — `agentFlow.taskSource` is user-facing.
 
 ---
 
@@ -603,12 +603,18 @@ export class JiraAuthError extends TaskAuthError {
   }
 }
 
-/** Kept as the Jira-flavoured aliases so no call site changes in this task. */
-export const markJiraNetworkFailure = markTaskNetworkFailure;
-export const isJiraNetworkError = isTaskNetworkError;
 ```
 
-Delete the two old function bodies for `markJiraNetworkFailure` / `isJiraNetworkError`, keeping their doc comments moved onto the aliases.
+Then **delete** `markJiraNetworkFailure` and `isJiraNetworkError` outright — no aliases. Aliasing them would leave a dead export the moment Task 8 migrates their callers, and there are only three call sites in the whole repo:
+
+- `client.ts:115` and `client.ts:123` call `markJiraNetworkFailure(...)` → call `markTaskNetworkFailure(...)` directly. Move the old function's doc comment onto neither; the explanation now lives on `markTaskNetworkFailure` in `provider.ts`.
+- `tasksView.ts` imports `isJiraNetworkError` (line 6) and uses it once (line 88) → change both to `isTaskNetworkError`, importing from `./tasks/provider`.
+
+Verify nothing survives:
+
+```bash
+grep -rn "markJiraNetworkFailure\|isJiraNetworkError" src/ test/ || echo "clean"
+```
 
 In `src/telemetry/events.ts:50`, widen the name check. **Do not import anything** — this module must stay a leaf:
 
@@ -2317,59 +2323,7 @@ byte-identically to the pre-seam strings for Jira."
 
 ---
 
-## Task 14: The `{tracker}` placeholder
-
-**Files:**
-- Modify: `src/engine/prompt.ts`
-- Test: `test/unit/engine/prompt.test.ts` (create if absent)
-
-**Interfaces:**
-- Consumes: `SourceInfo.label`.
-- Produces: `renderPrompt` accepting a `tracker` substitution.
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-// append to test/unit/engine/prompt.test.ts
-it("substitutes {tracker} with the source label", () => {
-  expect(renderPrompt("{tracker} {key}: done", { key: "A-1", tracker: "Jira" }))
-    .toBe("Jira A-1: done");
-});
-
-it("leaves a template with no {tracker} untouched", () => {
-  // Every shipped default is in this category and must stay byte-identical.
-  expect(renderPrompt('Jira {key}: "{summary}"', { key: "A-1", summary: "s", tracker: "Jira" }))
-    .toBe('Jira A-1: "s"');
-});
-```
-
-- [ ] **Step 2: Run it to verify it fails**
-
-Run: `npx vitest run test/unit/engine/prompt.test.ts`
-Expected: FAIL — `{tracker}` is emitted literally.
-
-- [ ] **Step 3: Implement**
-
-Add `tracker` to `renderPrompt`'s substitution map exactly as `{key}` and `{summary}` are handled, and pass `connector.info().label` at each call site in `tasksView.ts`. **Do not change any `DEFAULT_*_PROMPT` in `config.ts`** — none of them uses `{tracker}`, by design.
-
-- [ ] **Step 4: Run the tests and the defaults-parity tests**
-
-Run: `npm test`
-Expected: PASS, including the existing `config.ts` ↔ `package.json` prompt-defaults parity tests, which prove no default moved.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add -A
-git commit -m "feat(prompt): add a {tracker} placeholder for the source label
-
-Available to anyone customizing a prompt; no shipped default uses it, so every
-uncustomized user's agent receives the exact same seed text as before."
-```
-
----
-
-## Task 15: Docs
+## Task 14: Docs
 
 **Files:**
 - Create: `docs/CONNECTORS.md`
@@ -2495,7 +2449,7 @@ Automated tests cannot prove the one thing that matters most. Do this by hand:
 
 ## Self-review notes
 
-**Spec coverage.** §1 seam → Tasks 2, 5, 6. §2 frozen surface → Task 1 plus the Global Constraints, re-verified in Task 15 Step 5. §3 consumers → Tasks 8 (tasksView), 9 (deckView + `ticketKeyFor`), 10 (Doctor), 11 (setup + activation), 12 (`engine/status`, `engine/retire`, types), 13 (webview). §4 registry/config/fixture/docs → Tasks 6, 7, 15. §5 gates → Global Constraints, enforced at Task 12 Step 5 and Task 15 Step 5. §7 out-of-scope items are respected: no second shipped connector, no default prompt rewritten (Task 14 Step 4 proves it), command titles untouched, `explorePrompts.jiraTicket` untouched.
+**Spec coverage.** §1 seam → Tasks 2, 5, 6. §2 frozen surface → Task 1 plus the Global Constraints, re-verified in Task 14 Step 5. §3 consumers → Tasks 8 (tasksView), 9 (deckView + `ticketKeyFor`), 10 (Doctor), 11 (setup + activation), 12 (`engine/status`, `engine/retire`, types), 13 (webview). §4 registry/config/fixture/docs → Tasks 6, 7, 14. §5 gates → Global Constraints, enforced at Task 12 Step 5 and Task 14 Step 5. §7 out-of-scope items are respected: no second shipped connector, no default prompt rewritten (no task touches config.ts's DEFAULT_*_PROMPT constants at all, and the existing config/manifest parity tests fail if one moves), command titles untouched, `explorePrompts.jiraTicket` untouched.
 
 **Three landmines found while writing this plan that the spec does not yet mention** — the spec should be amended, and they are already binding here via the Global Constraints:
 1. `Op` in `events.ts:60` includes the transmitted values `"jira_fetch" | "jira_write" | "jira_auth"`. Frozen (Task 8 Step 7).

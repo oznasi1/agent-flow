@@ -39,7 +39,8 @@ ships here.
 | Is `Filter` renamed to `Lens`? | **No.** `Filter` is referenced by `OutboundMessage`, `App.tsx`, `agentFlow.defaultFilter` and `DEFAULT_FILTER_VALUES`. The type keeps its name; only parameters are named `lens` where it reads better. |
 | How is the seam proven real? | A **second complete `TaskProvider`** backed by static fixtures, in the test suite, declaring **no** optional capabilities — so every view is forced to render a sprint-less, component-less, label-less source correctly or tests fail. Plus `docs/CONNECTORS.md`. |
 | Does `addLabel` stay required? | **No** — it moved into `caps.labels`. One extra flag, and it is the honest answer for a tracker without labels; `stampLabelOnWrite` already has to degrade to a no-op there. |
-| Do the shipped prompt defaults stop saying "Jira"? | **No.** Rewriting the seed prompt every uncustomized user's agent receives, for zero benefit while Jira is the only source, is a regression. A `{tracker}` placeholder is *added*; no shipped default uses it. |
+| Do the shipped prompt defaults stop saying "Jira"? | **No.** Rewriting the seed prompt every uncustomized user's agent receives, for zero benefit while Jira is the only source, is a regression. Nothing in the prompt layer is touched — see below. |
+| Is a `{tracker}` placeholder added? | **No.** An earlier revision added one, unused by any shipped default. That is dead code by any honest reading of YAGNI, and the placeholder has no second case to be designed against until a real second connector exists. Deferred to connector #2, which has to revisit the prompt wording regardless. |
 | Do the `Sign in to Jira` command titles change? | **No.** `package.json` command titles cannot be dynamic, and degrading them to "Sign in to Task Source" is worse for 100% of current users. Known limitation, recorded below. |
 
 ## 1. The seam
@@ -517,9 +518,12 @@ Either way the condition kinds stay `ticket-*` and no flow file needs migrating.
   `gh` runner infra already exists at `engine/pr/which.ts` and `execRunner`) and
   is a genuine stress test for the capability model, but it is a real feature
   with a real support surface that nobody has asked for yet.
-- **Prompt wording.** `{tracker}` is added as an available placeholder resolving
-  to `connector.info().label`; no shipped default uses it. Rewriting the defaults is
-  connector #2's job, with a real second case to write for.
+- **The prompt layer entirely.** No `DEFAULT_*_PROMPT` in `config.ts` is touched,
+  and no `{tracker}` placeholder is added — an unused placeholder is dead code,
+  and there is nothing to design it against until a second connector exists.
+  Connector #2 owns both the placeholder and the reworded defaults, together,
+  with a real second case in hand. The existing `config.ts` ↔ `package.json`
+  parity tests fail if any default moves, which is the guardrail.
 - **Command titles.** `Sign in to Jira` / `Sign out of Jira` stay literal;
   `package.json` titles cannot be templated. The honest fix is per-connector
   command entries with `when` clauses, which is premature at one connector.
