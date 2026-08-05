@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Pluggable task sources.** Where Agent Flow reads tasks from is now a
+  connector behind a `TaskProvider` / `TaskConnector` seam, selected by the new
+  `agentFlow.taskSource` setting. Jira remains the default and the only shipped
+  source, and every existing install keeps its settings, credentials and board
+  untouched — the setting defaults to `jira`. Adding a source is one directory
+  and one registry line; see [docs/CONNECTORS.md](docs/CONNECTORS.md)
+  (`src/tasks/`, `src/tasksView.ts`, `src/deckView.ts`, `src/doctorView.ts`).
+
+### Changed
+
+- **First-run setup counts to 3, not 4.** The wizard's numbered steps now read
+  "(1/3)" through "(3/3)" instead of "(1/4)" through "(3/4)" — the old fourth
+  step was always the sign-in flow, which was never actually a numbered box.
+  Nothing about the steps themselves changed. Only a brand-new, unconfigured
+  install sees this; anyone already set up never runs the wizard again.
+- **A whitespace-only Jira site URL now reads as unconfigured.** Previously a
+  `agentFlow.jira.baseUrl` containing only spaces counted as "configured" and
+  the task pool would try to load and fail; it now shows the same setup
+  call-to-action as leaving the setting empty. Doesn't affect anyone with a
+  real URL already set.
+
 ## [0.4.2] — 2026-08-05
 
 ### Fixed

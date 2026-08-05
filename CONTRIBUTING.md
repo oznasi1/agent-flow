@@ -36,6 +36,10 @@ complete the first-run setup wizard.
   read through `getConfig()` in `src/config.ts` — never inlined. New behavior that varies per
   user should follow the same pattern and be collected in the first-run wizard (`src/setup.ts`)
   where appropriate.
+- **Task sources are pluggable.** Jira is the default connector, not a hardwired
+  dependency. Anything reading or writing tickets goes through `TaskProvider` /
+  `TaskConnector` in `src/tasks/provider.ts` — never `src/tasks/jira/` directly.
+  To add a source, see [docs/CONNECTORS.md](docs/CONNECTORS.md).
 - **Tests.** Add or update tests for any behavior change; coverage thresholds are enforced by
   `npm run test:cov`. The `vscode` module is mocked in `test/_mocks/vscode.ts`.
 - **Type safety.** Keep `npm run typecheck` clean.

@@ -45,7 +45,7 @@ interface DetailState {
   descriptionText?: string;
   repos?: string[];
   selected?: string[];
-  sourceComponents?: string[]; // components on the ticket, spelled as Jira spells them
+  sourceComponents?: string[]; // components on the ticket, spelled as the source spells them
   // repo name → canonical component name; `null` means the project's component
   // list couldn't be read, so no chip's state (on-ticket, pushable, local-only)
   // can be claimed.
@@ -345,7 +345,7 @@ export function App(): JSX.Element {
     });
   };
 
-  /** Apply a chip-list edit, writing whatever part of it Jira can accept. Adding a
+  /** Apply a chip-list edit, writing whatever part of it the source can accept. Adding a
    * repo the project has a component for pushes it; removing a chip only writes when
    * that component is actually on the ticket — a chip inferred from a label or a text
    * mention has nothing to remove. Both changes are optimistic; `componentsChanged`
