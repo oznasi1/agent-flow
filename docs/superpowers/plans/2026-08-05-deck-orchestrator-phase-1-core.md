@@ -11,7 +11,8 @@
 ## Global Constraints
 
 - Follow the approved spec exactly: `docs/superpowers/specs/2026-08-05-deck-orchestrator-flows-design.md`.
-- **None of these five modules may import `vscode` or `fs`.** `path` and `os` are permitted in `store.ts` only, for `defaultFlowsDir()` — the same latitude `engine/runs.ts` takes.
+- **None of these five modules may import `vscode`, or `fs` directly, or perform any I/O.** `path` and `os` are permitted in `store.ts` only, for `defaultFlowsDir()` — the same latitude `engine/runs.ts` takes.
+  - The point of this rule is that every rule here is testable from plain fixtures with no temp directory. **`conditions.ts` importing the pure `mostActive` from `engine/status.ts` is explicitly allowed**, even though `status.ts` transitively imports `fs` via `./runs` and `./transcript`: nothing on that call path is executed, and reimplementing the agent-state ranking here instead would duplicate semantics that must not drift from the board's.
 - `npx tsc --noEmit` must be clean before every commit.
 - `npx vitest run` must be green before moving to the next task.
 - **≥95% line coverage on every file this plan creates.** Check with `npx vitest run --coverage`. The repo's configured thresholds (90/85/85/90) are floors for the whole project, not the bar for new code.
