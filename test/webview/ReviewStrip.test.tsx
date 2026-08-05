@@ -162,7 +162,11 @@ describe("ReviewStrip", () => {
     expect(onLaunch).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
   });
 
-  it("disables the agent action with a reason when the repo is not checked out", () => {
+  it("still offers the agent action, with a reason in the title, when the repo is not checked out", () => {
+    // Not checked out locally is not a reason to block the click: launchReview
+    // (the host side) already fails this case gracefully with an explanatory
+    // toast, so the button stays live and the title alone carries the caveat —
+    // same reasoning as review status never gating this button either.
     const onLaunch = vi.fn();
     render(<ReviewStrip {...props({
       expanded: "CyberJackGit/aws-ops#8491",
@@ -170,14 +174,10 @@ describe("ReviewStrip", () => {
       requests: [mk({ localPath: null })],
     })} />);
     const btn = screen.getByText(/Review with agent/i) as HTMLButtonElement;
-    expect(btn.disabled).toBe(true);
-    expect(btn.title).toMatch(/not checked out/i);
-    // A disabled button whose onClick is still wired would pass a check on
-    // `disabled` alone — jsdom (like a real browser) suppresses the click on a
-    // disabled element, so this only holds if `disabled` is a real DOM attribute,
-    // not just a class name or a visual-only style.
+    expect(btn.disabled).toBe(false);
+    expect(btn.title).toMatch(/isn't checked out/i);
     fireEvent.click(btn);
-    expect(onLaunch).not.toHaveBeenCalled();
+    expect(onLaunch).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
   });
 
   it("says a review is already running", () => {

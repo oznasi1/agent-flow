@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-08-05
+
+### Fixed
+
+- **Deck: "Review with agent" is never disabled.** The button used to grey out
+  when the repo behind a queued PR wasn't checked out locally, with no way to
+  launch a review agent for it at all. It's now always clickable; if the repo
+  really isn't checked out, clicking it surfaces the existing explanatory toast
+  instead of doing nothing (`src/webview/ReviewStrip.tsx`).
+
 ## [0.4.1] — 2026-08-05
 
 ### Changed
