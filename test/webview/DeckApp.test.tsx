@@ -1095,6 +1095,24 @@ describe("Agents view", () => {
     expect(screen.getAllByText("ASM-1")).toHaveLength(1);
   });
 
+  it("shows the session slug as a tooltip on an expanded agent row", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      agents: [{ ...mkAgent("agent-flow-2e", "working", 100), activity: { state: "working", lastActivityMs: 100, slug: "export-streaming-fix" } }],
+    })], "PR initiated", "workspaces"));
+    fireEvent.click(screen.getByTitle(/sessions open in this directory/i));
+    expect(screen.getByTitle("export-streaming-fix")).toBeInTheDocument();
+  });
+
+  it("has no title on an expanded agent row when no slug is known yet", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      agents: [mkAgent("agent-flow-2e", "working", 100)],
+    })], "PR initiated", "workspaces"));
+    fireEvent.click(screen.getByTitle(/sessions open in this directory/i));
+    expect(container.querySelector(".ag-name")).not.toHaveAttribute("title");
+  });
+
   it("splits one run's agents across the columns their own states put them in", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [

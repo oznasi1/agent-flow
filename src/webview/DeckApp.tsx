@@ -158,7 +158,7 @@ function AgentsRow({ agents }: { agents: CardAgent[] }): JSX.Element | null {
         return (
           <div className="ag-row" key={a.session.sessionId}>
             <span className={`sdot tone-${st.tone} ${st.tone === "working" ? "pulse" : ""}`} />
-            <span className="ag-name">{a.session.name ?? a.session.sessionId.slice(0, 8)}</span>
+            <span className="ag-name" title={a.activity.slug ?? undefined}>{a.session.name ?? a.session.sessionId.slice(0, 8)}</span>
             <span className={`ag-state tone-${st.tone}`}>{st.text}</span>
             <span className="ag-age">{timeAgo(a.activity.lastActivityMs)}</span>
             {/* readOpenSessions defaults a missing startedAt to 0 — timeAgo(0) is ""
