@@ -274,6 +274,20 @@ optional polish.
   launch because an unrelated worktree's agent ended its turn. `placeActivity` now falls back
   only when the run has one repo, and returns unknown otherwise. Any new code asking "what is
   this place's agent doing" must call `placeActivity`, never read `status.agent` directly.
+  **This rule was broken once already**, in Phase 2a's node badge, which read
+  `runs.find(...)?.agent.state` directly and put an amber "needs-you" dot on a node whose own
+  repo had no agent — while the inspector, which does go through `placeActivity`, said unknown
+  in the same panel. Grep for `.agent.state` before adding any status display.
+
+- **`flow:save` must not let a stale drawer overwrite the host's own writes.** Today the host
+  accepts a whole-flow save after checking only that the id exists. From 2b onward the host
+  itself stamps `firedAt`, `firedNote` and `error` onto that same file during its poll. A
+  drawer holding a `flow` prop from before a stamp would, on its next save, write those fields
+  back out as absent — **clearing the latch and re-firing an action that already ran**, which
+  for a `launch` means paying for a second agent session. Fix it in 2b by one of: having the
+  drawer send only `nodes` and `edges` and letting the host merge them over its own copy; or
+  merging host-owned fields per edge id on receipt. Do not leave the whole-document write as
+  it stands once anything can arm.
 
 ## Build order
 
