@@ -749,6 +749,10 @@ describe("package.json ⇄ config constants", () => {
     expect(props["agentFlow.reviewWrites"].default).toBe(false);
   });
 
+  it("declares orchestrator defaulting to false — the feature that will run agents on a timer", () => {
+    expect(props["agentFlow.orchestrator"].default).toBe(false);
+  });
+
   it("declares deckGrouping defaulting to agents, and both retirement windows", () => {
     const g = props["agentFlow.deckGrouping"] as { default?: unknown; enum?: unknown };
     expect(g.default).toBe("agents");
