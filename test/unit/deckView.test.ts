@@ -2795,6 +2795,21 @@ describe("orchestrator flows", () => {
     expect(h.flows[0].name).toBe("already here");
   });
 
+  it("refuses to write rather than clobber when every re-mint collides", async () => {
+    // The bound is 9 attempts (one plus eight retries). Seed all nine ids as
+    // already taken, so exhaustion is the only path left. Refusing is what stops
+    // a collision from silently overwriting a flow the user saved.
+    setConfig({ orchestrator: true });
+    h.flows = Array.from({ length: 9 }, (_, i) => mkFlow(`fTEST-${i + 1}`, `taken ${i + 1}`));
+    const { send } = await openPanel();
+    await send({ type: "flow:create" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+    // And nothing already on disk was disturbed.
+    expect(h.flows.map((f) => f.name)).toEqual(
+      Array.from({ length: 9 }, (_, i) => `taken ${i + 1}`),
+    );
+  });
+
   it("flow:rename changes only the name", async () => {
     setConfig({ orchestrator: true });
     h.flows = [mkFlow("f1", "old")];
