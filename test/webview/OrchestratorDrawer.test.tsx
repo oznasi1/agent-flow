@@ -302,6 +302,31 @@ describe("the canvas", () => {
     });
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.nodes).toHaveLength(1);
-    expect(saved.nodes[0].x % GRID).toBe(0);
+    // jsdom's canvas rect is deterministically zero, so the landing point is
+    // deterministic too: clientX/Y minus half the node box, snapped to GRID.
+    // (200 - 168/2) snapped = snap(116) = 120; (150 - 44/2) snapped = snap(128) = 128.
+    expect(saved.nodes[0]).toMatchObject({ x: 120, y: 128 });
+  });
+
+  // The tray and the canvas are two independent drop targets; the mockup toggles
+  // their highlight independently (tray.classList vs canvas.classList are two
+  // separate DOM toggles), so one shared boolean backing both would light up
+  // whichever zone you are NOT hovering too. These pin that distinction.
+  it("highlights the canvas on drag-over, and not the tray", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    const canvas = screen.getByTestId("orch-canvas");
+    const tray = screen.getByTestId("orch-tray");
+    fireEvent.dragOver(canvas);
+    expect(canvas.classList.contains("over")).toBe(true);
+    expect(tray.classList.contains("over")).toBe(false);
+  });
+
+  it("highlights the tray on drag-over, and not the canvas", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    const canvas = screen.getByTestId("orch-canvas");
+    const tray = screen.getByTestId("orch-tray");
+    fireEvent.dragOver(tray);
+    expect(tray.classList.contains("over")).toBe(true);
+    expect(canvas.classList.contains("over")).toBe(false);
   });
 });
