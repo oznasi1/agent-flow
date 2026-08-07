@@ -330,3 +330,81 @@ describe("the canvas", () => {
     expect(canvas.classList.contains("over")).toBe(false);
   });
 });
+
+const wired = () =>
+  flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+  });
+
+describe("wiring", () => {
+  it("draws one connector per edge", () => {
+    const { container } = render(<OrchestratorDrawer {...props({ flows: [wired()] })} />);
+    expect(container.querySelectorAll("svg path")).toHaveLength(1);
+  });
+
+  it("labels the connector with the condition, and the label is clickable", () => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()] })} />);
+    const label = screen.getByTestId("orch-edge-e1");
+    expect(label.textContent).toMatch(/merged/i);
+  });
+
+  it("creates a notify edge by dragging from a port onto another node", () => {
+    const onSave = vi.fn();
+    const two = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-2", repo: "r2" },
+      ],
+    });
+    render(<OrchestratorDrawer {...props({ onSave, flows: [two] })} />);
+    fireEvent.pointerDown(screen.getByTestId("orch-port-out-n1"));
+    fireEvent.pointerUp(screen.getByTestId("orch-node-n2"));
+    const saved = onSave.mock.calls[0][0] as Flow;
+    expect(saved.edges).toEqual([
+      expect.objectContaining({ from: "n1", to: "n2", action: "notify", cond: { kind: "pr-merged" } }),
+    ]);
+  });
+
+  it("refuses an edge from a node to itself", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [wired()] })} />);
+    fireEvent.pointerDown(screen.getByTestId("orch-port-out-n1"));
+    fireEvent.pointerUp(screen.getByTestId("orch-node-n1"));
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("refuses a duplicate edge between the same two nodes", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [wired()] })} />);
+    fireEvent.pointerDown(screen.getByTestId("orch-port-out-n1"));
+    fireEvent.pointerUp(screen.getByTestId("orch-node-n2"));
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("a notify node has no outgoing port — nothing follows a terminal", () => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()] })} />);
+    expect(screen.queryByTestId("orch-port-out-n2")).toBeNull();
+  });
+
+  it("releasing a wire on empty canvas creates nothing", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [wired()] })} />);
+    fireEvent.pointerDown(screen.getByTestId("orch-port-out-n1"));
+    fireEvent.pointerUp(screen.getByTestId("orch-canvas"));
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("dragging from a port does not also drag the node", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [wired()] })} />);
+    fireEvent.pointerDown(screen.getByTestId("orch-port-out-n1"), { clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(window, { clientX: 90, clientY: 60 });
+    fireEvent.pointerUp(screen.getByTestId("orch-canvas"));
+    // No node moved, so nothing was saved.
+    expect(onSave).not.toHaveBeenCalled();
+  });
+});

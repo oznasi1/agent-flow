@@ -1,6 +1,6 @@
 import * as React from "react";
-import { NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
-import { Flow, FlowNode, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
+import { Condition, Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { AgentState, RunStatus } from "../types";
 
 /** The drag payload a Deck card carries. A NUL separator cannot appear in a
@@ -51,6 +51,40 @@ const STATE_HUE: Record<AgentState, string> = {
   unknown: "var(--dim)",
 };
 
+/** The drawer's own wording for a condition. `describeCond` says what a place
+ * currently looks like; this says what the rule is. Both are needed and they are
+ * not the same sentence. */
+export const COND_LABEL: Record<Condition["kind"], string> = {
+  "pr-merged": "PR is merged",
+  "ci-passed": "CI passed",
+  "ci-failed": "CI failed",
+  "review-approved": "review approved",
+  "changes-requested": "changes requested",
+  "threads-resolved": "0 unresolved threads",
+  "pr-conflicting": "branch conflicts",
+  "agent-ended-turn": "agent ended its turn",
+  "agent-idle-over": "agent idle over…",
+  "no-agent-left": "no agent left",
+  "tree-clean": "tree is clean",
+  "has-uncommitted": "has uncommitted work",
+  "nothing-to-push": "nothing to push",
+  "ticket-done": "ticket reached done",
+  "ticket-status-is": "ticket status is…",
+};
+
+/** Conditions that describe something being wrong. The only edges allowed a
+ * danger tint — colour here is attention debt, not decoration. */
+const BAD_CONDS = new Set<Condition["kind"]>(["ci-failed", "changes-requested", "pr-conflicting"]);
+
+/** What the inspector offers. `agent-idle-over` and `ticket-status-is` each carry
+ * a parameter (a minute count, a status name) and this phase has no input for
+ * one — offering them would create a rule waiting on a fixed 10 minutes or on the
+ * empty string, which never matches. They stay in `COND_LABEL` because a flow
+ * hand-edited on disk can still hold one and its edge must still render. */
+export const OFFERED_CONDS: Condition["kind"][] = (
+  Object.keys(COND_LABEL) as Condition["kind"][]
+).filter((k) => k !== "agent-idle-over" && k !== "ticket-status-is");
+
 export interface OrchestratorDrawerProps {
   flows: Flow[];
   /** Which flow is open. `null` closes the drawer. */
@@ -74,6 +108,8 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const graphRef = React.useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = React.useState<{ id: string; dx: number; dy: number; x: number; y: number } | null>(null);
   const [sel, setSel] = React.useState<string | null>(null);
+  const [wiring, setWiring] = React.useState<string | null>(null);
+  const [selEdge, setSelEdge] = React.useState<string | null>(null);
 
   // One pointer handler, and a save only on release — a save per pointermove would
   // be a disk write per pixel. Guarded on `flow` too: hooks must run unconditionally
@@ -155,6 +191,25 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * being dragged, else the model's. */
   const posOf = (n: { id: string; x: number; y: number }) =>
     drag && drag.id === n.id ? { x: drag.x, y: drag.y } : { x: n.x, y: n.y };
+
+  /** A node's live box for the anchor maths: its in-flight position, and its
+   * real width — a notify node is narrower than a place, and `anchor` needs the
+   * actual box, not the place default. */
+  const boxOf = (n: { id: string; x: number; y: number; kind: string }) => {
+    const pos = posOf(n);
+    return { x: pos.x, y: pos.y, w: n.kind === "notify" ? NOTIFY_W : NODE_W, h: NODE_H };
+  };
+
+  const finishWire = (toId: string) => {
+    const from = wiring;
+    setWiring(null);
+    if (!from || from === toId) return;
+    if (flow.edges.some((e) => e.from === from && e.to === toId)) return;
+    const id = `e${flow.edges.length + 1}`;
+    const edge: FlowEdge = { id, from, to: toId, cond: { kind: "pr-merged" }, action: "notify" };
+    setSelEdge(id);
+    p.onSave({ ...flow, edges: [...flow.edges, edge] });
+  };
 
   const addNotify = () =>
     p.onSave({
@@ -247,7 +302,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
         <div
           ref={graphRef}
           data-testid="orch-canvas"
-          className={`orch-graph${overGraph ? " over" : ""}`}
+          className={`orch-graph${overGraph ? " over" : ""}${wiring ? " wiring" : ""}`}
           onDragOver={(e) => { e.preventDefault(); setOverGraph(true); }}
           onDragLeave={() => setOverGraph(false)}
           onDrop={(e) => {
@@ -260,6 +315,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               snap(e.clientY - (box?.top ?? 0) - NODE_H / 2),
             );
           }}
+          onPointerUp={() => setWiring(null)}
         >
           {flow.nodes.length === 0 && (
             <div className="orch-empty" style={{ border: 0, position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
@@ -267,6 +323,27 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               then connect two nodes to put a condition between them.
             </div>
           )}
+          <svg>
+            {flow.edges.map((e) => {
+              const a = flow.nodes.find((n) => n.id === e.from);
+              const b = flow.nodes.find((n) => n.id === e.to);
+              if (!a || !b) return null;
+              const from = anchor(boxOf(a), "out");
+              const to = anchor(boxOf(b), "in");
+              const bad = BAD_CONDS.has(e.cond.kind);
+              const on = selEdge === e.id;
+              return (
+                <path
+                  key={e.id}
+                  d={edgePath(from, to)}
+                  fill="none"
+                  strokeWidth={on ? 1.8 : 1.4}
+                  strokeDasharray={bad ? "4 3" : undefined}
+                  stroke={bad ? "var(--c-danger)" : on ? "var(--brand)" : "var(--edge)"}
+                />
+              );
+            })}
+          </svg>
           {flow.nodes.map((n) => {
             const pos = posOf(n);
             const st = nodeState(n, p.runs);
@@ -274,9 +351,10 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               <div
                 key={n.id}
                 data-testid={`orch-node-${n.id}`}
-                className={`orch-node${n.kind === "planned" ? " plan" : ""}${n.kind === "notify" ? " notify" : ""}${sel === n.id ? " sel" : ""}`}
+                className={`orch-node${n.kind === "planned" ? " plan" : ""}${n.kind === "notify" ? " notify" : ""}${sel === n.id ? " sel" : ""}${wiring === n.id ? " src" : ""}`}
                 style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
                 onPointerDown={(e) => startDrag(n.id, e)}
+                onPointerUp={() => wiring && finishWire(n.id)}
               >
                 <div className="l1">
                   <span className="d" style={{ background: st ? STATE_HUE[st] : "var(--dim)" }} />
@@ -287,7 +365,37 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 <div className="st">
                   {n.kind === "place" ? n.repo : n.kind === "planned" ? "not taken" : n.message}
                 </div>
+                <span
+                  className="orch-port in"
+                  data-testid={`orch-port-in-${n.id}`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                />
+                {n.kind !== "notify" && (
+                  <span
+                    className="orch-port out"
+                    data-testid={`orch-port-out-${n.id}`}
+                    onPointerDown={(e) => { e.stopPropagation(); setWiring(n.id); }}
+                  />
+                )}
               </div>
+            );
+          })}
+          {flow.edges.map((e) => {
+            const a = flow.nodes.find((n) => n.id === e.from);
+            const b = flow.nodes.find((n) => n.id === e.to);
+            if (!a || !b) return null;
+            const mid = labelPoint(anchor(boxOf(a), "out"), anchor(boxOf(b), "in"));
+            return (
+              <button
+                type="button"
+                key={e.id}
+                data-testid={`orch-edge-${e.id}`}
+                className={`orch-edge${selEdge === e.id ? " sel" : ""}${BAD_CONDS.has(e.cond.kind) ? " bad" : ""}`}
+                style={{ left: `${mid.x}px`, top: `${mid.y}px` }}
+                onClick={() => setSelEdge(e.id)}
+              >
+                {COND_LABEL[e.cond.kind]}
+              </button>
             );
           })}
         </div>

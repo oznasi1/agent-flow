@@ -112,4 +112,27 @@ export const ORCH_CSS = `
   .orch-node .k { font-family: var(--mono); font-size: var(--t-data); }
   .orch-node .st { margin-top: 3px; font-size: var(--t-micro); color: var(--dim);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .orch-port { position: absolute; width: 10px; height: 10px; top: 50%; margin-top: -5px;
+    border: 1px solid var(--edge); border-radius: 50%; cursor: crosshair;
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); }
+  .orch-port.out { right: -6px; }
+  .orch-port.in { left: -6px; }
+  .orch-port:hover { background: var(--brand); border-color: var(--brand); }
+  /* While a wire is being drawn, every legal target announces itself. */
+  .orch-graph.wiring .orch-node:not(.src) { border-color: color-mix(in srgb, var(--brand) 45%, var(--hair)); }
+  .orch-graph.wiring .orch-node:not(.src) .orch-port.in { background: var(--brand); border-color: var(--brand); }
+
+  .orch-graph svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  /* Sits ABOVE the midpoint, not on it: centred, a label as wide as the gap
+     between two columns hides the whole connector it is labelling. */
+  .orch-edge { position: absolute; transform: translate(-50%, -150%); white-space: nowrap; cursor: pointer;
+    padding: 1px 6px; border: 1px solid var(--hair); border-radius: var(--r-chip);
+    font-size: var(--t-micro); color: var(--dim);
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background)); }
+  .orch-edge:hover { color: var(--vscode-foreground); border-color: var(--edge); }
+  .orch-edge.sel { border-color: var(--brand); color: var(--vscode-foreground); }
+  /* Danger tint only when the CONDITION is itself a failure — not decoration. */
+  .orch-edge.bad { border-color: color-mix(in srgb, var(--c-danger) 40%, var(--hair)); }
 `;
