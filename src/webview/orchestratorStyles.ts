@@ -82,4 +82,34 @@ export const ORCH_CSS = `
   .orch-tchip .rm { border: 0; background: transparent; color: var(--dim); cursor: pointer;
     font-size: 9px; padding: 0 1px; }
   .orch-tchip .rm:hover { color: var(--vscode-foreground); }
+
+  /* The graph takes whatever height the tray and inspector leave. A canvas that
+     scrolls the inspector out of view makes you scroll away from the thing you
+     are editing to edit it. */
+  .orch-graph { flex: 1; min-height: 180px; position: relative; overflow: hidden;
+    border: 1px solid var(--hair); border-radius: var(--r-card);
+    background: var(--vscode-editor-background);
+    background-image: radial-gradient(color-mix(in srgb, var(--vscode-foreground) 13%, transparent) 1px, transparent 0);
+    background-size: 16px 16px; }
+  .orch-graph.over { border-color: var(--brand); }
+  .orch-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+  .orch-bar .sp { flex: 1; }
+
+  /* 168px is enough for a state dot, the key, and the one fact the rules read.
+     Narrower and a node degenerates into a bare key. */
+  .orch-node { position: absolute; width: 168px; padding: 7px 9px; cursor: grab; user-select: none;
+    border: 1px solid var(--hair); border-radius: var(--r-ctl);
+    background: color-mix(in srgb, var(--vscode-foreground) 6%, var(--vscode-editor-background)); }
+  .orch-node:hover { border-color: color-mix(in srgb, var(--vscode-foreground) 26%, transparent); }
+  .orch-node.sel { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); }
+  /* Not taken yet: dashed, because the place does not exist until something
+     launches it. A notify terminal is not a place at all, so it loses a place's
+     chrome entirely. */
+  .orch-node.plan { border-style: dashed; background: transparent; }
+  .orch-node.notify { width: 138px; border-radius: 16px; }
+  .orch-node .l1 { display: flex; align-items: center; gap: 6px; }
+  .orch-node .l1 .d { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+  .orch-node .k { font-family: var(--mono); font-size: var(--t-data); }
+  .orch-node .st { margin-top: 3px; font-size: var(--t-micro); color: var(--dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 `;

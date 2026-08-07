@@ -6,8 +6,9 @@ import { render, screen, fireEvent, act, within } from "@testing-library/react";
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
 import { DeckApp } from "../../src/webview/DeckApp";
+import { DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { send } from "../../src/webview/vscodeApi";
-import type { AgentActivity, CardAgent, OutboundMessage, PrFacts, ReviewRequest, RunStatus } from "../../src/types";
+import type { AgentActivity, CardAgent, OutboundMessage, PrFacts, RepoGit, ReviewRequest, RunStatus } from "../../src/types";
 
 const sent = vi.mocked(send);
 
@@ -42,6 +43,23 @@ const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: nu
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
   activity: { state, lastActivityMs, slug: null },
 });
+
+/** Renders the board with exactly one run and returns its card element, found by
+ * the run's own key (rendered as button text regardless of column or agent). Reuses
+ * mkStatus/host/runsMsg rather than adding a second render harness. */
+function renderOneCard(opts: { key: string; repos: { name: string }[]; agents?: CardAgent[] }): HTMLElement {
+  render(<DeckApp />);
+  const repos: RepoGit[] = opts.repos.map((r) => ({
+    name: r.name, path: `/r/${r.name}`, branch: null, dirty: false, ahead: 0, added: 0, removed: 0, files: 0,
+  }));
+  const status = mkStatus({
+    run: { ...mkStatus().run, key: opts.key, repos: repos.map((r) => ({ name: r.name, path: r.path, isGit: true })) },
+    repos,
+    agents: opts.agents ?? [],
+  });
+  host(runsMsg([status]));
+  return screen.getByText(opts.key).closest(".card") as HTMLElement;
+}
 
 beforeEach(() => sent.mockClear());
 
@@ -1309,5 +1327,35 @@ describe("DeckApp — source label", () => {
     host(runsMsg([localCard()], "PR initiated", "agents", "Acme"));
     expect(screen.getByTitle("Open ASM-5641 in Acme")).toBeInTheDocument();
     expect(screen.queryByTitle(/in Jira/)).not.toBeInTheDocument();
+  });
+});
+
+// A place node resolves to exactly one repo — the invariant the whole node model
+// rests on. If a multi-repo card became draggable, it would produce a node whose
+// `repo` matches nothing, and every condition on it would silently never fire.
+describe("the drag source", () => {
+  it("makes a single-repo card draggable, carrying its run key and repo", () => {
+    const card = renderOneCard({ key: "ASM-1", repos: [{ name: "agent-flow" }] });
+    expect(card.getAttribute("draggable")).toBe("true");
+    const dt = { setData: vi.fn() };
+    fireEvent.dragStart(card, { dataTransfer: dt });
+    expect(dt.setData).toHaveBeenCalledWith("text/plain", `ASM-1${DRAG_SEP}agent-flow`);
+  });
+
+  it("does not make a multi-repo card draggable — a place node must mean one repo", () => {
+    const card = renderOneCard({
+      key: "ASM-2",
+      repos: [{ name: "api" }, { name: "web" }],
+    });
+    expect(card.getAttribute("draggable")).not.toBe("true");
+  });
+
+  it("a two-repo run's agent card is draggable when the agent names its own repo", () => {
+    const agent: CardAgent = { ...mkAgent("sess-1", "working", 1_000), repo: "api" };
+    const card = renderOneCard({ key: "ASM-3", repos: [{ name: "api" }, { name: "web" }], agents: [agent] });
+    expect(card.getAttribute("draggable")).toBe("true");
+    const dt = { setData: vi.fn() };
+    fireEvent.dragStart(card, { dataTransfer: dt });
+    expect(dt.setData).toHaveBeenCalledWith("text/plain", `ASM-3${DRAG_SEP}api`);
   });
 });

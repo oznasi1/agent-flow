@@ -129,7 +129,7 @@ describe("brand accent", () => {
     deck: [".act.primary", ".act.primary:hover", ".ctl.on .switch", ".ctl.on .switch::after"],
     marketplace: [".btn.pri", ".btn.pri:hover"],
     controls: [],
-    orchestrator: [".orch-tray.over"],
+    orchestrator: [".orch-tray.over", ".orch-node.sel", ".orch-graph.over"],
   };
 
   it.each(SURFACES)("%s spends --brand on exactly its agreed selectors", (name, sheet) => {
