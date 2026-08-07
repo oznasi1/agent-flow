@@ -1318,6 +1318,35 @@ git commit -m "feat(orchestrator): attach a board card to a flow by dragging it 
 - Consumes: `NODE_W`, `NODE_H`, `snap`, `tidy` from `../engine/orchestrator/layout` (Phase 1).
 - Produces: the canvas element with test id `orch-canvas`, and a node element per node with test id `orch-node-<id>`. Task 7 adds ports to those nodes.
 
+**Also in scope: cover the drag SOURCE, which Task 5 left untested.** `DeckApp.tsx`'s `dragRepo` / `cardDragKey` logic decides whether a card is draggable at all, and it is the invariant the whole node model rests on — a place node must resolve to exactly ONE repo so no condition is ambiguous about which repo's git or PR it means. Nothing tests it. If it breaks, a multi-repo card becomes draggable and produces a node whose `repo` matches nothing, so every condition on it silently never fires. Add to `test/webview/DeckApp.test.tsx`:
+
+```tsx
+it("makes a single-repo card draggable, carrying its run key and repo", () => {
+  // Render the board with one card whose run has exactly one repo, then read the
+  // payload the card would put on the dataTransfer.
+  // Use this file's existing helper for posting a `deck:runs` message and finding
+  // a rendered card, rather than adding a new harness.
+  const card = renderOneCard({ key: "ASM-1", repos: [{ name: "agent-flow", path: "/r/agent-flow", isGit: true }] });
+  expect(card.getAttribute("draggable")).toBe("true");
+  const dt = { setData: vi.fn() };
+  fireEvent.dragStart(card, { dataTransfer: dt });
+  expect(dt.setData).toHaveBeenCalledWith("text/plain", `ASM-1${DRAG_SEP}agent-flow`);
+});
+
+it("does not make a multi-repo card draggable — a place node must mean one repo", () => {
+  const card = renderOneCard({
+    key: "ASM-2",
+    repos: [
+      { name: "api", path: "/r/api", isGit: true },
+      { name: "web", path: "/r/web", isGit: true },
+    ],
+  });
+  expect(card.getAttribute("draggable")).not.toBe("true");
+});
+```
+
+`renderOneCard` is illustrative — use whatever this file already does to render a board with a chosen run, and import `DRAG_SEP` from `../../src/webview/OrchestratorDrawer`. If an agent card carries its own `repo`, cover that path too: a two-repo run whose card belongs to one agent IS draggable, because that agent resolves the ambiguity.
+
 All geometry comes from `layout.ts`. Do not recompute a position, a grid snap or a layout by hand here — that module is unit-tested and this component must not grow a second copy of it.
 
 - [ ] **Step 1: Write the failing tests**
