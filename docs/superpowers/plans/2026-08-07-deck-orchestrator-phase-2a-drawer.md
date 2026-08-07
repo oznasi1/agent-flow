@@ -1056,7 +1056,7 @@ git commit -m "feat(orchestrator): add the header chip and the drawer shell"
 
 **Interfaces:**
 - Consumes: the props from Task 4.
-- Produces: the drag payload contract — a card sets `text/plain` to `<runKey> <repo>`, and the tray parses it into a `place` node. Task 6's canvas reuses the same payload.
+- Produces: the drag payload contract — a card sets `text/plain` to `<runKey>\0<repo>`, and the tray parses it into a `place` node. Task 6's canvas reuses the same payload.
 
 A `place` node stores `runKey` and `repo`, never a session id — sessions come and go inside a worktree, and the worktree is what a condition can be about.
 
@@ -1072,7 +1072,7 @@ describe("the tray", () => {
   it("adds a place node when a card is dropped", () => {
     const onSave = vi.fn();
     render(<OrchestratorDrawer {...props({ onSave })} />);
-    drop(screen.getByTestId("orch-tray"), "ASM-1 agent-flow");
+    drop(screen.getByTestId("orch-tray"), "ASM-1\0agent-flow");
     expect(onSave).toHaveBeenCalledTimes(1);
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.nodes).toEqual([
@@ -1084,7 +1084,7 @@ describe("the tray", () => {
     const onSave = vi.fn();
     const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-9", repo: "r" }] });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    drop(screen.getByTestId("orch-tray"), "ASM-1 agent-flow");
+    drop(screen.getByTestId("orch-tray"), "ASM-1\0agent-flow");
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(new Set(saved.nodes.map((n) => n.id)).size).toBe(2);
   });
@@ -1093,7 +1093,7 @@ describe("the tray", () => {
     const onSave = vi.fn();
     const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" }] });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    drop(screen.getByTestId("orch-tray"), "ASM-1 agent-flow");
+    drop(screen.getByTestId("orch-tray"), "ASM-1\0agent-flow");
     expect(onSave).not.toHaveBeenCalled();
   });
 
@@ -1101,7 +1101,7 @@ describe("the tray", () => {
     const onSave = vi.fn();
     const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" }] });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    drop(screen.getByTestId("orch-tray"), "ASM-1 bite-me");
+    drop(screen.getByTestId("orch-tray"), "ASM-1\0bite-me");
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 
@@ -1173,7 +1173,7 @@ Add a helper above the component, and the tray section inside `.orch-body` befor
 ```tsx
 /** The drag payload a Deck card carries. A NUL separator cannot appear in a
  * ticket key or a repo name, so parsing is unambiguous. */
-export const DRAG_SEP = " ";
+export const DRAG_SEP = "\0";
 
 function parseDrag(raw: string): { runKey: string; repo: string } | null {
   const i = raw.indexOf(DRAG_SEP);
@@ -1412,7 +1412,7 @@ describe("the canvas", () => {
     render(<OrchestratorDrawer {...props({ onSave, flows: [flow()] })} />);
     const canvas = screen.getByTestId("orch-canvas");
     fireEvent.drop(canvas, {
-      dataTransfer: { getData: () => "ASM-7 centaur", dropEffect: "copy" },
+      dataTransfer: { getData: () => "ASM-7\0centaur", dropEffect: "copy" },
       clientX: 200, clientY: 150,
     });
     const saved = onSave.mock.calls[0][0] as Flow;
