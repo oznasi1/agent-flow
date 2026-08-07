@@ -458,6 +458,66 @@ describe("wiring", () => {
     render(<OrchestratorDrawer {...props({ flows: [wired()] })} />); // wired()'s condition is pr-merged
     expect(screen.getByTestId("orch-edge-e1").classList.contains("bad")).toBe(false);
   });
+
+  // Minting an edge id from `flow.edges.length + 1` is not collision-safe: three
+  // edges [e1, e2, e3], minus the middle one, is a list of length two, so the
+  // next id minted the naive way is `e3` — which the untouched third edge
+  // already has. `nextNodeId` already scans past what is taken instead of
+  // trusting the count; edges need the same treatment.
+  const threeIntoNotify = () =>
+    flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n2", kind: "place", x: 24, y: 112, join: "any", runKey: "ASM-2", repo: "r" },
+        { id: "n3", kind: "place", x: 24, y: 200, join: "any", runKey: "ASM-3", repo: "r" },
+        { id: "n4", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-4", repo: "r" },
+        { id: "n5", kind: "notify", x: 320, y: 200, join: "any", message: "done" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n5", cond: { kind: "pr-merged" }, action: "notify" },
+        { id: "e2", from: "n2", to: "n5", cond: { kind: "pr-merged" }, action: "notify" },
+        { id: "e3", from: "n3", to: "n5", cond: { kind: "pr-merged" }, action: "notify" },
+      ],
+    });
+
+  it("mints a unique edge id even after a delete leaves a gap", () => {
+    const onSave = vi.fn();
+    const three = threeIntoNotify();
+    // Delete the middle connection first, leaving [e1, e3] — length two, the
+    // exact shape that makes `e${length + 1}` collide with the untouched e3.
+    const afterDelete: Flow = { ...three, edges: three.edges.filter((e) => e.id !== "e2") };
+    render(<OrchestratorDrawer {...props({ onSave, flows: [afterDelete] })} />);
+    fireEvent.pointerDown(screen.getByTestId("orch-port-out-n4"));
+    fireEvent.pointerUp(screen.getByTestId("orch-node-n5"));
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    const ids = saved.edges.map((e) => e.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("deleting one connection removes exactly one, even where a colliding id used to be minted", () => {
+    const onSave = vi.fn();
+    const three = threeIntoNotify();
+    const afterDelete: Flow = { ...three, edges: three.edges.filter((e) => e.id !== "e2") };
+    const { rerender } = render(<OrchestratorDrawer {...props({ onSave, flows: [afterDelete] })} />);
+    fireEvent.pointerDown(screen.getByTestId("orch-port-out-n4"));
+    fireEvent.pointerUp(screen.getByTestId("orch-node-n5"));
+    const wired3 = onSave.mock.calls.at(-1)![0] as Flow;
+
+    // Re-render (not a second `render()` — that would leave the first tree
+    // mounted too, making every query below ambiguous for reasons unrelated to
+    // the bug this test exists to catch) against the flow the wire just
+    // produced, then delete the connection that sits where a collision used to
+    // land (n3 → n5, originally e3). getAllByTestId rather than getByTestId:
+    // under the un-fixed minting this id is not unique in the DOM, and the
+    // point of this test is the resulting edge count, not whether the lookup
+    // itself is unambiguous.
+    const onSave2 = vi.fn();
+    rerender(<OrchestratorDrawer {...props({ onSave: onSave2, flows: [wired3] })} />);
+    fireEvent.click(screen.getAllByTestId("orch-edge-e3")[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete connection" }));
+    const saved = onSave2.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges).toHaveLength(2);
+  });
 });
 
 const runStatus = (key: string, repo: string, over: Partial<RunStatus> = {}): RunStatus => {
@@ -563,6 +623,21 @@ describe("the inspector", () => {
     const { onSave } = open();
     fireEvent.click(screen.getByRole("button", { name: "Delete connection" }));
     expect((onSave.mock.calls.at(-1)![0] as Flow).edges).toEqual([]);
+  });
+
+  it("clears the selection itself when a connection is deleted, not just because the flow shrank", () => {
+    // "stops showing an inspector once the edge is gone" (below) rerenders with
+    // a brand-new flow whose edges array already lacks the id, so
+    // `flow.edges.find(...) ?? null` returns null regardless of what `selEdge`
+    // holds — that test would still pass even if `deleteEdge` never cleared the
+    // selection. This one pins the clear itself: no rerender happens, so the
+    // component's `flow` prop still carries e1 throughout. The only thing that
+    // can make the inspector revert to its empty state is `setSelEdge(null)`
+    // actually firing inside `deleteEdge` — a stale `selEdge` would otherwise
+    // still resolve against the very same, unchanged edges array.
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Delete connection" }));
+    expect(screen.getByText(/select a connection/i)).toBeTruthy();
   });
 
   it("stops showing an inspector once the edge is gone", () => {

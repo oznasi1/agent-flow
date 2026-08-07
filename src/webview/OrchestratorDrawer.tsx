@@ -16,13 +16,29 @@ function parseDrag(raw: string): { runKey: string; repo: string } | null {
   return runKey && repo ? { runKey, repo } : null;
 }
 
-/** An id unique within this flow. Node ids are local to a flow, so a counter
- * over the existing ids is enough and keeps them readable. */
+/** The next unused `${prefix}N` id, scanning past whatever is already taken
+ * rather than trusting the live count. A count alone drifts the moment
+ * anything is deleted: three edges minus the middle one is a list of length
+ * two, so `length + 1` mints the id the untouched third edge already has.
+ * One minting strategy for both node and edge ids — see `nextNodeId` and
+ * `nextEdgeId` below — so this file never mints an id two different ways. */
+function nextId(prefix: string, taken: Set<string>): string {
+  let n = 1;
+  while (taken.has(`${prefix}${n}`)) n++;
+  return `${prefix}${n}`;
+}
+
+/** An id unique within this flow. Node ids are local to a flow. */
 function nextNodeId(flow: Flow): string {
-  let n = flow.nodes.length + 1;
-  const taken = new Set(flow.nodes.map((x) => x.id));
-  while (taken.has(`n${n}`)) n++;
-  return `n${n}`;
+  return nextId("n", new Set(flow.nodes.map((x) => x.id)));
+}
+
+/** An id unique within this flow. Edge ids are local to a flow, and must stay
+ * unique even after a delete: `deleteEdge`, `setCond` and the inspector's own
+ * `flow.edges.find` all key off this id, so two edges sharing one silently
+ * merge into whichever the code touches first. */
+function nextEdgeId(flow: Flow): string {
+  return nextId("e", new Set(flow.edges.map((x) => x.id)));
 }
 
 /** The tray shows what a condition can attach to: a place already on disk, or
@@ -230,7 +246,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     setWiring(null);
     if (!from || from === toId) return;
     if (flow.edges.some((e) => e.from === from && e.to === toId)) return;
-    const id = `e${flow.edges.length + 1}`;
+    const id = nextEdgeId(flow);
     const edge: FlowEdge = { id, from, to: toId, cond: { kind: "pr-merged" }, action: "notify" };
     setSelEdge(id);
     p.onSave({ ...flow, edges: [...flow.edges, edge] });
