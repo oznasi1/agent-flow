@@ -1451,7 +1451,9 @@ describe("the canvas", () => {
 });
 ```
 
-Note: jsdom reports zero-size rects, so a dropped position resolves against `clientX/Y` minus a zero origin. The assertions above therefore check grid alignment rather than an exact pixel, which is the property that actually matters.
+Note: jsdom reports zero-size rects, so a dropped position resolves against `clientX/Y` minus a **zero** origin — which makes the result deterministic, not unknowable. Assert the actual coordinates. Checking only `x % GRID === 0` is vacuous: it holds for `x === 0`, so it cannot tell a correct drop from one that landed at the origin, which is exactly what a missing coordinate produces.
+
+Also note this repo's pinned jsdom has no `PointerEvent` or `DragEvent` constructor, so `fireEvent.pointerDown`/`drop` silently discard `clientX`/`clientY`. `test/webview/OrchestratorDrawer.test.tsx` installs a conditional MouseEvent-subclass polyfill for both at the top of the file; keep using it rather than re-discovering the gap.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
