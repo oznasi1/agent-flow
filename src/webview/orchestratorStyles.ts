@@ -8,12 +8,17 @@
 //     toggles the conditions read from; covering them hides the state.
 //  2. There is NO scrim. A modal veil would block the drag the drawer exists to
 //     receive — the board stays fully live while the drawer is open.
+// Width is a fixed 560px in this phase: resize and expand were cut from Phase 2a
+// and tracked as a known gap, not built here. Do not reintroduce a var(--orch-w,
+// 560px) indirection speculatively — nothing sets that variable yet, and
+// tokens.test.ts's orphan-usage check is what caught it last time. A real resize
+// task can add the variable back once something actually sets it inline.
 export const ORCH_CSS = `
   .orch-chip { gap: 6px; }
   .orch-chip .ic { font-size: 12px; line-height: 1; }
   .orch-chip .ct { font-family: var(--mono); font-size: var(--t-micro); color: var(--dim); }
 
-  .orch { position: fixed; top: 53px; right: 0; bottom: 0; width: var(--orch-w, 560px); z-index: 40;
+  .orch { position: fixed; top: 53px; right: 0; bottom: 0; width: 560px; z-index: 40;
     display: flex; flex-direction: column;
     background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
     border-left: 1px solid var(--hair); box-shadow: -14px 0 34px -12px rgba(0,0,0,.45); }

@@ -49,11 +49,8 @@ const ruleBlocks = (sheet: string): { selector: string; body: string }[] =>
 
 // Set per-card as an inline style in DeckApp.tsx (a computed value, not a shared
 // token), so it never appears as a declaration in any stylesheet's own text —
-// excluded from the orphan check the same way --vscode-* variables are. --orch-w
-// is the drawer's width: it has no declaration anywhere yet either, because
-// nothing sets it inline until a resize control lands in a later task — until
-// then the var()'s own 560px fallback is what actually renders.
-const RUNTIME_ONLY = ["--accent", "--orch-w"];
+// excluded from the orphan check the same way --vscode-* variables are.
+const RUNTIME_ONLY = ["--accent"];
 
 describe("tokens.ts", () => {
   it("declares every token it owns", () => {
