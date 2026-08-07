@@ -5,6 +5,7 @@ import type { ChangedFile } from "../../src/engine/git";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
+import type { Flow } from "../../src/engine/orchestrator/model";
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
 // builder, and a stubbed workspace opener.
@@ -89,6 +90,15 @@ const h = vi.hoisted(() => ({
   // steerable per test, unlike repoRoot below, because the branch is exactly the
   // thing a local card's ticket inference and "no card twice" tests need to vary.
   branch: "ASM-5641-team-table" as string | null,
+  // Orchestrator flows (Task 3): the on-disk store, replaced wholesale so this
+  // suite never touches a real ~/.agentflow/flows.
+  flows: [] as Flow[],
+  writeFlow: vi.fn(),
+  removeFlow: vi.fn(),
+  // A counter, not a constant: deterministic so ids are assertable, but varying
+  // so the re-mint-on-collision path is reachable. A constant would make the
+  // retry loop indistinguishable from a refusal.
+  idSeq: 0,
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -177,6 +187,19 @@ vi.mock("../../src/engine/review/store", () => ({
   isReviewCacheStale: (c: { fetchedAt: number } | null, ttl: number, now: number) => !c || now - c.fetchedAt >= ttl,
 }));
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: () => h.repos }));
+vi.mock("../../src/engine/orchestrator/store", () => ({
+  defaultFlowsDir: () => "/flows",
+  readFlows: () => h.flows,
+  writeFlow: h.writeFlow,
+  removeFlow: h.removeFlow,
+}));
+vi.mock("../../src/engine/orchestrator/flowIo", () => ({
+  nodeFlowIo: () => ({ readDir: () => [], readFile: () => null, writeFile: () => {}, remove: () => {} }),
+  // A counter, not a constant: deterministic so ids are assertable, but varying so
+  // the re-mint-on-collision path is reachable. A constant would make the retry
+  // loop indistinguishable from a refusal.
+  newFlowId: () => `fTEST-${++h.idSeq}`,
+}));
 // Partial mock: deckView.ts and everything it pulls in (engine/worktree,
 // engine/gitExclude, jsonc-parser's consumers, etc.) use far more of `fs` than
 // the two functions this suite stubs — a bare vi.mock("fs") would blank the
@@ -214,6 +237,10 @@ vi.mock("../../src/config", async (importActual) => {
       deckGrouping: actual.getConfig().deckGrouping,
       retireFinishedAfterHours: actual.getConfig().retireFinishedAfterHours,
       retireAbandonedAfterDays: actual.getConfig().retireAbandonedAfterDays,
+      // Same reason: a test steers this through setConfig({ orchestrator }),
+      // which only reaches deckView.ts if this mock forwards the real,
+      // vscode-configStore-backed value rather than a field frozen here.
+      orchestrator: actual.getConfig().orchestrator,
     }),
   };
 });
@@ -363,6 +390,10 @@ beforeEach(() => {
   h.stampLabelOnWrite = true;
   h.reviewSubmit.mockClear().mockResolvedValue({ ok: true });
   h.branch = "ASM-5641-team-table";
+  h.flows = [];
+  h.idSeq = 0;
+  h.writeFlow.mockClear();
+  h.removeFlow.mockClear();
   // Confirm by default: resolve the label passed as the modal's sole action item,
   // rather than vscode's own mock default of `undefined` (which reads as "declined"
   // for every other suite in this file). Individual tests override this per case.
@@ -2703,5 +2734,119 @@ describe("DeckPanel — Address PR", () => {
     expect(posts(p)).toContainEqual(
       expect.objectContaining({ type: "toast", level: "info", message: expect.stringContaining("agentFlow.seedAgent") }),
     );
+  });
+});
+
+const mkFlow = (id: string, name: string): Flow =>
+  ({ id, name, armed: false, createdAt: 1_000, nodes: [], edges: [] });
+
+describe("orchestrator flows", () => {
+  /** Open a panel and return it plus a way to deliver an inbound message — the
+   * same `show()` + `settled()` + `_fire` idiom every other describe block in
+   * this file uses, rather than reaching into `webview.onDidReceiveMessage`
+   * directly. */
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  it("posts deck:flows with enabled false when the setting is off", async () => {
+    // With the setting off the webview renders no chip at all, but the host still
+    // posts: silence is indistinguishable from "not loaded yet".
+    setConfig({ orchestrator: false });
+    const { p } = await openPanel();
+    expect(posts(p).find((m) => m.type === "deck:flows")).toMatchObject({ enabled: false, flows: [] });
+  });
+
+  it("posts the flows it read from the store when enabled", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "Ship it")];
+    const { p } = await openPanel();
+    const msg = posts(p).find((m) => m.type === "deck:flows");
+    expect(msg).toMatchObject({ enabled: true });
+    expect(msg.flows.map((f: Flow) => f.name)).toEqual(["Ship it"]);
+  });
+
+  it("flow:create writes a new disarmed flow with a store-safe id", async () => {
+    setConfig({ orchestrator: true });
+    const { send } = await openPanel();
+    await send({ type: "flow:create" });
+    expect(h.writeFlow).toHaveBeenCalledTimes(1);
+    const written = h.writeFlow.mock.calls[0][2] as Flow;
+    expect(written).toMatchObject({ name: "New flow", armed: false, nodes: [], edges: [] });
+    expect(written.id).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it("flow:create re-mints rather than overwriting an id already on disk", async () => {
+    // newFlowId is probabilistic. A collision must not clobber the user's flow.
+    // The flowIo mock's newFlowId is deterministic, so seed the store with exactly
+    // what it will return first and assert the write does not target that id.
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("fTEST-1", "already here")];
+    const { send } = await openPanel();
+    await send({ type: "flow:create" });
+    const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    // It must re-mint past the taken id. Overwriting "fTEST-1" is the one outcome
+    // that must never happen — that is the user's saved flow.
+    expect(written.id).not.toBe("fTEST-1");
+    expect(written.id).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(h.flows[0].name).toBe("already here");
+  });
+
+  it("flow:rename changes only the name", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "old")];
+    const { send } = await openPanel();
+    await send({ type: "flow:rename", id: "f1", name: "Ship the migration" });
+    expect(h.writeFlow.mock.calls.at(-1)![2]).toMatchObject({ id: "f1", name: "Ship the migration" });
+  });
+
+  it("flow:rename ignores an id it does not have", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "old")];
+    const { send } = await openPanel();
+    await send({ type: "flow:rename", id: "nope", name: "x" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("flow:save persists the whole graph", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "n")];
+    const { send } = await openPanel();
+    const edited: Flow = {
+      ...mkFlow("f1", "n"),
+      nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" }],
+    };
+    await send({ type: "flow:save", flow: edited });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).nodes).toHaveLength(1);
+  });
+
+  it("flow:save refuses a flow whose id is not in the store", async () => {
+    // The drawer can only ever edit a flow the host gave it. Anything else is a
+    // bug or a hostile message, and writing it would create a file from nothing.
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "n")];
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: mkFlow("intruder", "x") });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("flow:delete removes it", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "n")];
+    const { send } = await openPanel();
+    await send({ type: "flow:delete", id: "f1" });
+    expect(h.removeFlow).toHaveBeenCalledWith(expect.anything(), "/flows", "f1");
+  });
+
+  it("ignores every flow message when the setting is off", async () => {
+    setConfig({ orchestrator: false });
+    const { send } = await openPanel();
+    await send({ type: "flow:create" });
+    await send({ type: "flow:delete", id: "f1" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+    expect(h.removeFlow).not.toHaveBeenCalled();
   });
 });

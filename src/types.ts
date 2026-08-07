@@ -2,6 +2,7 @@
 // Type-only: src/tasks/provider.ts imports Filter/Task/Size from here, so a
 // value import would be a runtime cycle. `import type` is erased at build time.
 import type { SerializedCaps, TaskConnector } from "./tasks/provider";
+import { Flow } from "./engine/orchestrator/model";
 
 export type Filter = "unassigned" | "mine" | "mysprint" | "sprint" | "backlog" | "all";
 export type Size = "any" | "s" | "m" | "l"; // by original time estimate
@@ -351,6 +352,14 @@ export type InboundMessage =
   | { type: "deck:reviewLaunch"; id: string }
   | { type: "deck:reviewLoadDraft"; id: string }
   | { type: "deck:reviewSubmit"; id: string; verb: ReviewVerb; body: string; fromDraft: boolean }
+  // ── Orchestrator flows ──────────────────────────────────────────────
+  // `flow:save` carries the WHOLE flow rather than a patch: a graph is small,
+  // the drawer is its only editor, and a whole-document write means no merge
+  // logic and no partial-update bugs.
+  | { type: "flow:create" }
+  | { type: "flow:rename"; id: string; name: string }
+  | { type: "flow:save"; flow: Flow }
+  | { type: "flow:delete"; id: string }
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }
@@ -453,6 +462,9 @@ export type OutboundMessage =
   // still in flight — this is the only message the webview can trust to release
   // that row's disable, or to know a failure was *this* row's.
   | { type: "deck:reviewSubmitDone"; id: string; outcome: "ok" | "failed" | "cancelled" }
+  // `enabled: false` still posts, with an empty list: the webview must be able
+  // to tell "the setting is off" from "not loaded yet", and silence cannot.
+  | { type: "deck:flows"; flows: Flow[]; enabled: boolean }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
   | { type: "mkt:loading"; loading: boolean }

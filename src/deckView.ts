@@ -5,6 +5,9 @@ import * as path from "path";
 import { getConfig } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
+import { Flow, emptyFlow } from "./engine/orchestrator/model";
+import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
+import { nodeFlowIo, newFlowId } from "./engine/orchestrator/flowIo";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
@@ -106,6 +109,11 @@ export class DeckPanel {
    * busy indicator — an inner `finally` must not stop the spinner while an
    * overlapping refresh is still working. */
   private busyDepth = 0;
+  /** The flows store's directory — `defaultFlowsDir()` in production, the same
+   * shape this file already uses for `defaultRunsDir()`. Resolved once, since
+   * it never changes for the life of the panel. */
+  private readonly flowsDir = defaultFlowsDir();
+  private readonly flowIo = nodeFlowIo();
 
   static show(context: vscode.ExtensionContext, connector: TaskConnector, log: (m: string) => void): void {
     if (DeckPanel.current) {
@@ -160,6 +168,14 @@ export class DeckPanel {
 
   private toast(level: "success" | "error" | "info", message: string): void {
     this.post({ type: "toast", level, message });
+  }
+
+  /** Read the flows store and post it. Cheap — a handful of small JSON files —
+   * so it rides the same refresh as everything else rather than owning a cache. */
+  private postFlows(): void {
+    const enabled = getConfig().orchestrator;
+    const flows: Flow[] = enabled ? readFlows(this.flowIo, this.flowsDir) : [];
+    this.post({ type: "deck:flows", flows, enabled });
   }
 
   private startPolling(): void {
@@ -850,6 +866,7 @@ export class DeckPanel {
       // which happens while the strip is off.
       if (this.reviewsEnabled()) this.enqueueReviews(Date.now());
       else this.postReviews();
+      this.postFlows();
     } catch (e) {
       this.log(`deck: refresh failed: ${e}`);
     }
@@ -958,6 +975,47 @@ export class DeckPanel {
       case "deck:addressPr":
         await this.addressPr(m.key);
         break;
+      case "flow:create": {
+        if (!getConfig().orchestrator) return;
+        const now = Date.now();
+        // `newFlowId` is probabilistic, not unique by construction: its salt space
+        // is 36^4, so two flows minted in the same millisecond CAN collide, and a
+        // collision here would silently overwrite the user's existing flow, since
+        // the store writes by id. Re-mint against what is already on disk. Bounded
+        // rather than a while-loop so a pathological `Math.random()` cannot hang
+        // the extension host.
+        const taken = new Set(readFlows(this.flowIo, this.flowsDir).map((f) => f.id));
+        let id = newFlowId(now);
+        for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+        if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
+        writeFlow(this.flowIo, this.flowsDir, emptyFlow(id, "New flow", now));
+        this.postFlows();
+        return;
+      }
+      case "flow:rename": {
+        if (!getConfig().orchestrator) return;
+        const existing = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
+        if (!existing) return;
+        writeFlow(this.flowIo, this.flowsDir, { ...existing, name: m.name });
+        this.postFlows();
+        return;
+      }
+      case "flow:save": {
+        if (!getConfig().orchestrator) return;
+        // Only a flow the host already has may be saved. The drawer can only ever
+        // edit one it was given; anything else would create a file from nothing.
+        const known = readFlows(this.flowIo, this.flowsDir).some((f) => f.id === m.flow.id);
+        if (!known) return;
+        writeFlow(this.flowIo, this.flowsDir, m.flow);
+        this.postFlows();
+        return;
+      }
+      case "flow:delete": {
+        if (!getConfig().orchestrator) return;
+        removeFlow(this.flowIo, this.flowsDir, m.id);
+        this.postFlows();
+        return;
+      }
       case "openExternal": {
         const u = vscode.Uri.parse(m.url);
         // f.url and every failing check's detailsUrl/targetUrl now come from
