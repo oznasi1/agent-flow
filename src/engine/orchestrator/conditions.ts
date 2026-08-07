@@ -99,9 +99,9 @@ export function evalCond(cond: Condition, c: CondContext): boolean {
       return !!g && g.ahead === 0;
     }
     case "ticket-done":
-      return c.status.jiraCategory === "done";
+      return c.status.ticketCategory === "done";
     case "ticket-status-is":
-      return c.status.jiraStatus === cond.status;
+      return c.status.ticketStatus === cond.status;
   }
 }
 
@@ -195,12 +195,12 @@ export function describeCond(cond: Condition, c: CondContext): string {
       // whenever the status text's own claim about "done-ness" does not match
       // it, so the drawer never shows "Done" beside a rule that cannot fire —
       // or the reverse.
-      const status = c.status.jiraStatus ?? "no Jira status";
+      const status = c.status.ticketStatus ?? "no ticket status";
       const looksDone = /done/i.test(status);
-      const isDone = c.status.jiraCategory === "done";
-      return looksDone === isDone ? status : `${status} (${c.status.jiraCategory ?? "no category"})`;
+      const isDone = c.status.ticketCategory === "done";
+      return looksDone === isDone ? status : `${status} (${c.status.ticketCategory ?? "no category"})`;
     }
     case "ticket-status-is":
-      return c.status.jiraStatus ?? "no Jira status";
+      return c.status.ticketStatus ?? "no ticket status";
   }
 }

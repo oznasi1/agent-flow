@@ -21,7 +21,7 @@ const status = (key: string, over: { merged?: boolean; agents?: CardAgent[]; unk
     repos: [{ name: repo, path: `/r/${repo}`, isGit: true }], briefPaths: [] };
   const prs: PrEntryMap = { [repo]: { facts: facts({ state: over.merged ? "MERGED" : "OPEN" }), fetchedAt: NOW } };
   return {
-    run, column: "progress", jiraStatus: null, jiraCategory: null, repos: [git],
+    run, column: "progress", ticketStatus: null, ticketCategory: null, repos: [git],
     agent: { state: over.unknownAgent ? "unknown" : "working", lastActivityMs: NOW, slug: null },
     windowOpen: false, prs, agents: over.agents ?? [],
   };

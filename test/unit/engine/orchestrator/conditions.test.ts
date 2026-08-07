@@ -32,7 +32,7 @@ const ctx = (over: Partial<RunStatus> = {}, prs: PrEntryMap = {}): CondContext =
   repo: REPO,
   nowMs: NOW,
   status: {
-    run, column: "progress", jiraStatus: null, jiraCategory: null,
+    run, column: "progress", ticketStatus: null, ticketCategory: null,
     repos: [git()], agent: { state: "unknown", lastActivityMs: null, slug: null },
     windowOpen: false, prs, agents: [], ...over,
   },
@@ -134,7 +134,7 @@ describe("evalCond — agent state", () => {
       repo: "api",
       nowMs: NOW,
       status: {
-        run: multiRepoRun, column: "progress", jiraStatus: null, jiraCategory: null,
+        run: multiRepoRun, column: "progress", ticketStatus: null, ticketCategory: null,
         repos: [git({ name: "api" }), git({ name: "web" })],
         agent: { state: "needs-you", lastActivityMs: NOW, slug: null }, // the web agent, aggregated
         windowOpen: false, prs: {},
@@ -203,17 +203,17 @@ describe("evalCond — git", () => {
   });
 });
 
-describe("evalCond — Jira", () => {
+describe("evalCond — ticket source", () => {
   it("ticket-done reads the category", () => {
-    expect(met({ kind: "ticket-done" }, ctx({ jiraCategory: "done" }))).toBe(true);
-    expect(met({ kind: "ticket-done" }, ctx({ jiraCategory: "indeterminate" }))).toBe(false);
-    expect(met({ kind: "ticket-done" }, ctx({ jiraCategory: null }))).toBe(false);
+    expect(met({ kind: "ticket-done" }, ctx({ ticketCategory: "done" }))).toBe(true);
+    expect(met({ kind: "ticket-done" }, ctx({ ticketCategory: "indeterminate" }))).toBe(false);
+    expect(met({ kind: "ticket-done" }, ctx({ ticketCategory: null }))).toBe(false);
   });
 
   it("ticket-status-is matches the exact status", () => {
-    expect(met({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: "PR initiated" }))).toBe(true);
-    expect(met({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: "In Progress" }))).toBe(false);
-    expect(met({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: null }))).toBe(false);
+    expect(met({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ ticketStatus: "PR initiated" }))).toBe(true);
+    expect(met({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ ticketStatus: "In Progress" }))).toBe(false);
+    expect(met({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ ticketStatus: null }))).toBe(false);
   });
 });
 
@@ -325,33 +325,33 @@ describe("describeCond", () => {
     expect(describeCond({ kind: "nothing-to-push" }, ctx({ repos: [git({ name: "elsewhere" })] }))).toBe("repo not found");
   });
 
-  it("describes Jira", () => {
-    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: "In Progress" }))).toBe("In Progress");
-    expect(describeCond({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: "In Progress" }))).toBe("In Progress");
-    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: null }))).toBe("no Jira status");
+  it("describes the ticket status", () => {
+    expect(describeCond({ kind: "ticket-done" }, ctx({ ticketStatus: "In Progress" }))).toBe("In Progress");
+    expect(describeCond({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ ticketStatus: "In Progress" }))).toBe("In Progress");
+    expect(describeCond({ kind: "ticket-done" }, ctx({ ticketStatus: null }))).toBe("no ticket status");
   });
 
   it("ticket-done reflects the category when the status text disagrees with it — same class of bug as ci-failed/ci-passed above", () => {
-    // The predicate reads jiraCategory, not jiraStatus. A status literally
+    // The predicate reads ticketCategory, not ticketStatus. A status literally
     // named "Done" under a non-"done" category must not describe as plain
     // "Done" (eval is false), and a "done" category with no status text must
-    // not describe as plain "no Jira status" (eval is true).
-    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: "Done", jiraCategory: "indeterminate" })))
+    // not describe as plain "no ticket status" (eval is true).
+    expect(describeCond({ kind: "ticket-done" }, ctx({ ticketStatus: "Done", ticketCategory: "indeterminate" })))
       .toBe("Done (indeterminate)");
-    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: null, jiraCategory: "done" })))
-      .toBe("no Jira status (done)");
+    expect(describeCond({ kind: "ticket-done" }, ctx({ ticketStatus: null, ticketCategory: "done" })))
+      .toBe("no ticket status (done)");
     // Agreement needs no adornment.
-    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: "In Progress", jiraCategory: "indeterminate" })))
+    expect(describeCond({ kind: "ticket-done" }, ctx({ ticketStatus: "In Progress", ticketCategory: "indeterminate" })))
       .toBe("In Progress");
-    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: "Done", jiraCategory: "done" })))
+    expect(describeCond({ kind: "ticket-done" }, ctx({ ticketStatus: "Done", ticketCategory: "done" })))
       .toBe("Done");
     // A mismatch with no category at all still says so, rather than omitting it.
-    expect(describeCond({ kind: "ticket-done" }, ctx({ jiraStatus: "Done", jiraCategory: null })))
+    expect(describeCond({ kind: "ticket-done" }, ctx({ ticketStatus: "Done", ticketCategory: null })))
       .toBe("Done (no category)");
   });
 
-  it("ticket-status-is falls back to 'no Jira status' too, same as ticket-done", () => {
-    expect(describeCond({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ jiraStatus: null })))
-      .toBe("no Jira status");
+  it("ticket-status-is falls back to 'no ticket status' too, same as ticket-done", () => {
+    expect(describeCond({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ ticketStatus: null })))
+      .toBe("no ticket status");
   });
 });
