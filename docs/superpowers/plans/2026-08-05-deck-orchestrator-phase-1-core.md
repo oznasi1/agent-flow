@@ -20,6 +20,7 @@
 - **Do not touch** the `version` field in `package.json`, any version field in `package-lock.json`, or `CHANGELOG.md`. The orchestrator session owns those.
 - Work in a git worktree, never the main checkout — `vsce package` packages the working directory, so a stray file there ships inside the extension.
 - Conventional commits, scoped `orchestrator`: `feat(orchestrator): …`.
+- **RESOLVED 2026-08-07:** the connector work shipped in `main`'s 0.5.0. `RunStatus` now carries `ticketStatus` and `ticketCategory`, and `conditions.ts` was updated to match in commit `1e58664` — along with the user-facing "no Jira status" wording, which the seam made wrong. The condition kinds were already `ticket-done` / `ticket-status-is`, so nothing persisted in a saved flow changed. The guidance below is kept as the record of the decision, not as an instruction.
 - **`main` moves fast — re-check it before starting.** `docs/superpowers/specs/2026-08-05-pluggable-task-connectors-design.md` landed alongside this one and renames `RunStatus.jiraCategory` → `ticketCategory` (and `JiraTask` → `Task`). `conditions.ts` reads `status.jiraCategory` and `status.jiraStatus`, so:
   - If the connectors work has already landed, read `status.ticketCategory` instead and update the two fixtures in `conditions.test.ts`. Nothing else in this plan is affected.
   - If it has not, write `jiraCategory` as this plan does; it is one more call site for that rename to sweep.

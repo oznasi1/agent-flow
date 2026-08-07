@@ -14,7 +14,7 @@
 - **Do not touch** the `version` field in `package.json`, any version field in `package-lock.json`, or `CHANGELOG.md`. The release session owns those. The `contributes.configuration` hunk in `package.json` IS in scope and pre-approved.
 - **No arming, no runner, no launching, no seeding in this phase.** The only edge action available is `notify`. The drawer must have no Arm control at all — its footer states the flow is not armed and that arming arrives next. An Arm button that does nothing is worse than no button.
 - **Flow ids must match `/^[A-Za-z0-9_-]+$/`.** Phase 1's `store.ts` skips such a record on read and throws in `fileFor` on write. A slug-from-name scheme (spaces, dots, non-ASCII) will throw.
-- `npx tsc --noEmit` clean and `npx vitest run` green before each commit. The suite is 2232 tests across 77 files at the start of this phase; it must only grow.
+- `npx tsc --noEmit` clean and `npx vitest run` green before each commit. The suite is 2375 tests across 85 files at the start of this phase; it must only grow.
 - **≥95% line coverage on every file this plan creates or modifies.** Check with `npx vitest run --coverage`.
 - **`orchestratorStyles.ts` must not redeclare any token owned by `tokens.ts`.** `test/webview/tokens.test.ts` enforces this in both directions and will fail if you do. Use `--t-body`, `--r-ctl`, `--brand`, `--dim`, `--hair`, `--edge`, `--mono` and the `--c-*` hues; never re-define them.
 - The Deck's four house design rules, which a reviewer will check against:
@@ -153,7 +153,7 @@ Expected: PASS.
 
 Run: `npx tsc --noEmit`
 Run: `npx vitest run`
-Expected: clean, and green with a count two higher than 2232.
+Expected: clean, and green with a count two higher than 2375.
 
 - [ ] **Step 8: Commit**
 
