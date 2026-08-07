@@ -3,7 +3,7 @@ import { send } from "./vscodeApi";
 import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
 import type { Flow } from "../engine/orchestrator/model";
 import { DeckCard, projectCards } from "./deckCards";
-import { OrchestratorDrawer } from "./OrchestratorDrawer";
+import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
 import { isPrReviewStatus } from "./helpers";
 
@@ -229,6 +229,11 @@ function Card({ r, live, prReviewStatus, onForget, agent, column, sourceLabel }:
   // r.run.url with) and sent as `inferredTicketKey` — absent whenever the host
   // found no ticket in the url, which for a non-local run is always.
   const inferredKey = local ? (r.inferredTicketKey ?? "") : "";
+  // Only a card that names one run and one repo can become a node: a place node
+  // resolves to exactly one repo so no condition is ever ambiguous about which
+  // repo's git or PR it means.
+  const dragRepo = agent?.repo ?? (r.repos.length === 1 ? r.repos[0].name : undefined);
+  const cardDragKey = dragRepo ? `${r.run.key}${DRAG_SEP}${dragRepo}` : null;
   const [menuOpen, setMenuOpen] = React.useState(false);
   React.useEffect(() => {
     if (!menuOpen) return;
@@ -240,7 +245,14 @@ function Card({ r, live, prReviewStatus, onForget, agent, column, sourceLabel }:
   }, [menuOpen]);
 
   return (
-    <div className={`card ${column === "needs" ? "attn" : ""}`} style={{ ["--accent" as any]: accent }}>
+    <div
+      className={`card ${column === "needs" ? "attn" : ""}`}
+      style={{ ["--accent" as any]: accent }}
+      draggable={cardDragKey !== null}
+      onDragStart={(e) => {
+        if (cardDragKey) e.dataTransfer.setData("text/plain", cardDragKey);
+      }}
+    >
       {/* State leads, identity trails: the dot sits at the same x on every card, so a column
           scans top-to-bottom as one strip of "who needs me". */}
       <div className="c-top">

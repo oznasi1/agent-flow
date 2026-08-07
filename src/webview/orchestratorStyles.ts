@@ -65,4 +65,21 @@ export const ORCH_CSS = `
     color: var(--vscode-foreground); font: inherit; font-size: var(--t-body);
     padding: 5px 8px; border-radius: var(--r-chip); cursor: pointer; }
   .orch-flows button:hover { background: var(--vscode-toolbar-hoverBackground); }
+
+  /* The tray sits ABOVE the graph: attaching comes before wiring, and this is
+     the primary drop target. It is a view of the same node list the canvas
+     draws — never a second store. */
+  .orch-tray { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    padding: 7px; min-height: 46px; border: 1px dashed var(--edge); border-radius: var(--r-card); }
+  .orch-tray.over { border-style: solid; border-color: var(--brand);
+    background: color-mix(in srgb, var(--brand) 7%, transparent); }
+  .orch-tray .hint { font-size: var(--t-body); color: var(--dim); padding: 3px 4px; }
+  .orch-tchip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 8px;
+    border: 1px solid var(--hair); border-radius: var(--r-chip);
+    background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent); }
+  .orch-tchip .k { font-family: var(--mono); font-size: var(--t-data); }
+  .orch-tchip .sub { font-size: var(--t-micro); color: var(--dim); }
+  .orch-tchip .rm { border: 0; background: transparent; color: var(--dim); cursor: pointer;
+    font-size: 9px; padding: 0 1px; }
+  .orch-tchip .rm:hover { color: var(--vscode-foreground); }
 `;
