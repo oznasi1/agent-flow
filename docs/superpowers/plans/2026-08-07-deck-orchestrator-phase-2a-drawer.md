@@ -1183,8 +1183,18 @@ function parseDrag(raw: string): { runKey: string; repo: string } | null {
   return runKey && repo ? { runKey, repo } : null;
 }
 
-/** An id unique within this flow. Node ids are local to a flow, so a counter
- * over the existing ids is enough and keeps them readable. */
+/** An id unique within this flow. Ids are local to a flow, so scanning the taken
+ * ones is enough and keeps them readable. Both helpers MUST skip taken ids: a bare
+ * `length + 1` collides as soon as anything in the middle is deleted, and a
+ * duplicate id makes every id-keyed operation (delete, edit, select) hit the wrong
+ * element — or two of them. */
+function nextEdgeId(flow: Flow): string {
+  let n = flow.edges.length + 1;
+  const taken = new Set(flow.edges.map((e) => e.id));
+  while (taken.has(`e${n}`)) n++;
+  return `e${n}`;
+}
+
 function nextNodeId(flow: Flow): string {
   let n = flow.nodes.length + 1;
   const taken = new Set(flow.nodes.map((x) => x.id));
@@ -1886,7 +1896,11 @@ Inside the component:
     setWiring(null);
     if (!from || from === toId) return;
     if (flow.edges.some((e) => e.from === from && e.to === toId)) return;
-    const id = `e${flow.edges.length + 1}`;
+    // NOT `e${edges.length + 1}` — that collides. Delete the middle of [e1,e2,e3]
+    // and the next mint is "e3", which already exists; deleteEdge filters by id, so
+    // deleting one connection would silently delete two. Scan the taken ids, the
+    // same way nextNodeId does for nodes.
+    const id = nextEdgeId(flow);
     const edge: FlowEdge = { id, from, to: toId, cond: { kind: "pr-merged" }, action: "notify" };
     setSelEdge(id);
     p.onSave({ ...flow, edges: [...flow.edges, edge] });
