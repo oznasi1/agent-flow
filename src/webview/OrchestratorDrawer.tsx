@@ -40,8 +40,16 @@ function nodeState(node: FlowNode, runs: RunStatus[]): AgentState | undefined {
 }
 
 /** A notify node is narrower than a place. This must match `.orch-node.notify`'s
- * width in orchestratorStyles.ts — the anchor maths needs the real box, and the
- * two are the same number in two languages. */
+ * width in orchestratorStyles.ts — the two are the same number in two languages.
+ *
+ * Correction to an earlier version of this comment: this number is NOT currently
+ * load-bearing for the anchor maths, and no test can prove otherwise. `anchor`'s
+ * "in" side never reads a box's `w` (only "out" adds it), and a notify node can
+ * never be a wiring's source — it has no out-port — so this width only ever
+ * reaches `anchor`'s "in" branch, where it is ignored. It stays a real, correct
+ * fact about the model (a notify node genuinely IS this narrow) so a terminal
+ * that later gains an out-port doesn't silently inherit the wrong box, but treat
+ * it as inert today, not protective. */
 const NOTIFY_W = 138;
 
 const STATE_HUE: Record<AgentState, string> = {
@@ -192,9 +200,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const posOf = (n: { id: string; x: number; y: number }) =>
     drag && drag.id === n.id ? { x: drag.x, y: drag.y } : { x: n.x, y: n.y };
 
-  /** A node's live box for the anchor maths: its in-flight position, and its
-   * real width — a notify node is narrower than a place, and `anchor` needs the
-   * actual box, not the place default. */
+  /** A node's live box for the anchor maths: its in-flight position, and its real
+   * width. The width is a true fact about the model — see `NOTIFY_W` — but is
+   * currently unobservable: a notify node is never a wiring's source, so this
+   * conditional never affects a rendered edge today. It stays, correctly, for
+   * the day a terminal gains an out-port. */
   const boxOf = (n: { id: string; x: number; y: number; kind: string }) => {
     const pos = posOf(n);
     return { x: pos.x, y: pos.y, w: n.kind === "notify" ? NOTIFY_W : NODE_W, h: NODE_H };

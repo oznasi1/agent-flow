@@ -4,7 +4,7 @@ import * as React from "react";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { OrchestratorDrawer, DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import type { Flow } from "../../src/engine/orchestrator/model";
-import { GRID } from "../../src/engine/orchestrator/layout";
+import { anchor, edgePath, GRID, labelPoint, NODE_H, NODE_W } from "../../src/engine/orchestrator/layout";
 
 // This repo's pinned jsdom has no PointerEvent constructor. Without it, a
 // fireEvent.pointer* call falls through to a bare Event with no clientX/clientY,
@@ -406,5 +406,55 @@ describe("wiring", () => {
     fireEvent.pointerUp(screen.getByTestId("orch-canvas"));
     // No node moved, so nothing was saved.
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  // Nothing above asserts WHERE a connector actually lands. Every one of those
+  // tests would still pass if `anchor`'s "out"/"in" arguments were swapped, or
+  // the wrong node's box were passed in — the label would just be wrong, in a
+  // place, and every test would stay green. This pins the real numbers.
+  //
+  // The expected values are computed by calling the SAME layout functions the
+  // component calls, not by pasting numbers: this pins that the component wires
+  // anchor/edgePath/labelPoint together correctly (right node, right side), not
+  // that some other formula happens to agree with layout.ts.
+  it("pins the connector's geometry: the label and the path sit exactly where layout.ts puts them", () => {
+    // wired(): n1 (place) at (24, 24) is the source, n2 (notify) at (320, 24) is
+    // the target. `anchor`'s "in" side never reads a box's width (only "out"
+    // does), so the target box's width is irrelevant here — NODE_W is used for
+    // both boxes on purpose, to keep that fact visible rather than importing the
+    // component's private NOTIFY_W.
+    const fromBox = { x: 24, y: 24, w: NODE_W, h: NODE_H };
+    const toBox = { x: 320, y: 24, w: NODE_W, h: NODE_H };
+    const from = anchor(fromBox, "out");
+    const to = anchor(toBox, "in");
+    const expectedMid = labelPoint(from, to);
+    const expectedPath = edgePath(from, to);
+
+    const { container } = render(<OrchestratorDrawer {...props({ flows: [wired()] })} />);
+    const label = screen.getByTestId("orch-edge-e1");
+    expect(label.style.left).toBe(`${expectedMid.x}px`);
+    expect(label.style.top).toBe(`${expectedMid.y}px`);
+    const path = container.querySelector("svg path");
+    expect(path?.getAttribute("d")).toBe(expectedPath);
+  });
+
+  // "Red only for a real failure" is a house rule (see orchestratorStyles.ts's
+  // own comment on .orch-edge.bad); it needs its own test on each side, or the
+  // rule erodes the first time someone "simplifies" BAD_CONDS.
+  it("tints a connector whose condition is a failure", () => {
+    const failing = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "ci-failed" }, action: "notify" }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [failing] })} />);
+    expect(screen.getByTestId("orch-edge-e1").classList.contains("bad")).toBe(true);
+  });
+
+  it("does not tint a normal connection", () => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()] })} />); // wired()'s condition is pr-merged
+    expect(screen.getByTestId("orch-edge-e1").classList.contains("bad")).toBe(false);
   });
 });
