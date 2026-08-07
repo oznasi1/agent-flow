@@ -113,6 +113,13 @@ it. A merged PR moves the card to **Done** and is the only thing that makes a ca
 say *merged*. Turn it off with the **PR facts** toggle or `agentFlow.prFacts`, and
 cards fall back to the git + Jira backbone.
 
+An **Orchestrator** drawer (off by default, `agentFlow.orchestrator`) lets you wire the
+agents already on the board into a *flow*: drag a card in, connect two nodes, and put a
+condition on the connection — a merged PR, failing CI, an agent that ended its turn, a
+clean tree, a Jira status. Each connection can currently **notify** you, and the drawer
+says what each condition is waiting on right now. Nothing runs on its own yet: arming a
+flow, and letting it launch the next agent for you, lands in a following release.
+
 Above the columns sits your **review queue** — every open PR that asks for your
 review, found with one `gh` search. PRs in archived repositories are left out:
 an archived repo is read-only, so GitHub refuses a review on one, and those
@@ -299,6 +306,7 @@ repo, so they never get committed.
 | `agentFlow.reviewRequestMode` | `ask` | Pin one review mode by `id` to skip the question. |
 | `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow Deck opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
 | `agentFlow.environments` | `["dev", "staging", "production"]` | Environments offered by the **Verify on an environment** Explore action. The picker also offers **Custom…** for a one-off. |
+| `agentFlow.orchestrator` | `false` | Show the Deck's Orchestrator drawer, where you wire in-flight agents into a flow with a condition on each connection. |
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
 `agentFlow.exploreMode`, `agentFlow.explorePrompts.*`, `agentFlow.prReviewPrompt`, and

@@ -1,4 +1,5 @@
 import * as React from "react";
+import { describeCond } from "../engine/orchestrator/conditions";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { AgentState, RunStatus } from "../types";
@@ -92,6 +93,20 @@ const BAD_CONDS = new Set<Condition["kind"]>(["ci-failed", "changes-requested", 
 export const OFFERED_CONDS: Condition["kind"][] = (
   Object.keys(COND_LABEL) as Condition["kind"][]
 ).filter((k) => k !== "agent-idle-over" && k !== "ticket-status-is");
+
+/** How a node's end reads in the inspector's title. */
+function endLabel(flow: Flow, id: string): string {
+  const n = flow.nodes.find((x) => x.id === id);
+  if (!n) return "?";
+  return n.kind === "place" ? n.runKey : n.kind === "planned" ? n.ticketKey : "notify";
+}
+
+/** The message the edge's notify target carries, or empty when the target is
+ * not a notify node. */
+function notifyMessageOf(flow: Flow, e: FlowEdge): string {
+  const n = flow.nodes.find((x) => x.id === e.to);
+  return n && n.kind === "notify" ? n.message : "";
+}
 
 export interface OrchestratorDrawerProps {
   flows: Flow[];
@@ -228,6 +243,37 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     });
 
   const onTidy = () => p.onSave({ ...flow, nodes: tidy(flow) });
+
+  const edge = flow.edges.find((e) => e.id === selEdge) ?? null;
+
+  /** What the source place looks like right now, in `describeCond`'s words. Null
+   * when the node's run is not on the board — a claim we cannot make. */
+  const observation = (e: FlowEdge): string | null => {
+    const from = flow.nodes.find((n) => n.id === e.from);
+    if (!from || from.kind !== "place") return null;
+    const status = p.runs.find((r) => r.run.key === from.runKey);
+    if (!status) return null;
+    return describeCond(e.cond, { status, repo: from.repo, nowMs: Date.now() });
+  };
+
+  const setCond = (e: FlowEdge, kind: Condition["kind"]) => {
+    // Only bare kinds are reachable from the dropdown (see OFFERED_CONDS), so the
+    // parameterised arms cannot be constructed here without a value to put in them.
+    if (kind === "agent-idle-over" || kind === "ticket-status-is") return;
+    const cond: Condition = { kind };
+    p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, cond } : x)) });
+  };
+
+  const setNotifyMessage = (e: FlowEdge, message: string) =>
+    p.onSave({
+      ...flow,
+      nodes: flow.nodes.map((n) => (n.id === e.to && n.kind === "notify" ? { ...n, message } : n)),
+    });
+
+  const deleteEdge = (e: FlowEdge) => {
+    setSelEdge(null);
+    p.onSave({ ...flow, edges: flow.edges.filter((x) => x.id !== e.id) });
+  };
 
   return (
     <aside className="orch" aria-label="Orchestrator">
@@ -409,6 +455,55 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             );
           })}
         </div>
+        {!edge ? (
+          <div className="orch-insp none" data-testid="orch-inspector">
+            Select a connection to set its condition.
+          </div>
+        ) : (
+          <div className="orch-insp" data-testid="orch-inspector">
+            <div className="t">
+              <span>
+                Connection ·{" "}
+                <span className="k" style={{ fontFamily: "var(--mono)" }}>{endLabel(flow, edge.from)}</span>
+                {" → "}
+                <span className="k" style={{ fontFamily: "var(--mono)" }}>{endLabel(flow, edge.to)}</span>
+              </span>
+              <span className="sp" />
+              <button type="button" className="orch-mini" aria-label="Delete connection" onClick={() => deleteEdge(edge)}>
+                Delete
+              </button>
+            </div>
+            <div className="orch-clause">
+              <span className="orch-kw">WHEN</span>
+              <select
+                className="orch-sel"
+                aria-label="Condition"
+                value={edge.cond.kind}
+                onChange={(ev) => setCond(edge, ev.currentTarget.value as Condition["kind"])}
+              >
+                {OFFERED_CONDS.map((k) => (
+                  <option key={k} value={k}>{COND_LABEL[k]}</option>
+                ))}
+              </select>
+            </div>
+            <div className="orch-clause">
+              <span className="orch-kw">THEN</span>
+              {/* notify is the only action this phase has. It is stated, not
+                  offered as a choice of one. */}
+              <span style={{ fontSize: "var(--t-body)" }}>notify me</span>
+              <input
+                className="orch-msg"
+                aria-label="Notify message"
+                key={edge.id}
+                defaultValue={notifyMessageOf(flow, edge)}
+                onBlur={(ev) => setNotifyMessage(edge, ev.currentTarget.value)}
+              />
+            </div>
+            <div className="orch-obs">
+              {observation(edge) ?? "this card is not on the board right now"}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="orch-ft">

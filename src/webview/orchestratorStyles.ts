@@ -135,4 +135,24 @@ export const ORCH_CSS = `
   .orch-edge.sel { border-color: var(--brand); color: var(--vscode-foreground); }
   /* Danger tint only when the CONDITION is itself a failure — not decoration. */
   .orch-edge.bad { border-color: color-mix(in srgb, var(--c-danger) 40%, var(--hair)); }
+
+  .orch-insp { flex: none; margin-top: 10px; padding: 10px 11px;
+    border: 1px solid var(--hair); border-radius: var(--r-card);
+    background: var(--vscode-editor-background); }
+  .orch-insp.none { text-align: center; color: var(--dim); font-size: var(--t-body); padding: 16px 11px; }
+  .orch-insp .t { display: flex; align-items: center; gap: 7px; margin-bottom: 8px;
+    font-size: var(--t-micro); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+  .orch-insp .t .sp { flex: 1; }
+  .orch-clause { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .orch-clause + .orch-clause { margin-top: 6px; }
+  /* Three fixed-width keywords, so a rule reads as a sentence and not a form. */
+  .orch-kw { width: 40px; flex: none; font-size: var(--t-micro); letter-spacing: .06em; color: var(--dim); }
+  .orch-sel { height: 22px; padding: 0 7px; border-radius: var(--r-chip);
+    border: 1px solid var(--edge); background: var(--vscode-input-background);
+    color: var(--vscode-foreground); font: inherit; font-size: var(--t-body); cursor: pointer; }
+  .orch-msg { flex: 1; min-width: 120px; height: 22px; padding: 0 7px; border-radius: var(--r-chip);
+    border: 1px solid var(--edge); background: var(--vscode-input-background);
+    color: var(--vscode-foreground); font: inherit; font-size: var(--t-body); }
+  .orch-obs { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--hair);
+    font-size: var(--t-micro); color: var(--dim); }
 `;

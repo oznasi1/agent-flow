@@ -5,6 +5,7 @@ import { render, screen, fireEvent, within } from "@testing-library/react";
 import { OrchestratorDrawer, DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import type { Flow } from "../../src/engine/orchestrator/model";
 import { anchor, edgePath, GRID, labelPoint, NODE_H, NODE_W } from "../../src/engine/orchestrator/layout";
+import type { PrEntryMap, RunStatus } from "../../src/types";
 
 // This repo's pinned jsdom has no PointerEvent constructor. Without it, a
 // fireEvent.pointer* call falls through to a bare Event with no clientX/clientY,
@@ -456,5 +457,117 @@ describe("wiring", () => {
   it("does not tint a normal connection", () => {
     render(<OrchestratorDrawer {...props({ flows: [wired()] })} />); // wired()'s condition is pr-merged
     expect(screen.getByTestId("orch-edge-e1").classList.contains("bad")).toBe(false);
+  });
+});
+
+const runStatus = (key: string, repo: string, over: Partial<RunStatus> = {}): RunStatus => {
+  const prs: PrEntryMap = {
+    [repo]: {
+      facts: {
+        number: 118, url: "u", title: "t", state: "OPEN", isDraft: false,
+        ci: { passing: 4, pending: 3, failing: [] }, review: "none", unresolved: null,
+        mergeable: "clean", ciAdvisory: false,
+      },
+      fetchedAt: 1,
+    },
+  };
+  return {
+    run: { key, summary: "s", url: `https://j/browse/${key}`, createdAt: 1, mode: "multiroot",
+      repos: [{ name: repo, path: `/r/${repo}`, isGit: true }], briefPaths: [] },
+    column: "progress", ticketStatus: "In Progress", ticketCategory: "indeterminate",
+    repos: [{ name: repo, path: `/r/${repo}`, branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
+    agent: { state: "working", lastActivityMs: 1, slug: null },
+    windowOpen: true, prs, agents: [], ...over,
+  };
+};
+
+describe("the inspector", () => {
+  const open = (onSave = vi.fn(), runs: RunStatus[] = []) => {
+    const r = render(<OrchestratorDrawer {...props({ onSave, runs, flows: [wired()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    return { r, onSave };
+  };
+
+  it("says to select an edge when none is selected", () => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()] })} />);
+    expect(screen.getByText(/select a connection/i)).toBeTruthy();
+  });
+
+  it("names the two ends of the selected edge", () => {
+    open();
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.textContent).toContain("ASM-1");
+  });
+
+  it("changes the condition", () => {
+    const { onSave } = open();
+    fireEvent.change(screen.getByLabelText("Condition"), { target: { value: "ci-failed" } });
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0].cond).toEqual({ kind: "ci-failed" });
+  });
+
+  it("offers no launch or seed action — those do not exist yet", () => {
+    open();
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.textContent).not.toMatch(/launch|seed/i);
+  });
+
+  it("does not offer a condition it has no input for", () => {
+    // agent-idle-over needs a minute count and ticket-status-is needs a status
+    // name; with no field for either, offering them would build a rule that waits
+    // on a hardcoded 10 minutes or on the empty string.
+    open();
+    const values = Array.from(
+      screen.getByLabelText("Condition").querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).not.toContain("agent-idle-over");
+    expect(values).not.toContain("ticket-status-is");
+    expect(values).toContain("pr-merged");
+  });
+
+  it("edits the notify message on blur", () => {
+    const { onSave } = open();
+    const box = screen.getByLabelText("Notify message");
+    fireEvent.change(box, { target: { value: "the migration has landed" } });
+    fireEvent.blur(box);
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    const target = saved.nodes.find((n) => n.id === "n2")!;
+    expect(target).toMatchObject({ kind: "notify", message: "the migration has landed" });
+  });
+
+  it("shows what the place currently looks like, from the board", () => {
+    // Deviates from the brief's literal fixture here: wired()'s edge condition
+    // is pr-merged, and describeCond's already-tested, off-limits behaviour for
+    // pr-merged on an OPEN PR is "PR open" (see
+    // test/unit/engine/orchestrator/conditions.test.ts:274) — never CI text, no
+    // matter what the inspector does. To show describeCond's CI wording
+    // actually reaching the user, this edge needs a CI condition instead; every
+    // other node/PR fixture is unchanged.
+    const ciWired = flow({
+      nodes: wired().nodes,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "ci-passed" }, action: "notify" }],
+    });
+    render(<OrchestratorDrawer {...props({ runs: [runStatus("ASM-1", "agent-flow")], flows: [ciWired] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    // 4 of 7 checks reported: describeCond's own wording, reaching a user for
+    // the first time.
+    expect(screen.getByTestId("orch-inspector").textContent).toContain("CI running, 4 of 7");
+  });
+
+  it("says the card is not on the board when the run is absent", () => {
+    open(vi.fn(), []);
+    expect(screen.getByTestId("orch-inspector").textContent).toMatch(/not on the board/i);
+  });
+
+  it("deletes the edge", () => {
+    const { onSave } = open();
+    fireEvent.click(screen.getByRole("button", { name: "Delete connection" }));
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges).toEqual([]);
+  });
+
+  it("stops showing an inspector once the edge is gone", () => {
+    const { r } = open();
+    r.rerender(<OrchestratorDrawer {...props({ flows: [flow({ nodes: wired().nodes, edges: [] })] })} />);
+    expect(screen.getByText(/select a connection/i)).toBeTruthy();
   });
 });
