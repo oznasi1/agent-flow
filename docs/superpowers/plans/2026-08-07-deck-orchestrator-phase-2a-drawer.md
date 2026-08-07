@@ -800,7 +800,7 @@ export const ORCH_CSS = `
   .orch-chip .ic { font-size: 12px; line-height: 1; }
   .orch-chip .ct { font-family: var(--mono); font-size: var(--t-micro); color: var(--dim); }
 
-  .orch { position: fixed; top: 53px; right: 0; bottom: 0; width: var(--orch-w, 560px); z-index: 40;
+  .orch { position: fixed; top: 53px; right: 0; bottom: 0; width: 560px; z-index: 40;
     display: flex; flex-direction: column;
     background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
     border-left: 1px solid var(--hair); box-shadow: -14px 0 34px -12px rgba(0,0,0,.45); }
