@@ -3,6 +3,7 @@ import { TOKENS_CSS, BASE_CSS, CONTROLS_CSS } from "../../src/webview/tokens";
 import { CSS } from "../../src/webview/styles";
 import { DECK_CSS } from "../../src/webview/deckStyles";
 import { MARKETPLACE_CSS } from "../../src/webview/marketplaceStyles";
+import { ORCH_CSS } from "../../src/webview/orchestratorStyles";
 
 /** The tokens tokens.ts owns. A surface may USE these; none may DECLARE them. */
 const OWNED = [
@@ -19,6 +20,7 @@ const SURFACES: [string, string][] = [
   ["deck", DECK_CSS],
   ["marketplace", MARKETPLACE_CSS],
   ["controls", CONTROLS_CSS],
+  ["orchestrator", ORCH_CSS],
 ];
 
 // Comments are prose, not CSS: deckStyles.ts has one that reads "...--c-attn, not
@@ -47,8 +49,11 @@ const ruleBlocks = (sheet: string): { selector: string; body: string }[] =>
 
 // Set per-card as an inline style in DeckApp.tsx (a computed value, not a shared
 // token), so it never appears as a declaration in any stylesheet's own text —
-// excluded from the orphan check the same way --vscode-* variables are.
-const RUNTIME_ONLY = ["--accent"];
+// excluded from the orphan check the same way --vscode-* variables are. --orch-w
+// is the drawer's width: it has no declaration anywhere yet either, because
+// nothing sets it inline until a resize control lands in a later task — until
+// then the var()'s own 560px fallback is what actually renders.
+const RUNTIME_ONLY = ["--accent", "--orch-w"];
 
 describe("tokens.ts", () => {
   it("declares every token it owns", () => {

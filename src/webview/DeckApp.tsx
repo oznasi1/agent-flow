@@ -1,7 +1,9 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
 import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
+import type { Flow } from "../engine/orchestrator/model";
 import { DeckCard, projectCards } from "./deckCards";
+import { OrchestratorDrawer } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
 import { isPrReviewStatus } from "./helpers";
 
@@ -399,6 +401,9 @@ export function DeckApp(): JSX.Element {
    * information about an enabled, empty queue; a switched-off strip should show
    * no tile at all, the same way the strip itself renders nothing below. */
   const [reviewsSeen, setReviewsSeen] = React.useState(false);
+  const [flows, setFlows] = React.useState<Flow[]>([]);
+  const [orchEnabled, setOrchEnabled] = React.useState(false);
+  const [openFlowId, setOpenFlowId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     const handler = (ev: MessageEvent<OutboundMessage>) => {
@@ -452,6 +457,19 @@ export function DeckApp(): JSX.Element {
         // "cancelled": nothing was attempted — only the disable above lifts. The
         // body, any draft flag, and any earlier failure warning are left exactly
         // as the user last saw them.
+      } else if (m.type === "deck:flows") {
+        setFlows((old) => {
+          // A create posts a flow we did not have — open it, since pressing the
+          // chip with none is a request for exactly that. A flow deleted
+          // elsewhere must not leave the drawer open on nothing.
+          setOpenFlowId((cur) => {
+            if (cur && m.flows.some((f) => f.id === cur)) return cur;
+            const fresh = m.flows.find((f) => !old.some((o) => o.id === f.id));
+            return fresh ? fresh.id : null;
+          });
+          return m.flows;
+        });
+        setOrchEnabled(m.enabled);
       }
     };
     window.addEventListener("message", handler);
@@ -505,6 +523,20 @@ export function DeckApp(): JSX.Element {
           <div className="stat"><span className="n">{cards.length}</span><span className="l">Total</span></div>
         </div>
         <div className="sp" />
+        {orchEnabled && (
+          <button
+            type="button"
+            className="ctl orch-chip"
+            onClick={() => {
+              if (flows.length === 0) send({ type: "flow:create" });
+              else setOpenFlowId((cur) => (cur ? null : flows[0].id));
+            }}
+          >
+            <span className="ic">⚡</span>
+            <span>Orchestrator</span>
+            {flows.length > 0 && <span className="ct">{flows.length}</span>}
+          </button>
+        )}
         {/* Both toggles answer the same question — how much should the board trust? —
             so they read as one segmented control rather than two loose pills. Buttons,
             not divs: these are controls, and :focus-visible only reaches them here. */}
@@ -666,6 +698,20 @@ export function DeckApp(): JSX.Element {
           </div>
         ))}
       </div>
+
+      {orchEnabled && (
+        <OrchestratorDrawer
+          flows={flows}
+          openId={openFlowId}
+          runs={runs}
+          onClose={() => setOpenFlowId(null)}
+          onCreate={() => send({ type: "flow:create" })}
+          onOpen={(id) => setOpenFlowId(id)}
+          onRename={(id, name) => send({ type: "flow:rename", id, name })}
+          onSave={(flow) => send({ type: "flow:save", flow })}
+          onDelete={(id) => send({ type: "flow:delete", id })}
+        />
+      )}
     </>
   );
 }

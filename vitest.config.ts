@@ -28,6 +28,7 @@ export default defineConfig({
       exclude: [
         "src/webview/styles.ts",
         "src/webview/deckStyles.ts",
+        "src/webview/orchestratorStyles.ts",
         "src/webview/index.tsx",
         "src/webview/deck.tsx",
         "src/webview/marketplaceStyles.ts",
