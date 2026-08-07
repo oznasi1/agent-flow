@@ -385,12 +385,14 @@ vi.mock("../../src/engine/orchestrator/store", () => ({
 }));
 vi.mock("../../src/engine/orchestrator/flowIo", () => ({
   nodeFlowIo: () => ({ readDir: () => [], readFile: () => null, writeFile: () => {}, remove: () => {} }),
-  // Deterministic, so a created flow's id is assertable.
-  newFlowId: () => "fTEST-0001",
+  // A counter, not a constant: deterministic so ids are assertable, but varying so
+  // the re-mint-on-collision path is reachable. A constant would make the retry
+  // loop indistinguishable from a refusal.
+  newFlowId: () => `fTEST-${++h.idSeq}`,
 }));
 ```
 
-Reset `h.flows` in the existing `beforeEach` alongside `h.runs`.
+Add `idSeq: 0` to the hoisted `h` object too, and reset both `h.flows` and `h.idSeq` in the existing `beforeEach` alongside `h.runs`.
 
 The file already has `lastPanel()` (line 258) and `posts(p)` (line 259) for the panel and its posted messages, and `setConfig({ … })` for configuration. Use those. To deliver an inbound message, call the panel's registered receiver — the fake panel exposes `webview.onDidReceiveMessage`, so grab the handler the same way the file's existing message tests do.
 
@@ -435,6 +437,22 @@ describe("orchestrator flows", () => {
     const written = h.writeFlow.mock.calls[0][2] as Flow;
     expect(written).toMatchObject({ name: "New flow", armed: false, nodes: [], edges: [] });
     expect(written.id).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
+
+  it("flow:create re-mints rather than overwriting an id already on disk", async () => {
+    // newFlowId is probabilistic. A collision must not clobber the user's flow.
+    // The flowIo mock's newFlowId is deterministic, so seed the store with exactly
+    // what it will return first and assert the write does not target that id.
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("fTEST-1", "already here")];
+    const { send } = await openPanel();
+    await send({ type: "flow:create" });
+    const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    // It must re-mint past the taken id. Overwriting "fTEST-1" is the one outcome
+    // that must never happen — that is the user's saved flow.
+    expect(written.id).not.toBe("fTEST-1");
+    expect(written.id).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(h.flows[0].name).toBe("already here");
   });
 
   it("flow:rename changes only the name", async () => {
@@ -570,8 +588,18 @@ Then handle the four messages in `onMessage`, beside the existing cases:
 ```ts
       case "flow:create": {
         if (!readConfig().orchestrator) return;
-        const flow = emptyFlow(newFlowId(Date.now()), "New flow", Date.now());
-        writeFlow(this.flowIo, this.flowsDir, flow);
+        const now = Date.now();
+        // `newFlowId` is probabilistic, not unique by construction: its salt space
+        // is 36^4, so two flows minted in the same millisecond CAN collide, and a
+        // collision here would silently overwrite the user's existing flow, since
+        // the store writes by id. Re-mint against what is already on disk. Bounded
+        // rather than a while-loop so a pathological `Math.random()` cannot hang
+        // the extension host.
+        const taken = new Set(readFlows(this.flowIo, this.flowsDir).map((f) => f.id));
+        let id = newFlowId(now);
+        for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+        if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
+        writeFlow(this.flowIo, this.flowsDir, emptyFlow(id, "New flow", now));
         this.postFlows();
         return;
       }
