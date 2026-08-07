@@ -2206,9 +2206,17 @@ Run: `npx vitest run`
 Run: `npx vitest run --coverage`
 Expected: green; `OrchestratorDrawer.tsx` ≥95% lines, and every file this phase touched at ≥95%.
 
-- [ ] **Step 7: Update the README**
+- [ ] **Step 7: Update the README — both places**
 
-The Deck section of `README.md` documents each toggle and strip. Add a paragraph after the PR-facts paragraph, in the same voice — plain prose, no marketing:
+`README.md` documents settings twice, and both need the new one.
+
+**(a) The settings table**, around line 276, one row per setting with its default. Add a row in the same three-column format, placed to match the table's existing ordering:
+
+```markdown
+| `agentFlow.orchestrator` | `false` | Show the Deck's Orchestrator drawer, where you wire in-flight agents into a flow with a condition on each connection. |
+```
+
+**(b) The Deck's prose section**, which documents each toggle and strip. Add a paragraph after the PR-facts paragraph, in the same voice — plain prose, no marketing:
 
 ```markdown
 An **Orchestrator** drawer (off by default, `agentFlow.orchestrator`) lets you wire the
