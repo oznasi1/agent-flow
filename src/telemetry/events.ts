@@ -144,6 +144,7 @@ export interface SettingsSnapshot {
   review_requests: boolean;
   open_agents: boolean;
   review_writes: boolean;
+  orchestrator: boolean;
   stamp_label_on_write: boolean;
   track_open_windows: boolean;
   batch_confirm_threshold: number;

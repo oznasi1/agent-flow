@@ -245,6 +245,10 @@ export interface AgentFlowConfig {
   // Allow submitting approve / comment / request-changes from the Deck. The only
   // setting in Agent Flow Deck that lets it write to GitHub.
   reviewWrites: boolean;
+  /** Show the Deck's Orchestrator chip and drawer. Off by default, like
+   * `reviewWrites`: a flow eventually launches agents on a timer, so the whole
+   * feature stays invisible until you ask for it. */
+  orchestrator: boolean;
   // Seed modes offered by Review with agent, same shape as promptModes. Never
   // empty — an unusable configured value falls back to DEFAULT_REVIEW_REQUEST_MODES.
   reviewRequestModes: PromptMode[];
@@ -427,6 +431,7 @@ export function getConfig(): AgentFlowConfig {
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,
+    orchestrator: c.get<boolean>("orchestrator") ?? false,
     reviewRequestModes: (() => {
       // An explicit modes list is a deliberate layer over the built-ins and wins
       // over the deprecated string, even when it holds nothing usable.

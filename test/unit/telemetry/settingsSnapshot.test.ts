@@ -27,6 +27,7 @@ describe("settingsSnapshot", () => {
     expect(s.pr_review_prompt_customized).toBe(false);
     expect(s.open_agents).toBe(true);
     expect(s.review_writes).toBe(false);
+    expect(s.orchestrator).toBe(false);
     expect(s.repo_blocklist_count).toBe(0);
     expect(s.review_mode).toBe("ask");
     expect(s.review_modes_count).toBe(1);
@@ -321,5 +322,13 @@ describe("settingsSnapshot — mode counts", () => {
   it("carries no label, detail or prompt text", () => {
     setConfig({ promptModes: [{ id: "spike", label: "SECRET", detail: "SECRET", prompt: "SECRET" }] });
     expect(JSON.stringify(settingsSnapshot(getConfig()))).not.toContain("SECRET");
+  });
+});
+
+describe("settingsSnapshot — orchestrator", () => {
+  it("carries the orchestrator setting", () => {
+    expect(settingsSnapshot(getConfig()).orchestrator).toBe(false);
+    setConfig({ orchestrator: true });
+    expect(settingsSnapshot(getConfig()).orchestrator).toBe(true);
   });
 });

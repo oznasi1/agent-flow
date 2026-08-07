@@ -528,6 +528,15 @@ describe("review-request settings", () => {
     expect(getConfig().reviewWrites).toBe(true);
   });
 
+  it("defaults orchestrator to off", () => {
+    expect(getConfig().orchestrator).toBe(false);
+  });
+
+  it("reads orchestrator when turned on", () => {
+    setConfig({ orchestrator: true });
+    expect(getConfig().orchestrator).toBe(true);
+  });
+
   it("floors the TTL at 60 seconds", () => {
     setConfig({ reviewRequestsTtlSeconds: 5 });
     expect(getConfig().reviewRequestsTtlSeconds).toBe(60);
