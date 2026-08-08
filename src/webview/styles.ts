@@ -297,10 +297,16 @@ export const CSS = `
      already uses to signal state, just thinner. */
   .notepad { padding: 4px 0 12px; }
   .np-add { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+  /* One focus language for the whole panel: suppress the UA outline and move focus
+     onto the control's own border, exactly as .text-search:focus-within does. The
+     resting hairline is load-bearing — without it the border appears out of nothing
+     on focus, which reads as the field jumping rather than lighting up. */
   .np-title-input, .np-body-input { width: 100%; padding: 5px 7px;
     background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border, transparent); border-radius: var(--r-ctl);
+    border: 1px solid var(--vscode-input-border, var(--hair)); border-radius: var(--r-ctl);
     font-family: inherit; font-size: var(--t-body); }
+  .np-title-input:focus, .np-body-input:focus { outline: none;
+    border-color: var(--vscode-focusBorder); }
   .np-body-input { resize: vertical; }
   /* Each field carries its own mic immediately to its right, so which field a
      dictation session fills is never ambiguous. */

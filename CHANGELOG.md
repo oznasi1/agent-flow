@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Tabs at the top of the sidebar.** `Tasks | Notepad` is now the panel's first row, with the project and signed-in user moved into the view's own title bar. The panel is a row shorter on both tabs, and "Tasks" is no longer said twice.
+- **Notepad fields focus like every other input.** The title and detail fields lit up with a detached outline in the theme's focus hue; they now move focus onto their own border, matching the task search and repo picker.
 
 ## [0.6.0] — 2026-08-08
 
