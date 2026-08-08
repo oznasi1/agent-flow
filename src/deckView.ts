@@ -687,6 +687,12 @@ export class DeckPanel {
         seedAgent: cfg.seedAgent,
         openIn: "new",
         existingFolder: repo.path,
+        // A seed creates no run — the run this place belongs to already exists.
+        // Without this, openWorkspace's own writeRun would OVERWRITE that run's
+        // record under the same key: `repos` narrowed to just this one service,
+        // `createdAt` reset to now, `kind`/`mode`/`workspaceFile` dropped or
+        // forced, silently rewriting the card the user is looking at.
+        recordRun: false,
       });
     } catch (e) {
       // Tried and may have spent something (a window may already be open, a brief

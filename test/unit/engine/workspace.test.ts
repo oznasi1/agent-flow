@@ -107,6 +107,23 @@ describe("openWorkspace — multiroot", () => {
     expect(run.mode).toBe("multiroot");
     expect(run.repos.map((r: { name: string }) => r.name)).toEqual(["account-service", "centaur"]);
   });
+
+  it("writes no run record when recordRun is false — opening into work that already has one", async () => {
+    // A seed opens another agent into a place that already exists; the run it
+    // belongs to is already on disk, and writing one here would not merge but
+    // OVERWRITE that record under the same key (narrower repos, reset createdAt,
+    // dropped/forced kind/mode/workspaceFile) — see deckView.ts's seed path.
+    await openWorkspace(baseReq({ recordRun: false }));
+    expect(writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"))).toBeUndefined();
+  });
+
+  it("still writes a run record when recordRun is omitted — every existing caller is unaffected", async () => {
+    // The protective test for the flag's default: every caller that predates
+    // `recordRun` (every ordinary Take) never sets it, and must keep getting a
+    // run record exactly as before. If the default ever flips, this is what fails.
+    await openWorkspace(baseReq());
+    expect(writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"))).toBeTruthy();
+  });
 });
 
 describe("openWorkspace — run kind", () => {

@@ -52,6 +52,13 @@ export interface OpenRequest {
   existingFolder?: string; // when set: focus this already-open folder window + seed it
   remoteControl?: boolean; // offer Claude Code's Remote Control in the opened session
   kind?: Run["kind"]; // what launched this run; omitted means a task
+  /** Whether to record a Run for this open. Defaults to true. Set false when opening
+   * into work that already has a record — seeding a second agent into an existing
+   * place creates no new run, and writing one would not merge but overwrite: repos
+   * come from `services`, `createdAt` resets, `kind` and `mode` and `workspaceFile`
+   * are taken from this request. That silently rewrites the card the user is
+   * looking at. */
+  recordRun?: boolean;
 }
 
 export interface OpenResult {
@@ -264,26 +271,28 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   if (seedAgent) {
     writePlanFile({ key: ticket.key, createdAt: Date.now(), seedAgent: true, remoteControl, matches });
   }
-  const run: Run = {
-    key: ticket.key,
-    summary: ticket.summary,
-    url: ticket.url,
-    createdAt: Date.now(),
-    kind: req.kind,
-    mode: effMode,
-    workspaceFile,
-    repos: services.map((s) => ({
-      name: s.name,
-      path: s.path,
-      isGit: s.isGit,
-      branch: gitState(s.name, s.path).branch ?? undefined,
-    })),
-    briefPaths: briefs.map((b) => b.path),
-  };
-  try {
-    writeRun(defaultRunsDir(), run);
-  } catch {
-    /* the Deck record is best-effort — never fail a take over it */
+  if (req.recordRun !== false) {
+    const run: Run = {
+      key: ticket.key,
+      summary: ticket.summary,
+      url: ticket.url,
+      createdAt: Date.now(),
+      kind: req.kind,
+      mode: effMode,
+      workspaceFile,
+      repos: services.map((s) => ({
+        name: s.name,
+        path: s.path,
+        isGit: s.isGit,
+        branch: gitState(s.name, s.path).branch ?? undefined,
+      })),
+      briefPaths: briefs.map((b) => b.path),
+    };
+    try {
+      writeRun(defaultRunsDir(), run);
+    } catch {
+      /* the Deck record is best-effort — never fail a take over it */
+    }
   }
 
   // 4 — open (new window, or reuse the current one)

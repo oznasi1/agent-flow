@@ -3794,6 +3794,9 @@ describe("a met seed rule acts", () => {
     // spends money in the wrong place. Assert the actual argument object, not a
     // substring of some derived message.
     expect(req.existingFolder).toBe("/r/bite-me");
+    // The run this place belongs to already exists — a seed must not let
+    // openWorkspace's own writeRun overwrite that record under the same key.
+    expect(req.recordRun).toBe(false);
     expect(req.openIn).toBe("new");
     expect(req.mode).toBe("per-window");
     expect(req.services).toEqual([{ name: "bite-me", path: "/r/bite-me", isGit: true }]);
