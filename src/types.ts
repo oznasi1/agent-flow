@@ -71,8 +71,10 @@ export interface Run {
    * this, not the url, is what keeps them out of Jira polling and the columns.
    * "local" is the one kind that is never written to the runs store: it marks a
    * place discovered from an open Claude Code session, and stops being true the
-   * moment Track it lands. */
-  kind?: "task" | "explore" | "review" | "local";
+   * moment Track it lands.
+   * "notepad" is a run launched from the Notepad tab: ticketless like "explore",
+   * but distinguishable from it so the board can label it for what it is. */
+  kind?: "task" | "explore" | "review" | "local" | "notepad";
   mode: WorkspaceMode;
   workspaceFile?: string; // multi-root .code-workspace, when mode === "multiroot"
   repos: { name: string; path: string; isGit: boolean; branch?: string }[];
@@ -86,12 +88,14 @@ export interface Run {
   finishedAt?: number;
 }
 
-const RUN_KINDS = new Set(["task", "explore", "review", "local"]);
+const RUN_KINDS = new Set(["task", "explore", "review", "local", "notepad"]);
 
 /** A run's kind, tolerant of an old record with no field and of a hand-edited
  * one with a value we don't know. */
-export function runKind(run: Run): "task" | "explore" | "review" | "local" {
-  return RUN_KINDS.has(run.kind as string) ? (run.kind as "task" | "explore" | "review" | "local") : "task";
+export function runKind(run: Run): "task" | "explore" | "review" | "local" | "notepad" {
+  return RUN_KINDS.has(run.kind as string)
+    ? (run.kind as "task" | "explore" | "review" | "local" | "notepad")
+    : "task";
 }
 
 /** One open Claude Code session, as ~/.claude/sessions/<pid>.json records it.
