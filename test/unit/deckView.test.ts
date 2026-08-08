@@ -3244,3 +3244,195 @@ describe("the resume gate", () => {
     expect(h.writeFlow).not.toHaveBeenCalled();
   });
 });
+
+describe("arm, disarm and reset", () => {
+  /** Open a panel and return it plus a way to deliver an inbound message — the
+   * same `show()` + `settled()` + `_fire` idiom every other describe block in
+   * this file uses, rather than reaching into `webview.onDidReceiveMessage`
+   * directly. */
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  it("flow:arm sets armed and reports nothing when both sources are on", async () => {
+    // this.liveSignal defaults true and beforeEach already sets h.prFacts true
+    // (the mocked getConfig() returns h.prFacts, not whatever setConfig stores —
+    // see the module mock above), so both sources are already on without
+    // needing to steer either one here.
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "n")];
+    const { p, send } = await openPanel();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).armed).toBe(true);
+    expect(posts(p).some((m) => m.type === "toast" && /can never fire/i.test(m.message ?? ""))).toBe(false);
+  });
+
+  it("flow:arm names the rules that can never fire with a source off", async () => {
+    // h.prFacts, not setConfig({ prFacts: false }): the mocked getConfig() in
+    // this file always returns h.prFacts for the `prFacts` field, regardless of
+    // what the fake vscode configuration store holds — the same knob every
+    // other "PR facts off" test in this suite turns (see e.g. line ~1457).
+    // setConfig({ prFacts: false }) alone would leave this.prFacts seeded true
+    // in the constructor, and the dead-rule toast would never fire.
+    setConfig({ orchestrator: true });
+    h.prFacts = false;
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    }];
+    const { p, send } = await openPanel();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    // Armed anyway — a flow with one dead rule and three live ones is still worth arming.
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).armed).toBe(true);
+    const toast = posts(p).find((m) => m.type === "toast" && /PR facts/i.test(m.message ?? ""));
+    expect(toast).toBeTruthy();
+  });
+
+  it("flow:arm with armed:false disarms", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f1", "n"), armed: true }];
+    const { send } = await openPanel();
+    await send({ type: "flow:arm", id: "f1", armed: false });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).armed).toBe(false);
+  });
+
+  it("flow:arm ignores an unknown id", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "n")];
+    const { send } = await openPanel();
+    await send({ type: "flow:arm", id: "nope", armed: true });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("flow:arm(false) drops any held resume gate, so re-arming starts the cycle over", async () => {
+    // Task 4's resume gate: a flow whose first evaluation finds a rule already
+    // met holds it for approval rather than firing outright. Disarming while
+    // that gate is held must drop it — otherwise re-arming later would resume
+    // exactly where it left off instead of starting a fresh first evaluation.
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      armed: true,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "done" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    }];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { p, send } = await openPanel();
+    await settle();
+    const held = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { pendingResume: unknown[] };
+    expect(held.pendingResume).toHaveLength(1);
+    await send({ type: "flow:arm", id: "f1", armed: false });
+    const clearedPost = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { pendingResume: unknown[] };
+    expect(clearedPost.pendingResume).toEqual([]);
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    await send({ type: "deck:refresh" });
+    // Re-armed after a drop: the very next pass must hold again rather than
+    // fire straight away — proof the resume gate's own bookkeeping was reset,
+    // not just the flow's `armed` bit.
+    const again = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { pendingResume: unknown[] };
+    expect(again.pendingResume).toHaveLength(1);
+  });
+
+  it("flow:resetEdge clears firedAt, firedNote and error for one edge only", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [
+        { id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you", error: "boom" },
+        { id: "e2", from: "a", to: "y", cond: { kind: "pr-merged" }, action: "notify", firedAt: 7 },
+      ],
+    }];
+    const { send } = await openPanel();
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(w.edges[0].firedAt).toBeUndefined();
+    expect(w.edges[0].firedNote).toBeUndefined();
+    expect(w.edges[0].error).toBeUndefined();
+    expect(w.edges[1].firedAt).toBe(7);
+  });
+
+  it("flow:resetEdge ignores an unknown flow id", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5 }],
+    }];
+    const { send } = await openPanel();
+    await send({ type: "flow:resetEdge", id: "nope", edgeId: "e1" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("flow:save preserves the host's own firedAt when the drawer's copy is stale", async () => {
+    // The hazard: the host stamped e1 during a poll; the drawer still holds the
+    // pre-stamp flow and saves a node move. Writing its copy verbatim would clear
+    // the latch and re-fire a rule that already ran.
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you" }],
+    }];
+    const stale: Flow = {
+      ...mkFlow("f1", "n"),
+      nodes: [{ id: "n1", kind: "place", x: 99, y: 99, join: "any", runKey: "ASM-1", repo: "r" }],
+      edges: [{ id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify" }],
+    };
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: stale });
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(w.edges[0].firedAt).toBe(5);
+    expect(w.edges[0].firedNote).toBe("told you");
+    // The drawer's actual edit still lands.
+    expect(w.nodes[0].x).toBe(99);
+  });
+
+  it("flow:save keeps an error the host recorded", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify", error: "worktree exists" }],
+    }];
+    const stale: Flow = {
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify" }],
+    };
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: stale });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0].error).toBe("worktree exists");
+  });
+
+  it("flow:save does not resurrect host fields for an edge the drawer deleted", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5 }],
+    }];
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: { ...mkFlow("f1", "n"), edges: [] } });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges).toEqual([]);
+  });
+
+  it("flow:save lets the drawer's condition edit win over the host's copy", async () => {
+    // Only the three host-owned fields are preserved. Everything else is the
+    // drawer's to change.
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5 }],
+    }];
+    const edited: Flow = {
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "a", to: "z", cond: { kind: "ci-failed" }, action: "notify" }],
+    };
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: edited });
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(w.edges[0].cond).toEqual({ kind: "ci-failed" });
+    expect(w.edges[0].firedAt).toBe(5);
+  });
+});

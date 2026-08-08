@@ -9,6 +9,7 @@ import { Flow, emptyFlow } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
 import { nodeFlowIo, newFlowId } from "./engine/orchestrator/flowIo";
 import { evaluateFlow } from "./engine/orchestrator/evaluate";
+import { unfirableRules } from "./engine/orchestrator/armability";
 import { applyFired, notifyLines } from "./engine/orchestrator/runner";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
@@ -1074,9 +1075,21 @@ export class DeckPanel {
         if (!getConfig().orchestrator) return;
         // Only a flow the host already has may be saved. The drawer can only ever
         // edit one it was given; anything else would create a file from nothing.
-        const known = readFlows(this.flowIo, this.flowsDir).some((f) => f.id === m.flow.id);
-        if (!known) return;
-        writeFlow(this.flowIo, this.flowsDir, m.flow);
+        const existing = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.flow.id);
+        if (!existing) return;
+        // Preserve the fields the HOST owns. From this phase on the host stamps
+        // firedAt/firedNote/error during its poll, and the drawer may be holding a
+        // flow from before that stamp — writing its copy verbatim would clear the
+        // latch and re-fire a rule that already ran.
+        const mine = new Map(existing.edges.map((e) => [e.id, e]));
+        writeFlow(this.flowIo, this.flowsDir, {
+          ...m.flow,
+          edges: m.flow.edges.map((e) => {
+            const host = mine.get(e.id);
+            if (!host) return e;
+            return { ...e, firedAt: host.firedAt, firedNote: host.firedNote, error: host.error };
+          }),
+        });
         this.postFlows();
         return;
       }
@@ -1089,6 +1102,53 @@ export class DeckPanel {
         const existing = readFlows(this.flowIo, this.flowsDir).some((f) => f.id === m.id);
         if (!existing) return;
         removeFlow(this.flowIo, this.flowsDir, m.id);
+        this.postFlows();
+        return;
+      }
+      case "flow:arm": {
+        if (!getConfig().orchestrator) return;
+        const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
+        if (!flow) return;
+        writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed });
+        if (m.armed) {
+          // Warn and name, rather than refuse: a flow with one dead rule and three
+          // live ones is still worth arming, and silence is how a user ends up
+          // waiting forever on something that can never happen.
+          const dead = unfirableRules(flow, { liveSignal: this.liveSignal, prFacts: this.prFacts });
+          if (dead.length > 0) {
+            const live = dead.filter((d) => d.needs === "live-signal").length;
+            const pr = dead.filter((d) => d.needs === "pr-facts").length;
+            const parts: string[] = [];
+            if (pr > 0) parts.push(`${pr} need${pr === 1 ? "s" : ""} PR facts`);
+            if (live > 0) parts.push(`${live} need${live === 1 ? "s" : ""} the Live signal`);
+            this.post({
+              type: "toast",
+              level: "info",
+              message: `${flow.name} armed — but ${parts.join(" and ")}, which ${
+                parts.length > 1 ? "are" : "is"
+              } off, so ${dead.length === 1 ? "that rule" : "those rules"} can never fire.`,
+            });
+          }
+        } else {
+          // A disarmed flow holds no resume gate — re-arming starts the cycle over.
+          this.pendingResume.delete(m.id);
+          this.resumeCleared.delete(m.id);
+        }
+        this.postFlows();
+        return;
+      }
+      case "flow:resetEdge": {
+        if (!getConfig().orchestrator) return;
+        const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
+        if (!flow) return;
+        writeFlow(this.flowIo, this.flowsDir, {
+          ...flow,
+          // Rebuilt from its non-host fields rather than deleting three keys, so a
+          // future host-owned field cannot be silently forgotten here.
+          edges: flow.edges.map((e) =>
+            e.id === m.edgeId ? { id: e.id, from: e.from, to: e.to, cond: e.cond, action: e.action, mode: e.mode } : e,
+          ),
+        });
         this.postFlows();
         return;
       }

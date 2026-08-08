@@ -364,13 +364,21 @@ export type InboundMessage =
   | { type: "deck:reviewLoadDraft"; id: string }
   | { type: "deck:reviewSubmit"; id: string; verb: ReviewVerb; body: string; fromDraft: boolean }
   // ── Orchestrator flows ──────────────────────────────────────────────
-  // `flow:save` carries the WHOLE flow rather than a patch: a graph is small,
-  // the drawer is its only editor, and a whole-document write means no merge
-  // logic and no partial-update bugs.
+  // `flow:save` carries the WHOLE flow rather than a patch: a graph is small
+  // and the drawer is its only editor. The host still merges its own three
+  // per-edge fields (firedAt/firedNote/error) back in on receipt — see
+  // DeckPanel's flow:save handler — because the drawer's copy can predate a
+  // stamp the host wrote during a poll.
   | { type: "flow:create" }
   | { type: "flow:rename"; id: string; name: string }
   | { type: "flow:save"; flow: Flow }
   | { type: "flow:delete"; id: string }
+  // Arm/disarm a flow (Task 5). Arming warns and names any rule that can never
+  // fire with a data source switched off, rather than refusing to arm.
+  // Disarming also drops any resume gate the flow is holding.
+  | { type: "flow:arm"; id: string; armed: boolean }
+  // Clears one edge's latch (firedAt/firedNote/error) so it can fire again.
+  | { type: "flow:resetEdge"; id: string; edgeId: string }
   // The resume gate (Task 4): approving clears the gate so the next pass fires
   // normally; disarming turns the flow off instead. Neither message performs
   // anything itself — see DeckPanel.advanceArmedFlows.
