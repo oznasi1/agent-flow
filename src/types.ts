@@ -315,6 +315,34 @@ export interface ClaudeAssetsView {
   scannedAt: number;
 }
 
+// ── The Notepad: local, ticketless scratch items ────────────────────────────
+
+/** One notepad item, exactly as persisted in globalState. Deliberately global
+ * rather than per-workspace: these are the user's scratch items, not a repo's.
+ * `lastRunKey` is the key of the most recent run launched from this note — the
+ * only run-related field stored, since everything else is derived at read time. */
+export interface NotepadItem {
+  id: string;
+  title: string;
+  body: string;
+  done: boolean;
+  createdAt: number; // epoch ms
+  lastRunKey?: string;
+}
+
+/** A note's most recent run, as far as the two cheap signals can tell:
+ * "running" — a Claude Code session is open in one of its repos right now;
+ * "stale" — launched, but nothing attached to it at the moment;
+ * "finished" — the Deck's retire sweep stamped it landed.
+ * Absent entirely when there is no run record to speak for (never launched, or
+ * the Deck already retired it — guessing which would be dishonest). */
+export type NotepadRunStatus = "running" | "stale" | "finished";
+
+/** What crosses the wire: the stored note plus its derived status. The status is
+ * computed host-side per post and never persisted — the webview cannot read the
+ * runs store itself (it must not import a module that touches `fs`). */
+export type NotepadItemView = NotepadItem & { runStatus?: NotepadRunStatus };
+
 // Messages: webview → host
 export type InboundMessage =
   | { type: "ready" }
