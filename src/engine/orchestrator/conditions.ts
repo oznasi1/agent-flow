@@ -2,8 +2,14 @@
 // a single `RunStatus` — the snapshot `buildRunStatus` already builds for the board
 // — so the whole vocabulary is table-testable and adds no I/O of its own. Adding a
 // condition that needs a new fact means teaching the Deck to observe it first.
+//
+// Imports come from `../activity`, never `../status`: OrchestratorDrawer.tsx pulls
+// `describeCond` in, the webview bundles for a browser target, and esbuild resolves
+// statically — one hop into `status.ts` puts `child_process`, `fs`, `path` and `os`
+// in the Deck's bundle graph and the build stops resolving. `../activity` is a leaf
+// that imports types only. test/webview/webviewGraph.test.ts pins this.
 import { AgentActivity, PrFacts, RepoGit, RunStatus } from "../../types";
-import { mostActive } from "../status";
+import { mostActive, UNKNOWN_ACTIVITY } from "../activity";
 import { Condition } from "./model";
 
 export interface CondContext {
@@ -27,12 +33,6 @@ function git(c: CondContext): RepoGit | undefined {
 function agentsHere(c: CondContext) {
   return c.status.agents.filter((a) => a.repo === undefined || a.repo === c.repo);
 }
-
-/** Mirrors `transcript.ts`'s `UNKNOWN_ACTIVITY`. Not imported from there: that
- * module reads transcripts off disk and imports `fs` to do it, and this module
- * must stay I/O-free — pulling in that import for one constant would defeat the
- * point. */
-const UNKNOWN_ACTIVITY: AgentActivity = { state: "unknown", lastActivityMs: null, slug: null };
 
 /** Live state of this place, not of the whole run: a two-worktree run can have one
  * agent working and one waiting on you, and a rule about one must not read the

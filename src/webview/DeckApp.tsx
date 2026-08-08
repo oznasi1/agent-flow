@@ -416,6 +416,12 @@ export function DeckApp(): JSX.Element {
   const [flows, setFlows] = React.useState<Flow[]>([]);
   const [orchEnabled, setOrchEnabled] = React.useState(false);
   const [openFlowId, setOpenFlowId] = React.useState<string | null>(null);
+  /** The flow list the last `deck:flows` post carried. The message handler below is
+   * registered once (`[]` deps, because re-running it would re-post `deck:ready`), so
+   * the `flows` state variable it closes over never advances past `[]` — and telling
+   * a newly created flow from one we already had needs the previous list. Mirrors
+   * `flows` exactly; it is never a second source of truth for rendering. */
+  const flowsRef = React.useRef<Flow[]>([]);
 
   React.useEffect(() => {
     const handler = (ev: MessageEvent<OutboundMessage>) => {
@@ -470,16 +476,28 @@ export function DeckApp(): JSX.Element {
         // body, any draft flag, and any earlier failure warning are left exactly
         // as the user last saw them.
       } else if (m.type === "deck:flows") {
-        setFlows((old) => {
-          // A create posts a flow we did not have — open it, since pressing the
-          // chip with none is a request for exactly that. A flow deleted
-          // elsewhere must not leave the drawer open on nothing.
-          setOpenFlowId((cur) => {
-            if (cur && m.flows.some((f) => f.id === cur)) return cur;
-            const fresh = m.flows.find((f) => !old.some((o) => o.id === f.id));
-            return fresh ? fresh.id : null;
-          });
-          return m.flows;
+        // A create posts a flow we did not have — open it, since pressing the chip
+        // with none is a request for exactly that. A flow deleted elsewhere must not
+        // leave the drawer open on nothing.
+        //
+        // The comparison needs the previous list, and this listener is registered
+        // once with `[]` deps so the `flows` state variable in scope is permanently
+        // the initial `[]`. Hence the ref. What it must NOT be is `setOpenFlowId`
+        // nested inside `setFlows`'s updater, which is what shipped: React's contract
+        // is that an updater is pure, because React reserves the right to replay one.
+        // (Measured, for the record: React 18.3.1's eager-state path happens to run
+        // that updater exactly once per post, so the nested version was not producing
+        // a wrong open flow today — this is closing the hole, not fixing a live
+        // symptom. The same shape in the drawer's drag handler DID double-write.)
+        // Reading the ref once, before overwriting it, keeps this block idempotent no
+        // matter how many times React runs the updater below.
+        const old = flowsRef.current;
+        flowsRef.current = m.flows;
+        setFlows(m.flows);
+        setOpenFlowId((cur) => {
+          if (cur && m.flows.some((f) => f.id === cur)) return cur;
+          const fresh = m.flows.find((f) => !old.some((o) => o.id === f.id));
+          return fresh ? fresh.id : null;
         });
         setOrchEnabled(m.enabled);
       }

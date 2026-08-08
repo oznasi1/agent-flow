@@ -111,7 +111,7 @@ export type CommandId =
  * `*_fp` properties are matched by suffix and must be 16-char hex. */
 export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as const;
 
-/** The 33 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
+/** The 35 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
  *
  * `"invalid"` on the six enum-ish fields below (workspace_mode, open_in,
  * explore_mode, worktree, remote_control, default_filter) is a sentinel, not a

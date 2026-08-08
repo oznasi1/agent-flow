@@ -120,6 +120,36 @@ describe("OrchestratorDrawer", () => {
     fireEvent.click(screen.getByRole("button", { name: "+ New flow" }));
     expect(onCreate).toHaveBeenCalled();
   });
+
+  // `onDelete` was declared, wired in DeckApp and never called: a user could create
+  // flows forever and delete none, while src/types.ts, deckView.ts and two
+  // deckView tests carried a live fs.rmSync path with no caller.
+  it("deletes the open flow", () => {
+    const onDelete = vi.fn();
+    render(<OrchestratorDrawer {...props({ onDelete })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete flow" }));
+    expect(onDelete).toHaveBeenCalledWith("f1");
+  });
+
+  it("leaves the drawer showing nothing after deleting the open flow", () => {
+    // Not "the host will post deck:flows eventually" — the drawer closes on the
+    // spot, so it never renders a flow that has been deleted.
+    const onClose = vi.fn();
+    render(<OrchestratorDrawer {...props({ onClose })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete flow" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("keeps the delete quiet — no fill, no accent, no red", () => {
+    // A filled or accented control is reserved for Arm, which does not exist yet,
+    // and red is reserved for a real failure. `orch-mini` is the quiet style its
+    // neighbours use; orchestratorStyles.ts gives it a transparent background and
+    // a --dim foreground, and tokens.test.ts pins that --brand never reaches it.
+    render(<OrchestratorDrawer {...props()} />);
+    const del = screen.getByRole("button", { name: "Delete flow" });
+    expect(del.className).toBe("orch-mini");
+    expect(del.getAttribute("style")).toBeNull();
+  });
 });
 
 const drop = (el: Element, payload: string) =>
@@ -211,6 +241,40 @@ describe("the tray", () => {
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.edges).toEqual([]);
   });
+
+  // Ids are re-minted to the lowest free value (see `nextId`), so a selection that
+  // outlives its node lands on whatever next takes the id. Both of these render
+  // against an UNCHANGED flow prop — `onSave` is a mock, so nothing re-renders from
+  // the parent — which is the only way to observe the clear itself rather than the
+  // list simply having shrunk.
+  it("clears the node selection when a node is removed", () => {
+    const existing = flow({
+      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" }],
+    });
+    render(<OrchestratorDrawer {...props({ onSave: vi.fn(), flows: [existing] })} />);
+    // Pointer-down is what selects a node; release it so no drag is left in flight.
+    fireEvent.pointerDown(screen.getByTestId("orch-node-n1"), { clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(window);
+    expect(screen.getByTestId("orch-node-n1").classList.contains("sel")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Remove ASM-1" }));
+    expect(screen.getByTestId("orch-node-n1").classList.contains("sel")).toBe(false);
+  });
+
+  it("clears the edge selection when a node is removed", () => {
+    const existing = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "done" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    });
+    render(<OrchestratorDrawer {...props({ onSave: vi.fn(), flows: [existing] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.queryByText(/select a connection/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove ASM-1" }));
+    // A re-minted `e1` would otherwise open the inspector on a rule nobody clicked.
+    expect(screen.getByText(/select a connection/i)).toBeTruthy();
+  });
 });
 
 const twoPlaces = () =>
@@ -235,6 +299,65 @@ describe("the canvas", () => {
     const n1 = screen.getByTestId("orch-node-n1");
     expect(n1.textContent).toContain("ASM-1");
     expect(n1.textContent).toContain("agent-flow");
+  });
+
+  // Phase 1's Critical bug, reintroduced in the node badge: `runs.find(...)?.agent
+  // .state` is the RUN-level aggregate, `mostActive` over every agent in every repo
+  // of the run. A node must read `placeActivity` instead, or a panel makes two
+  // contradictory claims about one place — an amber needs-you dot on the node, and
+  // "agent state unknown" in the inspector two panes below.
+  describe("a node's state dot", () => {
+    const dotOf = (id: string) =>
+      (screen.getByTestId(`orch-node-${id}`).querySelector(".d") as HTMLElement).style.background;
+
+    /** A run with two worktrees, one agent, and that agent in `agentRepo`. Its
+     * run-level `agent` is what `buildRunStatus` would compute: `mostActive` over
+     * every repo, i.e. the one agent's own state. */
+    const twoRepoRun = (agentRepo: string): RunStatus => ({
+      run: {
+        key: "ASM-5", summary: "s", url: "https://j/browse/ASM-5", createdAt: 1, mode: "multiroot",
+        repos: [
+          { name: "web", path: "/r/web", isGit: true },
+          { name: "api", path: "/r/api", isGit: true },
+        ],
+        briefPaths: [],
+      },
+      column: "needs", ticketStatus: "In Progress", ticketCategory: "indeterminate",
+      repos: [
+        { name: "web", path: "/r/web", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
+        { name: "api", path: "/r/api", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
+      ],
+      agent: { state: "needs-you", lastActivityMs: 9, slug: null },
+      windowOpen: true, prs: {},
+      agents: [{
+        session: { pid: 1, sessionId: "s1", cwd: `/r/${agentRepo}`, startedAt: 1, name: "s1" },
+        activity: { state: "needs-you", lastActivityMs: 9, slug: null },
+        repo: agentRepo,
+      }],
+    });
+
+    const boundTo = (repo: string): Flow =>
+      flow({ nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-5", repo }] });
+
+    it("does not borrow another repo's state", () => {
+      // The agent that ended its turn is in `web`; this node is bound to `api`,
+      // which has no agent at all. Reading `status.agent` would paint it amber.
+      render(<OrchestratorDrawer {...props({ runs: [twoRepoRun("web")], flows: [boundTo("api")] })} />);
+      expect(dotOf("n1")).not.toBe("var(--c-attn)");
+      expect(dotOf("n1")).toBe("var(--dim)"); // unknown — the same thing the inspector says
+    });
+
+    it("still shows this place's own agent", () => {
+      // The mirror image, so the fix cannot be "always unknown": bind the node to
+      // the repo the agent is actually in and the amber dot must appear.
+      render(<OrchestratorDrawer {...props({ runs: [twoRepoRun("web")], flows: [boundTo("web")] })} />);
+      expect(dotOf("n1")).toBe("var(--c-attn)");
+    });
+
+    it("says nothing about a run that is not on the board", () => {
+      render(<OrchestratorDrawer {...props({ runs: [], flows: [boundTo("api")] })} />);
+      expect(dotOf("n1")).toBe("var(--dim)");
+    });
   });
 
   it("saves a snapped position after a node is dragged", () => {
@@ -265,6 +388,25 @@ describe("the canvas", () => {
     fireEvent.pointerDown(screen.getByTestId("orch-node-n1"), { clientX: 10, clientY: 10 });
     fireEvent.pointerUp(window);
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  // The save used to live INSIDE the `setDrag` updater. A state updater must be
+  // pure: React double-invokes this one under StrictMode, which turned one released
+  // drag into two writes of the user's flow file — measured, two `onSave` calls, not
+  // a theory. StrictMode is what makes it observable; outside it the eager-state path
+  // runs the updater once and the broken version looks fine.
+  it("writes the moved position exactly once, even under StrictMode", () => {
+    const onSave = vi.fn();
+    render(
+      <React.StrictMode>
+        <OrchestratorDrawer {...props({ onSave, flows: [twoPlaces()] })} />
+      </React.StrictMode>,
+    );
+    fireEvent.pointerDown(screen.getByTestId("orch-node-n1"), { clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(window, { clientX: 131, clientY: 100 });
+    fireEvent.pointerUp(window);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect((onSave.mock.calls[0][0] as Flow).nodes.find((n) => n.id === "n1")!.x).toBe(56);
   });
 
   it("Tidy re-lays-out and saves", () => {

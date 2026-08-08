@@ -2856,6 +2856,18 @@ describe("orchestrator flows", () => {
     expect(h.removeFlow).toHaveBeenCalledWith(expect.anything(), "/flows", "f1");
   });
 
+  it("flow:delete refuses an id that is not in the store", async () => {
+    // The same membership check flow:save and flow:rename make. This arm reaches
+    // fs.rmSync on a path built from webview-supplied text, and it was the only
+    // flow handler that took that id on trust.
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "n")];
+    const { send } = await openPanel();
+    await send({ type: "flow:delete", id: "intruder" });
+    expect(h.removeFlow).not.toHaveBeenCalled();
+    expect(h.flows.map((f) => f.id)).toEqual(["f1"]);
+  });
+
   it("ignores every flow message when the setting is off", async () => {
     setConfig({ orchestrator: false });
     const { send } = await openPanel();

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { describeCond } from "../engine/orchestrator/conditions";
+import { describeCond, placeActivity } from "../engine/orchestrator/conditions";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { AgentState, RunStatus } from "../types";
@@ -50,10 +50,20 @@ function isAgentNode(n: FlowNode): n is PlaceNode | PlannedNode {
 
 /** A node's live state, from the card it points at. `undefined` when the node is
  * not a place, or its run is not on the board — the node is still drawn, just
- * without a claim about it. Takes the union directly so no cast is needed. */
+ * without a claim about it. Takes the union directly so no cast is needed.
+ *
+ * Resolved through `placeActivity`, NOT through `status.agent`. That aggregate is
+ * `mostActive` over every agent in every repo of the run (see `buildRunStatus`), so
+ * reading it here would paint this node with another repo's state: a two-worktree
+ * run whose `web` agent has ended its turn would put an amber needs-you dot on a
+ * node bound to `api` — while the inspector, which goes through `describeCond` →
+ * `placeActivity`, correctly said "agent state unknown" two panes below. One panel
+ * cannot make two contradictory claims about the same place. */
 function nodeState(node: FlowNode, runs: RunStatus[]): AgentState | undefined {
   if (node.kind !== "place") return undefined;
-  return runs.find((r) => r.run.key === node.runKey)?.agent.state;
+  const status = runs.find((r) => r.run.key === node.runKey);
+  if (!status) return undefined;
+  return placeActivity({ status, repo: node.repo, nowMs: Date.now() }).state;
 }
 
 /** A notify node is narrower than a place. This must match `.orch-node.notify`'s
@@ -163,17 +173,20 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       const oy = box?.top ?? 0;
       setDrag((d) => (d ? { ...d, x: snap(e.clientX - ox - d.dx), y: snap(e.clientY - oy - d.dy) } : d));
     };
+    // The save happens OUTSIDE the `setDrag` updater. A state updater must be pure,
+    // and this one is not hypothetically impure: with `p.onSave` inside it, React
+    // double-invokes the updater under StrictMode and one released drag becomes TWO
+    // writes of the user's flow file (measured — see the "exactly once, even under
+    // StrictMode" test). `drag` is already in this effect's closure and the effect
+    // re-runs per drag position, so the released position is in scope here without
+    // the updater's argument at all.
     const up = () => {
-      setDrag((d) => {
-        if (d) {
-          const orig = flow.nodes.find((n) => n.id === d.id);
-          // Only a move that actually moved is worth a write.
-          if (orig && (orig.x !== d.x || orig.y !== d.y)) {
-            p.onSave({ ...flow, nodes: flow.nodes.map((n) => (n.id === d.id ? { ...n, x: d.x, y: d.y } : n)) });
-          }
-        }
-        return null;
-      });
+      const orig = flow.nodes.find((n) => n.id === drag.id);
+      // Only a move that actually moved is worth a write.
+      if (orig && (orig.x !== drag.x || orig.y !== drag.y)) {
+        p.onSave({ ...flow, nodes: flow.nodes.map((n) => (n.id === drag.id ? { ...n, x: drag.x, y: drag.y } : n)) });
+      }
+      setDrag(null);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -204,13 +217,22 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     });
   };
 
-  const removeNode = (id: string) =>
+  const removeNode = (id: string) => {
+    // Both selections go, not just the node's own. Ids are re-minted to the lowest
+    // free value (see `nextId`), so deleting `n2` and adding a node mints `n2` again
+    // — and a stale `sel` would render that brand-new node pre-selected. The same
+    // applies to `selEdge`: this delete drops every edge touching the node, and a
+    // re-minted edge id would spontaneously open the inspector on a rule the user
+    // never clicked.
+    setSel(null);
+    setSelEdge(null);
     p.onSave({
       ...flow,
       nodes: flow.nodes.filter((n) => n.id !== id),
       // An edge whose end is gone can never be evaluated, so it goes with it.
       edges: flow.edges.filter((e) => e.from !== id && e.to !== id),
     });
+  };
 
   const startDrag = (id: string, e: React.PointerEvent) => {
     const node = flow.nodes.find((n) => n.id === id);
@@ -299,6 +321,19 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           <div className="sp" />
           <button type="button" className="orch-mini" onClick={() => setPicking((v) => !v)}>
             Flows · {p.flows.length} ▾
+          </button>
+          {/* Same quiet `orch-mini` as its neighbour, deliberately: a filled or
+              accented control is reserved for Arm, which does not exist yet, and red
+              is reserved for a real failure. Deleting closes the drawer rather than
+              leaving it aimed at a flow that is gone — the host's `deck:flows` post
+              would arrive and close it a round trip later anyway, and a drawer
+              rendering a deleted flow in the meantime is a lie. */}
+          <button
+            type="button"
+            className="orch-mini"
+            onClick={() => { p.onDelete(flow.id); p.onClose(); }}
+          >
+            Delete flow
           </button>
           <button type="button" className="orch-x" aria-label="Close" onClick={p.onClose}>✕</button>
         </div>

@@ -167,7 +167,7 @@ entry point:
 
 ### Settings snapshot
 
-`extension_activated` includes a 33-field reduction of your configuration,
+`extension_activated` includes a 35-field reduction of your configuration,
 built by `settingsSnapshot()`. Every field is either a boolean, a count, or a
 value drawn from a fixed, shipped set of choices — never a user-authored string:
 

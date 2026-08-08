@@ -1012,6 +1012,12 @@ export class DeckPanel {
       }
       case "flow:delete": {
         if (!getConfig().orchestrator) return;
+        // The same membership check `flow:save` and `flow:rename` make, for the same
+        // reason: the drawer can only ever act on a flow the host handed it, so an id
+        // that is not on disk is not a delete to carry out. Without it this arm
+        // reaches `fs.rmSync` on a path built from webview-supplied text.
+        const existing = readFlows(this.flowIo, this.flowsDir).some((f) => f.id === m.id);
+        if (!existing) return;
         removeFlow(this.flowIo, this.flowsDir, m.id);
         this.postFlows();
         return;

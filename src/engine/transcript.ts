@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { AgentActivity } from "../types";
+import { UNKNOWN_ACTIVITY } from "./activity";
 
 // A working agent's transcript is written to within this window; older → not "working".
 const WORKING_WINDOW_MS = 45_000;
@@ -46,9 +47,10 @@ export function deriveActivity(lines: TranscriptLine[], mtimeMs: number, nowMs: 
   return { state: "idle", lastActivityMs: mtimeMs, slug };
 }
 
-/** No transcript, or nothing meaningful in it. Exported because status.ts needs
- * the same value and had its own copy. */
-export const UNKNOWN_ACTIVITY: AgentActivity = { state: "unknown", lastActivityMs: null, slug: null };
+// Defined in ./activity now, so a browser bundle can reach the constant without
+// reaching this module's `fs`. Re-exported because deckView.ts and
+// test/unit/engine/transcript.test.ts both address it here.
+export { UNKNOWN_ACTIVITY };
 
 function parseLines(file: string, tail = 200): TranscriptLine[] {
   let raw: string;

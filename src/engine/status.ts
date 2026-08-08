@@ -1,25 +1,17 @@
-import { AgentActivity, AgentState, CardAgent, Run, RunStatus, PrEntryMap } from "../types";
+import { CardAgent, Run, RunStatus, PrEntryMap } from "../types";
+import { mostActive, UNKNOWN_ACTIVITY } from "./activity";
 import { gitState } from "./git";
 import { runTarget } from "./runs";
-import { readAgentActivity, UNKNOWN_ACTIVITY } from "./transcript";
+import { readAgentActivity } from "./transcript";
 import { canon } from "./paths";
 import { deriveBucket, prSignals } from "./bucket";
 
-// needs-you outranks working: deriveBucket's ladder tests needs-you first, and
-// with the old order it never saw one — any working session in the run buried
-// the agent that was actually waiting on a human.
-const STATE_RANK: Record<AgentState, number> = { "needs-you": 3, working: 2, idle: 1, unknown: 0 };
-
-/** The liveliest agent across a run's repos — a multi-repo task's session may live
- * in any of them. Ties broken by most-recent activity. Pure. */
-export function mostActive(activities: AgentActivity[]): AgentActivity {
-  if (activities.length === 0) return UNKNOWN_ACTIVITY;
-  return [...activities].sort((a, b) => {
-    const byRank = STATE_RANK[b.state] - STATE_RANK[a.state];
-    if (byRank !== 0) return byRank;
-    return (b.lastActivityMs ?? 0) - (a.lastActivityMs ?? 0);
-  })[0];
-}
+// `mostActive` lives in ./activity now — a leaf that imports types and nothing
+// else — so the webview's browser bundle can reach it without reaching this
+// module's `child_process`/`fs`/`path`/`os` graph. Re-exported here because it
+// has always been part of this module's surface and its callers (and
+// test/unit/engine/status.test.ts) address it here.
+export { mostActive };
 
 export interface TicketInfo {
   status: string | null;

@@ -9,6 +9,7 @@ import { DeckApp } from "../../src/webview/DeckApp";
 import { DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { send } from "../../src/webview/vscodeApi";
 import type { AgentActivity, CardAgent, OutboundMessage, PrFacts, RepoGit, ReviewRequest, RunStatus } from "../../src/types";
+import type { Flow } from "../../src/engine/orchestrator/model";
 
 const sent = vi.mocked(send);
 
@@ -1357,5 +1358,206 @@ describe("the drag source", () => {
     const dt = { setData: vi.fn() };
     fireEvent.dragStart(card, { dataTransfer: dt });
     expect(dt.setData).toHaveBeenCalledWith("text/plain", `ASM-3${DRAG_SEP}api`);
+  });
+});
+
+// The DeckApp↔drawer seam. `setOrchEnabled` is the only writer of `orchEnabled`
+// and `deck:flows` is its only source, so before these tests nothing in the suite
+// ever put the board in its orchestrator-enabled state: the chip, the auto-open
+// logic and all seven drawer callbacks were unexercised, and a mistyped
+// `flow:*` message name would have shipped green. The assertions below name the
+// literal `type` strings on purpose — a typo is the failure mode.
+const mkFlow = (id: string, name: string): Flow => ({
+  id, name, armed: false, createdAt: 1_000, nodes: [], edges: [],
+});
+
+const flowsMsg = (flows: Flow[], enabled = true): OutboundMessage =>
+  ({ type: "deck:flows", flows, enabled });
+
+/** The drawer itself, not the header chip that shares its name. */
+const drawer = () => screen.queryByRole("complementary", { name: "Orchestrator" });
+const chip = () => screen.getByRole("button", { name: /Orchestrator/ });
+
+describe("the Orchestrator chip", () => {
+  it("appears once the host says the feature is on", () => {
+    render(<DeckApp />);
+    expect(screen.queryByRole("button", { name: /Orchestrator/ })).toBeNull();
+    host(flowsMsg([]));
+    expect(chip()).toBeInTheDocument();
+  });
+
+  it("renders no chip when the host says the feature is off", () => {
+    render(<DeckApp />);
+    host(flowsMsg([mkFlow("f1", "Ship it")], false));
+    expect(screen.queryByRole("button", { name: /Orchestrator/ })).toBeNull();
+    expect(drawer()).toBeNull();
+  });
+
+  it("counts the flows beside the label, and only when there are some", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    expect(chip().querySelector(".ct")).toBeNull();
+    host(flowsMsg([mkFlow("f1", "a"), mkFlow("f2", "b")]));
+    expect(chip().querySelector(".ct")!.textContent).toBe("2");
+  });
+
+  it("asks the host to create one when there are none", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    fireEvent.click(chip());
+    expect(sent).toHaveBeenCalledWith({ type: "flow:create" });
+  });
+
+  it("opens the drawer on the first flow when there is one", () => {
+    render(<DeckApp />);
+    host(flowsMsg([mkFlow("f1", "Ship the migration")]));
+    // The post itself auto-opens the flow it just learned about, so close it first
+    // to observe the chip doing the opening rather than the post.
+    fireEvent.click(chip());
+    expect(drawer()).toBeNull();
+    fireEvent.click(chip());
+    expect(drawer()).toBeInTheDocument();
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship the migration");
+  });
+
+  it("does not ask the host for anything when it only toggles the drawer", () => {
+    render(<DeckApp />);
+    host(flowsMsg([mkFlow("f1", "Ship it")]));
+    sent.mockClear();
+    fireEvent.click(chip());
+    fireEvent.click(chip());
+    expect(sent).not.toHaveBeenCalled();
+  });
+});
+
+describe("the deck:flows handler", () => {
+  it("opens a flow it has not seen before — the answer to pressing the chip with none", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    fireEvent.click(chip());
+    expect(sent).toHaveBeenCalledWith({ type: "flow:create" });
+    expect(drawer()).toBeNull();
+    // The host's answer to that create.
+    host(flowsMsg([mkFlow("f1", "New flow")]));
+    expect(drawer()).toBeInTheDocument();
+  });
+
+  // `setOpenFlowId` used to be called INSIDE `setFlows`'s updater — a side effect in
+  // a state updater, which React's contract forbids because it may replay one. The
+  // fix reads the previous list from a ref and calls both setters at the top level.
+  //
+  // Honest limit of this test: React 18.3.1's eager-state path calls a `useState`
+  // updater exactly once when the hook's queue is empty and reuses the eagerly
+  // computed result during render, so the nested version produces the same open flow
+  // here and this test passes against both. It is StrictMode double-rendering the
+  // whole board through the create round trip, which is worth having either way, and
+  // it will start biting if React ever replays the updater for real.
+  it("keeps a newly created flow open under StrictMode's double render", () => {
+    render(<React.StrictMode><DeckApp /></React.StrictMode>);
+    host(flowsMsg([]));
+    fireEvent.click(chip());
+    host(flowsMsg([mkFlow("f1", "New flow")]));
+    expect(drawer()).toBeInTheDocument();
+  });
+
+  // Two posts landing before React re-renders — the host calls postFlows from more
+  // than one place, so this is reachable. Batched, the nested version queued a
+  // second `setOpenFlowId` whose `m.flows` was the later message's, which is exactly
+  // the interleaving a side effect in an updater makes unpredictable.
+  it("survives two posts arriving in one batch", () => {
+    render(<DeckApp />);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { data: flowsMsg([]) }));
+      window.dispatchEvent(new MessageEvent("message", { data: flowsMsg([mkFlow("f1", "New flow")]) }));
+    });
+    expect(drawer()).toBeInTheDocument();
+    expect(screen.getByLabelText("Flow name")).toHaveValue("New flow");
+  });
+
+  it("keeps the open flow open across an unrelated post", () => {
+    render(<DeckApp />);
+    host(flowsMsg([mkFlow("f1", "One")]));
+    expect(drawer()).toBeInTheDocument();
+    host(flowsMsg([mkFlow("f1", "One"), mkFlow("f2", "Two")]));
+    // f2 is new, but f1 is still open and an open flow wins over a fresh one.
+    expect(screen.getByLabelText("Flow name")).toHaveValue("One");
+  });
+
+  it("closes the drawer when the open flow is deleted elsewhere", () => {
+    render(<DeckApp />);
+    host(flowsMsg([mkFlow("f1", "One"), mkFlow("f2", "Two")]));
+    expect(drawer()).toBeInTheDocument();
+    host(flowsMsg([mkFlow("f2", "Two")]));
+    expect(drawer()).toBeNull();
+  });
+});
+
+describe("the drawer's callbacks", () => {
+  /** Board with the feature on and one flow open in the drawer. */
+  const open = (flows: Flow[] = [mkFlow("f1", "Ship the migration")]) => {
+    render(<DeckApp />);
+    host(flowsMsg(flows));
+    sent.mockClear();
+  };
+
+  it("onSave posts flow:save with the whole flow", () => {
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "+ Notify" }));
+    const call = sent.mock.calls.find((c) => c[0].type === "flow:save");
+    expect(call).toBeDefined();
+    expect(call![0]).toMatchObject({
+      type: "flow:save",
+      flow: { id: "f1", nodes: [expect.objectContaining({ kind: "notify" })] },
+    });
+  });
+
+  it("onRename posts flow:rename with the id and the new name", () => {
+    open();
+    const input = screen.getByLabelText("Flow name");
+    fireEvent.change(input, { target: { value: "Land it" } });
+    fireEvent.blur(input);
+    expect(sent).toHaveBeenCalledWith({ type: "flow:rename", id: "f1", name: "Land it" });
+  });
+
+  it("onDelete posts flow:delete with the id", () => {
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Delete flow" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:delete", id: "f1" });
+    // And the drawer stops pointing at a flow that is gone.
+    expect(drawer()).toBeNull();
+  });
+
+  it("onCreate posts flow:create from the drawer's own switcher", () => {
+    open();
+    fireEvent.click(screen.getByRole("button", { name: /^Flows/ }));
+    fireEvent.click(screen.getByRole("button", { name: "+ New flow" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:create" });
+  });
+
+  it("onOpen switches flows locally, with no message to the host", () => {
+    open([mkFlow("f1", "One"), mkFlow("f2", "Two")]);
+    fireEvent.click(screen.getByRole("button", { name: /^Flows/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Two" }));
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Two");
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("onClose closes the drawer locally, with no message to the host", () => {
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(drawer()).toBeNull();
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("hands the drawer the board's runs, so a node can show its own state", () => {
+    // The seventh prop. Without `runs` reaching the drawer, a node's state dot is
+    // permanently dim and the inspector can never say what it is waiting on.
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    host(flowsMsg([{ ...mkFlow("f1", "One"),
+      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "svc" }] }]));
+    const dot = screen.getByTestId("orch-node-n1").querySelector(".d") as HTMLElement;
+    // mkStatus's single-repo run has a working agent.
+    expect(dot.style.background).toBe("var(--c-progress)");
   });
 });
