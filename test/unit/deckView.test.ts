@@ -3278,8 +3278,10 @@ describe("an armed flow advances on refresh", () => {
 });
 
 describe("a met launch rule acts", () => {
-  const openPanel = async () => {
-    show();
+  /** `log` is injectable because two cases here assert on the output channel: a
+   * deferred rule says so in the log and nowhere else. */
+  const openPanel = async (log: (m: string) => void = () => {}) => {
+    DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
     await settled();
     const p = lastPanel();
     return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
@@ -3307,11 +3309,11 @@ describe("a met launch rule acts", () => {
    * arm the met one — the same two-pass idiom every firing test in this file uses.
    * Without it the first met pass would only ever be held and reported, and every
    * assertion below about launching would be about the resume gate instead. */
-  const warmed = async (flows: Flow[]) => {
+  const warmed = async (flows: Flow[], log?: (m: string) => void) => {
     setConfig({ orchestrator: true });
     h.flows = flows;
     h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
-    const opened = await openPanel();
+    const opened = await openPanel(log);
     await settle();
     h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
     h.writeFlow.mockClear();
@@ -3524,13 +3526,87 @@ describe("a met launch rule acts", () => {
     expect(w.nodes.find((n) => n.id === "n2")!.kind).toBe("planned");
   });
 
-  it("stamps an error when the ticket cannot be read", async () => {
-    h.getDetail.mockRejectedValue(new Error("Jira said 503"));
-    const { send } = await warmed([launchFlow()]);
+  it("leaves a rule pending when the ticket read fails, and retries it on the next pass", async () => {
+    // A pre-flight READ spent nothing and decided nothing: a Jira blip, an expired
+    // token, a dropped VPN. Latching there would let one hiccup permanently kill a
+    // rule the user then has to go and find. Distinct from a failed LAUNCH, which
+    // stays latched because it may have spent something.
+    const log = vi.fn();
+    h.getDetail.mockRejectedValueOnce(new Error("Jira said 503"));
+    const { p, send } = await warmed([launchFlow()], log);
+    const toastsBefore = toastCount(p);
     await send({ type: "deck:refresh" });
     expect(h.launchPlanned).not.toHaveBeenCalled();
-    expect(lastWrite().edges[0].error).toContain("ASM-12");
-    expect(lastWrite().edges[0].firedAt).toBeUndefined();
+    // Nothing decided: nothing written, and nothing said out loud either — an
+    // unattended flow must not pop a notification for a transient read.
+    expect(h.writeFlow).not.toHaveBeenCalled();
+    expect(toastCount(p)).toBe(toastsBefore);
+    expect(h.flows[0].edges[0].error).toBeUndefined();
+    expect(h.flows[0].edges[0].firedAt).toBeUndefined();
+    // It is in the log, though — a rule quietly not advancing is otherwise invisible.
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("Jira said 503"));
+    // And the next pass gets on with it.
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    expect(lastWrite().edges[0].firedAt).toBeTypeOf("number");
+    expect(lastWrite().nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "ASM-12" });
+  });
+
+  it("writes nothing and says nothing when EVERY rule defers", async () => {
+    // Two deferring rules rather than one, so this cannot pass by way of a check
+    // that happens to hold for a single edge. An unchanged flow is not worth a write,
+    // and there is nothing to announce.
+    h.getDetail.mockRejectedValue(new Error("Jira said 503"));
+    const { p, send } = await warmed([launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+        {
+          id: "n3", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-13", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch" },
+      ],
+    })]);
+    const toastsBefore = toastCount(p);
+    await send({ type: "deck:refresh" });
+    expect(h.getDetail).toHaveBeenCalledTimes(2); // both rules really were attempted
+    expect(h.writeFlow).not.toHaveBeenCalled();
+    expect(toastCount(p)).toBe(toastsBefore);
+    expect(h.flows[0].edges.every((e) => e.firedAt === undefined && e.error === undefined)).toBe(true);
+  });
+
+  it("still stamps the rules that DID decide when one of them defers", async () => {
+    // The defer is per rule, not per pass: a notify that fired in the same pass has
+    // already been announced, so leaving it unstamped would announce it again forever.
+    h.getDetail.mockRejectedValue(new Error("Jira said 503"));
+    const { p, send } = await warmed([launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+        { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "notify" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    const w = lastWrite();
+    expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBeTypeOf("number");
+    const deferredEdge = w.edges.find((e) => e.id === "e1")!;
+    expect(deferredEdge.firedAt).toBeUndefined();
+    expect(deferredEdge.error).toBeUndefined();
+    expect(posts(p).some((m) => m.type === "toast" && /the migration has landed/.test(m.message ?? ""))).toBe(true);
   });
 
   it("stamps a seed rule as unperformed rather than pretending it acted", async () => {

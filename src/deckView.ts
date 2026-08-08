@@ -369,19 +369,38 @@ export class DeckPanel {
         const outcomes = new Map<string, ActOutcome>();
         const promotions: { nodeId: string; runKey: string; repo: string }[] = [];
         const receipts: { level: "success" | "error"; message: string }[] = [];
+        // The junction targets of rules that could not even be DECIDED this pass.
+        const deferredTargets = new Set<string>();
         for (const f of unclaimed) {
           // A stamped-only sibling performs nothing, and a notify's whole action is
           // the toast `notifyLines` produces below.
           if (!f.perform || f.edge.action === "notify") continue;
           const done = await this.performEdge(fresh, f.edge);
+          if (done.kind === "defer") {
+            // The log, and nothing else: a transient read failure on an unattended
+            // flow is not worth a notification, but a rule quietly not advancing is
+            // invisible without this.
+            this.log(`deck: flow ${flow.id} rule ${f.edge.id} deferred — ${done.reason}`);
+            deferredTargets.add(f.edge.to);
+            continue;
+          }
           outcomes.set(f.edge.id, done.outcome);
           if (done.promote) promotions.push(done.promote);
           if (done.receipt) receipts.push(done.receipt);
         }
-        let next = applyFired(fresh, unclaimed, nowMs, outcomes);
+        // A deferred rule is left exactly as it was, so the next pass retries it —
+        // and so is every sibling of its junction, for the reason `evaluate.ts` gives
+        // for firing NONE of a capped junction: stamping the siblings of an edge that
+        // did not act settles them around a performer that is still pending, and if
+        // its condition later stops holding the junction can never close.
+        const stamping = unclaimed.filter((f) => !deferredTargets.has(f.edge.to));
+        // Nothing was decided at all. Writing an unchanged flow would be a pointless
+        // write, and there is nothing to announce.
+        if (stamping.length === 0) continue;
+        let next = applyFired(fresh, stamping, nowMs, outcomes);
         for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo);
         writeFlow(this.flowIo, this.flowsDir, next);
-        for (const line of notifyLines(fresh, unclaimed)) {
+        for (const line of notifyLines(fresh, stamping)) {
           this.post({ type: "toast", level: "info", message: line });
         }
         for (const r of receipts) this.toast(r.level, r.message);
@@ -433,27 +452,45 @@ export class DeckPanel {
     else if (answer === DISARM) writeFlow(this.flowIo, this.flowsDir, { ...latest, armed: false });
   }
 
-  /** Perform one acting edge and report what happened. Never throws and never
-   * retries: every refusal comes back as an `error` the drawer shows as stalled and
-   * offers Reset for, because a launch that fails on every poll is how you end up
-   * with twenty windows. */
+  /** Perform one acting edge and report what happened. Never throws.
+   *
+   * A `done` result settles the edge and is never retried: that is what stops a
+   * launch failing on every poll from ending in twenty windows, and the drawer shows
+   * such a rule as stalled and offers Reset. It covers every DETERMINISTIC refusal
+   * (an unwired verb, a target that is not planned work, a prompt mode that no longer
+   * exists — none of which a later pass would answer differently) as well as a launch
+   * that genuinely tried and failed.
+   *
+   * A `defer` result is the opposite: a pre-flight READ failed, so nothing was spent
+   * and nothing is decided. The edge is left pending and the next pass tries again,
+   * because latching there would let one Jira blip permanently kill a rule. */
   private async performEdge(
     flow: Flow,
     edge: FlowEdge,
-  ): Promise<{
-    outcome: ActOutcome;
-    promote?: { nodeId: string; runKey: string; repo: string };
-    receipt?: { level: "success" | "error"; message: string };
-  }> {
+  ): Promise<
+    | {
+        kind: "done";
+        outcome: ActOutcome;
+        promote?: { nodeId: string; runKey: string; repo: string };
+        receipt?: { level: "success" | "error"; message: string };
+      }
+    | { kind: "defer"; reason: string }
+  > {
     if (edge.action === "seed") {
       // Seeding another agent into a place that already exists has no launcher yet.
       // Said plainly, and as an error rather than a receipt, so the rule is settled
       // (never re-firing in a loop) and one Reset makes it live once seed ships.
-      return { outcome: { ok: false, error: "seed: opening another agent in an existing place is not wired up yet." } };
+      return {
+        kind: "done",
+        outcome: { ok: false, error: "seed: opening another agent in an existing place is not wired up yet." },
+      };
     }
     const node = this.plannedTarget(flow, edge);
     if (!node) {
-      return { outcome: { ok: false, error: `a launch rule must point at planned work, and ${edge.to} is not.` } };
+      return {
+        kind: "done",
+        outcome: { ok: false, error: `a launch rule must point at planned work, and ${edge.to} is not.` },
+      };
     }
     const cfg = getConfig();
     // The node's `mode` is a PromptMode id. A mode the user has since deleted cannot
@@ -461,7 +498,11 @@ export class DeckPanel {
     // else's prompt, which is worse than not launching.
     const mode = cfg.promptModes.find((m) => m.id === node.mode);
     if (!mode) {
+      // Deterministic, so it latches: a later pass would answer this identically, and
+      // an armed flow silently retrying a rule that can never run forever is worse
+      // than one stalled rule the drawer shows and offers Reset for.
       return {
+        kind: "done",
         outcome: {
           ok: false,
           error: `the prompt mode "${node.mode}" is no longer configured — not launching ${node.ticketKey}.`,
@@ -475,7 +516,12 @@ export class DeckPanel {
     try {
       detail = await this.connector.provider().detail(node.ticketKey);
     } catch (e) {
-      return { outcome: { ok: false, error: `Couldn't read ${node.ticketKey}: ${e}` } };
+      // A pre-flight READ failed, so nothing was spent and nothing is decided. Leave
+      // the edge pending instead of settling it: latching here would let one Jira
+      // blip kill a rule permanently, and retrying a read costs nothing. Distinct
+      // from a failed launch, which stays latched because it may have spent
+      // something — an expired token, a dropped VPN and a 503 are all this case.
+      return { kind: "defer", reason: `couldn't read ${node.ticketKey}: ${e}` };
     }
     const res = await launchPlanned(
       {
@@ -494,9 +540,17 @@ export class DeckPanel {
       { createWorktrees, openWorkspace, log: this.log },
     );
     if (!res.ok) {
-      return { outcome: { ok: false, error: res.message }, receipt: { level: "error", message: `${flow.name}: ${res.message}` } };
+      // A launch that TRIED and failed latches, however transient the cause looks:
+      // it may have created a worktree or opened a window, and retrying every six
+      // seconds is how one bad rule becomes twenty windows.
+      return {
+        kind: "done",
+        outcome: { ok: false, error: res.message },
+        receipt: { level: "error", message: `${flow.name}: ${res.message}` },
+      };
     }
     return {
+      kind: "done",
       outcome: { ok: true, note: `launched ${node.ticketKey} in ${res.repo}` },
       promote: { nodeId: node.id, runKey: res.runKey, repo: res.repo },
       receipt: {
