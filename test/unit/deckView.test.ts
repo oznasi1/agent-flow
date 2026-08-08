@@ -2740,6 +2740,41 @@ describe("DeckPanel — Address PR", () => {
 const mkFlow = (id: string, name: string): Flow =>
   ({ id, name, armed: false, createdAt: 1_000, nodes: [], edges: [] });
 
+/** A RunStatus whose one repo's PR is in the given state, so a place node bound to
+ * `{ runKey: key, repo }` resolves and its PR conditions have data. */
+const prStatus = (key: string, repo: string, state: "OPEN" | "MERGED"): RunStatus => ({
+  run: {
+    key, summary: "s", url: `https://j/browse/${key}`, createdAt: 1, mode: "multiroot",
+    repos: [{ name: repo, path: `/r/${repo}`, isGit: true }], briefPaths: [],
+  },
+  column: "progress",
+  ticketStatus: "In Progress",
+  ticketCategory: "indeterminate",
+  repos: [{ name: repo, path: `/r/${repo}`, branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
+  agent: { state: "working", lastActivityMs: 1, slug: null },
+  windowOpen: true,
+  prs: {
+    [repo]: {
+      facts: {
+        number: 1, url: "u", title: "t", state, isDraft: false,
+        ci: { passing: 2, pending: 0, failing: [] }, review: "none", unresolved: null,
+        mergeable: "clean", ciAdvisory: false,
+      },
+      fetchedAt: 1,
+    },
+  },
+  agents: [],
+});
+const mergedStatus = (key: string, repo: string) => prStatus(key, repo, "MERGED");
+const openStatus = (key: string, repo: string) => prStatus(key, repo, "OPEN");
+
+/** Let the panel's in-flight refresh land. Two microtask drains is enough with
+ * these mocks — nothing here does real I/O. */
+const settle = async () => {
+  await Promise.resolve();
+  await Promise.resolve();
+};
+
 describe("orchestrator flows", () => {
   /** Open a panel and return it plus a way to deliver an inbound message — the
    * same `show()` + `settled()` + `_fire` idiom every other describe block in
@@ -2875,5 +2910,122 @@ describe("orchestrator flows", () => {
     await send({ type: "flow:delete", id: "f1" });
     expect(h.writeFlow).not.toHaveBeenCalled();
     expect(h.removeFlow).not.toHaveBeenCalled();
+  });
+});
+
+describe("an armed flow advances on refresh", () => {
+  /** Open a panel and return it plus a way to deliver an inbound message — the
+   * same `show()` + `settled()` + `_fire` idiom every other describe block in
+   * this file uses, rather than reaching into `webview.onDidReceiveMessage`
+   * directly. */
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** A place node plus a notify terminal, wired with one condition. */
+  const armedFlow = (over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    ...over,
+  });
+
+  it("stamps a met rule and posts a toast naming the flow", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow()];
+    // The status the evaluator will see: ASM-1's aws-ops PR is merged.
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { p } = await openPanel();
+    await settle();
+    const written = h.writeFlow.mock.calls.at(-1)?.[2] as Flow | undefined;
+    expect(written?.edges[0].firedAt).toBeTypeOf("number");
+    const toast = posts(p).find((m) => m.type === "toast" && /Ship the migration/.test(m.message));
+    expect(toast).toBeTruthy();
+  });
+
+  it("fires once and not again on the next refresh", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow()];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { p, send } = await openPanel();
+    await settle();
+    // The store now returns the stamped flow, as it would on disk.
+    h.flows = [h.writeFlow.mock.calls.at(-1)![2] as Flow];
+    h.writeFlow.mockClear();
+    // A real second poll tick, not just draining microtasks — nothing here
+    // advances the panel's own 6s timer, so the second pass has to be asked for.
+    await send({ type: "deck:refresh" });
+    await settle();
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("does nothing for a disarmed flow whose condition is met", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow({ armed: false })];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    await openPanel();
+    await settle();
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the setting is off, even for an armed flow", async () => {
+    setConfig({ orchestrator: false });
+    h.flows = [armedFlow()];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    await openPanel();
+    await settle();
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("does not fire when the condition is not met", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow()];
+    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    await openPanel();
+    await settle();
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("never performs a launch or a seed — they do not exist in this build", async () => {
+    // A hand-edited flow can hold action: "launch". It must be stamped so it does
+    // not re-evaluate forever, but nothing may be opened or started.
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow({
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
+    })];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { p } = await openPanel();
+    await settle();
+    expect(h.openInEditor).not.toHaveBeenCalled();
+    expect(h.writePlanFile).not.toHaveBeenCalled();
+    // And no toast claims it ran.
+    expect(posts(p).some((m) => m.type === "toast" && /launched/i.test(m.message ?? ""))).toBe(false);
+  });
+
+  it("keeps advancing the other flows when one throws while evaluating", async () => {
+    // A hand-edited or half-migrated flow on disk can be armed with a shape
+    // evaluateFlow chokes on (here: edges that are not an array). It must not
+    // take the whole pass down with it — the flow after it in the store still
+    // gets its own chance to fire, same as readFlows degrading one corrupt file
+    // rather than the whole drawer.
+    setConfig({ orchestrator: true });
+    const brokenFlow = { ...mkFlow("bad", "Broken"), armed: true, edges: null } as unknown as Flow;
+    h.flows = [brokenFlow, armedFlow()];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const log = vi.fn();
+    DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
+    await settled();
+    await settle();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("bad"));
+    const written = h.writeFlow.mock.calls.at(-1)?.[2] as Flow | undefined;
+    expect(written?.id).toBe("f1");
+    expect(written?.edges[0].firedAt).toBeTypeOf("number");
   });
 });

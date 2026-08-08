@@ -8,6 +8,8 @@ import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { Flow, emptyFlow } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
 import { nodeFlowIo, newFlowId } from "./engine/orchestrator/flowIo";
+import { evaluateFlow } from "./engine/orchestrator/evaluate";
+import { applyFired, notifyLines } from "./engine/orchestrator/runner";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
@@ -176,6 +178,29 @@ export class DeckPanel {
     const enabled = getConfig().orchestrator;
     const flows: Flow[] = enabled ? readFlows(this.flowIo, this.flowsDir) : [];
     this.post({ type: "deck:flows", flows, enabled });
+  }
+
+  /** Advance every armed flow against the statuses this pass already built.
+   *
+   * Deliberately here rather than on its own timer: the statuses are the expensive
+   * part and they exist by now, so evaluation is free. Each flow is evaluated,
+   * stamped and written independently — one flow that throws must not stop the
+   * others, the same posture `readFlows` takes with a corrupt file. */
+  private advanceArmedFlows(runs: RunStatus[], nowMs: number): void {
+    if (!getConfig().orchestrator) return;
+    for (const flow of readFlows(this.flowIo, this.flowsDir)) {
+      if (!flow.armed) continue;
+      try {
+        const result = evaluateFlow({ flow, statuses: runs, nowMs });
+        if (result.fired.length === 0) continue;
+        writeFlow(this.flowIo, this.flowsDir, applyFired(flow, result.fired, nowMs));
+        for (const line of notifyLines(flow, result.fired)) {
+          this.post({ type: "toast", level: "info", message: line });
+        }
+      } catch (e) {
+        this.log(`deck: flow ${flow.id} failed to advance: ${e}`);
+      }
+    }
   }
 
   private startPolling(): void {
@@ -866,6 +891,7 @@ export class DeckPanel {
       // which happens while the strip is off.
       if (this.reviewsEnabled()) this.enqueueReviews(Date.now());
       else this.postReviews();
+      this.advanceArmedFlows(runs, Date.now());
       this.postFlows();
     } catch (e) {
       this.log(`deck: refresh failed: ${e}`);
