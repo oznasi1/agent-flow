@@ -5,7 +5,7 @@ import * as path from "path";
 import { getConfig } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { Flow, FlowEdge, PlaceNode, PlannedNode, emptyFlow, findNode, isPlace, isPlanned, isSettled } from "./engine/orchestrator/model";
+import { Flow, FlowEdge, PlaceNode, PlannedNode, emptyFlow, findNode, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId } from "./engine/orchestrator/flowIo";
 import { LOCK_TTL_MS, acquire, release } from "./engine/orchestrator/lock";
@@ -449,7 +449,7 @@ export class DeckPanel {
         // target a deferred target can never also have a successful stamp to drop.
         const actedTargets = new Set<string>();
         const firing = unclaimed.map((f) => {
-          if (!f.perform || f.edge.action === "notify") return f;
+          if (!f.perform || !isSpendAction(f.edge.action)) return f;
           if (actedTargets.has(f.edge.to)) return { ...f, perform: false };
           actedTargets.add(f.edge.to);
           return f;
@@ -493,7 +493,7 @@ export class DeckPanel {
         for (const f of firing) {
           // A stamped-only sibling performs nothing, and a notify's whole action is
           // the toast `notifyLines` produces below.
-          if (!f.perform || f.edge.action === "notify") continue;
+          if (!f.perform || !isSpendAction(f.edge.action)) continue;
           // Re-read and check `armed` immediately before THIS edge, not once for the
           // whole flow: a launch or seed is its own `await`, and up to three of them
           // can run in one pass (the per-pass cap), each one long enough for
@@ -603,18 +603,18 @@ export class DeckPanel {
    * disk. `undefined` means the edge cannot spend anything (wrong kind of
    * target), so it must not count toward the once-per-flow gate below. */
   private spendTarget(flow: Flow, edge: FlowEdge): SpendTarget | undefined {
+    // `isSpendAction` is the one predicate for "does this rule cost money" — the
+    // caller hands every performing edge to this function rather than
+    // pre-filtering by action, so this guard is the only place that question is
+    // asked on this path. What follows resolves WHAT it spends on, which
+    // `isSpendAction` deliberately knows nothing about.
+    if (!isSpendAction(edge.action)) return undefined;
     if (edge.action === "launch") {
       const node = this.plannedTarget(flow, edge);
       return node ? { action: "launch", node } : undefined;
     }
-    if (edge.action === "seed") {
-      const node = this.placeTarget(flow, edge);
-      return node ? { action: "seed", node, mode: edge.mode } : undefined;
-    }
-    // A notify edge, which spends nothing. The caller hands every performing edge to
-    // this function rather than pre-filtering by action, so that "does this rule cost
-    // money?" is answered in exactly one place.
-    return undefined;
+    const node = this.placeTarget(flow, edge);
+    return node ? { action: "seed", node, mode: edge.mode } : undefined;
   }
 
   /** Ask, once per flow, before it ever spends anything — naming what will actually

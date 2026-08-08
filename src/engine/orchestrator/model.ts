@@ -120,6 +120,20 @@ export function isSettled(e: FlowEdge): boolean {
   return e.firedAt !== undefined || e.error !== undefined;
 }
 
+/** Does this action spend money — open a window, start a paid session? The ONE
+ * place that answers this, because it used to be answered three different ways
+ * that had to be kept in sync by hand: `evaluate.ts`'s launch cap, the
+ * once-per-target dedupe and the dispatch check in `deckView.ts`'s
+ * `advanceUnderLock`, and (indirectly) whether `spendTarget()` resolves to
+ * something. A fourth action added here without updating every call site by
+ * hand would otherwise be silently treated as free by whichever site got
+ * missed. `notify` is the only non-spending action today, but this is written
+ * as an allowlist, not a `!== "notify"` negation, so a NEW action defaults to
+ * "does not spend" until someone deliberately adds it here. */
+export function isSpendAction(action: FlowAction): boolean {
+  return action === "launch" || action === "seed";
+}
+
 export function isPlace(n: FlowNode): n is PlaceNode {
   return n.kind === "place";
 }

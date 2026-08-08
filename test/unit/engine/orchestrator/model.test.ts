@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  emptyFlow, isPlace, isPlanned, isNotify, isSettled, findNode, incomingEdges,
+  emptyFlow, isPlace, isPlanned, isNotify, isSettled, isSpendAction, findNode, incomingEdges,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -59,6 +59,21 @@ describe("isSettled", () => {
 
   it("is true when both are set", () => {
     expect(isSettled(edge("e1", "a", "z", { firedAt: 1, error: "boom" }))).toBe(true);
+  });
+});
+
+describe("isSpendAction", () => {
+  // The one place "does this action cost money" is answered — `evaluate.ts`'s
+  // launch cap, `deckView.ts`'s once-per-target dedupe and its dispatch check,
+  // and `spendTarget()` all defer to this rather than re-spelling `!== "notify"`
+  // (or `=== "launch" || === "seed"`) at each site by hand.
+  it("is true for launch and seed", () => {
+    expect(isSpendAction("launch")).toBe(true);
+    expect(isSpendAction("seed")).toBe(true);
+  });
+
+  it("is false for notify", () => {
+    expect(isSpendAction("notify")).toBe(false);
   });
 });
 

@@ -5,7 +5,7 @@
 // and the cap testable without launching a window.
 import { RunStatus } from "../../types";
 import { CondContext, evalCond, placeActivity } from "./conditions";
-import { Condition, Flow, FlowEdge, findNode, incomingEdges, isPlace, isSettled } from "./model";
+import { Condition, Flow, FlowEdge, findNode, incomingEdges, isPlace, isSettled, isSpendAction } from "./model";
 
 /** How many acting edges (`launch` or `seed`) may fire in one pass. A badly wired
  * graph should not be able to storm your window manager; the remainder is reported
@@ -99,7 +99,9 @@ export function evaluateFlow(i: EvalInput): EvalResult {
 
   // A launch or seed is what costs something — a window, an agent session. A
   // notify is a toast, never capped. Only ever asked of the edge that performs.
-  const costsSlot = (e: FlowEdge) => e.action === "launch" || e.action === "seed";
+  // `isSpendAction` is the one place this question is answered — see its own
+  // comment in `model.ts` for why it must not be re-spelled here.
+  const costsSlot = (e: FlowEdge) => isSpendAction(e.action);
 
   // Cap decisions are made in the same pass as candidate selection, in flow
   // order, so an "all" junction can see how many slots are already spent by
