@@ -355,6 +355,31 @@ export class DeckPanel {
         // toast — it already announced every one of these.
         if (unclaimed.length === 0) continue;
 
+        // ONE action per TARGET NODE per pass. `evaluate.ts` only collapses an "all"
+        // junction to a single performer; for any other target — including a planned
+        // node with the DEFAULT `join: "any"` — it marks EVERY met edge as performing.
+        // Two rules into one node is the ordinary way to wire "when it lands, start the
+        // next ticket" (`pr-merged` and `ci-passed` are both true the moment a PR
+        // merges), and acting per edge there opens two worktrees and pays for two
+        // sessions on one ticket, then promotes the same node twice with the second
+        // runKey orphaning the run the first launch created.
+        //
+        // The later edges DID fire, so they are stamped — demoted to `perform: false`,
+        // exactly what an "all" junction's siblings get, which also keeps `notifyLines`
+        // from announcing the same thing twice. Demoting rather than dropping matters:
+        // an unstamped met edge is re-evaluated on every pass forever.
+        //
+        // This is also what makes the perform unit and the defer unit the same thing:
+        // `deferredTargets` below is keyed by target, and with one acting edge per
+        // target a deferred target can never also have a successful stamp to drop.
+        const actedTargets = new Set<string>();
+        const firing = unclaimed.map((f) => {
+          if (!f.perform || f.edge.action === "notify") return f;
+          if (actedTargets.has(f.edge.to)) return { ...f, perform: false };
+          actedTargets.add(f.edge.to);
+          return f;
+        });
+
         // A flow asks ONCE before it ever spends anything, then runs unattended: a
         // mis-wired flow should cost one prompt, not a string of paid sessions. A
         // `seed` starts a paid Claude Code session exactly like a `launch` does, so
@@ -363,7 +388,7 @@ export class DeckPanel {
         // at all. Only a launch or seed we would actually attempt counts — an edge
         // pointing at the wrong kind of node spends nothing and is stamped as an
         // error below, so gating on it would ask about a rule that can never run.
-        const wantsSpend = unclaimed
+        const wantsSpend = firing
           .filter((f) => f.perform && (f.edge.action === "launch" || f.edge.action === "seed"))
           .map((f) => this.spendTarget(fresh, f.edge))
           .find((t) => t !== undefined);
@@ -382,7 +407,7 @@ export class DeckPanel {
         const receipts: { level: "success" | "error"; message: string }[] = [];
         // The junction targets of rules that could not even be DECIDED this pass.
         const deferredTargets = new Set<string>();
-        for (const f of unclaimed) {
+        for (const f of firing) {
           // A stamped-only sibling performs nothing, and a notify's whole action is
           // the toast `notifyLines` produces below.
           if (!f.perform || f.edge.action === "notify") continue;
@@ -404,7 +429,15 @@ export class DeckPanel {
         // for firing NONE of a capped junction: stamping the siblings of an edge that
         // did not act settles them around a performer that is still pending, and if
         // its condition later stops holding the junction can never close.
-        const stamping = unclaimed.filter((f) => !deferredTargets.has(f.edge.to));
+        const stamping = firing.filter((f) => !deferredTargets.has(f.edge.to));
+        // `promotions` and `receipts` need no filter of their own, and this is the
+        // invariant that says why: both are built only from a `done` result, one acting
+        // edge decides each target, and a target whose acting edge deferred contributes
+        // neither. So nothing can be promoted or announced whose own edge was dropped
+        // from `stamping` — which would otherwise leave the drawer showing a rule as
+        // still waiting on a node that is already a place, and the next pass latching
+        // that edge as "must point at planned work". If the one-per-target rule above
+        // ever goes, this comment is wrong and a filter is needed.
         // Nothing was decided at all. Writing an unchanged flow would be a pointless
         // write, and there is nothing to announce.
         if (stamping.length === 0) continue;

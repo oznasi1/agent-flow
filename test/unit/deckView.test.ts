@@ -3314,10 +3314,29 @@ describe("a met launch rule acts", () => {
    * arm the met one — the same two-pass idiom every firing test in this file uses.
    * Without it the first met pass would only ever be held and reported, and every
    * assertion below about launching would be about the resume gate instead. */
-  const warmed = async (flows: Flow[], log?: (m: string) => void) => {
+  /** An open PR with CI red, so NEITHER `pr-merged` nor `ci-passed` is met. The plain
+   * `openStatus` fixture has CI green, which is enough to fire a `ci-passed` rule — and
+   * a rule that fires during the warm-up pass is HELD by the resume gate instead of
+   * clearing it, which would silently make every later assertion about the gate rather
+   * than about acting. Any fixture wiring `ci-passed` has to warm with this. */
+  const redStatus = (key: string, repo: string): RunStatus => {
+    const s = openStatus(key, repo);
+    const entry = s.prs[repo]!;
+    return {
+      ...s,
+      prs: {
+        [repo]: {
+          ...entry,
+          facts: { ...entry.facts!, ci: { passing: 0, pending: 0, failing: [{ name: "build", url: "" }] } },
+        },
+      },
+    };
+  };
+
+  const warmed = async (flows: Flow[], log?: (m: string) => void, warm?: RunStatus) => {
     setConfig({ orchestrator: true });
     h.flows = flows;
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(warm ?? openStatus("ASM-1", "aws-ops"));
     const opened = await openPanel(log);
     await settle();
     h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
@@ -3678,6 +3697,106 @@ describe("a met launch rule acts", () => {
     // The sibling is stamped as closed — never as a launch it did not perform.
     expect(w.edges.find((e) => e.id === "e2")!.firedNote).toBe("closed with its junction");
     expect(w.nodes.filter((n) => n.kind === "place")).toHaveLength(2);
+  });
+
+  /** The same two rules into one planned node, but with the DEFAULT `join: "any"` —
+   * the shape `evaluate.ts` does NOT collapse to a single performer. `pr-merged` and
+   * `ci-passed` are both true the moment a PR merges, so this is the ordinary way a
+   * user wires "when it lands, start the next ticket". */
+  const twoRulesOneTarget = (over: Partial<Flow> = {}): Flow => launchFlow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      {
+        id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+        ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+      },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+      { id: "e2", from: "n1", to: "n2", cond: { kind: "ci-passed" }, action: "launch" },
+    ],
+    ...over,
+  });
+
+  it("launches ONCE for a join:any node with two met rules, and stamps both edges", async () => {
+    // THE unit of work is the target node, not the edge. `evaluate.ts` marks every met
+    // edge into a non-all target as performing, so acting per edge here would open two
+    // worktrees and pay for two sessions on one ticket — and promote the same node
+    // twice, the second runKey orphaning the run the first launch actually created.
+    const { p, send } = await warmed([twoRulesOneTarget()], undefined, redStatus("ASM-1", "aws-ops"));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    const w = lastWrite();
+    // Both edges fired — leaving the second unstamped would re-evaluate it forever…
+    expect(w.edges.find((e) => e.id === "e1")!.firedAt).toBeTypeOf("number");
+    expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBeTypeOf("number");
+    // …but only one of them claims to have launched anything.
+    expect(w.edges.find((e) => e.id === "e1")!.firedNote).toContain("launched");
+    expect(w.edges.find((e) => e.id === "e2")!.firedNote).toBe("closed with its junction");
+    expect(w.edges.find((e) => e.id === "e2")!.error).toBeUndefined();
+    // Promoted exactly once, to the run the one launch returned.
+    expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "ASM-12" });
+    // And said out loud once, not twice.
+    expect(posts(p).filter((m) => m.type === "toast" && /launched ASM-12/.test(m.message ?? ""))).toHaveLength(1);
+  });
+
+  it("holds a whole target back when its acting rule defers, siblings included", async () => {
+    // e1 acts and defers; e2 points at the same node and must NOT act in its place —
+    // that would spend exactly what the defer avoided. Nothing about this target is
+    // stamped either, so the next pass retries the target as a whole.
+    h.getDetail.mockRejectedValue(new Error("Jira said 503"));
+    const { p, send } = await warmed([twoRulesOneTarget()], undefined, redStatus("ASM-1", "aws-ops"));
+    const toastsBefore = toastCount(p);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    expect(h.getDetail).toHaveBeenCalledTimes(1); // one attempt for the target, not one per edge
+    expect(h.writeFlow).not.toHaveBeenCalled();
+    expect(toastCount(p)).toBe(toastsBefore);
+    expect(h.flows[0].edges.every((e) => e.firedAt === undefined && e.error === undefined)).toBe(true);
+    expect(h.flows[0].nodes.find((n) => n.id === "n2")!.kind).toBe("planned");
+  });
+
+  it("promotes and toasts only the targets that survive into the write", async () => {
+    // One target defers, another succeeds. The successful one is stamped, promoted and
+    // announced; the deferred one is left entirely alone. A promotion or a toast that
+    // outran its own stamp would leave the drawer showing a rule as still waiting on a
+    // node that is already a place — which the next pass then latches as "must point
+    // at planned work".
+    h.getDetail.mockImplementation(async (key: string) => {
+      if (key === "ASM-12") throw new Error("Jira said 503");
+      return {
+        key, summary: "do it", url: `https://jira/browse/${key}`, descriptionText: "the description",
+        labels: [], components: [], status: null, statusCategory: null,
+      };
+    });
+    const { p, send } = await warmed([launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+        {
+          id: "n3", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-13", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    const w = lastWrite();
+    // The one that worked: stamped, promoted, announced.
+    expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBeTypeOf("number");
+    expect(w.nodes.find((n) => n.id === "n3")).toMatchObject({ kind: "place", runKey: "ASM-13" });
+    expect(posts(p).some((m) => m.type === "toast" && /launched ASM-13/.test(m.message ?? ""))).toBe(true);
+    // The one that deferred: untouched in every respect.
+    expect(w.edges.find((e) => e.id === "e1")!.firedAt).toBeUndefined();
+    expect(w.edges.find((e) => e.id === "e1")!.error).toBeUndefined();
+    expect(w.nodes.find((n) => n.id === "n2")!.kind).toBe("planned");
+    expect(posts(p).some((m) => m.type === "toast" && /ASM-12/.test(m.message ?? ""))).toBe(false);
   });
 
   it("still launches at most three per pass, and the rest on the next one", async () => {
