@@ -23,6 +23,7 @@ import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, type MergeCandidate } from "./engine/workspace";
+import { briefMarkdown } from "./engine/brief";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, PresenceRecord } from "./engine/presence";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
@@ -1215,7 +1216,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
     const wantRemoteControl = await this.resolveRemoteControl(cfg);
 
-    const planMd = this.buildBrief(detail);
+    const planMd = briefMarkdown(detail);
     const result = await openWorkspace({
       ticket: { key: detail.key, summary: detail.summary, url: detail.url },
       planMd,
@@ -1410,7 +1411,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           key,
           task: {
             ticket: { key: detail.key, summary: detail.summary, url: detail.url },
-            planMd: this.buildBrief(detail),
+            planMd: briefMarkdown(detail),
             descriptionText: detail.descriptionText,
             services,
           },
@@ -1655,12 +1656,6 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     });
     if (!uris || !uris.length) return undefined;
     return { kind: "existing", file: uris[0].fsPath };
-  }
-
-  private buildBrief(detail: { key: string; summary: string; descriptionText: string }): string {
-    const desc = detail.descriptionText?.trim();
-    const body = desc ? `## Ticket description\n\n${desc}` : "_(No description on the ticket.)_";
-    return `## ${detail.key}: ${detail.summary}\n\n${body}\n\n## Plan\n\n_The Claude Code prompt for this task says whether to plan first or implement._`;
   }
 
   private html(webview: vscode.Webview): string {
