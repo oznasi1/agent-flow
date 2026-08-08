@@ -3875,4 +3875,57 @@ describe("notepad", () => {
     provider.postNotepad();
     expect((posted.at(-1) as { notes: unknown[] }).notes).toEqual([]);
   });
+
+  it("launches a run keyed off the note title and records it on the note", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "it double-fires" });
+    const id = notesIn(store)![0].id;
+    await sendMsg({ type: "notepad:run", id });
+
+    const call = vi.mocked(openWorkspace).mock.calls.at(-1)![0];
+    expect(call.kind).toBe("notepad");
+    expect(call.ticket.key).toBe("notepad-fix-the-retry-banner");
+    expect(call.ticket.url).toBe("");
+    expect(call.planMd).toContain("it double-fires");
+    expect((notesIn(store)![0] as { lastRunKey?: string }).lastRunKey).toBe("notepad-fix-the-retry-banner");
+  });
+
+  it("falls back to a generic key when the note has no title", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "", body: "just a body" });
+    const id = notesIn(store)![0].id;
+    await sendMsg({ type: "notepad:run", id });
+    expect(vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key).toBe("notepad-note");
+  });
+
+  it("uses the generic explore action's prompt, selected by id rather than list position", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    // Reorder the configured actions so "general" is no longer first — a positional
+    // pick (exploreActions[0]) would silently grab "Jira ticket" instead.
+    vi.mocked(getConfig).mockReturnValue({
+      ...CFG,
+      exploreActions: [...CFG.exploreActions].reverse(),
+    });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "check the general prompt", body: "" });
+    const id = notesIn(store)![0].id;
+    await sendMsg({ type: "notepad:run", id });
+    const general = CFG.exploreActions.find((a) => a.id === "general")!;
+    expect(vi.mocked(openWorkspace).mock.calls.at(-1)![0].promptTemplate).toBe(general.prompt);
+  });
+
+  it("does nothing for an id that is not in the list", async () => {
+    const { sendMsg } = mkProvider();
+    vi.mocked(openWorkspace).mockClear();
+    await sendMsg({ type: "notepad:run", id: "ghost" });
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
 });

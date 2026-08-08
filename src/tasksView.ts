@@ -70,6 +70,7 @@ const MESSAGE_OPS: Partial<Record<InboundMessage["type"], Op>> = {
   removeFromSprint: "jira_write",
   setComponent: "jira_write",
   explore: "workspace_write",
+  "notepad:run": "workspace_write",
   runDoctor: "jira_fetch",
 };
 
@@ -483,7 +484,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "notepad:run": {
-          // Task 6 implements this.
+          await this.runNotepadItem(m.id);
           break;
         }
         case "reorder": {
@@ -966,6 +967,103 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ? "to check on your other tasks"
         : "to explore";
     this.toast("success", `Opened ${where} ${what}. Brief seeded in each repo.${seeded}${rcNote}`);
+  }
+
+  /** Launch an agent for one notepad item. Same shape as explore(): pick repos and
+   * a destination, open a workspace, seed a brief — the note supplies the topic and
+   * the brief body, so there is no input box to show. The run is written with
+   * `kind: "notepad"` into the same store the Deck reads, which is the whole of the
+   * Deck integration: the board gains a second origin, not a second data path. */
+  public async runNotepadItem(id: string): Promise<void> {
+    const note = this.notes().find((n) => n.id === id);
+    if (!note) return;
+
+    const cfg = getConfig();
+    const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+    if (repos.length === 0) {
+      this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
+      return;
+    }
+
+    const target = await this.chooseOpenTarget(cfg);
+    if (!target) return;
+
+    let services: ServiceRef[];
+    if (target.kind === "existing" || target.kind === "live-folder") {
+      services = this.servicesFromExistingDestination(target, repos);
+      if (services.length === 0) {
+        this.toast("error", "That workspace has no repos to open.");
+        return;
+      }
+    } else {
+      const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
+        repos.map((r) => ({
+          label: r.name,
+          detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
+          repo: r,
+        })),
+        {
+          canPickMany: true,
+          title: "Notepad — pick the repos to open",
+          placeHolder: "Space to toggle · Enter to open",
+          ignoreFocusOut: true,
+        },
+      );
+      if (!picks || picks.length === 0) return;
+      services = picks.map((p) => p.repo);
+    }
+
+    const args = await this.targetToOpenArgs(target, services.length, "Notepad", cfg);
+    if (!args) return;
+
+    const wantRemoteControl = await this.resolveRemoteControl(cfg);
+
+    // The generic explore action's prompt/slackDm — a notepad run has no action to
+    // choose (there is no Explore-style picker for it), so it borrows the one action
+    // meant to be topic-agnostic. Selected by stable id, not list position, so
+    // reordering agentFlow.exploreActions can never silently swap in a different
+    // template here.
+    const generic = cfg.exploreActions.find((a) => a.id === "general");
+    const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+    const topic = note.title.trim() || "Notepad item";
+    // Slugged from the note's own title, not from the display fallback above — an
+    // untitled note must key as "notepad-note", not "notepad-notepad-item".
+    const key = `notepad-${slugify(note.title.trim()) || "note"}`;
+    const planMd =
+      `## Notepad: ${topic}\n\n_No ticket — an item you wrote in the Agent Flow notepad. ` +
+      `If it turns into tracked work, open a ticket afterwards._` +
+      (note.body.trim() ? `\n\n${note.body.trim()}` : "");
+
+    const result = await openWorkspace({
+      ticket: { key, summary: topic, url: "" },
+      planMd,
+      descriptionText: note.body,
+      services,
+      mode: args.mode,
+      promptTemplate: applyExploreVars(injectSlackDm(generic?.prompt ?? "", generic?.slackDm ?? false), {
+        env: undefined,
+        services: services.map((s) => s.name).join(", "),
+      }),
+      workspaceDir: cfg.workspaceDir,
+      seedAgent: cfg.seedAgent,
+      openIn: args.openIn,
+      existingWorkspaceFile: args.existingWorkspaceFile,
+      existingFolder: args.existingFolder,
+      remoteControl: wantRemoteControl,
+      kind: "notepad",
+    });
+
+    // Point the note at its run so the badge has something to derive from. Written
+    // after the launch, not before: a cancelled picker must leave no pointer to a
+    // run that was never created.
+    await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, lastRunKey: key } : n)));
+
+    const where = result.workspaceFile
+      ? `workspace ${result.workspaceFile.split("/").pop()}`
+      : `${result.opened.length} window(s)`;
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
+    this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
   }
 
   /** One repo → its own window; multiple → per the workspaceMode setting (asking if configured). */
