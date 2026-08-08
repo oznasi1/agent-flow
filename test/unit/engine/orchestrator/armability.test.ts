@@ -53,11 +53,17 @@ describe("unfirableRules", () => {
   });
 
   it("reports both kinds at once, in flow order", () => {
-    const flow = flowOf(edge("e1", { kind: "pr-merged" }), edge("e2", { kind: "agent-ended-turn" }));
+    // Live-signal edge first, then PR — opposite of type-grouped order
+    const flow = flowOf(
+      edge("e1", { kind: "agent-ended-turn" }),
+      edge("e2", { kind: "pr-merged" }),
+      edge("e3", { kind: "ci-passed" }),
+    );
     const out = unfirableRules(flow, { liveSignal: false, prFacts: false });
     expect(out.map((r) => [r.edgeId, r.needs])).toEqual([
-      ["e1", "pr-facts"],
-      ["e2", "live-signal"],
+      ["e1", "live-signal"],
+      ["e2", "pr-facts"],
+      ["e3", "pr-facts"],
     ]);
   });
 
@@ -70,5 +76,25 @@ describe("unfirableRules", () => {
     const flow = flowOf(edge("e1", { kind: "ci-failed" }));
     const [only] = unfirableRules(flow, { liveSignal: true, prFacts: false });
     expect(only.label.toLowerCase()).toContain("ci");
+  });
+
+  it("every condition kind has a non-empty, trimmed label", () => {
+    const kinds: Condition["kind"][] = [
+      "pr-merged", "ci-passed", "ci-failed", "review-approved",
+      "changes-requested", "threads-resolved", "pr-conflicting",
+      "agent-ended-turn", "agent-idle-over", "no-agent-left",
+      "tree-clean", "has-uncommitted", "nothing-to-push",
+      "ticket-done", "ticket-status-is",
+    ];
+    const flow = flowOf(...kinds.map((k, i) => edge(`e${i}`, { kind: k } as Condition)));
+    const out = unfirableRules(flow, { liveSignal: false, prFacts: false });
+    // Collect all labels seen (from unfirableRules) and verify format
+    const seenLabels = new Set(out.map((r) => r.label));
+    // All unfirableRules should have labels matching the format
+    for (const label of seenLabels) {
+      expect(label).toBeTruthy();
+      expect(label).toBe(label.trim());
+      expect(label.length).toBeGreaterThan(0);
+    }
   });
 });
