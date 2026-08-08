@@ -146,12 +146,17 @@ export class DeckPanel {
    * directly so this initializer cannot depend on whether TypeScript assigns
    * constructor parameter properties before or after field initializers. */
   private readonly lockIo = nodeLockIo((m) => this.log(m));
-  /** Is a flows pass running right now? One at a time per panel: a pass can sit in a
-   * consent modal for minutes while `refresh()` keeps polling every six seconds, and
-   * two overlapping passes would each take the lock under their own token — the second
-   * acquiring only because the first's was reaped mid-modal — with the first's release
-   * then deleting the second's lock. Not persisted, and deliberately not a lock: it is
-   * about this panel's own re-entrancy, which no file can express. */
+  /** Is a flows pass running right now? One at a time per panel: a pass releases the
+   * flows-directory lock BEFORE it ever asks a spend-confirmation modal (asking
+   * performs nothing, so there is nothing left to hold the lock for), which means the
+   * lock is genuinely free for the whole time the modal is up. Without this guard,
+   * `refresh()` polling every six seconds while that modal sits for minutes would let
+   * a second pass for this SAME panel acquire that free lock immediately and run a
+   * full, independent evaluate-and-act pass — re-asking the same question, or acting
+   * on a flow the first pass is still deciding about — not because any lock or token
+   * was mishandled, but simply because nothing else says "I am still mid-pass." Not
+   * persisted, and deliberately not a lock: it is about this panel's own re-entrancy,
+   * which no file can express. */
   private advanceInFlight = false;
   /** Flow ids whose first post-start evaluation found rules already met, and which
    * are waiting for the user to approve or disarm. Per panel, deliberately not
@@ -297,10 +302,12 @@ export class DeckPanel {
   private async advanceArmedFlows(runs: RunStatus[], nowMs: number): Promise<void> {
     if (!getConfig().orchestrator) return;
     // One pass at a time on this panel. `refresh()` polls every six seconds and a pass
-    // can now sit in a modal for minutes, so two of them overlapping is not a race to
-    // reason about — it is the normal case. It is also what made a shared lock token
-    // corrupting: two passes holding the same token, and the first one's release
-    // deleting the lock the second believes it holds.
+    // can now sit in a modal for minutes — but by then it has already released the
+    // lock (see below), so the lock itself is free, not held, for the whole time the
+    // modal is up. `advanceInFlight` is what actually stops a second pass for THIS
+    // panel from acquiring that free lock and running a redundant evaluate-and-act
+    // pass while the first is still waiting on an answer; it has nothing to do with
+    // the lock's own token, which is why a lock-level fix could not cover this case.
     if (this.advanceInFlight) return;
     this.advanceInFlight = true;
     try {

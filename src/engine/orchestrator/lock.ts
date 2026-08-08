@@ -19,11 +19,13 @@ export interface LockIo {
 }
 
 /** Must comfortably exceed the slowest thing done while holding the lock — a launch
- * that opens a window, or a confirmation modal a human leaves sitting. The TTL is
- * only crash recovery: if a holder dies, this is how long other windows wait before
- * reaping. Erring long is cheap (flows poll every six seconds and nothing here is
- * urgent) and erring short is not — a lock reaped out from under a live launch lets
- * a second window fire the same rule, which is a second paid session. */
+ * that opens a window or a seed that opens a workspace. NOT a confirmation modal: a
+ * pass that needs to ask performs nothing and records the ask instead, and the
+ * modal itself runs after `release` — see `advanceArmedFlows` in `deckView.ts`. The
+ * TTL is only crash recovery: if a holder dies, this is how long other windows wait
+ * before reaping. Erring long is cheap (flows poll every six seconds and nothing
+ * here is urgent) and erring short is not — a lock reaped out from under a live
+ * launch lets a second window fire the same rule, which is a second paid session. */
 export const LOCK_TTL_MS = 300_000;
 
 export function lockPath(dir: string): string {
