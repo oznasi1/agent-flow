@@ -41,6 +41,71 @@ const makeDeps = (over: Partial<LaunchDeps> = {}): LaunchDeps => ({
 });
 
 describe("launchPlanned", () => {
+  it("refuses when the node's ticketKey and the fetched detail's key disagree, and calls neither dep", async () => {
+    // The node (what the user wired) and the detail (what the caller fetched) are two
+    // independent sources of "which ticket". If a caller ever pairs them wrongly,
+    // refusing costs one rule; proceeding would spend a session on the wrong ticket's
+    // prompt and bind the promoted place to the wrong run, forever.
+    const d = makeDeps();
+    const out = await launchPlanned(makeReq({ node: node({ ticketKey: "OTHER-9" }) }), d);
+    expect(out).toEqual({
+      ok: false,
+      message: "flow node names OTHER-9 but the ticket fetched was ASM-12 — not launching.",
+    });
+    expect(d.createWorktrees).not.toHaveBeenCalled();
+    expect(d.openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("uses whichever ticket key node and detail agree on, not a value baked in from other fixtures", async () => {
+    // Every other test in this file sets node.ticketKey and detail.key to the same
+    // literal "ASM-12" — a launcher that read a hardcoded "ASM-12" (or always read
+    // node.ticketKey where it should read detail.key, or vice versa) would still pass
+    // every one of them. This uses an agreeing pair with a DIFFERENT shared value, so
+    // the identity actually used has to flow through, not be assumed.
+    const d = makeDeps();
+    const altDetail: LaunchTicketDetail = { ...detail, key: "OTHER-7", summary: "Different ticket entirely" };
+    const out = await launchPlanned(makeReq({ node: node({ ticketKey: "OTHER-7" }), detail: altDetail }), d);
+    expect(out).toEqual({ ok: true, runKey: "OTHER-7", repo: "aws-ops" });
+    const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
+    expect(arg.ticket).toEqual({ key: "OTHER-7", summary: "Different ticket entirely", url: altDetail.url });
+  });
+
+  it("refuses a node naming no repos at all, with its own message rather than an empty-list one", async () => {
+    const d = makeDeps();
+    const out = await launchPlanned(makeReq({ node: node({ repos: [] }) }), d);
+    expect(out).toEqual({
+      ok: false,
+      message: "the flow node names no repos — nothing to launch ASM-12 into.",
+    });
+    expect(d.createWorktrees).not.toHaveBeenCalled();
+    expect(d.openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("logs the repos it drops because they aren't checked out here, and still launches with what resolved", async () => {
+    const d = makeDeps();
+    const out = await launchPlanned(makeReq({ node: node({ repos: ["aws-ops", "ghost-repo"] }) }), d);
+    expect(out).toEqual({ ok: true, runKey: "ASM-12", repo: "aws-ops" });
+    expect(d.log).toHaveBeenCalledWith(expect.stringMatching(/ghost-repo.*not checked out/));
+    const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
+    expect(arg.services).toEqual([{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }]);
+  });
+
+  it("pluralizes the dropped-repos log when more than one name fails to resolve", async () => {
+    const d = makeDeps();
+    const out = await launchPlanned(makeReq({ node: node({ repos: ["ghost-one", "ghost-two", "aws-ops"] }) }), d);
+    expect(out).toEqual({ ok: true, runKey: "ASM-12", repo: "aws-ops" });
+    expect(d.log).toHaveBeenCalledWith(expect.stringMatching(/ghost-one, ghost-two.*without them/));
+  });
+
+  it("reports a failure when createWorktrees itself throws synchronously, rather than rejecting", async () => {
+    const d = makeDeps({ createWorktrees: vi.fn(() => { throw new Error("git not found"); }) });
+    await expect(launchPlanned(makeReq({ node: node({ dest: "worktree" }) }), d)).resolves.toMatchObject({
+      ok: false,
+      message: expect.stringContaining("git not found"),
+    });
+    expect(d.openWorkspace).not.toHaveBeenCalled();
+  });
+
   it("launches into the resolved repo and reports the run key and repo", async () => {
     const d = makeDeps();
     const out = await launchPlanned(makeReq(), d);
@@ -163,5 +228,13 @@ describe("launchPlanned", () => {
       { name: "aws-ops", path: "/repos/aws-ops", isGit: true },
       { name: "bite-me", path: "/repos/bite-me", isGit: true },
     ]);
+  });
+
+  it("logs the binding decision when the node names more than one repo", async () => {
+    // The comment on that log line says the choice is silent unless said out loud
+    // here — deleting the call would keep every other assertion in this file green.
+    const d = makeDeps();
+    await launchPlanned(makeReq({ node: node({ repos: ["aws-ops", "bite-me"] }) }), d);
+    expect(d.log).toHaveBeenCalledWith(expect.stringContaining("binding the place to aws-ops"));
   });
 });
