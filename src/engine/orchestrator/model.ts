@@ -93,6 +93,11 @@ export interface Flow {
   createdAt: number;
   nodes: FlowNode[];
   edges: FlowEdge[];
+  /** When the user approved this flow's first launch. A flow asks once, naming
+   * what it is about to open, then runs unattended — the same reasoning as the
+   * resume gate: a mis-wired flow should cost one prompt, not a string of paid
+   * sessions. Absent means it has never launched anything. */
+  launchConfirmedAt?: number;
 }
 
 export function emptyFlow(id: string, name: string, nowMs: number): Flow {

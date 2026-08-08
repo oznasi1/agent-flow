@@ -25,6 +25,10 @@ describe("emptyFlow", () => {
       id: "f1", name: "Ship the migration", armed: false, createdAt: 1_000, nodes: [], edges: [],
     });
   });
+
+  it("emptyFlow has no launch approval yet", () => {
+    expect(emptyFlow("f1", "n", 1).launchConfirmedAt).toBeUndefined();
+  });
 });
 
 describe("node guards", () => {

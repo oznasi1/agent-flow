@@ -5,6 +5,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { FlowIo } from "./store";
+import { LockIo } from "./lock";
 
 /** Mint a flow id. The charset is not cosmetic: `store.ts` builds a filename from
  * an id and rejects anything outside `[A-Za-z0-9_-]`, so a slug-from-name scheme
@@ -38,6 +39,31 @@ export function nodeFlowIo(): FlowIo {
     writeFile: (p, text) => {
       fs.mkdirSync(path.dirname(p), { recursive: true });
       fs.writeFileSync(p, text);
+    },
+    remove: (p) => fs.rmSync(p, { force: true }),
+  };
+}
+
+/** The lock's real IO. `wx` is the whole point: an atomic exclusive create, so two
+ * windows racing for the lock cannot both believe they took it. EEXIST means
+ * somebody else won — that is an answer, not an error. */
+export function nodeLockIo(): LockIo {
+  return {
+    tryCreate: (p, text) => {
+      try {
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, text, { flag: "wx" });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    read: (p) => {
+      try {
+        return fs.readFileSync(p, "utf8");
+      } catch {
+        return null;
+      }
     },
     remove: (p) => fs.rmSync(p, { force: true }),
   };

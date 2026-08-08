@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { nodeFlowIo, newFlowId } from "../../../../src/engine/orchestrator/flowIo";
+import { nodeFlowIo, newFlowId, nodeLockIo } from "../../../../src/engine/orchestrator/flowIo";
 import { readFlows, writeFlow, removeFlow } from "../../../../src/engine/orchestrator/store";
 import { emptyFlow } from "../../../../src/engine/orchestrator/model";
 
@@ -78,5 +78,43 @@ describe("nodeFlowIo", () => {
     writeFlow(io, dir, emptyFlow("a", "a", 2));
     writeFlow(io, dir, emptyFlow("b", "b", 1));
     expect(io.readDir(dir).sort()).toEqual(["a.json", "b.json"]);
+  });
+});
+
+describe("nodeLockIo", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "af-lockio-"));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("creates a lock exclusively — the second attempt fails rather than throwing", () => {
+    const io = nodeLockIo();
+    const p = path.join(dir, "x.lock");
+    expect(io.tryCreate(p, "1")).toBe(true);
+    expect(io.tryCreate(p, "2")).toBe(false);
+    // And the first writer's contents survive.
+    expect(io.read(p)).toBe("1");
+  });
+
+  it("creates the directory if it does not exist yet", () => {
+    const io = nodeLockIo();
+    expect(io.tryCreate(path.join(dir, "deep", "x.lock"), "1")).toBe(true);
+  });
+
+  it("reads null for a missing lock rather than throwing", () => {
+    expect(nodeLockIo().read(path.join(dir, "nope.lock"))).toBeNull();
+  });
+
+  it("removes a lock, and removing a missing one is not an error", () => {
+    const io = nodeLockIo();
+    const p = path.join(dir, "x.lock");
+    io.tryCreate(p, "1");
+    io.remove(p);
+    expect(io.read(p)).toBeNull();
+    expect(() => io.remove(p)).not.toThrow();
   });
 });
