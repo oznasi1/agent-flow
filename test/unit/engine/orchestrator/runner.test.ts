@@ -88,16 +88,16 @@ describe("applyFired", () => {
     expect(out.edges[0].firedAt).toBeUndefined();
   });
 
-  it("records an ERROR, not a firedAt, on a performed edge whose action is not notify", () => {
-    // evaluateFlow does not filter by action, so a launch edge from a hand-edited
-    // flow can fire. It must not be stamped as fired: `firedAt` consumes the latch
-    // AS A SUCCESS, so the edge never acts and — once a real launch ships — looks
-    // already-done forever and needs a manual Reset to ever run. `error` is settled
-    // too (see isSettled), so it still cannot re-fire in a loop, but the drawer
-    // surfaces it and offers Reset, and a Reset makes it genuinely run later.
+  it("records an ERROR, not a firedAt, for a performed acting edge the caller reported nothing about", () => {
+    // The caller performs a `launch` or a `seed` and says what happened. When it
+    // says nothing, this must fail CLOSED rather than stamp a success: `firedAt`
+    // consumes the latch AS A SUCCESS, so an edge nobody actually performed would
+    // look already-done forever and never run. `error` is settled too (see
+    // isSettled), so it still cannot re-fire in a loop, but the drawer surfaces it
+    // and offers Reset, and a Reset makes it genuinely run later.
     const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
-    expect(out.edges[0].error).toContain("not available in this build");
+    expect(out.edges[0].error).toBeTruthy();
     // The latch must NOT read as a success.
     expect(out.edges[0].firedAt).toBeUndefined();
     expect(out.edges[0].firedNote).toBeUndefined();
@@ -106,8 +106,50 @@ describe("applyFired", () => {
   it("names the action it could not perform, and never claims it ran", () => {
     const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "seed" })]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
-    expect(out.edges[0].error).toBe("seed is not available in this build");
+    expect(out.edges[0].error).toBe("seed was not performed");
     expect(out.edges[0].error).not.toMatch(/success|ran|done|told you/i);
+  });
+
+  it("takes the note from the caller for an acting edge that succeeded", () => {
+    // The whole point of the outcome argument: only the caller knows whether a
+    // launch opened a window, and what to call it. `applyFired` must not pre-judge.
+    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
+    const out = applyFired(
+      flow,
+      [{ edge: flow.edges[0], perform: true }],
+      NOW,
+      new Map([["e1", { ok: true, note: "launched ASM-12 in aws-ops" } as const]]),
+    );
+    expect(out.edges[0].firedAt).toBe(NOW);
+    expect(out.edges[0].firedNote).toBe("launched ASM-12 in aws-ops");
+    expect(out.edges[0].error).toBeUndefined();
+  });
+
+  it("takes the error from the caller for an acting edge that failed, and stamps no firedAt", () => {
+    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
+    const out = applyFired(
+      flow,
+      [{ edge: flow.edges[0], perform: true }],
+      NOW,
+      new Map([["e1", { ok: false, error: "Couldn't launch ASM-12: no worktree" } as const]]),
+    );
+    expect(out.edges[0].error).toBe("Couldn't launch ASM-12: no worktree");
+    expect(out.edges[0].firedAt).toBeUndefined();
+    expect(out.edges[0].firedNote).toBeUndefined();
+  });
+
+  it("keeps a notify edge's own note even when the caller reports an outcome for it", () => {
+    // A caller only ever performs the acting verbs, but an outcome keyed to a
+    // notify edge must not be able to rewrite what the toast already said.
+    const flow = flowWith([place("a", "ASM-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
+    const out = applyFired(
+      flow,
+      [{ edge: flow.edges[0], perform: true }],
+      NOW,
+      new Map([["e1", { ok: false, error: "nonsense" } as const]]),
+    );
+    expect(out.edges[0].error).toBeUndefined();
+    expect(out.edges[0].firedNote).toBe("told you: the migration has landed");
   });
 
   it("stamps a NON-performed non-notify edge as fired, not errored — it did nothing, and its junction closed", () => {

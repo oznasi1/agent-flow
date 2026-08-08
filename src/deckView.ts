@@ -5,12 +5,15 @@ import * as path from "path";
 import { getConfig } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { Flow, emptyFlow, isSettled } from "./engine/orchestrator/model";
+import { Flow, FlowEdge, PlannedNode, emptyFlow, findNode, isPlanned, isSettled } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
-import { nodeFlowIo, newFlowId } from "./engine/orchestrator/flowIo";
+import { nodeFlowIo, nodeLockIo, newFlowId } from "./engine/orchestrator/flowIo";
+import { LOCK_TTL_MS, acquire, release } from "./engine/orchestrator/lock";
 import { evaluateFlow } from "./engine/orchestrator/evaluate";
 import { unfirableRules } from "./engine/orchestrator/armability";
-import { applyFired, notifyLines } from "./engine/orchestrator/runner";
+import { ActOutcome, applyFired, notifyLines } from "./engine/orchestrator/runner";
+import { promoteToPlace } from "./engine/orchestrator/promote";
+import { LaunchTicketDetail, launchPlanned } from "./engine/orchestrator/launch";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
@@ -117,6 +120,20 @@ export class DeckPanel {
    * it never changes for the life of the panel. */
   private readonly flowsDir = defaultFlowsDir();
   private readonly flowIo = nodeFlowIo();
+  /** The lock's IO. `this.log` is reached through an arrow rather than passed
+   * directly so this initializer cannot depend on whether TypeScript assigns
+   * constructor parameter properties before or after field initializers. */
+  private readonly lockIo = nodeLockIo((m) => this.log(m));
+  /** This panel's identity in the flows lock, minted once per instance. It is what
+   * lets `release` delete only OUR lock: a window suspended past the TTL has its
+   * lock reaped and possibly retaken, and an untokened release on wake would delete
+   * the new holder's. */
+  private readonly lockToken = `deck-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  /** Flow ids whose first-launch question is on screen right now. A modal is
+   * answered by a human, so it can easily outlive the lock's TTL — after which our
+   * own next poll reacquires and would ask a second time. Per panel and never
+   * persisted: it is about what is currently on this screen. */
+  private readonly launchAsks = new Set<string>();
   /** Flow ids whose first post-start evaluation found rules already met, and which
    * are waiting for the user to approve or disarm. Per panel, deliberately not
    * persisted: the gate exists to protect the moment you come back, and asking on
@@ -242,9 +259,32 @@ export class DeckPanel {
    * rather than acted on; `flow:resumeApprove` is what lets the next pass fire.
    * A flow whose first evaluation finds nothing ready is never gated at all —
    * that is what keeps a rule met later in the same session firing without
-   * ceremony, per `resumeCleared`. */
-  private advanceArmedFlows(runs: RunStatus[], nowMs: number): void {
+   * ceremony, per `resumeCleared`.
+   *
+   * The whole pass runs under the flows-directory lock, acquired before the read
+   * and released in a `finally`. `defaultFlowsDir()` is the GLOBAL ~/.agentflow/flows
+   * and a DeckPanel is per-extension-host, so without it two windows read the same
+   * unfired edge and both act on it — measured in the previous phase as two
+   * identical toasts, and with a real `launch` that is a second paid session. A
+   * window that cannot take the lock does NOTHING — no evaluation, no write, no
+   * toast — and tries again on its next poll six seconds later. */
+  private async advanceArmedFlows(runs: RunStatus[], nowMs: number): Promise<void> {
     if (!getConfig().orchestrator) return;
+    // Silent rather than logged: with two windows polling every six seconds one of
+    // them skips almost every pass, and that is normal operation, not a fault. An
+    // unexpected filesystem failure IS logged — by `nodeLockIo`, which is why the
+    // panel hands it `this.log`.
+    if (!acquire(this.lockIo, this.flowsDir, nowMs, LOCK_TTL_MS, this.lockToken)) return;
+    try {
+      await this.advanceUnderLock(runs, nowMs);
+    } finally {
+      release(this.lockIo, this.flowsDir, this.lockToken);
+    }
+  }
+
+  /** The body of a pass, with the lock already held. Split out only so the lock's
+   * `try`/`finally` above stays one readable statement. */
+  private async advanceUnderLock(runs: RunStatus[], nowMs: number): Promise<void> {
     for (const flow of readFlows(this.flowIo, this.flowsDir)) {
       if (!flow.armed) {
         // A disarmed flow holds no gate — re-arming starts the cycle over.
@@ -280,15 +320,12 @@ export class DeckPanel {
         // unfired edge, both fire it, and the second write overwrites the first's
         // `firedAt`. That was probe-proved — two identical toasts for one rule.
         //
-        // Be honest about what this is: it NARROWS the window from about a poll
-        // interval to the microseconds between this read and the write below. It
-        // does not eliminate it — this is still read-then-write with no lock, and
-        // two windows can still interleave inside those microseconds. A full fix
-        // needs either a lock file beside the flow or a per-workspace flows
-        // directory, and it MUST land before any action can spend money: today a
-        // double fire costs a duplicate toast, but the identical sequence with a
-        // real `launch` is a duplicate paid agent session. Neither is attempted
-        // here — moving the storage location needs a migration.
+        // The lock this pass holds is what actually prevents that now, and this
+        // guard is kept rather than deleted because the lock's TTL is crash
+        // recovery, not mutual exclusion for a holder that HANGS: a pass stuck in
+        // `openWorkspace` for longer than the TTL has its lock reaped, and the pass
+        // that then acquires must still not restamp an edge the stuck one claimed.
+        // Cheap, and the failure it covers is a duplicate paid session.
         //
         // The write is based on `fresh`, not on the `flow` this pass evaluated:
         // writing the stale copy would erase the other window's stamp on the edge
@@ -309,14 +346,166 @@ export class DeckPanel {
         // Nothing left to stamp: the other window did all of it. No write, and no
         // toast — it already announced every one of these.
         if (unclaimed.length === 0) continue;
-        writeFlow(this.flowIo, this.flowsDir, applyFired(fresh, unclaimed, nowMs));
+
+        // A flow asks ONCE before it ever launches anything, then runs unattended:
+        // a mis-wired flow should cost one prompt, not a string of paid sessions.
+        // Only a launch we would actually attempt counts — a `launch` edge pointing
+        // at something that is not planned work spends nothing and is stamped as an
+        // error below, so gating on it would ask about a rule that can never run.
+        const wantsLaunch = unclaimed
+          .filter((f) => f.perform && f.edge.action === "launch")
+          .map((f) => this.plannedTarget(fresh, f.edge))
+          .find((n) => n !== undefined);
+        if (wantsLaunch !== undefined && fresh.launchConfirmedAt === undefined) {
+          await this.askFirstLaunch(fresh, wantsLaunch);
+          // Whatever the answer, THIS pass performs nothing: an approval only lets
+          // the next pass act, which keeps the acting path identical whether or not
+          // a question was ever asked.
+          continue;
+        }
+
+        // Act first, then record what happened — and record it all in ONE write, so
+        // a crash between the two cannot leave a launched ticket looking unlaunched.
+        const outcomes = new Map<string, ActOutcome>();
+        const promotions: { nodeId: string; runKey: string; repo: string }[] = [];
+        const receipts: { level: "success" | "error"; message: string }[] = [];
+        for (const f of unclaimed) {
+          // A stamped-only sibling performs nothing, and a notify's whole action is
+          // the toast `notifyLines` produces below.
+          if (!f.perform || f.edge.action === "notify") continue;
+          const done = await this.performEdge(fresh, f.edge);
+          outcomes.set(f.edge.id, done.outcome);
+          if (done.promote) promotions.push(done.promote);
+          if (done.receipt) receipts.push(done.receipt);
+        }
+        let next = applyFired(fresh, unclaimed, nowMs, outcomes);
+        for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo);
+        writeFlow(this.flowIo, this.flowsDir, next);
         for (const line of notifyLines(fresh, unclaimed)) {
           this.post({ type: "toast", level: "info", message: line });
         }
+        for (const r of receipts) this.toast(r.level, r.message);
       } catch (e) {
         this.log(`deck: flow ${flow.id} failed to advance: ${e}`);
       }
     }
+  }
+
+  /** The planned node a `launch` edge points at, or `undefined` when it points at
+   * anything else — a hand-edited flow can aim `launch` at a notify terminal. */
+  private plannedTarget(flow: Flow, edge: FlowEdge): PlannedNode | undefined {
+    const target = findNode(flow, edge.to);
+    return target && isPlanned(target) ? target : undefined;
+  }
+
+  /** Ask, once per flow, before it launches anything — naming the ticket, the repos
+   * and the prompt mode, because those are what the money is spent on. Writes the
+   * answer (an approval, or a disarm) and nothing else; the pass that asked never
+   * acts. Dismissing it writes nothing at all, so the flow stays armed and is asked
+   * again later. */
+  private async askFirstLaunch(flow: Flow, node: PlannedNode): Promise<void> {
+    if (this.launchAsks.has(flow.id)) return;
+    const cfg = getConfig();
+    const mode = cfg.promptModes.find((m) => m.id === node.mode);
+    const LAUNCH = "Launch";
+    const DISARM = "Disarm";
+    this.launchAsks.add(flow.id);
+    let answer: string | undefined;
+    try {
+      answer = await vscode.window.showWarningMessage(
+        `${flow.name} is ready to launch ${node.ticketKey} in ${node.repos.join(", ")} with the "${
+          mode?.label ?? node.mode
+        }" prompt, unattended. It will keep launching on its own from now on.`,
+        { modal: true },
+        LAUNCH,
+        DISARM,
+      );
+    } finally {
+      this.launchAsks.delete(flow.id);
+    }
+    // Re-read: a human can leave a modal up for far longer than the lock's TTL, and
+    // in that time another window may have stamped an edge or the user may have
+    // deleted the flow. Writing the copy we captured before asking would erase the
+    // one and resurrect the other.
+    const latest = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+    if (!latest) return;
+    if (answer === LAUNCH) writeFlow(this.flowIo, this.flowsDir, { ...latest, launchConfirmedAt: Date.now() });
+    else if (answer === DISARM) writeFlow(this.flowIo, this.flowsDir, { ...latest, armed: false });
+  }
+
+  /** Perform one acting edge and report what happened. Never throws and never
+   * retries: every refusal comes back as an `error` the drawer shows as stalled and
+   * offers Reset for, because a launch that fails on every poll is how you end up
+   * with twenty windows. */
+  private async performEdge(
+    flow: Flow,
+    edge: FlowEdge,
+  ): Promise<{
+    outcome: ActOutcome;
+    promote?: { nodeId: string; runKey: string; repo: string };
+    receipt?: { level: "success" | "error"; message: string };
+  }> {
+    if (edge.action === "seed") {
+      // Seeding another agent into a place that already exists has no launcher yet.
+      // Said plainly, and as an error rather than a receipt, so the rule is settled
+      // (never re-firing in a loop) and one Reset makes it live once seed ships.
+      return { outcome: { ok: false, error: "seed: opening another agent in an existing place is not wired up yet." } };
+    }
+    const node = this.plannedTarget(flow, edge);
+    if (!node) {
+      return { outcome: { ok: false, error: `a launch rule must point at planned work, and ${edge.to} is not.` } };
+    }
+    const cfg = getConfig();
+    // The node's `mode` is a PromptMode id. A mode the user has since deleted cannot
+    // be silently replaced with a default: that would seed an agent with someone
+    // else's prompt, which is worse than not launching.
+    const mode = cfg.promptModes.find((m) => m.id === node.mode);
+    if (!mode) {
+      return {
+        outcome: {
+          ok: false,
+          error: `the prompt mode "${node.mode}" is no longer configured — not launching ${node.ticketKey}.`,
+        },
+      };
+    }
+    // Typed as the launcher's own structural detail rather than left to inference:
+    // this is where a connector's `TaskDetail` is checked against the four fields a
+    // launch actually needs, and an evolving `any` would check nothing.
+    let detail: LaunchTicketDetail;
+    try {
+      detail = await this.connector.provider().detail(node.ticketKey);
+    } catch (e) {
+      return { outcome: { ok: false, error: `Couldn't read ${node.ticketKey}: ${e}` } };
+    }
+    const res = await launchPlanned(
+      {
+        node,
+        detail,
+        repos: discoverRepos(cfg.reposRoot, cfg.repoBlocklist),
+        promptTemplate: mode.prompt,
+        workspaceDir: cfg.workspaceDir,
+        seedAgent: cfg.seedAgent,
+        // `cfg.workspaceMode` also has "auto" and "ask", and neither is a layout: an
+        // unattended launch must never stop to ask. The same non-interactive mapping
+        // `takeBatch` makes — one repo means one window, and anything else is one
+        // multiroot window for the task rather than a window per repo.
+        workspaceMode: node.repos.length === 1 || cfg.workspaceMode === "per-window" ? "per-window" : "multiroot",
+      },
+      { createWorktrees, openWorkspace, log: this.log },
+    );
+    if (!res.ok) {
+      return { outcome: { ok: false, error: res.message }, receipt: { level: "error", message: `${flow.name}: ${res.message}` } };
+    }
+    return {
+      outcome: { ok: true, note: `launched ${node.ticketKey} in ${res.repo}` },
+      promote: { nodeId: node.id, runKey: res.runKey, repo: res.repo },
+      receipt: {
+        level: "success",
+        message: `${flow.name}: launched ${node.ticketKey} in ${res.repo}.${
+          cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : ""
+        }`,
+      },
+    };
   }
 
   private startPolling(): void {
@@ -1007,7 +1196,10 @@ export class DeckPanel {
       // which happens while the strip is off.
       if (this.reviewsEnabled()) this.enqueueReviews(Date.now());
       else this.postReviews();
-      this.advanceArmedFlows(runs, Date.now());
+      // Awaited: a pass can now open a workspace and ask a question, and postFlows()
+      // below must see the write that pass made — the whole reason this work rides
+      // the refresh instead of its own timer.
+      await this.advanceArmedFlows(runs, Date.now());
       this.postFlows();
     } catch (e) {
       this.log(`deck: refresh failed: ${e}`);

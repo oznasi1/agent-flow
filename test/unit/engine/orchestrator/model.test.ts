@@ -54,7 +54,7 @@ describe("isSettled", () => {
   });
 
   it("is true for an error with no firedAt — the half a firedAt-only check misses", () => {
-    expect(isSettled(edge("e1", "a", "z", { error: "launch is not available in this build" }))).toBe(true);
+    expect(isSettled(edge("e1", "a", "z", { error: "Couldn't launch ASM-12: no worktree" }))).toBe(true);
   });
 
   it("is true when both are set", () => {

@@ -108,6 +108,27 @@ const h = vi.hoisted(() => ({
   readFlows: vi.fn((): Flow[] => []),
   writeFlow: vi.fn(),
   removeFlow: vi.fn(),
+  // The flows-directory lock (Task 5). Granted by default, so every flow test
+  // that is not about contention behaves as it did before the lock existed; a
+  // test about a busy directory says so with mockReturnValue(false).
+  acquire: vi.fn((..._args: unknown[]) => true),
+  release: vi.fn(),
+  // The launcher (Task 4), stubbed so no test opens a window or a worktree. The
+  // default answers FROM THE REQUEST rather than with a constant: a pass can
+  // launch up to three planned nodes, and a constant run key would make "each
+  // node was promoted to its own run" indistinguishable from "they all collapsed
+  // onto one". Typed as the real union so a test can resolve a failure too.
+  launchPlanned: vi.fn(
+    async (req: { node: { ticketKey: string; repos: string[] } }): Promise<
+      { ok: true; runKey: string; repo: string } | { ok: false; message: string }
+    > => ({ ok: true, runKey: req.node.ticketKey, repo: req.node.repos[0] }),
+  ),
+  // The ticket read a launch needs. A superset of the four fields LaunchRequest
+  // wants, exactly as the real provider().detail returns.
+  getDetail: vi.fn(async (key: string) => ({
+    key, summary: "do it", url: `https://jira/browse/${key}`, descriptionText: "the description",
+    labels: [], components: [], status: null, statusCategory: null,
+  })),
   // A counter, not a constant: deterministic so ids are assertable, but varying
   // so the re-mint-on-collision path is reachable. A constant would make the
   // retry loop indistinguishable from a refusal.
@@ -206,8 +227,23 @@ vi.mock("../../src/engine/orchestrator/store", () => ({
   writeFlow: h.writeFlow,
   removeFlow: h.removeFlow,
 }));
+// Partial mock: LOCK_TTL_MS and lockPath stay real (the panel passes the real TTL,
+// and a test asserting on it should not be asserting on a number this file made
+// up) — only the two side-effecting calls are replaced.
+vi.mock("../../src/engine/orchestrator/lock", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/engine/orchestrator/lock")>();
+  return {
+    ...actual,
+    acquire: (...args: Parameters<typeof actual.acquire>) => h.acquire(...args),
+    release: (...args: Parameters<typeof actual.release>) => h.release(...args),
+  };
+});
+vi.mock("../../src/engine/orchestrator/launch", () => ({
+  launchPlanned: (...args: unknown[]) => h.launchPlanned(args[0] as { node: { ticketKey: string; repos: string[] } }),
+}));
 vi.mock("../../src/engine/orchestrator/flowIo", () => ({
   nodeFlowIo: () => ({ readDir: () => [], readFile: () => null, writeFile: () => {}, remove: () => {} }),
+  nodeLockIo: () => ({ tryCreate: () => true, read: () => null, remove: () => {} }),
   // A counter, not a constant: deterministic so ids are assertable, but varying so
   // the re-mint-on-collision path is reachable. A constant would make the retry
   // loop indistinguishable from a refusal.
@@ -254,6 +290,13 @@ vi.mock("../../src/config", async (importActual) => {
       // which only reaches deckView.ts if this mock forwards the real,
       // vscode-configStore-backed value rather than a field frozen here.
       orchestrator: actual.getConfig().orchestrator,
+      // The three settings an armed launch resolves for itself. Sourced from the
+      // real getConfig() for the same reason as the block above: `promptModes` in
+      // particular is what a flow node's `mode` id is matched against, so a test
+      // about a mode that is no longer configured has to be able to steer it.
+      promptModes: actual.getConfig().promptModes,
+      workspaceMode: actual.getConfig().workspaceMode,
+      workspaceDir: actual.getConfig().workspaceDir,
     }),
   };
 });
@@ -282,7 +325,8 @@ const reviewFixture = (): ReviewRequest => ({
 });
 
 /** A TaskConnector standing in for Jira. The Deck's polling path only ever calls
- * `provider().status(key)`, `isAuthenticated()`, and `keyFromUrl()` (through
+ * `provider().status(key)`, `provider().detail(key)` (a flow's launch, Task 5),
+ * `isAuthenticated()`, and `keyFromUrl()` (through
  * `ticketKeyFor`) — see src/deckView.ts — so nothing else here needs to do
  * anything real. `keyFromUrl` mirrors the real Jira connector's own /browse/
  * parsing (src/tasks/jira/connector.ts) rather than a stub that always answers
@@ -303,7 +347,7 @@ function fakeConnector(authed = false, label = "Jira"): TaskConnector {
     isAuthenticated: async () => authed,
     signIn: async () => true,
     signOut: async () => undefined,
-    provider: () => ({ status: h.getStatus }) as unknown as TaskProvider,
+    provider: () => ({ status: h.getStatus, detail: h.getDetail }) as unknown as TaskProvider,
     probe: async () => ({}),
     taskUrl: (key: string) => `https://jira${BROWSE}${key}`,
     keyFromUrl: (url: string) => {
@@ -418,6 +462,16 @@ beforeEach(() => {
     h.flows = i >= 0 ? h.flows.map((f, idx) => (idx === i ? flow : f)) : [...h.flows, flow];
   });
   h.removeFlow.mockClear();
+  h.acquire.mockClear().mockReturnValue(true);
+  h.release.mockClear();
+  h.launchPlanned.mockClear().mockImplementation(
+    async (req: { node: { ticketKey: string; repos: string[] } }) =>
+      ({ ok: true, runKey: req.node.ticketKey, repo: req.node.repos[0] }),
+  );
+  h.getDetail.mockClear().mockImplementation(async (key: string) => ({
+    key, summary: "do it", url: `https://jira/browse/${key}`, descriptionText: "the description",
+    labels: [], components: [], status: null, statusCategory: null,
+  }));
   // Confirm by default: resolve the label passed as the modal's sole action item,
   // rather than vscode's own mock default of `undefined` (which reads as "declined"
   // for every other suite in this file). Individual tests override this per case.
@@ -3042,9 +3096,10 @@ describe("an armed flow advances on refresh", () => {
     expect(h.writeFlow).not.toHaveBeenCalled();
   });
 
-  it("never performs a launch or a seed — they do not exist in this build", async () => {
-    // A hand-edited flow can hold action: "launch". It must be stamped so it does
-    // not re-evaluate forever, but nothing may be opened or started.
+  it("never launches a rule whose target is not planned work", async () => {
+    // A hand-edited flow can point action: "launch" at a notify node. There is
+    // nothing to launch, so it must be recorded as an error — stamped, so it does
+    // not re-evaluate forever, and never as a success — and nothing may be opened.
     setConfig({ orchestrator: true });
     h.flows = [armedFlow({
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
@@ -3059,8 +3114,12 @@ describe("an armed flow advances on refresh", () => {
     await settle();
     h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
     await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
     expect(h.openInEditor).not.toHaveBeenCalled();
     expect(h.writePlanFile).not.toHaveBeenCalled();
+    const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(written.edges[0].error).toMatch(/planned/i);
+    expect(written.edges[0].firedAt).toBeUndefined();
     // And no toast claims it ran.
     expect(posts(p).some((m) => m.type === "toast" && /launched/i.test(m.message ?? ""))).toBe(false);
   });
@@ -3215,6 +3274,351 @@ describe("an armed flow advances on refresh", () => {
     const written = h.writeFlow.mock.calls.at(-1)?.[2] as Flow | undefined;
     expect(written?.id).toBe("f1");
     expect(written?.edges[0].firedAt).toBeTypeOf("number");
+  });
+});
+
+describe("a met launch rule acts", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** A place whose PR is watched, wired to planned work. `launchConfirmedAt` is
+   * SET by default: most cases here are about what an already-approved flow does,
+   * and the first-launch question has its own cases below. */
+  const launchFlow = (over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      {
+        id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+        ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+      },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
+    ...over,
+  });
+
+  /** Open with the condition UNMET so the resume gate clears itself (Task 4), then
+   * arm the met one — the same two-pass idiom every firing test in this file uses.
+   * Without it the first met pass would only ever be held and reported, and every
+   * assertion below about launching would be about the resume gate instead. */
+  const warmed = async (flows: Flow[]) => {
+    setConfig({ orchestrator: true });
+    h.flows = flows;
+    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    return opened;
+  };
+
+  const toastCount = (p: ReturnType<typeof lastPanel>) => posts(p).filter((m) => m.type === "toast").length;
+  const lastWrite = () => h.writeFlow.mock.calls.at(-1)![2] as Flow;
+
+  it("does nothing at all when another window holds the flows lock", async () => {
+    const { p, send } = await warmed([launchFlow()]);
+    h.acquire.mockReturnValue(false);
+    const toastsBefore = toastCount(p);
+    await send({ type: "deck:refresh" });
+    // The board itself still refreshed — the lock gates the flows pass, not the Deck.
+    expect(h.buildRunStatus).toHaveBeenCalled();
+    expect(h.writeFlow).not.toHaveBeenCalled();
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    expect(toastCount(p)).toBe(toastsBefore);
+    // Not vacuous: the very same fixture launches the moment the lock is free, so
+    // the three assertions above are about the lock and not about an unmet rule.
+    h.acquire.mockReturnValue(true);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases the lock with the same token it acquired, even when the launch throws", async () => {
+    const { send } = await warmed([launchFlow()]);
+    h.launchPlanned.mockRejectedValue(new Error("boom"));
+    h.release.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.release).toHaveBeenCalled();
+    // acquire(io, dir, nowMs, ttlMs, token) and release(io, dir, token) — the same
+    // token, or a suspended window's release could delete a live holder's lock.
+    const token = h.acquire.mock.calls.at(-1)![4];
+    expect(token).toBeTypeOf("string");
+    expect(h.release.mock.calls.at(-1)![2]).toBe(token);
+  });
+
+  it("releases the lock when the pass itself throws, not only when a launch does", async () => {
+    // A throwing launch is caught per flow (one bad flow must not stop the others),
+    // so it never reaches the pass's own `finally`. This is what does: a throw from
+    // the store read, outside every per-flow guard. Without the `finally` the lock
+    // file would be left behind and every window would skip until the TTL reaped it.
+    const log = vi.fn();
+    setConfig({ orchestrator: true });
+    h.flows = [launchFlow()];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
+    await settled();
+    h.release.mockClear();
+    h.readFlows.mockImplementation(() => { throw new Error("store on fire"); });
+    await lastPanel()._fire({ type: "deck:refresh" });
+    await settled();
+    expect(h.release).toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("store on fire"));
+    // Put the store back before afterEach disposes the panel: the close path reads
+    // the flows too (hasArmedFlow), and a throw from there is nobody's to catch.
+    h.readFlows.mockImplementation(() => h.flows);
+  });
+
+  it("asks before a flow's first launch, naming the ticket, the repo and the prompt mode", async () => {
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[0]).toContain("ASM-12");
+    expect(call[0]).toContain("aws-ops");
+    expect(call[0]).toContain("Implementation"); // the configured mode's label
+    expect(call[1]).toMatchObject({ modal: true });
+    expect(call.slice(2)).toEqual(["Launch", "Disarm"]);
+    // The asking pass performs NOTHING.
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    expect(lastWrite().edges[0].firedAt).toBeUndefined();
+  });
+
+  it("stamps launchConfirmedAt on Launch and lets the NEXT pass act", async () => {
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    expect(lastWrite().launchConfirmedAt).toBeTypeOf("number");
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    // The store now holds the approval, as it would on disk.
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    // Asked once per flow, not once per pass.
+    expect(window.showWarningMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("disarms on Disarm, and never launches on any later pass", async () => {
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_m: string, _o: unknown, ...items: string[]) => items[1], // "Disarm"
+    );
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    expect(lastWrite().armed).toBe(false);
+    expect(lastWrite().launchConfirmedAt).toBeUndefined();
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+  });
+
+  it("writes nothing and launches nothing when the question is dismissed", async () => {
+    // Escape, or the modal being closed. Neither approval nor disarm: the flow
+    // stays armed and is asked again on a later pass.
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+  });
+
+  it("does not ask a second time while its own question is still on screen", async () => {
+    // The lock is mocked open here, so nothing but this guard stops a second poll
+    // from queueing another modal — which is exactly what happens in production
+    // once a question has been up longer than the lock's TTL.
+    let answer!: (v: string) => void;
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise<string>((r) => { answer = r; }),
+    );
+    const { p, send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    const first = p._fire({ type: "deck:refresh" });
+    await settled();
+    const second = p._fire({ type: "deck:refresh" });
+    await settled();
+    expect(window.showWarningMessage).toHaveBeenCalledTimes(1);
+    answer("Launch");
+    await first;
+    await second;
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+  });
+
+  it("forgets the question when the flow is deleted while it is on screen", async () => {
+    let answer!: (v: string) => void;
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise<string>((r) => { answer = r; }),
+    );
+    const { p } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    const pass = p._fire({ type: "deck:refresh" });
+    await settled();
+    h.flows = []; // another window deleted it
+    answer("Launch");
+    await pass;
+    await settled();
+    // Writing would recreate the file the user removed.
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("promotes the launched node and stamps the edge in ONE write", async () => {
+    const { p, send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(h.writeFlow).toHaveBeenCalledTimes(1); // a crash between the two is impossible
+    const w = lastWrite();
+    expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({
+      kind: "place", runKey: "ASM-12", repo: "aws-ops", x: 0, y: 0, join: "any",
+    });
+    expect(w.edges[0].firedAt).toBeTypeOf("number");
+    expect(w.edges[0].error).toBeUndefined();
+    expect(w.edges[0].firedNote).toContain("ASM-12");
+    expect(posts(p).some((m) => m.type === "toast" && /ASM-12/.test(m.message ?? ""))).toBe(true);
+  });
+
+  it("asks the launcher for the node, the ticket, the repos and the resolved prompt", async () => {
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(h.getDetail).toHaveBeenCalledWith("ASM-12");
+    const req = h.launchPlanned.mock.calls.at(-1)![0] as any;
+    expect(req.node).toMatchObject({ kind: "planned", ticketKey: "ASM-12" });
+    expect(req.detail).toMatchObject({ key: "ASM-12", summary: "do it", descriptionText: "the description" });
+    expect(req.repos).toEqual(h.repos);
+    // The node's `mode` is a PromptMode id, resolved against the configured modes.
+    expect(req.promptTemplate).toContain("Begin implementing");
+    expect(req.seedAgent).toBe(true);
+    expect(req.workspaceDir).toBeTypeOf("string");
+    // One repo, so one window — never "ask", which an unattended launch cannot do.
+    expect(req.workspaceMode).toBe("per-window");
+  });
+
+  it("stamps an error and promotes nothing when the launch fails, and never retries it", async () => {
+    h.launchPlanned.mockResolvedValue({ ok: false, message: "Couldn't create a git worktree in aws-ops" });
+    const { p, send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const w = lastWrite();
+    expect(w.edges[0].error).toBe("Couldn't create a git worktree in aws-ops");
+    expect(w.edges[0].firedAt).toBeUndefined();
+    expect(w.nodes.find((n) => n.id === "n2")!.kind).toBe("planned");
+    // No toast claims a launch that never happened…
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(false);
+    // …and the failure is not retried on the next poll: twenty windows is how that ends.
+    h.launchPlanned.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+  });
+
+  it("refuses a node whose prompt mode is no longer configured, rather than substituting one", async () => {
+    // A user who deleted a mode must not get an agent seeded with someone else's prompt.
+    const { send } = await warmed([launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "deleted-mode", dest: "worktree",
+        },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    const w = lastWrite();
+    expect(w.edges[0].error).toContain("deleted-mode");
+    expect(w.edges[0].firedAt).toBeUndefined();
+    expect(w.nodes.find((n) => n.id === "n2")!.kind).toBe("planned");
+  });
+
+  it("stamps an error when the ticket cannot be read", async () => {
+    h.getDetail.mockRejectedValue(new Error("Jira said 503"));
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    expect(lastWrite().edges[0].error).toContain("ASM-12");
+    expect(lastWrite().edges[0].firedAt).toBeUndefined();
+  });
+
+  it("stamps a seed rule as unperformed rather than pretending it acted", async () => {
+    // `seed` — another agent in a place that already exists — has no launcher yet.
+    // It must not read as a success, or it would look already-done forever.
+    const { send } = await warmed([launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-9", repo: "aws-ops" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "seed" }],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    expect(lastWrite().edges[0].error).toMatch(/seed/i);
+    expect(lastWrite().edges[0].firedAt).toBeUndefined();
+  });
+
+  it("fires a notify rule with no confirmation at all — notify spends nothing", async () => {
+    const { p, send } = await warmed([launchFlow({
+      launchConfirmedAt: undefined,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(lastWrite().edges[0].firedAt).toBeTypeOf("number");
+    expect(lastWrite().launchConfirmedAt).toBeUndefined();
+    expect(posts(p).some((m) => m.type === "toast" && /the migration has landed/.test(m.message ?? ""))).toBe(true);
+  });
+
+  it("launches ONCE for an \"all\" junction, not once per incoming edge", async () => {
+    // An "all" junction stamps every incoming edge and acts once. Both edges here
+    // point at the same planned node, so acting per stamped edge would open two
+    // worktrees and pay for two sessions on one ticket.
+    const { send } = await warmed([launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "all",
+          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n2", cond: { kind: "ci-passed" }, action: "launch" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    const w = lastWrite();
+    expect(w.edges.find((e) => e.id === "e1")!.firedNote).toContain("launched");
+    // The sibling is stamped as closed — never as a launch it did not perform.
+    expect(w.edges.find((e) => e.id === "e2")!.firedNote).toBe("closed with its junction");
+    expect(w.nodes.filter((n) => n.kind === "place")).toHaveLength(2);
+  });
+
+  it("still launches at most three per pass, and the rest on the next one", async () => {
+    // The cap is evaluateFlow's, and acting must not loop around it: five met
+    // launch rules are five paid sessions if the cap is bypassed.
+    const many = (): Flow => ({
+      ...launchFlow(),
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        ...[1, 2, 3, 4, 5].map((i) => ({
+          id: `p${i}`, kind: "planned" as const, x: 0, y: 0, join: "any" as const,
+          ticketKey: `ASM-2${i}`, repos: ["aws-ops"], mode: "implementation", dest: "worktree" as const,
+        })),
+      ],
+      edges: [1, 2, 3, 4, 5].map((i) => ({
+        id: `e${i}`, from: "n1", to: `p${i}`, cond: { kind: "pr-merged" as const }, action: "launch" as const,
+      })),
+    });
+    const { send } = await warmed([many()]);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(3);
+    const keys = h.launchPlanned.mock.calls.map((c) => (c[0] as any).node.ticketKey);
+    expect(keys).toEqual(["ASM-21", "ASM-22", "ASM-23"]);
+    // Each promoted to its own run, not all collapsed onto one.
+    const w = lastWrite();
+    expect(w.nodes.filter((n) => n.kind === "place").map((n: any) => n.runKey))
+      .toEqual(["ASM-1", "ASM-21", "ASM-22", "ASM-23"]);
+    h.launchPlanned.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned.mock.calls.map((c) => (c[0] as any).node.ticketKey)).toEqual(["ASM-24", "ASM-25"]);
   });
 });
 

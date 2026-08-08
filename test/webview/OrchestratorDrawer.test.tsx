@@ -934,7 +934,7 @@ describe("an errored rule", () => {
     ],
     edges: [{
       id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch",
-      error: "launch is not available in this build",
+      error: "Couldn't launch ASM-12: no worktree",
     }],
     ...over,
   });
@@ -955,7 +955,7 @@ describe("an errored rule", () => {
     render(<OrchestratorDrawer {...props({ flows: [erroredFlow()], runs: [runStatus("ASM-1", "agent-flow")] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     const insp = screen.getByTestId("orch-inspector");
-    expect(insp.textContent).toContain("launch is not available in this build");
+    expect(insp.textContent).toContain("Couldn't launch ASM-12: no worktree");
     expect(insp.textContent).not.toContain("not on the board");
     // "PR open" is exactly what describeCond returns for pr-merged against this
     // fixture's OPEN pull request — i.e. the waiting line this branch replaces.
@@ -967,7 +967,7 @@ describe("an errored rule", () => {
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     const err = container.querySelector(".orch-obs .err");
     expect(err).not.toBeNull();
-    expect(err!.textContent).toBe("launch is not available in this build");
+    expect(err!.textContent).toBe("Couldn't launch ASM-12: no worktree");
     // And it is NOT wearing the done-coloured receipt class.
     expect(container.querySelector(".orch-obs .fired")).toBeNull();
   });
@@ -976,13 +976,13 @@ describe("an errored rule", () => {
     const both = erroredFlow({
       edges: [{
         id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch",
-        firedAt: 5, firedNote: "told you: landed", error: "launch is not available in this build",
+        firedAt: 5, firedNote: "told you: landed", error: "Couldn't launch ASM-12: no worktree",
       }],
     });
     render(<OrchestratorDrawer {...props({ flows: [both] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     const insp = screen.getByTestId("orch-inspector");
-    expect(insp.textContent).toContain("launch is not available in this build");
+    expect(insp.textContent).toContain("Couldn't launch ASM-12: no worktree");
     expect(insp.textContent).not.toContain("told you: landed");
   });
 

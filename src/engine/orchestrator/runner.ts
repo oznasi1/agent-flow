@@ -4,6 +4,13 @@
 import { FiredEdge } from "./evaluate";
 import { Flow, findNode } from "./model";
 
+/** What actually happened when the caller performed one acting edge. Only the
+ * caller can know — a `launch` either opened a window or explained why it did not —
+ * so this is reported IN rather than guessed here. */
+export type ActOutcome =
+  | { ok: true; note: string }
+  | { ok: false; error: string };
+
 /** Stamp `firedAt` and a receipt on every fired edge. Returns a new flow.
  *
  * Every fired edge is stamped, including the `perform: false` ones: an "all"
@@ -12,18 +19,24 @@ import { Flow, findNode } from "./model";
  * "this ran" and "this junction closed" are different claims and the drawer shows
  * whichever it is told.
  *
- * The one exception is a PERFORMED edge whose action is not `notify` — a `launch`
- * or `seed` from a hand-edited flow, neither of which exists in this build. That
- * records `error`, not `firedAt`, and the difference matters in three ways:
+ * A PERFORMED edge whose action is not `notify` — a `launch` or a `seed` — is
+ * stamped from `outcomes`, keyed by edge id. A success takes `firedAt` and the
+ * caller's note; a failure takes `error` and NO `firedAt`, and the difference
+ * matters in three ways:
  *  - `isSettled` counts `error`, so it still cannot re-fire in a loop;
  *  - the drawer surfaces an errored edge and offers Reset for it, so it is not a
  *    dead end the user cannot clear;
- *  - a `firedAt` would consume the latch AS A SUCCESS, so when a real `launch`
- *    ships the edge would look already-done and never run. An `error` needs one
- *    Reset to become live instead.
+ *  - a `firedAt` would consume the latch AS A SUCCESS, so a failed launch would
+ *    look already-done and never run. An `error` needs one Reset to become live.
+ * An acting edge with no outcome fails closed the same way, because the honest
+ * reading of "the caller said nothing" is that nothing was performed — never a
+ * success stamp for an action that may never have happened.
+ *
  * A `perform: false` non-notify edge is NOT an error: it genuinely did nothing,
  * and its junction genuinely closed. */
-export function applyFired(flow: Flow, fired: FiredEdge[], nowMs: number): Flow {
+export function applyFired(
+  flow: Flow, fired: FiredEdge[], nowMs: number, outcomes?: ReadonlyMap<string, ActOutcome>,
+): Flow {
   if (fired.length === 0) return { ...flow, edges: flow.edges.map((e) => ({ ...e })) };
   const byId = new Map(fired.map((f) => [f.edge.id, f]));
   return {
@@ -31,7 +44,12 @@ export function applyFired(flow: Flow, fired: FiredEdge[], nowMs: number): Flow 
     edges: flow.edges.map((e) => {
       const hit = byId.get(e.id);
       if (!hit) return { ...e };
-      if (hit.perform && e.action !== "notify") return { ...e, error: `${e.action} is not available in this build` };
+      if (hit.perform && e.action !== "notify") {
+        const outcome = outcomes?.get(e.id);
+        if (!outcome) return { ...e, error: `${e.action} was not performed` };
+        if (!outcome.ok) return { ...e, error: outcome.error };
+        return { ...e, firedAt: nowMs, firedNote: outcome.note };
+      }
       return {
         ...e,
         firedAt: nowMs,
@@ -42,7 +60,7 @@ export function applyFired(flow: Flow, fired: FiredEdge[], nowMs: number): Flow 
 }
 
 /** Only ever asked of a performed `notify` edge — the caller above routes every
- * other action to an `error` instead, so there is no unavailable-action arm here. */
+ * other action through its outcome instead, so there is no acting arm here. */
 function performedNote(flow: Flow, hit: FiredEdge): string {
   const target = findNode(flow, hit.edge.to);
   return target && target.kind === "notify" ? `told you: ${target.message}` : "told you";
