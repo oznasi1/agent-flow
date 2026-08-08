@@ -1946,6 +1946,20 @@ describe("takeTask", () => {
       );
     });
 
+    // The picker's currentWindow() read and targetToOpenArgs' later currentWindow()
+    // read aren't atomic — the window can lose its identity in between (its last
+    // folder closes while the pick is settling). That race must cancel the take
+    // rather than open a workspace the user never actually chose.
+    it("cancels the take when this window loses its identity between the pick and the resolve", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+      vi.mocked(currentWindow).mockReturnValueOnce(HERE).mockReturnValue(undefined);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      expect(openWorkspace).not.toHaveBeenCalled();
+    });
+
     it("says the session landed in this window", async () => {
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
       vi.mocked(currentWindow).mockReturnValue(HERE);
