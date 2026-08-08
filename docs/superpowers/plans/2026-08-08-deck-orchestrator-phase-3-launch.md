@@ -273,7 +273,9 @@ git commit -m "feat(orchestrator): add a TTL lock so two windows cannot fire one
 - Test: `test/unit/engine/orchestrator/flowIo.test.ts`, `test/unit/engine/orchestrator/model.test.ts`
 
 **Interfaces:**
-- Produces: `nodeLockIo(): LockIo` from `flowIo.ts`, and `Flow.launchConfirmedAt?: number`. Task 5 uses both.
+- Produces: `nodeLockIo(log?: (m: string) => void): LockIo` from `flowIo.ts`, and `Flow.launchConfirmedAt?: number`. Task 5 uses both, passing `this.log`.
+
+> **Correction applied during execution.** `tryCreate` originally caught every error and returned `false`, making a permissions/read-only/ENOSPC failure indistinguishable from "another window holds the lock" — which in an unattended poll loop means a flow that never advances again, with nothing to diagnose. It still fails closed (a throw would escape into the Deck's refresh), but now logs when the error is not `EEXIST`. The optional `log` keeps every existing call site valid.
 
 `flowIo.ts` is the only file in this directory allowed to import `fs`. `tryCreate` must use the `"wx"` flag — an atomic exclusive create on POSIX and Windows — and return `false` on `EEXIST` rather than throwing.
 

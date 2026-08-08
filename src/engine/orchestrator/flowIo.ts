@@ -45,16 +45,25 @@ export function nodeFlowIo(): FlowIo {
 }
 
 /** The lock's real IO. `wx` is the whole point: an atomic exclusive create, so two
- * windows racing for the lock cannot both believe they took it. EEXIST means
- * somebody else won — that is an answer, not an error. */
-export function nodeLockIo(): LockIo {
+ * windows racing for the lock cannot both believe they took it.
+ *
+ * `log` is optional so tests can omit it; the panel passes its channel. It exists
+ * because EEXIST and "the filesystem is broken" both have to return false — the
+ * lock must fail closed, and a throw here would escape into the Deck's refresh —
+ * but a permissions error silently presenting as "another window holds it" would
+ * strand an armed flow forever with nothing to diagnose. */
+export function nodeLockIo(log?: (m: string) => void): LockIo {
   return {
     tryCreate: (p, text) => {
       try {
         fs.mkdirSync(path.dirname(p), { recursive: true });
         fs.writeFileSync(p, text, { flag: "wx" });
         return true;
-      } catch {
+      } catch (e) {
+        // EEXIST is the expected answer: somebody else won the race.
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") {
+          log?.(`orchestrator: could not take the flows lock: ${(e as Error).message}`);
+        }
         return false;
       }
     },

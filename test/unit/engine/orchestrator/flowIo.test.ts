@@ -117,4 +117,30 @@ describe("nodeLockIo", () => {
     expect(io.read(p)).toBeNull();
     expect(() => io.remove(p)).not.toThrow();
   });
+
+  it("reports an unexpected failure and still fails closed", () => {
+    // A file sits where a directory in the lock's path needs to be. mkdirSync
+    // must walk through `blocker` as an intermediate segment (not just find it as
+    // the immediate parent — that case collapses to EEXIST on this platform,
+    // indistinguishable from ordinary lock contention) to get ENOTDIR, which is
+    // NOT EEXIST. The lock must still say "no" — never throw into the caller's
+    // refresh — but it must also say why, or a stuck flow is undiagnosable.
+    const blocker = path.join(dir, "blocker");
+    fs.writeFileSync(blocker, "not a directory");
+    const lines: string[] = [];
+    const io = nodeLockIo((m) => lines.push(m));
+
+    expect(io.tryCreate(path.join(blocker, "sub", "x.lock"), "1")).toBe(false);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("lock");
+  });
+
+  it("does not log when the lock is merely already held", () => {
+    const lines: string[] = [];
+    const io = nodeLockIo((m) => lines.push(m));
+    const p = path.join(dir, "x.lock");
+    expect(io.tryCreate(p, "1")).toBe(true);
+    expect(io.tryCreate(p, "2")).toBe(false);
+    expect(lines).toEqual([]);
+  });
 });
