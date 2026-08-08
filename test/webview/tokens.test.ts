@@ -126,7 +126,12 @@ describe("brand accent", () => {
       ".gate .btn", ".gate .btn:hover",
       ".batch-launch", ".batch-launch:hover",
     ],
-    deck: [".act.primary", ".act.primary:hover", ".ctl.on .switch", ".ctl.on .switch::after"],
+    // `.ctl.on .switch::after` was removed from this list: under the tightened
+    // detector it turns out to spend only `var(--brand-ink)` (the knob's own
+    // ink colour), never `var(--brand)` itself — see deckStyles.ts's own
+    // `.ctl.on .switch::after` rule. The substring detector had been counting
+    // that as a --brand spend for as long as this list has existed.
+    deck: [".act.primary", ".act.primary:hover", ".ctl.on .switch"],
     marketplace: [".btn.pri", ".btn.pri:hover"],
     controls: [],
     orchestrator: [
@@ -140,9 +145,17 @@ describe("brand accent", () => {
     ],
   };
 
+  // A plain `body.includes("--brand")` also lights up on `--brand-ink`, since
+  // "--brand-ink".includes("--brand") is true — a selector whose only var() is
+  // `var(--brand-ink)` (ink, not fill) would be wrongly counted as spending the
+  // fill token. Extract each var()'s real token name the same way `usagesIn`
+  // does, and compare it exactly, so `--brand-ink` cannot stand in for `--brand`.
+  const spendsBrandFill = (body: string): boolean =>
+    [...body.matchAll(/var\(\s*(--[a-z0-9-]+)/g)].some((m) => m[1] === "--brand");
+
   it.each(SURFACES)("%s spends --brand on exactly its agreed selectors", (name, sheet) => {
     const actual = new Set(
-      ruleBlocks(sheet).filter((r) => r.body.includes("--brand")).map((r) => r.selector),
+      ruleBlocks(sheet).filter((r) => spendsBrandFill(r.body)).map((r) => r.selector),
     );
     const allowed = new Set(PERMITTED_BRAND_SELECTORS[name] ?? []);
     // Each string below names the offending selector directly, so a failure reads
