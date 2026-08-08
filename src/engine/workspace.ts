@@ -11,6 +11,7 @@ import { writeRun, defaultRunsDir } from "./runs";
 import { gitState } from "./git";
 import { ensureGitExcluded } from "./gitExclude";
 import { windowIdentity } from "./presence";
+import { readAgentSurface } from "../config";
 
 export const BRIEF_DIR = ".pick-task";
 export const BRIEF_FILE = "TASK.md";
@@ -19,6 +20,23 @@ const PLAN_TTL_MS = 15 * 60 * 1000; // seed handshake valid for 15 min
 
 /** Pause between sessions when one window seeds a whole batch (see maybeSeedAgent). */
 const SEED_STAGGER_MS = 400;
+
+/** The CLI that terminal-surface seeding runs. Fixed on purpose — see the spec's
+ * "Out of scope": a missing binary shows as `command not found` in the terminal,
+ * which is self-explanatory and leaves the pre-typed prompt there to reuse. */
+const CLI_CMD = "claude";
+/** How long the CLI's TUI needs before it will accept typed input. Typing sooner
+ * loses the prompt to a screen that isn't listening yet. Verified by hand in the
+ * dev host — there is no event to await. */
+const CLI_BOOT_MS = 1500;
+
+/** Wrap text so the terminal delivers it as a *paste*. renderPrompt appends the
+ * relevant-files block after a blank line, so most task prompts are multi-line,
+ * and a bare newline sent to the CLI's TUI submits — the agent would start on a
+ * truncated prompt. Pasted text keeps its newlines inline. Applied to every
+ * prompt: harmless when single-line, and the only thing that saves a
+ * user-customized multi-line template. */
+const bracketedPaste = (text: string) => `\u001b[200~${text}\u001b[201~`;
 
 // The Claude Code extension command that opens the panel with a pre-filled prompt.
 // Verified against anthropic.claude-code 2.1.x — its URI /open handler calls exactly this.
@@ -594,7 +612,14 @@ async function runSeedPass(context: vscode.ExtensionContext, log: (m: string) =>
     const plan = due[i];
     const match = plan.matches.find((m) => canon(m.matchPath) === identity)!;
     await context.globalState.update(seededGuard(plan, identity), true);
-    await seedClaudeCode(match.prompt, plan.key, log, plan.remoteControl === true, multi);
+    await seedClaudeCode({
+      prompt: match.prompt,
+      key: plan.key,
+      matchPath: match.matchPath,
+      log,
+      remoteControl: plan.remoteControl === true,
+      multi,
+    });
     // Claude Code picks a session's column by scanning the tab groups for an existing
     // Claude group, and that model doesn't update synchronously — without this pause
     // consecutive sessions each decide there is no group yet and land in separate columns.
@@ -633,6 +658,34 @@ export function watchPlansAndSeed(
   };
 }
 
+/** Start the session in an integrated terminal: run the CLI, wait for its TUI,
+ * then type the prompt without submitting it. Returns false if the terminal
+ * could not be driven, so the caller can fall back to the clipboard. */
+async function seedViaTerminal(
+  seedText: string,
+  key: string,
+  matchPath: string,
+  log: (m: string) => void,
+): Promise<boolean> {
+  try {
+    // matchPath is whatever windowIdentity() produced: a repo directory in
+    // per-window mode, but the .code-workspace FILE in multiroot mode. A file is
+    // not a valid cwd, and no single directory is "the" repo for a multiroot
+    // window — omitting cwd lets VS Code default to the window's first root.
+    const cwd = matchPath.endsWith(".code-workspace") ? undefined : matchPath;
+    const terminal = vscode.window.createTerminal({ name: `Claude · ${key}`, cwd });
+    terminal.show();
+    terminal.sendText(CLI_CMD, true);
+    await delay(CLI_BOOT_MS);
+    terminal.sendText(bracketedPaste(seedText), false);
+    log(`seed ${key}: typed the prompt into a terminal${cwd ? ` in ${cwd}` : ""}`);
+    return true;
+  } catch (e) {
+    log(`seed ${key}: terminal seeding failed: ${e instanceof Error ? e.message : String(e)}`);
+    return false;
+  }
+}
+
 /** Open the Claude Code panel with the prompt pre-filled. Polls for the verified
  * command (handles the activation race), then the URI handler, then clipboard.
  *
@@ -640,13 +693,15 @@ export function watchPlansAndSeed(
  * prompt travels on the clipboard — the slash command is `local-jsx`, so Claude Code
  * cannot stack it ahead of a prompt in one submission, and the panel takes a single
  * buffer with a single Enter. */
-async function seedClaudeCode(
-  prompt: string,
-  key: string,
-  log: (m: string) => void,
-  remoteControl = false,
-  multi = false,
-): Promise<void> {
+async function seedClaudeCode(opts: {
+  prompt: string;
+  key: string;
+  matchPath: string;
+  log: (m: string) => void;
+  remoteControl?: boolean;
+  multi?: boolean;
+}): Promise<void> {
+  const { prompt, key, matchPath, log, remoteControl = false, multi = false } = opts;
   const seedText = remoteControl ? `/remote-control ${key}` : prompt;
   // Write it before the panel opens so it's already there to paste.
   if (remoteControl) await vscode.env.clipboard.writeText(prompt);
@@ -659,36 +714,48 @@ async function seedClaudeCode(
     );
   };
 
-  // 1 — verified command claude-vscode.primaryEditor.open(session, prompt);
-  //     poll because our extension and Claude Code both activate onStartupFinished.
-  const preferred = multi ? [CLAUDE_NEW_TAB_CMD, CLAUDE_OPEN_CMD] : [CLAUDE_OPEN_CMD];
-  for (let attempt = 1; attempt <= 7; attempt++) {
+  // The surface is read here, in the target window, at seed time — never carried
+  // in the plan file. Flipping the setting therefore also affects plans already
+  // on disk, which is what a preference should do.
+  if (readAgentSurface() === "terminal") {
+    if (await seedViaTerminal(seedText, key, matchPath, log)) {
+      announceRemoteControl();
+      return;
+    }
+    // Terminal seeding failed — skip the extension attempts (this user does not
+    // use the panel) and land on the clipboard fallback at the end.
+  } else {
+    // 1 — verified command claude-vscode.primaryEditor.open(session, prompt);
+    //     poll because our extension and Claude Code both activate onStartupFinished.
+    const preferred = multi ? [CLAUDE_NEW_TAB_CMD, CLAUDE_OPEN_CMD] : [CLAUDE_OPEN_CMD];
+    for (let attempt = 1; attempt <= 7; attempt++) {
+      try {
+        const cmds = await vscode.commands.getCommands(true);
+        const cmd = preferred.find((c) => cmds.includes(c));
+        if (cmd) {
+          await vscode.commands.executeCommand(cmd, undefined, seedText);
+          log(`seed ${key}: opened Claude Code via ${cmd} (attempt ${attempt})${remoteControl ? " + Remote Control" : ""}`);
+          announceRemoteControl();
+          return;
+        }
+      } catch (e) {
+        log(`seed ${key}: command attempt ${attempt} threw: ${e}`);
+      }
+      await delay(700);
+    }
+    log(`seed ${key}: no Claude Code open command registered — trying URI handler`);
+
+    // 2 — URI handler
     try {
-      const cmds = await vscode.commands.getCommands(true);
-      const cmd = preferred.find((c) => cmds.includes(c));
-      if (cmd) {
-        await vscode.commands.executeCommand(cmd, undefined, seedText);
-        log(`seed ${key}: opened Claude Code via ${cmd} (attempt ${attempt})${remoteControl ? " + Remote Control" : ""}`);
+      const uri = `${vscode.env.uriScheme}://Anthropic.claude-code/open?prompt=${encodeURIComponent(seedText)}`;
+      if (await vscode.env.openExternal(vscode.Uri.parse(uri))) {
+        log(`seed ${key}: opened via URI${remoteControl ? " + Remote Control" : ""}`);
         announceRemoteControl();
         return;
       }
     } catch (e) {
-      log(`seed ${key}: command attempt ${attempt} threw: ${e}`);
+      log(`seed ${key}: URI failed: ${e}`);
     }
-    await delay(700);
-  }
-  log(`seed ${key}: no Claude Code open command registered — trying URI handler`);
-
-  // 2 — URI handler
-  try {
-    const uri = `${vscode.env.uriScheme}://Anthropic.claude-code/open?prompt=${encodeURIComponent(seedText)}`;
-    if (await vscode.env.openExternal(vscode.Uri.parse(uri))) {
-      log(`seed ${key}: opened via URI${remoteControl ? " + Remote Control" : ""}`);
-      announceRemoteControl();
-      return;
-    }
-  } catch (e) {
-    log(`seed ${key}: URI failed: ${e}`);
   }
 
   // 3 — fallback. One clipboard can't carry N prompts, so a batch gets a pointer to
