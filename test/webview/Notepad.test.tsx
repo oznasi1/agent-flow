@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act, within } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import * as React from "react";
 
 const sendSpy = vi.fn();
@@ -127,109 +127,5 @@ describe("Notepad", () => {
   it("says so when the filter hides everything", () => {
     render(<Notepad notes={[note({ done: true })]} />);
     expect(screen.getByText("Nothing active. Add a note above.")).toBeTruthy();
-  });
-});
-
-describe("Notepad dictation", () => {
-  // A stand-in for the browser's SpeechRecognition: jsdom implements neither the
-  // constructor nor the events, so the component is driven through this fake.
-  class FakeRecognition {
-    static last: FakeRecognition | null = null;
-    continuous = false;
-    interimResults = false;
-    lang = "";
-    started = false;
-    onresult: ((e: unknown) => void) | null = null;
-    onend: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-    constructor() { FakeRecognition.last = this; }
-    start() { this.started = true; }
-    stop() { this.started = false; this.onend?.(); }
-  }
-
-  beforeEach(() => {
-    FakeRecognition.last = null;
-    (window as unknown as Record<string, unknown>).SpeechRecognition = FakeRecognition;
-  });
-
-  afterEach(() => {
-    delete (window as unknown as Record<string, unknown>).SpeechRecognition;
-    delete (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
-  });
-
-  it("hides the mic when the browser has no SpeechRecognition at all", () => {
-    delete (window as unknown as Record<string, unknown>).SpeechRecognition;
-    render(<Notepad notes={[]} />);
-    expect(screen.queryByRole("button", { name: /Dictate/ })).toBeNull();
-  });
-
-  it("appends a final transcript into the body", () => {
-    render(<Notepad notes={[]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Dictate the note body" }));
-    act(() => {
-      FakeRecognition.last!.onresult!({
-        resultIndex: 0,
-        results: [Object.assign([{ transcript: "check the retry path" }], { isFinal: true })],
-      });
-    });
-    expect((screen.getByPlaceholderText("Any detail the agent should know (optional)") as HTMLTextAreaElement).value)
-      .toContain("check the retry path");
-  });
-
-  it("stops listening on a second click", () => {
-    render(<Notepad notes={[]} />);
-    const mic = screen.getByRole("button", { name: "Dictate the note body" });
-    fireEvent.click(mic);
-    expect(FakeRecognition.last!.started).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Stop dictating the note body" }));
-    expect(FakeRecognition.last!.started).toBe(false);
-  });
-
-  it("appends a final transcript into the title", () => {
-    render(<Notepad notes={[]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Dictate the title" }));
-    act(() => {
-      FakeRecognition.last!.onresult!({
-        resultIndex: 0,
-        results: [Object.assign([{ transcript: "ship the retry fix" }], { isFinal: true })],
-      });
-    });
-    expect((screen.getByPlaceholderText("What needs doing?") as HTMLInputElement).value)
-      .toContain("ship the retry fix");
-  });
-
-  it("starting the other mic stops the first — only one microphone is ever live", () => {
-    render(<Notepad notes={[]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Dictate the title" }));
-    const titleRec = FakeRecognition.last!;
-    expect(titleRec.started).toBe(true);
-
-    fireEvent.click(screen.getByRole("button", { name: "Dictate the note body" }));
-    const bodyRec = FakeRecognition.last!;
-
-    expect(titleRec.started).toBe(false); // the title's recogniser was stopped
-    expect(bodyRec.started).toBe(true); // and only the body's is live
-    expect(titleRec).not.toBe(bodyRec);
-    // The title button reflects the switch too — it dropped back to "Dictate".
-    expect(screen.getByRole("button", { name: "Dictate the title" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Stop dictating the note body" })).toBeTruthy();
-  });
-
-  it("recovers its idle label when recognition errors out", () => {
-    render(<Notepad notes={[]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Dictate the note body" }));
-    act(() => {
-      FakeRecognition.last!.onerror!();
-      FakeRecognition.last!.onend!();
-    });
-    expect(screen.getByRole("button", { name: "Dictate the note body" })).toBeTruthy();
-  });
-
-  it("stops the microphone when the view unmounts mid-dictation", () => {
-    const { unmount } = render(<Notepad notes={[]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Dictate the note body" }));
-    expect(FakeRecognition.last!.started).toBe(true);
-    unmount();
-    expect(FakeRecognition.last!.started).toBe(false);
   });
 });

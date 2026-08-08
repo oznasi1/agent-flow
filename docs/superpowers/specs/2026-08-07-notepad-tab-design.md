@@ -17,7 +17,7 @@ The Tasks sidebar webview (`agentFlow.tasks`, `src/tasksView.ts` + `src/webview/
 | Can a note be marked done? | Yes — a checkbox toggles `done` on each note. Done notes stay in the list (not auto-removed) until explicitly cleared. |
 | How does the user manage done vs. not-done? | A filter control (All / Active / Done) above the note list, defaulting to **Active** on open (so done items don't clutter the view by default), and a "Clear completed" button that removes every `done: true` note in one action. |
 | How does a note become an agent run? | Reuses `explore()`'s internals in `tasksView.ts` (repo/destination resolution → `createWorktrees` → `openWorkspace`) via a new `runNotepadItem(id)` method — skips the `showInputBox` prompt since the note already supplies the topic/brief text. Same "no ticket yet" brief framing Explore already uses. |
-| How is speech captured? | Browser `SpeechRecognition` / `webkitSpeechRecognition` (Web Speech API), used entirely client-side inside the webview's `Notepad.tsx` — no new extension-host code or message-protocol traffic for transcription itself. |
+| How is speech captured? | **It isn't — the extension ships no dictation control.** The original decision (browser `SpeechRecognition` in the webview) was implemented and then removed: it cannot work in this environment. See "Dictation: why there is no microphone button" below. The fields are ordinary inputs, so OS-level dictation types into them.|
 | Does this touch the existing Tasks list, filters, or connectors? | No. Tasks view, `EXPLORE_ACTION_DEFS`, Jira/task connector code, worktree/workspace engine internals are unchanged except for the new `runNotepadItem` entry point, which is additive. |
 | How does a notepad run show up on the Deck board? | `runNotepadItem` calls `openWorkspace({ ..., kind: "notepad" })` exactly like `explore()` does with `kind: "explore"` — this writes a normal `Run` record via `writeRun(defaultRunsDir(), run)` (`src/engine/workspace.ts`) into the same `~/.agentflow/runs` store Deck already reads via `readRuns()`. `"notepad"` is added to `RUN_KINDS` (`src/types.ts`) alongside `"task" \| "explore" \| "review" \| "local"`, so it survives `runKind()`'s clamp instead of silently becoming `"task"`. No new merge/aggregation logic is needed in `deckView.ts` — it was already reading one run store; the "two sources" are two origins that both write into it. |
 | How does the note know its own run's status? | Each note gains an optional `lastRunKey` (the synthetic ticket key `openWorkspace` generates, e.g. `notepad-<slug>`), set when "Run agent" is clicked. `TasksViewProvider` derives a `NotepadRunStatus` per note from `readRuns()` + the live-session set, and includes it in the `notepad:notes` payload. Re-running a note overwrites `lastRunKey` — history of earlier runs from the same note isn't tracked, only the most recent. |
@@ -90,3 +90,37 @@ The mic button in `Notepad.tsx` toggles a `SpeechRecognition` instance (feature-
 - Unit test that a run written with `kind: "notepad"` survives `runKind()` unchanged (doesn't clamp to `"task"`) and is included by Deck's board filter and excluded correctly from the review strip.
 - Component test for `Notepad.tsx` covering add/edit/toggle-done/delete/run/clear-completed interactions, the All/Active/Done filter, and the status badge rendering for each `runStatus` value, via the message protocol (mocked `vscodeApi.send`), following existing `App.tsx` test conventions.
 - Speech-to-text is not unit-testable in a meaningful way (browser API, no jsdom support) — verified manually during implementation instead.
+
+## Dictation: why there is no microphone button
+
+The design originally specified in-webview dictation via the Web Speech API. It was
+built, shipped behind passing tests, and then removed once verified against a real
+VS Code window, where it did nothing at all. Two independent blockers, either of
+which alone is fatal:
+
+1. **The Web Speech API does not function in Electron.** Chromium's
+   `SpeechRecognition` calls a Google speech service using an API key that only
+   official Chrome builds carry; Electron does not ship it. The constructor exists —
+   which is why feature detection passed and the button rendered — but `start()`
+   fires `error: "network"` and ends, with no permission prompt.
+   ([electron/electron#7749](https://github.com/electron/electron/issues/7749))
+2. **A VS Code webview cannot reach the microphone.** Webviews are sandboxed iframes
+   whose tokens are `allow-scripts allow-same-origin allow-forms allow-pointer-lock
+   allow-downloads` — no `allow="microphone"`, and `WebviewOptions` exposes no flag
+   to add one. ([microsoft/vscode#250568](https://github.com/microsoft/vscode/issues/250568))
+
+VS Code's own speech extension (which powers Copilot Chat's voice input) sidesteps
+both by running a **native binary** from the extension host and registering against
+the **proposed** `speech` API. `vsce publish` hard-errors on proposed APIs, and access
+is gated by a Microsoft-controlled allowlist, so that route is closed to this
+extension.
+
+**What we do instead:** nothing. The title and body are ordinary `<input>` and
+`<textarea>` elements, so the operating system's own dictation (double-tap Control on
+macOS, Win+H on Windows) types into them directly, with live text as you speak. It
+costs no code, no API key, and no native dependency.
+
+**The lesson for this spec's process:** the tests all passed against an injected fake
+`SpeechRecognition`, which proved the wiring and nothing about whether the mechanism
+could ever work. A load-bearing external dependency needs a real-environment check
+*before* it is built on, not as a post-implementation verification step.

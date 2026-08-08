@@ -12,8 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Notepad tab.** A second tab in the Tasks panel holding freeform items that
   aren't tied to any ticket, saved globally so the same list follows you across
   every workspace. Notes can be checked off, filtered (Active by default), and
-  cleared once done — and dictated, via the microphone button.
-- **Kick off an agent from a note.** "Run agent" on a note opens a workspace and
+  cleared once done. The fields are ordinary text inputs, so your operating
+  system's own dictation (double-tap Control on macOS, Win+H on Windows) types
+  straight into them.
+- **Kick off an agent from a note.** **Start** on a note opens a workspace and
   seeds a brief from it, the same way Explore does. The run appears on the Deck
   board like any other, and the note shows whether it is running, stale, or
   finished.
@@ -21,11 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Notepad restyled to match the rest of the panel.** Text links are now real
-  buttons — a filled Start (formerly "Run agent"), and quiet icon-only Edit,
-  Delete and dictation controls — status badges are outline pills instead of
-  filled ones, and notes render as a hairline-separated list with a status rail
-  instead of boxed cards. The title can now be dictated too, with its own mic
-  beside it; only one field dictates at a time.
+  buttons — a filled Start (formerly "Run agent") and quiet icon-only Edit and
+  Delete — status badges are outline pills instead of filled ones, and notes
+  render as a hairline-separated list with a status rail instead of boxed cards.
 
 ## [0.5.0] — 2026-08-07
 

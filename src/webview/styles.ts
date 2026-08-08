@@ -302,7 +302,6 @@ export const CSS = `
      dictation session fills is never ambiguous. */
   .np-field-row { display: flex; gap: 6px; align-items: flex-start; }
   .np-field-row > input, .np-field-row > textarea { flex: 1; }
-  .quiet.mic.on { border-color: var(--brand); color: var(--brand); }
   .np-add-btn { align-self: flex-start; }
   .np-empty { padding: 14px 2px; color: var(--dim); font-size: var(--t-body); }
 

@@ -1,7 +1,7 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
 import { NotepadItemView, NotepadRunStatus } from "../types";
-import { MicIcon, PenIcon, PlayIcon, StopIcon, TrashIcon } from "./icons";
+import { PenIcon, PlayIcon, TrashIcon } from "./icons";
 
 /** Which notes the list shows. Local state, defaulting to Active on every mount:
  * a persisted "Done" selection would greet the user with an empty-looking notepad
@@ -34,109 +34,11 @@ const EMPTY: Record<NoteFilter, string> = {
   all: "No notes yet. Add one above.",
 };
 
-// The Web Speech API, as the two engines that ship it actually expose it. Typed
-// here rather than pulled from `lib.dom` because TypeScript's DOM lib does not
-// declare SpeechRecognition at all — it is not a standard, only widely shipped.
-interface SpeechRecognitionLike {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start(): void;
-  stop(): void;
-  onresult: ((e: SpeechResultLike) => void) | null;
-  onend: (() => void) | null;
-  onerror: (() => void) | null;
-}
-interface SpeechResultLike {
-  resultIndex: number;
-  results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }>;
-}
-
-function speechCtor(): (new () => SpeechRecognitionLike) | undefined {
-  const w = window as unknown as Record<string, unknown>;
-  return (w.SpeechRecognition ?? w.webkitSpeechRecognition) as (new () => SpeechRecognitionLike) | undefined;
-}
-
-/** The field a dictation session is currently filling. */
-type DictField = "title" | "body";
-
-/** Dictation into either the title or the body field. A single `SpeechRecognition`
- * instance is shared between both mics — one microphone, one live session — so
- * `active` (rather than two independent booleans) is the one source of truth for
- * which field, if any, is being dictated into. Returns undefined when the engine
- * has no speech recognition at all: the caller renders no mic for either field
- * rather than a button that cannot work. All client-side: no API key, no network
- * call from the extension host, and nothing crosses the message protocol until
- * the note itself is saved. */
-function useDictation(
-  appendTitle: (text: string) => void,
-  appendBody: (text: string) => void,
-): { active: DictField | null; toggle: (field: DictField) => void } | undefined {
-  const [active, setActive] = React.useState<DictField | null>(null);
-  const ref = React.useRef<SpeechRecognitionLike | null>(null);
-  const appendRef = React.useRef({ title: appendTitle, body: appendBody });
-  React.useEffect(() => {
-    appendRef.current = { title: appendTitle, body: appendBody };
-  }, [appendTitle, appendBody]);
-  const supported = !!speechCtor();
-
-  // Never leave the microphone open when the view goes away.
-  React.useEffect(() => () => ref.current?.stop(), []);
-
-  if (!supported) return undefined;
-
-  const start = (field: DictField) => {
-    const Ctor = speechCtor();
-    if (!Ctor) return;
-    const rec = new Ctor();
-    rec.continuous = true;
-    rec.interimResults = false; // only settled text lands in the field
-    rec.lang = navigator.language || "en-US";
-    rec.onresult = (e) => {
-      let text = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        if (r.isFinal) text += r[0].transcript;
-      }
-      if (text.trim()) appendRef.current[field](text.trim());
-    };
-    // Both paths land on onend, which is the single place listening is released —
-    // an error that did not also end the session would strand the button on "Stop".
-    rec.onerror = () => { rec.stop(); };
-    // Guarded on identity, not recency: once a session has been superseded by a
-    // newer one (the other field's mic started), its own onend must not clear
-    // the newer session's state — a real recognizer's onend can arrive well
-    // after `stop()` was called on it.
-    rec.onend = () => { if (ref.current === rec) { ref.current = null; setActive(null); } };
-    ref.current = rec;
-    rec.start();
-    setActive(field);
-  };
-
-  // Only one field may be dictated at a time. Switching mics stops whichever
-  // session is live (via its own onend, above) before starting the other, so two
-  // SpeechRecognition instances never compete for one microphone.
-  const toggle = (field: DictField) => {
-    if (active === field) {
-      ref.current?.stop();
-      return;
-    }
-    ref.current?.stop();
-    start(field);
-  };
-
-  return { active, toggle };
-}
-
 export function Notepad({ notes }: { notes: NotepadItemView[] }): JSX.Element {
   const [filter, setFilter] = React.useState<NoteFilter>("active");
   const [title, setTitle] = React.useState("");
   const [body, setBody] = React.useState("");
   const [editing, setEditing] = React.useState<string | null>(null);
-  const dictation = useDictation(
-    React.useCallback((text: string) => setTitle((prev) => (prev ? `${prev} ${text}` : text)), []),
-    React.useCallback((text: string) => setBody((prev) => (prev ? `${prev} ${text}` : text)), []),
-  );
 
   const shown = notes.filter((n) => (filter === "all" ? true : filter === "done" ? n.done : !n.done));
   const anyDone = notes.some((n) => n.done);
@@ -162,16 +64,6 @@ export function Notepad({ notes }: { notes: NotepadItemView[] }): JSX.Element {
             // The body deliberately does not: it is multi-line by design.
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
           />
-          {dictation && (
-            <button
-              className={`quiet icon-only mic ${dictation.active === "title" ? "on" : ""}`}
-              aria-label={dictation.active === "title" ? "Stop dictating the title" : "Dictate the title"}
-              title={dictation.active === "title" ? "Stop dictating the title" : "Dictate the title"}
-              onClick={() => dictation.toggle("title")}
-            >
-              {dictation.active === "title" ? <StopIcon /> : <MicIcon />}
-            </button>
-          )}
         </div>
         <div className="np-field-row">
           <textarea
@@ -181,16 +73,6 @@ export function Notepad({ notes }: { notes: NotepadItemView[] }): JSX.Element {
             value={body}
             onChange={(e) => setBody(e.target.value)}
           />
-          {dictation && (
-            <button
-              className={`quiet icon-only mic ${dictation.active === "body" ? "on" : ""}`}
-              aria-label={dictation.active === "body" ? "Stop dictating the note body" : "Dictate the note body"}
-              title={dictation.active === "body" ? "Stop dictating the note body" : "Dictate the note body"}
-              onClick={() => dictation.toggle("body")}
-            >
-              {dictation.active === "body" ? <StopIcon /> : <MicIcon />}
-            </button>
-          )}
         </div>
         <button className="quiet np-add-btn" disabled={!canAdd} onClick={add}>Add note</button>
       </div>
