@@ -87,6 +87,17 @@ describe("applyFired", () => {
     expect(out.edges).toHaveLength(1);
     expect(out.edges[0].firedAt).toBeUndefined();
   });
+
+  it("stamps a performed non-notify edge with a receipt that says it is unavailable, not that it ran", () => {
+    // evaluateFlow does not filter by action, so a launch edge can fire. The
+    // receipt must NOT claim it ran — that would be a lie in the drawer. It must
+    // say the action is not available in this build.
+    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
+    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
+    const note = out.edges[0].firedNote;
+    expect(note).toContain("not available in this build");
+    expect(note).not.toMatch(/success|ran|ran successfully/i);
+  });
 });
 
 describe("notifyLines", () => {
