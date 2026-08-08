@@ -1698,7 +1698,7 @@ export class DeckPanel {
         const mine = new Map(existing.edges.map((e) => [e.id, e]));
         writeFlow(this.flowIo, this.flowsDir, {
           ...m.flow,
-          // The host owns three FLOW-level fields too, and a graph save has no
+          // The host owns four FLOW-level fields too, and a graph save has no
           // business carrying any of them. `armed` is written only by `flow:arm`
           // and `flow:resumeDisarm`: a save built from a `flow` prop captured
           // before a `deck:flows` post lands holds a stale value, so pressing
@@ -1706,9 +1706,13 @@ export class DeckPanel {
           // RE-ARM the flow with the resume gate already cleared — armed, and free
           // to fire immediately. `name` belongs to `flow:rename`, and `createdAt`
           // is the sort key: neither is the drawer's to overwrite on a node drag.
+          // `launchConfirmedAt` is written by `askFirstSpend`'s answer, once per
+          // flow — a stale save dropping it would silently un-ask a question the
+          // user already answered.
           name: existing.name,
           armed: existing.armed,
           createdAt: existing.createdAt,
+          launchConfirmedAt: existing.launchConfirmedAt,
           edges: m.flow.edges.map((e) => {
             const host = mine.get(e.id);
             if (!host) return e;

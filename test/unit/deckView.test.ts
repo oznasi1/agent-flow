@@ -4840,6 +4840,25 @@ describe("arm, disarm and reset", () => {
     expect(w.nodes[0].x).toBe(48);
   });
 
+  it("flow:save cannot drop launchConfirmedAt — the host owns it too", async () => {
+    // The host writes `launchConfirmedAt` when the user answers the once-per-flow
+    // spend question (`askFirstSpend`). A save built from a `flow` prop captured
+    // before that write landed holds `undefined` for it — writing that verbatim
+    // would silently un-ask the question, and the very next met launch rule would
+    // pop the modal again for a flow the user already confirmed.
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f1", "Ship the migration"), launchConfirmedAt: 500 }];
+    const stale: Flow = {
+      ...mkFlow("f1", "Ship the migration"),
+      nodes: [{ id: "n1", kind: "place", x: 48, y: 48, join: "any", runKey: "ASM-1", repo: "r" }],
+    };
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: stale });
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(w.launchConfirmedAt).toBe(500);
+    expect(w.nodes[0].x).toBe(48);
+  });
+
   it("flow:save writes a brand-new edge through untouched, alongside preserving an existing one's host fields", async () => {
     // The merge's other branch: `mine.get(e.id)` misses for an edge the drawer
     // just drew, since the host has never seen it. That edge must land exactly
