@@ -469,8 +469,15 @@ export class DeckPanel {
           continue;
         }
 
-        // Act first, then record what happened — and record it all in ONE write, so
-        // a crash between the two cannot leave a launched ticket looking unlaunched.
+        // Act first, then record what happened — and record every outcome from
+        // this pass in ONE write, so a crash between deciding two edges' outcomes
+        // cannot leave one of them looking unlaunched. That is what is guaranteed:
+        // NOT that the act and the record are atomic with each other. If
+        // `writeFlow` below throws after a launch (or a seed) truly ran, the spend
+        // already happened but nothing was stamped, so the next pass sees the same
+        // edge still unfired and launches it again. Known and accepted — see the
+        // spec's Known limitations, alongside `openWorkspace`'s equally-unrecorded
+        // `writeRun` failure.
         const outcomes = new Map<string, ActOutcome>();
         const promotions: { nodeId: string; runKey: string; repo: string }[] = [];
         const receipts: { level: "success" | "error"; message: string }[] = [];

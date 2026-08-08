@@ -351,6 +351,16 @@ cheaper to live with than to fix.
 - **Two `notify` edges into one node toast twice.** The act-once-per-target rule deliberately
   covers only spending actions (`launch`, `seed`); a duplicate toast is cheap, and collapsing
   it would hide the fact that two distinct rules both became true.
+- **A `writeFlow` that throws right after a real launch relaunches it, and pays again.** The
+  act-then-record comment at that site in `advanceUnderLock` guarantees atomicity across
+  *outcomes* within one pass — a crash between deciding two edges' fates cannot leave one
+  looking unlaunched — not atomicity across the act and the record themselves. If the store
+  write throws after `performEdge` genuinely launched (or seeded) something, nothing gets
+  stamped, so the next pass sees the same edge still unfired and launches it again. The same
+  shape as the `writeRun` limitation above, and left the same way: `writeFlow` failing at all
+  is rare (a full disk, a permissions change mid-session), and a from-scratch retry-and-toast
+  path here would need its own tests to be trusted on the one loop in this file that spends
+  money — not a change to make under this task's time budget.
 
 ## Carried forward from Phase 2a's reviews
 
