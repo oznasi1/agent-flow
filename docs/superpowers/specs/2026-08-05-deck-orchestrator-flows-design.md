@@ -270,34 +270,78 @@ node 1 of 3` — and only while a flow exists. No persistent hint lines.
 **Toast.** `Ship the migration launched ASM-12 in bite-me — CI passed on ASM-2.` Every
 autonomous action reports what it did and why, with an **Open** action.
 
-## The blocker Phase 3 must clear before anything can spend money
+## Concurrency: resolved in Phase 3
 
 **Two VS Code windows can fire the same rule twice.** `defaultFlowsDir()` is the global
 `~/.agentflow/flows`; `DeckPanel` is per extension host; and advancing a flow is
-read → evaluate → write with no lock. Two windows with the Deck open both read an unfired
-edge and both fire it. This was proved with a probe: two identical toasts, one window's
-`firedAt` overwriting the other's.
+read → evaluate → write. Two windows with the Deck open both read an unfired edge and both
+fire it. This was proved with a probe: two identical toasts, one window's `firedAt`
+overwriting the other's.
 
-Phase 2b **narrowed** it — the write now re-reads the store, drops any edge another window
+Phase 2b **narrowed** it — the write re-reads the store, drops any edge another window
 already stamped, and bases the write on that fresh copy rather than the stale evaluated one.
-That last part is load-bearing and was not obvious: writing the stale flow erases the other
-window's stamp on the very edge it just claimed, un-latching it, so the rule fires again on
-the next pass. The window is now microseconds rather than a poll interval.
+Phase 3 **closes** it with a TTL lock over the flows directory (`src/engine/orchestrator/lock.ts`),
+held for the whole of one pass:
 
-It is still read-then-write with no lock, so **it is not closed**. Today the cost is a
-duplicate toast. The moment a rule can `launch`, the identical sequence is a **second paid
-agent session**. A real fix needs either a lock file beside the flow or a per-workspace flows
-directory — the latter changes the storage location and so needs a migration. Whichever is
-chosen, **it must land before any action can spend money.** The constraint is also recorded
-in a comment at the site in `deckView.ts`.
+- `acquire`/`release` take a **per-pass token**, not a per-panel one — `refresh()` polls every
+  six seconds and a pass can now sit inside a spend-confirmation modal for minutes, so two
+  passes from the same panel overlapping is the normal case, not a race to reason about. A
+  shared token would let the first pass's `release` delete the second pass's live lock.
+- A window that cannot take the lock does **nothing** — no evaluation, no write, no toast —
+  and tries again on its next poll.
+- The lock **reaps rather than steals**: `acquire` on a lock past its TTL (`LOCK_TTL_MS`,
+  300s) deletes it and still returns `false`. It does not then re-create and return `true` —
+  two windows independently judging the same stale lock dead would otherwise both come away
+  believing they hold it, which is the double-launch this exists to prevent. The pass *after*
+  the one that reaped a dead holder is the one that actually acquires.
+- The TTL is crash recovery, not mutual exclusion for a holder that hangs. 300s must
+  comfortably exceed the slowest thing done under the lock — a launch that opens a window —
+  so erring long is cheap (nothing here is urgent) and erring short is not (a lock reaped out
+  from under a live launch is a second paid session).
+- **Consent is asked outside the lock.** A spend-confirmation modal is answered on human time;
+  the lock is held on machine time. The pass that finds a flow needs asking performs nothing
+  and records the ask; the modal itself runs after `release`, so no other window waits on a
+  human, and past the TTL the lock is free for another window's pass to use while the modal is
+  still up.
 
-Two smaller things for the same phase, both inert while `notify` is the only action:
+Two smaller races carried from the same phase, both now closed too, in `advanceUnderLock`:
 
-- **A flow disarmed mid-pass still completes that pass.** A pass already in flight stamps
-  and toasts once even if the user disarms while it runs; the flow then correctly stays
-  disarmed. Harmless for a toast, worth deciding for a launch.
-- **`notifyLines` reads `action` from the stale edge while `applyFired` reads it from the
-  fresh one.** Identical while every edge is `notify`; a divergence once actions differ.
+- **A flow disarmed mid-pass no longer completes that pass.** Every acting edge re-reads the
+  store and checks `armed` immediately before it runs, not once for the whole flow — a launch
+  or a seed is its own `await`, and up to three can run in one pass, each one long enough for
+  a disarm to land in between. An edge stopped this way is left pending rather than stamped,
+  so a re-arm gets a clean retry.
+- **`notifyLines` and `applyFired` now read `action` from the same (fresh) copy.** Both decide
+  "is this a notify" by indexing the flow that is actually about to be written, by edge id —
+  not from the `FiredEdge.edge` reference evaluation captured, which could be a stale object
+  if the edge's action changed between evaluation and the write.
+
+## Known limitations
+
+Decisions, not a bug list — each one was looked at and left as it is, with the reason it is
+cheaper to live with than to fix.
+
+- **A launch can report success for a run that was never recorded.** `openWorkspace` treats
+  its `writeRun` as best-effort and swallows a failure (`src/engine/workspace.ts`), and
+  `OpenResult` carries no signal that it happened. So `launchPlanned` can legitimately return
+  `{ ok: true, runKey }` for a run with no record on disk, after which `evaluate.ts`'s
+  `byKey.get(runKey)` misses it forever: the node this launch just promoted to a place
+  observes nothing, and the chain stalls with no explanation. **Not a Phase 3 regression** —
+  an ordinary Take has exactly the same hole, and fails the same way. Changing
+  `openWorkspace`'s error posture would touch the Take path too, and that is out of scope
+  here.
+- **A crashed window stalls other windows' flows for up to five minutes.** `LOCK_TTL_MS` is
+  300s because it must exceed the slowest thing done under the lock — a launch that opens a
+  window. The TTL is only crash recovery, never mutual exclusion for a live holder: erring
+  long is cheap, because flows poll every six seconds and nothing here is urgent, while erring
+  short lets a lock be reaped out from under a live launch — a second paid session for the
+  window whose lock was just taken.
+- **An unanswered spend confirmation stalls its own panel's flows.** The in-flight guard
+  (`advanceInFlight`) means that panel runs no further passes until its modal is answered.
+  Other windows are unaffected, because the asking happens outside the lock — see above.
+- **Two `notify` edges into one node toast twice.** The act-once-per-target rule deliberately
+  covers only spending actions (`launch`, `seed`); a duplicate toast is cheap, and collapsing
+  it would hide the fact that two distinct rules both became true.
 
 ## Carried forward from Phase 2a's reviews
 

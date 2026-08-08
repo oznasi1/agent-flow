@@ -116,16 +116,22 @@ cards fall back to the git + Jira backbone.
 An **Orchestrator** drawer (off by default, `agentFlow.orchestrator`) lets you wire the
 agents already on the board into a *flow*: drag a card in, connect two nodes, and put a
 condition on the connection — a merged PR, failing CI, an agent that ended its turn, a
-clean tree, a Jira status. Each connection can currently **notify** you, and the drawer
-says what each condition is waiting on right now. **Arm** a flow and it is checked on
-every Deck refresh; a rule that is met fires exactly once and tells you, rather than
-firing again on every later pass. It keeps advancing while the Deck is hidden — an armed
-flow that only ran while you were looking at the board would not be armed — and closing
-the Deck genuinely does stop it, since the panel owns the poll; closing with something
-armed says so. Reopening the Deck, including after a restart, shows you what is already
-ready and waits for a **Go** before acting on it, so an armed flow can never spend
-anything the moment you come back. The only thing a rule can do in this build is notify
-you — launching the next agent for you lands in a following release.
+clean tree, a Jira status. Each connection can **launch** the next agent in a fresh
+worktree, **seed** a second agent into a place that already exists, or **notify** you,
+and the drawer says what each condition is waiting on right now. **Arm** a flow and it
+is checked on every Deck refresh; a rule that is met fires exactly once and tells you,
+rather than firing again on every later pass. It keeps advancing while the Deck is
+hidden — an armed flow that only ran while you were looking at the board would not be
+armed — and closing the Deck genuinely does stop it, since the panel owns the poll;
+closing with something armed says so. Reopening the Deck, including after a restart,
+shows you what is already ready and waits for a **Go** before acting on it, so an armed
+flow can never spend anything the moment you come back. Before it ever launches or seeds
+for the first time, a flow also asks once — naming the ticket, the repos, and the prompt
+mode it would use — and only then runs unattended; at most three launches happen in a
+single pass, with the rest picked up on the next one. A launch that fails stamps its rule
+as errored and stops it there until you **Reset** it; a pre-flight read that fails
+instead — Jira unreachable, say — is retried on the next pass rather than latched as a
+failure. Two VS Code windows with the Deck open cannot fire the same rule twice.
 
 Above the columns sits your **review queue** — every open PR that asks for your
 review, found with one `gh` search. PRs in archived repositories are left out:
