@@ -27,28 +27,53 @@ export function lockPath(dir: string): string {
   return path.join(dir, ".advance.lock");
 }
 
-/** Take the lock, or report that someone else holds it. The stored value is the
- * acquiring timestamp, which is all the TTL check needs. */
-export function acquire(io: LockIo, dir: string, nowMs: number, ttlMs: number): boolean {
-  const p = lockPath(dir);
-  if (io.tryCreate(p, String(nowMs))) return true;
-
-  // Someone holds it — or held it. Decide whether they are alive.
-  const raw = io.read(p);
-  // Vanished between the create and the read: released in the gap, so try again
-  // rather than reporting a lock nobody holds.
-  if (raw === null) return io.tryCreate(p, String(nowMs));
-
-  const heldAt = Number(raw);
-  // An unparseable lock (half-written, hand-mangled) must not wedge every window
-  // forever. Treat it as dead.
-  const dead = !Number.isFinite(heldAt) || nowMs - heldAt > ttlMs;
-  if (!dead) return false;
-
-  io.remove(p);
-  return io.tryCreate(p, String(nowMs));
+/** The stored value is `<acquiredAt>:<token>`. */
+function stamp(nowMs: number, token: string): string {
+  return `${nowMs}:${token}`;
 }
 
-export function release(io: LockIo, dir: string): void {
-  io.remove(lockPath(dir));
+function tokenOf(raw: string): string {
+  return raw.slice(raw.indexOf(":") + 1);
+}
+
+/** A lock nobody can be holding: past its TTL, or unparseable — half-written or
+ * hand-mangled, which must not wedge every window forever. */
+function isDead(raw: string, nowMs: number, ttlMs: number): boolean {
+  const heldAt = Number(raw.slice(0, raw.indexOf(":")));
+  return !Number.isFinite(heldAt) || nowMs - heldAt > ttlMs;
+}
+
+/** Take the lock, or report that someone else holds it.
+ *
+ * This returns true from exactly one place: a successful exclusive create on an
+ * empty path. A lock past its TTL is REAPED, not stolen — we delete it and report
+ * failure, letting the next poll's plain create arbitrate. Stealing (remove, then
+ * create, then return true) looks equivalent and is not: two windows that both
+ * judge one stale lock dead interleave their remove/create pairs and both come
+ * away believing they hold it, which is precisely the double-launch this lock
+ * exists to prevent. Reaping costs one poll of recovery latency after a crash and
+ * cannot double-acquire. */
+export function acquire(
+  io: LockIo, dir: string, nowMs: number, ttlMs: number, token: string,
+): boolean {
+  const p = lockPath(dir);
+  if (io.tryCreate(p, stamp(nowMs, token))) return true;
+
+  const raw = io.read(p);
+  // Vanished between the create and the read: the holder released in the gap, so
+  // try once more rather than reporting a lock nobody holds.
+  if (raw === null) return io.tryCreate(p, stamp(nowMs, token));
+
+  if (isDead(raw, nowMs, ttlMs)) io.remove(p);
+  return false;
+}
+
+/** Release our own lock, and only ours. A window suspended past the TTL has its
+ * lock reaped and possibly replaced; without the token check its `release` would
+ * delete a live holder's lock. */
+export function release(io: LockIo, dir: string, token: string): void {
+  const p = lockPath(dir);
+  const raw = io.read(p);
+  if (raw !== null && tokenOf(raw) !== token) return;
+  io.remove(p);
 }
