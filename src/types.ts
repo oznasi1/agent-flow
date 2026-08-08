@@ -354,6 +354,13 @@ export type InboundMessage =
   | { type: "changeStatus"; key: string }
   | { type: "addToMySprint"; key: string }
   | { type: "explore" }
+  // The Notepad tab (same webview as the task pool, second view)
+  | { type: "notepad:add"; title: string; body: string }
+  | { type: "notepad:update"; id: string; title: string; body: string }
+  | { type: "notepad:toggleDone"; id: string }
+  | { type: "notepad:delete"; id: string }
+  | { type: "notepad:clearCompleted" }
+  | { type: "notepad:run"; id: string }
   | { type: "openExternal"; url: string }
   | { type: "signIn" }
   | { type: "runSetup" }
@@ -436,6 +443,11 @@ export type OutboundMessage =
   // the command exists.
   | { type: "error"; message: string; canRetry: boolean; canRunDoctor?: boolean }
   | { type: "loading"; loading: boolean }
+  // Every note, with each one's derived run status. Posted on `ready`, after every
+  // mutation, and on a poll tick so a badge cannot go stale while the panel sits
+  // open. The whole array every time: it is a handful of small records, and a
+  // diff protocol would buy nothing but a chance to desynchronise.
+  | { type: "notepad:notes"; notes: NotepadItemView[] }
   // The Deck
   | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; reviewQueue: boolean; ghNote: string | null; prReviewStatus: string;
       // Which lens to render. Echoed on every post rather than sent once, so a
