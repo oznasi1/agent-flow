@@ -33,7 +33,7 @@ import { readSessionActivity, UNKNOWN_ACTIVITY } from "./engine/transcript";
 import { canon } from "./engine/paths";
 import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
 
-const POLL_MS = 6000;
+export const POLL_MS = 6000;
 const TICKET_TTL_MS = 30_000;
 
 /** The footer note per reason PR facts are off. Naming the actual gap matters:
@@ -156,13 +156,48 @@ export class DeckPanel {
     this.reviewQueue = getConfig().reviewRequests;
     this.panel.webview.html = this.html(this.panel.webview);
     this.panel.webview.onDidReceiveMessage((m: InboundMessage) => this.onMessage(m), null, this.disposables);
-    this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
+    this.panel.onDidDispose(() => {
+      const wasArmed = this.hasArmedFlow();
+      this.dispose();
+      if (!wasArmed) return;
+      // Closing the panel does stop it advancing — the panel owns the poll and
+      // there is no cancellable close to gate that on. The flow stays armed on
+      // disk deliberately: the intent survives, and the resume gate (Task 4) is
+      // what makes coming back safe.
+      const reopen = "Reopen the Deck";
+      void vscode.window
+        .showWarningMessage(
+          "A flow is armed, and closing the Deck stops it advancing.",
+          reopen,
+          "Leave it closed",
+        )
+        .then((answer) => {
+          if (answer === reopen) void vscode.commands.executeCommand("agentFlow.openDeck");
+        });
+    }, null, this.disposables);
     this.panel.onDidChangeViewState(
-      () => (this.panel.visible ? this.startPolling() : this.stopPolling()),
+      () => {
+        // An armed flow that only advances while you are looking at the board is
+        // not armed. Closing the panel does stop it — that is what the close
+        // notice above is for.
+        if (this.panel.visible || this.hasArmedFlow()) this.startPolling();
+        else this.stopPolling();
+      },
       null,
       this.disposables,
     );
     this.startPolling();
+  }
+
+  /** Is any flow armed right now? Read from the store rather than cached: arming
+   * is a disk write, and this is asked only on a visibility change or a close.
+   * No try/catch here: `readFlows` already degrades a corrupt or unreadable
+   * file to "skip it" internally and never throws — every other call site in
+   * this file (`postFlows`, `advanceArmedFlows`, the `flow:*` handlers) trusts
+   * that the same way. */
+  private hasArmedFlow(): boolean {
+    if (!getConfig().orchestrator) return false;
+    return readFlows(this.flowIo, this.flowsDir).some((f) => f.armed);
   }
 
   private post(msg: OutboundMessage): void {

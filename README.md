@@ -117,8 +117,15 @@ An **Orchestrator** drawer (off by default, `agentFlow.orchestrator`) lets you w
 agents already on the board into a *flow*: drag a card in, connect two nodes, and put a
 condition on the connection — a merged PR, failing CI, an agent that ended its turn, a
 clean tree, a Jira status. Each connection can currently **notify** you, and the drawer
-says what each condition is waiting on right now. Nothing runs on its own yet: arming a
-flow, and letting it launch the next agent for you, lands in a following release.
+says what each condition is waiting on right now. **Arm** a flow and it is checked on
+every Deck refresh; a rule that is met fires exactly once and tells you, rather than
+firing again on every later pass. It keeps advancing while the Deck is hidden — an armed
+flow that only ran while you were looking at the board would not be armed — and closing
+the Deck genuinely does stop it, since the panel owns the poll; closing with something
+armed says so. Reopening the Deck, including after a restart, shows you what is already
+ready and waits for a **Go** before acting on it, so an armed flow can never spend
+anything the moment you come back. The only thing a rule can do in this build is notify
+you — launching the next agent for you lands in a following release.
 
 Above the columns sits your **review queue** — every open PR that asks for your
 review, found with one `gh` search. PRs in archived repositories are left out:

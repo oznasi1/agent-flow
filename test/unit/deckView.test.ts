@@ -250,7 +250,7 @@ vi.mock("../../src/config", async (importActual) => {
     }),
   };
 });
-import { DeckPanel } from "../../src/deckView";
+import { DeckPanel, POLL_MS } from "../../src/deckView";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
 import { TaskAuthError } from "../../src/tasks/provider";
 
@@ -3469,5 +3469,85 @@ describe("arm, disarm and reset", () => {
     expect(e2.firedNote).toBeUndefined();
     expect(e2.error).toBeUndefined();
     expect(e2.cond).toEqual({ kind: "ci-passed" });
+  });
+});
+
+describe("the poll and the close confirmation", () => {
+  // A 6s interval never fires under real timers within a test's lifetime, so
+  // this describe alone runs on fake ones — the rest of the file depends on
+  // real timers (e.g. `settled()`'s macrotask wait), so this must not be global.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Advance fake time AND drain whatever microtasks that unblocks — `settled()`
+   * (a real setTimeout) cannot be used here since fake timers intercept it too. */
+  const settle = async (ms = 0) => {
+    await vi.advanceTimersByTimeAsync(ms);
+  };
+
+  /** Open a panel and return it plus a way to deliver an inbound message — the
+   * same shape every other describe block's own `openPanel` uses, adapted to
+   * this describe's fake-timer-safe `settle`. */
+  const openPanel = async () => {
+    show();
+    await settle();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settle(); } };
+  };
+
+  const armed = (): Flow => ({ ...mkFlow("f1", "Ship the migration"), armed: true });
+
+  it("keeps polling when the panel is hidden and a flow is armed", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armed()];
+    const { p } = await openPanel();
+    const before = h.buildRunStatus.mock.calls.length;
+    p.visible = false;
+    p._fireViewState();
+    await settle(POLL_MS + 1);
+    expect(h.buildRunStatus.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it("stops polling when hidden with nothing armed", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "n")];
+    const { p } = await openPanel();
+    const before = h.buildRunStatus.mock.calls.length;
+    p.visible = false;
+    p._fireViewState();
+    await settle(POLL_MS + 1);
+    expect(h.buildRunStatus.mock.calls.length).toBe(before);
+  });
+
+  it("says so when the panel closes with a flow armed", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armed()];
+    const { p } = await openPanel();
+    p._fireDispose();
+    await settle();
+    expect(window.showWarningMessage).toHaveBeenCalled();
+  });
+
+  it("says nothing when the panel closes with nothing armed", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "n")];
+    const { p } = await openPanel();
+    p._fireDispose();
+    await settle();
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it("reopens the Deck when the user answers the close notice", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armed()];
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce("Reopen the Deck");
+    const { p } = await openPanel();
+    p._fireDispose();
+    await settle();
+    expect(commands.executeCommand).toHaveBeenCalledWith("agentFlow.openDeck");
   });
 });

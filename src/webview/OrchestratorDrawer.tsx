@@ -163,6 +163,14 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const [overGraph, setOverGraph] = React.useState(false);
   const graphRef = React.useRef<HTMLDivElement | null>(null);
   const [drag, setDrag] = React.useState<{ id: string; dx: number; dy: number; x: number; y: number } | null>(null);
+  /** The live drag position, written on every move alongside `setDrag`. `pointermove`
+   * is InputContinuous priority and `pointerup` is Discrete, so a release can arrive
+   * before React has flushed the final move into `drag` — reading `drag` itself in
+   * the release handler would then save the position one move stale. This ref is
+   * written synchronously in the same handler that computes the position, so the
+   * release handler below always reads what actually happened, not what React has
+   * gotten around to committing. */
+  const dragRef = React.useRef<{ id: string; x: number; y: number } | null>(null);
   const [sel, setSel] = React.useState<string | null>(null);
   const [wiring, setWiring] = React.useState<string | null>(null);
   const [selEdge, setSelEdge] = React.useState<string | null>(null);
@@ -178,21 +186,30 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       const box = graphRef.current?.getBoundingClientRect();
       const ox = box?.left ?? 0;
       const oy = box?.top ?? 0;
-      setDrag((d) => (d ? { ...d, x: snap(e.clientX - ox - d.dx), y: snap(e.clientY - oy - d.dy) } : d));
+      const x = snap(e.clientX - ox - drag.dx);
+      const y = snap(e.clientY - oy - drag.dy);
+      dragRef.current = { id: drag.id, x, y };
+      setDrag((d) => (d ? { ...d, x, y } : d));
     };
     // The save happens OUTSIDE the `setDrag` updater. A state updater must be pure,
     // and this one is not hypothetically impure: with `p.onSave` inside it, React
     // double-invokes the updater under StrictMode and one released drag becomes TWO
     // writes of the user's flow file (measured — see the "exactly once, even under
-    // StrictMode" test). `drag` is already in this effect's closure and the effect
-    // re-runs per drag position, so the released position is in scope here without
-    // the updater's argument at all.
+    // StrictMode" test).
+    //
+    // Reads `dragRef.current`, not the `drag` this effect closed over: `pointermove`
+    // is InputContinuous priority and `pointerup` is Discrete, so a release arriving
+    // before React flushes the final move's `setDrag` would otherwise save the
+    // position from one move ago. The ref is written synchronously in `move` above,
+    // so it always holds the truth regardless of where React's render is.
     const up = () => {
+      const live = dragRef.current;
       const orig = flow.nodes.find((n) => n.id === drag.id);
       // Only a move that actually moved is worth a write.
-      if (orig && (orig.x !== drag.x || orig.y !== drag.y)) {
-        p.onSave({ ...flow, nodes: flow.nodes.map((n) => (n.id === drag.id ? { ...n, x: drag.x, y: drag.y } : n)) });
+      if (orig && live && (orig.x !== live.x || orig.y !== live.y)) {
+        p.onSave({ ...flow, nodes: flow.nodes.map((n) => (n.id === drag.id ? { ...n, x: live.x, y: live.y } : n)) });
       }
+      dragRef.current = null;
       setDrag(null);
     };
     window.addEventListener("pointermove", move);

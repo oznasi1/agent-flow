@@ -1415,6 +1415,23 @@ describe("the Orchestrator chip", () => {
     expect(chip().querySelector(".ct")!.textContent).toBe("2");
   });
 
+  // With arming real, the count that matters is how many flows are armed — not
+  // how many merely exist. Both directions of the condition are proved here so
+  // inverting either branch of `armedCount > 0 ? ... : ...` fails one of them.
+  it("reports the armed count on the chip, not the flow count", () => {
+    render(<DeckApp />);
+    host(flowsMsg([{ ...mkFlow("f1", "a"), armed: true }, mkFlow("f2", "b")]));
+    expect(chip().textContent).toContain("1 armed");
+  });
+
+  it("shows a plain count when nothing is armed", () => {
+    render(<DeckApp />);
+    host(flowsMsg([mkFlow("f1", "a"), mkFlow("f2", "b")]));
+    const text = chip().textContent ?? "";
+    expect(text).not.toContain("armed");
+    expect(text).toContain("2");
+  });
+
   it("asks the host to create one when there are none", () => {
     render(<DeckApp />);
     host(flowsMsg([]));
@@ -1422,16 +1439,34 @@ describe("the Orchestrator chip", () => {
     expect(sent).toHaveBeenCalledWith({ type: "flow:create" });
   });
 
-  it("opens the drawer on the first flow when there is one", () => {
+  it("opens the drawer via the chip when there is a flow", () => {
     render(<DeckApp />);
     host(flowsMsg([mkFlow("f1", "Ship the migration")]));
-    // The post itself auto-opens the flow it just learned about, so close it first
-    // to observe the chip doing the opening rather than the post.
-    fireEvent.click(chip());
+    // A saved flow no longer auto-opens on the post (Task 7) — only the chip does.
     expect(drawer()).toBeNull();
     fireEvent.click(chip());
     expect(drawer()).toBeInTheDocument();
     expect(screen.getByLabelText("Flow name")).toHaveValue("Ship the migration");
+  });
+
+  // The bug this phase carried over: on the first post the previous list is `[]`,
+  // so every saved flow reads as "fresh" and popped the drawer open for anyone
+  // who has one, every time they opened the Deck.
+  it("does not open the drawer by itself when a saved flow arrives", () => {
+    render(<DeckApp />);
+    host(flowsMsg([mkFlow("f1", "Ship the migration")]));
+    expect(drawer()).toBeNull();
+  });
+
+  // The behaviour the auto-open exists for, proved alongside the fix above so the
+  // seen-set guard cannot be the kind of fix that also breaks what it must keep.
+  it("still opens the drawer for a flow that was just created", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    fireEvent.click(chip());
+    expect(sent).toHaveBeenCalledWith({ type: "flow:create" });
+    host(flowsMsg([mkFlow("f1", "New flow")]));
+    expect(drawer()).toBeInTheDocument();
   });
 
   it("does not ask the host for anything when it only toggles the drawer", () => {
@@ -1491,6 +1526,7 @@ describe("the deck:flows handler", () => {
   it("keeps the open flow open across an unrelated post", () => {
     render(<DeckApp />);
     host(flowsMsg([mkFlow("f1", "One")]));
+    fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     expect(drawer()).toBeInTheDocument();
     host(flowsMsg([mkFlow("f1", "One"), mkFlow("f2", "Two")]));
     // f2 is new, but f1 is still open and an open flow wins over a fresh one.
@@ -1500,6 +1536,7 @@ describe("the deck:flows handler", () => {
   it("closes the drawer when the open flow is deleted elsewhere", () => {
     render(<DeckApp />);
     host(flowsMsg([mkFlow("f1", "One"), mkFlow("f2", "Two")]));
+    fireEvent.click(chip()); // opens flows[0] ("One") — no longer automatic
     expect(drawer()).toBeInTheDocument();
     host(flowsMsg([mkFlow("f2", "Two")]));
     expect(drawer()).toBeNull();
@@ -1511,6 +1548,7 @@ describe("the drawer's callbacks", () => {
   const open = (flows: Flow[] = [mkFlow("f1", "Ship the migration")]) => {
     render(<DeckApp />);
     host(flowsMsg(flows));
+    fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     sent.mockClear();
   };
 
@@ -1570,6 +1608,7 @@ describe("the drawer's callbacks", () => {
     host(runsMsg([mkStatus()]));
     host(flowsMsg([{ ...mkFlow("f1", "One"),
       nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "svc" }] }]));
+    fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     const dot = screen.getByTestId("orch-node-n1").querySelector(".d") as HTMLElement;
     // mkStatus's single-repo run has a working agent.
     expect(dot.style.background).toBe("var(--c-progress)");
@@ -1593,6 +1632,7 @@ describe("the drawer's callbacks", () => {
       enabled: true,
       pendingResume: [{ flowId: "f1", flowName: "Ship the migration", lines: ["ready"] }],
     });
+    fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     fireEvent.click(screen.getByRole("button", { name: /^go$/i }));
     expect(sent).toHaveBeenCalledWith({ type: "flow:resumeApprove", id: "f1" });
   });
@@ -1600,6 +1640,7 @@ describe("the drawer's callbacks", () => {
   it("passes a reset through as flow:resetEdge", () => {
     render(<DeckApp />);
     host(flowsMsg([firedFlow()]));
+    fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     fireEvent.click(screen.getByRole("button", { name: /reset/i }));
     expect(sent).toHaveBeenCalledWith({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });

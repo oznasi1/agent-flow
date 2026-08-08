@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
 import * as React from "react";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { OrchestratorDrawer, DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import type { Flow } from "../../src/engine/orchestrator/model";
 import { anchor, edgePath, GRID, labelPoint, NODE_H, NODE_W } from "../../src/engine/orchestrator/layout";
@@ -403,6 +403,36 @@ describe("the canvas", () => {
     fireEvent.pointerUp(window);
     expect(onSave).toHaveBeenCalledTimes(1);
     expect((onSave.mock.calls[0][0] as Flow).nodes.find((n) => n.id === "n1")!.x).toBe(56);
+  });
+
+  // pointermove is InputContinuous priority and pointerup is Discrete, so a
+  // release can arrive before React has flushed the final move into `drag` —
+  // reading `drag` itself in the release handler would then save the position
+  // one move stale. snap() hides the gap unless the final move crosses a grid
+  // line, which is why this needs two moves, not one.
+  //
+  // Each `fireEvent.*` call is individually wrapped in `act()`, which flushes
+  // state and effects before the next line runs — so two separate calls would
+  // never observe the race even against the unfixed handler. Nesting all three
+  // dispatches inside one manual `act()` defers that flush until the very end,
+  // the same way a real browser can deliver a move and the following release
+  // before React gets a chance to reconcile in between.
+  it("saves the final drag position even when the release arrives before the last move flushes", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [twoPlaces()] })} />);
+    const n1 = screen.getByTestId("orch-node-n1");
+    fireEvent.pointerDown(n1, { clientX: 100, clientY: 100 });
+    act(() => {
+      // Two moves, then an immediate release, all before React reconciles: the
+      // saved position must be the LAST move's, not the previous one's.
+      fireEvent.pointerMove(window, { clientX: 140, clientY: 100 });
+      fireEvent.pointerMove(window, { clientX: 180, clientY: 100 });
+      fireEvent.pointerUp(window);
+    });
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    // dx = 100 - 0 - 24 = 76 (node.x=24, jsdom's getBoundingClientRect is all 0).
+    // Final move: clientX=180 → snap(180 - 0 - 76) = snap(104) = 104.
+    expect(saved.nodes.find((n) => n.id === "n1")!.x).toBe(104);
   });
 
   it("Tidy re-lays-out and saves", () => {

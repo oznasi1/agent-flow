@@ -423,6 +423,10 @@ export function DeckApp(): JSX.Element {
    * a newly created flow from one we already had needs the previous list. Mirrors
    * `flows` exactly; it is never a second source of truth for rendering. */
   const flowsRef = React.useRef<Flow[]>([]);
+  /** True once a `deck:flows` post has landed. Before that, every flow looks
+   * "fresh" against an empty previous list, which would pop the drawer open for
+   * anyone with a saved flow the moment they open the Deck. */
+  const seenFlowsRef = React.useRef(false);
 
   React.useEffect(() => {
     const handler = (ev: MessageEvent<OutboundMessage>) => {
@@ -493,11 +497,16 @@ export function DeckApp(): JSX.Element {
         // Reading the ref once, before overwriting it, keeps this block idempotent no
         // matter how many times React runs the updater below.
         const old = flowsRef.current;
+        // Only ever "fresh" against a post we have actually seen — the very
+        // first post's previous list is `[]`, which would otherwise make every
+        // saved flow look newly created.
+        const seenBefore = seenFlowsRef.current;
         flowsRef.current = m.flows;
+        seenFlowsRef.current = true;
         setFlows(m.flows);
         setOpenFlowId((cur) => {
           if (cur && m.flows.some((f) => f.id === cur)) return cur;
-          const fresh = m.flows.find((f) => !old.some((o) => o.id === f.id));
+          const fresh = seenBefore ? m.flows.find((f) => !old.some((o) => o.id === f.id)) : undefined;
           return fresh ? fresh.id : null;
         });
         setOrchEnabled(m.enabled);
@@ -521,6 +530,10 @@ export function DeckApp(): JSX.Element {
     ? projectCards(runs)
     : runs.map((r) => ({ id: `w:${r.run.key}`, status: r, agent: null, column: r.column }));
   const needs = cards.filter((c) => c.column === "needs").length;
+  // With arming real, the count that matters on the chip is how many flows are
+  // armed — that is the thing quietly spending your attention while the drawer
+  // is closed, not how many flows merely exist.
+  const armedCount = flows.filter((f) => f.armed).length;
   const toggleLive = () => {
     const next = !live;
     setLive(next);
@@ -558,7 +571,7 @@ export function DeckApp(): JSX.Element {
         {orchEnabled && (
           <button
             type="button"
-            className="ctl orch-chip"
+            className={`ctl orch-chip${armedCount > 0 ? " armed" : ""}`}
             onClick={() => {
               if (flows.length === 0) send({ type: "flow:create" });
               else setOpenFlowId((cur) => (cur ? null : flows[0].id));
@@ -566,7 +579,9 @@ export function DeckApp(): JSX.Element {
           >
             <span className="ic">⚡</span>
             <span>Orchestrator</span>
-            {flows.length > 0 && <span className="ct">{flows.length}</span>}
+            {armedCount > 0
+              ? <span className="ct">{armedCount} armed</span>
+              : flows.length > 0 && <span className="ct">{flows.length}</span>}
           </button>
         )}
         {/* Both toggles answer the same question — how much should the board trust? —

@@ -17,6 +17,11 @@ export const ORCH_CSS = `
   .orch-chip { gap: 6px; }
   .orch-chip .ic { font-size: 12px; line-height: 1; }
   .orch-chip .ct { font-family: var(--mono); font-size: var(--t-micro); color: var(--dim); }
+  /* Armed is what is quietly spending your attention while the drawer is
+     closed — worth reading at a glance, but the chip stays a chip: Arm is the
+     drawer's one filled control, so this earns weight through contrast and
+     weight alone, never a fill of its own. */
+  .orch-chip.armed .ct { color: var(--vscode-foreground); font-weight: 600; }
 
   .orch { position: fixed; top: 53px; right: 0; bottom: 0; width: 560px; z-index: 40;
     display: flex; flex-direction: column;
