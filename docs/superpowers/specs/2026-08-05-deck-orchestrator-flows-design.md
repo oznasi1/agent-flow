@@ -252,6 +252,30 @@ node 1 of 3` — and only while a flow exists. No persistent hint lines.
 **Toast.** `Ship the migration launched ASM-12 in bite-me — CI passed on ASM-2.` Every
 autonomous action reports what it did and why, with an **Open** action.
 
+## Carried forward from Phase 2a's reviews
+
+Three things deliberately left as they are, each with a known consequence. None blocks a
+merge; all three are cheap and belong in 2b.
+
+- **The drawer opens unprompted on the first `deck:flows` post that carries any flow.** The
+  auto-open rule treats a flow as "fresh" when it was not in the previous list, and on the
+  first post the previous list is `[]` — so every saved flow reads as new. Mild today (the
+  setting is off by default, the drawer is non-modal), but it means opening the Deck pops the
+  drawer for anyone with a saved flow. Fix by seeding the seen-set from the first post, or by
+  opening only when a create was actually requested.
+- **A `pointerup` can save a one-event-stale node position.** Lifting `onSave` out of the
+  `setDrag` updater — which was correct, and fixed a real double-write — means the release
+  handler reads the drag position from its effect closure rather than from the updater's
+  argument. `pointermove` is InputContinuous priority and `pointerup` is Discrete, so a
+  release arriving before React flushes the final move saves the previous position. `snap()`
+  hides it unless that move crossed a grid line. Fix with a `dragRef` read in the release
+  handler.
+- **The webview import-graph guard is narrower than its name.** `test/webview/webviewGraph.test.ts`
+  walks relative imports only: it skips bare npm specifiers, so a webview-reachable package
+  that requires `fs` passes the test and still fails the build. It also matches `import`
+  syntax, not `require()` or dynamic `import()`. Adequate for this ESM/TS repo; worth widening
+  if a dependency ever enters the webview graph.
+
 ## What Phase 1 forced into Phase 2's contract
 
 Three requirements the review of the built core surfaced. They are binding on Phase 2, not
