@@ -634,6 +634,43 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
       expect(window.showInformationMessage).toHaveBeenCalled();
     });
+
+    it("types /remote-control and leaves the prompt on the clipboard", async () => {
+      // Same contract as the panel: the slash command cannot be stacked ahead of
+      // a prompt in one submission, so the prompt travels by clipboard.
+      setupMatchingPlan({ remoteControl: true });
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
+      expect(terminalAt().sendText.mock.calls[1][0]).toBe(
+        `${BRACKET_ON}/remote-control ASM-1${BRACKET_OFF}`,
+      );
+      expect(terminalAt().sendText.mock.calls[1][1]).toBe(false);
+      // The user is told what to press.
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Remote Control"),
+      );
+    });
+
+    it("gives each task in a batch its own named terminal", async () => {
+      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readFileSync.mockImplementation((p) =>
+        String(p).includes("ASM-1")
+          ? planJson({ key: "ASM-1", seq: 0 })
+          : planJson({ key: "ASM-2", seq: 1 }),
+      );
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal.mock.calls.map((c) => c[0]?.name)).toEqual([
+        "Claude · ASM-1",
+        "Claude · ASM-2",
+      ]);
+    });
   });
 
   it("uses the extension panel and no terminal when agentSurface is unset", async () => {
