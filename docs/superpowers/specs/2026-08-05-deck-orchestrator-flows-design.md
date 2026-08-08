@@ -189,10 +189,28 @@ This is the part that decides whether the feature is safe.
 `DeckViewProvider` starts and stops its poll on `onDidChangeViewState`. That changes in one
 place: **the poll keeps running while any flow is armed**, even when the panel is hidden.
 
-Closing the panel still ends evaluation, so closing with a flow armed asks first:
+Closing the panel still ends evaluation. This originally specified a dialog *before*
+closing — **Disarm · Keep it open · Close anyway** — and that turned out to be
+unbuildable: VS Code exposes no cancellable close for a webview panel. `onDidDispose`
+fires after disposal and there is no `onWillDispose`, so a close cannot be vetoed, and the
+user closes the panel with the tab's × or the keyboard rather than through a command that
+could be wrapped.
 
-> *Ship the migration is armed. Closing the Deck stops it advancing.* — **Disarm** ·
-> **Keep it open** · **Close anyway**
+What ships instead: on close, if anything was armed, the extension says so plainly and
+offers to reopen the Deck. The flow stays armed on disk, so the intent survives — and the
+**resume gate** below is what makes coming back safe, which is the guarantee the dialog was
+reaching for anyway.
+
+### Coming back to an armed flow
+
+An armed flow persists across restarts, so the first evaluation after the panel is created
+does **not** act. It reports what is ready — "3 rules are ready: …" — and waits for **Go**
+or **Disarm**. Every pass after that fires normally. Without this, reopening the Deck after
+a week acts on every condition that went true while you were away, and once launching
+exists that means paid agent sessions starting before you have read anything.
+
+The gate is per panel and deliberately not persisted: it protects the moment you come back,
+and asking on every poll would defeat arming.
 
 Extracting the observation loop host-side so armed flows survive the Deck being closed is
 the correct end state and is **explicitly out of scope here** — it is a refactor of
