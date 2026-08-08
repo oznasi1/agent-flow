@@ -95,22 +95,28 @@ describe("acquire", () => {
     expect(acquire(io, DIR, NOW + 1, LOCK_TTL_MS, "win-a")).toBe(true);
   });
 
-  it("prevents two windows from both acquiring one stale lock", () => {
-    // Both windows meet a stale lock, judge it dead, and both call acquire.
-    // Reaping (delete + fail) instead of stealing (remove + create + succeed)
-    // prevents both from returning true on the same pass: at most one can succeed.
-    const { io } = fakeIo();
-    const STALE_NOW = NOW;
-    // Create a stale lock from window A.
-    expect(acquire(io, DIR, STALE_NOW, LOCK_TTL_MS, "win-a")).toBe(true);
+  it("never reaps and acquires in the same pass — the property that makes reaping safe", () => {
+    // The double-acquire that stealing allows needs one window to have read the
+    // stale stamp before another reaps and recreates, which no sequential fake can
+    // express. What IS observable sequentially is the invariant that rules it out:
+    // a pass that deletes a dead lock does not go on to claim it. Under stealing
+    // this call returns true; under reaping it must return false.
+    const { io, files } = fakeIo();
+    let removed = false;
+    const watched: LockIo = {
+      ...io,
+      remove: (p) => {
+        removed = true;
+        io.remove(p);
+      },
+    };
 
-    // Both windows now try to acquire at a time past the TTL.
-    const CHECK_NOW = STALE_NOW + LOCK_TTL_MS + 1;
-    const aResult = acquire(io, DIR, CHECK_NOW, LOCK_TTL_MS, "win-a");
-    const bResult = acquire(io, DIR, CHECK_NOW, LOCK_TTL_MS, "win-b");
+    acquire(watched, DIR, NOW, LOCK_TTL_MS, "win-a");
+    const stolen = acquire(watched, DIR, NOW + LOCK_TTL_MS + 1, LOCK_TTL_MS, "win-b");
 
-    // The key invariant: NOT both can return true. At least one must be false.
-    expect(aResult && bResult).toBe(false);
+    expect(removed).toBe(true); // it really did meet a dead lock and reap it
+    expect(stolen).toBe(false); // and it did NOT claim it in the same pass
+    expect(files[lockPath(DIR)]).toBeUndefined();
   });
 });
 
