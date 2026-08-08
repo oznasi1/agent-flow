@@ -356,6 +356,10 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * in the type system knows that at the render site, so the fallback is
    * purely to satisfy `LaunchDest`'s type, never a value the user can see. */
   const launchDest = edge && edge.action === "launch" ? plannedTargetOf(flow, edge)?.dest : undefined;
+  /** The Mode select's value. A launch's mode lives on its target planned
+   * node (never on the edge — see `setMode`'s own doc comment); a seed's
+   * lives on the edge, because a place has no mode field of its own. */
+  const modeValue = edge ? (edge.action === "launch" ? plannedTargetOf(flow, edge)?.mode : edge.mode) ?? "" : "";
 
   /** What the source place looks like right now, in `describeCond`'s words. Null
    * when the node's run is not on the board — a claim we cannot make. */
@@ -375,37 +379,43 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, cond } : x)) });
   };
 
-  /** Change what the edge does. `notify` clears `mode` — the only field a
-   * verb switch can leave stale, since a `notify` edge spends nothing and the
-   * engine would otherwise carry forward a value it never reads again.
-   * Switching TO `launch` or `seed` seeds `mode` from whatever is already
-   * live for this pairing (the edge's own value, or — for a launch — its
-   * target's, since a planned node is never created without one) rather than
-   * leaving the selector on nothing the instant the verb changes. */
+  /** Change what the edge does. `notify` and `launch` both clear `edge.mode` —
+   * `FlowEdge.mode` belongs to `seed` alone (see its own doc comment in
+   * model.ts): a launch's mode already lives on the target `PlannedNode`,
+   * which is never created without one, so there is nothing to write there
+   * just for switching the verb. Clearing it here matters for the same reason
+   * `notify`'s clear does: a launch edge left carrying a `mode` would be a
+   * second, unread source of truth for a fact the node alone owns — one
+   * field diverging from the other with nothing to say which one is real. */
   const setAction = (e: FlowEdge, action: FlowAction) => {
-    if (action === "notify") {
-      p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, action, mode: undefined } : x)) });
+    if (action === "seed") {
+      const mode = e.mode ?? p.promptModes[0]?.id;
+      p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, action, mode } : x)) });
       return;
     }
-    const target = plannedTargetOf(flow, e);
-    const mode = e.mode ?? target?.mode ?? p.promptModes[0]?.id;
-    p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, action, mode } : x)) });
+    p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, action, mode: undefined } : x)) });
   };
 
-  /** Write a chosen prompt mode where the engine actually spends it.
-   * `performSeed` in deckView.ts reads `edge.mode` — a place has no mode
-   * field of its own, so the edge is the only place a seed's mode CAN live.
-   * `performEdge` reads a launch's mode from `node.mode` on the target
-   * PLANNED node instead, never from the edge — so a launch's selection is
-   * written there too, kept in step with `edge.mode` rather than landing
-   * somewhere the engine silently ignores (the same trap `notify`'s clear,
-   * above, closes from the other side). */
+  /** Write a chosen prompt mode where the engine actually spends it — and
+   * ONLY there, never in both places. `performSeed` in deckView.ts reads
+   * `edge.mode`, because a place has no mode field of its own for a seed's
+   * mode to live in instead. `performEdge` reads a launch's mode from
+   * `node.mode` on the target PLANNED node, never from the edge — so a
+   * launch's selection is written to the node alone. Mirroring it onto
+   * `edge.mode` too was tried and reverted: two homes for one fact is the
+   * exact bug class a reviewer already caught once in this plan (a launch
+   * node's `ticketKey` and a fetched detail's `key`, nothing reconciling
+   * them), and every fixture happening to agree is not the same as the
+   * write path enforcing it. */
   const setMode = (e: FlowEdge, mode: string) => {
-    const target = plannedTargetOf(flow, e);
-    const nodes = e.action === "launch" && target
-      ? flow.nodes.map((n) => (n.id === target.id ? { ...n, mode } : n))
-      : flow.nodes;
-    p.onSave({ ...flow, nodes, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, mode } : x)) });
+    if (e.action === "launch") {
+      p.onSave({
+        ...flow,
+        nodes: flow.nodes.map((n) => (n.id === e.to && n.kind === "planned" ? { ...n, mode } : n)),
+      });
+      return;
+    }
+    p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, mode } : x)) });
   };
 
   /** A launch's destination lives on its target planned node — `LaunchDest`
@@ -731,7 +741,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 <select
                   className="orch-sel"
                   aria-label="Mode"
-                  value={edge.mode ?? ""}
+                  value={modeValue}
                   onChange={(ev) => setMode(edge, ev.currentTarget.value)}
                 >
                   {p.promptModes.map((m) => (

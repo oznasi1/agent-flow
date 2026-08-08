@@ -74,7 +74,10 @@ export interface FlowEdge {
   to: string; // node id
   cond: Condition;
   action: FlowAction;
-  /** A PromptMode id, for `launch` and `seed`. */
+  /** A PromptMode id, for `seed` only. A launch's prompt and destination live on the
+   * `planned` node it targets, which carries its whole launch configuration — see
+   * `PlannedNode`. Two homes for one fact is deliberate here: a place has no mode
+   * field, so a seed's has nowhere else to go. */
   mode?: string;
   /** Set once this edge has fired. Its presence IS the latch: an edge with a
    * `firedAt` is never evaluated again until Reset clears it. */

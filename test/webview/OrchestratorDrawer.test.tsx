@@ -860,14 +860,23 @@ describe("the acting verbs", () => {
     expect(values).toEqual(["launch", "seed", "notify"]);
   });
 
-  it("selecting launch writes the action and the mode onto the edge", () => {
-    const onSave = openInspector(placeAndPlanned());
+  it("selecting launch does not carry a mode onto the edge — it already lives on the target node", () => {
+    // deckView.ts's performEdge reads a launch's mode from the target PLANNED
+    // node (`node.mode`), never from `edge.mode` — that field is `seed`'s
+    // alone (see FlowEdge.mode's own doc comment). Mirroring the value onto
+    // the edge too would give a launch two sources of truth for one fact,
+    // the exact bug class a reviewer already caught once in this plan.
+    const before = placeAndPlanned();
+    const onSave = openInspector(before);
     fireEvent.change(screen.getByLabelText("Action"), { target: { value: "launch" } });
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
-    // n2's own mode ("quick") is what deckView.ts's performEdge actually spends
-    // for a launch — carrying it onto the edge too keeps both in step rather
-    // than leaving edge.mode on nothing the instant the verb changes.
-    expect(saved.edges[0]).toMatchObject({ action: "launch", mode: "quick" });
+    expect(saved.edges[0].action).toBe("launch");
+    expect(saved.edges[0].mode).toBeUndefined();
+    // The node already carried both — switching the verb doesn't need to
+    // touch them, but they must still be there for the USING clause to show.
+    const target = saved.nodes.find((n) => n.id === "n2") as { mode: string; dest: string };
+    expect(target.mode).toBe("quick");
+    expect(target.dest).toBe("worktree");
   });
 
   it("selecting seed writes the action and a mode onto the edge", () => {
@@ -889,16 +898,18 @@ describe("the acting verbs", () => {
     expect(saved.edges[0].mode).toBeUndefined();
   });
 
-  it("changing the mode updates the edge, and — for a launch — the target node too", () => {
-    const launching = placeAndPlanned();
-    launching.edges[0] = { ...launching.edges[0], action: "launch", mode: "quick" };
+  it("changing the mode for a launch writes only to the target node, never the edge", () => {
+    const launching = placeAndPlanned(); // edge action is "notify"; give it "launch" with no edge.mode
+    launching.edges[0] = { ...launching.edges[0], action: "launch" };
     const onSave = openInspector(launching);
     fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "careful" } });
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
-    expect(saved.edges[0].mode).toBe("careful");
     // Written where deckView.ts's performEdge actually reads a launch's
-    // mode from — the target planned node's own field, not the edge.
+    // mode from — the target planned node's own field.
     expect((saved.nodes.find((n) => n.id === "n2") as { mode: string }).mode).toBe("careful");
+    // And NOT mirrored onto the edge — one field, one meaning, no second copy
+    // that could later diverge from the node's.
+    expect(saved.edges[0].mode).toBeUndefined();
   });
 
   it("changing the mode for a seed does not touch any node", () => {
@@ -913,7 +924,7 @@ describe("the acting verbs", () => {
 
   it("the destination selector appears for launch and not for seed or notify", () => {
     const launching = placeAndPlanned();
-    launching.edges[0] = { ...launching.edges[0], action: "launch", mode: "quick" };
+    launching.edges[0] = { ...launching.edges[0], action: "launch" }; // a launch edge carries no mode of its own
     const r1 = render(<OrchestratorDrawer {...props({ flows: [launching] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     expect(screen.getByLabelText("Destination")).toBeTruthy();
@@ -933,7 +944,7 @@ describe("the acting verbs", () => {
 
   it("changing the destination writes it onto the target node, not the edge", () => {
     const launching = placeAndPlanned();
-    launching.edges[0] = { ...launching.edges[0], action: "launch", mode: "quick" };
+    launching.edges[0] = { ...launching.edges[0], action: "launch" };
     const onSave = openInspector(launching);
     fireEvent.change(screen.getByLabelText("Destination"), { target: { value: "new-window" } });
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
@@ -984,7 +995,7 @@ describe("the acting verbs", () => {
           ticketKey: "ASM-12", repos: ["agent-flow"], mode: "custom-1", dest: "worktree",
         },
       ],
-      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", mode: "custom-1" }],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
     });
     render(<OrchestratorDrawer {...props({ flows: [launching], promptModes: hostModes })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
@@ -994,7 +1005,7 @@ describe("the acting verbs", () => {
 
   it("shows the target's identifier in mono, house style for an identifier", () => {
     const launching = placeAndPlanned();
-    launching.edges[0] = { ...launching.edges[0], action: "launch", mode: "quick" };
+    launching.edges[0] = { ...launching.edges[0], action: "launch" };
     render(<OrchestratorDrawer {...props({ flows: [launching] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     // "ASM-12" renders three times — the canvas node's own label (mono via a
