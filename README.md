@@ -356,6 +356,21 @@ behavior above); choosing an open **folder** window focuses it and seeds the age
 briefs but aren't added as roots). Set `agentFlow.trackOpenWindows` to `false` to turn
 this off.
 
+### Where the session opens
+
+Two settings, two different questions. `agentFlow.openIn` decides **which window** a
+task lands in. `agentFlow.agentSurface` decides **what starts the session** once it's
+there:
+
+- `extension` (default) — the Claude Code extension panel, prompt pre-filled.
+- `terminal` — an integrated terminal named `Claude · <KEY>` running the `claude`
+  CLI, prompt pre-typed.
+
+Either way you press Enter to start, and both work for every launch path: taking a
+task, batch launches, Explore, Notepad, and **Address PR**. Terminal mode needs
+`claude` on your `PATH`; if it isn't, the terminal says `command not found` and the
+prompt is still sitting there to reuse.
+
 ## Architecture
 
 ```

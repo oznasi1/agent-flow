@@ -5,6 +5,17 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`agentFlow.agentSurface` — open a session in the terminal.** Set it to
+  `terminal` and a taken task starts the `claude` CLI in an integrated terminal
+  named for the ticket, with the prompt pre-typed and waiting on your Enter,
+  instead of the Claude Code extension panel. Applies to every launch path —
+  take, batch, Explore, Notepad and **Address PR**. Defaults to `extension`, so
+  nothing changes unless you ask for it.
+
 ## [0.6.0] — 2026-08-08
 
 ### Added
