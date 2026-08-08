@@ -123,6 +123,9 @@ describe("brand accent", () => {
       ".take", ".take:hover",
       ".gate .btn", ".gate .btn:hover",
       ".batch-launch", ".batch-launch:hover",
+      // Notepad restyle (direction B): the checkbox tint and the listening-mic
+      // outline are the two new places the sidebar spends the brand hue.
+      ".cb", ".quiet.mic.on",
     ],
     deck: [".act.primary", ".act.primary:hover", ".ctl.on .switch", ".ctl.on .switch::after"],
     marketplace: [".btn.pri", ".btn.pri:hover"],

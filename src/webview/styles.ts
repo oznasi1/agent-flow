@@ -146,19 +146,21 @@ export const CSS = `
      Deck, and a PR waiting on you is the opposite of done) and the sprint actions.
      Explore is the only one pushed to the row's far side; the other three are the
      only ones that must never wrap their own label. */
-  .explore, .address-pr, .sprint-add, .sprint-remove {
+  .explore, .address-pr, .sprint-add, .sprint-remove, .quiet {
     display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-body); font-weight: 500;
     height: 24px; padding: 0 10px; border-radius: var(--r-ctl); cursor: pointer;
     border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
     transition: background-color .12s ease, border-color .12s ease; }
   .explore { margin-left: auto; }
   .address-pr, .sprint-add, .sprint-remove { white-space: nowrap; }
-  .sprint-remove { color: var(--dim); }
-  .explore:hover, .address-pr:hover, .sprint-add:hover, .sprint-remove:hover {
+  .sprint-remove, .quiet.dim { color: var(--dim); }
+  .explore:hover, .address-pr:hover, .sprint-add:hover, .sprint-remove:hover, .quiet:hover {
     background: var(--vscode-toolbar-hoverBackground);
     border-color: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); }
+  .quiet:disabled { opacity: .45; cursor: default; }
+  .quiet:disabled:hover { background: transparent; border-color: var(--edge); }
   /* Icon-only: a square of the same height, so the row reads as one set of controls. */
-  .sprint-remove.icon-only { width: 24px; padding: 0; justify-content: center; }
+  .sprint-remove.icon-only, .quiet.icon-only { width: 24px; padding: 0; justify-content: center; }
 
   .detail { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
   .detail-loading { font-size: 11px; color: var(--vscode-descriptionForeground); }
@@ -284,37 +286,48 @@ export const CSS = `
   .tabbar button[aria-selected="true"] { color: var(--vscode-foreground);
     border-bottom-color: var(--vscode-focusBorder); }
 
+  /* Restyled to the product's own control language (direction B — compact rows,
+     see .superpowers/sdd/notepad-ui/brief.md): real buttons instead of text
+     links, an outline .status pill instead of a filled one, and a hairline list
+     with a status rail instead of boxed cards — the same shape a task card
+     already uses to signal state, just thinner. */
   .notepad { padding: 4px 0 12px; }
   .np-add { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
   .np-title-input, .np-body-input { width: 100%; padding: 5px 7px;
     background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border, transparent); border-radius: var(--r-ctl); font-family: inherit; }
-  .np-body-row { display: flex; gap: 6px; align-items: flex-start; }
-  .np-body-row .np-body-input { flex: 1; resize: vertical; }
-  .np-mic { background: none; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
-    border-radius: var(--r-ctl); cursor: pointer; padding: 4px 7px; font-size: var(--t-body); line-height: 1; }
-  .np-mic.on { border-color: var(--vscode-focusBorder); background: var(--vscode-inputOption-activeBackground); }
+    border: 1px solid var(--vscode-input-border, transparent); border-radius: var(--r-ctl);
+    font-family: inherit; font-size: var(--t-body); }
+  .np-body-input { resize: vertical; }
+  /* Each field carries its own mic immediately to its right, so which field a
+     dictation session fills is never ambiguous. */
+  .np-field-row { display: flex; gap: 6px; align-items: flex-start; }
+  .np-field-row > input, .np-field-row > textarea { flex: 1; }
+  .quiet.mic.on { border-color: var(--brand); color: var(--brand); }
   .np-add-btn { align-self: flex-start; }
-  .np-clear { background: none; border: none; cursor: pointer; font-size: var(--t-body);
-    color: var(--vscode-descriptionForeground); text-decoration: underline; }
-  .np-empty { padding: 14px 2px; color: var(--vscode-descriptionForeground); font-size: var(--t-body); }
-  .np-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-  .np-row { padding: 7px 8px; border: 1px solid var(--vscode-panel-border); border-radius: var(--r-card); }
-  .np-row.is-done .np-title { text-decoration: line-through; opacity: 0.6; }
-  .np-head { display: flex; align-items: center; gap: 7px; }
-  .np-title { flex: 1; }
-  .np-body { margin: 4px 0 0 24px; font-size: var(--t-body); color: var(--vscode-descriptionForeground);
-    white-space: pre-wrap; }
-  .np-actions { display: flex; gap: 8px; margin-top: 6px; }
-  .np-ghost { background: none; border: none; cursor: pointer; padding: 0; font-size: var(--t-body);
-    color: var(--vscode-textLink-foreground); }
-  /* Delete is destructive but routine, not a failure — red stays reserved for real
-     failures, so it reads no differently from the plain Edit action beside it. */
-  .np-ghost.danger { color: var(--vscode-descriptionForeground); }
-  .np-status { font-size: var(--t-micro); padding: 1px 6px; border-radius: var(--r-chip);
-    background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
-  .np-status.st-running { background: var(--c-progress); color: var(--vscode-editor-background); }
-  .np-status.st-stale { background: var(--c-idle); color: var(--vscode-editor-background); }
-  /* st-finished deliberately inherits the neutral badge default above — a landed
-     run is not a state that needs a color to shout about. */
+  .np-empty { padding: 14px 2px; color: var(--dim); font-size: var(--t-body); }
+
+  .np-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hair); }
+  .np-item { position: relative; padding: 8px 2px 9px 11px; border-bottom: 1px solid var(--hair); }
+  .np-item::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 9px; width: 2px;
+    border-radius: 1px; background: var(--rail, transparent); }
+  .np-item.r-running { --rail: var(--c-progress); }
+  .np-item.r-stale   { --rail: var(--c-idle); }
+  .np-item.r-done    { --rail: var(--c-done); }
+  .cb { width: 13px; height: 13px; margin: 0; accent-color: var(--brand); flex: none; cursor: pointer; }
+  .np-top { display: flex; align-items: center; gap: 7px; }
+  .np-top .np-title { flex: 1; }
+  .np-title { font-size: var(--t-body); line-height: 1.35; }
+  .np-item.is-done .np-title { text-decoration: line-through; opacity: .5; }
+  .np-body { margin: 3px 0 6px 20px; font-size: var(--t-body); color: var(--dim); white-space: pre-wrap; }
+  .np-acts { display: flex; align-items: center; gap: 6px; margin: 6px 0 0 20px; }
+  /* A checked-off note drops Start from filled brand teal to the quiet language —
+     a finished item must not out-shout an active one — but it stays clickable. */
+  .np-item.is-done .take { background: transparent; color: var(--dim); border: 1px solid var(--edge);
+    font-weight: 500; padding: 2px 10px 2px 8px; }
+  .np-item.is-done .take:hover { background: var(--vscode-toolbar-hoverBackground); }
+
+  /* The add form's edit-in-place row shares its layout with a note's own edit
+     state (NoteRow, while editing). */
+  .edit { display: flex; flex-direction: column; gap: 6px; }
+  .edit .row { display: flex; gap: 6px; }
 `;

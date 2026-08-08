@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   board like any other, and the note shows whether it is running, stale, or
   finished.
 
+### Changed
+
+- **Notepad restyled to match the rest of the panel.** Text links are now real
+  buttons — a filled Start (formerly "Run agent"), and quiet icon-only Edit,
+  Delete and dictation controls — status badges are outline pills instead of
+  filled ones, and notes render as a hairline-separated list with a status rail
+  instead of boxed cards. The title can now be dictated too, with its own mic
+  beside it; only one field dictates at a time.
+
 ## [0.5.0] — 2026-08-07
 
 ### Added

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 import * as React from "react";
 
 const sendSpy = vi.fn();
@@ -56,9 +56,16 @@ describe("Notepad", () => {
     expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:toggleDone", id: "n1" });
   });
 
-  it("sends notepad:run from Run agent", () => {
+  it("sends notepad:run from Start", () => {
     render(<Notepad notes={[note()]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Run agent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:run", id: "n1" });
+  });
+
+  it("still renders a clickable Start on a done note", () => {
+    render(<Notepad notes={[note({ done: true })]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
     expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:run", id: "n1" });
   });
 
@@ -89,6 +96,23 @@ describe("Notepad", () => {
     expect(screen.getByText("Stale")).toBeTruthy();
     expect(screen.getByText("Finished")).toBeTruthy();
     expect(screen.getAllByText(/Running|Stale|Finished/)).toHaveLength(3);
+  });
+
+  it("gives each run status its own rail class, and no rail when there is no status", () => {
+    render(<Notepad notes={[
+      note({ id: "a", title: "r", runStatus: "running" }),
+      note({ id: "b", title: "s", runStatus: "stale" }),
+      note({ id: "c", title: "f", runStatus: "finished" }),
+      note({ id: "d", title: "n" }),
+    ]} />);
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    const rowFor = (t: string) => screen.getByText(t).closest("li")!;
+    expect(rowFor("r")).toHaveClass("r-running");
+    expect(rowFor("s")).toHaveClass("r-stale");
+    expect(rowFor("f")).toHaveClass("r-done");
+    const noStatusRow = rowFor("n");
+    expect(noStatusRow.className).not.toMatch(/r-running|r-stale|r-done/);
+    expect(within(noStatusRow).queryByText(/Running|Stale|Finished/)).toBeNull();
   });
 
   it("edits a note and sends notepad:update", () => {
@@ -157,8 +181,38 @@ describe("Notepad dictation", () => {
     const mic = screen.getByRole("button", { name: "Dictate the note body" });
     fireEvent.click(mic);
     expect(FakeRecognition.last!.started).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Stop dictating" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop dictating the note body" }));
     expect(FakeRecognition.last!.started).toBe(false);
+  });
+
+  it("appends a final transcript into the title", () => {
+    render(<Notepad notes={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Dictate the title" }));
+    act(() => {
+      FakeRecognition.last!.onresult!({
+        resultIndex: 0,
+        results: [Object.assign([{ transcript: "ship the retry fix" }], { isFinal: true })],
+      });
+    });
+    expect((screen.getByPlaceholderText("What needs doing?") as HTMLInputElement).value)
+      .toContain("ship the retry fix");
+  });
+
+  it("starting the other mic stops the first — only one microphone is ever live", () => {
+    render(<Notepad notes={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Dictate the title" }));
+    const titleRec = FakeRecognition.last!;
+    expect(titleRec.started).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dictate the note body" }));
+    const bodyRec = FakeRecognition.last!;
+
+    expect(titleRec.started).toBe(false); // the title's recogniser was stopped
+    expect(bodyRec.started).toBe(true); // and only the body's is live
+    expect(titleRec).not.toBe(bodyRec);
+    // The title button reflects the switch too — it dropped back to "Dictate".
+    expect(screen.getByRole("button", { name: "Dictate the title" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop dictating the note body" })).toBeTruthy();
   });
 
   it("recovers its idle label when recognition errors out", () => {

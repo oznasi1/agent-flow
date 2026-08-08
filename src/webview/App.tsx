@@ -9,6 +9,7 @@ import { Filter, FilterVisibility, Task, OutboundMessage, Size, NotepadItemView 
 import type { SerializedCaps } from "../tasks/provider";
 import { GaugeMark } from "./GaugeMark";
 import { Notepad } from "./Notepad";
+import { PlayIcon } from "./icons";
 
 let toastSeq = 0;
 
@@ -61,12 +62,6 @@ interface CardDnd {
   dragging: boolean;
   hint: "before" | "after" | null;
 }
-
-const PlayIcon = () => (
-  <svg className="take-icon" width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
-    <path fill="currentColor" d="M7 5.5v13a1 1 0 0 0 1.54.84l10-6.5a1 1 0 0 0 0-1.68l-10-6.5A1 1 0 0 0 7 5.5z" />
-  </svg>
-);
 
 const SearchIcon = () => (
   <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">

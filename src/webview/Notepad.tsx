@@ -1,6 +1,7 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
 import { NotepadItemView, NotepadRunStatus } from "../types";
+import { MicIcon, PenIcon, PlayIcon, StopIcon, TrashIcon } from "./icons";
 
 /** Which notes the list shows. Local state, defaulting to Active on every mount:
  * a persisted "Done" selection would greet the user with an empty-looking notepad
@@ -17,6 +18,14 @@ const STATUS_LABEL: Record<NotepadRunStatus, string> = {
   running: "Running",
   stale: "Stale",
   finished: "Finished",
+};
+
+// A run status maps onto the rail's three hues; "finished" reads as "done" there,
+// matching the Tasks tab's own rail convention (s-progress / s-done / a dim idle).
+const RAIL_CLASS: Record<NotepadRunStatus, string> = {
+  running: "r-running",
+  stale: "r-stale",
+  finished: "r-done",
 };
 
 const EMPTY: Record<NoteFilter, string> = {
@@ -48,15 +57,27 @@ function speechCtor(): (new () => SpeechRecognitionLike) | undefined {
   return (w.SpeechRecognition ?? w.webkitSpeechRecognition) as (new () => SpeechRecognitionLike) | undefined;
 }
 
-/** Dictation into a text field. Returns undefined when the engine has no speech
- * recognition — the caller renders no mic at all rather than a button that cannot
- * work. All client-side: no API key, no network call from the extension host, and
- * nothing crosses the message protocol until the note itself is saved. */
-function useDictation(append: (text: string) => void): { listening: boolean; toggle: () => void } | undefined {
-  const [listening, setListening] = React.useState(false);
+/** The field a dictation session is currently filling. */
+type DictField = "title" | "body";
+
+/** Dictation into either the title or the body field. A single `SpeechRecognition`
+ * instance is shared between both mics — one microphone, one live session — so
+ * `active` (rather than two independent booleans) is the one source of truth for
+ * which field, if any, is being dictated into. Returns undefined when the engine
+ * has no speech recognition at all: the caller renders no mic for either field
+ * rather than a button that cannot work. All client-side: no API key, no network
+ * call from the extension host, and nothing crosses the message protocol until
+ * the note itself is saved. */
+function useDictation(
+  appendTitle: (text: string) => void,
+  appendBody: (text: string) => void,
+): { active: DictField | null; toggle: (field: DictField) => void } | undefined {
+  const [active, setActive] = React.useState<DictField | null>(null);
   const ref = React.useRef<SpeechRecognitionLike | null>(null);
-  const appendRef = React.useRef(append);
-  React.useEffect(() => { appendRef.current = append; }, [append]);
+  const appendRef = React.useRef({ title: appendTitle, body: appendBody });
+  React.useEffect(() => {
+    appendRef.current = { title: appendTitle, body: appendBody };
+  }, [appendTitle, appendBody]);
   const supported = !!speechCtor();
 
   // Never leave the microphone open when the view goes away.
@@ -64,13 +85,7 @@ function useDictation(append: (text: string) => void): { listening: boolean; tog
 
   if (!supported) return undefined;
 
-  const toggle = () => {
-    if (ref.current) {
-      ref.current.stop();
-      ref.current = null;
-      setListening(false);
-      return;
-    }
+  const start = (field: DictField) => {
     const Ctor = speechCtor();
     if (!Ctor) return;
     const rec = new Ctor();
@@ -83,18 +98,34 @@ function useDictation(append: (text: string) => void): { listening: boolean; tog
         const r = e.results[i];
         if (r.isFinal) text += r[0].transcript;
       }
-      if (text.trim()) appendRef.current(text.trim());
+      if (text.trim()) appendRef.current[field](text.trim());
     };
     // Both paths land on onend, which is the single place listening is released —
     // an error that did not also end the session would strand the button on "Stop".
     rec.onerror = () => { rec.stop(); };
-    rec.onend = () => { ref.current = null; setListening(false); };
+    // Guarded on identity, not recency: once a session has been superseded by a
+    // newer one (the other field's mic started), its own onend must not clear
+    // the newer session's state — a real recognizer's onend can arrive well
+    // after `stop()` was called on it.
+    rec.onend = () => { if (ref.current === rec) { ref.current = null; setActive(null); } };
     ref.current = rec;
     rec.start();
-    setListening(true);
+    setActive(field);
   };
 
-  return { listening, toggle };
+  // Only one field may be dictated at a time. Switching mics stops whichever
+  // session is live (via its own onend, above) before starting the other, so two
+  // SpeechRecognition instances never compete for one microphone.
+  const toggle = (field: DictField) => {
+    if (active === field) {
+      ref.current?.stop();
+      return;
+    }
+    ref.current?.stop();
+    start(field);
+  };
+
+  return { active, toggle };
 }
 
 export function Notepad({ notes }: { notes: NotepadItemView[] }): JSX.Element {
@@ -103,6 +134,7 @@ export function Notepad({ notes }: { notes: NotepadItemView[] }): JSX.Element {
   const [body, setBody] = React.useState("");
   const [editing, setEditing] = React.useState<string | null>(null);
   const dictation = useDictation(
+    React.useCallback((text: string) => setTitle((prev) => (prev ? `${prev} ${text}` : text)), []),
     React.useCallback((text: string) => setBody((prev) => (prev ? `${prev} ${text}` : text)), []),
   );
 
@@ -120,16 +152,28 @@ export function Notepad({ notes }: { notes: NotepadItemView[] }): JSX.Element {
   return (
     <div className="notepad">
       <div className="np-add">
-        <input
-          className="np-title-input"
-          placeholder="What needs doing?"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          // Enter commits from the title, where a newline means nothing anyway.
-          // The body deliberately does not: it is multi-line by design.
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
-        />
-        <div className="np-body-row">
+        <div className="np-field-row">
+          <input
+            className="np-title-input"
+            placeholder="What needs doing?"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            // Enter commits from the title, where a newline means nothing anyway.
+            // The body deliberately does not: it is multi-line by design.
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+          />
+          {dictation && (
+            <button
+              className={`quiet icon-only mic ${dictation.active === "title" ? "on" : ""}`}
+              aria-label={dictation.active === "title" ? "Stop dictating the title" : "Dictate the title"}
+              title={dictation.active === "title" ? "Stop dictating the title" : "Dictate the title"}
+              onClick={() => dictation.toggle("title")}
+            >
+              {dictation.active === "title" ? <StopIcon /> : <MicIcon />}
+            </button>
+          )}
+        </div>
+        <div className="np-field-row">
           <textarea
             className="np-body-input"
             placeholder="Any detail the agent should know (optional)"
@@ -139,16 +183,16 @@ export function Notepad({ notes }: { notes: NotepadItemView[] }): JSX.Element {
           />
           {dictation && (
             <button
-              className={`np-mic ${dictation.listening ? "on" : ""}`}
-              aria-label={dictation.listening ? "Stop dictating" : "Dictate the note body"}
-              title={dictation.listening ? "Stop dictating" : "Dictate the note body"}
-              onClick={dictation.toggle}
+              className={`quiet icon-only mic ${dictation.active === "body" ? "on" : ""}`}
+              aria-label={dictation.active === "body" ? "Stop dictating the note body" : "Dictate the note body"}
+              title={dictation.active === "body" ? "Stop dictating the note body" : "Dictate the note body"}
+              onClick={() => dictation.toggle("body")}
             >
-              {dictation.listening ? "◼" : "🎤"}
+              {dictation.active === "body" ? <StopIcon /> : <MicIcon />}
             </button>
           )}
         </div>
-        <button className="btn np-add-btn" disabled={!canAdd} onClick={add}>Add note</button>
+        <button className="quiet np-add-btn" disabled={!canAdd} onClick={add}>Add note</button>
       </div>
 
       <div className="lenses">
@@ -162,7 +206,7 @@ export function Notepad({ notes }: { notes: NotepadItemView[] }): JSX.Element {
           </div>
         </div>
         {anyDone && (
-          <button className="np-clear" onClick={() => send({ type: "notepad:clearCompleted" })}>
+          <button className="quiet dim np-clear" onClick={() => send({ type: "notepad:clearCompleted" })}>
             Clear completed
           </button>
         )}
@@ -201,25 +245,30 @@ function NoteRow({ note, editing, onEdit, onDone }: {
 
   if (editing) {
     return (
-      <li className="np-row editing">
-        <input className="np-title-input" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <textarea className="np-body-input" rows={3} value={body} onChange={(e) => setBody(e.target.value)} />
-        <div className="np-actions">
-          <button className="btn" onClick={() => { send({ type: "notepad:update", id: note.id, title, body }); onDone(); }}>
-            Save
-          </button>
-          <button className="np-ghost" onClick={() => { setTitle(note.title); setBody(note.body); onDone(); }}>
-            Cancel
-          </button>
+      <li className="np-item">
+        <div className="edit">
+          <input className="np-title-input" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <textarea className="np-body-input" rows={3} value={body} onChange={(e) => setBody(e.target.value)} />
+          <div className="row">
+            <button className="quiet" onClick={() => { send({ type: "notepad:update", id: note.id, title, body }); onDone(); }}>
+              Save
+            </button>
+            <button className="quiet dim" onClick={() => { setTitle(note.title); setBody(note.body); onDone(); }}>
+              Cancel
+            </button>
+          </div>
         </div>
       </li>
     );
   }
 
+  const railClass = note.runStatus ? RAIL_CLASS[note.runStatus] : "";
+
   return (
-    <li className={`np-row ${note.done ? "is-done" : ""}`}>
-      <div className="np-head">
+    <li className={`np-item ${railClass} ${note.done ? "is-done" : ""}`}>
+      <div className="np-top">
         <input
+          className="cb"
           type="checkbox"
           checked={note.done}
           aria-label={`Done: ${note.title || "untitled note"}`}
@@ -227,15 +276,20 @@ function NoteRow({ note, editing, onEdit, onDone }: {
         />
         <span className="np-title">{note.title}</span>
         {note.runStatus && (
-          <span className={`np-status st-${note.runStatus}`}>{STATUS_LABEL[note.runStatus]}</span>
+          <span className="status">{STATUS_LABEL[note.runStatus]}</span>
         )}
       </div>
       {note.body && <div className="np-body">{note.body}</div>}
-      <div className="np-actions">
-        <button className="np-ghost" onClick={() => send({ type: "notepad:run", id: note.id })}>Run agent</button>
-        <button className="np-ghost" aria-label="Edit note" onClick={onEdit}>Edit</button>
-        <button className="np-ghost danger" aria-label="Delete note" onClick={() => send({ type: "notepad:delete", id: note.id })}>
-          Delete
+      <div className="np-acts">
+        <button className="take" onClick={() => send({ type: "notepad:run", id: note.id })} title="Start this note as an agent run">
+          <PlayIcon /> Start
+        </button>
+        <span className="spacer" />
+        <button className="quiet icon-only dim" aria-label="Edit note" title="Edit note" onClick={onEdit}>
+          <PenIcon />
+        </button>
+        <button className="quiet icon-only dim" aria-label="Delete note" title="Delete note" onClick={() => send({ type: "notepad:delete", id: note.id })}>
+          <TrashIcon />
         </button>
       </div>
     </li>
