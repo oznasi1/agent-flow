@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Notepad tab.** A second tab in the Tasks panel holding freeform items that
+  aren't tied to any ticket, saved globally so the same list follows you across
+  every workspace. Notes can be checked off, filtered (Active by default), and
+  cleared once done — and dictated, via the microphone button.
+- **Kick off an agent from a note.** "Run agent" on a note opens a workspace and
+  seeds a brief from it, the same way Explore does. The run appears on the Deck
+  board like any other, and the note shows whether it is running, stale, or
+  finished.
+
 ## [0.5.0] — 2026-08-07
 
 ### Added

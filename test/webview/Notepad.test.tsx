@@ -170,4 +170,12 @@ describe("Notepad dictation", () => {
     });
     expect(screen.getByRole("button", { name: "Dictate the note body" })).toBeTruthy();
   });
+
+  it("stops the microphone when the view unmounts mid-dictation", () => {
+    const { unmount } = render(<Notepad notes={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Dictate the note body" }));
+    expect(FakeRecognition.last!.started).toBe(true);
+    unmount();
+    expect(FakeRecognition.last!.started).toBe(false);
+  });
 });
