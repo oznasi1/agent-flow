@@ -39,6 +39,31 @@ export function windowIdentity(): WindowIdentity | undefined {
   return undefined;
 }
 
+/** This window as a seed destination: its identity plus the roots it actually has.
+ *  Everything the "This window" open path needs, resolved in one place so the picker,
+ *  the target resolver and the open path can't disagree about what "here" is.
+ *
+ *  `undefined` whenever `windowIdentity` is — an empty or untitled multi-root window
+ *  can't be named by a plan match, so it can't be seeded, so it must not be offered.
+ *
+ *  Roots are canonicalized to match `workspaceFolders()`, whose output feeds the same
+ *  `mentionInWorkspace` / `containingRoot` comparisons. */
+export interface CurrentWindow {
+  identity: string;
+  kind: "workspace" | "folder";
+  roots: { name?: string; path: string }[];
+}
+
+export function currentWindow(): CurrentWindow | undefined {
+  const id = windowIdentity();
+  if (!id) return undefined;
+  const roots = (vscode.workspace.workspaceFolders ?? []).map((f) => ({
+    name: f.name,
+    path: canon(f.uri.fsPath),
+  }));
+  return { identity: id.identity, kind: id.kind, roots };
+}
+
 /** Write (or refresh) this window's presence record. Best-effort — never throws. */
 export function writePresence(dir: string, rec: PresenceRecord): void {
   try {

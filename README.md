@@ -339,13 +339,20 @@ was skipped, so you're never left waiting for a `/remote-control` prompt.
 ### Where a task opens
 
 `agentFlow.openIn` controls where a task you take gets opened: `ask` (ask each time),
-`new-window`, `this-window` (reuse the current window), or `pick-existing` — pick an
-existing `.code-workspace` file to open the task into. Repos the workspace already has a
-folder for (matched by name) are skipped automatically and named in the toast — a
-worktree keeps its repo's bare name, so adding it anyway would grow a second root by
-that name. Anything genuinely new is added only after you approve it in a prompt;
-declining leaves the file byte-identical. Either way the workspace's existing folders,
-settings, and formatting are preserved and it opens as a multi-root workspace.
+`new-window`, `this-window` (start a session in the window you're already in), or
+`pick-existing` — pick an existing `.code-workspace` file to open the task into. Repos
+the workspace already has a folder for (matched by name) are skipped automatically and
+named in the toast — a worktree keeps its repo's bare name, so adding it anyway would
+grow a second root by that name. Anything genuinely new is added only after you approve
+it in a prompt; declining leaves the file byte-identical. Either way the workspace's
+existing folders, settings, and formatting are preserved and it opens as a multi-root
+workspace.
+
+`this-window` never replaces what's open. The window keeps its folders, its editors and
+any session already running in it, and the task's agent starts alongside them. A window
+Agent Flow can't name — an empty one, or several folders with no saved
+`.code-workspace` — can't hold a seeded session, so **This window** isn't offered there
+and `this-window` opens a new window instead.
 
 When taking a task (or starting an Explore session) with `agentFlow.openIn` set to
 `ask`, Agent Flow Deck also lists the windows you already have open — a repo folder or a

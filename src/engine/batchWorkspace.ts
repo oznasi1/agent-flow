@@ -17,6 +17,7 @@ import {
   workspaceFolders,
   writePlanFile,
 } from "./workspace";
+import { type CurrentWindow } from "./presence";
 
 export interface BatchTask {
   ticket: TicketRef;
@@ -38,6 +39,9 @@ export interface SharedOpenRequest {
   workspaceDir: string;
   seedAgent: boolean;
   target: SharedTarget;
+  /** This window's identity + roots. REQUIRED when `target.kind` is "current" — without
+   *  it there is no plan match that names this window, so nothing would seed. */
+  currentWindow?: CurrentWindow;
   /** Folders the user approved adding to an `existing` target — the ONLY thing merged.
    *  Absent or empty leaves that workspace file byte-identical. */
   foldersToAdd?: { name: string; path: string }[];
@@ -51,6 +55,7 @@ export interface SharedOpenResult {
   mergeFailed?: boolean; // existing workspace couldn't be parsed; opened as-is
   unaddedFolders?: string[]; // live-folder: roots VS Code can't inject remotely
   seeded: number; // plan files written
+  seededInPlace?: boolean; // "current": this window was seeded as-is; nothing was opened
 }
 
 /** A task's worktree as a workspace folder. The key qualifier is load-bearing: two
@@ -69,6 +74,7 @@ export function folderName(key: string, repo: string): string {
  */
 export async function openSharedWorkspace(req: SharedOpenRequest): Promise<SharedOpenResult> {
   const { tasks, promptTemplate, workspaceDir, seedAgent, target } = req;
+  const here = target.kind === "current" ? req.currentWindow : undefined;
 
   // 1 — a brief per task-service pair. Every service is a per-task worktree, so no
   //     two tasks share a brief path.
@@ -106,7 +112,12 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
   let mergeFailed: boolean | undefined;
   let unaddedFolders: string[] | undefined;
   let openTarget: string;
-  if (target.kind === "existing") {
+  if (here) {
+    // Seed this window as it stands — no workspace file, nothing opened. The worktrees
+    // aren't roots here unless they happen to sit inside one, exactly as with any other
+    // already-open destination; the absolute brief paths carry the context regardless.
+    openTarget = here.identity;
+  } else if (target.kind === "existing") {
     const merge = mergeReposIntoWorkspace(target.file, req.foldersToAdd ?? []);
     mergedFolders = merge.added;
     mergeFailed = merge.ok ? undefined : true;
@@ -134,14 +145,18 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
   // candidate matches no root and gets no mention at all — deliberate, not the old code's
   // bare `@rel` fallback. The live-folder destination never gets the worktrees, and a
   // freshly written workspace has every folder as a root.
-  const roots = target.kind === "existing" ? workspaceFolders(target.file) ?? [] : undefined;
+  // "current" resolves against the roots this window actually has, for the same reason
+  // "existing" resolves against the file's: a mention naming a root the window doesn't
+  // have silently points at a different checkout.
+  const roots = here ? here.roots : target.kind === "existing" ? workspaceFolders(target.file) ?? [] : undefined;
   const mentionsFor = (key: string, s: ServiceRef, files: string[]): string[] =>
     roots
       ? files.map((f) => mentionInWorkspace(roots, s.path, f)).filter((m): m is string => !!m)
       : files.map((f) => mention(workspaceFile ? "multiroot" : "per-window", folderName(key, s.name), f));
 
   // 4 — one plan + one run per task, all naming the same window. Durable writes come
-  //     before the open: reusing the current window reloads this extension host.
+  //     before the open: a window that opens (or is focused) and seeds can otherwise
+  //     race these to disk, so nothing may be opened before this lands.
   const createdAt = Date.now();
 
   // The plan files must land back-to-back: the plan-dir watcher debounces 300ms after
@@ -168,7 +183,7 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
       summary: t.ticket.summary,
       url: t.ticket.url,
       createdAt,
-      mode: workspaceFile ? "multiroot" : "per-window",
+      mode: here ? (here.kind === "workspace" ? "multiroot" : "per-window") : workspaceFile ? "multiroot" : "per-window",
       workspaceFile,
       repos: t.services.map((s) => ({
         name: s.name,
@@ -185,8 +200,8 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
     }
   });
 
-  // 5 — open once.
-  const opened = await openInEditor(openTarget, target.kind !== "current");
+  // 5 — open once, unless the destination is the window we're already in.
+  const opened = here ? true : await openInEditor(openTarget);
   return {
     workspaceFile,
     opened,
@@ -195,5 +210,6 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
     mergeFailed,
     unaddedFolders,
     seeded: seedAgent ? tasks.length : 0,
+    seededInPlace: !!here,
   };
 }

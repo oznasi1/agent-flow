@@ -96,6 +96,24 @@ describe("openWorkspace — multiroot", () => {
     expect(result.opened).toEqual(["/ws/ASM-1.code-workspace"]);
   });
 
+  // The same-window reuse branch is gone: openFolder is only ever reached as the
+  // fallback for a failed `open -a`, and only ever with forceNewWindow: true. Aimed at
+  // the request that USED to take the deleted branch — a plain baseReq() never reached
+  // it even before the deletion, so it would guard nothing.
+  it("never asks openFolder to reuse the current window", async () => {
+    exec.mockImplementation(((_cmd: string, cb: (e: unknown) => void) => cb(new Error("no app"))) as never);
+    await openWorkspace(
+      baseReq({
+        openIn: "current",
+        currentWindow: { identity: "/repos/account-service", kind: "folder", roots: [{ name: "account-service", path: "/repos/account-service" }] },
+      }),
+    );
+    const reuse = commands.executeCommand.mock.calls.filter(
+      (c) => c[0] === "vscode.openFolder" && (c[2] as { forceNewWindow?: boolean })?.forceNewWindow === false,
+    );
+    expect(reuse).toEqual([]);
+  });
+
   it("does not write a plan file when seedAgent is off", async () => {
     await openWorkspace(baseReq({ seedAgent: false }));
     expect(writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"))).toBeUndefined();
@@ -1125,6 +1143,87 @@ describe("openWorkspace — remote control", () => {
     const result = await openWorkspace(baseReq({ seedAgent: false, remoteControl: true }));
     expect(result.remoteControl).toBe(false);
     expect(writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"))).toBeUndefined();
+  });
+});
+
+describe("openWorkspace — this window", () => {
+  const folderWindow = { identity: "/repos/account-service", kind: "folder" as const, roots: [{ name: "account-service", path: "/repos/account-service" }] };
+
+  it("seeds this window without opening or reloading anything", async () => {
+    const result = await openWorkspace(
+      baseReq({ openIn: "current", currentWindow: folderWindow }),
+    );
+
+    // The whole point: no `open -a`, and no vscode.openFolder in either direction.
+    expect(exec).not.toHaveBeenCalled();
+    expect(commands.executeCommand).not.toHaveBeenCalledWith("vscode.openFolder", expect.anything(), expect.anything());
+
+    expect(result.seededInPlace).toBe(true);
+    expect(result.opened).toEqual(["/repos/account-service"]);
+  });
+
+  it("names this window's identity as the single plan match", async () => {
+    await openWorkspace(baseReq({ openIn: "current", currentWindow: folderWindow }));
+    const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
+    const plan = JSON.parse(String(planWrite![1]));
+    expect(plan.matches).toHaveLength(1);
+    expect(plan.matches[0].matchPath).toBe("/repos/account-service");
+  });
+
+  // Two repos would normally be laid out as a multiroot workspace file. Here the window
+  // already exists and is not being laid out, so nothing is written and nothing is opened.
+  it("writes no .code-workspace even for a multi-repo take", async () => {
+    const result = await openWorkspace(
+      baseReq({ openIn: "current", currentWindow: folderWindow }),
+    );
+    expect(writeArg((p) => p.endsWith(".code-workspace"))).toBeUndefined();
+    expect(result.workspaceFile).toBeUndefined();
+  });
+
+  it("takes the mode from the window's own shape, not the repo count", async () => {
+    const wsWindow = { identity: "/ws/team.code-workspace", kind: "workspace" as const, roots: [{ name: "api", path: "/repos/api" }] };
+    const folder = await openWorkspace(baseReq({ openIn: "current", currentWindow: folderWindow }));
+    const ws = await openWorkspace(baseReq({ openIn: "current", currentWindow: wsWindow }));
+    expect(folder.mode).toBe("per-window");
+    expect(ws.mode).toBe("multiroot");
+  });
+
+  // One match means the single-window guard passes, so a multi-repo take can offer
+  // Remote Control here — it couldn't when "current" produced one match per repo.
+  it("keeps Remote Control available for a multi-repo take", async () => {
+    const result = await openWorkspace(
+      baseReq({ openIn: "current", currentWindow: folderWindow, remoteControl: true }),
+    );
+    expect(result.remoteControl).toBe(true);
+  });
+
+  it("uses an absolute brief path so {brief} resolves outside this window's roots", async () => {
+    await openWorkspace(
+      baseReq({
+        openIn: "current",
+        currentWindow: folderWindow,
+        promptTemplate: "Brief: {brief}",
+      }),
+    );
+    const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
+    const plan = JSON.parse(String(planWrite![1]));
+    expect(plan.matches[0].prompt).toContain("/repos/account-service/.pick-task/TASK.md");
+  });
+
+  it("mentions files under a root and drops files outside every root", async () => {
+    execSync.mockReturnValue("src/export.py\n"); // git ls-files result
+    await openWorkspace(
+      baseReq({
+        openIn: "current",
+        currentWindow: folderWindow, // only account-service is a root; centaur is not
+        descriptionText: "fix `src/export.py`",
+        promptTemplate: "Go{files}",
+      }),
+    );
+    const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
+    const prompt = String(JSON.parse(String(planWrite![1])).matches[0].prompt);
+    expect(prompt).toContain("@account-service/src/export.py");
+    expect(prompt).not.toContain("@centaur/");
   });
 });
 

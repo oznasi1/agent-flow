@@ -53,6 +53,7 @@ vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: vi.fn(() => []),
   windowIdentity: vi.fn(() => undefined),
   defaultWindowsDir: vi.fn(() => "/win"),
+  currentWindow: vi.fn(() => undefined),
 }));
 vi.mock("../../src/engine/runs", async () => {
   const actual = await vi.importActual<typeof import("../../src/engine/runs")>("../../src/engine/runs");
@@ -93,7 +94,7 @@ import { discoverRepos } from "../../src/engine/repos";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge } from "../../src/engine/workspace";
 import { createWorktrees } from "../../src/engine/worktree";
 import { openSharedWorkspace } from "../../src/engine/batchWorkspace";
-import { readLiveWindows, windowIdentity } from "../../src/engine/presence";
+import { readLiveWindows, windowIdentity, currentWindow } from "../../src/engine/presence";
 import { readRuns } from "../../src/engine/runs";
 import { readOpenSessions } from "../../src/engine/sessions";
 import { JiraClient, JiraAuthError } from "../../src/tasks/jira/client";
@@ -201,6 +202,7 @@ beforeEach(() => {
   });
   vi.mocked(readLiveWindows).mockReturnValue([]);
   vi.mocked(windowIdentity).mockReturnValue(undefined);
+  vi.mocked(currentWindow).mockReturnValue(undefined);
   vi.mocked(openSharedWorkspace).mockResolvedValue({
     workspaceFile: "/ws/ASM-1+1.code-workspace",
     opened: true,
@@ -1859,6 +1861,11 @@ describe("takeTask", () => {
       // "current" only reachable via the 3-way pick (openIn config has no "current+existing" combo);
       // this covers the openIn:"current" vs "new" branch in isolation from the existing-workspace flag.
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+      vi.mocked(currentWindow).mockReturnValue({
+        identity: "/repos/account-service",
+        kind: "folder",
+        roots: [{ name: "account-service", path: "/repos/account-service" }],
+      });
 
       const { provider } = setup();
       await provider.takeTask("ASM-1", "card", ["account-service"]);
@@ -1866,6 +1873,140 @@ describe("takeTask", () => {
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({ openIn: "current", existingWorkspaceFile: undefined }),
       );
+    });
+
+    const HERE = {
+      identity: "/repos/account-service",
+      kind: "folder" as const,
+      roots: [{ name: "account-service", path: "/repos/account-service" }],
+    };
+
+    it("offers This window with copy that promises the folders are kept", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+      vi.mocked(currentWindow).mockReturnValue(HERE);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never); // cancel; we only inspect the items
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string; detail: string }[];
+      const item = items.find((i) => i.label.includes("This window"));
+      expect(item?.detail).toBe("Start a session here — keeps this window's folders");
+    });
+
+    // An empty or untitled multi-root window can't be named by a plan match, so offering
+    // it would produce a take that silently seeds nothing.
+    it("omits This window when this window has no identity", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+      vi.mocked(currentWindow).mockReturnValue(undefined);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string }[];
+      expect(items.some((i) => i.label.includes("This window"))).toBe(false);
+    });
+
+    it("passes this window through to openWorkspace for target 'current'", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+      vi.mocked(currentWindow).mockReturnValue(HERE);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      expect(openWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({ openIn: "current", currentWindow: HERE, mode: "per-window" }),
+      );
+    });
+
+    it("takes the mode from a workspace window's shape, not the repo count", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+      vi.mocked(currentWindow).mockReturnValue({
+        identity: "/ws/team.code-workspace",
+        kind: "workspace",
+        roots: [{ name: "api", path: "/repos/api" }],
+      });
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "multiroot" }));
+    });
+
+    it("falls back to a new window when the this-window setting has no window to use", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+      vi.mocked(currentWindow).mockReturnValue(undefined);
+
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ openIn: "new" }));
+      expect(posted()).toContainEqual(
+        expect.objectContaining({
+          type: "toast",
+          level: "info",
+          // Not "no folder open" — an untitled multi-root window has several folders open
+          // and still has no identity, so that wording would be plainly false for it.
+          message: expect.stringContaining("no saved workspace file and no single folder"),
+        }),
+      );
+    });
+
+    // The picker's currentWindow() read and targetToOpenArgs' later currentWindow()
+    // read aren't atomic — the window can lose its identity in between (its last
+    // folder closes while the pick is settling). That race must cancel the take
+    // rather than open a workspace the user never actually chose.
+    it("cancels the take when this window loses its identity between the pick and the resolve", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+      vi.mocked(currentWindow).mockReturnValueOnce(HERE).mockReturnValue(undefined);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      expect(openWorkspace).not.toHaveBeenCalled();
+    });
+
+    it("says the session landed in this window", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+      vi.mocked(currentWindow).mockReturnValue(HERE);
+      vi.mocked(openWorkspace).mockResolvedValue({
+        mode: "per-window",
+        briefs: [],
+        opened: ["/repos/account-service"],
+        remoteControl: false,
+        seededInPlace: true,
+      } as never);
+
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      expect(posted()).toContainEqual(
+        expect.objectContaining({ type: "toast", level: "success", message: expect.stringContaining("in this window") }),
+      );
+    });
+
+    // Seeding into this window with seedAgent off is the one outcome with nothing to
+    // show: no window opened, no session started, only briefs on disk. Claiming
+    // "Opened in this window" would describe something that never happened.
+    it("does not claim a window opened when seeding is off and the destination is this window", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window", seedAgent: false });
+      vi.mocked(currentWindow).mockReturnValue(HERE);
+      vi.mocked(openWorkspace).mockResolvedValue({
+        mode: "per-window",
+        briefs: [],
+        opened: ["/repos/account-service"],
+        remoteControl: false,
+        seededInPlace: true,
+      } as never);
+
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+      expect(toast.message).toContain("Opened nothing");
+      expect(toast.message).toContain("agentFlow.seedAgent is off");
+      expect(toast.message).not.toContain("Opened in this window");
     });
 
     it("toasts an info message (not success) when the merge into the existing workspace fails to parse", async () => {
@@ -2948,12 +3089,62 @@ describe("takeBatch", () => {
   it("skips the layout pick for this-window and goes straight to the shared path", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(currentWindow).mockReturnValue({
+      identity: "/repos/api",
+      kind: "folder",
+      roots: [{ name: "api", path: "/repos/api" }],
+    });
     const { provider } = setup();
     await provider.takeBatch(twoKeys, ["api"]);
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(openSharedWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ target: { kind: "current" } }),
     );
+  });
+
+  // The gap between the destination pick and the shared open spans the prompt-mode
+  // pick, the layout pick and createWorktrees for every task — seconds, not a
+  // millisecond. Without the guard openSharedWorkspace has no "current" destination
+  // and falls through to the new-window path, spawning a window nobody asked for.
+  it("fails the shared batch instead of spawning a window when this window loses its identity", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(currentWindow)
+      .mockReturnValueOnce({ identity: "/repos/api", kind: "folder", roots: [{ name: "api", path: "/repos/api" }] })
+      .mockReturnValue(undefined);
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(openSharedWorkspace).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual(
+      expect.objectContaining({
+        type: "toast",
+        level: "error",
+        message: expect.stringContaining("no longer hold a session"),
+      }),
+    );
+  });
+
+  // A batch seeded into this window opened nothing — "in one shared window" would
+  // imply one appeared.
+  it("says a shared batch landed in this window when it seeded in place", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(currentWindow).mockReturnValue({
+      identity: "/repos/api",
+      kind: "folder",
+      roots: [{ name: "api", path: "/repos/api" }],
+    });
+    vi.mocked(openSharedWorkspace).mockResolvedValue({
+      opened: true,
+      briefs: [],
+      seeded: 2,
+      seededInPlace: true,
+    } as never);
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toContain("in this window");
+    expect(toast.message).not.toContain("in one shared window");
   });
 
   it("skips the layout pick for a one-key batch", async () => {
@@ -3063,6 +3254,11 @@ describe("takeBatch", () => {
   it("skips Remote Control without asking for a one-key batch to a shared (non-new) destination", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window", remoteControl: "ask" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(currentWindow).mockReturnValue({
+      identity: "/repos/api",
+      kind: "folder",
+      roots: [{ name: "api", path: "/repos/api" }],
+    });
     const { provider, posted } = setup();
     await provider.takeBatch(["ASM-1"], ["api"]);
     expect(window.showQuickPick).not.toHaveBeenCalled(); // resolveRemoteControl's picker never fires

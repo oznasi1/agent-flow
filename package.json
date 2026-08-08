@@ -2,7 +2,7 @@
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
   "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a Claude Code agent already briefed.",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",
   "license": "MIT",
@@ -237,11 +237,11 @@
           "enumDescriptions": [
             "Ask each time you take a task",
             "Always open a task in a new window",
-            "Always open a task in the current window (replaces what's here)",
+            "Always start the task here, keeping this window's folders as they are",
             "Always pick an existing .code-workspace to open the task into"
           ],
           "default": "ask",
-          "description": "Where to open a task you take: a new window, or reuse the current one."
+          "description": "Where to open a task you take: a new window, this window, or an existing .code-workspace."
         },
         "agentFlow.taskMode": {
           "type": "string",

@@ -209,17 +209,70 @@ describe("openSharedWorkspace", () => {
     expect(String(exec.mock.calls[0][0])).toContain("/ws/ASM-1+1.code-workspace");
   });
 
-  // `target.kind !== "current"` is the whole this-window flow: the current window has to
-  // be replaced in place (which reloads it, firing the seed handshake), never spawned.
-  it("reloads the current window instead of spawning one for target 'current'", async () => {
-    const result = await openSharedWorkspace(baseReq({ target: { kind: "current" } }));
-    expect(exec).not.toHaveBeenCalled();
-    expect(commands.executeCommand).toHaveBeenCalledWith(
-      "vscode.openFolder",
-      expect.objectContaining({ fsPath: "/ws/ASM-1+1.code-workspace" }),
-      { forceNewWindow: false },
-    );
-    expect(result.opened).toBe(true);
+  // "This window" is the one destination that changes nothing about the window it
+  // targets: every task's plan names it, and no window is opened or reloaded.
+  describe("target 'current'", () => {
+    const here = { identity: "/repos/api", kind: "folder" as const, roots: [{ name: "api", path: "/repos/api" }] };
+
+    it("seeds this window without opening or reloading anything", async () => {
+      const result = await openSharedWorkspace(
+        baseReq({ target: { kind: "current" }, currentWindow: here }),
+      );
+      expect(exec).not.toHaveBeenCalled();
+      expect(commands.executeCommand).not.toHaveBeenCalledWith("vscode.openFolder", expect.anything(), expect.anything());
+      expect(result.seededInPlace).toBe(true);
+      expect(result.opened).toBe(true);
+    });
+
+    // The Run record's mode describes the window it landed in, not the batch layout —
+    // a workspace window is multiroot even though no workspace file was written for it.
+    it("records multiroot for a workspace-kind window", async () => {
+      await openSharedWorkspace(
+        baseReq({
+          target: { kind: "current" },
+          currentWindow: { identity: "/ws/team.code-workspace", kind: "workspace", roots: [{ name: "api", path: "/repos/api" }] },
+        }),
+      );
+      const runs = writes((p) => p.includes("runs") && p.endsWith(".json"));
+      expect(runs.length).toBeGreaterThan(0);
+      for (const r of runs) expect(JSON.parse(String(r[1])).mode).toBe("multiroot");
+    });
+
+    it("points every task's plan at this window and writes no workspace file", async () => {
+      const result = await openSharedWorkspace(
+        baseReq({ target: { kind: "current" }, currentWindow: here }),
+      );
+      const plans = writes((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
+      expect(plans).toHaveLength(2);
+      for (const p of plans) {
+        expect(JSON.parse(String(p[1])).matches[0].matchPath).toBe("/repos/api");
+      }
+      expect(writes((p) => p.endsWith(".code-workspace"))).toHaveLength(0);
+      expect(result.workspaceFile).toBeUndefined();
+    });
+
+    // The worktrees live at /repos/api/.claude/worktrees/<KEY>, i.e. inside the root
+    // this window has, so each one earns a precise mention through that root.
+    it("resolves mentions against this window's roots", async () => {
+      execSync.mockReturnValue("src/export.py\n");
+      await openSharedWorkspace(
+        baseReq({
+          target: { kind: "current" },
+          currentWindow: here,
+          promptTemplate: "Go{files}",
+          tasks: [
+            {
+              ticket: { key: "ASM-1", summary: "one", url: "https://jira/ASM-1" },
+              planMd: "## Plan\n\na",
+              descriptionText: "fix `src/export.py`",
+              services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+            },
+          ],
+        }),
+      );
+      const plan = JSON.parse(String(writes((p) => p.includes("plans") && p.endsWith(".json"))[0][1]));
+      expect(String(plan.matches[0].prompt)).toContain("@api/.claude/worktrees/ASM-1/src/export.py");
+    });
   });
 });
 
