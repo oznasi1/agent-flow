@@ -2959,20 +2959,28 @@ describe("an armed flow advances on refresh", () => {
     // rule as still pending for one extra poll tick.
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
-    const { p } = await openPanel();
+    // Warm the resume gate first (Task 4): a first pass that finds nothing
+    // ready clears it without ever needing an approval, leaving the very next
+    // pass to fire in the ordinary way this test is actually about.
+    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    const { p, send } = await openPanel();
     await settle();
-    const msg = posts(p).find((m) => m.type === "deck:flows") as { flows: Flow[] } | undefined;
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    await send({ type: "deck:refresh" });
+    const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { flows: Flow[] } | undefined;
     expect(msg?.flows[0]?.edges[0]?.firedAt).toBeTypeOf("number");
   });
 
   it("stamps a met rule and posts a toast naming the flow", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
+    // Warm the resume gate first (Task 4) — see the test above.
+    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    const { p, send } = await openPanel();
+    await settle();
     // The status the evaluator will see: ASM-1's aws-ops PR is merged.
     h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
-    const { p } = await openPanel();
-    await settle();
+    await send({ type: "deck:refresh" });
     const written = h.writeFlow.mock.calls.at(-1)?.[2] as Flow | undefined;
     expect(written?.edges[0].firedAt).toBeTypeOf("number");
     const toast = posts(p).find((m) => m.type === "toast" && /Ship the migration/.test(m.message));
@@ -2982,16 +2990,18 @@ describe("an armed flow advances on refresh", () => {
   it("fires once and not again on the next refresh", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
-    const { p, send } = await openPanel();
+    // Warm the resume gate first (Task 4) — see the test above.
+    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    const { send } = await openPanel();
     await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    await send({ type: "deck:refresh" });
     // The store now returns the stamped flow, as it would on disk.
     h.flows = [h.writeFlow.mock.calls.at(-1)![2] as Flow];
     h.writeFlow.mockClear();
-    // A real second poll tick, not just draining microtasks — nothing here
-    // advances the panel's own 6s timer, so the second pass has to be asked for.
+    // A real third poll tick, not just draining microtasks — nothing here
+    // advances the panel's own 6s timer, so each pass has to be asked for.
     await send({ type: "deck:refresh" });
-    await settle();
     expect(h.writeFlow).not.toHaveBeenCalled();
   });
 
@@ -3029,9 +3039,16 @@ describe("an armed flow advances on refresh", () => {
     h.flows = [armedFlow({
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
     })];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
-    const { p } = await openPanel();
+    // Warm the resume gate first (Task 4): without this, the met condition
+    // would only ever be reported and held on the first pass, and this test
+    // would pass without ever reaching the perform path it means to guard —
+    // nothing is performed for a HELD flow either, gate or no gate, so that
+    // would prove nothing about the launch/seed guard specifically.
+    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    const { p, send } = await openPanel();
     await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    await send({ type: "deck:refresh" });
     expect(h.openInEditor).not.toHaveBeenCalled();
     expect(h.writePlanFile).not.toHaveBeenCalled();
     // And no toast claims it ran.
@@ -3047,14 +3064,183 @@ describe("an armed flow advances on refresh", () => {
     setConfig({ orchestrator: true });
     const brokenFlow = { ...mkFlow("bad", "Broken"), armed: true, edges: null } as unknown as Flow;
     h.flows = [brokenFlow, armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    // Warm f1's resume gate first (Task 4) so this test isolates the throwing
+    // flow's effect on its sibling, not the resume gate holding f1 anyway.
+    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
     const log = vi.fn();
     DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
     await settled();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    await lastPanel()._fire({ type: "deck:refresh" });
     await settle();
     expect(log).toHaveBeenCalledWith(expect.stringContaining("bad"));
     const written = h.writeFlow.mock.calls.at(-1)?.[2] as Flow | undefined;
     expect(written?.id).toBe("f1");
     expect(written?.edges[0].firedAt).toBeTypeOf("number");
+  });
+});
+
+describe("the resume gate", () => {
+  /** Open a panel and return it plus a way to deliver an inbound message — the
+   * same `show()` + `settled()` + `_fire` idiom every other describe block in
+   * this file uses, rather than reaching into `webview.onDidReceiveMessage`
+   * directly. */
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  const armedFlow = (): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+  });
+
+  /** The last deck:flows post. `.filter(...).at(-1)` rather than `.findLast`:
+   * this project's tsconfig caps `lib` at ES2022, one short of the ES2023
+   * `findLast` needs, so that would fail `tsc --noEmit` despite reading fine. */
+  const lastFlowsPost = (p: ReturnType<typeof lastPanel>) =>
+    posts(p).filter((m) => m.type === "deck:flows").at(-1) as { pendingResume: unknown };
+
+  it("does not act on the first pass — it reports what is ready", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow()];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { p } = await openPanel();
+    await settle();
+    expect(h.writeFlow).not.toHaveBeenCalled();
+    expect(lastFlowsPost(p).pendingResume).toEqual([
+      { flowId: "f1", flowName: "Ship the migration", lines: [expect.any(String)] },
+    ]);
+  });
+
+  it("falls back to a generic line when the held rule is not a notify", async () => {
+    // notifyLines only ever describes a PERFORMED notify edge (Task 3) — a
+    // pending launch or seed rule has no such line, but the banner still needs
+    // something to show while it holds.
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...armedFlow(),
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
+    }];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { p } = await openPanel();
+    await settle();
+    expect(lastFlowsPost(p).pendingResume).toEqual([
+      { flowId: "f1", flowName: "Ship the migration", lines: ["Ship the migration: a rule is ready."] },
+    ]);
+  });
+
+  it("fires on the pass after approval", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow()];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    await settle();
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0].firedAt).toBeTypeOf("number");
+  });
+
+  it("disarms instead, if that is what you choose", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow()];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    await send({ type: "flow:resumeDisarm", id: "f1" });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).armed).toBe(false);
+    h.writeFlow.mockClear();
+    // A genuine subsequent poll, not just a microtask drain — the brief's own
+    // `await settle()` here would never exercise a second pass at all (nothing
+    // advances the panel's real 6s timer), which would make "nothing fires
+    // afterwards" pass even if the disarm write never actually landed on disk.
+    await send({ type: "deck:refresh" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("holds the gate across several passes until you answer", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow()];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    // Three genuine, separate polls — not three microtask drains of the same
+    // one pass, which is all the brief's own `await settle()` × 3 would be.
+    await send({ type: "deck:refresh" });
+    await send({ type: "deck:refresh" });
+    await send({ type: "deck:refresh" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("does not gate a flow with nothing ready — there is nothing to approve", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow()];
+    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    const { p } = await openPanel();
+    await settle();
+    expect(lastFlowsPost(p).pendingResume).toEqual([]);
+  });
+
+  it("fires without a gate once a rule becomes met later in the same session", async () => {
+    // The gate protects the moment you come back, not every future firing.
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow()];
+    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    // A real second pass: the brief's own bare `await settle()` here never asks
+    // the panel for one (nothing here advances its real 6s timer), so
+    // `h.writeFlow.mock.calls.at(-1)` would still be the FIRST pass's call — or,
+    // since the first pass never wrote (openStatus), `undefined`, throwing on
+    // the `!` below rather than merely passing for the wrong reason.
+    await send({ type: "deck:refresh" });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0].firedAt).toBeTypeOf("number");
+  });
+
+  it("ignores an approval for an id it is not holding", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow()];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { p, send } = await openPanel();
+    await settle();
+    const loadsBefore = posts(p).filter((m) => m.type === "deck:loading").length;
+    await send({ type: "flow:resumeApprove", id: "nope" });
+    // An id nobody is holding must not even kick off a refresh — asserting only
+    // "no write" would still pass if the guard were deleted outright, since
+    // "nope" doesn't match any real flow's id either way. Asserting on the
+    // busy indicator instead catches the guard's absence directly.
+    expect(posts(p).filter((m) => m.type === "deck:loading").length).toBe(loadsBefore);
+    // And f1's own gate is still intact on a genuine subsequent poll — proving
+    // the bogus id did not clear (or otherwise disturb) a real held gate.
+    await send({ type: "deck:refresh" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("flow:resumeDisarm ignores an id that is not in the store", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow()];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    await send({ type: "flow:resumeDisarm", id: "nope" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("ignores both resume messages when the setting is off", async () => {
+    setConfig({ orchestrator: false });
+    h.flows = [armedFlow()];
+    const { send } = await openPanel();
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    await send({ type: "flow:resumeDisarm", id: "f1" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
   });
 });

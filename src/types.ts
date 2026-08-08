@@ -312,6 +312,17 @@ export interface ClaudeAssetsView {
   scannedAt: number;
 }
 
+/** An armed flow with rules already met on the first evaluation after the panel
+ * was created. Reported rather than acted on: a flow armed last week must not
+ * spend anything the moment you reopen the Deck, before you have read what it is
+ * about to do. */
+export interface PendingResume {
+  flowId: string;
+  flowName: string;
+  /** One line per rule about to fire, in the drawer's own words. */
+  lines: string[];
+}
+
 // Messages: webview → host
 export type InboundMessage =
   | { type: "ready" }
@@ -360,6 +371,11 @@ export type InboundMessage =
   | { type: "flow:rename"; id: string; name: string }
   | { type: "flow:save"; flow: Flow }
   | { type: "flow:delete"; id: string }
+  // The resume gate (Task 4): approving clears the gate so the next pass fires
+  // normally; disarming turns the flow off instead. Neither message performs
+  // anything itself — see DeckPanel.advanceArmedFlows.
+  | { type: "flow:resumeApprove"; id: string }
+  | { type: "flow:resumeDisarm"; id: string }
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }
@@ -464,7 +480,9 @@ export type OutboundMessage =
   | { type: "deck:reviewSubmitDone"; id: string; outcome: "ok" | "failed" | "cancelled" }
   // `enabled: false` still posts, with an empty list: the webview must be able
   // to tell "the setting is off" from "not loaded yet", and silence cannot.
-  | { type: "deck:flows"; flows: Flow[]; enabled: boolean }
+  // `pendingResume` is the resume gate's own report — flows with rules already
+  // met on the panel's first evaluation, held for approval rather than fired.
+  | { type: "deck:flows"; flows: Flow[]; enabled: boolean; pendingResume: PendingResume[] }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
   | { type: "mkt:loading"; loading: boolean }

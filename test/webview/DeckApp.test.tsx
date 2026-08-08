@@ -1371,8 +1371,11 @@ const mkFlow = (id: string, name: string): Flow => ({
   id, name, armed: false, createdAt: 1_000, nodes: [], edges: [],
 });
 
+// `pendingResume` defaults empty: the resume gate (Task 4) is host-side state
+// with no rendering yet (Task 6 wires the banner) — every existing fixture here
+// predates the field and has nothing to hold.
 const flowsMsg = (flows: Flow[], enabled = true): OutboundMessage =>
-  ({ type: "deck:flows", flows, enabled });
+  ({ type: "deck:flows", flows, enabled, pendingResume: [] });
 
 /** The drawer itself, not the header chip that shares its name. */
 const drawer = () => screen.queryByRole("complementary", { name: "Orchestrator" });

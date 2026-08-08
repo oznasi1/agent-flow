@@ -30,7 +30,7 @@ import { inferTicket, localRunFor } from "./engine/localRuns";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity, UNKNOWN_ACTIVITY } from "./engine/transcript";
 import { canon } from "./engine/paths";
-import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PrEntry, PrEntryMap, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
+import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
 
 const POLL_MS = 6000;
 const TICKET_TTL_MS = 30_000;
@@ -116,6 +116,15 @@ export class DeckPanel {
    * it never changes for the life of the panel. */
   private readonly flowsDir = defaultFlowsDir();
   private readonly flowIo = nodeFlowIo();
+  /** Flow ids whose first post-start evaluation found rules already met, and which
+   * are waiting for the user to approve or disarm. Per panel, deliberately not
+   * persisted: the gate exists to protect the moment you come back, and asking on
+   * every poll would defeat arming. */
+  private readonly pendingResume = new Map<string, PendingResume>();
+  /** Flow ids that have completed their first evaluation in this panel's life —
+   * either because the user approved a hold, or because that first evaluation
+   * found nothing ready to hold. Once set, a flow's own passes fire normally. */
+  private readonly resumeCleared = new Set<string>();
 
   static show(context: vscode.ExtensionContext, connector: TaskConnector, log: (m: string) => void): void {
     if (DeckPanel.current) {
@@ -177,7 +186,11 @@ export class DeckPanel {
   private postFlows(): void {
     const enabled = getConfig().orchestrator;
     const flows: Flow[] = enabled ? readFlows(this.flowIo, this.flowsDir) : [];
-    this.post({ type: "deck:flows", flows, enabled });
+    // Emptied alongside `flows` when the setting is off, for the same reason:
+    // silence must not be mistaken for "not loaded yet", and a stale hold from
+    // before the setting was switched off has nothing left to be approved.
+    const pendingResume = enabled ? [...this.pendingResume.values()] : [];
+    this.post({ type: "deck:flows", flows, enabled, pendingResume });
   }
 
   /** Advance every armed flow against the statuses this pass already built.
@@ -185,14 +198,45 @@ export class DeckPanel {
    * Deliberately here rather than on its own timer: the statuses are the expensive
    * part and they exist by now, so evaluation is free. Each flow is evaluated,
    * stamped and written independently — one flow that throws must not stop the
-   * others, the same posture `readFlows` takes with a corrupt file. */
+   * others, the same posture `readFlows` takes with a corrupt file.
+   *
+   * Holds the resume gate before any of that: a flow armed last week must not
+   * spend anything the moment you reopen the Deck. The FIRST evaluation that
+   * finds rules already met is reported on `deck:flows` as `pendingResume`
+   * rather than acted on; `flow:resumeApprove` is what lets the next pass fire.
+   * A flow whose first evaluation finds nothing ready is never gated at all —
+   * that is what keeps a rule met later in the same session firing without
+   * ceremony, per `resumeCleared`. */
   private advanceArmedFlows(runs: RunStatus[], nowMs: number): void {
     if (!getConfig().orchestrator) return;
     for (const flow of readFlows(this.flowIo, this.flowsDir)) {
-      if (!flow.armed) continue;
+      if (!flow.armed) {
+        // A disarmed flow holds no gate — re-arming starts the cycle over.
+        this.pendingResume.delete(flow.id);
+        this.resumeCleared.delete(flow.id);
+        continue;
+      }
       try {
         const result = evaluateFlow({ flow, statuses: runs, nowMs });
-        if (result.fired.length === 0) continue;
+        if (result.fired.length === 0) {
+          // Nothing ready means nothing to approve: clear the gate so a rule
+          // that becomes met later in this session fires without ceremony.
+          this.pendingResume.delete(flow.id);
+          this.resumeCleared.add(flow.id);
+          continue;
+        }
+        if (!this.resumeCleared.has(flow.id)) {
+          // Held, not fired: report what is about to happen and wait.
+          const lines = notifyLines(flow, result.fired);
+          this.pendingResume.set(flow.id, {
+            flowId: flow.id,
+            flowName: flow.name,
+            lines: lines.length > 0
+              ? lines
+              : result.fired.filter((f) => f.perform).map(() => `${flow.name}: a rule is ready.`),
+          });
+          continue;
+        }
         writeFlow(this.flowIo, this.flowsDir, applyFired(flow, result.fired, nowMs));
         for (const line of notifyLines(flow, result.fired)) {
           this.post({ type: "toast", level: "info", message: line });
@@ -1045,6 +1089,31 @@ export class DeckPanel {
         const existing = readFlows(this.flowIo, this.flowsDir).some((f) => f.id === m.id);
         if (!existing) return;
         removeFlow(this.flowIo, this.flowsDir, m.id);
+        this.postFlows();
+        return;
+      }
+      case "flow:resumeApprove": {
+        if (!getConfig().orchestrator) return;
+        // An id nobody is holding is not this flow's approval to act on — most
+        // plausibly a stale click from a banner the store has since moved past.
+        // Refusing here, before touching anything, is also what keeps this a
+        // no-op rather than an unearned busy-refresh for a click that named
+        // nothing this panel is actually holding.
+        if (!this.pendingResume.has(m.id)) return;
+        this.pendingResume.delete(m.id);
+        // Clearing the gate is all approval does — it does not fire anything
+        // itself. The refresh that follows is what lets the next pass fire.
+        this.resumeCleared.add(m.id);
+        await this.refreshBusy();
+        return;
+      }
+      case "flow:resumeDisarm": {
+        if (!getConfig().orchestrator) return;
+        const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
+        if (!flow) return;
+        this.pendingResume.delete(m.id);
+        this.resumeCleared.add(m.id);
+        writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: false });
         this.postFlows();
         return;
       }
