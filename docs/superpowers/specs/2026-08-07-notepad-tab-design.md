@@ -15,7 +15,7 @@ The Tasks sidebar webview (`agentFlow.tasks`, `src/tasksView.ts` + `src/webview/
 | Note shape? | Structured: `{ id, title, body, done, createdAt, lastRunKey? }` — not a single freeform blob. Closer to a lightweight task, easier to seed a kickoff brief from. `lastRunKey` is set on kickoff and drives the status badge; it's the only run-related field stored on the note itself, everything else (running/stale/finished) is derived at read time. |
 | Where are notes persisted? | `context.globalState`, new key `agentFlow.notepad`, plain array. Deliberately **global**, not `workspaceState` — the user wants the same notepad regardless of which workspace/repo the panel is open in (e.g. same list in Cursor and in a plain VS Code window on a different repo), so notes are not scoped per-workspace the way `sprintOrder` is. |
 | Can a note be marked done? | Yes — a checkbox toggles `done` on each note. Done notes stay in the list (not auto-removed) until explicitly cleared. |
-| How does the user manage done vs. not-done? | A filter control (All / Active / Done) above the note list, and a "Clear completed" button that removes every `done: true` note in one action. |
+| How does the user manage done vs. not-done? | A filter control (All / Active / Done) above the note list, defaulting to **Active** on open (so done items don't clutter the view by default), and a "Clear completed" button that removes every `done: true` note in one action. |
 | How does a note become an agent run? | Reuses `explore()`'s internals in `tasksView.ts` (repo/destination resolution → `createWorktrees` → `openWorkspace`) via a new `runNotepadItem(id)` method — skips the `showInputBox` prompt since the note already supplies the topic/brief text. Same "no ticket yet" brief framing Explore already uses. |
 | How is speech captured? | Browser `SpeechRecognition` / `webkitSpeechRecognition` (Web Speech API), used entirely client-side inside the webview's `Notepad.tsx` — no new extension-host code or message-protocol traffic for transcription itself. |
 | Does this touch the existing Tasks list, filters, or connectors? | No. Tasks view, `EXPLORE_ACTION_DEFS`, Jira/task connector code, worktree/workspace engine internals are unchanged except for the new `runNotepadItem` entry point, which is additive. |
@@ -68,7 +68,7 @@ New `OutboundMessage` variant (host → webview):
 ## Done / filter / cleanup
 
 - `toggleNoteDone(id)` flips the note's `done` flag in `globalState` and re-posts `notepad:state`.
-- The filter (All / Active / Done) is purely client-side in `Notepad.tsx` — the host always sends the full note array; the webview decides what to render, matching how task filters already work as a client-side view over host-sent data.
+- The filter (All / Active / Done) is purely client-side in `Notepad.tsx` — the host always sends the full note array; the webview decides what to render, matching how task filters already work as a client-side view over host-sent data. Filter state is local `useState` defaulting to **Active** each time the Notepad tab mounts — not persisted, so it doesn't carry a stale "Done" selection into the next session.
 - `clearCompletedNotes()` removes every note with `done: true` from the stored array in one `globalState` write, then re-posts `notepad:state`. No per-note confirmation; the button itself is the confirming action (consistent with it only being enabled when there's at least one done note to clear).
 
 ## Deck integration ("notepad" run kind)
