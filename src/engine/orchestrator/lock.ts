@@ -18,10 +18,13 @@ export interface LockIo {
   remove(p: string): void;
 }
 
-/** Long enough that a healthy critical section (one read, one evaluate, a few small
- * writes) can never be mistaken for a dead holder; short enough that a crashed
- * window costs at most this much progress. */
-export const LOCK_TTL_MS = 30_000;
+/** Must comfortably exceed the slowest thing done while holding the lock — a launch
+ * that opens a window, or a confirmation modal a human leaves sitting. The TTL is
+ * only crash recovery: if a holder dies, this is how long other windows wait before
+ * reaping. Erring long is cheap (flows poll every six seconds and nothing here is
+ * urgent) and erring short is not — a lock reaped out from under a live launch lets
+ * a second window fire the same rule, which is a second paid session. */
+export const LOCK_TTL_MS = 300_000;
 
 export function lockPath(dir: string): string {
   return path.join(dir, ".advance.lock");
