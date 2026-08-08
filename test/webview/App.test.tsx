@@ -58,21 +58,43 @@ describe("mount + auth gate", () => {
     expect(sent).toHaveBeenCalledWith({ type: "signIn" });
   });
 
-  it("renders the project + user header and the task list when authenticated", () => {
+  // The project name and the signed-in user moved to the VS Code view title bar
+  // (tasksView.postState) — asserting they are ABSENT here is what stops the old
+  // header from creeping back in beside the tabs.
+  it("renders the task list, with the identity left to the view title bar", () => {
     render(<App />);
     authed();
     host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "ASM-1", summary: "Fix the bug" })] });
-    expect(screen.getByText("ASM")).toBeInTheDocument(); // header title, not the card key
-    expect(screen.getByText("Jane")).toBeInTheDocument();
     expect(screen.getByText("ASM-1")).toBeInTheDocument();
     expect(screen.getByText("Fix the bug")).toBeInTheDocument();
+    expect(screen.queryByText("Jane")).not.toBeInTheDocument();
+    expect(document.querySelector(".header")).toBeNull();
   });
 
-  it("reports open windows on the header gauge", () => {
+  it("keeps the gauge and Explore in the tab row on both tabs", () => {
     render(<App />);
     host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane",
            prReviewStatus: "PR initiated", filters: ALL_FILTERS, liveCount: 2 });
-    expect(screen.getByRole("img", { name: "2 Agent Flow windows open" })).toBeInTheDocument();
+    const trail = () => document.querySelector(".tabbar .tabbar-trail") as HTMLElement;
+    expect(trail()).not.toBeNull();
+    expect(within(trail()).getByRole("img", { name: "2 Agent Flow windows open" })).toBeInTheDocument();
+    expect(within(trail()).getByRole("button", { name: /Explore/ })).toBeInTheDocument();
+
+    // Explore starts a session on repos, not on a ticket, and the gauge counts open
+    // windows — neither belongs to one tab, so both survive the switch to Notepad.
+    fireEvent.click(screen.getByRole("tab", { name: "Notepad" }));
+    expect(within(trail()).getByRole("img", { name: "2 Agent Flow windows open" })).toBeInTheDocument();
+    expect(within(trail()).getByRole("button", { name: /Explore/ })).toBeInTheDocument();
+  });
+
+  it("puts the tab row before the task list in the document", () => {
+    render(<App />);
+    authed();
+    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "ASM-1", summary: "Fix the bug" })] });
+    const tabbar = document.querySelector(".tabbar")!;
+    const lenses = document.querySelector(".lenses")!;
+    // Node.DOCUMENT_POSITION_FOLLOWING === 4: `lenses` comes after `tabbar`.
+    expect(tabbar.compareDocumentPosition(lenses) & 4).toBeTruthy();
   });
 
   it("falls back to the static mark when the host reports no count", () => {

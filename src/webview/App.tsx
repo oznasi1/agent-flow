@@ -488,21 +488,24 @@ export function App(): JSX.Element {
 
   return (
     <div>
-      <div className="header">
-        <span className="title"><GaugeMark live={liveCount} /> {project || "Tasks"}</span>
-        <button
-          className="explore"
-          onClick={() => send({ type: "explore" })}
-          title="Explore repos with a Claude Code agent — pick repos, no ticket needed"
-        >
-          <CompassIcon /> Explore
-        </button>
-        {me && <span className="me">{me}</span>}
-      </div>
-
+      {/* The panel's first row. The project name and user live in the VS Code view
+          title bar above this (tasksView.postState), so the tabs are the first thing
+          in our own content. The gauge and Explore trail them on both tabs: Explore
+          starts a session on repos rather than on a ticket, and the gauge counts open
+          windows — neither is a Tasks-only concern. */}
       <div className="tabbar" role="tablist" aria-label="Panel view">
         <button role="tab" aria-selected={tab === "tasks"} onClick={() => setTab("tasks")}>Tasks</button>
         <button role="tab" aria-selected={tab === "notepad"} onClick={() => setTab("notepad")}>Notepad</button>
+        <span className="tabbar-trail">
+          <GaugeMark live={liveCount} />
+          <button
+            className="explore"
+            onClick={() => send({ type: "explore" })}
+            title="Explore repos with a Claude Code agent — pick repos, no ticket needed"
+          >
+            <CompassIcon /> Explore
+          </button>
+        </span>
       </div>
 
       {tab === "notepad" && <Notepad notes={notes} />}
