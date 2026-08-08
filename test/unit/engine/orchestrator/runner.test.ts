@@ -152,6 +152,30 @@ describe("applyFired", () => {
     expect(out.edges[0].firedNote).toBe("told you: the migration has landed");
   });
 
+  it("branches on the edge it actually performed, not on the flow's current copy of it", () => {
+    // `hit.edge` is the vintage the caller (`deckView.ts`) rebinds to `fresh`
+    // before ever calling `performEdge` — the vintage `outcomes` is keyed to,
+    // and the vintage a launch or seed actually ran against. `flow`, this
+    // function's own first argument, can be a LATER read (`atWrite` in
+    // `deckView.ts`, re-read after the act so a concurrent edit's other fields
+    // pass through) — and if that concurrent edit ALSO changed this exact
+    // edge's action, the two copies disagree about what kind of edge this is.
+    // Trusting `flow`'s copy here would silently discard a real launch's
+    // outcome for a generic "told you" note, because the flow now says this
+    // edge is a `notify`.
+    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "notify" })]);
+    const performed = edge("e1", "a", "b", { action: "launch" }); // same id, the earlier (acted-on) vintage
+    const out = applyFired(
+      flow,
+      [{ edge: performed, perform: true }],
+      NOW,
+      new Map([["e1", { ok: true, note: "launched ASM-12 in aws-ops" } as const]]),
+    );
+    expect(out.edges[0].firedAt).toBe(NOW);
+    expect(out.edges[0].firedNote).toBe("launched ASM-12 in aws-ops");
+    expect(out.edges[0].error).toBeUndefined();
+  });
+
   it("stamps a NON-performed non-notify edge as fired, not errored — it did nothing, and its junction closed", () => {
     // The distinction the error must not swallow: a perform:false sibling never
     // attempted its action, so there is nothing to have failed. Recording an error

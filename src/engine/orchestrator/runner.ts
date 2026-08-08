@@ -22,10 +22,11 @@ export type ActOutcome =
  * another edge into the same target already did" are different, and the drawer
  * shows whichever it is told.
  *
- * A PERFORMED edge whose action is not `notify` — a `launch` or a `seed` — is
- * stamped from `outcomes`, keyed by edge id. A success takes `firedAt` and the
- * caller's note; a failure takes `error` and NO `firedAt`, and the difference
- * matters in three ways:
+ * A PERFORMED edge whose action — AS ACTUALLY PERFORMED, `hit.edge.action`, not
+ * necessarily `flow`'s own current copy of it (see the branch below) — is not
+ * `notify` — a `launch` or a `seed` — is stamped from `outcomes`, keyed by edge
+ * id. A success takes `firedAt` and the caller's note; a failure takes `error`
+ * and NO `firedAt`, and the difference matters in three ways:
  *  - `isSettled` counts `error`, so it still cannot re-fire in a loop;
  *  - the drawer surfaces an errored edge and offers Reset for it, so it is not a
  *    dead end the user cannot clear;
@@ -47,9 +48,23 @@ export function applyFired(
     edges: flow.edges.map((e) => {
       const hit = byId.get(e.id);
       if (!hit) return { ...e };
-      if (hit.perform && e.action !== "notify") {
+      // Branch on `hit.edge.action` — the vintage the caller actually PERFORMED
+      // against, and the vintage `outcomes` is keyed to — never on `e.action`,
+      // this function's OWN `flow` argument's current copy. In `deckView.ts`,
+      // `flow` can be `atWrite`: read AFTER the act, specifically so a
+      // concurrent `flow:save`'s other fields pass through to the write. If
+      // that same concurrent edit changed THIS edge's action too, `e.action`
+      // and `hit.edge.action` disagree about what kind of edge this is — and
+      // branching on `e.action` would silently discard a real launch's outcome
+      // for a generic "told you" note (if the flow now says `notify`), or
+      // mislabel a genuinely-fired notify as an unperformed launch (if the flow
+      // now says `launch`). The stamp must describe what was actually done,
+      // which only `hit.edge` knows. Every OTHER field below still comes from
+      // `e`/`flow` — only which branch to take, and which verb the fallback
+      // error below names, come from `hit.edge`.
+      if (hit.perform && hit.edge.action !== "notify") {
         const outcome = outcomes?.get(e.id);
-        if (!outcome) return { ...e, error: `${e.action} was not performed` };
+        if (!outcome) return { ...e, error: `${hit.edge.action} was not performed` };
         if (!outcome.ok) return { ...e, error: outcome.error };
         return { ...e, firedAt: nowMs, firedNote: outcome.note };
       }
