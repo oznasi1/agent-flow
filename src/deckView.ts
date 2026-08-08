@@ -703,16 +703,9 @@ export class DeckPanel {
         ticket: { key: status.run.key, summary: status.run.summary, url: status.run.url },
         planMd: "",
         descriptionText: "",
-        // The place's OWN repo, as the single service. `openWorkspace` rewrites
-        // brief.md for every entry in `services` unconditionally (workspace.ts:189,
-        // BEFORE the existingFolder branch even runs) — passing an empty list here
-        // would not have left the existing brief untouched either, since the
-        // existingFolder branch's own fallback write (workspace.ts:231-236) fires
-        // whenever the folder is not already among `services`. Naming the repo here
-        // is what makes the rewritten "Repos in scope" section name it instead of
-        // coming up empty; it does not make the write itself go away, and with no
-        // ticket description to give it, the rewritten brief's body is blank either
-        // way. See task-5b-report.md for the full comparison.
+        // The place's OWN repo, as the single service — which is what makes the brief's
+        // "Repos in scope" section name it rather than come up empty, on the one path
+        // that still writes a brief here (a place that has none yet).
         services: [{ name: repo.name, path: repo.path, isGit: repo.isGit }],
         mode: "per-window",
         promptTemplate: mode.prompt,
@@ -726,6 +719,14 @@ export class DeckPanel {
         // `createdAt` reset to now, `kind`/`mode`/`workspaceFile` dropped or
         // forced, silently rewriting the card the user is looking at.
         recordRun: false,
+        // The same reasoning one file over, for the other thing a seed would otherwise
+        // overwrite. This worktree's brief is the one the agent ALREADY working here was
+        // given, and the file this seeded prompt's own `{brief}` resolves to. A seed
+        // brings a second pair of hands to work that is under way; it is not a new task,
+        // and it has no ticket description to write a brief from — with `planMd` and
+        // `descriptionText` both empty, rewriting would replace a real brief with an
+        // empty one, unattended, with nothing to undo it from.
+        keepExistingBrief: true,
       });
     } catch (e) {
       // Tried and may have spent something (a window may already be open, a brief

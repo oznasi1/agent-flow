@@ -59,6 +59,18 @@ export interface OpenRequest {
    * are taken from this request. That silently rewrites the card the user is
    * looking at. */
   recordRun?: boolean;
+  /** Never overwrite a brief that is already on disk. Defaults to false, which is what
+   * every caller before it relied on: a Take rewrites the brief because the brief IS
+   * the task it is starting.
+   *
+   * Set true when opening into work that is already under way. A seeded second agent
+   * lands in a worktree whose `.pick-task/TASK.md` is the brief the RUNNING agent was
+   * given, and the file the seeded prompt's own `{brief}` resolves to — rewriting it
+   * destroys live, user-visible content, unattended, with nothing to undo it from.
+   *
+   * "Keep" means never destroy, not never create: a place with no brief yet still gets
+   * one, because `{brief}` has to resolve to something. */
+  keepExistingBrief?: boolean;
 }
 
 export interface OpenResult {
@@ -198,7 +210,12 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     const dir = path.join(s.path, BRIEF_DIR);
     fs.mkdirSync(dir, { recursive: true });
     const briefPath = path.join(dir, BRIEF_FILE);
-    fs.writeFileSync(briefPath, briefMarkdown(ticket, planMd, services, s.name, files));
+    // Unconditional by default — see `keepExistingBrief` for the one caller that must
+    // not clobber a brief an agent is already working from. The path is reported either
+    // way, so a kept brief still resolves the seeded prompt's `{brief}`.
+    if (!(req.keepExistingBrief && fs.existsSync(briefPath))) {
+      fs.writeFileSync(briefPath, briefMarkdown(ticket, planMd, services, s.name, files));
+    }
     return { repo: s.name, path: briefPath, gitExcluded: ensureGitExcluded(s.path, `${BRIEF_DIR}/`), files: files.length };
   });
 
@@ -238,7 +255,12 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     if (!services.some((s) => canon(s.path) === canon(folder))) {
       const dir = path.join(folder, BRIEF_DIR);
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, BRIEF_FILE), briefMarkdown(ticket, planMd, services, path.basename(folder), []));
+      const fallbackBrief = path.join(dir, BRIEF_FILE);
+      // The second write site, and it needs the same guard for the same reason: this
+      // folder is a window someone is already working in.
+      if (!(req.keepExistingBrief && fs.existsSync(fallbackBrief))) {
+        fs.writeFileSync(fallbackBrief, briefMarkdown(ticket, planMd, services, path.basename(folder), []));
+      }
       ensureGitExcluded(folder, `${BRIEF_DIR}/`);
     }
     unaddedRepos = services.filter((s) => canon(s.path) !== canon(folder)).map((s) => s.name);

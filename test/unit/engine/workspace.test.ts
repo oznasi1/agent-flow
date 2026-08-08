@@ -955,6 +955,54 @@ describe("openWorkspace — existing folder window", () => {
   });
 });
 
+describe("openWorkspace — keepExistingBrief", () => {
+  const BRIEF = "/repos/account-service/.pick-task/TASK.md";
+  /** The brief is already on disk, as it is in any worktree an agent is working in. */
+  const briefExists = () =>
+    existsSync.mockImplementation((p) => String(p).endsWith("/.git") || String(p) === BRIEF || String(p) === "/other/open-window/.pick-task/TASK.md");
+
+  it("overwrites an existing brief by default — every caller before this flag relied on it", async () => {
+    briefExists();
+    await openWorkspace(baseReq({ services: mkRepos(["account-service"]) }));
+    const brief = writeArg((p) => p === BRIEF);
+    expect(brief).toBeTruthy();
+    expect(String(brief![1])).toContain("ASM-1");
+  });
+
+  it("leaves an existing brief untouched when asked to keep it", async () => {
+    // A seed opens a SECOND agent in a worktree that is already working. That
+    // worktree's TASK.md is the brief the running agent was given, and the file the
+    // seeded prompt's {brief} resolves to — rewriting it destroys live, user-visible
+    // content on an unattended path.
+    briefExists();
+    await openWorkspace(baseReq({ services: mkRepos(["account-service"]), keepExistingBrief: true }));
+    expect(writeArg((p) => p === BRIEF)).toBeUndefined();
+  });
+
+  it("still writes a brief when none exists, even when asked to keep it", async () => {
+    // "Keep" means never destroy, not never create: the seeded prompt's {brief} has to
+    // resolve to something, and a place with no brief yet has nothing to preserve.
+    await openWorkspace(baseReq({ services: mkRepos(["account-service"]), keepExistingBrief: true }));
+    const brief = writeArg((p) => p === BRIEF);
+    expect(brief).toBeTruthy();
+  });
+
+  it("reports the brief's path either way, so the seeded prompt can name it", async () => {
+    briefExists();
+    const kept = await openWorkspace(baseReq({ services: mkRepos(["account-service"]), keepExistingBrief: true }));
+    expect(kept.briefs.map((b) => b.path)).toEqual([BRIEF]);
+  });
+
+  it("keeps the existingFolder fallback brief too", async () => {
+    // The second write site: a target folder that is not one of `services`.
+    briefExists();
+    await openWorkspace(baseReq({
+      services: mkRepos(["solo"]), existingFolder: "/other/open-window", keepExistingBrief: true,
+    }));
+    expect(writeArg((p) => p === "/other/open-window/.pick-task/TASK.md")).toBeUndefined();
+  });
+});
+
 describe("openWorkspace — remote control", () => {
   const planOf = () => {
     const w = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));

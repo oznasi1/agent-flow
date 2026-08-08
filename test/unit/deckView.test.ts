@@ -3916,6 +3916,11 @@ describe("a met seed rule acts", () => {
     // The run this place belongs to already exists — a seed must not let
     // openWorkspace's own writeRun overwrite that record under the same key.
     expect(req.recordRun).toBe(false);
+    // Nor overwrite the brief the agent ALREADY working in this worktree was given,
+    // which is also the file this seeded prompt's own {brief} resolves to. With
+    // planMd and descriptionText both empty, a rewrite replaces it with an empty one.
+    expect(req.keepExistingBrief).toBe(true);
+    expect(req.planMd).toBe("");
     expect(req.openIn).toBe("new");
     expect(req.mode).toBe("per-window");
     expect(req.services).toEqual([{ name: "bite-me", path: "/r/bite-me", isGit: true }]);
