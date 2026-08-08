@@ -55,7 +55,7 @@ describe("applyFired", () => {
     );
     expect(out.edges[0].firedNote).not.toBe(out.edges[1].firedNote);
     // The stamped-only one must not claim it did something.
-    expect(out.edges[1].firedNote).toMatch(/junction|closed|with/i);
+    expect(out.edges[1].firedNote).toMatch(/already acted|another edge/i);
   });
 
   it("leaves an edge that did not fire completely alone", () => {
@@ -167,7 +167,7 @@ describe("applyFired", () => {
     );
     expect(out.edges[1].error).toBeUndefined();
     expect(out.edges[1].firedAt).toBe(NOW);
-    expect(out.edges[1].firedNote).toBe("closed with its junction");
+    expect(out.edges[1].firedNote).toBe("another edge into this target already acted");
   });
 });
 

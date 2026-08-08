@@ -3812,7 +3812,7 @@ describe("a met launch rule acts", () => {
     const w = lastWrite();
     expect(w.edges.find((e) => e.id === "e1")!.firedNote).toContain("launched");
     // The sibling is stamped as closed — never as a launch it did not perform.
-    expect(w.edges.find((e) => e.id === "e2")!.firedNote).toBe("closed with its junction");
+    expect(w.edges.find((e) => e.id === "e2")!.firedNote).toBe("another edge into this target already acted");
     expect(w.nodes.filter((n) => n.kind === "place")).toHaveLength(2);
   });
 
@@ -3849,7 +3849,9 @@ describe("a met launch rule acts", () => {
     expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBeTypeOf("number");
     // …but only one of them claims to have launched anything.
     expect(w.edges.find((e) => e.id === "e1")!.firedNote).toContain("launched");
-    expect(w.edges.find((e) => e.id === "e2")!.firedNote).toBe("closed with its junction");
+    // Not "closed with its junction" — a default `join: "any"` node with two
+    // rules into it is not a junction at all; this is the per-target dedupe.
+    expect(w.edges.find((e) => e.id === "e2")!.firedNote).toBe("another edge into this target already acted");
     expect(w.edges.find((e) => e.id === "e2")!.error).toBeUndefined();
     // Promoted exactly once, to the run the one launch returned.
     expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "ASM-12" });

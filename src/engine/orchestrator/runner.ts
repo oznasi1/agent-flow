@@ -14,10 +14,13 @@ export type ActOutcome =
 /** Stamp `firedAt` and a receipt on every fired edge. Returns a new flow.
  *
  * Every fired edge is stamped, including the `perform: false` ones: an "all"
- * junction stamps its whole set and acts once, and a sibling left unstamped would
- * be re-evaluated on every pass forever. The note distinguishes them, because
- * "this ran" and "this junction closed" are different claims and the drawer shows
- * whichever it is told.
+ * junction stamps its whole set and acts once, and so does the per-target dedupe
+ * on any OTHER target with more than one incoming edge (the ordinary shape of
+ * "when it lands, start the next ticket" wired from two conditions) — either way
+ * a sibling left unstamped would be re-evaluated on every pass forever. The note
+ * distinguishes the two claims, because "this ran" and "this didn't, because
+ * another edge into the same target already did" are different, and the drawer
+ * shows whichever it is told.
  *
  * A PERFORMED edge whose action is not `notify` — a `launch` or a `seed` — is
  * stamped from `outcomes`, keyed by edge id. A success takes `firedAt` and the
@@ -53,7 +56,11 @@ export function applyFired(
       return {
         ...e,
         firedAt: nowMs,
-        firedNote: hit.perform ? performedNote(flow, hit) : "closed with its junction",
+        // NOT "closed with its junction": most of the time this is now the
+        // per-target dedupe on an ordinary `join: "any"` node, which is not a
+        // junction at all — the drawer would show that word for a node that
+        // never waited on anything. True for both shapes instead.
+        firedNote: hit.perform ? performedNote(flow, hit) : "another edge into this target already acted",
       };
     }),
   };
