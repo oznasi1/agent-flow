@@ -1,0 +1,167 @@
+import { describe, it, expect, vi } from "vitest";
+import { launchPlanned, LaunchDeps, LaunchRequest, LaunchTicketDetail } from "../../../../src/engine/orchestrator/launch";
+import { PlannedNode } from "../../../../src/engine/orchestrator/model";
+import type { ServiceRef } from "../../../../src/types";
+import type { OpenRequest, OpenResult } from "../../../../src/engine/workspace";
+
+const node = (over: Partial<PlannedNode> = {}): PlannedNode => ({
+  id: "n1", kind: "planned", x: 0, y: 0, join: "any",
+  ticketKey: "ASM-12", repos: ["aws-ops"], mode: "backend", dest: "new-window", ...over,
+});
+
+const detail: LaunchTicketDetail = {
+  key: "ASM-12", summary: "Isolate renew queue", url: "https://jira.example/ASM-12", descriptionText: "do the thing",
+};
+
+const repos: ServiceRef[] = [
+  { name: "aws-ops", path: "/repos/aws-ops", isGit: true },
+  { name: "bite-me", path: "/repos/bite-me", isGit: true },
+];
+
+const makeReq = (over: Partial<LaunchRequest> = {}): LaunchRequest => ({
+  node: node(),
+  detail,
+  repos,
+  promptTemplate: "Fix {key}",
+  workspaceDir: "/ws",
+  seedAgent: true,
+  workspaceMode: "per-window",
+  ...over,
+});
+
+const makeDeps = (over: Partial<LaunchDeps> = {}): LaunchDeps => ({
+  createWorktrees: vi.fn((services: ServiceRef[]) =>
+    services.map((s) => ({ ...s, path: `${s.path}/.claude/worktrees/ASM-12` })),
+  ),
+  openWorkspace: vi.fn(async (_req: OpenRequest): Promise<OpenResult> => ({
+    mode: "per-window", briefs: [], opened: ["/w"], remoteControl: false,
+  })),
+  log: vi.fn(),
+  ...over,
+});
+
+describe("launchPlanned", () => {
+  it("launches into the resolved repo and reports the run key and repo", async () => {
+    const d = makeDeps();
+    const out = await launchPlanned(makeReq(), d);
+    expect(out).toEqual({ ok: true, runKey: "ASM-12", repo: "aws-ops" });
+    expect(d.openWorkspace).toHaveBeenCalledTimes(1);
+    const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
+    expect(arg.services).toEqual([{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }]);
+    expect(arg.mode).toBe("per-window");
+    expect(arg.promptTemplate).toBe("Fix {key}");
+    expect(arg.ticket).toEqual({ key: "ASM-12", summary: "Isolate renew queue", url: "https://jira.example/ASM-12" });
+    expect(arg.openIn).toBe("new");
+    expect(arg.kind).toBeUndefined();
+  });
+
+  it("refuses when the node's repos resolve to nothing on this machine, and calls neither dep", async () => {
+    const d = makeDeps();
+    const out = await launchPlanned(makeReq({ node: node({ repos: ["ghost-repo"] }) }), d);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.message).toContain("ghost-repo");
+    expect(d.createWorktrees).not.toHaveBeenCalled();
+    expect(d.openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("pluralizes the refusal when several named repos all fail to resolve", async () => {
+    const d = makeDeps();
+    const out = await launchPlanned(makeReq({ node: node({ repos: ["ghost-one", "ghost-two"] }) }), d);
+    expect(out).toEqual({
+      ok: false,
+      message: "ghost-one, ghost-two aren't checked out under your repos root — not launching ASM-12.",
+    });
+  });
+
+  it("falls back to a placeholder plan when the ticket has no description", async () => {
+    const d = makeDeps();
+    await launchPlanned(makeReq({ detail: { ...detail, descriptionText: "   " } }), d);
+    const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
+    expect(arg.planMd).toContain("_(No description on the ticket.)_");
+    expect(arg.planMd).not.toContain("## Ticket description");
+  });
+
+  it("dest: worktree creates a worktree and opens the worktree-mapped services", async () => {
+    const d = makeDeps();
+    await launchPlanned(makeReq({ node: node({ dest: "worktree" }) }), d);
+    expect(d.createWorktrees).toHaveBeenCalledWith(
+      [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }],
+      "ASM-12",
+      "Isolate renew queue",
+      d.log,
+    );
+    const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
+    // The whole point: openWorkspace must receive the WORKTREE-mapped services, not
+    // the original checkout createWorktrees was given.
+    expect(arg.services).toEqual([{ name: "aws-ops", path: "/repos/aws-ops/.claude/worktrees/ASM-12", isGit: true }]);
+    expect(arg.openIn).toBe("new");
+  });
+
+  it("dest: new-window does not create a worktree", async () => {
+    const d = makeDeps();
+    await launchPlanned(makeReq({ node: node({ dest: "new-window" }) }), d);
+    expect(d.createWorktrees).not.toHaveBeenCalled();
+    const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
+    expect(arg.openIn).toBe("new");
+    expect(arg.services).toEqual([{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }]);
+  });
+
+  it("dest: current-window does not create a worktree and reuses the running window", async () => {
+    const d = makeDeps();
+    await launchPlanned(makeReq({ node: node({ dest: "current-window" }) }), d);
+    expect(d.createWorktrees).not.toHaveBeenCalled();
+    const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
+    expect(arg.openIn).toBe("current");
+  });
+
+  it("refuses rather than launching into the main checkout when createWorktrees falls back", async () => {
+    // A stub that returns its input unchanged, exactly like createWorktrees's own
+    // failure fallback (non-git repo, or `git worktree add` failing outright).
+    const d = makeDeps({ createWorktrees: vi.fn((services: ServiceRef[]) => services) });
+    const out = await launchPlanned(makeReq({ node: node({ dest: "worktree" }) }), d);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.message).toContain("aws-ops");
+    expect(d.openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("reports a failure from openWorkspace rather than throwing", async () => {
+    const d = makeDeps({ openWorkspace: vi.fn(async () => { throw new Error("disk full"); }) });
+    const out = await launchPlanned(makeReq(), d);
+    expect(out.ok).toBe(false);
+    if (!out.ok) expect(out.message).toContain("disk full");
+  });
+
+  it("passes the resolved prompt template through unchanged", async () => {
+    const d = makeDeps();
+    await launchPlanned(makeReq({ promptTemplate: "Investigate {key} carefully, then {summary}" }), d);
+    const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
+    expect(arg.promptTemplate).toBe("Investigate {key} carefully, then {summary}");
+  });
+
+  it("still succeeds when seedAgent is false, and forwards it rather than assuming true", async () => {
+    const d = makeDeps();
+    const out = await launchPlanned(makeReq({ seedAgent: false }), d);
+    expect(out.ok).toBe(true);
+    const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
+    expect(arg.seedAgent).toBe(false);
+  });
+
+  it("binds the place to the first named repo that actually resolved, not literally the first name", async () => {
+    const d = makeDeps();
+    const out = await launchPlanned(makeReq({ node: node({ repos: ["ghost-repo", "bite-me"] }) }), d);
+    expect(out).toEqual({ ok: true, runKey: "ASM-12", repo: "bite-me" });
+    const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
+    expect(arg.services).toEqual([{ name: "bite-me", path: "/repos/bite-me", isGit: true }]);
+  });
+
+  it("opens every resolved repo, not only the one it binds the place to", async () => {
+    const d = makeDeps();
+    const out = await launchPlanned(makeReq({ node: node({ repos: ["aws-ops", "bite-me"] }) }), d);
+    expect(out).toEqual({ ok: true, runKey: "ASM-12", repo: "aws-ops" });
+    const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
+    expect(arg.services).toEqual([
+      { name: "aws-ops", path: "/repos/aws-ops", isGit: true },
+      { name: "bite-me", path: "/repos/bite-me", isGit: true },
+    ]);
+  });
+});
