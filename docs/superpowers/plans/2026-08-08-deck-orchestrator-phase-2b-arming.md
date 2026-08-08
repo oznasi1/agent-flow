@@ -1504,44 +1504,55 @@ describe("the poll and the close confirmation", () => {
   it("keeps polling when the panel is hidden and a flow is armed", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armed()];
-    const { p } = await openPanel();
+    const p = await openPanel().then((r) => r.p);
+    await settle();
     const before = h.buildRunStatus.mock.calls.length;
-    hide(p);                    // drive onDidChangeViewState with visible: false
-    await advanceTimers(POLL_MS + 1);
+    p.visible = false;
+    p._fireViewState();
+    vi.advanceTimersByTime(POLL_MS + 1);
+    await settle();
     expect(h.buildRunStatus.mock.calls.length).toBeGreaterThan(before);
   });
 
   it("stops polling when hidden with nothing armed", async () => {
     setConfig({ orchestrator: true });
     h.flows = [mkFlow("f1", "n")];
-    const { p } = await openPanel();
+    const p = await openPanel().then((r) => r.p);
+    await settle();
     const before = h.buildRunStatus.mock.calls.length;
-    hide(p);
-    await advanceTimers(POLL_MS + 1);
+    p.visible = false;
+    p._fireViewState();
+    vi.advanceTimersByTime(POLL_MS + 1);
+    await settle();
     expect(h.buildRunStatus.mock.calls.length).toBe(before);
   });
 
-  it("asks before closing with a flow armed", async () => {
+  it("says so when the panel closes with a flow armed", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armed()];
-    const { p } = await openPanel();
-    await close(p);             // drive onDidDispose
+    const p = await openPanel().then((r) => r.p);
+    p._fireDispose();
+    await settle();
     expect(window.showWarningMessage).toHaveBeenCalled();
   });
 
-  it("does not ask when nothing is armed", async () => {
+  it("says nothing when the panel closes with nothing armed", async () => {
     setConfig({ orchestrator: true });
     h.flows = [mkFlow("f1", "n")];
-    const { p } = await openPanel();
-    await close(p);
+    const p = await openPanel().then((r) => r.p);
+    p._fireDispose();
+    await settle();
     expect(window.showWarningMessage).not.toHaveBeenCalled();
   });
 });
 ```
 
-`hide(p)`, `close(p)` and `advanceTimers(ms)` must follow whatever this file already does to drive `onDidChangeViewState`, `onDidDispose` and the poll timer — it already tests polling behaviour, so those mechanisms exist. Use them; do not add fake timers if the file drives the timer another way.
-
-**`POLL_MS` is a module-level `const` in `deckView.ts` and is NOT exported**, so a test cannot import it. Use the literal the file already uses in its own polling tests, or export the constant if that is what the file already does for other values — do not add a second source of truth for the interval.
+**The exact mechanisms, verified to exist** — use these and do not invent helpers:
+- `p.visible = false; p._fireViewState();` drives a visibility change. The mock's panel exposes `_fire(msg)`, `_fireDispose()` and `_fireViewState()`; see the comment at `test/_mocks/vscode.ts:53`, and the existing polling test around `test/unit/deckView.test.ts:1541` for the `visible = false` idiom.
+- `p._fireDispose()` simulates the user closing the panel.
+- **This file does NOT currently use fake timers**, and a 6-second interval will never fire under real ones — so these two polling tests need `vi.useFakeTimers()` in a `beforeEach` scoped to this `describe` and `vi.useRealTimers()` in its `afterEach`. Do not switch the whole file to fake timers; other tests depend on real ones.
+- **`POLL_MS` is a module-level `const` in `deckView.ts` and is not exported.** Export it (`export const POLL_MS = 6000;`) and import it in the test rather than duplicating the number — a second copy would silently stop matching if the interval ever changes.
+- If `window.showWarningMessage` is not already a `vi.fn()` on the mock, check how the file asserts on other `showWarningMessage` calls (the Clear-stale confirmation at `deckView.ts:758` is already tested) and follow that.
 
 For (c), add to `test/webview/DeckApp.test.tsx`, using the same helpers as Task 6:
 
