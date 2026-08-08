@@ -306,11 +306,20 @@ held for the whole of one pass:
 
 Two smaller races carried from the same phase, both now closed too, in `advanceUnderLock`:
 
-- **A flow disarmed mid-pass no longer completes that pass.** Every acting edge re-reads the
-  store and checks `armed` immediately before it runs, not once for the whole flow — a launch
-  or a seed is its own `await`, and up to three can run in one pass, each one long enough for
-  a disarm to land in between. An edge stopped this way is left pending rather than stamped,
-  so a re-arm gets a clean retry.
+- **A flow disarmed mid-pass no longer completes that pass.** This took two fixes, not one.
+  Every acting edge re-reads the store and checks `armed` immediately before it runs, not
+  once for the whole flow — a launch or a seed is its own `await`, and up to three can run
+  in one pass, each one long enough for a Disarm to land in between. That guard alone was
+  not enough: the pass's own write was still built from the copy read *before* those awaits,
+  so it silently overwrote a Disarm that landed during them, turning the guard into a
+  one-poll pause rather than a stop — the edges it left pending would simply relaunch on the
+  very next pass, because the flow never looked disarmed to that pass either. The write now
+  re-reads the store one more time, immediately before writing, and takes every edge and
+  every flow-level field from THAT read rather than the evaluated one — only the stamps on
+  the edges this pass actually decided about come from the earlier read plus their outcomes.
+  The same fix incidentally closes the identical hole for a concurrent rename, a
+  `flow:resetEdge` on a sibling edge, and a node edit: none of them race the write anymore
+  either.
 - **`notifyLines` and `applyFired` now read `action` from the same (fresh) copy.** Both decide
   "is this a notify" by indexing the flow that is actually about to be written, by edge id —
   not from the `FiredEdge.edge` reference evaluation captured, which could be a stale object
