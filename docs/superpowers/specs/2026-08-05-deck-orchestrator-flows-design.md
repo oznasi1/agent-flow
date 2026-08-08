@@ -270,6 +270,35 @@ node 1 of 3` — and only while a flow exists. No persistent hint lines.
 **Toast.** `Ship the migration launched ASM-12 in bite-me — CI passed on ASM-2.` Every
 autonomous action reports what it did and why, with an **Open** action.
 
+## The blocker Phase 3 must clear before anything can spend money
+
+**Two VS Code windows can fire the same rule twice.** `defaultFlowsDir()` is the global
+`~/.agentflow/flows`; `DeckPanel` is per extension host; and advancing a flow is
+read → evaluate → write with no lock. Two windows with the Deck open both read an unfired
+edge and both fire it. This was proved with a probe: two identical toasts, one window's
+`firedAt` overwriting the other's.
+
+Phase 2b **narrowed** it — the write now re-reads the store, drops any edge another window
+already stamped, and bases the write on that fresh copy rather than the stale evaluated one.
+That last part is load-bearing and was not obvious: writing the stale flow erases the other
+window's stamp on the very edge it just claimed, un-latching it, so the rule fires again on
+the next pass. The window is now microseconds rather than a poll interval.
+
+It is still read-then-write with no lock, so **it is not closed**. Today the cost is a
+duplicate toast. The moment a rule can `launch`, the identical sequence is a **second paid
+agent session**. A real fix needs either a lock file beside the flow or a per-workspace flows
+directory — the latter changes the storage location and so needs a migration. Whichever is
+chosen, **it must land before any action can spend money.** The constraint is also recorded
+in a comment at the site in `deckView.ts`.
+
+Two smaller things for the same phase, both inert while `notify` is the only action:
+
+- **A flow disarmed mid-pass still completes that pass.** A pass already in flight stamps
+  and toasts once even if the user disarms while it runs; the flow then correctly stays
+  disarmed. Harmless for a toast, worth deciding for a launch.
+- **`notifyLines` reads `action` from the stale edge while `applyFired` reads it from the
+  fresh one.** Identical while every edge is `notify`; a divergence once actions differ.
+
 ## Carried forward from Phase 2a's reviews
 
 Three things deliberately left as they are, each with a known consequence. None blocks a
