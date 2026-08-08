@@ -179,6 +179,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   private postState(authed: boolean, configured: boolean, me: string | null): void {
     const cfg = getConfig();
     const info = this.connector.info();
+    // VS Code renders the view's own title bar directly above the webview, so the
+    // panel's identity belongs there rather than repeated in the first row of our
+    // content. Set here, not in resolveWebviewView: postState is the one path that
+    // re-runs on every auth, config and refresh change, so the bar cannot go stale.
+    // The fallback matters — an unconfigured first run has no project key, and a
+    // blank bar holding nothing but three action icons reads as a broken render.
+    if (this.view) {
+      this.view.title = info.scopeValue || "Tasks";
+      this.view.description = me ?? undefined;
+    }
     this.post({ type: "state", authed, configured, project: info.scopeValue, me,
       prReviewStatus: cfg.prReviewStatus, filters: cfg.filters,
       sourceLabel: info.label, caps: serializeCaps(this.provider().caps),
