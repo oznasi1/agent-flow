@@ -4033,17 +4033,66 @@ describe("an edge whose action changes between evaluation and the write", () => 
     h.readFlows.mockImplementation(() => (++reads === 1 ? [flow("notify")] : [flow("launch")]));
     await send({ type: "deck:refresh" });
 
-    // The fresh action is `launch`, so nothing was performed — this must stamp
-    // as an unperformed launch, exactly what `applyFired` gives an acting edge
-    // with no recorded outcome.
+    // The fresh action is `launch`, and the dispatch check now reads that same
+    // fresh copy too (a second fix, made alongside this one): the edge is
+    // genuinely attempted as a launch, and refused for the reason a launch
+    // actually fails here — its target, `n2`, is a `notify` node, not planned
+    // work — never silently skipped as if it were still a `notify`.
     expect(h.launchPlanned).not.toHaveBeenCalled();
     const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
-    expect(w.edges[0].error).toBe("launch was not performed");
+    expect(w.edges[0].error).toBe("a launch rule must point at planned work, and n2 is not.");
     expect(w.edges[0].firedAt).toBeUndefined();
     // And it must NOT also claim, in a toast, that the notify's message was told —
     // that would be true only if the edge were still a `notify` by the time it
     // was decided.
     expect(posts(p).filter((m) => m.type === "toast").length).toBe(toastsBefore);
+  });
+
+  it("does not launch, or spend anything, for an edge revoked to notify before the write", async () => {
+    // The dangerous direction. The other one (tested above) is harmless — a
+    // notify-at-evaluation edge that turns out to be a launch by write time just
+    // gets skipped and picked up next pass, spending nothing either way. This
+    // direction spends: a `launch` at evaluation whose action the user switched
+    // to `notify` in the drawer before this pass got to act must not go ahead and
+    // launch anyway on the strength of a verdict the user has already revoked.
+    const flowWith = (action: "launch" | "notify"): Flow => ({
+      ...mkFlow("f1", "Ship the migration"),
+      armed: true,
+      launchConfirmedAt: 500,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action }],
+    });
+    setConfig({ orchestrator: true });
+    h.flows = [flowWith("launch")];
+    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    show();
+    await settled();
+    const p = lastPanel();
+    const send = async (m: unknown) => { await p._fire(m); await settled(); };
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.writeFlow.mockClear();
+
+    // Evaluation sees `e1` as a `launch`. Every read after that — the fresh
+    // re-read before acting, and `postFlows`' read afterward — sees it as it is
+    // on disk now: `notify`, as if the drawer's edit landed in between.
+    let reads = 0;
+    h.readFlows.mockImplementation(() => (++reads === 1 ? [flowWith("launch")] : [flowWith("notify")]));
+    await send({ type: "deck:refresh" });
+
+    // No worktree, no window, no agent session — the whole point.
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    // Stamped as the notify it now is, not promoted, not left looking launched.
+    expect(w.edges[0].firedAt).toBeTypeOf("number");
+    expect(w.edges[0].firedNote).not.toContain("launch");
+    expect(w.nodes.find((n) => n.id === "n2")!.kind).toBe("planned");
   });
 });
 

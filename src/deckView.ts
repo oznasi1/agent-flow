@@ -398,10 +398,27 @@ export class DeckPanel {
         // `fresh ?? flow`, silently recreates the deleted flow.
         if (!fresh) continue;
         const freshById = new Map(fresh.edges.map((e) => [e.id, e]));
-        const unclaimed = result.fired.filter((f) => {
-          const now = freshById.get(f.edge.id);
-          return now !== undefined && !isSettled(now);
-        });
+        const unclaimed = result.fired
+          .filter((f) => {
+            const now = freshById.get(f.edge.id);
+            return now !== undefined && !isSettled(now);
+          })
+          // Rebind `.edge` to the fresh copy, once, for everything unclaimed. From
+          // here on, EVERY decision about an edge — is it a spend, which verb, what
+          // it points at, which prompt mode — must be about the edge as the store
+          // holds it now, not as evaluation saw it a store-read ago: a user can edit
+          // an armed flow (change an edge's action, target or mode) in the moments
+          // between this pass's evaluation and its acting step, and the stale
+          // `action` is the direction that actually spends money — a rule the user
+          // just switched to `notify` must not still launch because evaluation
+          // captured it as a `launch` a moment earlier. `perform` is untouched: that
+          // verdict is evaluation's own, and redeciding it here would mean
+          // re-evaluating. INVARIANT: after this line, nothing below ever reads
+          // `f.edge` from a `FiredEdge` that predates this map — `firing`, `stamping`,
+          // the dedup, the spend gate, the dispatch check and `performEdge` itself
+          // all inherit the fresh edge from here. Do not reintroduce a raw
+          // `result.fired` reference below this point.
+          .map((f) => ({ ...f, edge: freshById.get(f.edge.id)! }));
         // Nothing left to stamp: the other window did all of it. No write, and no
         // toast — it already announced every one of these.
         if (unclaimed.length === 0) continue;

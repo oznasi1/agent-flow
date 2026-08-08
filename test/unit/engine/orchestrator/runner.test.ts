@@ -212,4 +212,18 @@ describe("notifyLines", () => {
     ]);
     expect(lines).toHaveLength(2);
   });
+
+  it("decides `action` from the flow's own edge, not from the FiredEdge's — the two can differ", () => {
+    // The caller (deckView's `advanceUnderLock`) re-reads the store immediately
+    // before writing, so a `FiredEdge.edge` it evaluated a moment earlier can be a
+    // stale copy by the time it gets here — this is the exact shape a caller that
+    // did NOT rebind its `FiredEdge`s to the fresh copy would hand in. `applyFired`
+    // decides "is this a notify" from `flow.edges`; this must agree, or an edge
+    // that became a `launch` before the write gets announced here as a notify
+    // that told you something, while `applyFired` is stamping it as an unperformed
+    // launch instead.
+    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
+    const stale = edge("e1", "a", "b", { action: "notify" }); // same id, stale action
+    expect(notifyLines(flow, [{ edge: stale, perform: true }])).toEqual([]);
+  });
 });
