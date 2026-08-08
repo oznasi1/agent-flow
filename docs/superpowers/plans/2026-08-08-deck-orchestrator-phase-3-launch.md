@@ -47,7 +47,9 @@ Tests mirror each source file; `test/unit/deckView.test.ts` and `test/webview/Or
 - Test: `test/unit/engine/orchestrator/lock.test.ts`
 
 **Interfaces:**
-- Produces: `LockIo` (`{ tryCreate(path, text): boolean; read(path): string | null; remove(path): void }`), `lockPath(dir)`, `acquire(io, dir, nowMs, ttlMs)` returning `boolean`, `release(io, dir)`. Task 5's `deckView.ts` wraps a read-evaluate-write in these.
+- Produces: `LockIo` (`{ tryCreate(path, text): boolean; read(path): string | null; remove(path): void }`), `lockPath(dir)`, `acquire(io, dir, nowMs, ttlMs, token)` returning `boolean`, `release(io, dir, token)`. Task 5's `deckView.ts` wraps a read-evaluate-write in these and supplies a per-panel `token`.
+
+> **Correction applied during execution.** This task originally specified `acquire` *stealing* a dead lock — `remove` then `tryCreate`, returning `true`. Review found that defeats the task's own purpose: `remove`+`tryCreate` is not atomic, so two windows that both judge one stale lock dead interleave their pairs and **both** return `true`. Reaping replaced stealing (see the implementation comment), and a token was added so a window suspended past the TTL cannot release a lock that has since been reaped and retaken. **The implementation block below is the corrected version. The test block below is the original** — its three steal cases (`steals a lock older than the TTL`, `does not steal a lock exactly at the TTL`, `steals a lock whose contents are unreadable`) became reap-then-acquire cases, the `vanished` case was given a small `nowMs` so it actually pins the null branch, and two cases were added: two windows meeting one stale lock never both acquire, and `release` with a foreign token leaves the lock alone. Read `test/unit/engine/orchestrator/lock.test.ts` for what shipped.
 
 **Why this exists.** `defaultFlowsDir()` is the global `~/.agentflow/flows` and `DeckPanel` is per extension host, so two VS Code windows both read an unfired edge and both fire it — proved with a probe in the previous phase: two identical toasts, one window's stamp overwriting the other's. Today that is a duplicate toast. **Once a rule can launch, it is a second paid agent session.** Phase 2b narrowed the window to microseconds; this closes it.
 
@@ -193,30 +195,55 @@ export function lockPath(dir: string): string {
   return path.join(dir, ".advance.lock");
 }
 
-/** Take the lock, or report that someone else holds it. The stored value is the
- * acquiring timestamp, which is all the TTL check needs. */
-export function acquire(io: LockIo, dir: string, nowMs: number, ttlMs: number): boolean {
-  const p = lockPath(dir);
-  if (io.tryCreate(p, String(nowMs))) return true;
-
-  // Someone holds it — or held it. Decide whether they are alive.
-  const raw = io.read(p);
-  // Vanished between the create and the read: released in the gap, so try again
-  // rather than reporting a lock nobody holds.
-  if (raw === null) return io.tryCreate(p, String(nowMs));
-
-  const heldAt = Number(raw);
-  // An unparseable lock (half-written, hand-mangled) must not wedge every window
-  // forever. Treat it as dead.
-  const dead = !Number.isFinite(heldAt) || nowMs - heldAt > ttlMs;
-  if (!dead) return false;
-
-  io.remove(p);
-  return io.tryCreate(p, String(nowMs));
+/** The stored value is `<acquiredAt>:<token>`. */
+function stamp(nowMs: number, token: string): string {
+  return `${nowMs}:${token}`;
 }
 
-export function release(io: LockIo, dir: string): void {
-  io.remove(lockPath(dir));
+function tokenOf(raw: string): string {
+  return raw.slice(raw.indexOf(":") + 1);
+}
+
+/** A lock nobody can be holding: past its TTL, or unparseable — half-written or
+ * hand-mangled, which must not wedge every window forever. */
+function isDead(raw: string, nowMs: number, ttlMs: number): boolean {
+  const heldAt = Number(raw.slice(0, raw.indexOf(":")));
+  return !Number.isFinite(heldAt) || nowMs - heldAt > ttlMs;
+}
+
+/** Take the lock, or report that someone else holds it.
+ *
+ * This returns true from exactly one place: a successful exclusive create on an
+ * empty path. A lock past its TTL is REAPED, not stolen — we delete it and report
+ * failure, letting the next poll's plain create arbitrate. Stealing (remove, then
+ * create, then return true) looks equivalent and is not: two windows that both
+ * judge one stale lock dead interleave their remove/create pairs and both come
+ * away believing they hold it, which is precisely the double-launch this lock
+ * exists to prevent. Reaping costs one poll of recovery latency after a crash and
+ * cannot double-acquire. */
+export function acquire(
+  io: LockIo, dir: string, nowMs: number, ttlMs: number, token: string,
+): boolean {
+  const p = lockPath(dir);
+  if (io.tryCreate(p, stamp(nowMs, token))) return true;
+
+  const raw = io.read(p);
+  // Vanished between the create and the read: the holder released in the gap, so
+  // try once more rather than reporting a lock nobody holds.
+  if (raw === null) return io.tryCreate(p, stamp(nowMs, token));
+
+  if (isDead(raw, nowMs, ttlMs)) io.remove(p);
+  return false;
+}
+
+/** Release our own lock, and only ours. A window suspended past the TTL has its
+ * lock reaped and possibly replaced; without the token check its `release` would
+ * delete a live holder's lock. */
+export function release(io: LockIo, dir: string, token: string): void {
+  const p = lockPath(dir);
+  const raw = io.read(p);
+  if (raw !== null && tokenOf(raw) !== token) return;
+  io.remove(p);
 }
 ```
 
@@ -553,6 +580,8 @@ git commit -m "feat(orchestrator): add the launcher for a planned node"
 This is the task that spends money, so it is the one to review hardest. Five things must hold, and each has a test:
 
 1. **Everything happens under the lock.** `advanceArmedFlows` acquires before its read and releases in a `finally`. If the lock is held, the pass does nothing at all and returns — no evaluation, no write, no toast. A window that skips retries on its next poll.
+
+   `acquire`/`release` take a **token** identifying this panel. Mint one per `DeckPanel` instance (any stable unique string — the panel already has state to hang it on) and pass the same token to both calls. It exists so a window suspended past the TTL, whose lock was reaped and retaken by another window, cannot delete the new holder's lock on wake. Because a reaped lock is never stolen in-place, the **first pass after a crash returns false** and the pass that follows acquires — so a test asserting "the lock recovers after a dead holder" must poll twice.
 2. **A flow asks once before its first launch.** If `flow.launchConfirmedAt` is absent and this pass would perform a `launch`, do not launch: show a modal naming the ticket, the repo and the prompt mode, with **Launch** and **Disarm**. On Launch, stamp `launchConfirmedAt` and let the next pass act. On Disarm, write `armed: false`. Either way this pass performs nothing. Follow the existing modal idiom — `vscode.window.showWarningMessage(msg, { modal: true }, label)` as used by the Clear-stale confirmation.
 3. **A successful launch promotes its node**, in the same write that stamps the edge, so a crash between them cannot leave a launched ticket looking unlaunched.
 4. **A failed launch stamps `error` and is never retried.** The drawer already surfaces an errored edge as stalled and offers Reset.
