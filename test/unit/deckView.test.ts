@@ -4049,6 +4049,53 @@ describe("a met launch rule acts", () => {
     expect(w.edges[0].firedAt).toBeTypeOf("number");
     expect(w.name).toBe("Renamed mid-pass");
   });
+
+  it("chains a promotion into the next hop: pass 2 sees the new place and fires out of it", async () => {
+    // The phase's headline behavior, end to end rather than in its two separate,
+    // already-unit-tested halves (a launch promotes its target; a place-node
+    // condition evaluates against a run). "ASM-1 merged -> launch ASM-12 ->
+    // ASM-12 merged -> notify" is the design doc's own worked example for why
+    // the planned-to-place rewrite exists at all — nothing here proves the chain
+    // actually completes across two real passes.
+    const chain = (): Flow => ({
+      ...mkFlow("f1", "Ship the migration"),
+      armed: true,
+      launchConfirmedAt: 500,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+        { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "chain complete" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n2", to: "n3", cond: { kind: "pr-merged" }, action: "notify" },
+      ],
+    });
+    const { p, send } = await warmed([chain()]);
+    await send({ type: "deck:refresh" });
+    // e1 fired: n2 is now a place, bound to the run the launch returned.
+    let w = lastWrite();
+    expect(w.edges.find((e) => e.id === "e1")!.firedAt).toBeTypeOf("number");
+    expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "ASM-12" });
+    // e2 has NOT fired — n2 was still planned work when THIS pass evaluated, so
+    // there was no run for its condition to read yet.
+    expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBeUndefined();
+
+    // The run a real launch's `writeRun` would have recorded now exists —
+    // `launchPlanned` is mocked here, so this is that record's stand-in — and its
+    // PR is already merged.
+    h.runs.push(mkRun({ key: "ASM-12", repos: [{ name: "aws-ops", path: "/r/aws-ops", isGit: true, branch: "b" }] }));
+    h.buildRunStatus.mockImplementation((i: { run: Run }) =>
+      (i.run.key === "ASM-12" ? mergedStatus("ASM-12", "aws-ops") : mergedStatus("ASM-1", "aws-ops")));
+    h.writeFlow.mockClear();
+    await send({ type: "deck:refresh" });
+    w = lastWrite();
+    expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBeTypeOf("number");
+    expect(posts(p).some((m) => m.type === "toast" && /chain complete/.test(m.message ?? ""))).toBe(true);
+  });
 });
 
 describe("an edge whose action changes between evaluation and the write", () => {
