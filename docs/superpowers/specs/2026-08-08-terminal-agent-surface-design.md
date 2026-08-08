@@ -73,17 +73,29 @@ Wiring:
 ## Terminal mode mechanics
 
 ```
-createTerminal({ name: `Claude · ${key}`, cwd: match.matchPath })
+createTerminal({ name: `Claude · ${key}`, cwd })
 terminal.show()
 sendText("claude", true)                // run the CLI
 await delay(CLI_BOOT_MS)                // the TUI must be ready to receive input
 sendText(bracketedPaste(seedText), false)   // pre-typed, NO trailing newline
 ```
 
-**One terminal per task**, named for the ticket, `cwd` set to that task's matched repo
-path. A batch of three tasks produces three named terminals — mirroring the three tabs the
-extension path produces. The existing `SEED_STAGGER_MS` loop in `runSeedPass` needs no
-change.
+**One terminal per task**, named for the ticket. A batch of three tasks produces three named
+terminals — mirroring the three tabs the extension path produces. The existing
+`SEED_STAGGER_MS` loop in `runSeedPass` needs no change.
+
+**`cwd` is conditional.** A plan's `matchPath` is whatever `windowIdentity()` produces:
+a repo **directory** in per-window mode, but the `.code-workspace` **file** in multiroot
+mode. A file is not a valid `cwd`, so:
+
+```
+cwd = matchPath.endsWith(".code-workspace") ? undefined : matchPath
+```
+
+Omitting `cwd` lets VS Code default the terminal to the window's first root — the right
+answer for a multiroot window, where no single directory is "the" task's repo. Decided on
+the string suffix rather than an `fs.statSync` probe because that suffix *is* the
+distinction `windowIdentity()` draws, and it keeps the path free of filesystem calls.
 
 **No trailing newline** on the prompt. You review it and press Enter, exactly as in the
 panel.
