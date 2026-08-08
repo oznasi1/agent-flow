@@ -29,11 +29,26 @@ import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/ses
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
-import { Filter, InboundMessage, Task, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
+import { newNote, noteStatus, sanitizeNotes } from "./notepad";
+import {
+  Filter,
+  InboundMessage,
+  NotepadItem,
+  NotepadItemView,
+  Task,
+  OutboundMessage,
+  PromptMode,
+  ServiceRef,
+  Size,
+  WorkspaceMode,
+} from "./types";
 import { track, trackError, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
 import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, PromptModeProp, RepoSource, TakeSource } from "./telemetry/events";
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
+// globalState, not workspaceState: a notepad belongs to the user, not to whichever
+// repo happens to be open. Same storage the install-reported flag uses.
+const NOTEPAD_KEY = "agentFlow.notepad";
 
 /** Which engine operation a webview message represents, for operation_failed.
  * Messages absent from this map report as "jira_fetch" only if they read the task
@@ -221,6 +236,60 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     await this.context.workspaceState.update(SPRINT_ORDER_KEY, order);
   }
 
+  private notes(): NotepadItem[] {
+    return sanitizeNotes(this.context.globalState.get<unknown>(NOTEPAD_KEY, []));
+  }
+
+  private async saveNotes(notes: NotepadItem[]): Promise<void> {
+    await this.context.globalState.update(NOTEPAD_KEY, notes);
+    this.postNotepad();
+  }
+
+  /** Post every note with its derived run status. Public because the poll tick in
+   * extension.ts drives it too — a badge must not sit stale while the panel is open. */
+  public postNotepad(): void {
+    const notes = this.notes();
+    // Skip both directory reads entirely when nothing has ever been launched:
+    // the common case is a notepad of plain items with no runs behind them.
+    const anyRun = notes.some((n) => n.lastRunKey);
+    const runs = anyRun ? readRuns(defaultRunsDir()) : [];
+    const livePlaces = anyRun
+      ? new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys())
+      : new Set<string>();
+    const view: NotepadItemView[] = notes.map((n) => {
+      const runStatus = noteStatus(n, runs, livePlaces);
+      return runStatus ? { ...n, runStatus } : { ...n };
+    });
+    this.post({ type: "notepad:notes", notes: view });
+  }
+
+  private async addNote(title: string, body: string): Promise<void> {
+    // A note with neither a title nor a body is nothing at all — silently ignored
+    // rather than toasted: the webview already disables the button, so reaching
+    // here means a stale view, not a user who needs telling.
+    if (!title.trim() && !body.trim()) return;
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    await this.saveNotes([...this.notes(), newNote(title, body, id, Date.now())]);
+  }
+
+  private async updateNote(id: string, title: string, body: string): Promise<void> {
+    await this.saveNotes(
+      this.notes().map((n) => (n.id === id ? { ...n, title: title.trim(), body: body.trim() } : n)),
+    );
+  }
+
+  private async toggleNoteDone(id: string): Promise<void> {
+    await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, done: !n.done } : n)));
+  }
+
+  private async deleteNote(id: string): Promise<void> {
+    await this.saveNotes(this.notes().filter((n) => n.id !== id));
+  }
+
+  private async clearCompletedNotes(): Promise<void> {
+    await this.saveNotes(this.notes().filter((n) => !n.done));
+  }
+
   public async refresh(): Promise<void> {
     await this.postInitialState();
   }
@@ -240,6 +309,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       authed = false;
     }
     this.postState(authed, configured, null);
+    this.postNotepad();
     if (!configured || !authed) return;
 
     const provider = this.provider();
@@ -390,6 +460,30 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
         case "explore": {
           await this.explore();
+          break;
+        }
+        case "notepad:add": {
+          await this.addNote(m.title, m.body);
+          break;
+        }
+        case "notepad:update": {
+          await this.updateNote(m.id, m.title, m.body);
+          break;
+        }
+        case "notepad:toggleDone": {
+          await this.toggleNoteDone(m.id);
+          break;
+        }
+        case "notepad:delete": {
+          await this.deleteNote(m.id);
+          break;
+        }
+        case "notepad:clearCompleted": {
+          await this.clearCompletedNotes();
+          break;
+        }
+        case "notepad:run": {
+          // Task 6 implements this.
           break;
         }
         case "reorder": {

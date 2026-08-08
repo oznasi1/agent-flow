@@ -3787,3 +3787,92 @@ describe("a refused write that names fields to retry", () => {
     expect(posted.some((m) => m.type === "statusChanged")).toBe(false);
   });
 });
+
+describe("notepad", () => {
+  // A provider wired to a context whose globalState is a real in-memory map, so
+  // these tests assert on what was actually persisted rather than on a spy.
+  function mkProvider() {
+    const store = new Map<string, unknown>();
+    const ctx = {
+      ...fakeContext(),
+      globalState: {
+        get: (k: string, d?: unknown) => (store.has(k) ? store.get(k) : d),
+        update: async (k: string, v: unknown) => void store.set(k, v),
+      },
+    } as unknown as ConstructorParameters<typeof TasksViewProvider>[0];
+    const posted: unknown[] = [];
+    const provider = new TasksViewProvider(ctx, makeFixtureConnector(), () => {});
+    // The provider posts through its resolved webview; stand one in.
+    (provider as unknown as { view: unknown }).view = {
+      webview: { postMessage: (m: unknown) => void posted.push(m) },
+    };
+    // `onMessage` is private on the class — these tests drive it directly because
+    // it IS the unit under test, matching how the rest of this file reaches it
+    // (see the `send`/`handler` helpers above).
+    const sendMsg = (m: InboundMessage) =>
+      (provider as unknown as { onMessage(m: InboundMessage): Promise<void> }).onMessage(m);
+    return { provider, posted, store, sendMsg };
+  }
+
+  const notesIn = (store: Map<string, unknown>) =>
+    store.get("agentFlow.notepad") as { id: string; title: string; done: boolean }[] | undefined;
+
+  it("adds a note and posts the new list back", async () => {
+    const { posted, store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Write the thing", body: "details" });
+    expect(notesIn(store)!.map((n) => n.title)).toEqual(["Write the thing"]);
+    const last = posted.at(-1) as { type: string; notes: { title: string }[] };
+    expect(last.type).toBe("notepad:notes");
+    expect(last.notes.map((n) => n.title)).toEqual(["Write the thing"]);
+  });
+
+  it("ignores an add whose title and body are both blank", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "   ", body: "  " });
+    expect(notesIn(store) ?? []).toEqual([]);
+  });
+
+  it("edits a note in place", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "old", body: "b" });
+    const id = notesIn(store)![0].id;
+    await sendMsg({ type: "notepad:update", id, title: "new", body: "b2" });
+    expect(notesIn(store)![0]).toMatchObject({ id, title: "new", body: "b2" });
+  });
+
+  it("toggles done and back", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "t", body: "" });
+    const id = notesIn(store)![0].id;
+    await sendMsg({ type: "notepad:toggleDone", id });
+    expect(notesIn(store)![0].done).toBe(true);
+    await sendMsg({ type: "notepad:toggleDone", id });
+    expect(notesIn(store)![0].done).toBe(false);
+  });
+
+  it("deletes one note and leaves the rest", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "a", body: "" });
+    await sendMsg({ type: "notepad:add", title: "b", body: "" });
+    const id = notesIn(store)!.find((n) => n.title === "a")!.id;
+    await sendMsg({ type: "notepad:delete", id });
+    expect(notesIn(store)!.map((n) => n.title)).toEqual(["b"]);
+  });
+
+  it("clears only the completed notes", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "keep", body: "" });
+    await sendMsg({ type: "notepad:add", title: "drop", body: "" });
+    const id = notesIn(store)!.find((n) => n.title === "drop")!.id;
+    await sendMsg({ type: "notepad:toggleDone", id });
+    await sendMsg({ type: "notepad:clearCompleted" });
+    expect(notesIn(store)!.map((n) => n.title)).toEqual(["keep"]);
+  });
+
+  it("survives a globalState value that is not an array", async () => {
+    const { provider, store, posted } = mkProvider();
+    store.set("agentFlow.notepad", { corrupt: true });
+    provider.postNotepad();
+    expect((posted.at(-1) as { notes: unknown[] }).notes).toEqual([]);
+  });
+});
