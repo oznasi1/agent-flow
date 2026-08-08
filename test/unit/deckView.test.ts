@@ -117,6 +117,10 @@ const h = vi.hoisted(() => ({
   // that is not about contention behaves as it did before the lock existed; a
   // test about a busy directory says so with mockReturnValue(false).
   acquire: vi.fn((..._args: unknown[]) => true),
+  // Whatever logger the panel handed nodeLockIo, so a test can prove it passed one
+  // and that it reaches the output channel.
+  lockIoLog: undefined as ((m: string) => void) | undefined,
+  discoverRepos: vi.fn((_root: string, _blocklist: string[]) => [] as ServiceRef[]),
   release: vi.fn(),
   // The launcher (Task 4), stubbed so no test opens a window or a worktree. The
   // default answers FROM THE REQUEST rather than with a constant: a pass can
@@ -224,7 +228,12 @@ vi.mock("../../src/engine/review/store", () => ({
   // Exercise the real staleness rule rather than restating it here.
   isReviewCacheStale: (c: { fetchedAt: number } | null, ttl: number, now: number) => !c || now - c.fetchedAt >= ttl,
 }));
-vi.mock("../../src/engine/repos", () => ({ discoverRepos: () => h.repos }));
+// A spy over the arguments, not a bare `() => h.repos`: the real signature is
+// (reposRoot, blocklist), and a caller that passed them the other way round would
+// discover repos under a blocklist entry. An arg-ignoring mock cannot tell.
+vi.mock("../../src/engine/repos", () => ({
+  discoverRepos: (root: string, blocklist: string[]) => h.discoverRepos(root, blocklist),
+}));
 vi.mock("../../src/engine/orchestrator/store", () => ({
   defaultFlowsDir: () => "/flows",
   readFlows: () => h.readFlows(),
@@ -247,7 +256,14 @@ vi.mock("../../src/engine/orchestrator/launch", () => ({
 }));
 vi.mock("../../src/engine/orchestrator/flowIo", () => ({
   nodeFlowIo: () => ({ readDir: () => [], readFile: () => null, writeFile: () => {}, remove: () => {} }),
-  nodeLockIo: () => ({ tryCreate: () => true, read: () => null, remove: () => {} }),
+  // Records the logger it was given. `log` is OPTIONAL on the real nodeLockIo, so
+  // dropping the argument compiles and every arity-ignoring mock stays green — while
+  // an unexpected filesystem failure silently becomes indistinguishable from ordinary
+  // contention, stranding an armed flow with nothing in the log to explain it.
+  nodeLockIo: (log?: (m: string) => void) => {
+    h.lockIoLog = log;
+    return { tryCreate: () => true, read: () => null, remove: () => {} };
+  },
   // A counter, not a constant: deterministic so ids are assertable, but varying so
   // the re-mint-on-collision path is reachable. A constant would make the retry
   // loop indistinguishable from a refusal.
@@ -275,7 +291,7 @@ vi.mock("../../src/config", async (importActual) => {
     getConfig: () => ({
       baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds,
       openAgents: h.openAgents,
-      reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: [],
+      reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: ["vendored"],
       reviewWrites: h.reviewWrites, stampLabelOnWrite: h.stampLabelOnWrite,
       prReviewPrompt: h.prReviewPrompt, prReviewAutoFix: h.prReviewAutoFix, seedAgent: h.seedAgent,
       prReviewStatus: "PR initiated",
@@ -471,6 +487,8 @@ beforeEach(() => {
   });
   h.removeFlow.mockClear();
   h.acquire.mockClear().mockReturnValue(true);
+  h.lockIoLog = undefined;
+  h.discoverRepos.mockClear().mockImplementation(() => h.repos);
   h.release.mockClear();
   h.launchPlanned.mockClear().mockImplementation(
     async (req: { node: { ticketKey: string; repos: string[] } }) =>
@@ -3434,6 +3452,18 @@ describe("a met launch rule acts", () => {
     for (const [i, call] of h.release.mock.calls.entries()) expect(call[2]).toBe(tokens[i]);
   });
 
+  it("gives the lock's IO a logger that reaches the output channel", async () => {
+    // `log` is optional on nodeLockIo, so dropping it compiles and every other test
+    // stays green — while EEXIST and "the filesystem is broken" both return false, so
+    // a permissions failure would present as ordinary contention and strand an armed
+    // flow forever with nothing to diagnose.
+    const log = vi.fn();
+    await warmed([launchFlow()], log);
+    expect(h.lockIoLog).toBeTypeOf("function");
+    h.lockIoLog!("orchestrator: could not take the flows lock: EACCES");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("EACCES"));
+  });
+
   it("passes the real TTL to acquire, not a value that would reap a live holder", async () => {
     const { send } = await warmed([launchFlow()]);
     await send({ type: "deck:refresh" });
@@ -3573,6 +3603,10 @@ describe("a met launch rule acts", () => {
     expect(req.node).toMatchObject({ kind: "planned", ticketKey: "ASM-12" });
     expect(req.detail).toMatchObject({ key: "ASM-12", summary: "do it", descriptionText: "the description" });
     expect(req.repos).toEqual(h.repos);
+    // …discovered with the reposRoot as the root and the blocklist as the blocklist.
+    // Asserting the ARGUMENTS, not just the return: the mock ignores them, so passing
+    // them the other way round would look identical from `req.repos` alone.
+    expect(h.discoverRepos).toHaveBeenCalledWith("/repos", ["vendored"]);
     // The node's `mode` is a PromptMode id, resolved against the configured modes.
     expect(req.promptTemplate).toContain("Begin implementing");
     expect(req.seedAgent).toBe(true);

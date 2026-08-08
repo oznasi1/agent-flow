@@ -34,7 +34,7 @@ import { inferTicket, localRunFor } from "./engine/localRuns";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity, UNKNOWN_ACTIVITY } from "./engine/transcript";
 import { canon } from "./engine/paths";
-import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
+import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
 
 export const POLL_MS = 6000;
 const TICKET_TTL_MS = 30_000;
@@ -65,6 +65,20 @@ const VERB_LABEL: Record<ReviewVerb, string> = {
 type SpendTarget =
   | { action: "launch"; node: PlannedNode }
   | { action: "seed"; node: PlaceNode; mode?: string };
+
+/** One acting edge, decided. `promote` turns a launched planned node into the place
+ * the rest of the chain observes; `receipt` is the toast, which exists only when there
+ * is something honest to say. */
+interface EdgeDone {
+  kind: "done";
+  outcome: ActOutcome;
+  promote?: { nodeId: string; runKey: string; repo: string };
+  receipt?: { level: "success" | "error"; message: string };
+}
+
+/** What acting on one edge can answer: it happened (or deterministically cannot), or
+ * nothing was decided and the next pass should try again. */
+type EdgeResult = EdgeDone | { kind: "defer"; reason: string };
 
 /** The Deck: a full-window board of every task launched via Agent Flow Deck, opened as a
  * singleton editor-area panel. Reuses the Jira client, runs store, and status engine. */
@@ -419,7 +433,7 @@ export class DeckPanel {
         // pointing at the wrong kind of node spends nothing and is stamped as an
         // error below, so gating on it would ask about a rule that can never run.
         const wantsSpend = firing
-          .filter((f) => f.perform && (f.edge.action === "launch" || f.edge.action === "seed"))
+          .filter((f) => f.perform)
           .map((f) => this.spendTarget(fresh, f.edge))
           .find((t) => t !== undefined);
         if (wantsSpend !== undefined && fresh.launchConfirmedAt === undefined) {
@@ -515,6 +529,9 @@ export class DeckPanel {
       const node = this.placeTarget(flow, edge);
       return node ? { action: "seed", node, mode: edge.mode } : undefined;
     }
+    // A notify edge, which spends nothing. The caller hands every performing edge to
+    // this function rather than pre-filtering by action, so that "does this rule cost
+    // money?" is answered in exactly one place.
     return undefined;
   }
 
@@ -554,7 +571,33 @@ export class DeckPanel {
     else if (answer === DISARM) writeFlow(this.flowIo, this.flowsDir, { ...latest, armed: false });
   }
 
-  /** Perform one acting edge and report what happened. Never throws.
+  /** The configured PromptMode for an id, or a `done` refusal naming what will not
+   * happen because of it. Shared by both acting verbs, which resolve the id from
+   * different places — a launch from its planned node, a seed from the edge — but must
+   * refuse identically: a mode the user has since deleted can never be silently
+   * replaced with a default, because that seeds an agent with someone else's prompt,
+   * which is worse than not acting at all. Deterministic, so it latches: a later pass
+   * would answer this identically, and an armed flow retrying a rule that can never run
+   * is worse than one stalled rule the drawer shows and offers Reset for. */
+  private modeFor(id: string | undefined, notDoing: string): { mode: PromptMode } | { refusal: EdgeDone } {
+    const mode = getConfig().promptModes.find((m) => m.id === id);
+    if (mode) return { mode };
+    return {
+      refusal: {
+        kind: "done",
+        outcome: { ok: false, error: `the prompt mode "${id}" is no longer configured — ${notDoing}.` },
+      },
+    };
+  }
+
+  /** Perform one acting edge and report what happened.
+   *
+   * Every SPENDING step is guarded — `launchPlanned` never throws by contract, and the
+   * `openWorkspace` a seed calls is wrapped — so nothing here can spend money and then
+   * throw instead of reporting it. The pre-flight reads around them (`getConfig`,
+   * `discoverRepos`) are NOT wrapped: a throw there escapes to the per-flow `catch` in
+   * `advanceUnderLock`, which logs it and leaves the edge pending. That is the honest
+   * outcome — those calls spend nothing — but it is not "never throws".
    *
    * A `done` result settles the edge and is never retried: that is what stops a
    * launch failing on every poll from ending in twenty windows, and the drawer shows
@@ -574,15 +617,7 @@ export class DeckPanel {
     flow: Flow,
     edge: FlowEdge,
     statuses: RunStatus[],
-  ): Promise<
-    | {
-        kind: "done";
-        outcome: ActOutcome;
-        promote?: { nodeId: string; runKey: string; repo: string };
-        receipt?: { level: "success" | "error"; message: string };
-      }
-    | { kind: "defer"; reason: string }
-  > {
+  ): Promise<EdgeResult> {
     if (edge.action === "seed") return this.performSeed(flow, edge, statuses);
     const node = this.plannedTarget(flow, edge);
     if (!node) {
@@ -592,22 +627,9 @@ export class DeckPanel {
       };
     }
     const cfg = getConfig();
-    // The node's `mode` is a PromptMode id. A mode the user has since deleted cannot
-    // be silently replaced with a default: that would seed an agent with someone
-    // else's prompt, which is worse than not launching.
-    const mode = cfg.promptModes.find((m) => m.id === node.mode);
-    if (!mode) {
-      // Deterministic, so it latches: a later pass would answer this identically, and
-      // an armed flow silently retrying a rule that can never run forever is worse
-      // than one stalled rule the drawer shows and offers Reset for.
-      return {
-        kind: "done",
-        outcome: {
-          ok: false,
-          error: `the prompt mode "${node.mode}" is no longer configured — not launching ${node.ticketKey}.`,
-        },
-      };
-    }
+    // A planned node carries its own PromptMode id.
+    const found = this.modeFor(node.mode, `not launching ${node.ticketKey}`);
+    if ("refusal" in found) return found.refusal;
     // Typed as the launcher's own structural detail rather than left to inference:
     // this is where a connector's `TaskDetail` is checked against the four fields a
     // launch actually needs, and an evolving `any` would check nothing.
@@ -627,7 +649,7 @@ export class DeckPanel {
         node,
         detail,
         repos: discoverRepos(cfg.reposRoot, cfg.repoBlocklist),
-        promptTemplate: mode.prompt,
+        promptTemplate: found.mode.prompt,
         workspaceDir: cfg.workspaceDir,
         seedAgent: cfg.seedAgent,
         // `cfg.workspaceMode` also has "auto" and "ask", and neither is a layout: an
@@ -674,12 +696,7 @@ export class DeckPanel {
     flow: Flow,
     edge: FlowEdge,
     statuses: RunStatus[],
-  ): Promise<{
-    kind: "done";
-    outcome: ActOutcome;
-    promote?: { nodeId: string; runKey: string; repo: string };
-    receipt?: { level: "success" | "error"; message: string };
-  }> {
+  ): Promise<EdgeDone> {
     const node = this.placeTarget(flow, edge);
     if (!node) {
       return {
@@ -708,21 +725,10 @@ export class DeckPanel {
       };
     }
     const cfg = getConfig();
-    // The edge's `mode` is a PromptMode id — a place has no `mode` of its own the
-    // way a planned node does, so a seed's prompt lives on the edge (Task 6 is what
-    // lets the inspector set it). A mode the user has since deleted latches exactly
-    // as a launch's does, for the same reason: silently substituting one would seed
-    // an agent with someone else's prompt.
-    const mode = cfg.promptModes.find((m) => m.id === edge.mode);
-    if (!mode) {
-      return {
-        kind: "done",
-        outcome: {
-          ok: false,
-          error: `the prompt mode "${edge.mode}" is no longer configured — not seeding ${node.repo}.`,
-        },
-      };
-    }
+    // A place has no `mode` of its own the way a planned node does, so a seed's prompt
+    // id lives on the EDGE (Task 6 is what lets the inspector set it).
+    const found = this.modeFor(edge.mode, `not seeding ${node.repo}`);
+    if ("refusal" in found) return found.refusal;
     try {
       await openWorkspace({
         // A seed has no ticket: `run.key`/`summary`/`url` are the closest thing —
@@ -735,7 +741,7 @@ export class DeckPanel {
         // that still writes a brief here (a place that has none yet).
         services: [{ name: repo.name, path: repo.path, isGit: repo.isGit }],
         mode: "per-window",
-        promptTemplate: mode.prompt,
+        promptTemplate: found.mode.prompt,
         workspaceDir: cfg.workspaceDir,
         seedAgent: cfg.seedAgent,
         openIn: "new",
