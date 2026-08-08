@@ -463,6 +463,20 @@ export class DeckPanel {
           // A stamped-only sibling performs nothing, and a notify's whole action is
           // the toast `notifyLines` produces below.
           if (!f.perform || f.edge.action === "notify") continue;
+          // Re-read and check `armed` immediately before THIS edge, not once for the
+          // whole flow: a launch or seed is its own `await`, and up to three of them
+          // can run in one pass (the per-pass cap), each one long enough for
+          // `flow:arm` — this window or another — to disarm the flow while an
+          // earlier edge in this same loop is still in flight. Harmless for a toast;
+          // a launch that goes ahead anyway is a second paid session the user just
+          // said stop to. Left pending rather than stamped: a re-arm should get a
+          // clean retry, not a permanently latched failure for a rule that never ran.
+          const stillArmed = readFlows(this.flowIo, this.flowsDir).find((fl) => fl.id === flow.id)?.armed;
+          if (!stillArmed) {
+            this.log(`deck: flow ${flow.id} rule ${f.edge.id} skipped — disarmed mid-pass`);
+            deferredTargets.add(f.edge.to);
+            continue;
+          }
           const done = await this.performEdge(fresh, f.edge, runs);
           if (done.kind === "defer") {
             // The log, and nothing else: a transient read failure on an unattended

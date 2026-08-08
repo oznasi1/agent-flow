@@ -71,8 +71,17 @@ function performedNote(flow: Flow, hit: FiredEdge): string {
  * happened. */
 export function notifyLines(flow: Flow, fired: FiredEdge[]): string[] {
   const out: string[] = [];
+  // Indexed once, not read off `f.edge` per item: `f.edge` is the edge object
+  // evaluation captured, which can be a stale copy by the time the caller re-reads
+  // the store immediately before writing (Task 5's guard against two windows
+  // racing). `applyFired` decides "is this a notify" from `flow.edges` — the copy
+  // the caller actually writes — and this must agree, or a `launch` that a
+  // concurrent edit turned this edge into between evaluation and the write gets
+  // announced here as a notify that told you something, while `applyFired` stamps
+  // it as an unperformed launch with an error. Same question, same copy.
+  const byId = new Map(flow.edges.map((e) => [e.id, e]));
   for (const f of fired) {
-    if (!f.perform || f.edge.action !== "notify") continue;
+    if (!f.perform || byId.get(f.edge.id)?.action !== "notify") continue;
     const target = findNode(flow, f.edge.to);
     const message = target && target.kind === "notify" ? target.message : null;
     out.push(message ? `${flow.name}: ${message}` : `${flow.name}: a rule fired.`);

@@ -3945,6 +3945,106 @@ describe("a met launch rule acts", () => {
     await send({ type: "deck:refresh" });
     expect(h.launchPlanned.mock.calls.map((c) => (c[0] as any).node.ticketKey)).toEqual(["ASM-24", "ASM-25"]);
   });
+
+  it("stops a later acting edge in the same pass once the flow is disarmed mid-pass", async () => {
+    // Three targets, so this pass has three `performEdge` calls to make, each one
+    // an await — room for `flow:arm` (this window, or another) to disarm the flow
+    // between the first launch and the second. Harmless for a toast; not for a
+    // launch, which is exactly why this guard exists.
+    const many = (): Flow => ({
+      ...launchFlow(),
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        ...[1, 2, 3].map((i) => ({
+          id: `p${i}`, kind: "planned" as const, x: 0, y: 0, join: "any" as const,
+          ticketKey: `ASM-2${i}`, repos: ["aws-ops"], mode: "implementation", dest: "worktree" as const,
+        })),
+      ],
+      edges: [1, 2, 3].map((i) => ({
+        id: `e${i}`, from: "n1", to: `p${i}`, cond: { kind: "pr-merged" as const }, action: "launch" as const,
+      })),
+    });
+    const { send } = await warmed([many()]);
+    h.launchPlanned.mockClear().mockImplementation(async (req: { node: { ticketKey: string; repos: string[] } }) => {
+      // The disarm itself: written straight to the store, exactly as a `flow:arm`
+      // handler (this window) or another window's own write would land on disk
+      // while THIS pass sits inside the first launch's await.
+      h.flows = h.flows.map((f) => ({ ...f, armed: false }));
+      return { ok: true, runKey: req.node.ticketKey, repo: req.node.repos[0] };
+    });
+    await send({ type: "deck:refresh" });
+    // Only the first edge got to launch.
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    const w = lastWrite();
+    expect(w.edges.find((e) => e.id === "e1")!.firedAt).toBeTypeOf("number");
+    // The two stopped mid-pass are left exactly as they were — no error, no
+    // firedAt — so a re-arm gets a clean retry rather than a latched failure.
+    expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBeUndefined();
+    expect(w.edges.find((e) => e.id === "e2")!.error).toBeUndefined();
+    expect(w.edges.find((e) => e.id === "e3")!.firedAt).toBeUndefined();
+    expect(w.edges.find((e) => e.id === "e3")!.error).toBeUndefined();
+    expect(w.nodes.find((n) => n.id === "p2")!.kind).toBe("planned");
+    expect(w.nodes.find((n) => n.id === "p3")!.kind).toBe("planned");
+  });
+});
+
+describe("an edge whose action changes between evaluation and the write", () => {
+  // `advanceUnderLock` evaluates against one read of the store and then re-reads
+  // it immediately before writing, to drop anything another window claimed in
+  // between (Task 5). That guard is about WHICH edges got claimed — this is
+  // about what a still-unclaimed edge's OWN fields say. `applyFired` decides
+  // "is this a notify" from the fresh copy (it indexes `flow.edges` by id); if
+  // `notifyLines` decided the same question from the stale `FiredEdge.edge` it
+  // captured at evaluation time, the two could disagree about a single edge —
+  // and disagree in the one way that matters: announcing a "told you" toast for
+  // an edge `applyFired` is busy stamping as an unperformed launch.
+  const flow = (action: "notify" | "launch"): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "it happened" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action }],
+  });
+
+  it("does not toast a notify's message for an edge that became a launch before the write", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [flow("notify")];
+    // Warm-up pass with the condition UNMET, so the resume gate clears itself and
+    // the real pass below acts instead of just reporting "ready" — the same
+    // two-pass idiom every firing test in this file uses.
+    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    show();
+    await settled();
+    const p = lastPanel();
+    const send = async (m: unknown) => { await p._fire(m); await settled(); };
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    const toastsBefore = posts(p).filter((m) => m.type === "toast").length;
+
+    // Evaluation (the FIRST read this pass makes) sees `e1` as a `notify`. Every
+    // read after that — the fresh re-read before writing, and `postFlows`'
+    // read afterward — sees the edge as it is "on disk" now: a `launch`, as if
+    // another window's edit landed in between.
+    let reads = 0;
+    h.readFlows.mockImplementation(() => (++reads === 1 ? [flow("notify")] : [flow("launch")]));
+    await send({ type: "deck:refresh" });
+
+    // The fresh action is `launch`, so nothing was performed — this must stamp
+    // as an unperformed launch, exactly what `applyFired` gives an acting edge
+    // with no recorded outcome.
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(w.edges[0].error).toBe("launch was not performed");
+    expect(w.edges[0].firedAt).toBeUndefined();
+    // And it must NOT also claim, in a toast, that the notify's message was told —
+    // that would be true only if the edge were still a `notify` by the time it
+    // was decided.
+    expect(posts(p).filter((m) => m.type === "toast").length).toBe(toastsBefore);
+  });
 });
 
 describe("a met seed rule acts", () => {
