@@ -12,6 +12,11 @@ import type { Flow } from "../../src/engine/orchestrator/model";
 const h = vi.hoisted(() => ({
   runs: [] as Run[],
   openInEditor: vi.fn(async (_t: string) => true),
+  // A seed edge's launcher (Task 5b) — stubbed so no test opens a real window.
+  // Typed loosely (the mock never inspects its own argument) so the module's
+  // real OpenRequest/OpenResult shapes stay the single source of truth; the
+  // tests assert on what `deckView.ts` PASSED it, not on what it returns.
+  openWorkspace: vi.fn(async (_req: unknown) => ({ mode: "per-window", briefs: [], opened: [], remoteControl: false })),
   writePlanFile: vi.fn(),
   prReviewPrompt: "Assess the PR for {key}.{files}" as string,
   prReviewAutoFix: false as boolean,
@@ -143,10 +148,9 @@ vi.mock("../../src/engine/runs", () => ({
 vi.mock("../../src/engine/status", () => ({ buildRunStatus: h.buildRunStatus }));
 vi.mock("../../src/engine/workspace", () => ({
   openInEditor: h.openInEditor,
-  // Never actually invoked in this suite — launchReview itself is mocked below,
-  // so it never calls through to its own deps. Present only so deckView's
-  // import of BRIEF_DIR and openWorkspace resolves to something.
-  openWorkspace: vi.fn(),
+  // Invoked directly by a met `seed` rule (Task 5b) — see h.openWorkspace above.
+  // launchReview itself is mocked below, so it never calls through to this.
+  openWorkspace: h.openWorkspace,
   BRIEF_DIR: ".pick-task",
   writePlanFile: h.writePlanFile,
   // A stub that encodes its brief argument in the output, so a test can assert
@@ -405,6 +409,7 @@ const sess = (over: Partial<OpenSession> = {}): OpenSession => ({
 beforeEach(() => {
   h.runs = [mkRun()];
   h.openInEditor.mockClear().mockResolvedValue(true);
+  h.openWorkspace.mockClear().mockResolvedValue({ mode: "per-window", briefs: [], opened: [], remoteControl: false });
   h.writePlanFile.mockClear();
   h.prReviewPrompt = "Assess the PR for {key}.{files}";
   h.prReviewAutoFix = false;
@@ -3609,19 +3614,27 @@ describe("a met launch rule acts", () => {
     expect(posts(p).some((m) => m.type === "toast" && /the migration has landed/.test(m.message ?? ""))).toBe(true);
   });
 
-  it("stamps a seed rule as unperformed rather than pretending it acted", async () => {
-    // `seed` — another agent in a place that already exists — has no launcher yet.
-    // It must not read as a success, or it would look already-done forever.
+  it("never routes a seed rule through the launcher — see \"a met seed rule acts\" below for its own path", async () => {
+    // `seed` opens another agent in a place that already exists; it has no ticket
+    // and nothing to launch, so it must never reach launchPlanned, however its own
+    // rule resolves. The full seed behavior (success, and every latch) has its own
+    // describe block below, with its own fixtures — a place's run/repo has to be
+    // resolvable against the statuses this pass built, which this file's `ASM-1`
+    // fixture (repo "aws-ops" only) does not model for a second place.
     const { send } = await warmed([launchFlow({
       nodes: [
         { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
         { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-9", repo: "aws-ops" },
       ],
-      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "seed" }],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "seed", mode: "implementation" }],
     })]);
     await send({ type: "deck:refresh" });
     expect(h.launchPlanned).not.toHaveBeenCalled();
-    expect(lastWrite().edges[0].error).toMatch(/seed/i);
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+    // ASM-9 is not in the statuses this pass built (only ASM-1 is), so this
+    // particular rule happens to latch on the missing-run guard — proven properly,
+    // with its own message assertion, below.
+    expect(lastWrite().edges[0].error).toBeTypeOf("string");
     expect(lastWrite().edges[0].firedAt).toBeUndefined();
   });
 
@@ -3695,6 +3708,249 @@ describe("a met launch rule acts", () => {
     h.launchPlanned.mockClear();
     await send({ type: "deck:refresh" });
     expect(h.launchPlanned.mock.calls.map((c) => (c[0] as any).node.ticketKey)).toEqual(["ASM-24", "ASM-25"]);
+  });
+});
+
+describe("a met seed rule acts", () => {
+  /** `log` is injectable for the same reason `a met launch rule acts` above wants
+   * it: nothing here asserts on it today, but keeping the same shape means a case
+   * that later wants to assert on the log does not have to change this helper. */
+  const openPanel = async (log: (m: string) => void = () => {}) => {
+    DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** One run, two repos: `aws-ops` is the watched place whose PR merging is the
+   * rule's condition, `bite-me` is the place a `seed` opens another agent in. One
+   * RunStatus covers both, since `Run.repos` is a single array and place nodes
+   * only ever narrow it to one entry each. */
+  const seedRunStatus = (prState: "OPEN" | "MERGED"): RunStatus => ({
+    run: {
+      key: "ASM-1", summary: "ship the migration", url: "https://jira/ASM-1", createdAt: 1, mode: "multiroot",
+      repos: [
+        { name: "aws-ops", path: "/r/aws-ops", isGit: true },
+        { name: "bite-me", path: "/r/bite-me", isGit: true },
+      ],
+      briefPaths: [],
+    },
+    column: "progress", ticketStatus: "In Progress", ticketCategory: "indeterminate",
+    repos: [{ name: "aws-ops", path: "/r/aws-ops", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
+    agent: { state: "working", lastActivityMs: 1, slug: null },
+    windowOpen: true,
+    prs: {
+      "aws-ops": {
+        facts: {
+          number: 1, url: "u", title: "t", state: prState, isDraft: false,
+          ci: { passing: 2, pending: 0, failing: [] }, review: "none", unresolved: null,
+          mergeable: "clean", ciAdvisory: false,
+        },
+        fetchedAt: 1,
+      },
+    },
+    agents: [],
+  });
+
+  /** A place watching `aws-ops`, wired to seed another agent into `bite-me` — both
+   * places belong to the same run, `ASM-1`. `launchConfirmedAt` is set by default,
+   * exactly as `launchFlow` does above: most cases here are about what an
+   * already-approved flow does, and the first-spend question has its own cases in
+   * "the resume gate"/gate-widening tests below. */
+  const seedFlow = (over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "bite-me" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "seed", mode: "implementation" }],
+    ...over,
+  });
+
+  /** Open with the condition UNMET so the resume gate clears itself (Task 4), then
+   * arm the met one — the same two-pass idiom every firing test in this file uses. */
+  const warmed = async (flows: Flow[], log?: (m: string) => void) => {
+    setConfig({ orchestrator: true });
+    h.flows = flows;
+    h.buildRunStatus.mockReturnValue(seedRunStatus("OPEN"));
+    const opened = await openPanel(log);
+    await settle();
+    h.buildRunStatus.mockReturnValue(seedRunStatus("MERGED"));
+    h.writeFlow.mockClear();
+    h.openWorkspace.mockClear();
+    return opened;
+  };
+
+  const lastWrite = () => h.writeFlow.mock.calls.at(-1)![2] as Flow;
+
+  it("opens another agent in the place's resolved directory, stamps the edge, and promotes nothing", async () => {
+    const { p, send } = await warmed([seedFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(h.openWorkspace).toHaveBeenCalledTimes(1);
+    const req = h.openWorkspace.mock.calls.at(-1)![0] as any;
+    // The failure this whole task is about: a seed pointed at the wrong directory
+    // spends money in the wrong place. Assert the actual argument object, not a
+    // substring of some derived message.
+    expect(req.existingFolder).toBe("/r/bite-me");
+    expect(req.openIn).toBe("new");
+    expect(req.mode).toBe("per-window");
+    expect(req.services).toEqual([{ name: "bite-me", path: "/r/bite-me", isGit: true }]);
+    expect(req.promptTemplate).toContain("Begin implementing"); // "implementation" mode, resolved
+    expect(req.seedAgent).toBe(true);
+    expect(req.workspaceDir).toBeTypeOf("string");
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+
+    const w = lastWrite();
+    expect(w.edges[0].firedAt).toBeTypeOf("number");
+    expect(w.edges[0].error).toBeUndefined();
+    expect(w.edges[0].firedNote).toContain("bite-me");
+    // The place already existed — nothing was promoted, and the node is
+    // byte-identical to what it was before this pass.
+    expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "ASM-1", repo: "bite-me" });
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "success" && /bite-me/.test(m.message ?? ""))).toBe(true);
+  });
+
+  it("latches when the place's run is no longer on the board, naming the run", async () => {
+    const { send } = await warmed([seedFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-GONE", repo: "bite-me" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+    const w = lastWrite();
+    expect(w.edges[0].error).toContain("ASM-GONE");
+    expect(w.edges[0].firedAt).toBeUndefined();
+    // Deterministic, so it is not retried on the next pass either.
+    h.openWorkspace.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("latches when the place's repo is no longer one of that run's repos, naming the repo", async () => {
+    const { send } = await warmed([seedFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "not-in-this-run" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+    const w = lastWrite();
+    expect(w.edges[0].error).toContain("not-in-this-run");
+    expect(w.edges[0].firedAt).toBeUndefined();
+  });
+
+  it("refuses a seed rule whose target is not a place, the mirror of launch's not-planned guard", async () => {
+    const { send } = await warmed([seedFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "not a place" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+    const w = lastWrite();
+    expect(w.edges[0].error).toMatch(/place/i);
+    expect(w.edges[0].firedAt).toBeUndefined();
+  });
+
+  it("refuses a seed whose prompt mode is no longer configured, rather than substituting one", async () => {
+    const { send } = await warmed([seedFlow({
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "seed", mode: "deleted-mode" }],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+    const w = lastWrite();
+    expect(w.edges[0].error).toContain("deleted-mode");
+    expect(w.edges[0].firedAt).toBeUndefined();
+  });
+
+  it("stamps an error and never retries when openWorkspace itself throws", async () => {
+    h.openWorkspace.mockRejectedValueOnce(new Error("disk full"));
+    const { p, send } = await warmed([seedFlow()]);
+    await send({ type: "deck:refresh" });
+    const w = lastWrite();
+    expect(w.edges[0].error).toContain("disk full");
+    expect(w.edges[0].firedAt).toBeUndefined();
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "error")).toBe(true);
+    h.openWorkspace.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("asks before a flow's first seed, naming the place and the prompt mode — not a ticket", async () => {
+    // Step 1's own test: a `seed` starts a paid session exactly like a `launch`
+    // does, so the once-per-flow confirmation must see it too, or a flow whose
+    // only acting rule is a `seed` would spend money with no consent at all.
+    const { send } = await warmed([seedFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[0]).toContain("bite-me");
+    expect(call[0]).toContain("Implementation"); // the configured mode's label
+    expect(call[0]).not.toMatch(/\blaunch\b/i); // no ticket to launch — say so
+    expect(call[1]).toMatchObject({ modal: true });
+    expect(call.slice(2)).toEqual(["Seed", "Disarm"]);
+    // The asking pass performs NOTHING — whatever the answer, THIS pass never
+    // calls openWorkspace or stamps the edge (see "stamps launchConfirmedAt on
+    // Seed" below for what the confirmed answer itself does).
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+    expect(lastWrite().edges[0].firedAt).toBeUndefined();
+  });
+
+  it("writes nothing and seeds nothing when the question is dismissed", async () => {
+    // Escape, or the modal being closed. Neither approval nor disarm: the flow
+    // stays armed and is asked again on a later pass.
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const { send } = await warmed([seedFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("stamps launchConfirmedAt on Seed and lets the NEXT pass act", async () => {
+    const { send } = await warmed([seedFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    expect(lastWrite().launchConfirmedAt).toBeTypeOf("number");
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+    h.flows = [lastWrite()];
+    await send({ type: "deck:refresh" });
+    expect(h.openWorkspace).toHaveBeenCalledTimes(1);
+    expect(window.showWarningMessage).toHaveBeenCalledTimes(1); // asked once per flow
+  });
+
+  it("disarms on Disarm, and never seeds on any later pass", async () => {
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_m: string, _o: unknown, ...items: string[]) => items[1], // "Disarm"
+    );
+    const { send } = await warmed([seedFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    expect(lastWrite().armed).toBe(false);
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+    h.flows = [lastWrite()];
+    await send({ type: "deck:refresh" });
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("does NOT gate on a seed edge whose target is not a place — nothing would be spent", async () => {
+    // The same reasoning `launchFlow`'s "never launches a rule whose target is not
+    // planned work" case rests on: gating on a rule that can never spend anything
+    // would ask about something that will never happen.
+    const { send } = await warmed([seedFlow({
+      launchConfirmedAt: undefined,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "not a place" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    // Still refused, exactly as it would be with an approval already on file.
+    expect(lastWrite().edges[0].error).toMatch(/place/i);
+    expect(lastWrite().launchConfirmedAt).toBeUndefined();
   });
 });
 

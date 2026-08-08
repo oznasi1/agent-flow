@@ -5,7 +5,7 @@ import * as path from "path";
 import { getConfig } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { Flow, FlowEdge, PlannedNode, emptyFlow, findNode, isPlanned, isSettled } from "./engine/orchestrator/model";
+import { Flow, FlowEdge, PlaceNode, PlannedNode, emptyFlow, findNode, isPlace, isPlanned, isSettled } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId } from "./engine/orchestrator/flowIo";
 import { LOCK_TTL_MS, acquire, release } from "./engine/orchestrator/lock";
@@ -57,6 +57,14 @@ const VERB_LABEL: Record<ReviewVerb, string> = {
   comment: "Comment",
   "request-changes": "Request changes",
 };
+
+/** What a performing edge (`launch` or `seed`) is about to spend money on, resolved
+ * just far enough for the once-per-flow confirmation to name it. A `launch` has a
+ * ticket and a set of repos; a `seed` has no ticket at all — only the place it opens
+ * another agent in and the prompt mode it uses. */
+type SpendTarget =
+  | { action: "launch"; node: PlannedNode }
+  | { action: "seed"; node: PlaceNode; mode?: string };
 
 /** The Deck: a full-window board of every task launched via Agent Flow Deck, opened as a
  * singleton editor-area panel. Reuses the Jira client, runs store, and status engine. */
@@ -347,17 +355,20 @@ export class DeckPanel {
         // toast — it already announced every one of these.
         if (unclaimed.length === 0) continue;
 
-        // A flow asks ONCE before it ever launches anything, then runs unattended:
-        // a mis-wired flow should cost one prompt, not a string of paid sessions.
-        // Only a launch we would actually attempt counts — a `launch` edge pointing
-        // at something that is not planned work spends nothing and is stamped as an
+        // A flow asks ONCE before it ever spends anything, then runs unattended: a
+        // mis-wired flow should cost one prompt, not a string of paid sessions. A
+        // `seed` starts a paid Claude Code session exactly like a `launch` does, so
+        // it gates the same way — the once-per-flow confirmation must see it, or a
+        // flow whose only acting rule is a `seed` would spend money with no consent
+        // at all. Only a launch or seed we would actually attempt counts — an edge
+        // pointing at the wrong kind of node spends nothing and is stamped as an
         // error below, so gating on it would ask about a rule that can never run.
-        const wantsLaunch = unclaimed
-          .filter((f) => f.perform && f.edge.action === "launch")
-          .map((f) => this.plannedTarget(fresh, f.edge))
-          .find((n) => n !== undefined);
-        if (wantsLaunch !== undefined && fresh.launchConfirmedAt === undefined) {
-          await this.askFirstLaunch(fresh, wantsLaunch);
+        const wantsSpend = unclaimed
+          .filter((f) => f.perform && (f.edge.action === "launch" || f.edge.action === "seed"))
+          .map((f) => this.spendTarget(fresh, f.edge))
+          .find((t) => t !== undefined);
+        if (wantsSpend !== undefined && fresh.launchConfirmedAt === undefined) {
+          await this.askFirstSpend(fresh, wantsSpend);
           // Whatever the answer, THIS pass performs nothing: an approval only lets
           // the next pass act, which keeps the acting path identical whether or not
           // a question was ever asked.
@@ -375,7 +386,7 @@ export class DeckPanel {
           // A stamped-only sibling performs nothing, and a notify's whole action is
           // the toast `notifyLines` produces below.
           if (!f.perform || f.edge.action === "notify") continue;
-          const done = await this.performEdge(fresh, f.edge);
+          const done = await this.performEdge(fresh, f.edge, runs);
           if (done.kind === "defer") {
             // The log, and nothing else: a transient read failure on an unattended
             // flow is not worth a notification, but a rule quietly not advancing is
@@ -417,28 +428,59 @@ export class DeckPanel {
     return target && isPlanned(target) ? target : undefined;
   }
 
-  /** Ask, once per flow, before it launches anything — naming the ticket, the repos
-   * and the prompt mode, because those are what the money is spent on. Writes the
-   * answer (an approval, or a disarm) and nothing else; the pass that asked never
-   * acts. Dismissing it writes nothing at all, so the flow stays armed and is asked
-   * again later. */
-  private async askFirstLaunch(flow: Flow, node: PlannedNode): Promise<void> {
+  /** The place a `seed` edge points at, or `undefined` when it points at anything
+   * else — the mirror of `plannedTarget` for the other spending action. A `seed`
+   * opens another agent in a place that already exists, so its target must be a
+   * place, never planned work. */
+  private placeTarget(flow: Flow, edge: FlowEdge): PlaceNode | undefined {
+    const target = findNode(flow, edge.to);
+    return target && isPlace(target) ? target : undefined;
+  }
+
+  /** What a `launch` or `seed` edge would actually spend money on, resolved just
+   * far enough to ask about it — never as far as reading a ticket or touching
+   * disk. `undefined` means the edge cannot spend anything (wrong kind of
+   * target), so it must not count toward the once-per-flow gate below. */
+  private spendTarget(flow: Flow, edge: FlowEdge): SpendTarget | undefined {
+    if (edge.action === "launch") {
+      const node = this.plannedTarget(flow, edge);
+      return node ? { action: "launch", node } : undefined;
+    }
+    if (edge.action === "seed") {
+      const node = this.placeTarget(flow, edge);
+      return node ? { action: "seed", node, mode: edge.mode } : undefined;
+    }
+    return undefined;
+  }
+
+  /** Ask, once per flow, before it ever spends anything — naming what will actually
+   * happen, because that is what the money is spent on: a launch names the ticket
+   * and the repos it would open, a seed names the place (it has no ticket to name).
+   * Both name the prompt mode. Writes the answer (an approval, or a disarm) and
+   * nothing else; the pass that asked never acts. Dismissing it writes nothing at
+   * all, so the flow stays armed and is asked again later. */
+  private async askFirstSpend(flow: Flow, target: SpendTarget): Promise<void> {
     if (this.launchAsks.has(flow.id)) return;
     const cfg = getConfig();
-    const mode = cfg.promptModes.find((m) => m.id === node.mode);
-    const LAUNCH = "Launch";
+    const ACT = target.action === "launch" ? "Launch" : "Seed";
     const DISARM = "Disarm";
     this.launchAsks.add(flow.id);
     let answer: string | undefined;
     try {
-      answer = await vscode.window.showWarningMessage(
-        `${flow.name} is ready to launch ${node.ticketKey} in ${node.repos.join(", ")} with the "${
-          mode?.label ?? node.mode
-        }" prompt, unattended. It will keep launching on its own from now on.`,
-        { modal: true },
-        LAUNCH,
-        DISARM,
-      );
+      const message = target.action === "launch"
+        ? (() => {
+            const mode = cfg.promptModes.find((m) => m.id === target.node.mode);
+            return `${flow.name} is ready to launch ${target.node.ticketKey} in ${target.node.repos.join(", ")} with the "${
+              mode?.label ?? target.node.mode
+            }" prompt, unattended. It will keep launching on its own from now on.`;
+          })()
+        : (() => {
+            const mode = cfg.promptModes.find((m) => m.id === target.mode);
+            return `${flow.name} is ready to seed another agent into ${target.node.repo} with the "${
+              mode?.label ?? target.mode ?? "default"
+            }" prompt, unattended. It will keep seeding on its own from now on.`;
+          })();
+      answer = await vscode.window.showWarningMessage(message, { modal: true }, ACT, DISARM);
     } finally {
       this.launchAsks.delete(flow.id);
     }
@@ -448,7 +490,7 @@ export class DeckPanel {
     // one and resurrect the other.
     const latest = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
     if (!latest) return;
-    if (answer === LAUNCH) writeFlow(this.flowIo, this.flowsDir, { ...latest, launchConfirmedAt: Date.now() });
+    if (answer === ACT) writeFlow(this.flowIo, this.flowsDir, { ...latest, launchConfirmedAt: Date.now() });
     else if (answer === DISARM) writeFlow(this.flowIo, this.flowsDir, { ...latest, armed: false });
   }
 
@@ -463,10 +505,15 @@ export class DeckPanel {
    *
    * A `defer` result is the opposite: a pre-flight READ failed, so nothing was spent
    * and nothing is decided. The edge is left pending and the next pass tries again,
-   * because latching there would let one Jira blip permanently kill a rule. */
+   * because latching there would let one Jira blip permanently kill a rule.
+   *
+   * `statuses` is the same `RunStatus[]` this poll already built for the board —
+   * threaded in rather than re-read, so a `seed` resolves its place against exactly
+   * what the rest of this pass saw. */
   private async performEdge(
     flow: Flow,
     edge: FlowEdge,
+    statuses: RunStatus[],
   ): Promise<
     | {
         kind: "done";
@@ -476,15 +523,7 @@ export class DeckPanel {
       }
     | { kind: "defer"; reason: string }
   > {
-    if (edge.action === "seed") {
-      // Seeding another agent into a place that already exists has no launcher yet.
-      // Said plainly, and as an error rather than a receipt, so the rule is settled
-      // (never re-firing in a loop) and one Reset makes it live once seed ships.
-      return {
-        kind: "done",
-        outcome: { ok: false, error: "seed: opening another agent in an existing place is not wired up yet." },
-      };
-    }
+    if (edge.action === "seed") return this.performSeed(flow, edge, statuses);
     const node = this.plannedTarget(flow, edge);
     if (!node) {
       return {
@@ -556,6 +595,116 @@ export class DeckPanel {
       receipt: {
         level: "success",
         message: `${flow.name}: launched ${node.ticketKey} in ${res.repo}.${
+          cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : ""
+        }`,
+      },
+    };
+  }
+
+  /** Perform a `seed` edge: open another agent in a place that already exists — a
+   * second pair of hands in the same worktree. Unlike `launch`, there is no ticket
+   * to fetch (a place is not planned work) and nothing to promote (the place is
+   * already there), so this never returns `promote`.
+   *
+   * Resolving the place to a directory is entirely local — the `run.key`/`repo`
+   * lookup below reads only `statuses`, the RunStatus[] this poll already built —
+   * so every failure here is deterministic and latches immediately. There is no
+   * pre-flight network read to `defer` on, the way a launch defers a ticket fetch. */
+  private async performSeed(
+    flow: Flow,
+    edge: FlowEdge,
+    statuses: RunStatus[],
+  ): Promise<{
+    kind: "done";
+    outcome: ActOutcome;
+    promote?: { nodeId: string; runKey: string; repo: string };
+    receipt?: { level: "success" | "error"; message: string };
+  }> {
+    const node = this.placeTarget(flow, edge);
+    if (!node) {
+      return {
+        kind: "done",
+        outcome: { ok: false, error: `a seed rule must point at a place, and ${edge.to} is not.` },
+      };
+    }
+    // The run this place belongs to is not coming back on its own if it is gone —
+    // another window's retire sweep removed it, or the user did — so this latches
+    // exactly like a launch whose ticket is gone would, naming what went missing.
+    const status = statuses.find((s) => s.run.key === node.runKey);
+    if (!status) {
+      return {
+        kind: "done",
+        outcome: { ok: false, error: `the run "${node.runKey}" is no longer on the board — not seeding ${node.repo}.` },
+      };
+    }
+    const repo = status.run.repos.find((r) => r.name === node.repo);
+    if (!repo) {
+      return {
+        kind: "done",
+        outcome: {
+          ok: false,
+          error: `"${node.repo}" is no longer one of ${node.runKey}'s repos — not seeding it.`,
+        },
+      };
+    }
+    const cfg = getConfig();
+    // The edge's `mode` is a PromptMode id — a place has no `mode` of its own the
+    // way a planned node does, so a seed's prompt lives on the edge (Task 6 is what
+    // lets the inspector set it). A mode the user has since deleted latches exactly
+    // as a launch's does, for the same reason: silently substituting one would seed
+    // an agent with someone else's prompt.
+    const mode = cfg.promptModes.find((m) => m.id === edge.mode);
+    if (!mode) {
+      return {
+        kind: "done",
+        outcome: {
+          ok: false,
+          error: `the prompt mode "${edge.mode}" is no longer configured — not seeding ${node.repo}.`,
+        },
+      };
+    }
+    try {
+      await openWorkspace({
+        // A seed has no ticket: `run.key`/`summary`/`url` are the closest thing —
+        // they identify the place, not a new piece of work.
+        ticket: { key: status.run.key, summary: status.run.summary, url: status.run.url },
+        planMd: "",
+        descriptionText: "",
+        // The place's OWN repo, as the single service. `openWorkspace` rewrites
+        // brief.md for every entry in `services` unconditionally (workspace.ts:189,
+        // BEFORE the existingFolder branch even runs) — passing an empty list here
+        // would not have left the existing brief untouched either, since the
+        // existingFolder branch's own fallback write (workspace.ts:231-236) fires
+        // whenever the folder is not already among `services`. Naming the repo here
+        // is what makes the rewritten "Repos in scope" section name it instead of
+        // coming up empty; it does not make the write itself go away, and with no
+        // ticket description to give it, the rewritten brief's body is blank either
+        // way. See task-5b-report.md for the full comparison.
+        services: [{ name: repo.name, path: repo.path, isGit: repo.isGit }],
+        mode: "per-window",
+        promptTemplate: mode.prompt,
+        workspaceDir: cfg.workspaceDir,
+        seedAgent: cfg.seedAgent,
+        openIn: "new",
+        existingFolder: repo.path,
+      });
+    } catch (e) {
+      // Tried and may have spent something (a window may already be open, a brief
+      // may already be written) — latches exactly like a launch that threw.
+      const message = `Couldn't seed ${node.repo}: ${e}`;
+      return {
+        kind: "done",
+        outcome: { ok: false, error: message },
+        receipt: { level: "error", message: `${flow.name}: ${message}` },
+      };
+    }
+    return {
+      kind: "done",
+      outcome: { ok: true, note: `seeded another agent in ${node.repo}` },
+      // A seed never promotes anything: the place it targets already exists.
+      receipt: {
+        level: "success",
+        message: `${flow.name}: seeded another agent in ${node.repo}.${
           cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : ""
         }`,
       },
