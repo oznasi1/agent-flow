@@ -360,6 +360,14 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * node (never on the edge — see `setMode`'s own doc comment); a seed's
    * lives on the edge, because a place has no mode field of its own. */
   const modeValue = edge ? (edge.action === "launch" ? plannedTargetOf(flow, edge)?.mode : edge.mode) ?? "" : "";
+  /** Does `modeValue` name a mode that still exists? A `<select>` whose `value`
+   * matches none of its `<option>`s does not render blank — the browser falls
+   * back to showing its FIRST option, selected, while the store still holds the
+   * deleted (or never-set) id. That is not a rendering detail: `modeFor` refuses
+   * to launch with a mode that is not configured, so the drawer would show a
+   * mode that will run while the flow is actually about to error. See the extra
+   * `<option>` this gates, below. */
+  const modeExists = modeValue !== "" && p.promptModes.some((m) => m.id === modeValue);
 
   /** What the source place looks like right now, in `describeCond`'s words. Null
    * when the node's run is not on the board — a claim we cannot make. */
@@ -744,6 +752,16 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   value={modeValue}
                   onChange={(ev) => setMode(edge, ev.currentTarget.value)}
                 >
+                  {/* An option for whatever the store actually holds, when it names
+                      no configured mode — an absent one, or one since deleted. Without
+                      this, a `<select>` whose value matches no option falls back to
+                      showing its first option selected, which would show a mode that
+                      will run while the one on disk is the one `modeFor` will refuse. */}
+                  {!modeExists && (
+                    <option value={modeValue}>
+                      {modeValue ? `${modeValue} (not configured)` : "(no mode set)"}
+                    </option>
+                  )}
                   {p.promptModes.map((m) => (
                     <option key={m.id} value={m.id}>{m.label}</option>
                   ))}

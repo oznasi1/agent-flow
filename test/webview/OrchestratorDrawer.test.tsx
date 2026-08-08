@@ -1003,6 +1003,27 @@ describe("the acting verbs", () => {
     expect(options).toEqual(["A mode only this test made up"]);
   });
 
+  it("shows a deleted mode explicitly, rather than silently displaying the first configured one", () => {
+    // A `<select>` whose `value` matches none of its `<option>`s does not render
+    // blank — the browser falls back to its FIRST option, selected. Without an
+    // option for the actual stored value, the inspector would show "Quick pass"
+    // for a target node whose mode is really "deleted-mode" — a launch `modeFor`
+    // will in fact refuse, described here as if it will run.
+    const launching = placeAndPlanned();
+    launching.edges[0] = { ...launching.edges[0], action: "launch" };
+    launching.nodes[1] = { ...(launching.nodes[1] as any), mode: "deleted-mode" };
+    render(<OrchestratorDrawer {...props({ flows: [launching] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const select = screen.getByLabelText("Mode") as HTMLSelectElement;
+    expect(select.value).toBe("deleted-mode");
+    expect(select.selectedOptions[0].textContent).toContain("deleted-mode");
+    // The real, configured modes are still all there, just not what's selected.
+    const options = Array.from(select.querySelectorAll("option")).map((o) => o.textContent);
+    expect(options).toEqual(
+      expect.arrayContaining(MODES.map((m) => m.label)),
+    );
+  });
+
   it("shows the target's identifier in mono, house style for an identifier", () => {
     const launching = placeAndPlanned();
     launching.edges[0] = { ...launching.edges[0], action: "launch" };
