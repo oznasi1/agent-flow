@@ -91,7 +91,13 @@ const h = vi.hoisted(() => ({
   // thing a local card's ticket inference and "no card twice" tests need to vary.
   branch: "ASM-5641-team-table" as string | null,
   // Orchestrator flows (Task 3): the on-disk store, replaced wholesale so this
-  // suite never touches a real ~/.agentflow/flows.
+  // suite never touches a real ~/.agentflow/flows. writeFlow's default
+  // implementation (set in beforeEach) actually updates `flows`, so a read
+  // that follows a write in the same test — postFlows() after
+  // advanceArmedFlows, in particular — sees what was just written, the same
+  // way the real file-backed store would. A bare spy here would make the
+  // write-then-read ordering in advanceArmedFlows untestable: readFlows would
+  // never be able to see a write that "landed" a moment earlier.
   flows: [] as Flow[],
   writeFlow: vi.fn(),
   removeFlow: vi.fn(),
@@ -392,7 +398,15 @@ beforeEach(() => {
   h.branch = "ASM-5641-team-table";
   h.flows = [];
   h.idSeq = 0;
-  h.writeFlow.mockClear();
+  // Honest, not just recorded: replaces the entry sharing this id, or appends
+  // when it's new — exactly what the real file-per-id store does. A test that
+  // wants the store's OWN write to be visible on a later read (e.g. a second
+  // refresh, or postFlows() right after advanceArmedFlows) needs this; a test
+  // that only inspects `h.writeFlow.mock.calls` is unaffected either way.
+  h.writeFlow.mockClear().mockImplementation((_io: unknown, _dir: string, flow: Flow) => {
+    const i = h.flows.findIndex((f) => f.id === flow.id);
+    h.flows = i >= 0 ? h.flows.map((f, idx) => (idx === i ? flow : f)) : [...h.flows, flow];
+  });
   h.removeFlow.mockClear();
   // Confirm by default: resolve the label passed as the modal's sole action item,
   // rather than vscode's own mock default of `undefined` (which reads as "declined"
@@ -2935,6 +2949,21 @@ describe("an armed flow advances on refresh", () => {
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
     ...over,
+  });
+
+  it("posts the stamped flow on deck:flows in the SAME pass it fired, not one poll later", async () => {
+    // advanceArmedFlows writes before postFlows() reads — that ordering is the
+    // whole point of doing this work inline in refresh() rather than on its own
+    // timer. If the two lines were ever swapped, postFlows() would read the
+    // store before this pass's write landed, and the webview would show the
+    // rule as still pending for one extra poll tick.
+    setConfig({ orchestrator: true });
+    h.flows = [armedFlow()];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { p } = await openPanel();
+    await settle();
+    const msg = posts(p).find((m) => m.type === "deck:flows") as { flows: Flow[] } | undefined;
+    expect(msg?.flows[0]?.edges[0]?.firedAt).toBeTypeOf("number");
   });
 
   it("stamps a met rule and posts a toast naming the flow", async () => {
