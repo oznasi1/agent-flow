@@ -3435,4 +3435,39 @@ describe("arm, disarm and reset", () => {
     expect(w.edges[0].cond).toEqual({ kind: "ci-failed" });
     expect(w.edges[0].firedAt).toBe(5);
   });
+
+  it("flow:save writes a brand-new edge through untouched, alongside preserving an existing one's host fields", async () => {
+    // The merge's other branch: `mine.get(e.id)` misses for an edge the drawer
+    // just drew, since the host has never seen it. That edge must land exactly
+    // as the drawer sent it — no firedAt/firedNote/error appear from nowhere —
+    // while a pre-existing edge in the SAME save still gets its host fields
+    // preserved. Asserting both in one test is what proves the two branches
+    // (host has this edge / host does not) are actually distinguished, rather
+    // than both happening to produce the right answer by accident.
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you" }],
+    }];
+    const withNewEdge: Flow = {
+      ...mkFlow("f1", "n"),
+      edges: [
+        { id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify" },
+        { id: "e2", from: "a", to: "y", cond: { kind: "ci-passed" }, action: "notify" },
+      ],
+    };
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: withNewEdge });
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    const e1 = w.edges.find((e) => e.id === "e1")!;
+    const e2 = w.edges.find((e) => e.id === "e2")!;
+    expect(e1.firedAt).toBe(5);
+    expect(e1.firedNote).toBe("told you");
+    // The new edge has no host counterpart — it must arrive exactly as the
+    // drawer sent it, not stamped with anything the host never wrote.
+    expect(e2.firedAt).toBeUndefined();
+    expect(e2.firedNote).toBeUndefined();
+    expect(e2.error).toBeUndefined();
+    expect(e2.cond).toEqual({ kind: "ci-passed" });
+  });
 });
