@@ -1,18 +1,13 @@
-// Pure notepad logic — no `vscode`, no `fs`. Lives outside tasksView.ts so it is
-// testable without a mocked extension context, and so the 1700-line controller
-// grows only the glue that genuinely needs VS Code.
+// Pure notepad logic — no `vscode`, no mocked extension context needed, no
+// `Date.now`/`Math.random`. Lives outside tasksView.ts (host-side only; the
+// webview imports only the notepad types from ./types, never this module) so
+// it is unit-testable without a mocked extension context, and so the
+// 1700-line controller grows only the glue that genuinely needs VS Code.
+// `canon` does touch `fs` (via `fs.realpathSync`), same as `src/engine/runs.ts`
+// which imports it the same way — that's fine here, per the same reasoning:
+// this file's purity bar is "no vscode / no mocked context", not "no fs".
 import { NotepadItem, NotepadRunStatus, Run } from "./types";
-
-// `canon` is deliberately reimplemented here rather than imported from
-// `./engine/paths` — that module does `import * as fs from "fs"` at module
-// scope, and dragging that into notepad.ts would break the "no fs" purity
-// this file exists to guarantee (the webview may one day import it directly).
-// Since notes only ever compare against `livePlaces` sets built the same way
-// callers already build them (see `noteStatus` below), an identity fallback
-// for paths that don't resolve is all that's needed here.
-function canon(p: string): string {
-  return p;
-}
+import { canon } from "./engine/paths";
 
 /** A note's run status, from the two cheap signals `describeActiveTasks` already
  * uses for the same question — deliberately NOT `retireVerdict`, which needs live

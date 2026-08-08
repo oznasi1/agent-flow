@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { newNote, noteStatus, sanitizeNotes } from "../../src/notepad";
 import type { NotepadItem, Run } from "../../src/types";
 
@@ -36,6 +39,28 @@ describe("noteStatus", () => {
   it("tolerates a record whose repos field is missing entirely", () => {
     const runs = [{ key: "notepad-a", summary: "s", url: "", createdAt: 1 } as unknown as Run];
     expect(noteStatus(note({ lastRunKey: "notepad-a" }), runs, new Set(["/repo"]))).toBe("stale");
+  });
+
+  it("is running when the run's repo path differs from livePlaces only by symlink resolution", () => {
+    // Regression guard: `livePlaces` is built from real, canonicalised session
+    // directories (deckView.ts resolves symlinks); a run record's stored repo
+    // path is whatever the user's shell handed it, which can be the symlinked
+    // spelling. A non-canonicalising comparison here would silently report
+    // "stale" for a genuinely running agent whenever the two disagree — the
+    // classic /var vs /private/var case on macOS. Using a real temp dir + a
+    // real symlink means this test actually fails against an identity-only
+    // `canon`, unlike the literal-path tests above.
+    const real = fs.mkdtempSync(path.join(os.tmpdir(), "notepad-canon-"));
+    const linkDir = path.join(os.tmpdir(), `notepad-canon-link-${process.pid}-${Date.now()}`);
+    fs.symlinkSync(real, linkDir);
+    try {
+      const runs = [run({ repos: [{ name: "r", path: linkDir, isGit: true }] })];
+      const livePlaces = new Set([fs.realpathSync(real)]);
+      expect(noteStatus(note({ lastRunKey: "notepad-a" }), runs, livePlaces)).toBe("running");
+    } finally {
+      fs.unlinkSync(linkDir);
+      fs.rmdirSync(real);
+    }
   });
 });
 
