@@ -165,14 +165,13 @@ export function writePlanFile(plan: PlanFile): void {
 }
 
 // ── opening ───────────────────────────────────────────────────────────────────
-export function openInEditor(target: string, newWindow = true): Promise<boolean> {
-  // Reuse the current window: replace its folder(s) in place. This reloads the window,
-  // so the seed-on-activation handshake fires here. (`open -a` can't target this window.)
-  if (!newWindow) {
-    return Promise.resolve(
-      vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(target), { forceNewWindow: false }),
-    ).then(() => true, () => false);
-  }
+/** Open `target` in a separate window, or focus the window that already holds it —
+ *  `open -a` does both, and falls back to openFolder when the app can't be shelled to.
+ *
+ *  There is deliberately no same-window mode. Replacing the running window's folders
+ *  reloads the extension host and destroys whatever was open in it; "this window" is a
+ *  seed destination now (see the `currentWindow` path in openWorkspace), not a reload. */
+export function openInEditor(target: string): Promise<boolean> {
   const app = vscode.env.appName || "Cursor";
   return new Promise((resolve) => {
     exec(`open -a ${JSON.stringify(app)} ${JSON.stringify(target)}`, (err) => {
@@ -297,8 +296,8 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   // "applies" must never be true when no plan file will carry it.
   const remoteControl = !!req.remoteControl && seedAgent && matches.length === 1;
 
-  // 3 — durable writes BEFORE opening: reusing the current window reloads this
-  //     extension host, which would otherwise race these to disk.
+  // 3 — durable writes BEFORE opening: a window that opens (or is focused) and seeds
+  //     can otherwise race these to disk, so nothing may be opened before this lands.
   if (seedAgent) {
     writePlanFile({ key: ticket.key, createdAt: Date.now(), seedAgent: true, remoteControl, matches });
   }

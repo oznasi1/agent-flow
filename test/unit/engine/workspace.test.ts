@@ -93,6 +93,17 @@ describe("openWorkspace — multiroot", () => {
     expect(result.opened).toEqual(["/ws/ASM-1.code-workspace"]);
   });
 
+  // The same-window reuse branch is gone: openFolder is only ever reached as the
+  // fallback for a failed `open -a`, and only ever with forceNewWindow: true.
+  it("never asks openFolder to reuse the current window", async () => {
+    exec.mockImplementation(((_cmd: string, cb: (e: unknown) => void) => cb(new Error("no app"))) as never);
+    await openWorkspace(baseReq());
+    const reuse = commands.executeCommand.mock.calls.filter(
+      (c) => c[0] === "vscode.openFolder" && (c[2] as { forceNewWindow?: boolean })?.forceNewWindow === false,
+    );
+    expect(reuse).toEqual([]);
+  });
+
   it("does not write a plan file when seedAgent is off", async () => {
     await openWorkspace(baseReq({ seedAgent: false }));
     expect(writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"))).toBeUndefined();
