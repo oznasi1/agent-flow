@@ -524,10 +524,40 @@ export class DeckPanel {
         // Nothing was decided at all. Writing an unchanged flow would be a pointless
         // write, and there is nothing to announce.
         if (stamping.length === 0) continue;
-        let next = applyFired(fresh, stamping, nowMs, outcomes);
+        // Re-read ONE MORE TIME, immediately before this write, and build `next`
+        // from THAT read, not from `fresh`. `fresh` was read before up to three
+        // `performEdge` awaits — a Jira fetch plus `openWorkspace`, real seconds —
+        // and in that window a `flow:arm` Disarm, a `flow:rename`, a `flow:resetEdge`
+        // on some OTHER edge, a `flow:save` node drag, or the answer this same
+        // flow's OWN first-spend ask just recorded (`launchConfirmedAt`) can land
+        // on disk. Writing `next` built straight from `fresh` would silently
+        // overwrite every one of those with the value this pass started with —
+        // resurrecting `armed: true` over a Disarm the user just clicked, in
+        // particular, which turns the per-edge `stillArmed` guard above into a
+        // one-poll pause instead of a stop: the edges it left pending would
+        // relaunch on the very next pass because the flow never actually looks
+        // disarmed to that pass either.
+        //
+        // `applyFired`'s FLOW argument is this read (`atWrite`), not `fresh`: every
+        // edge and every flow-level field this pass did NOT just decide about
+        // passes through untouched from whatever is on disk right now. Only the
+        // STAMPS — `firedAt`/`firedNote`/`error` on the edges named in `stamping` —
+        // come from `outcomes`, which is deliberately about `fresh`'s copy of
+        // those specific edges: the launch (or seed) actually ran against that
+        // copy, and that is what must latch regardless of what else moved. Do not
+        // "simplify" this back to `applyFired(fresh, …)` — that is exactly what
+        // resurrects a concurrent Disarm, rename, Reset or node edit.
+        const atWrite = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+        // Gone from the store between `fresh` and here (deleted mid-pass). Writing
+        // would resurrect it, the same reasoning as the `!fresh` check above.
+        if (!atWrite) continue;
+        let next = applyFired(atWrite, stamping, nowMs, outcomes);
         for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo);
         writeFlow(this.flowIo, this.flowsDir, next);
-        for (const line of notifyLines(fresh, stamping)) {
+        // `next`, not `fresh`: the toast should describe what was actually just
+        // written — same reasoning as building `next` from `atWrite` above — and
+        // `next` already carries the promotions too.
+        for (const line of notifyLines(next, stamping)) {
           this.post({ type: "toast", level: "info", message: line });
         }
         for (const r of receipts) this.toast(r.level, r.message);

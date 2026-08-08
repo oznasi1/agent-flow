@@ -3985,6 +3985,67 @@ describe("a met launch rule acts", () => {
     expect(w.edges.find((e) => e.id === "e3")!.error).toBeUndefined();
     expect(w.nodes.find((n) => n.id === "p2")!.kind).toBe("planned");
     expect(w.nodes.find((n) => n.id === "p3")!.kind).toBe("planned");
+    // The Disarm itself must survive this pass's own write. `fresh` was read
+    // BEFORE the disarm landed, so writing straight from `fresh` would silently
+    // resurrect `armed: true` over the disarm the mock above just wrote to
+    // `h.flows` — undoing the very thing the guard above is supposed to make
+    // stick. Stopping a later edge is worthless if the write undoes the stop.
+    expect(w.armed).toBe(false);
+    // And a stop, not a pause: the two edges left pending must not launch on the
+    // NEXT pass either, because the flow they belong to is disarmed. If the write
+    // above resurrected `armed: true`, this is where that would show up.
+    h.launchPlanned.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+  });
+
+  it("a concurrent flow:resetEdge on another edge survives this pass's write", async () => {
+    // e2 is already settled (errored) before this pass starts, so `evaluateFlow`
+    // never touches it — `isSettled` skips it outright. The user Resets it (the
+    // real handler rebuilds it from only its structural fields, dropping
+    // firedAt/firedNote/error) while THIS pass is inside e1's launch await. The
+    // pass's own write, built from a read taken before the Reset landed, must not
+    // silently restore the error the user just cleared.
+    const withErroredSibling = (): Flow => {
+      const base = launchFlow();
+      return {
+        ...base,
+        nodes: [...base.nodes, { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "already done" }],
+        edges: [
+          ...base.edges,
+          { id: "e2", from: "n1", to: "n3", cond: { kind: "ci-failed" }, action: "notify", error: "boom" },
+        ],
+      };
+    };
+    const { send } = await warmed([withErroredSibling()]);
+    h.launchPlanned.mockClear().mockImplementation(async (req: { node: { ticketKey: string; repos: string[] } }) => {
+      // The Reset itself: written straight to the store, exactly as
+      // `flow:resetEdge`'s handler would while this pass sits inside e1's await.
+      h.flows = h.flows.map((f) => ({
+        ...f,
+        edges: f.edges.map((e) =>
+          (e.id === "e2" ? { id: e.id, from: e.from, to: e.to, cond: e.cond, action: e.action, mode: e.mode } : e)),
+      }));
+      return { ok: true, runKey: req.node.ticketKey, repo: req.node.repos[0] };
+    });
+    await send({ type: "deck:refresh" });
+    const w = lastWrite();
+    expect(w.edges.find((e) => e.id === "e1")!.firedAt).toBeTypeOf("number");
+    expect(w.edges.find((e) => e.id === "e2")!.error).toBeUndefined();
+  });
+
+  it("a concurrent flow:rename survives this pass's write", async () => {
+    const { send } = await warmed([launchFlow()]);
+    h.launchPlanned.mockClear().mockImplementation(async (req: { node: { ticketKey: string; repos: string[] } }) => {
+      // The rename itself: written straight to the store, exactly as
+      // `flow:rename`'s handler would while this pass sits inside e1's await.
+      h.flows = h.flows.map((f) => ({ ...f, name: "Renamed mid-pass" }));
+      return { ok: true, runKey: req.node.ticketKey, repo: req.node.repos[0] };
+    });
+    await send({ type: "deck:refresh" });
+    const w = lastWrite();
+    expect(w.edges[0].firedAt).toBeTypeOf("number");
+    expect(w.name).toBe("Renamed mid-pass");
   });
 });
 
