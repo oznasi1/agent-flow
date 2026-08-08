@@ -991,8 +991,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       kind: "explore",
     });
 
-    const where = this.openedWhere(result);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
+    const where = this.openedWhere(result, cfg.seedAgent);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     const what = env
       ? `to verify on ${env}`
@@ -1067,8 +1067,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // run that was never created.
     await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, lastRunKey: key } : n)));
 
-    const where = this.openedWhere(result);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
+    const where = this.openedWhere(result, cfg.seedAgent);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
   }
@@ -1348,8 +1348,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** Toast fragment announcing the pre-seed, shared by `launch()` and `explore()`. With
    * Remote Control applied, Enter only connects the bridge — the task itself starts on
    * the later paste + Enter — so the plain "press Enter to start" copy would be wrong. */
-  private seededNote(seedAgent: boolean, remoteControl: boolean): string {
-    if (!seedAgent) return "";
+  private seededNote(seedAgent: boolean, remoteControl: boolean, seededInPlace = false): string {
+    // Seeding into this window with seeding off is the one destination that ends with
+    // NOTHING to show: no window opened, no session started, only briefs on disk. Every
+    // other destination at least leaves a window behind, so silence reads as success.
+    if (!seedAgent) {
+      return seededInPlace
+        ? " This window is untouched — agentFlow.seedAgent is off, so no session was seeded."
+        : "";
+    }
     return remoteControl
       ? " Claude Code pre-seeded with /remote-control — Enter to connect, then paste."
       : " Claude Code pre-seeded — press Enter to start.";
@@ -1357,9 +1364,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
   /** Where a completed open put the session, for the success toast. "This window" is
    *  its own case because nothing was opened — reporting "1 window(s)" would imply one
-   *  appeared. */
-  private openedWhere(result: { seededInPlace?: boolean; workspaceFile?: string; opened: string[] }): string {
-    if (result.seededInPlace) return "in this window";
+   *  appeared. With seeding off it opened nothing AND seeded nothing, so even "in this
+   *  window" overclaims; seededNote carries the explanation. */
+  private openedWhere(
+    result: { seededInPlace?: boolean; workspaceFile?: string; opened: string[] },
+    seedAgent: boolean,
+  ): string {
+    if (result.seededInPlace) return seedAgent ? "in this window" : "nothing";
     if (result.workspaceFile) return `workspace ${result.workspaceFile.split("/").pop()}`;
     return `${result.opened.length} window(s)`;
   }
@@ -1441,8 +1452,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       remoteControl: wantRemoteControl,
     });
 
-    const where = this.openedWhere(result);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
+    const where = this.openedWhere(result, cfg.seedAgent);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     if (result.mergeFailed) {
       this.toast(
@@ -1631,8 +1642,18 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
     let launched = 0;
     let extra = "";
+    let seededInPlace = false;
     if (shared && resolved.length) {
       try {
+        // This window can lose its identity between the destination pick and here: the
+        // prompt-mode pick, the layout pick and createWorktrees for every task all run
+        // in between. openSharedWorkspace has no "current" destination without it and
+        // would fall through to the new-window path, spawning a window nobody asked for
+        // — so fail the batch the way the catch below does. A single take cancels at the
+        // same point, for the same reason.
+        const here = target.kind === "current" ? currentWindow() : undefined;
+        if (target.kind === "current" && !here) throw new Error("this window can no longer hold a session");
+
         // Same guarantee as a single take: the workspace file is the user's artifact.
         const additions =
           target.kind === "existing"
@@ -1656,10 +1677,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           // OpenTarget and SharedTarget are the same four shapes — no cast needed.
           target,
           // The shared-window batch needs the same "here" the single take does.
-          currentWindow: currentWindow(),
+          currentWindow: here,
           foldersToAdd: additions.foldersToAdd,
         });
         launched = resolved.length;
+        seededInPlace = !!result.seededInPlace;
         if (result.mergeFailed) extra = " That workspace's folders couldn't be parsed — the worktrees weren't added.";
         else if (result.unaddedFolders?.length) {
           extra = ` ${result.unaddedFolders.join(", ")} couldn't be added as roots to that window — the briefs are still in place.`;
@@ -1717,7 +1739,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       if (!isBatch) extra += this.remoteControlNote(wantRemoteControl, appliedRemoteControl);
     }
 
-    const where = shared ? "in one shared window" : "in parallel";
+    // A batch seeded into this window opened nothing — "in one shared window" would
+    // imply one appeared.
+    const where = !shared ? "in parallel" : seededInPlace ? "in this window" : "in one shared window";
     const summary = `Launched ${launched} of ${keys.length} ${where}.`;
     const rcNote = isBatch && rcSkipped ? " Remote Control skipped — one clipboard can't serve several sessions." : "";
     if (failed.length) {
@@ -1788,7 +1812,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       if (here) return { kind: "current" };
       this.toast(
         "info",
-        "This window has no folder open, so it can't hold a session — opening a new window instead.",
+        "This window has no saved workspace file and no single folder, so it can't hold a session — opening a new window instead.",
       );
       return { kind: "new" };
     }

@@ -216,4 +216,18 @@ describe("currentWindow", () => {
 
     expect(currentWindow()).toBeUndefined();
   });
+
+  // A saved workspace file declaring no folders is still a seedable window — it has an
+  // identity. Every mention then resolves against no root and is dropped, which is the
+  // correct outcome rather than a crash on an absent folder list.
+  it("returns empty roots for a saved workspace that declares no folders", () => {
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/empty.code-workspace" } as never;
+    workspace.workspaceFolders = undefined as never;
+
+    expect(currentWindow()).toEqual({
+      identity: "/ws/empty.code-workspace",
+      kind: "workspace",
+      roots: [],
+    });
+  });
 });

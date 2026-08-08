@@ -1942,7 +1942,13 @@ describe("takeTask", () => {
 
       expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ openIn: "new" }));
       expect(posted()).toContainEqual(
-        expect.objectContaining({ type: "toast", level: "info", message: expect.stringContaining("no folder open") }),
+        expect.objectContaining({
+          type: "toast",
+          level: "info",
+          // Not "no folder open" — an untitled multi-root window has several folders open
+          // and still has no identity, so that wording would be plainly false for it.
+          message: expect.stringContaining("no saved workspace file and no single folder"),
+        }),
       );
     });
 
@@ -1977,6 +1983,29 @@ describe("takeTask", () => {
       expect(posted()).toContainEqual(
         expect.objectContaining({ type: "toast", level: "success", message: expect.stringContaining("in this window") }),
       );
+    });
+
+    // Seeding into this window with seedAgent off is the one outcome with nothing to
+    // show: no window opened, no session started, only briefs on disk. Claiming
+    // "Opened in this window" would describe something that never happened.
+    it("does not claim a window opened when seeding is off and the destination is this window", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window", seedAgent: false });
+      vi.mocked(currentWindow).mockReturnValue(HERE);
+      vi.mocked(openWorkspace).mockResolvedValue({
+        mode: "per-window",
+        briefs: [],
+        opened: ["/repos/account-service"],
+        remoteControl: false,
+        seededInPlace: true,
+      } as never);
+
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+      expect(toast.message).toContain("Opened nothing");
+      expect(toast.message).toContain("agentFlow.seedAgent is off");
+      expect(toast.message).not.toContain("Opened in this window");
     });
 
     it("toasts an info message (not success) when the merge into the existing workspace fails to parse", async () => {
@@ -3070,6 +3099,51 @@ describe("takeBatch", () => {
     expect(openSharedWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ target: { kind: "current" } }),
     );
+  });
+
+  // The gap between the destination pick and the shared open spans the prompt-mode
+  // pick, the layout pick and createWorktrees for every task — seconds, not a
+  // millisecond. Without the guard openSharedWorkspace has no "current" destination
+  // and falls through to the new-window path, spawning a window nobody asked for.
+  it("fails the shared batch instead of spawning a window when this window loses its identity", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(currentWindow)
+      .mockReturnValueOnce({ identity: "/repos/api", kind: "folder", roots: [{ name: "api", path: "/repos/api" }] })
+      .mockReturnValue(undefined);
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(openSharedWorkspace).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual(
+      expect.objectContaining({
+        type: "toast",
+        level: "error",
+        message: expect.stringContaining("no longer hold a session"),
+      }),
+    );
+  });
+
+  // A batch seeded into this window opened nothing — "in one shared window" would
+  // imply one appeared.
+  it("says a shared batch landed in this window when it seeded in place", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(currentWindow).mockReturnValue({
+      identity: "/repos/api",
+      kind: "folder",
+      roots: [{ name: "api", path: "/repos/api" }],
+    });
+    vi.mocked(openSharedWorkspace).mockResolvedValue({
+      opened: true,
+      briefs: [],
+      seeded: 2,
+      seededInPlace: true,
+    } as never);
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toContain("in this window");
+    expect(toast.message).not.toContain("in one shared window");
   });
 
   it("skips the layout pick for a one-key batch", async () => {

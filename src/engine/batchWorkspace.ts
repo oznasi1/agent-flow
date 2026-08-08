@@ -155,7 +155,8 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
       : files.map((f) => mention(workspaceFile ? "multiroot" : "per-window", folderName(key, s.name), f));
 
   // 4 — one plan + one run per task, all naming the same window. Durable writes come
-  //     before the open: reusing the current window reloads this extension host.
+  //     before the open: a window that opens (or is focused) and seeds can otherwise
+  //     race these to disk, so nothing may be opened before this lands.
   const createdAt = Date.now();
 
   // The plan files must land back-to-back: the plan-dir watcher debounces 300ms after

@@ -5,6 +5,21 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **"This window" no longer replaces the window.** Taking a task into the window
+  you're already in starts a Claude session there and leaves everything else
+  alone — the folders, the open editors, and any session already running stay
+  put. It used to swap the window's folder set and reload the extension host,
+  throwing all of that away. A batch opened into one shared window behaves the
+  same way.
+- **A window with nothing to seed is no longer offered.** An empty window, or an
+  untitled multi-root window with no saved `.code-workspace`, can't be named by
+  the seed handshake, so **This window** is hidden there and
+  `agentFlow.openIn: this-window` opens a new window instead.
+
 ## [0.6.0] — 2026-08-08
 
 ### Added

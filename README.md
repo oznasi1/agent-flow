@@ -349,7 +349,8 @@ workspace.
 
 `this-window` never replaces what's open. The window keeps its folders, its editors and
 any session already running in it, and the task's agent starts alongside them. A window
-with no folder open can't hold a seeded session, so **This window** isn't offered there
+Agent Flow can't name — an empty one, or several folders with no saved
+`.code-workspace` — can't hold a seeded session, so **This window** isn't offered there
 and `this-window` opens a new window instead.
 
 When taking a task (or starting an Explore session) with `agentFlow.openIn` set to

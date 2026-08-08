@@ -224,6 +224,20 @@ describe("openSharedWorkspace", () => {
       expect(result.opened).toBe(true);
     });
 
+    // The Run record's mode describes the window it landed in, not the batch layout —
+    // a workspace window is multiroot even though no workspace file was written for it.
+    it("records multiroot for a workspace-kind window", async () => {
+      await openSharedWorkspace(
+        baseReq({
+          target: { kind: "current" },
+          currentWindow: { identity: "/ws/team.code-workspace", kind: "workspace", roots: [{ name: "api", path: "/repos/api" }] },
+        }),
+      );
+      const runs = writes((p) => p.includes("runs") && p.endsWith(".json"));
+      expect(runs.length).toBeGreaterThan(0);
+      for (const r of runs) expect(JSON.parse(String(r[1])).mode).toBe("multiroot");
+    });
+
     it("points every task's plan at this window and writes no workspace file", async () => {
       const result = await openSharedWorkspace(
         baseReq({ target: { kind: "current" }, currentWindow: here }),

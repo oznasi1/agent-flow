@@ -94,10 +94,17 @@ describe("openWorkspace — multiroot", () => {
   });
 
   // The same-window reuse branch is gone: openFolder is only ever reached as the
-  // fallback for a failed `open -a`, and only ever with forceNewWindow: true.
+  // fallback for a failed `open -a`, and only ever with forceNewWindow: true. Aimed at
+  // the request that USED to take the deleted branch — a plain baseReq() never reached
+  // it even before the deletion, so it would guard nothing.
   it("never asks openFolder to reuse the current window", async () => {
     exec.mockImplementation(((_cmd: string, cb: (e: unknown) => void) => cb(new Error("no app"))) as never);
-    await openWorkspace(baseReq());
+    await openWorkspace(
+      baseReq({
+        openIn: "current",
+        currentWindow: { identity: "/repos/account-service", kind: "folder", roots: [{ name: "account-service", path: "/repos/account-service" }] },
+      }),
+    );
     const reuse = commands.executeCommand.mock.calls.filter(
       (c) => c[0] === "vscode.openFolder" && (c[2] as { forceNewWindow?: boolean })?.forceNewWindow === false,
     );
