@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import * as React from "react";
 
 const sendSpy = vi.fn();
@@ -142,9 +142,11 @@ describe("Notepad dictation", () => {
   it("appends a final transcript into the body", () => {
     render(<Notepad notes={[]} />);
     fireEvent.click(screen.getByRole("button", { name: "Dictate the note body" }));
-    FakeRecognition.last!.onresult!({
-      resultIndex: 0,
-      results: [Object.assign([{ transcript: "check the retry path" }], { isFinal: true })],
+    act(() => {
+      FakeRecognition.last!.onresult!({
+        resultIndex: 0,
+        results: [Object.assign([{ transcript: "check the retry path" }], { isFinal: true })],
+      });
     });
     expect((screen.getByPlaceholderText("Any detail the agent should know (optional)") as HTMLTextAreaElement).value)
       .toContain("check the retry path");
@@ -162,8 +164,10 @@ describe("Notepad dictation", () => {
   it("recovers its idle label when recognition errors out", () => {
     render(<Notepad notes={[]} />);
     fireEvent.click(screen.getByRole("button", { name: "Dictate the note body" }));
-    FakeRecognition.last!.onerror!();
-    FakeRecognition.last!.onend!();
+    act(() => {
+      FakeRecognition.last!.onerror!();
+      FakeRecognition.last!.onend!();
+    });
     expect(screen.getByRole("button", { name: "Dictate the note body" })).toBeTruthy();
   });
 });

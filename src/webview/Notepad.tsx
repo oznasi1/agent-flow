@@ -1,5 +1,4 @@
 import * as React from "react";
-import { flushSync } from "react-dom";
 import { send } from "./vscodeApi";
 import { NotepadItemView, NotepadRunStatus } from "../types";
 
@@ -67,15 +66,8 @@ function useDictation(append: (text: string) => void): { listening: boolean; tog
 
   const toggle = () => {
     if (ref.current) {
-      // A user-initiated stop runs inside React's own click handling, which is
-      // already a batched update in progress — flushSync there would nest inside
-      // it. Detach onend first so the engine's stop doesn't also try to flush;
-      // the plain setState below is enough because the click handler's own
-      // batch will commit it.
-      const rec = ref.current;
+      ref.current.stop();
       ref.current = null;
-      rec.onend = null;
-      rec.stop();
       setListening(false);
       return;
     }
@@ -85,21 +77,18 @@ function useDictation(append: (text: string) => void): { listening: boolean; tog
     rec.continuous = true;
     rec.interimResults = false; // only settled text lands in the field
     rec.lang = navigator.language || "en-US";
-    // The engine dispatches these outside React's own event system, so a plain
-    // setState here would only surface on the next unrelated render. flushSync
-    // keeps the transcript and button label in step with each event as it fires.
     rec.onresult = (e) => {
       let text = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
         if (r.isFinal) text += r[0].transcript;
       }
-      if (text.trim()) flushSync(() => appendRef.current(text.trim()));
+      if (text.trim()) appendRef.current(text.trim());
     };
     // Both paths land on onend, which is the single place listening is released —
     // an error that did not also end the session would strand the button on "Stop".
     rec.onerror = () => { rec.stop(); };
-    rec.onend = () => { ref.current = null; flushSync(() => setListening(false)); };
+    rec.onend = () => { ref.current = null; setListening(false); };
     ref.current = rec;
     rec.start();
     setListening(true);
