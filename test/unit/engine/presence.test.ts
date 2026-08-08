@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
-import { windowIdentity, writePresence, removePresence, readLiveWindows, type PresenceRecord } from "../../../src/engine/presence";
+import { windowIdentity, writePresence, removePresence, readLiveWindows, currentWindow, type PresenceRecord } from "../../../src/engine/presence";
 import { workspace } from "../../_mocks/vscode";
 
 vi.mock("fs");
@@ -176,5 +176,44 @@ describe("readLiveWindows", () => {
     expect(() => { live = readLiveWindows("/win"); }).not.toThrow();
     expect(live.map((w) => w.identity)).toEqual(["/repos/a"]);
     killSpy.mockRestore();
+  });
+});
+
+describe("currentWindow", () => {
+  it("returns the workspace identity with every root folder", () => {
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/team.code-workspace" } as never;
+    workspace.workspaceFolders = [
+      { name: "api", uri: { fsPath: "/repos/api" } },
+      { name: "web", uri: { fsPath: "/repos/web" } },
+    ] as never;
+
+    expect(currentWindow()).toEqual({
+      identity: "/ws/team.code-workspace",
+      kind: "workspace",
+      roots: [
+        { name: "api", path: "/repos/api" },
+        { name: "web", path: "/repos/web" },
+      ],
+    });
+  });
+
+  it("returns the folder identity for a single-folder window", () => {
+    workspace.workspaceFile = undefined as never;
+    workspace.workspaceFolders = [{ name: "api", uri: { fsPath: "/repos/api" } }] as never;
+
+    expect(currentWindow()).toEqual({
+      identity: "/repos/api",
+      kind: "folder",
+      roots: [{ name: "api", path: "/repos/api" }],
+    });
+  });
+
+  // An empty window can't be named by a plan match, so it can't be a seed destination —
+  // the picker relies on this undefined to hide "This window" entirely.
+  it("returns undefined for a window with no identity", () => {
+    workspace.workspaceFile = undefined as never;
+    workspace.workspaceFolders = undefined as never;
+
+    expect(currentWindow()).toBeUndefined();
   });
 });
