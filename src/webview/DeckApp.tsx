@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PendingResume, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
+import { AgentActivity, CardAgent, DeckColumn, FlowPromptMode, OutboundMessage, PendingResume, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
 import type { Flow } from "../engine/orchestrator/model";
 import { DeckCard, projectCards } from "./deckCards";
 import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
@@ -415,6 +415,7 @@ export function DeckApp(): JSX.Element {
   const [reviewsSeen, setReviewsSeen] = React.useState(false);
   const [flows, setFlows] = React.useState<Flow[]>([]);
   const [pendingResume, setPendingResume] = React.useState<PendingResume[]>([]);
+  const [promptModes, setPromptModes] = React.useState<FlowPromptMode[]>([]);
   const [orchEnabled, setOrchEnabled] = React.useState(false);
   const [openFlowId, setOpenFlowId] = React.useState<string | null>(null);
   /** The flow list the last `deck:flows` post carried. The message handler below is
@@ -511,6 +512,7 @@ export function DeckApp(): JSX.Element {
         });
         setOrchEnabled(m.enabled);
         setPendingResume(m.pendingResume);
+        setPromptModes(m.promptModes);
       }
     };
     window.addEventListener("message", handler);
@@ -752,6 +754,7 @@ export function DeckApp(): JSX.Element {
           openId={openFlowId}
           runs={runs}
           pendingResume={pendingResume}
+          promptModes={promptModes}
           onClose={() => setOpenFlowId(null)}
           onCreate={() => send({ type: "flow:create" })}
           onOpen={(id) => setOpenFlowId(id)}

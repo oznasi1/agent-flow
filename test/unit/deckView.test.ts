@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { window, ViewColumn, env, workspace, commands, setConfig, ConfigurationTarget } from "../_mocks/vscode";
+import { DEFAULT_PROMPT_MODES } from "../../src/config";
 import { fakeContext } from "../_helpers/factories";
 import type { ChangedFile } from "../../src/engine/git";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
@@ -2906,6 +2907,22 @@ describe("orchestrator flows", () => {
     const msg = posts(p).find((m) => m.type === "deck:flows");
     expect(msg).toMatchObject({ enabled: true });
     expect(msg.flows.map((f: Flow) => f.name)).toEqual(["Ship it"]);
+  });
+
+  // The inspector's USING selector needs the six configured modes, but never the
+  // `prompt` text itself — that can be long and is never displayed there. This
+  // is what makes the mode list configuration rather than a second copy of it.
+  // Setting off on purpose: this is configuration, not flow data, so it must
+  // still post — the same reasoning `flows`/`pendingResume` are emptied for,
+  // applied in the opposite direction.
+  it("posts the configured prompt modes narrowed to id and label, even with the setting off", async () => {
+    setConfig({ orchestrator: false });
+    const { p } = await openPanel();
+    const msg = posts(p).find((m) => m.type === "deck:flows") as { promptModes: { id: string; label: string }[] };
+    expect(msg.promptModes.length).toBe(DEFAULT_PROMPT_MODES.length);
+    expect(msg.promptModes).toEqual(DEFAULT_PROMPT_MODES.map((m) => ({ id: m.id, label: m.label })));
+    // Narrowed, not the whole PromptMode — `prompt` never reaches the webview.
+    expect(msg.promptModes[0]).not.toHaveProperty("prompt");
   });
 
   it("flow:create writes a new disarmed flow with a store-safe id", async () => {

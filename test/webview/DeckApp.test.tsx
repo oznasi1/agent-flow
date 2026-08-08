@@ -1386,7 +1386,7 @@ const firedFlow = (): Flow => ({
 // with no rendering yet (Task 6 wires the banner) — every existing fixture here
 // predates the field and has nothing to hold.
 const flowsMsg = (flows: Flow[], enabled = true): OutboundMessage =>
-  ({ type: "deck:flows", flows, enabled, pendingResume: [] });
+  ({ type: "deck:flows", flows, enabled, pendingResume: [], promptModes: [] });
 
 /** The drawer itself, not the header chip that shares its name. */
 const drawer = () => screen.queryByRole("complementary", { name: "Orchestrator" });
@@ -1631,10 +1631,36 @@ describe("the drawer's callbacks", () => {
       flows: [{ ...mkFlow("f1", "Ship the migration"), armed: true }],
       enabled: true,
       pendingResume: [{ flowId: "f1", flowName: "Ship the migration", lines: ["ready"] }],
+      promptModes: [],
     });
     fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     fireEvent.click(screen.getByRole("button", { name: /^go$/i }));
     expect(sent).toHaveBeenCalledWith({ type: "flow:resumeApprove", id: "f1" });
+  });
+
+  // The eighth prop, added alongside the acting verbs: without it reaching the
+  // drawer, `USING` would have nothing to offer but an empty select — this pins
+  // that the host's own list (not a hardcoded one) is what renders.
+  it("hands the drawer the host's prompt modes, not a hardcoded list", () => {
+    render(<DeckApp />);
+    host({
+      type: "deck:flows",
+      flows: [{
+        ...mkFlow("f1", "Ship the migration"),
+        nodes: [
+          { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+          { id: "n2", kind: "planned", x: 320, y: 24, join: "any", ticketKey: "ASM-12", repos: ["agent-flow"], mode: "quick", dest: "worktree" },
+        ],
+        edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", mode: "quick" }],
+      }],
+      enabled: true,
+      pendingResume: [],
+      promptModes: [{ id: "quick", label: "Quick pass from the host" }],
+    });
+    fireEvent.click(chip());
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const options = Array.from(screen.getByLabelText("Mode").querySelectorAll("option")).map((o) => o.textContent);
+    expect(options).toEqual(["Quick pass from the host"]);
   });
 
   it("passes a reset through as flow:resetEdge", () => {

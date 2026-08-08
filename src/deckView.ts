@@ -34,7 +34,7 @@ import { inferTicket, localRunFor } from "./engine/localRuns";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity, UNKNOWN_ACTIVITY } from "./engine/transcript";
 import { canon } from "./engine/paths";
-import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
+import { CardAgent, FlowPromptMode, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
 
 export const POLL_MS = 6000;
 const TICKET_TTL_MS = 30_000;
@@ -256,13 +256,20 @@ export class DeckPanel {
   /** Read the flows store and post it. Cheap — a handful of small JSON files —
    * so it rides the same refresh as everything else rather than owning a cache. */
   private postFlows(): void {
-    const enabled = getConfig().orchestrator;
+    const cfg = getConfig();
+    const enabled = cfg.orchestrator;
     const flows: Flow[] = enabled ? readFlows(this.flowIo, this.flowsDir) : [];
     // Emptied alongside `flows` when the setting is off, for the same reason:
     // silence must not be mistaken for "not loaded yet", and a stale hold from
     // before the setting was switched off has nothing left to be approved.
     const pendingResume = enabled ? [...this.pendingResume.values()] : [];
-    this.post({ type: "deck:flows", flows, enabled, pendingResume });
+    // Sent regardless of `enabled`: this is configuration, not flow data, and
+    // the webview cannot read it itself — it has no fs access (see
+    // OrchestratorDrawer's own doc comment on why the mode list arrives as a
+    // prop instead of an import). Never the whole `PromptMode` — `prompt` can
+    // be long and the inspector never displays it.
+    const promptModes: FlowPromptMode[] = cfg.promptModes.map((m) => ({ id: m.id, label: m.label }));
+    this.post({ type: "deck:flows", flows, enabled, pendingResume, promptModes });
   }
 
   /** Advance every armed flow against the statuses this pass already built.

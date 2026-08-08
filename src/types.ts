@@ -52,6 +52,15 @@ export interface PromptMode {
   prompt: string;
 }
 
+/** The subset of a `PromptMode` the orchestrator inspector needs to list and
+ * select one — never the `prompt` text itself, which can be long and is never
+ * displayed there. The webview cannot read config directly (it has no fs
+ * access), so this is what `deck:flows` carries instead of the full mode. */
+export interface FlowPromptMode {
+  id: string;
+  label: string;
+}
+
 // ── The Deck: in-flight orchestration board ─────────────────────────────────────
 
 /** Live agent activity, inferred best-effort from the Claude Code session transcript. */
@@ -490,7 +499,10 @@ export type OutboundMessage =
   // to tell "the setting is off" from "not loaded yet", and silence cannot.
   // `pendingResume` is the resume gate's own report — flows with rules already
   // met on the panel's first evaluation, held for approval rather than fired.
-  | { type: "deck:flows"; flows: Flow[]; enabled: boolean; pendingResume: PendingResume[] }
+  // `promptModes` is the six configured prompt modes, narrowed to what the
+  // inspector's USING selector needs — sent unconditionally, even with the
+  // setting off, since it is configuration rather than flow data.
+  | { type: "deck:flows"; flows: Flow[]; enabled: boolean; pendingResume: PendingResume[]; promptModes: FlowPromptMode[] }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
   | { type: "mkt:loading"; loading: boolean }

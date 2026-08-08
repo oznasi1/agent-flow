@@ -1,8 +1,8 @@
 import * as React from "react";
 import { describeCond, placeActivity } from "../engine/orchestrator/conditions";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
-import { Condition, Flow, FlowEdge, FlowNode, isSettled, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
-import { AgentState, PendingResume, RunStatus } from "../types";
+import { Condition, Flow, FlowAction, FlowEdge, FlowNode, isSettled, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { AgentState, FlowPromptMode, PendingResume, RunStatus } from "../types";
 
 /** The drag payload a Deck card carries. A NUL separator cannot appear in a
  * ticket key or a repo name, so parsing is unambiguous. */
@@ -134,6 +134,32 @@ function notifyMessageOf(flow: Flow, e: FlowEdge): string {
   return n && n.kind === "notify" ? n.message : "";
 }
 
+/** The edge's target, narrowed to a planned node — or `undefined` when it
+ * points at anything else. A launch's prompt mode and destination live on
+ * exactly this node (see `PlannedNode`'s own doc comment: "an armed launch
+ * cannot stop to ask"), never on the edge, so every read and write of them
+ * goes through here rather than a cast at each call site. */
+function plannedTargetOf(flow: Flow, e: FlowEdge): PlannedNode | undefined {
+  const n = flow.nodes.find((x) => x.id === e.to);
+  return n && n.kind === "planned" ? n : undefined;
+}
+
+/** Why `launch` or `seed` on this edge would never run, given the kind of node
+ * it actually points at — or `null` when the pairing is fine. This is exactly
+ * what `deckView.ts`'s `performEdge`/`performSeed` refuse at evaluation time
+ * ("a launch rule must point at planned work" / "a seed rule must point at a
+ * place"); saying it here means a mis-wired rule is visible the moment it is
+ * made, not only once armed and it comes back as a stalled edge. */
+function actionMismatch(flow: Flow, e: FlowEdge): string | null {
+  if (e.action === "launch" && !plannedTargetOf(flow, e)) {
+    return "a launch needs planned work — this points at something already there.";
+  }
+  if (e.action === "seed" && flow.nodes.find((x) => x.id === e.to)?.kind !== "place") {
+    return "a seed needs a place that already exists — this points at planned work.";
+  }
+  return null;
+}
+
 export interface OrchestratorDrawerProps {
   flows: Flow[];
   /** Which flow is open. `null` closes the drawer. */
@@ -144,6 +170,11 @@ export interface OrchestratorDrawerProps {
   /** Rules already met on an armed flow, reported rather than acted on — see
    * `PendingResume`'s own doc comment for why this is a gate, not a courtesy. */
   pendingResume: PendingResume[];
+  /** The configured prompt modes, narrowed to what the inspector's USING
+   * selector needs. Configuration, not flow data — it comes from the host's
+   * `deck:flows` post (`postFlows` in deckView.ts) rather than being
+   * hardcoded here, because the webview has no fs access to read it itself. */
+  promptModes: FlowPromptMode[];
   onClose: () => void;
   onCreate: () => void;
   onOpen: (id: string) => void;
@@ -315,6 +346,16 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const onTidy = () => p.onSave({ ...flow, nodes: tidy(flow) });
 
   const edge = flow.edges.find((e) => e.id === selEdge) ?? null;
+  // Computed once here, not inline in the JSX below: it needs `edge` narrowed
+  // to non-null, which the ternary in the render already does, but a `const`
+  // cannot be declared in the middle of a JSX expression.
+  const mismatch = edge ? actionMismatch(flow, edge) : null;
+  /** The destination select's value, resolved without a non-null assertion:
+   * this is only ever rendered once `mismatch` is null and `edge.action` is
+   * `launch`, which together guarantee a planned target exists — but nothing
+   * in the type system knows that at the render site, so the fallback is
+   * purely to satisfy `LaunchDest`'s type, never a value the user can see. */
+  const launchDest = edge && edge.action === "launch" ? plannedTargetOf(flow, edge)?.dest : undefined;
 
   /** What the source place looks like right now, in `describeCond`'s words. Null
    * when the node's run is not on the board — a claim we cannot make. */
@@ -333,6 +374,49 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     const cond: Condition = { kind };
     p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, cond } : x)) });
   };
+
+  /** Change what the edge does. `notify` clears `mode` — the only field a
+   * verb switch can leave stale, since a `notify` edge spends nothing and the
+   * engine would otherwise carry forward a value it never reads again.
+   * Switching TO `launch` or `seed` seeds `mode` from whatever is already
+   * live for this pairing (the edge's own value, or — for a launch — its
+   * target's, since a planned node is never created without one) rather than
+   * leaving the selector on nothing the instant the verb changes. */
+  const setAction = (e: FlowEdge, action: FlowAction) => {
+    if (action === "notify") {
+      p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, action, mode: undefined } : x)) });
+      return;
+    }
+    const target = plannedTargetOf(flow, e);
+    const mode = e.mode ?? target?.mode ?? p.promptModes[0]?.id;
+    p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, action, mode } : x)) });
+  };
+
+  /** Write a chosen prompt mode where the engine actually spends it.
+   * `performSeed` in deckView.ts reads `edge.mode` — a place has no mode
+   * field of its own, so the edge is the only place a seed's mode CAN live.
+   * `performEdge` reads a launch's mode from `node.mode` on the target
+   * PLANNED node instead, never from the edge — so a launch's selection is
+   * written there too, kept in step with `edge.mode` rather than landing
+   * somewhere the engine silently ignores (the same trap `notify`'s clear,
+   * above, closes from the other side). */
+  const setMode = (e: FlowEdge, mode: string) => {
+    const target = plannedTargetOf(flow, e);
+    const nodes = e.action === "launch" && target
+      ? flow.nodes.map((n) => (n.id === target.id ? { ...n, mode } : n))
+      : flow.nodes;
+    p.onSave({ ...flow, nodes, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, mode } : x)) });
+  };
+
+  /** A launch's destination lives on its target planned node — `LaunchDest`
+   * has no edge-level counterpart in the model (`FlowEdge` carries no `dest`
+   * field at all), because it is the node's own launch configuration, not a
+   * property of any one rule that triggers it. */
+  const setDest = (e: FlowEdge, dest: LaunchDest) =>
+    p.onSave({
+      ...flow,
+      nodes: flow.nodes.map((n) => (n.id === e.to && n.kind === "planned" ? { ...n, dest } : n)),
+    });
 
   const setNotifyMessage = (e: FlowEdge, message: string) =>
     p.onSave({
@@ -605,17 +689,74 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             </div>
             <div className="orch-clause">
               <span className="orch-kw">THEN</span>
-              {/* notify is the only action this phase has. It is stated, not
-                  offered as a choice of one. */}
-              <span style={{ fontSize: "var(--t-body)" }}>notify me</span>
-              <input
-                className="orch-msg"
-                aria-label="Notify message"
-                key={edge.id}
-                defaultValue={notifyMessageOf(flow, edge)}
-                onBlur={(ev) => setNotifyMessage(edge, ev.currentTarget.value)}
-              />
+              <select
+                className="orch-sel"
+                aria-label="Action"
+                value={edge.action}
+                onChange={(ev) => setAction(edge, ev.currentTarget.value as FlowAction)}
+              >
+                <option value="launch">launch</option>
+                <option value="seed">seed</option>
+                <option value="notify">notify me</option>
+              </select>
+              {/* The target's name — an identifier, so mono — is part of the
+                  sentence for the two acting verbs ("THEN launch ASM-12"), but
+                  notify already reads complete on its own ("THEN notify me"). */}
+              {edge.action !== "notify" && (
+                <span className="k" style={{ fontFamily: "var(--mono)" }}>{endLabel(flow, edge.to)}</span>
+              )}
             </div>
+            {edge.action === "notify" ? (
+              <div className="orch-clause">
+                <input
+                  className="orch-msg"
+                  aria-label="Notify message"
+                  key={edge.id}
+                  defaultValue={notifyMessageOf(flow, edge)}
+                  onBlur={(ev) => setNotifyMessage(edge, ev.currentTarget.value)}
+                />
+              </div>
+            ) : mismatch ? (
+              // Say so now, rather than let the user build a rule the engine
+              // will always refuse later — see `actionMismatch`'s own doc
+              // comment. Not red: nothing has tried and failed yet, so
+              // `--c-danger` (reserved for exactly that, in `.orch-obs .err`
+              // below) would be a claim this state does not make.
+              <div className="orch-clause">
+                <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>{mismatch}</span>
+              </div>
+            ) : (
+              <div className="orch-clause">
+                <span className="orch-kw">USING</span>
+                <select
+                  className="orch-sel"
+                  aria-label="Mode"
+                  value={edge.mode ?? ""}
+                  onChange={(ev) => setMode(edge, ev.currentTarget.value)}
+                >
+                  {p.promptModes.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                </select>
+                {/* A place already exists, so `seed` has nothing to pick a
+                    destination for — only `launch` opens one. */}
+                {edge.action === "launch" && (
+                  <>
+                    <span style={{ fontSize: "var(--t-body)" }}>in a</span>
+                    <select
+                      className="orch-sel"
+                      aria-label="Destination"
+                      value={launchDest ?? "worktree"}
+                      onChange={(ev) => setDest(edge, ev.currentTarget.value as LaunchDest)}
+                    >
+                      <option value="worktree">worktree</option>
+                      <option value="new-window">new window</option>
+                      <option value="current-window">current window</option>
+                    </select>
+                  </>
+                )}
+              </div>
+            )}
             {/* Reset is offered for an ERRORED edge, not only a fired one. An edge
                 carrying `error` with no `firedAt` is settled in `evaluate.ts`, so it
                 never fires again — offering Reset only for `firedAt` made it an
