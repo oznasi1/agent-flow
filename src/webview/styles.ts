@@ -291,6 +291,9 @@ export const CSS = `
     border: 1px solid var(--vscode-input-border, transparent); border-radius: var(--r-ctl); font-family: inherit; }
   .np-body-row { display: flex; gap: 6px; align-items: flex-start; }
   .np-body-row .np-body-input { flex: 1; resize: vertical; }
+  .np-mic { background: none; border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    border-radius: var(--r-ctl); cursor: pointer; padding: 4px 7px; font-size: var(--t-body); line-height: 1; }
+  .np-mic.on { border-color: var(--vscode-focusBorder); background: var(--vscode-inputOption-activeBackground); }
   .np-add-btn { align-self: flex-start; }
   .np-clear { background: none; border: none; cursor: pointer; font-size: var(--t-body);
     color: var(--vscode-descriptionForeground); text-decoration: underline; }

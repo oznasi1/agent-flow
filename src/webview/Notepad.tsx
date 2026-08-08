@@ -1,4 +1,5 @@
 import * as React from "react";
+import { flushSync } from "react-dom";
 import { send } from "./vscodeApi";
 import { NotepadItemView, NotepadRunStatus } from "../types";
 
@@ -25,11 +26,96 @@ const EMPTY: Record<NoteFilter, string> = {
   all: "No notes yet. Add one above.",
 };
 
+// The Web Speech API, as the two engines that ship it actually expose it. Typed
+// here rather than pulled from `lib.dom` because TypeScript's DOM lib does not
+// declare SpeechRecognition at all — it is not a standard, only widely shipped.
+interface SpeechRecognitionLike {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  onresult: ((e: SpeechResultLike) => void) | null;
+  onend: (() => void) | null;
+  onerror: (() => void) | null;
+}
+interface SpeechResultLike {
+  resultIndex: number;
+  results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }>;
+}
+
+function speechCtor(): (new () => SpeechRecognitionLike) | undefined {
+  const w = window as unknown as Record<string, unknown>;
+  return (w.SpeechRecognition ?? w.webkitSpeechRecognition) as (new () => SpeechRecognitionLike) | undefined;
+}
+
+/** Dictation into a text field. Returns undefined when the engine has no speech
+ * recognition — the caller renders no mic at all rather than a button that cannot
+ * work. All client-side: no API key, no network call from the extension host, and
+ * nothing crosses the message protocol until the note itself is saved. */
+function useDictation(append: (text: string) => void): { listening: boolean; toggle: () => void } | undefined {
+  const [listening, setListening] = React.useState(false);
+  const ref = React.useRef<SpeechRecognitionLike | null>(null);
+  const appendRef = React.useRef(append);
+  React.useEffect(() => { appendRef.current = append; }, [append]);
+  const supported = !!speechCtor();
+
+  // Never leave the microphone open when the view goes away.
+  React.useEffect(() => () => ref.current?.stop(), []);
+
+  if (!supported) return undefined;
+
+  const toggle = () => {
+    if (ref.current) {
+      // A user-initiated stop runs inside React's own click handling, which is
+      // already a batched update in progress — flushSync there would nest inside
+      // it. Detach onend first so the engine's stop doesn't also try to flush;
+      // the plain setState below is enough because the click handler's own
+      // batch will commit it.
+      const rec = ref.current;
+      ref.current = null;
+      rec.onend = null;
+      rec.stop();
+      setListening(false);
+      return;
+    }
+    const Ctor = speechCtor();
+    if (!Ctor) return;
+    const rec = new Ctor();
+    rec.continuous = true;
+    rec.interimResults = false; // only settled text lands in the field
+    rec.lang = navigator.language || "en-US";
+    // The engine dispatches these outside React's own event system, so a plain
+    // setState here would only surface on the next unrelated render. flushSync
+    // keeps the transcript and button label in step with each event as it fires.
+    rec.onresult = (e) => {
+      let text = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        if (r.isFinal) text += r[0].transcript;
+      }
+      if (text.trim()) flushSync(() => appendRef.current(text.trim()));
+    };
+    // Both paths land on onend, which is the single place listening is released —
+    // an error that did not also end the session would strand the button on "Stop".
+    rec.onerror = () => { rec.stop(); };
+    rec.onend = () => { ref.current = null; flushSync(() => setListening(false)); };
+    ref.current = rec;
+    rec.start();
+    setListening(true);
+  };
+
+  return { listening, toggle };
+}
+
 export function Notepad({ notes }: { notes: NotepadItemView[] }): JSX.Element {
   const [filter, setFilter] = React.useState<NoteFilter>("active");
   const [title, setTitle] = React.useState("");
   const [body, setBody] = React.useState("");
   const [editing, setEditing] = React.useState<string | null>(null);
+  const dictation = useDictation(
+    React.useCallback((text: string) => setBody((prev) => (prev ? `${prev} ${text}` : text)), []),
+  );
 
   const shown = notes.filter((n) => (filter === "all" ? true : filter === "done" ? n.done : !n.done));
   const anyDone = notes.some((n) => n.done);
@@ -62,6 +148,16 @@ export function Notepad({ notes }: { notes: NotepadItemView[] }): JSX.Element {
             value={body}
             onChange={(e) => setBody(e.target.value)}
           />
+          {dictation && (
+            <button
+              className={`np-mic ${dictation.listening ? "on" : ""}`}
+              aria-label={dictation.listening ? "Stop dictating" : "Dictate the note body"}
+              title={dictation.listening ? "Stop dictating" : "Dictate the note body"}
+              onClick={dictation.toggle}
+            >
+              {dictation.listening ? "◼" : "🎤"}
+            </button>
+          )}
         </div>
         <button className="btn np-add-btn" disabled={!canAdd} onClick={add}>Add note</button>
       </div>
