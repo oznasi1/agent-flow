@@ -305,6 +305,9 @@ vi.mock("../../src/config", async (importActual) => {
   };
 });
 import { DeckPanel, POLL_MS } from "../../src/deckView";
+// The real constant, through the partial mock above (which spreads the actual module):
+// a test that restated the number could not catch the call site passing a literal.
+import { LOCK_TTL_MS } from "../../src/engine/orchestrator/lock";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
 import { TaskAuthError } from "../../src/tasks/provider";
 
@@ -3397,6 +3400,69 @@ describe("a met launch rule acts", () => {
     // Put the store back before afterEach disposes the panel: the close path reads
     // the flows too (hasArmedFlow), and a throw from there is nobody's to catch.
     h.readFlows.mockImplementation(() => h.flows);
+  });
+
+  it("releases the lock BEFORE it asks, so no other window waits on a human", async () => {
+    // A modal is answered on human time; the lock is held on machine time. Awaiting
+    // one inside the other stalls every other window's pass for as long as the
+    // question is up, and past the TTL the lock is reaped and someone else acquires
+    // while this pass is still inside the modal — the very read-then-write window the
+    // lock exists to close.
+    const order: string[] = [];
+    h.release.mockImplementation(() => { order.push("release"); });
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      order.push("ask");
+      return "Launch";
+    });
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    order.length = 0;
+    await send({ type: "deck:refresh" });
+    expect(order).toEqual(["release", "ask"]);
+  });
+
+  it("mints a fresh lock token per pass, so a release can only remove its own lock", async () => {
+    // A token shared across passes is worse than no token: when a modal outlives the
+    // TTL and this panel's next poll reacquires, the first pass's release passes
+    // lock.ts's token check and deletes the lock the second pass believes it holds.
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    await send({ type: "deck:refresh" });
+    const tokens = h.acquire.mock.calls.map((c) => c[4]);
+    expect(tokens.length).toBeGreaterThan(1);
+    expect(new Set(tokens).size).toBe(tokens.length);
+    // And each release used the token its own pass acquired with.
+    for (const [i, call] of h.release.mock.calls.entries()) expect(call[2]).toBe(tokens[i]);
+  });
+
+  it("passes the real TTL to acquire, not a value that would reap a live holder", async () => {
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const ttl = h.acquire.mock.calls.at(-1)![3];
+    expect(ttl).toBe(LOCK_TTL_MS);
+    // The invariant behind the constant: a TTL under the poll interval would reap a
+    // live holder between two of its own polls.
+    expect(ttl).toBeGreaterThan(POLL_MS);
+  });
+
+  it("skips a pass while another is still running on this panel", async () => {
+    // Two concurrent passes on one panel is what makes a shared token corrupting, and
+    // it is reachable today: refresh() polls every six seconds and a modal can sit for
+    // minutes. The second pass must not evaluate, acquire, or ask anything.
+    let answer!: (v: string) => void;
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise<string>((r) => { answer = r; }),
+    );
+    const { p } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    h.acquire.mockClear();
+    const first = p._fire({ type: "deck:refresh" });
+    await settled();
+    const second = p._fire({ type: "deck:refresh" });
+    await settled();
+    expect(h.acquire).toHaveBeenCalledTimes(1);
+    expect(window.showWarningMessage).toHaveBeenCalledTimes(1);
+    answer("Launch");
+    await first;
+    await second;
   });
 
   it("asks before a flow's first launch, naming the ticket, the repo and the prompt mode", async () => {

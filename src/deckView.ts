@@ -132,16 +132,13 @@ export class DeckPanel {
    * directly so this initializer cannot depend on whether TypeScript assigns
    * constructor parameter properties before or after field initializers. */
   private readonly lockIo = nodeLockIo((m) => this.log(m));
-  /** This panel's identity in the flows lock, minted once per instance. It is what
-   * lets `release` delete only OUR lock: a window suspended past the TTL has its
-   * lock reaped and possibly retaken, and an untokened release on wake would delete
-   * the new holder's. */
-  private readonly lockToken = `deck-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-  /** Flow ids whose first-launch question is on screen right now. A modal is
-   * answered by a human, so it can easily outlive the lock's TTL — after which our
-   * own next poll reacquires and would ask a second time. Per panel and never
-   * persisted: it is about what is currently on this screen. */
-  private readonly launchAsks = new Set<string>();
+  /** Is a flows pass running right now? One at a time per panel: a pass can sit in a
+   * consent modal for minutes while `refresh()` keeps polling every six seconds, and
+   * two overlapping passes would each take the lock under their own token — the second
+   * acquiring only because the first's was reaped mid-modal — with the first's release
+   * then deleting the second's lock. Not persisted, and deliberately not a lock: it is
+   * about this panel's own re-entrancy, which no file can express. */
+  private advanceInFlight = false;
   /** Flow ids whose first post-start evaluation found rules already met, and which
    * are waiting for the user to approve or disarm. Per panel, deliberately not
    * persisted: the gate exists to protect the moment you come back, and asking on
@@ -278,21 +275,54 @@ export class DeckPanel {
    * toast — and tries again on its next poll six seconds later. */
   private async advanceArmedFlows(runs: RunStatus[], nowMs: number): Promise<void> {
     if (!getConfig().orchestrator) return;
-    // Silent rather than logged: with two windows polling every six seconds one of
-    // them skips almost every pass, and that is normal operation, not a fault. An
-    // unexpected filesystem failure IS logged — by `nodeLockIo`, which is why the
-    // panel hands it `this.log`.
-    if (!acquire(this.lockIo, this.flowsDir, nowMs, LOCK_TTL_MS, this.lockToken)) return;
+    // One pass at a time on this panel. `refresh()` polls every six seconds and a pass
+    // can now sit in a modal for minutes, so two of them overlapping is not a race to
+    // reason about — it is the normal case. It is also what made a shared lock token
+    // corrupting: two passes holding the same token, and the first one's release
+    // deleting the lock the second believes it holds.
+    if (this.advanceInFlight) return;
+    this.advanceInFlight = true;
     try {
-      await this.advanceUnderLock(runs, nowMs);
+      // A token per PASS, not per panel. `release` only removes a lock whose token
+      // matches, and that check is worth nothing if every pass presents the same one.
+      const token = `deck-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      let asks: { flow: Flow; target: SpendTarget }[] = [];
+      // Silent rather than logged: with two windows polling every six seconds one of
+      // them skips almost every pass, and that is normal operation, not a fault. An
+      // unexpected filesystem failure IS logged — by `nodeLockIo`, which is why the
+      // panel hands it `this.log`.
+      if (!acquire(this.lockIo, this.flowsDir, nowMs, LOCK_TTL_MS, token)) return;
+      try {
+        asks = await this.advanceUnderLock(runs, nowMs);
+      } finally {
+        release(this.lockIo, this.flowsDir, token);
+      }
+      // Asked with the lock RELEASED. A modal is answered on human time and the lock is
+      // held on machine time: awaiting one inside the other stalls every other window
+      // for as long as the question is up, and past the TTL the lock is reaped and
+      // another pass acquires while this one is still inside the modal — which is the
+      // read-then-write window the lock exists to close. Nothing needs reordering,
+      // because a pass that asks performs nothing anyway.
+      //
+      // The write that records the answer is therefore unlocked, exactly like every
+      // other user-driven flow write in this file (`flow:arm`, `flow:save`,
+      // `flow:resetEdge`, `flow:resumeDisarm`): it re-reads immediately before writing,
+      // and it touches only flow-level fields, never an edge stamp.
+      for (const ask of asks) await this.askFirstSpend(ask.flow, ask.target);
     } finally {
-      release(this.lockIo, this.flowsDir, this.lockToken);
+      this.advanceInFlight = false;
     }
   }
 
-  /** The body of a pass, with the lock already held. Split out only so the lock's
-   * `try`/`finally` above stays one readable statement. */
-  private async advanceUnderLock(runs: RunStatus[], nowMs: number): Promise<void> {
+  /** The body of a pass, with the lock held. Returns the flows that need the user's
+   * consent before they can ever spend anything — the caller asks once the lock is
+   * released. Split out so the lock's `try`/`finally` above stays readable, and so
+   * "what happens under the lock" is one function with no modal in it. */
+  private async advanceUnderLock(
+    runs: RunStatus[],
+    nowMs: number,
+  ): Promise<{ flow: Flow; target: SpendTarget }[]> {
+    const asks: { flow: Flow; target: SpendTarget }[] = [];
     for (const flow of readFlows(this.flowIo, this.flowsDir)) {
       if (!flow.armed) {
         // A disarmed flow holds no gate — re-arming starts the cycle over.
@@ -393,10 +423,11 @@ export class DeckPanel {
           .map((f) => this.spendTarget(fresh, f.edge))
           .find((t) => t !== undefined);
         if (wantsSpend !== undefined && fresh.launchConfirmedAt === undefined) {
-          await this.askFirstSpend(fresh, wantsSpend);
-          // Whatever the answer, THIS pass performs nothing: an approval only lets
-          // the next pass act, which keeps the acting path identical whether or not
-          // a question was ever asked.
+          // Recorded, not asked — the caller asks once the lock is released. Whatever
+          // the answer, THIS pass performs nothing: an approval only lets the next pass
+          // act, which keeps the acting path identical whether or not a question was
+          // ever asked.
+          asks.push({ flow: fresh, target: wantsSpend });
           continue;
         }
 
@@ -452,6 +483,7 @@ export class DeckPanel {
         this.log(`deck: flow ${flow.id} failed to advance: ${e}`);
       }
     }
+    return asks;
   }
 
   /** The planned node a `launch` edge points at, or `undefined` when it points at
@@ -493,34 +525,29 @@ export class DeckPanel {
    * nothing else; the pass that asked never acts. Dismissing it writes nothing at
    * all, so the flow stays armed and is asked again later. */
   private async askFirstSpend(flow: Flow, target: SpendTarget): Promise<void> {
-    if (this.launchAsks.has(flow.id)) return;
     const cfg = getConfig();
     const ACT = target.action === "launch" ? "Launch" : "Seed";
     const DISARM = "Disarm";
-    this.launchAsks.add(flow.id);
-    let answer: string | undefined;
-    try {
-      const message = target.action === "launch"
-        ? (() => {
-            const mode = cfg.promptModes.find((m) => m.id === target.node.mode);
-            return `${flow.name} is ready to launch ${target.node.ticketKey} in ${target.node.repos.join(", ")} with the "${
-              mode?.label ?? target.node.mode
-            }" prompt, unattended. It will keep launching on its own from now on.`;
-          })()
-        : (() => {
-            const mode = cfg.promptModes.find((m) => m.id === target.mode);
-            return `${flow.name} is ready to seed another agent into ${target.node.repo} with the "${
-              mode?.label ?? target.mode ?? "default"
-            }" prompt, unattended. It will keep seeding on its own from now on.`;
-          })();
-      answer = await vscode.window.showWarningMessage(message, { modal: true }, ACT, DISARM);
-    } finally {
-      this.launchAsks.delete(flow.id);
-    }
-    // Re-read: a human can leave a modal up for far longer than the lock's TTL, and
-    // in that time another window may have stamped an edge or the user may have
-    // deleted the flow. Writing the copy we captured before asking would erase the
-    // one and resurrect the other.
+    const message = target.action === "launch"
+      ? (() => {
+          const mode = cfg.promptModes.find((m) => m.id === target.node.mode);
+          return `${flow.name} is ready to launch ${target.node.ticketKey} in ${target.node.repos.join(", ")} with the "${
+            mode?.label ?? target.node.mode
+          }" prompt, unattended. It will keep launching on its own from now on.`;
+        })()
+      : (() => {
+          const mode = cfg.promptModes.find((m) => m.id === target.mode);
+          return `${flow.name} is ready to seed another agent into ${target.node.repo} with the "${
+            mode?.label ?? target.mode ?? "default"
+          }" prompt, unattended. It will keep seeding on its own from now on.`;
+        })();
+    const answer = await vscode.window.showWarningMessage(message, { modal: true }, ACT, DISARM);
+    // Re-read, and this is the ONLY thing standing between two windows here: the caller
+    // released the lock before asking, so while this modal was up another window's pass
+    // may have stamped an edge, or the user may have deleted the flow. Writing the copy
+    // captured before the question would erase the one and resurrect the other. Narrow
+    // by construction — read and write are adjacent, and only flow-level fields are
+    // touched, never an edge stamp.
     const latest = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
     if (!latest) return;
     if (answer === ACT) writeFlow(this.flowIo, this.flowsDir, { ...latest, launchConfirmedAt: Date.now() });
