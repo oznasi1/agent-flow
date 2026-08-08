@@ -105,6 +105,12 @@ export function activate(context: vscode.ExtensionContext): void {
     registerTracked("agentFlow.doctor", () => showDoctor(defaultDeps(connector, log))),
   );
 
+  // Same cadence as the Deck's own poll: a badge that says "running" after the agent
+  // closed is worse than no badge, and the two directory reads are cheap enough to
+  // repeat (and are skipped entirely when no note has ever been launched).
+  const notepadPoll = setInterval(() => provider.postNotepad(), 6000);
+  context.subscriptions.push({ dispose: () => clearInterval(notepadPoll) });
+
   // Best-effort niceties, all of them optional. A failure here must NEVER propagate out
   // of activate() — an uncaught throw makes VS Code dispose every registration above
   // (commands + the view provider), which surfaces as "command not found" and a dead

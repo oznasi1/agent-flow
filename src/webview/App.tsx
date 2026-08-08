@@ -5,9 +5,11 @@ import {
   addOnce, deriveStatuses, effectiveFilter, fmtEst, gateCopy, isPrReviewStatus, isTopPriority,
   matchesStatus, moveKey, railClass, visibleFilters,
 } from "./helpers";
-import { Filter, FilterVisibility, Task, OutboundMessage, Size } from "../types";
+import { Filter, FilterVisibility, Task, OutboundMessage, Size, NotepadItemView } from "../types";
 import type { SerializedCaps } from "../tasks/provider";
 import { GaugeMark } from "./GaugeMark";
+import { Notepad } from "./Notepad";
+import { PlayIcon } from "./icons";
 
 let toastSeq = 0;
 
@@ -60,12 +62,6 @@ interface CardDnd {
   dragging: boolean;
   hint: "before" | "after" | null;
 }
-
-const PlayIcon = () => (
-  <svg className="take-icon" width="13" height="13" viewBox="0 0 24 24" aria-hidden="true">
-    <path fill="currentColor" d="M7 5.5v13a1 1 0 0 0 1.54.84l10-6.5a1 1 0 0 0 0-1.68l-10-6.5A1 1 0 0 0 7 5.5z" />
-  </svg>
-);
 
 const SearchIcon = () => (
   <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
@@ -158,6 +154,10 @@ export function App(): JSX.Element {
     });
   const clearBatch = () => setBatchSelected(new Set());
   const [textQuery, setTextQuery] = React.useState("");
+  // Which of the panel's two views is showing. Not persisted: the panel always
+  // opens on Tasks, which is what the sidebar is primarily for.
+  const [tab, setTab] = React.useState<"tasks" | "notepad">("tasks");
+  const [notes, setNotes] = React.useState<NotepadItemView[]>([]);
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [toasts, setToasts] = React.useState<
@@ -295,6 +295,9 @@ export function App(): JSX.Element {
           break;
         case "loading":
           setLoading(m.loading);
+          break;
+        case "notepad:notes":
+          setNotes(m.notes);
           break;
         case "toast": {
           const id = ++toastSeq;
@@ -497,6 +500,14 @@ export function App(): JSX.Element {
         {me && <span className="me">{me}</span>}
       </div>
 
+      <div className="tabbar" role="tablist" aria-label="Panel view">
+        <button role="tab" aria-selected={tab === "tasks"} onClick={() => setTab("tasks")}>Tasks</button>
+        <button role="tab" aria-selected={tab === "notepad"} onClick={() => setTab("notepad")}>Notepad</button>
+      </div>
+
+      {tab === "notepad" && <Notepad notes={notes} />}
+
+      {tab === "tasks" && <>
       <div className="lenses">
         <div className="lens">
           <div className="seg" role="group" aria-label="Task filter">
@@ -661,6 +672,7 @@ export function App(): JSX.Element {
           </button>
         </div>
       )}
+      </>}
       {toastStack}
     </div>
   );

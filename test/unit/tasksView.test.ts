@@ -3787,3 +3787,199 @@ describe("a refused write that names fields to retry", () => {
     expect(posted.some((m) => m.type === "statusChanged")).toBe(false);
   });
 });
+
+describe("notepad", () => {
+  // A provider wired to a context whose globalState is a real in-memory map, so
+  // these tests assert on what was actually persisted rather than on a spy.
+  function mkProvider() {
+    const store = new Map<string, unknown>();
+    const ctx = {
+      ...fakeContext(),
+      globalState: {
+        get: (k: string, d?: unknown) => (store.has(k) ? store.get(k) : d),
+        update: async (k: string, v: unknown) => void store.set(k, v),
+      },
+    } as unknown as ConstructorParameters<typeof TasksViewProvider>[0];
+    const posted: unknown[] = [];
+    const provider = new TasksViewProvider(ctx, makeFixtureConnector(), () => {});
+    // The provider posts through its resolved webview; stand one in.
+    (provider as unknown as { view: unknown }).view = {
+      webview: { postMessage: (m: unknown) => void posted.push(m) },
+    };
+    // `onMessage` is private on the class — these tests drive it directly because
+    // it IS the unit under test, matching how the rest of this file reaches it
+    // (see the `send`/`handler` helpers above).
+    const sendMsg = (m: InboundMessage) =>
+      (provider as unknown as { onMessage(m: InboundMessage): Promise<void> }).onMessage(m);
+    return { provider, posted, store, sendMsg };
+  }
+
+  const notesIn = (store: Map<string, unknown>) =>
+    store.get("agentFlow.notepad") as { id: string; title: string; done: boolean }[] | undefined;
+
+  it("adds a note and posts the new list back", async () => {
+    const { posted, store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Write the thing", body: "details" });
+    expect(notesIn(store)!.map((n) => n.title)).toEqual(["Write the thing"]);
+    const last = posted.at(-1) as { type: string; notes: { title: string }[] };
+    expect(last.type).toBe("notepad:notes");
+    expect(last.notes.map((n) => n.title)).toEqual(["Write the thing"]);
+  });
+
+  it("ignores an add whose title and body are both blank", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "   ", body: "  " });
+    expect(notesIn(store) ?? []).toEqual([]);
+  });
+
+  it("edits a note in place", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "old", body: "b" });
+    const id = notesIn(store)![0].id;
+    await sendMsg({ type: "notepad:update", id, title: "new", body: "b2" });
+    expect(notesIn(store)![0]).toMatchObject({ id, title: "new", body: "b2" });
+  });
+
+  it("toggles done and back", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "t", body: "" });
+    const id = notesIn(store)![0].id;
+    await sendMsg({ type: "notepad:toggleDone", id });
+    expect(notesIn(store)![0].done).toBe(true);
+    await sendMsg({ type: "notepad:toggleDone", id });
+    expect(notesIn(store)![0].done).toBe(false);
+  });
+
+  it("deletes one note and leaves the rest", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "a", body: "" });
+    await sendMsg({ type: "notepad:add", title: "b", body: "" });
+    const id = notesIn(store)!.find((n) => n.title === "a")!.id;
+    await sendMsg({ type: "notepad:delete", id });
+    expect(notesIn(store)!.map((n) => n.title)).toEqual(["b"]);
+  });
+
+  it("clears only the completed notes", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "keep", body: "" });
+    await sendMsg({ type: "notepad:add", title: "drop", body: "" });
+    const id = notesIn(store)!.find((n) => n.title === "drop")!.id;
+    await sendMsg({ type: "notepad:toggleDone", id });
+    await sendMsg({ type: "notepad:clearCompleted" });
+    expect(notesIn(store)!.map((n) => n.title)).toEqual(["keep"]);
+  });
+
+  it("survives a globalState value that is not an array", async () => {
+    const { provider, store, posted } = mkProvider();
+    store.set("agentFlow.notepad", { corrupt: true });
+    provider.postNotepad();
+    expect((posted.at(-1) as { notes: unknown[] }).notes).toEqual([]);
+  });
+
+  it("launches a run keyed off the note title plus the note's own id, and records it on the note", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "it double-fires" });
+    const id = notesIn(store)![0].id;
+    await sendMsg({ type: "notepad:run", id });
+
+    const call = vi.mocked(openWorkspace).mock.calls.at(-1)![0];
+    expect(call.kind).toBe("notepad");
+    expect(call.ticket.key).toBe(`notepad-fix-the-retry-banner-${id}`);
+    expect(call.ticket.url).toBe("");
+    expect(call.planMd).toContain("it double-fires");
+    expect((notesIn(store)![0] as { lastRunKey?: string }).lastRunKey).toBe(`notepad-fix-the-retry-banner-${id}`);
+  });
+
+  it("falls back to a generic slug, still suffixed with the note's id, when the note has no title", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "", body: "just a body" });
+    const id = notesIn(store)![0].id;
+    await sendMsg({ type: "notepad:run", id });
+    expect(vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key).toBe(`notepad-note-${id}`);
+  });
+
+  it("gives two distinct untitled notes different run keys", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValue([{ repo: repos[0] }] as never); // repo picker, both runs
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "", body: "first" });
+    await sendMsg({ type: "notepad:add", title: "", body: "second" });
+    const [idA, idB] = notesIn(store)!.map((n) => n.id);
+    expect(idA).not.toBe(idB);
+
+    await sendMsg({ type: "notepad:run", id: idA });
+    const keyA = vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key;
+    await sendMsg({ type: "notepad:run", id: idB });
+    const keyB = vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key;
+
+    expect(keyA).not.toBe(keyB);
+  });
+
+  it("gives two notes with identical titles different run keys", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValue([{ repo: repos[0] }] as never); // repo picker, both runs
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Fix login", body: "attempt one" });
+    await sendMsg({ type: "notepad:add", title: "Fix login", body: "attempt two" });
+    const notes = notesIn(store)!;
+    const idA = notes.find((n) => n.title === "Fix login")!.id;
+    const idB = notes.filter((n) => n.title === "Fix login")[1].id;
+    expect(idA).not.toBe(idB);
+
+    await sendMsg({ type: "notepad:run", id: idA });
+    const keyA = vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key;
+    await sendMsg({ type: "notepad:run", id: idB });
+    const keyB = vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key;
+
+    expect(keyA).not.toBe(keyB);
+  });
+
+  it("reuses the same run key when the same note is run twice", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValue([{ repo: repos[0] }] as never); // repo picker, both runs
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Re-run me", body: "" });
+    const id = notesIn(store)![0].id;
+
+    await sendMsg({ type: "notepad:run", id });
+    const key1 = vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key;
+    await sendMsg({ type: "notepad:run", id });
+    const key2 = vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key;
+
+    expect(key1).toBe(key2);
+  });
+
+  it("uses the generic explore action's prompt, selected by id rather than list position", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    // Reorder the configured actions so "general" is no longer first — a positional
+    // pick (exploreActions[0]) would silently grab "Jira ticket" instead.
+    vi.mocked(getConfig).mockReturnValue({
+      ...CFG,
+      exploreActions: [...CFG.exploreActions].reverse(),
+    });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "check the general prompt", body: "" });
+    const id = notesIn(store)![0].id;
+    await sendMsg({ type: "notepad:run", id });
+    const general = CFG.exploreActions.find((a) => a.id === "general")!;
+    expect(vi.mocked(openWorkspace).mock.calls.at(-1)![0].promptTemplate).toBe(general.prompt);
+  });
+
+  it("does nothing for an id that is not in the list", async () => {
+    const { sendMsg } = mkProvider();
+    vi.mocked(openWorkspace).mockClear();
+    await sendMsg({ type: "notepad:run", id: "ghost" });
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+});

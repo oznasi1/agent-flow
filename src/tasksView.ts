@@ -29,11 +29,33 @@ import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/ses
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
-import { Filter, InboundMessage, Task, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
+import { newNote, noteStatus, sanitizeNotes } from "./notepad";
+import {
+  Filter,
+  InboundMessage,
+  NotepadItem,
+  NotepadItemView,
+  Task,
+  OutboundMessage,
+  PromptMode,
+  ServiceRef,
+  Size,
+  WorkspaceMode,
+} from "./types";
 import { track, trackError, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
 import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, PromptModeProp, RepoSource, TakeSource } from "./telemetry/events";
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
+// globalState, not workspaceState: a notepad belongs to the user, not to whichever
+// repo happens to be open. Same storage the install-reported flag uses.
+const NOTEPAD_KEY = "agentFlow.notepad";
+
+/** Shared by `explore()` and `runNotepadItem` for turning free text into a run
+ * key fragment: lowercase, dashes for anything non-alphanumeric, capped at 40
+ * chars so a long topic or title can't produce an unbounded filename. */
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+}
 
 /** Which engine operation a webview message represents, for operation_failed.
  * Messages absent from this map report as "jira_fetch" only if they read the task
@@ -55,6 +77,7 @@ const MESSAGE_OPS: Partial<Record<InboundMessage["type"], Op>> = {
   removeFromSprint: "jira_write",
   setComponent: "jira_write",
   explore: "workspace_write",
+  "notepad:run": "workspace_write",
   runDoctor: "jira_fetch",
 };
 
@@ -221,6 +244,60 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     await this.context.workspaceState.update(SPRINT_ORDER_KEY, order);
   }
 
+  private notes(): NotepadItem[] {
+    return sanitizeNotes(this.context.globalState.get<unknown>(NOTEPAD_KEY, []));
+  }
+
+  private async saveNotes(notes: NotepadItem[]): Promise<void> {
+    await this.context.globalState.update(NOTEPAD_KEY, notes);
+    this.postNotepad();
+  }
+
+  /** Post every note with its derived run status. Public because the poll tick in
+   * extension.ts drives it too — a badge must not sit stale while the panel is open. */
+  public postNotepad(): void {
+    const notes = this.notes();
+    // Skip both directory reads entirely when nothing has ever been launched:
+    // the common case is a notepad of plain items with no runs behind them.
+    const anyRun = notes.some((n) => n.lastRunKey);
+    const runs = anyRun ? readRuns(defaultRunsDir()) : [];
+    const livePlaces = anyRun
+      ? new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys())
+      : new Set<string>();
+    const view: NotepadItemView[] = notes.map((n) => {
+      const runStatus = noteStatus(n, runs, livePlaces);
+      return runStatus ? { ...n, runStatus } : { ...n };
+    });
+    this.post({ type: "notepad:notes", notes: view });
+  }
+
+  private async addNote(title: string, body: string): Promise<void> {
+    // A note with neither a title nor a body is nothing at all — silently ignored
+    // rather than toasted: the webview already disables the button, so reaching
+    // here means a stale view, not a user who needs telling.
+    if (!title.trim() && !body.trim()) return;
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    await this.saveNotes([...this.notes(), newNote(title, body, id, Date.now())]);
+  }
+
+  private async updateNote(id: string, title: string, body: string): Promise<void> {
+    await this.saveNotes(
+      this.notes().map((n) => (n.id === id ? { ...n, title: title.trim(), body: body.trim() } : n)),
+    );
+  }
+
+  private async toggleNoteDone(id: string): Promise<void> {
+    await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, done: !n.done } : n)));
+  }
+
+  private async deleteNote(id: string): Promise<void> {
+    await this.saveNotes(this.notes().filter((n) => n.id !== id));
+  }
+
+  private async clearCompletedNotes(): Promise<void> {
+    await this.saveNotes(this.notes().filter((n) => !n.done));
+  }
+
   public async refresh(): Promise<void> {
     await this.postInitialState();
   }
@@ -240,6 +317,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       authed = false;
     }
     this.postState(authed, configured, null);
+    this.postNotepad();
     if (!configured || !authed) return;
 
     const provider = this.provider();
@@ -390,6 +468,30 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
         case "explore": {
           await this.explore();
+          break;
+        }
+        case "notepad:add": {
+          await this.addNote(m.title, m.body);
+          break;
+        }
+        case "notepad:update": {
+          await this.updateNote(m.id, m.title, m.body);
+          break;
+        }
+        case "notepad:toggleDone": {
+          await this.toggleNoteDone(m.id);
+          break;
+        }
+        case "notepad:delete": {
+          await this.deleteNote(m.id);
+          break;
+        }
+        case "notepad:clearCompleted": {
+          await this.clearCompletedNotes();
+          break;
+        }
+        case "notepad:run": {
+          await this.runNotepadItem(m.id);
           break;
         }
         case "reorder": {
@@ -751,6 +853,63 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return typed?.trim() || undefined;
   }
 
+  /** Shared kickoff tail for `explore()` and `runNotepadItem`: pick a destination,
+   * resolve the repo set for it (skipping the picker for an existing/live-folder
+   * destination that already fixes its own repos), turn the destination into
+   * `openWorkspace` args, and resolve the Remote Control toggle. `pickerLabel` and
+   * `argsLabel` are the only two points where the two callers' copy differs.
+   * Returns undefined on any cancellation, at which point the caller must open
+   * nothing. */
+  private async resolveKickoffTarget(
+    cfg: AgentFlowConfig,
+    repos: ServiceRef[],
+    pickerLabel: string,
+    argsLabel: string,
+  ): Promise<
+    | {
+        target: OpenTarget;
+        services: ServiceRef[];
+        args: { mode: WorkspaceMode; openIn: "new" | "current"; existingWorkspaceFile?: string; existingFolder?: string };
+        wantRemoteControl: boolean;
+      }
+    | undefined
+  > {
+    const target = await this.chooseOpenTarget(cfg);
+    if (!target) return undefined;
+
+    let services: ServiceRef[];
+    if (target.kind === "existing" || target.kind === "live-folder") {
+      services = this.servicesFromExistingDestination(target, repos);
+      if (services.length === 0) {
+        this.toast("error", "That workspace has no repos to open.");
+        return undefined;
+      }
+    } else {
+      const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
+        repos.map((r) => ({
+          label: r.name,
+          detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
+          repo: r,
+        })),
+        {
+          canPickMany: true,
+          title: `${pickerLabel} — pick the repos to open`,
+          placeHolder: "Space to toggle · Enter to open",
+          ignoreFocusOut: true,
+        },
+      );
+      if (!picks || picks.length === 0) return undefined;
+      services = picks.map((p) => p.repo);
+    }
+
+    const args = await this.targetToOpenArgs(target, services.length, argsLabel, cfg);
+    if (!args) return undefined;
+
+    const wantRemoteControl = await this.resolveRemoteControl(cfg);
+
+    return { target, services, args, wantRemoteControl };
+  }
+
   /** Explore flow: pick repos freely (no ticket), open a workspace, and seed a Claude Code
    * agent for investigation/knowledge — a Jira ticket can come out of it later. */
   public async explore(): Promise<void> {
@@ -799,40 +958,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
 
     // Destination first — an existing workspace / live folder already fixes its repos.
-    const target = await this.chooseOpenTarget(cfg);
-    if (!target) return;
+    const kickoff = await this.resolveKickoffTarget(cfg, repos, "Explore", "Explore");
+    if (!kickoff) return;
+    const { services, args, wantRemoteControl } = kickoff;
 
-    let services: ServiceRef[];
-    if (target.kind === "existing" || target.kind === "live-folder") {
-      services = this.servicesFromExistingDestination(target, repos);
-      if (services.length === 0) {
-        this.toast("error", "That workspace has no repos to open.");
-        return;
-      }
-    } else {
-      const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
-        repos.map((r) => ({
-          label: r.name,
-          detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
-          repo: r,
-        })),
-        {
-          canPickMany: true,
-          title: "Explore — pick the repos to open",
-          placeHolder: "Space to toggle · Enter to open",
-          ignoreFocusOut: true,
-        },
-      );
-      if (!picks || picks.length === 0) return;
-      services = picks.map((p) => p.repo);
-    }
-
-    const args = await this.targetToOpenArgs(target, services.length, "Explore", cfg);
-    if (!args) return;
-
-    const wantRemoteControl = await this.resolveRemoteControl(cfg);
-
-    const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
     const slug = slugify(topic) || "explore";
     const serviceNames = services.map((s) => s.name).join(", ");
     const key = env ? `verify-${slugify(env) || "env"}-${slug}` : `explore-${slug}`;
@@ -872,6 +1001,78 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ? "to check on your other tasks"
         : "to explore";
     this.toast("success", `Opened ${where} ${what}. Brief seeded in each repo.${seeded}${rcNote}`);
+  }
+
+  /** Launch an agent for one notepad item. Same shape as explore(): pick repos and
+   * a destination, open a workspace, seed a brief — the note supplies the topic and
+   * the brief body, so there is no input box to show. The run is written with
+   * `kind: "notepad"` into the same store the Deck reads, which is the whole of the
+   * Deck integration: the board gains a second origin, not a second data path. */
+  public async runNotepadItem(id: string): Promise<void> {
+    const note = this.notes().find((n) => n.id === id);
+    if (!note) return;
+
+    const cfg = getConfig();
+    const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+    if (repos.length === 0) {
+      this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
+      return;
+    }
+
+    const kickoff = await this.resolveKickoffTarget(cfg, repos, "Notepad", "Notepad");
+    if (!kickoff) return;
+    const { services, args, wantRemoteControl } = kickoff;
+
+    // The generic explore action's prompt/slackDm — a notepad run has no action to
+    // choose (there is no Explore-style picker for it), so it borrows the one action
+    // meant to be topic-agnostic. Selected by stable id, not list position, so
+    // reordering agentFlow.exploreActions can never silently swap in a different
+    // template here.
+    const generic = cfg.exploreActions.find((a) => a.id === "general");
+    const topic = note.title.trim() || "Notepad item";
+    // Slugged from the note's own title, not from the display fallback above — an
+    // untitled note must key as "notepad-note-<id>", not "notepad-notepad-item-<id>".
+    // The note's own id is included (not just the title slug) because two notes can
+    // share a title — or both be untitled — and would otherwise collide on the same
+    // run-store key, silently overwriting each other's run record. Re-running the
+    // SAME note still reuses this exact key, which is intended: it replaces that
+    // note's own previous run rather than accumulating orphaned records.
+    const key = `notepad-${slugify(note.title.trim()) || "note"}-${note.id}`;
+    const planMd =
+      `## Notepad: ${topic}\n\n_No ticket — an item you wrote in the Agent Flow notepad. ` +
+      `If it turns into tracked work, open a ticket afterwards._` +
+      (note.body.trim() ? `\n\n${note.body.trim()}` : "");
+
+    const result = await openWorkspace({
+      ticket: { key, summary: topic, url: "" },
+      planMd,
+      descriptionText: note.body,
+      services,
+      mode: args.mode,
+      promptTemplate: applyExploreVars(injectSlackDm(generic?.prompt ?? "", generic?.slackDm ?? false), {
+        env: undefined,
+        services: services.map((s) => s.name).join(", "),
+      }),
+      workspaceDir: cfg.workspaceDir,
+      seedAgent: cfg.seedAgent,
+      openIn: args.openIn,
+      existingWorkspaceFile: args.existingWorkspaceFile,
+      existingFolder: args.existingFolder,
+      remoteControl: wantRemoteControl,
+      kind: "notepad",
+    });
+
+    // Point the note at its run so the badge has something to derive from. Written
+    // after the launch, not before: a cancelled picker must leave no pointer to a
+    // run that was never created.
+    await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, lastRunKey: key } : n)));
+
+    const where = result.workspaceFile
+      ? `workspace ${result.workspaceFile.split("/").pop()}`
+      : `${result.opened.length} window(s)`;
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
+    this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
   }
 
   /** One repo → its own window; multiple → per the workspaceMode setting (asking if configured). */

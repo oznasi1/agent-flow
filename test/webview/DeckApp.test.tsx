@@ -289,6 +289,15 @@ describe("DeckApp", () => {
     expect(screen.queryByText("explore")).not.toBeInTheDocument();
   });
 
+  it("labels a notepad run on the untracked key chip", () => {
+    render(<DeckApp />);
+    host(runsMsg([untracked({
+      run: { ...mkStatus().run, key: "notepad-fix-it", summary: "fix it", url: "", kind: "notepad" },
+    })]));
+    expect(screen.getByText("notepad")).toBeInTheDocument();
+    expect(screen.queryByText("notepad-fix-it")).not.toBeInTheDocument();
+  });
+
   it("shows a toast message from the host", () => {
     render(<DeckApp />);
     host({ type: "toast", level: "error", message: "Nothing to open for ASM-1." });

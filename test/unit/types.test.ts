@@ -101,4 +101,16 @@ describe("runKind", () => {
   it("falls back to task for a hand-edited nonsense kind", () => {
     expect(runKind(mkRun({ kind: "banana" as unknown as Run["kind"] }))).toBe("task");
   });
+
+  it("keeps a notepad run's kind rather than clamping it to task", () => {
+    const run = { key: "notepad-x", summary: "s", url: "", createdAt: 1, kind: "notepad",
+      mode: "per-window", repos: [], briefPaths: [] } as unknown as Run;
+    expect(runKind(run)).toBe("notepad");
+  });
+
+  it("still clamps an unknown kind to task", () => {
+    const run = { key: "k", summary: "s", url: "", createdAt: 1, kind: "nonsense",
+      mode: "per-window", repos: [], briefPaths: [] } as unknown as Run;
+    expect(runKind(run)).toBe("task");
+  });
 });
