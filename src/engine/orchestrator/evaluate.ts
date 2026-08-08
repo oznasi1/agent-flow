@@ -5,7 +5,7 @@
 // and the cap testable without launching a window.
 import { RunStatus } from "../../types";
 import { CondContext, evalCond, placeActivity } from "./conditions";
-import { Condition, Flow, FlowEdge, findNode, incomingEdges, isPlace } from "./model";
+import { Condition, Flow, FlowEdge, findNode, incomingEdges, isPlace, isSettled } from "./model";
 
 /** How many acting edges (`launch` or `seed`) may fire in one pass. A badly wired
  * graph should not be able to storm your window manager; the remainder is reported
@@ -46,11 +46,6 @@ export interface EvalResult {
   fired: FiredEdge[];
   blocked: BlockedNote[];
   deferred: number;
-}
-
-/** Has this edge already run? Either verdict is terminal until Reset clears it. */
-function settled(e: FlowEdge): boolean {
-  return e.firedAt !== undefined || e.error !== undefined;
 }
 
 export function evaluateFlow(i: EvalInput): EvalResult {
@@ -116,7 +111,7 @@ export function evaluateFlow(i: EvalInput): EvalResult {
   const handledTargets = new Set<string>();
 
   for (const edge of i.flow.edges) {
-    if (settled(edge)) continue;
+    if (isSettled(edge)) continue;
     const target = findNode(i.flow, edge.to);
     if (!target) continue;
 
@@ -148,14 +143,14 @@ export function evaluateFlow(i: EvalInput): EvalResult {
 
     // Already-settled siblings count as satisfied: the junction closes over
     // time, not in one instant, and a flow that forgot its earlier arrivals
-    // would never close. `settled(e)` (not just `e.firedAt`) also means a
+    // would never close. `isSettled(e)` (not just `e.firedAt`) also means a
     // settled edge is never handed to `met` again.
-    const allMet = incoming.every((e) => settled(e) || met(e) === true);
+    const allMet = incoming.every((e) => isSettled(e) || met(e) === true);
     if (!allMet) continue;
 
     // The first still-*pending* edge in flow order performs — a settled edge
     // cannot perform again, which is why this is not simply "first incoming".
-    const pending = incoming.filter((e) => !settled(e));
+    const pending = incoming.filter((e) => !isSettled(e));
     const performer = pending[0];
 
     // Decide the junction's fate BEFORE any of its edges enter `fired`. If the

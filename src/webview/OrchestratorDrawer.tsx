@@ -1,7 +1,7 @@
 import * as React from "react";
 import { describeCond, placeActivity } from "../engine/orchestrator/conditions";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
-import { Condition, Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { Condition, Flow, FlowEdge, FlowNode, isSettled, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { AgentState, PendingResume, RunStatus } from "../types";
 
 /** The drag payload a Deck card carries. A NUL separator cannot appear in a
@@ -223,6 +223,10 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   if (!flow) return null;
 
   const places = flow.nodes.filter((n) => n.kind !== "notify").length;
+  /** How many rules cannot advance. Driven by the edges' own `error` — the half of
+   * `isSettled` that means "tried and failed" rather than "ran". An armed flow with
+   * one of these is not simply watching, and the footer must not say it is. */
+  const stalled = flow.edges.filter((e) => e.error !== undefined).length;
   // Reported by the host on `deck:flows`, keyed by flow id — never a second
   // source of truth for whether rules are met, only for whether the user has
   // yet said "go" on what already is.
@@ -351,8 +355,9 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             Flows · {p.flows.length} ▾
           </button>
           {/* Same quiet `orch-mini` as its neighbour, deliberately: a filled or
-              accented control is reserved for Arm, which does not exist yet, and red
-              is reserved for a real failure. Deleting closes the drawer rather than
+              accented control is reserved for Arm — the drawer's one filled control,
+              shipped in this phase — and red is reserved for a real failure (an
+              errored rule, in the inspector below). Deleting closes the drawer rather than
               leaving it aimed at a flow that is gone — the host's `deck:flows` post
               would arrive and close it a round trip later anyway, and a drawer
               rendering a deleted flow in the meantime is a lie. */}
@@ -611,10 +616,23 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 onBlur={(ev) => setNotifyMessage(edge, ev.currentTarget.value)}
               />
             </div>
+            {/* Reset is offered for an ERRORED edge, not only a fired one. An edge
+                carrying `error` with no `firedAt` is settled in `evaluate.ts`, so it
+                never fires again — offering Reset only for `firedAt` made it an
+                unresettable dead end that still rendered the *waiting* line, as if
+                it were patiently watching. Error wins over a receipt when a
+                hand-edited flow somehow carries both: a failure is the more
+                important claim. And this is the one place in the drawer red is
+                right — a rule that tried and failed is a real failure, which is
+                exactly what `--c-danger` is for. */}
             <div className="orch-obs">
-              {edge.firedAt !== undefined ? (
+              {isSettled(edge) ? (
                 <>
-                  <span className="fired">{edge.firedNote ?? "fired"}</span>
+                  {edge.error !== undefined ? (
+                    <span className="err">{edge.error}</span>
+                  ) : (
+                    <span className="fired">{edge.firedNote ?? "fired"}</span>
+                  )}
                   <div className="sp" />
                   <button type="button" className="orch-mini" onClick={() => p.onResetEdge(flow.id, edge.id)}>Reset</button>
                 </>
@@ -627,9 +645,20 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       </div>
 
       <div className="orch-ft">
-        <span className={`live${flow.armed ? " on" : ""}`}>
+        {/* An armed flow with an errored rule must not claim it is watching: that
+            rule is settled and will never be evaluated again until Reset. It says
+            how many rules are stalled instead — "N rules stalled", not "this flow
+            is stalled", because the flow's OTHER rules genuinely are still live.
+            The node and rule counts stay on the footer's right-hand side either
+            way, so nothing is lost by spending the left side on the failure.
+            Disarmed is left alone: "Not armed" makes no claim to correct. */}
+        <span className={`live${flow.armed ? " on" : ""}${flow.armed && stalled > 0 ? " stalled" : ""}`}>
           <span className="d" />
-          {flow.armed ? `Armed · watching ${places} ${places === 1 ? "node" : "nodes"}` : "Not armed"}
+          {!flow.armed
+            ? "Not armed"
+            : stalled > 0
+              ? `Armed · ${stalled} ${stalled === 1 ? "rule" : "rules"} stalled`
+              : `Armed · watching ${places} ${places === 1 ? "node" : "nodes"}`}
         </span>
         <div className="sp" />
         <span>

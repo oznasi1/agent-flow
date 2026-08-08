@@ -88,15 +88,44 @@ describe("applyFired", () => {
     expect(out.edges[0].firedAt).toBeUndefined();
   });
 
-  it("stamps a performed non-notify edge with a receipt that says it is unavailable, not that it ran", () => {
-    // evaluateFlow does not filter by action, so a launch edge can fire. The
-    // receipt must NOT claim it ran — that would be a lie in the drawer. It must
-    // say the action is not available in this build.
+  it("records an ERROR, not a firedAt, on a performed edge whose action is not notify", () => {
+    // evaluateFlow does not filter by action, so a launch edge from a hand-edited
+    // flow can fire. It must not be stamped as fired: `firedAt` consumes the latch
+    // AS A SUCCESS, so the edge never acts and — once a real launch ships — looks
+    // already-done forever and needs a manual Reset to ever run. `error` is settled
+    // too (see isSettled), so it still cannot re-fire in a loop, but the drawer
+    // surfaces it and offers Reset, and a Reset makes it genuinely run later.
     const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
-    const note = out.edges[0].firedNote;
-    expect(note).toContain("not available in this build");
-    expect(note).not.toMatch(/success|ran|ran successfully/i);
+    expect(out.edges[0].error).toContain("not available in this build");
+    // The latch must NOT read as a success.
+    expect(out.edges[0].firedAt).toBeUndefined();
+    expect(out.edges[0].firedNote).toBeUndefined();
+  });
+
+  it("names the action it could not perform, and never claims it ran", () => {
+    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "seed" })]);
+    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
+    expect(out.edges[0].error).toBe("seed is not available in this build");
+    expect(out.edges[0].error).not.toMatch(/success|ran|done|told you/i);
+  });
+
+  it("stamps a NON-performed non-notify edge as fired, not errored — it did nothing, and its junction closed", () => {
+    // The distinction the error must not swallow: a perform:false sibling never
+    // attempted its action, so there is nothing to have failed. Recording an error
+    // for it would stall the junction it just legitimately closed.
+    const flow = flowWith(
+      [place("a", "ASM-1"), place("b", "ASM-2"), place("c", "ASM-3", "all")],
+      [edge("e1", "a", "c"), edge("e2", "b", "c", { action: "launch" })],
+    );
+    const out = applyFired(
+      flow,
+      [{ edge: flow.edges[0], perform: true }, { edge: flow.edges[1], perform: false }],
+      NOW,
+    );
+    expect(out.edges[1].error).toBeUndefined();
+    expect(out.edges[1].firedAt).toBe(NOW);
+    expect(out.edges[1].firedNote).toBe("closed with its junction");
   });
 });
 

@@ -923,3 +923,108 @@ describe("Reset", () => {
     expect(screen.queryByRole("button", { name: /reset/i })).toBeNull();
   });
 });
+
+describe("an errored rule", () => {
+  /** The same graph as `firedFlow`, but the edge tried and FAILED: `error` with no
+   * `firedAt`. `evaluate.ts` settles on that, so this edge never fires again. */
+  const erroredFlow = (over: Partial<Flow> = {}) => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
+    ],
+    edges: [{
+      id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch",
+      error: "launch is not available in this build",
+    }],
+    ...over,
+  });
+
+  it("offers Reset — it is settled, so without one it is a dead end", () => {
+    const onResetEdge = vi.fn();
+    render(<OrchestratorDrawer {...props({ flows: [erroredFlow()], onResetEdge })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    fireEvent.click(screen.getByRole("button", { name: /reset/i }));
+    expect(onResetEdge).toHaveBeenCalledWith("f1", "e1");
+  });
+
+  it("shows the error text rather than the waiting line", () => {
+    // `runs` is deliberately non-empty and matching, so `observation()` WOULD
+    // return a real waiting sentence here. Without that, an empty `runs` array
+    // makes the drawer fall back to "this card is not on the board right now" and
+    // the test could pass while still rendering the waiting branch.
+    render(<OrchestratorDrawer {...props({ flows: [erroredFlow()], runs: [runStatus("ASM-1", "agent-flow")] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.textContent).toContain("launch is not available in this build");
+    expect(insp.textContent).not.toContain("not on the board");
+    // "PR open" is exactly what describeCond returns for pr-merged against this
+    // fixture's OPEN pull request — i.e. the waiting line this branch replaces.
+    expect(insp.textContent).not.toContain("PR open");
+  });
+
+  it("spends --c-danger on it — a rule that tried and failed is a real failure", () => {
+    const { container } = render(<OrchestratorDrawer {...props({ flows: [erroredFlow()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const err = container.querySelector(".orch-obs .err");
+    expect(err).not.toBeNull();
+    expect(err!.textContent).toBe("launch is not available in this build");
+    // And it is NOT wearing the done-coloured receipt class.
+    expect(container.querySelector(".orch-obs .fired")).toBeNull();
+  });
+
+  it("lets the error win over a receipt when a hand-edited flow carries both", () => {
+    const both = erroredFlow({
+      edges: [{
+        id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch",
+        firedAt: 5, firedNote: "told you: landed", error: "launch is not available in this build",
+      }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [both] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.textContent).toContain("launch is not available in this build");
+    expect(insp.textContent).not.toContain("told you: landed");
+  });
+
+  it("says so in the footer rather than claiming an armed flow is watching", () => {
+    render(<OrchestratorDrawer {...props({ flows: [erroredFlow({ armed: true })] })} />);
+    expect(screen.getByText(/armed · 1 rule stalled/i)).toBeTruthy();
+    expect(screen.queryByText(/watching/i)).toBeNull();
+  });
+
+  it("counts the stalled rules", () => {
+    const two = erroredFlow({
+      armed: true,
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", error: "boom" },
+        { id: "e2", from: "n1", to: "n2", cond: { kind: "ci-passed" }, action: "seed", error: "bang" },
+      ],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [two] })} />);
+    expect(screen.getByText(/armed · 2 rules stalled/i)).toBeTruthy();
+  });
+
+  it("marks the footer dot as stalled, not as healthy", () => {
+    const { container } = render(<OrchestratorDrawer {...props({ flows: [erroredFlow({ armed: true })] })} />);
+    expect(container.querySelector(".orch-ft .live.stalled")).not.toBeNull();
+  });
+
+  it("still says it is watching when an armed flow has no errored rule", () => {
+    // The other side of the same branch: a fired-but-not-errored edge is not a
+    // stall, and the footer must not start crying failure over a rule that ran.
+    const fired = erroredFlow({
+      armed: true,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you: landed" }],
+    });
+    const { container } = render(<OrchestratorDrawer {...props({ flows: [fired] })} />);
+    expect(screen.getByText(/armed · watching/i)).toBeTruthy();
+    expect(screen.queryByText(/stalled/i)).toBeNull();
+    expect(container.querySelector(".orch-ft .live.stalled")).toBeNull();
+  });
+
+  it("leaves a disarmed flow's footer alone — 'Not armed' makes no claim to correct", () => {
+    render(<OrchestratorDrawer {...props({ flows: [erroredFlow({ armed: false })] })} />);
+    expect(screen.getByText("Not armed")).toBeTruthy();
+    expect(screen.queryByText(/stalled/i)).toBeNull();
+  });
+});

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  emptyFlow, isPlace, isPlanned, isNotify, findNode, incomingEdges,
+  emptyFlow, isPlace, isPlanned, isNotify, isSettled, findNode, incomingEdges,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -33,6 +33,28 @@ describe("node guards", () => {
     expect([isPlace(p), isPlanned(p), isNotify(p)]).toEqual([true, false, false]);
     expect([isPlace(pl), isPlanned(pl), isNotify(pl)]).toEqual([false, true, false]);
     expect([isPlace(nt), isPlanned(nt), isNotify(nt)]).toEqual([false, false, true]);
+  });
+});
+
+describe("isSettled", () => {
+  // The shared notion `evaluate.ts` skips on and `armability.ts` must agree with.
+  // It lives in model.ts precisely so those two cannot drift again — armability
+  // used to check `firedAt` alone and reported an errored edge as "waiting on a
+  // toggle".
+  it("is false for an edge that has neither fired nor errored", () => {
+    expect(isSettled(edge("e1", "a", "z"))).toBe(false);
+  });
+
+  it("is true once firedAt is stamped", () => {
+    expect(isSettled(edge("e1", "a", "z", { firedAt: 1 }))).toBe(true);
+  });
+
+  it("is true for an error with no firedAt — the half a firedAt-only check misses", () => {
+    expect(isSettled(edge("e1", "a", "z", { error: "launch is not available in this build" }))).toBe(true);
+  });
+
+  it("is true when both are set", () => {
+    expect(isSettled(edge("e1", "a", "z", { firedAt: 1, error: "boom" }))).toBe(true);
   });
 });
 

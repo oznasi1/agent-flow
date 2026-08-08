@@ -99,6 +99,13 @@ const h = vi.hoisted(() => ({
   // write-then-read ordering in advanceArmedFlows untestable: readFlows would
   // never be able to see a write that "landed" a moment earlier.
   flows: [] as Flow[],
+  // A spy, not a bare `() => h.flows` arrow, for one reason: `advanceArmedFlows`
+  // reads the store TWICE per pass — once to evaluate, once immediately before it
+  // writes, to drop any edge another VS Code window stamped in between. A test of
+  // that guard has to make the second read differ from the first, which needs a
+  // per-call implementation. Its default (set in beforeEach) is the honest
+  // `() => h.flows`, so every other flow test is unaffected.
+  readFlows: vi.fn((): Flow[] => []),
   writeFlow: vi.fn(),
   removeFlow: vi.fn(),
   // A counter, not a constant: deterministic so ids are assertable, but varying
@@ -195,7 +202,7 @@ vi.mock("../../src/engine/review/store", () => ({
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: () => h.repos }));
 vi.mock("../../src/engine/orchestrator/store", () => ({
   defaultFlowsDir: () => "/flows",
-  readFlows: () => h.flows,
+  readFlows: () => h.readFlows(),
   writeFlow: h.writeFlow,
   removeFlow: h.removeFlow,
 }));
@@ -398,6 +405,9 @@ beforeEach(() => {
   h.branch = "ASM-5641-team-table";
   h.flows = [];
   h.idSeq = 0;
+  // The honest default: every read sees whatever is "on disk" right now, including
+  // a write this same pass just made. Only the two-window race tests override it.
+  h.readFlows.mockClear().mockImplementation(() => h.flows);
   // Honest, not just recorded: replaces the entry sharing this id, or appends
   // when it's new — exactly what the real file-per-id store does. A test that
   // wants the store's OWN write to be visible on a later read (e.g. a second
@@ -3055,6 +3065,133 @@ describe("an armed flow advances on refresh", () => {
     expect(posts(p).some((m) => m.type === "toast" && /launched/i.test(m.message ?? ""))).toBe(false);
   });
 
+  // Two VS Code windows share ~/.agentflow/flows (defaultFlowsDir is global) and a
+  // DeckPanel is per-extension-host, so both evaluate the same file and both can
+  // fire the same unfired edge. Probe-proved: two identical toasts, the second
+  // window's firedAt overwriting the first's. advanceArmedFlows now re-reads the
+  // store immediately before writing and drops anything already stamped there.
+  //
+  // Every test below steers `h.readFlows` per call. Read 1 of a pass is
+  // advanceArmedFlows' own evaluate read; read 2 is the guard read right before the
+  // write; read 3 is postFlows'. The `reads` assertion in the first test is what
+  // proves the guard read exists at all rather than the mock simply never firing.
+  describe("the two-window race", () => {
+    const stampedByOtherWindow = (): Flow => {
+      const f = armedFlow();
+      return { ...f, edges: [{ ...f.edges[0], firedAt: 111, firedNote: "told you: the migration has landed" }] };
+    };
+
+    /** Warm the resume gate with an unmet condition, then arm the met one — the
+     * same two-pass idiom every firing test in this file uses. */
+    const warmed = async () => {
+      h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+      const opened = await openPanel();
+      await settle();
+      h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+      return opened;
+    };
+
+    it("neither stamps nor toasts an edge the other window stamped between the read and the write", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [armedFlow()];
+      const { p, send } = await warmed();
+      let reads = 0;
+      h.readFlows.mockImplementation(() => (++reads === 1 ? [armedFlow()] : [stampedByOtherWindow()]));
+      h.writeFlow.mockClear();
+      const toastsBefore = posts(p).filter((m) => m.type === "toast").length;
+      await send({ type: "deck:refresh" });
+      // The guard read has to have actually happened, or the two branches below
+      // would both pass on a pass that simply never got that far.
+      expect(reads).toBeGreaterThan(1);
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      // No second toast: the other window already announced this rule.
+      expect(posts(p).filter((m) => m.type === "toast").length).toBe(toastsBefore);
+    });
+
+    it("bases its write on the FRESH copy, so it cannot erase the other window's stamp on a different edge", async () => {
+      // The subtler half of the same defect. Dropping the claimed edge from what we
+      // stamp is not enough on its own: writing the STALE flow we evaluated would
+      // erase the other window's `firedAt` on e2, un-latching a rule that already
+      // ran and firing it a second time on the next pass.
+      setConfig({ orchestrator: true });
+      const twoRules = (): Flow => ({
+        ...armedFlow(),
+        nodes: [
+          { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+          { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+          { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "ci went red" },
+        ],
+        edges: [
+          { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" },
+          // Never met against these fixtures (no failing checks) — it is only here
+          // to be the edge the other window stamped.
+          { id: "e2", from: "n1", to: "n3", cond: { kind: "ci-failed" }, action: "notify" },
+        ],
+      });
+      const otherWindowStampedE2 = (): Flow => {
+        const f = twoRules();
+        return { ...f, edges: [f.edges[0], { ...f.edges[1], firedAt: 777, firedNote: "told you: ci went red" }] };
+      };
+      h.flows = [twoRules()];
+      const { send } = await warmed();
+      let reads = 0;
+      h.readFlows.mockImplementation(() => (++reads === 1 ? [twoRules()] : [otherWindowStampedE2()]));
+      h.writeFlow.mockClear();
+      await send({ type: "deck:refresh" });
+      const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      // This pass's own rule is stamped…
+      expect(w.edges.find((e) => e.id === "e1")!.firedAt).toBeTypeOf("number");
+      // …and the other window's stamp survives rather than being written back to
+      // undefined.
+      expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBe(777);
+    });
+
+    it("writes nothing when the flow vanished from the store between the two reads", async () => {
+      // Another window deleted it. Writing would recreate the file the user removed.
+      setConfig({ orchestrator: true });
+      h.flows = [armedFlow()];
+      const { send } = await warmed();
+      let reads = 0;
+      h.readFlows.mockImplementation(() => (++reads === 1 ? [armedFlow()] : []));
+      h.writeFlow.mockClear();
+      await send({ type: "deck:refresh" });
+      expect(reads).toBeGreaterThan(1);
+      expect(h.writeFlow).not.toHaveBeenCalled();
+    });
+
+    it("still fires the rules the other window did NOT claim", async () => {
+      // The guard drops claimed edges, not the whole pass: e1 is stamped on disk
+      // already, e2's condition is met here, and e2 must still fire.
+      setConfig({ orchestrator: true });
+      const twoRules = (over: { e1Fired?: boolean } = {}): Flow => ({
+        ...armedFlow(),
+        nodes: [
+          { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+          { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+          { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "also merged" },
+        ],
+        edges: [
+          { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", ...(over.e1Fired ? { firedAt: 111 } : {}) },
+          { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "notify" },
+        ],
+      });
+      h.flows = [twoRules()];
+      const { p, send } = await warmed();
+      let reads = 0;
+      h.readFlows.mockImplementation(() => (++reads === 1 ? [twoRules()] : [twoRules({ e1Fired: true })]));
+      h.writeFlow.mockClear();
+      await send({ type: "deck:refresh" });
+      const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      expect(w.edges.find((e) => e.id === "e1")!.firedAt).toBe(111);
+      expect(w.edges.find((e) => e.id === "e2")!.firedAt).not.toBe(111);
+      expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBeTypeOf("number");
+      // One toast, for e2's message only — e1's was the other window's to post.
+      const messages = posts(p).filter((m) => m.type === "toast").map((m) => m.message as string);
+      expect(messages.filter((t) => /also merged/.test(t))).toHaveLength(1);
+      expect(messages.filter((t) => /the migration has landed/.test(t))).toHaveLength(0);
+    });
+  });
+
   it("keeps advancing the other flows when one throws while evaluating", async () => {
     // A hand-edited or half-migrated flow on disk can be armed with a shape
     // evaluateFlow chokes on (here: edges that are not an array). It must not
@@ -3434,6 +3571,83 @@ describe("arm, disarm and reset", () => {
     const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
     expect(w.edges[0].cond).toEqual({ kind: "ci-failed" });
     expect(w.edges[0].firedAt).toBe(5);
+  });
+
+  it("flow:save cannot re-arm a disarmed flow", async () => {
+    // `armed` is a HOST-owned flow field: only flow:arm and flow:resumeDisarm write
+    // it. A save built from a `flow` prop captured before a `deck:flows` post landed
+    // carries a stale value, and writing it verbatim silently re-arms the flow.
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f1", "n"), armed: false }];
+    const stale: Flow = {
+      ...mkFlow("f1", "n"),
+      armed: true,
+      nodes: [{ id: "n1", kind: "place", x: 12, y: 12, join: "any", runKey: "ASM-1", repo: "r" }],
+    };
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: stale });
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(w.armed).toBe(false);
+    // The drawer's actual graph edit still lands — this preserves a field, it does
+    // not reject the save.
+    expect(w.nodes).toHaveLength(1);
+  });
+
+  it("flow:save cannot disarm an armed one either", async () => {
+    // The other direction of the same branch. A save is not a consent point in
+    // either direction; Arm is.
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f1", "n"), armed: true }];
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: { ...mkFlow("f1", "n"), armed: false } });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).armed).toBe(true);
+  });
+
+  it("a save queued before Disarm cannot re-arm the flow with the resume gate already cleared", async () => {
+    // The worst case this preserves against, end to end. Disarm in the resume
+    // banner ALSO clears the gate (resumeCleared), so a stale save that puts
+    // `armed: true` back leaves the flow armed and ungated — it fires on the very
+    // next poll, which is precisely what the user just refused.
+    setConfig({ orchestrator: true });
+    const shape: Flow = {
+      ...mkFlow("f1", "Ship the migration"),
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    };
+    h.flows = [{ ...shape, armed: true }];
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    await send({ type: "flow:resumeDisarm", id: "f1" });
+    // The drawer's copy still says armed — it was captured before the disarm.
+    await send({ type: "flow:save", flow: { ...shape, armed: true } });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).armed).toBe(false);
+    h.writeFlow.mockClear();
+    // And a genuine subsequent poll fires nothing, rather than acting on the gate
+    // the disarm cleared.
+    await send({ type: "deck:refresh" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("flow:save cannot rename a flow or rewrite its createdAt", async () => {
+    // flow:rename owns the name; createdAt is the store's sort key. Neither is the
+    // drawer's to overwrite on a node drag.
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f1", "Ship the migration"), createdAt: 1_234 }];
+    const stale: Flow = {
+      ...mkFlow("f1", "clobbered"),
+      createdAt: 9_999,
+      nodes: [{ id: "n1", kind: "place", x: 48, y: 48, join: "any", runKey: "ASM-1", repo: "r" }],
+    };
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: stale });
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(w.name).toBe("Ship the migration");
+    expect(w.createdAt).toBe(1_234);
+    expect(w.nodes[0].x).toBe(48);
   });
 
   it("flow:save writes a brand-new edge through untouched, alongside preserving an existing one's host fields", async () => {

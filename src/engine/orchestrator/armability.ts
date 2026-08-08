@@ -2,7 +2,7 @@
 // observe. Arming warns and names them rather than refusing: a flow with one dead
 // rule and three live ones is still worth arming, and silence is how a user ends up
 // waiting forever on something that can never happen.
-import { Condition, Flow } from "./model";
+import { Condition, Flow, isSettled } from "./model";
 
 /** The two Deck toggles a condition can depend on. */
 export interface SourceState {
@@ -59,8 +59,11 @@ const LABEL: Record<Condition["kind"], string> = {
 export function unfirableRules(flow: Flow, sources: SourceState): UnfirableRule[] {
   const out: UnfirableRule[] = [];
   for (const e of flow.edges) {
-    // An edge that already fired is not waiting on anything.
-    if (e.firedAt !== undefined) continue;
+    // A settled edge is not waiting on anything. `isSettled` — the same notion
+    // `evaluate.ts` skips on — rather than `firedAt` alone: an edge carrying an
+    // `error` will never be evaluated again either, so naming it here would blame
+    // a toggle for a rule whose real reason is a failure the drawer already shows.
+    if (isSettled(e)) continue;
     const label = LABEL[e.cond.kind];
     if (!sources.prFacts && NEEDS_PR.has(e.cond.kind)) out.push({ edgeId: e.id, needs: "pr-facts", label });
     else if (!sources.liveSignal && NEEDS_LIVE.has(e.cond.kind)) out.push({ edgeId: e.id, needs: "live-signal", label });

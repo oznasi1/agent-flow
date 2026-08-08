@@ -72,6 +72,30 @@ describe("unfirableRules", () => {
     expect(unfirableRules(flow, { liveSignal: true, prFacts: false })).toEqual([]);
   });
 
+  it("skips an edge that ERRORED — settled means settled, whichever way", () => {
+    // The same notion of settled `evaluate.ts` skips on. An edge carrying `error`
+    // and no `firedAt` is never evaluated again either, so naming it here would
+    // blame the PR-facts toggle for a rule whose real reason is a failure the
+    // drawer already shows and offers a Reset for.
+    const flow = flowOf({ ...edge("e1", { kind: "pr-merged" }), error: "launch is not available in this build" });
+    expect(unfirableRules(flow, { liveSignal: true, prFacts: false })).toEqual([]);
+  });
+
+  it("skips an errored LIVE-signal edge too, not just a PR one", () => {
+    const flow = flowOf({ ...edge("e1", { kind: "agent-ended-turn" }), error: "boom" });
+    expect(unfirableRules(flow, { liveSignal: false, prFacts: true })).toEqual([]);
+  });
+
+  it("still names an unsettled sibling of an errored edge", () => {
+    // The skip must be per-edge, not a bail on the whole flow: e2 is genuinely
+    // waiting on a toggle that is off and must still be reported.
+    const flow = flowOf(
+      { ...edge("e1", { kind: "pr-merged" }), error: "boom" },
+      edge("e2", { kind: "ci-passed" }),
+    );
+    expect(unfirableRules(flow, { liveSignal: true, prFacts: false }).map((r) => r.edgeId)).toEqual(["e2"]);
+  });
+
   it("gives each rule a human label naming its condition", () => {
     const flow = flowOf(edge("e1", { kind: "ci-failed" }));
     const [only] = unfirableRules(flow, { liveSignal: true, prFacts: false });

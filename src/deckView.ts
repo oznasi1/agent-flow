@@ -5,7 +5,7 @@ import * as path from "path";
 import { getConfig } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { Flow, emptyFlow } from "./engine/orchestrator/model";
+import { Flow, emptyFlow, isSettled } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
 import { nodeFlowIo, newFlowId } from "./engine/orchestrator/flowIo";
 import { evaluateFlow } from "./engine/orchestrator/evaluate";
@@ -273,8 +273,44 @@ export class DeckPanel {
           });
           continue;
         }
-        writeFlow(this.flowIo, this.flowsDir, applyFired(flow, result.fired, nowMs));
-        for (const line of notifyLines(flow, result.fired)) {
+        // Re-read the store immediately before writing, and drop any fired edge
+        // another window has already stamped. `defaultFlowsDir()` is the GLOBAL
+        // ~/.agentflow/flows and a DeckPanel is per-extension-host, so two VS Code
+        // windows with the Deck open evaluate the same file: both read the same
+        // unfired edge, both fire it, and the second write overwrites the first's
+        // `firedAt`. That was probe-proved — two identical toasts for one rule.
+        //
+        // Be honest about what this is: it NARROWS the window from about a poll
+        // interval to the microseconds between this read and the write below. It
+        // does not eliminate it — this is still read-then-write with no lock, and
+        // two windows can still interleave inside those microseconds. A full fix
+        // needs either a lock file beside the flow or a per-workspace flows
+        // directory, and it MUST land before any action can spend money: today a
+        // double fire costs a duplicate toast, but the identical sequence with a
+        // real `launch` is a duplicate paid agent session. Neither is attempted
+        // here — moving the storage location needs a migration.
+        //
+        // The write is based on `fresh`, not on the `flow` this pass evaluated:
+        // writing the stale copy would erase the other window's stamp on the edge
+        // we just decided not to claim, un-latching it so it fires all over again.
+        const fresh = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+        // Gone from the store between the two reads (another window deleted it).
+        // Writing would resurrect a file the user removed. Stated explicitly rather
+        // than left to `fresh?.edges ?? []` — that would land in the same place (no
+        // fresh edges means nothing survives the filter below, so nothing is
+        // written) but only by accident, and the plausible convenience spelling,
+        // `fresh ?? flow`, silently recreates the deleted flow.
+        if (!fresh) continue;
+        const freshById = new Map(fresh.edges.map((e) => [e.id, e]));
+        const unclaimed = result.fired.filter((f) => {
+          const now = freshById.get(f.edge.id);
+          return now !== undefined && !isSettled(now);
+        });
+        // Nothing left to stamp: the other window did all of it. No write, and no
+        // toast — it already announced every one of these.
+        if (unclaimed.length === 0) continue;
+        writeFlow(this.flowIo, this.flowsDir, applyFired(fresh, unclaimed, nowMs));
+        for (const line of notifyLines(fresh, unclaimed)) {
           this.post({ type: "toast", level: "info", message: line });
         }
       } catch (e) {
@@ -1119,6 +1155,17 @@ export class DeckPanel {
         const mine = new Map(existing.edges.map((e) => [e.id, e]));
         writeFlow(this.flowIo, this.flowsDir, {
           ...m.flow,
+          // The host owns three FLOW-level fields too, and a graph save has no
+          // business carrying any of them. `armed` is written only by `flow:arm`
+          // and `flow:resumeDisarm`: a save built from a `flow` prop captured
+          // before a `deck:flows` post lands holds a stale value, so pressing
+          // Disarm in the resume banner and then flushing a queued save would
+          // RE-ARM the flow with the resume gate already cleared — armed, and free
+          // to fire immediately. `name` belongs to `flow:rename`, and `createdAt`
+          // is the sort key: neither is the drawer's to overwrite on a node drag.
+          name: existing.name,
+          armed: existing.armed,
+          createdAt: existing.createdAt,
           edges: m.flow.edges.map((e) => {
             const host = mine.get(e.id);
             if (!host) return e;

@@ -99,6 +99,19 @@ export function emptyFlow(id: string, name: string, nowMs: number): Flow {
   return { id, name, armed: false, createdAt: nowMs, nodes: [], edges: [] };
 }
 
+/** Does this edge carry a terminal stamp? A shape-level fact about the record —
+ * `firedAt` says it ran, `error` says it tried and failed — and either one is
+ * terminal until Reset clears it.
+ *
+ * It lives here, not in `evaluate.ts`, because two modules answer this question
+ * and they must not drift: `evaluate.ts` skips a settled edge, and
+ * `armability.ts` must not report one as "waiting on a toggle" when the real
+ * reason it will never fire is that it already errored. That drift was a real
+ * defect — `armability.ts` used to check only `firedAt`. */
+export function isSettled(e: FlowEdge): boolean {
+  return e.firedAt !== undefined || e.error !== undefined;
+}
+
 export function isPlace(n: FlowNode): n is PlaceNode {
   return n.kind === "place";
 }

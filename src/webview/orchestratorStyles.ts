@@ -165,6 +165,10 @@ export const ORCH_CSS = `
      column uses — not a new claim of colour, the same one this codebase already
      spends on "this finished". */
   .orch-obs .fired { color: var(--c-done); }
+  /* An errored rule tried and FAILED, and it will never be evaluated again until
+     Reset. That is a real failure, which is the whole and only licence red has in
+     this codebase — the same licence .orch-edge.bad spends above. */
+  .orch-obs .err { color: var(--c-danger); }
 
   /* The drawer's ONE filled control, and the phase that earns it: Arm is the
      consent point for everything a flow does. Nothing else here may be filled. */
@@ -180,6 +184,11 @@ export const ORCH_CSS = `
   .orch-ft .live { display: inline-flex; align-items: center; gap: 6px; }
   .orch-ft .live .d { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
   .orch-ft .live.on .d { background: var(--brand); }
+  /* A stalled rule is a real failure, so the armed dot stops reading as healthy.
+     One dot, not a wall of red: the words beside it carry the count, and the
+     inspector is where the failure is actually read. Ordered after .live.on so it
+     wins at equal specificity — an armed AND stalled flow carries both classes. */
+  .orch-ft .live.stalled .d { background: var(--c-danger); }
 
   /* The resume gate. Not red — nothing failed; a flow is waiting to be told to go. */
   .orch-resume { flex: none; margin-bottom: 12px; padding: 10px 12px;
