@@ -492,10 +492,14 @@ export function App(): JSX.Element {
           title bar above this (tasksView.postState), so the tabs are the first thing
           in our own content. The gauge and Explore trail them on both tabs: Explore
           starts a session on repos rather than on a ticket, and the gauge counts open
-          windows — neither is a Tasks-only concern. */}
-      <div className="tabbar" role="tablist" aria-label="Panel view">
-        <button role="tab" aria-selected={tab === "tasks"} onClick={() => setTab("tasks")}>Tasks</button>
-        <button role="tab" aria-selected={tab === "notepad"} onClick={() => setTab("notepad")}>Notepad</button>
+          windows — neither is a Tasks-only concern. They sit OUTSIDE the tablist:
+          a tablist that contains an image and an unrelated button is a widget a
+          screen reader has to arrow through to get between two tabs. */}
+      <div className="tabbar">
+        <span className="tabbar-tabs" role="tablist" aria-label="Panel view">
+          <button role="tab" aria-selected={tab === "tasks"} onClick={() => setTab("tasks")}>Tasks</button>
+          <button role="tab" aria-selected={tab === "notepad"} onClick={() => setTab("notepad")}>Notepad</button>
+        </span>
         <span className="tabbar-trail">
           <GaugeMark live={liveCount} />
           <button

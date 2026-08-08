@@ -87,14 +87,14 @@ describe("mount + auth gate", () => {
     expect(within(trail()).getByRole("button", { name: /Explore/ })).toBeInTheDocument();
   });
 
-  it("puts the tab row before the task list in the document", () => {
-    render(<App />);
+  it("puts the tab bar first, with nothing rendered before it", () => {
+    const { container } = render(<App />);
     authed();
     host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "ASM-1", summary: "Fix the bug" })] });
-    const tabbar = document.querySelector(".tabbar")!;
-    const lenses = document.querySelector(".lenses")!;
-    // Node.DOCUMENT_POSITION_FOLLOWING === 4: `lenses` comes after `tabbar`.
-    expect(tabbar.compareDocumentPosition(lenses) & 4).toBeTruthy();
+    // The panel's own root element — App's top-level <div> — must open on the tab
+    // bar now that the header above it is gone.
+    const panelRoot = container.firstElementChild as HTMLElement;
+    expect(panelRoot.firstElementChild).toHaveClass("tabbar");
   });
 
   it("falls back to the static mark when the host reports no count", () => {

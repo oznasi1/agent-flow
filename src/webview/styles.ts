@@ -140,8 +140,9 @@ export const CSS = `
   /* One quiet secondary language for every non-Take action: Explore (the pool's
      escape hatch), Address PR (which gives up its green — green means Done on the
      Deck, and a PR waiting on you is the opposite of done) and the sprint actions.
-     Explore is the only one pushed to the row's far side; the other three are the
-     only ones that must never wrap their own label. */
+     Explore is pushed to the tab row's far side by its .tabbar-trail wrapper, not
+     by anything in this group; the other three are the only ones that must never
+     wrap their own label. */
   .explore, .address-pr, .sprint-add, .sprint-remove, .quiet {
     display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-body); font-weight: 500;
     height: 24px; padding: 0 10px; border-radius: var(--r-ctl); cursor: pointer;
@@ -281,6 +282,7 @@ export const CSS = `
      button (Explore) that must keep the shared .explore language, not become a tab. */
   .tabbar { display: flex; align-items: center; gap: 2px; margin: 0 0 10px;
     border-bottom: 1px solid var(--vscode-panel-border); }
+  .tabbar-tabs { display: inline-flex; align-items: center; gap: 2px; }
   .tabbar button[role="tab"] { background: none; border: none; border-bottom: 2px solid transparent;
     padding: 5px 10px 7px; cursor: pointer; color: var(--dim); font-size: var(--t-body); font-weight: 500; }
   .tabbar button[role="tab"][aria-selected="true"] { color: var(--vscode-foreground); font-weight: 600;
