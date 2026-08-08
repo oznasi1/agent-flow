@@ -23,7 +23,7 @@ import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, type MergeCandidate } from "./engine/workspace";
-import { readLiveWindows, windowIdentity, defaultWindowsDir, PresenceRecord } from "./engine/presence";
+import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, PresenceRecord, type CurrentWindow } from "./engine/presence";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
@@ -869,7 +869,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     | {
         target: OpenTarget;
         services: ServiceRef[];
-        args: { mode: WorkspaceMode; openIn: "new" | "current"; existingWorkspaceFile?: string; existingFolder?: string };
+        args: { mode: WorkspaceMode; openIn: "new" | "current"; existingWorkspaceFile?: string; existingFolder?: string; currentWindow?: CurrentWindow };
         wantRemoteControl: boolean;
       }
     | undefined
@@ -986,13 +986,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       openIn: args.openIn,
       existingWorkspaceFile: args.existingWorkspaceFile,
       existingFolder: args.existingFolder,
+      currentWindow: args.currentWindow,
       remoteControl: wantRemoteControl,
       kind: "explore",
     });
 
-    const where = result.workspaceFile
-      ? `workspace ${result.workspaceFile.split("/").pop()}`
-      : `${result.opened.length} window(s)`;
+    const where = this.openedWhere(result);
     const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     const what = env
@@ -1058,6 +1057,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       openIn: args.openIn,
       existingWorkspaceFile: args.existingWorkspaceFile,
       existingFolder: args.existingFolder,
+      currentWindow: args.currentWindow,
       remoteControl: wantRemoteControl,
       kind: "notepad",
     });
@@ -1067,9 +1067,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // run that was never created.
     await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, lastRunKey: key } : n)));
 
-    const where = result.workspaceFile
-      ? `workspace ${result.workspaceFile.split("/").pop()}`
-      : `${result.opened.length} window(s)`;
+    const where = this.openedWhere(result);
     const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
@@ -1357,6 +1355,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       : " Claude Code pre-seeded — press Enter to start.";
   }
 
+  /** Where a completed open put the session, for the success toast. "This window" is
+   *  its own case because nothing was opened — reporting "1 window(s)" would imply one
+   *  appeared. */
+  private openedWhere(result: { seededInPlace?: boolean; workspaceFile?: string; opened: string[] }): string {
+    if (result.seededInPlace) return "in this window";
+    if (result.workspaceFile) return `workspace ${result.workspaceFile.split("/").pop()}`;
+    return `${result.opened.length} window(s)`;
+  }
+
   /** Open + seed a resolved kick-off: worktree decision → workspace mode → brief →
    * openWorkspace → success toast. Shared by Take and Address PR. The destination
    * `target` is resolved earlier in resolveKickoff. `forceWorktree` (Address PR) always
@@ -1429,13 +1436,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       openIn: args.openIn,
       existingWorkspaceFile: args.existingWorkspaceFile,
       existingFolder: args.existingFolder,
+      currentWindow: args.currentWindow,
       foldersToAdd: additions.foldersToAdd,
       remoteControl: wantRemoteControl,
     });
 
-    const where = result.workspaceFile
-      ? `workspace ${result.workspaceFile.split("/").pop()}`
-      : `${result.opened.length} window(s)`;
+    const where = this.openedWhere(result);
     const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     if (result.mergeFailed) {
@@ -1649,6 +1655,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           seedAgent: cfg.seedAgent,
           // OpenTarget and SharedTarget are the same four shapes — no cast needed.
           target,
+          // The shared-window batch needs the same "here" the single take does.
+          currentWindow: currentWindow(),
           foldersToAdd: additions.foldersToAdd,
         });
         launched = resolved.length;
@@ -1772,14 +1780,27 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * window you already have open. Live windows appear only in the interactive "ask"
    * flow (a specific open window is inherently a per-take choice). */
   private async chooseOpenTarget(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
+    // A window with no identity can't be named by a plan match, so it can't hold a
+    // seeded session — "this window" is not offered, and the setting can't force it.
+    const here = currentWindow();
     if (cfg.openIn === "new-window") return { kind: "new" };
-    if (cfg.openIn === "this-window") return { kind: "current" };
+    if (cfg.openIn === "this-window") {
+      if (here) return { kind: "current" };
+      this.toast(
+        "info",
+        "This window has no folder open, so it can't hold a session — opening a new window instead.",
+      );
+      return { kind: "new" };
+    }
     if (cfg.openIn === "pick-existing") return this.pickExistingWorkspace(cfg);
 
     type PickTarget = OpenTarget | { kind: "existing-pick" };
+    const thisWindow: { label: string; detail: string; target: PickTarget }[] = here
+      ? [{ label: "$(window) This window", detail: "Start a session here — keeps this window's folders", target: { kind: "current" } }]
+      : [];
     const base: { label: string; detail: string; target: PickTarget }[] = [
       { label: "$(empty-window) New window", detail: "Open the task in a separate window", target: { kind: "new" } },
-      { label: "$(window) This window", detail: "Open it in the current window (replaces what's here)", target: { kind: "current" } },
+      ...thisWindow,
       { label: "$(folder-library) Existing workspace…", detail: "Open the task into a .code-workspace you already have", target: { kind: "existing-pick" } },
     ];
     const live = cfg.trackOpenWindows ? this.liveWindowItems() : [];
@@ -1819,10 +1840,21 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     count: number,
     label: string,
     cfg: AgentFlowConfig,
-  ): Promise<{ mode: WorkspaceMode; openIn: "new" | "current"; existingWorkspaceFile?: string; existingFolder?: string } | undefined> {
+  ): Promise<
+    | { mode: WorkspaceMode; openIn: "new" | "current"; existingWorkspaceFile?: string; existingFolder?: string; currentWindow?: CurrentWindow }
+    | undefined
+  > {
     if (target.kind === "existing") return { mode: "multiroot", openIn: "new", existingWorkspaceFile: target.file };
     if (target.kind === "live-folder") return { mode: "per-window", openIn: "new", existingFolder: target.folder };
-    if (target.kind === "current") return { mode: count === 1 ? "per-window" : "multiroot", openIn: "current" };
+    if (target.kind === "current") {
+      // The window's own shape is the mode — nothing is being laid out, so the repo
+      // count has no say. A window that lost its identity between the pick and here
+      // has no seed destination left, so the take cancels rather than opening something
+      // the user didn't choose.
+      const here = currentWindow();
+      if (!here) return undefined;
+      return { mode: here.kind === "workspace" ? "multiroot" : "per-window", openIn: "current", currentWindow: here };
+    }
     const mode = await this.chooseWorkspaceMode(count, cfg.workspaceMode, label);
     if (!mode) return undefined;
     return { mode, openIn: "new" };
