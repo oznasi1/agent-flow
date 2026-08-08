@@ -36,7 +36,7 @@ These apply to **every** task. They are the repo's CI gates (`CONTRIBUTING.md`) 
 **Modified:**
 - `src/types.ts` — add `"notepad"` to `Run["kind"]` + `RUN_KINDS` + `runKind`'s return type; add `NotepadItem`/`NotepadItemView`/`NotepadRunStatus`; add the six `notepad:*` inbound messages and the one outbound.
 - `src/tasksView.ts` — add `NOTEPAD_KEY`, the note CRUD methods, `runNotepadItem`, status computation, `postNotepad`, and the six `onMessage` cases.
-- `src/webview/App.tsx` — add the tab bar and render `<Notepad>` when selected; handle the `notepad:state` message.
+- `src/webview/App.tsx` — add the tab bar and render `<Notepad>` when selected; handle the `notepad:notes` message.
 - `src/webview/styles.ts` — styles for the tab bar, note rows, status badges, and mic button.
 - `src/webview/DeckApp.tsx` — label `"notepad"` runs on the untracked-key chip.
 - `CHANGELOG.md` — one `## [Unreleased]` entry.

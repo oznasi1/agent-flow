@@ -21,7 +21,15 @@ import { canon } from "./engine/paths";
  * Undefined means "nothing to say": either the note was never run, or its record
  * is gone because the Deck's sweep already retired it. Claiming "finished" for a
  * retired record would be a guess — retirement covers unreachable and abandoned
- * too, not just landed work. */
+ * too, not just landed work.
+ *
+ * Known limitation: "finished" is only reachable through the Deck. `finishedAt`
+ * has exactly one writer — the Deck's own poll loop (`src/deckView.ts`) — so a
+ * user who runs a note but never opens the Deck will see this settle on
+ * "running" and then "stale" once the session ends, but never "finished". This
+ * matches how plain `explore` runs already behave (their status has the same
+ * dependency); it is accepted, not a bug, but is easy to misread from this
+ * function alone since all three states otherwise read as self-sufficient. */
 export function noteStatus(
   note: NotepadItem,
   runs: Run[],

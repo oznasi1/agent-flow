@@ -50,6 +50,13 @@ const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 // repo happens to be open. Same storage the install-reported flag uses.
 const NOTEPAD_KEY = "agentFlow.notepad";
 
+/** Shared by `explore()` and `runNotepadItem` for turning free text into a run
+ * key fragment: lowercase, dashes for anything non-alphanumeric, capped at 40
+ * chars so a long topic or title can't produce an unbounded filename. */
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+}
+
 /** Which engine operation a webview message represents, for operation_failed.
  * Messages absent from this map report as "jira_fetch" only if they read the task
  * source; anything genuinely unclassifiable is left out and reports nothing.
@@ -846,6 +853,63 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return typed?.trim() || undefined;
   }
 
+  /** Shared kickoff tail for `explore()` and `runNotepadItem`: pick a destination,
+   * resolve the repo set for it (skipping the picker for an existing/live-folder
+   * destination that already fixes its own repos), turn the destination into
+   * `openWorkspace` args, and resolve the Remote Control toggle. `pickerLabel` and
+   * `argsLabel` are the only two points where the two callers' copy differs.
+   * Returns undefined on any cancellation, at which point the caller must open
+   * nothing. */
+  private async resolveKickoffTarget(
+    cfg: AgentFlowConfig,
+    repos: ServiceRef[],
+    pickerLabel: string,
+    argsLabel: string,
+  ): Promise<
+    | {
+        target: OpenTarget;
+        services: ServiceRef[];
+        args: { mode: WorkspaceMode; openIn: "new" | "current"; existingWorkspaceFile?: string; existingFolder?: string };
+        wantRemoteControl: boolean;
+      }
+    | undefined
+  > {
+    const target = await this.chooseOpenTarget(cfg);
+    if (!target) return undefined;
+
+    let services: ServiceRef[];
+    if (target.kind === "existing" || target.kind === "live-folder") {
+      services = this.servicesFromExistingDestination(target, repos);
+      if (services.length === 0) {
+        this.toast("error", "That workspace has no repos to open.");
+        return undefined;
+      }
+    } else {
+      const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
+        repos.map((r) => ({
+          label: r.name,
+          detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
+          repo: r,
+        })),
+        {
+          canPickMany: true,
+          title: `${pickerLabel} — pick the repos to open`,
+          placeHolder: "Space to toggle · Enter to open",
+          ignoreFocusOut: true,
+        },
+      );
+      if (!picks || picks.length === 0) return undefined;
+      services = picks.map((p) => p.repo);
+    }
+
+    const args = await this.targetToOpenArgs(target, services.length, argsLabel, cfg);
+    if (!args) return undefined;
+
+    const wantRemoteControl = await this.resolveRemoteControl(cfg);
+
+    return { target, services, args, wantRemoteControl };
+  }
+
   /** Explore flow: pick repos freely (no ticket), open a workspace, and seed a Claude Code
    * agent for investigation/knowledge — a Jira ticket can come out of it later. */
   public async explore(): Promise<void> {
@@ -894,40 +958,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
 
     // Destination first — an existing workspace / live folder already fixes its repos.
-    const target = await this.chooseOpenTarget(cfg);
-    if (!target) return;
+    const kickoff = await this.resolveKickoffTarget(cfg, repos, "Explore", "Explore");
+    if (!kickoff) return;
+    const { services, args, wantRemoteControl } = kickoff;
 
-    let services: ServiceRef[];
-    if (target.kind === "existing" || target.kind === "live-folder") {
-      services = this.servicesFromExistingDestination(target, repos);
-      if (services.length === 0) {
-        this.toast("error", "That workspace has no repos to open.");
-        return;
-      }
-    } else {
-      const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
-        repos.map((r) => ({
-          label: r.name,
-          detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
-          repo: r,
-        })),
-        {
-          canPickMany: true,
-          title: "Explore — pick the repos to open",
-          placeHolder: "Space to toggle · Enter to open",
-          ignoreFocusOut: true,
-        },
-      );
-      if (!picks || picks.length === 0) return;
-      services = picks.map((p) => p.repo);
-    }
-
-    const args = await this.targetToOpenArgs(target, services.length, "Explore", cfg);
-    if (!args) return;
-
-    const wantRemoteControl = await this.resolveRemoteControl(cfg);
-
-    const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
     const slug = slugify(topic) || "explore";
     const serviceNames = services.map((s) => s.name).join(", ");
     const key = env ? `verify-${slugify(env) || "env"}-${slug}` : `explore-${slug}`;
@@ -985,38 +1019,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    const target = await this.chooseOpenTarget(cfg);
-    if (!target) return;
-
-    let services: ServiceRef[];
-    if (target.kind === "existing" || target.kind === "live-folder") {
-      services = this.servicesFromExistingDestination(target, repos);
-      if (services.length === 0) {
-        this.toast("error", "That workspace has no repos to open.");
-        return;
-      }
-    } else {
-      const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
-        repos.map((r) => ({
-          label: r.name,
-          detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
-          repo: r,
-        })),
-        {
-          canPickMany: true,
-          title: "Notepad — pick the repos to open",
-          placeHolder: "Space to toggle · Enter to open",
-          ignoreFocusOut: true,
-        },
-      );
-      if (!picks || picks.length === 0) return;
-      services = picks.map((p) => p.repo);
-    }
-
-    const args = await this.targetToOpenArgs(target, services.length, "Notepad", cfg);
-    if (!args) return;
-
-    const wantRemoteControl = await this.resolveRemoteControl(cfg);
+    const kickoff = await this.resolveKickoffTarget(cfg, repos, "Notepad", "Notepad");
+    if (!kickoff) return;
+    const { services, args, wantRemoteControl } = kickoff;
 
     // The generic explore action's prompt/slackDm — a notepad run has no action to
     // choose (there is no Explore-style picker for it), so it borrows the one action
@@ -1024,11 +1029,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // reordering agentFlow.exploreActions can never silently swap in a different
     // template here.
     const generic = cfg.exploreActions.find((a) => a.id === "general");
-    const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
     const topic = note.title.trim() || "Notepad item";
     // Slugged from the note's own title, not from the display fallback above — an
-    // untitled note must key as "notepad-note", not "notepad-notepad-item".
-    const key = `notepad-${slugify(note.title.trim()) || "note"}`;
+    // untitled note must key as "notepad-note-<id>", not "notepad-notepad-item-<id>".
+    // The note's own id is included (not just the title slug) because two notes can
+    // share a title — or both be untitled — and would otherwise collide on the same
+    // run-store key, silently overwriting each other's run record. Re-running the
+    // SAME note still reuses this exact key, which is intended: it replaces that
+    // note's own previous run rather than accumulating orphaned records.
+    const key = `notepad-${slugify(note.title.trim()) || "note"}-${note.id}`;
     const planMd =
       `## Notepad: ${topic}\n\n_No ticket — an item you wrote in the Agent Flow notepad. ` +
       `If it turns into tracked work, open a ticket afterwards._` +

@@ -3876,7 +3876,7 @@ describe("notepad", () => {
     expect((posted.at(-1) as { notes: unknown[] }).notes).toEqual([]);
   });
 
-  it("launches a run keyed off the note title and records it on the note", async () => {
+  it("launches a run keyed off the note title plus the note's own id, and records it on the note", async () => {
     const repos = mkRepos(["account-service"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
@@ -3887,13 +3887,13 @@ describe("notepad", () => {
 
     const call = vi.mocked(openWorkspace).mock.calls.at(-1)![0];
     expect(call.kind).toBe("notepad");
-    expect(call.ticket.key).toBe("notepad-fix-the-retry-banner");
+    expect(call.ticket.key).toBe(`notepad-fix-the-retry-banner-${id}`);
     expect(call.ticket.url).toBe("");
     expect(call.planMd).toContain("it double-fires");
-    expect((notesIn(store)![0] as { lastRunKey?: string }).lastRunKey).toBe("notepad-fix-the-retry-banner");
+    expect((notesIn(store)![0] as { lastRunKey?: string }).lastRunKey).toBe(`notepad-fix-the-retry-banner-${id}`);
   });
 
-  it("falls back to a generic key when the note has no title", async () => {
+  it("falls back to a generic slug, still suffixed with the note's id, when the note has no title", async () => {
     const repos = mkRepos(["account-service"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
@@ -3901,7 +3901,61 @@ describe("notepad", () => {
     await sendMsg({ type: "notepad:add", title: "", body: "just a body" });
     const id = notesIn(store)![0].id;
     await sendMsg({ type: "notepad:run", id });
-    expect(vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key).toBe("notepad-note");
+    expect(vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key).toBe(`notepad-note-${id}`);
+  });
+
+  it("gives two distinct untitled notes different run keys", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValue([{ repo: repos[0] }] as never); // repo picker, both runs
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "", body: "first" });
+    await sendMsg({ type: "notepad:add", title: "", body: "second" });
+    const [idA, idB] = notesIn(store)!.map((n) => n.id);
+    expect(idA).not.toBe(idB);
+
+    await sendMsg({ type: "notepad:run", id: idA });
+    const keyA = vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key;
+    await sendMsg({ type: "notepad:run", id: idB });
+    const keyB = vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key;
+
+    expect(keyA).not.toBe(keyB);
+  });
+
+  it("gives two notes with identical titles different run keys", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValue([{ repo: repos[0] }] as never); // repo picker, both runs
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Fix login", body: "attempt one" });
+    await sendMsg({ type: "notepad:add", title: "Fix login", body: "attempt two" });
+    const notes = notesIn(store)!;
+    const idA = notes.find((n) => n.title === "Fix login")!.id;
+    const idB = notes.filter((n) => n.title === "Fix login")[1].id;
+    expect(idA).not.toBe(idB);
+
+    await sendMsg({ type: "notepad:run", id: idA });
+    const keyA = vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key;
+    await sendMsg({ type: "notepad:run", id: idB });
+    const keyB = vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key;
+
+    expect(keyA).not.toBe(keyB);
+  });
+
+  it("reuses the same run key when the same note is run twice", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValue([{ repo: repos[0] }] as never); // repo picker, both runs
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Re-run me", body: "" });
+    const id = notesIn(store)![0].id;
+
+    await sendMsg({ type: "notepad:run", id });
+    const key1 = vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key;
+    await sendMsg({ type: "notepad:run", id });
+    const key2 = vi.mocked(openWorkspace).mock.calls.at(-1)![0].ticket.key;
+
+    expect(key1).toBe(key2);
   });
 
   it("uses the generic explore action's prompt, selected by id rather than list position", async () => {
