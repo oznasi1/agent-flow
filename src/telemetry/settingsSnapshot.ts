@@ -41,6 +41,7 @@ export const OPEN_IN_MODES = ["ask", "new-window", "this-window", "pick-existing
 export const EXPLORE_MODES = ["ask", "jiraTicket", "knowledge", "debug", "general", "supervise", "verify"] as const;
 export const WORKTREE_MODES = ["ask", "always", "never"] as const;
 export const REMOTE_CONTROL_MODES = ["off", "on", "ask"] as const;
+export const AGENT_SURFACES = ["extension", "terminal"] as const;
 export const DEFAULT_FILTER_VALUES = ["unassigned", "mysprint", "mine", "sprint", "backlog"] as const;
 
 const DEFAULT_ENVIRONMENT_LIST = DEFAULT_ENVIRONMENTS.join(",");
@@ -87,6 +88,7 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
   return {
     workspace_mode: enumOrInvalid(cfg.workspaceMode, WORKSPACE_MODES),
     open_in: enumOrInvalid(cfg.openIn, OPEN_IN_MODES),
+    agent_surface: enumOrInvalid(cfg.agentSurface, AGENT_SURFACES),
     explore_mode: enumOrInvalid(cfg.exploreMode, EXPLORE_MODES),
     task_source: enumOrInvalid(cfg.taskSource, CONNECTOR_IDS),
     worktree: enumOrInvalid(cfg.worktree, WORKTREE_MODES),

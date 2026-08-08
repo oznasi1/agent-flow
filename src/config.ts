@@ -117,6 +117,20 @@ export const DEFAULT_EXPLORE_VERIFY_PROMPT =
  * explore prompt its own setting. */
 export const DEFAULT_ENVIRONMENTS = ["dev", "staging", "production"];
 
+/** Where Agent Flow starts a session. */
+export type AgentSurface = "extension" | "terminal";
+
+/** Read the session surface. Anything unrecognized — including undefined — means
+ * the extension panel, so a typo in settings.json degrades to the default rather
+ * than breaking seeding. Takes the configuration so getConfig() can share its
+ * handle; called with no argument from the seeding path, which reads at seed time
+ * rather than capturing at activation. */
+export function readAgentSurface(
+  c: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration("agentFlow"),
+): AgentSurface {
+  return c.get<string>("agentSurface") === "terminal" ? "terminal" : "extension";
+}
+
 /** One Explore action as seen by the flow: id + picker label + resolved prompt + Slack toggle. */
 export interface ExploreAction {
   id: string;
@@ -199,6 +213,9 @@ export interface AgentFlowConfig {
   repoBlocklist: string[];
   defaultFilter: string;
   seedAgent: boolean;
+  // Where a seeded session opens: the Claude Code extension panel, or the `claude`
+  // CLI in an integrated terminal.
+  agentSurface: AgentSurface;
   workspaceMode: "auto" | "multiroot" | "per-window" | "ask";
   openIn: "ask" | "new-window" | "this-window" | "pick-existing";
   taskMode: string; // "ask", or a PromptMode id
@@ -397,6 +414,7 @@ export function getConfig(): AgentFlowConfig {
     })(),
     defaultFilter: c.get<string>("defaultFilter") || "mysprint",
     seedAgent: c.get<boolean>("seedAgent") ?? true,
+    agentSurface: readAgentSurface(c),
     workspaceMode: (c.get<AgentFlowConfig["workspaceMode"]>("workspaceMode")) || "auto",
     openIn: (c.get<AgentFlowConfig["openIn"]>("openIn")) || "ask",
     taskMode: c.get<string>("taskMode") || "ask",
