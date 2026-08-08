@@ -617,6 +617,46 @@ git commit -m "feat(orchestrator): launch and seed under a lock, asking once per
 
 ---
 
+## Task 5b: Seed — another agent in a place that already exists
+
+**Files:**
+- Modify: `src/deckView.ts`
+- Test: `test/unit/deckView.test.ts`
+
+**Why this task exists.** The plan's own goal and its "Done when" both promise `seed`, and Task 6 puts it in the inspector — but no task ever implemented it, and Task 5's implementer correctly refused to invent one, leaving a stopgap that stamps a settled, resettable error. Shipping a UI verb that always fails is worse than not offering it, so this closes the gap. **Added during execution.**
+
+**What seed means.** `launch` creates a place; `seed` opens another agent in one that already exists — a second pair of hands in the same worktree. So its target node is a `place`, not planned work, and it never promotes anything.
+
+**The seam already exists.** `OpenRequest.existingFolder` focuses an already-open folder window and seeds there; the branch at `src/engine/workspace.ts:226` also ensures a brief exists in that folder so a relative `{brief}` resolves. The precedent caller is the `live-folder` open target at `src/tasksView.ts:1624`, which builds `{ mode: "per-window", openIn: "new", existingFolder: target.folder }`. **Read both before writing anything.**
+
+**Resolving a place to a directory:** a `PlaceNode` carries `runKey` and `repo`. Find the `RunStatus` whose `run.key` matches, then `run.repos.find(r => r.name === node.repo)` for its `path` (`Run.repos` is `{name, path, isGit, branch?}[]`). The statuses this pass already built are in hand — do not re-read them.
+
+**One decision to investigate rather than assume.** Whether to pass the place's own repo as the single `service` or an empty list changes whether the brief already in that folder is **reused or overwritten** — the `existingFolder` branch only writes a brief when the folder is *not* among `services`. Default to passing the place's repo, so a seed reuses the brief that is already there rather than replacing it with a description-less one. Read that branch, confirm what each choice does to the `{brief}` placeholder, and **report what you found** — including what happens when no brief exists yet. If the evidence contradicts the default, say so and take the other path with reasons.
+
+**Failure posture:** a run or repo that is gone is not coming back, so latch it with a message naming what was missing. A missing prompt mode latches, exactly as `launch` does. Neither is a defer — defer is only for a pre-flight *read* that spent nothing.
+
+- [ ] **Step 1: Extend the spend gate to cover seed — do this first**
+
+`performEdge`'s sibling gate in `advanceUnderLock` currently computes `wantsLaunch` from `f.edge.action === "launch"` only. **A seed starts a paid Claude Code session too**, so the once-per-flow confirmation must cover it, or a flow whose only acting rule is a `seed` spends money with no consent at all. Widen the gate to any performing edge whose action is `launch` or `seed`, and adapt the modal wording so it names what will actually happen (a seed names the place and the prompt mode; there is no ticket to launch). Write the test that a seed-only flow with no `launchConfirmedAt` shows the modal and performs nothing — and confirm it fails before the fix.
+
+- [ ] **Step 2: Write the failing tests**
+
+Cover: a met `seed` rule calls `openWorkspace` with `existingFolder` set to the place's resolved path and `openIn: "new"`; the edge is stamped `firedAt` with a receipt naming the place; **no promotion happens**; a place whose run is absent from the statuses latches with a message naming the run; a place whose named repo is absent from that run's `repos` latches naming the repo; a missing prompt mode latches; and a seed on a node that is *not* a place latches (the mirror of `launch`'s not-planned guard). Assert on the actual `openWorkspace` argument object — a seed pointed at the wrong directory is the failure that costs money.
+
+- [ ] **Step 3: Run them, confirm red for the expected reason, then implement, then confirm green**
+
+Replace Task 5's stopgap error in `performEdge`. Keep its shape: return the same `{outcome, promote?, receipt?}` triple, with `promote` always absent.
+
+- [ ] **Step 4: All four gates, then commit**
+
+`npx tsc --noEmit`; `rm -rf dist && npm run build` (exit 0); `npx vitest run`; coverage ≥95% on `deckView.ts`.
+
+```bash
+git commit -m "feat(orchestrator): seed another agent into an existing place"
+```
+
+---
+
 ## Task 6: Offer the acting verbs in the inspector
 
 **Files:**
