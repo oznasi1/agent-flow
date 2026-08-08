@@ -8,10 +8,6 @@ export const CSS = `
     background: var(--vscode-sideBar-background); }
   #root { padding: 8px 8px 20px; }
 
-  .header { display: flex; align-items: center; gap: 8px; padding: 4px 4px 10px; }
-  .header .title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: var(--t-title); }
-  .header .me { color: var(--vscode-descriptionForeground); font-size: 11px; margin-left: 8px; }
-
   /* The mark is the sidebar's status display: lit dots are open Agent Flow
      windows. Unlit and texture dots ride the theme foreground so the ring keeps
      its shape on any background, and sit just under it rather than at a quarter
@@ -144,14 +140,14 @@ export const CSS = `
   /* One quiet secondary language for every non-Take action: Explore (the pool's
      escape hatch), Address PR (which gives up its green — green means Done on the
      Deck, and a PR waiting on you is the opposite of done) and the sprint actions.
-     Explore is the only one pushed to the row's far side; the other three are the
-     only ones that must never wrap their own label. */
+     Explore is pushed to the tab row's far side by its .tabbar-trail wrapper, not
+     by anything in this group; the other three are the only ones that must never
+     wrap their own label. */
   .explore, .address-pr, .sprint-add, .sprint-remove, .quiet {
     display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-body); font-weight: 500;
     height: 24px; padding: 0 10px; border-radius: var(--r-ctl); cursor: pointer;
     border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
     transition: background-color .12s ease, border-color .12s ease; }
-  .explore { margin-left: auto; }
   .address-pr, .sprint-add, .sprint-remove { white-space: nowrap; }
   .sprint-remove, .quiet.dim { color: var(--dim); }
   .explore:hover, .address-pr:hover, .sprint-add:hover, .sprint-remove:hover, .quiet:hover {
@@ -280,11 +276,19 @@ export const CSS = `
     background: var(--brand); color: var(--brand-ink); }
   .batch-launch:hover { background: color-mix(in srgb, var(--brand) 84%, var(--vscode-foreground)); }
 
-  .tabbar { display: flex; gap: 2px; margin: 8px 0 4px; border-bottom: 1px solid var(--vscode-panel-border); }
-  .tabbar button { background: none; border: none; border-bottom: 2px solid transparent;
-    padding: 6px 10px; cursor: pointer; color: var(--vscode-descriptionForeground); font-size: var(--t-body); }
-  .tabbar button[aria-selected="true"] { color: var(--vscode-foreground);
+  /* The panel's first row, and its title element — the VS Code view title bar above
+     it carries the project and user (tasksView.postState), so nothing repeats here.
+     Tab styling is scoped to [role="tab"] because the trailing group holds a real
+     button (Explore) that must keep the shared .explore language, not become a tab. */
+  .tabbar { display: flex; align-items: center; gap: 2px; margin: 0 0 10px;
+    border-bottom: 1px solid var(--vscode-panel-border); }
+  .tabbar-tabs { display: inline-flex; align-items: center; gap: 2px; }
+  .tabbar button[role="tab"] { background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 5px 10px 7px; cursor: pointer; color: var(--dim); font-size: var(--t-body); font-weight: 500; }
+  .tabbar button[role="tab"][aria-selected="true"] { color: var(--vscode-foreground); font-weight: 600;
     border-bottom-color: var(--vscode-focusBorder); }
+  .tabbar-trail { margin-left: auto; display: inline-flex; align-items: center; gap: 7px;
+    padding-bottom: 4px; }
 
   /* Restyled to the product's own control language (direction B — compact rows,
      see .superpowers/sdd/notepad-ui/brief.md): real buttons instead of text
@@ -293,10 +297,16 @@ export const CSS = `
      already uses to signal state, just thinner. */
   .notepad { padding: 4px 0 12px; }
   .np-add { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+  /* One focus language for the whole panel: suppress the UA outline and move focus
+     onto the control's own border, exactly as .text-search:focus-within does. The
+     resting hairline is load-bearing — without it the border appears out of nothing
+     on focus, which reads as the field jumping rather than lighting up. */
   .np-title-input, .np-body-input { width: 100%; padding: 5px 7px;
     background: var(--vscode-input-background); color: var(--vscode-input-foreground);
-    border: 1px solid var(--vscode-input-border, transparent); border-radius: var(--r-ctl);
+    border: 1px solid var(--vscode-input-border, var(--hair)); border-radius: var(--r-ctl);
     font-family: inherit; font-size: var(--t-body); }
+  .np-title-input:focus, .np-body-input:focus { outline: none;
+    border-color: var(--vscode-focusBorder); }
   .np-body-input { resize: vertical; }
   /* Each field carries its own mic immediately to its right, so which field a
      dictation session fills is never ambiguous. */

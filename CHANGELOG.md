@@ -5,6 +5,22 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-08-08
+
+### Changed
+
+- **Tabs at the top of the sidebar.** `Tasks | Notepad` is now the panel's first
+  row, with the project key and your name moved into the view's own title bar —
+  so the panel no longer says "Tasks" twice, and it's a row shorter on both
+  tabs. The window gauge and **Explore** trail the tabs on that same row.
+
+### Fixed
+
+- **Notepad fields focus like every other input.** The title and detail fields
+  lit up with a detached outline in the theme's focus hue, offset from the field
+  and at the wrong corner radius. They now move focus onto their own border,
+  matching the task search and the repo picker.
+
 ## [0.8.0] — 2026-08-08
 
 ### Added
@@ -30,7 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   untitled multi-root window with no saved `.code-workspace`, can't be named by
   the seed handshake, so **This window** is hidden there and
   `agentFlow.openIn: this-window` opens a new window instead.
-
 ## [0.6.0] — 2026-08-08
 
 ### Added

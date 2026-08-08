@@ -283,7 +283,11 @@ function setup(opts: { authed?: boolean; workspaceState?: Record<string, unknown
     messages.push(m);
   });
   let handler: (m: InboundMessage) => Promise<void> = async () => {};
+  // `title` / `description` are the VS Code view title bar's text — the panel sets
+  // them from the same state it posts, so they are asserted like any other output.
   const view = {
+    title: "Tasks",
+    description: undefined as string | undefined,
     webview: {
       options: {},
       html: "",
@@ -299,7 +303,7 @@ function setup(opts: { authed?: boolean; workspaceState?: Record<string, unknown
   provider.resolveWebviewView(view as never);
   const send = (m: InboundMessage) => handler(m);
   const posted = () => post.mock.calls.map((c) => c[0] as OutboundMessage);
-  return { provider, post, send, posted, messages, logged, auth, connector, workspaceState, globalState };
+  return { provider, post, send, posted, messages, logged, auth, connector, workspaceState, globalState, view };
 }
 
 /** Mount the panel on a given connector and let it establish its state, the way the
@@ -404,6 +408,32 @@ describe("ready", () => {
     const { send } = setup();
     await send({ type: "runSetup" });
     expect(commands.executeCommand).toHaveBeenCalledWith("agentFlow.setup");
+  });
+
+  // The panel's own title bar is the identity row. The fixture connector's scope
+  // value is "ASM" (CFG.project) and the Jira client stub's getMyself returns "Jane".
+  it("titles the panel with the project and the signed-in user", async () => {
+    const { send, view } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(view.title).toBe("ASM");
+    expect(view.description).toBe("Jane");
+  });
+
+  it("drops the description when nobody is signed in", async () => {
+    const { send, view } = setup({ authed: false });
+    await send({ type: "ready" });
+    expect(view.title).toBe("ASM");
+    expect(view.description).toBeUndefined();
+  });
+
+  // A blank title bar holding three floating action icons reads as a rendering
+  // failure, so an unset project keeps the package.json name rather than emptying it.
+  it("falls back to the view's own name when no project is configured", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, baseUrl: "", project: "" });
+    const { send, view } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(view.title).toBe("Tasks");
+    expect(view.description).toBeUndefined();
   });
 });
 
