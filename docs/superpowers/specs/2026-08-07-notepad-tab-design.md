@@ -20,7 +20,7 @@ The Tasks sidebar webview (`agentFlow.tasks`, `src/tasksView.ts` + `src/webview/
 | How is speech captured? | Browser `SpeechRecognition` / `webkitSpeechRecognition` (Web Speech API), used entirely client-side inside the webview's `Notepad.tsx` — no new extension-host code or message-protocol traffic for transcription itself. |
 | Does this touch the existing Tasks list, filters, or connectors? | No. Tasks view, `EXPLORE_ACTION_DEFS`, Jira/task connector code, worktree/workspace engine internals are unchanged except for the new `runNotepadItem` entry point, which is additive. |
 | How does a notepad run show up on the Deck board? | `runNotepadItem` calls `openWorkspace({ ..., kind: "notepad" })` exactly like `explore()` does with `kind: "explore"` — this writes a normal `Run` record via `writeRun(defaultRunsDir(), run)` (`src/engine/workspace.ts`) into the same `~/.agentflow/runs` store Deck already reads via `readRuns()`. `"notepad"` is added to `RUN_KINDS` (`src/types.ts`) alongside `"task" \| "explore" \| "review" \| "local"`, so it survives `runKind()`'s clamp instead of silently becoming `"task"`. No new merge/aggregation logic is needed in `deckView.ts` — it was already reading one run store; the "two sources" are two origins that both write into it. |
-| How does the note know its own run's status? | Each note gains an optional `lastRunKey` (the synthetic ticket key `openWorkspace` generates, e.g. `notepad-<slug>`), set when "Run agent" is clicked. `TasksViewProvider` derives a `NotepadRunStatus` per note from `readRuns()` + the live-session set, and includes it in the `notepad:state` payload. Re-running a note overwrites `lastRunKey` — history of earlier runs from the same note isn't tracked, only the most recent. |
+| How does the note know its own run's status? | Each note gains an optional `lastRunKey` (the synthetic ticket key `openWorkspace` generates, e.g. `notepad-<slug>`), set when "Run agent" is clicked. `TasksViewProvider` derives a `NotepadRunStatus` per note from `readRuns()` + the live-session set, and includes it in the `notepad:notes` payload. Re-running a note overwrites `lastRunKey` — history of earlier runs from the same note isn't tracked, only the most recent. |
 | How exactly is that status derived? | From the two cheap signals `describeActiveTasks` (`src/engine/runs.ts`) already uses for the same question — **not** `retireVerdict`, which needs live git state, `gh` PR facts, and a ticket category, none of which the Tasks panel has or should pay for on a poll. Given the run record for `lastRunKey` and `livePlaces = new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys())`: no record → no badge (the Deck already retired it, and guessing why would be dishonest); `finishedAt` stamped → `finished`; else any repo path in `livePlaces` → `running`; else → `stale` ("launched, no agent attached right now"), which is exactly the wording `describeActiveTasks` already uses for that state. |
 
 ## Approach rationale
@@ -52,7 +52,7 @@ New `InboundMessage` variants (webview → host), added alongside the existing u
 - `{ type: "notepad:run", id: string }`
 
 New `OutboundMessage` variant (host → webview):
-- `{ type: "notepad:state", notes: NotepadItem[] }` — sent on `ready`, after every mutation, and on the same poll cadence Deck uses (`POLL_MS`) so run status badges stay current without user action. Each `NotepadItem` sent to the webview includes a derived `runStatus?: "running" | "stale" | "finished"` alongside the persisted fields — computed server-side, not stored.
+- `{ type: "notepad:notes", notes: NotepadItemView[] }` — sent on `ready`, after every mutation, and on the same poll cadence Deck uses (`POLL_MS`) so run status badges stay current without user action. Named `notepad:notes`, not `notepad:state`: `state` already means the panel's auth/config envelope in this protocol, and reusing the word for an unrelated payload would mislead. `NotepadItemView` is the stored `NotepadItem` plus a derived `runStatus?: "running" | "stale" | "finished"` — computed host-side per post, never persisted.
 
 `TasksViewProvider.onMessage` gets six new `case` branches following the existing dispatch style (each delegating to a small private method: `addNote`, `updateNote`, `toggleNoteDone`, `deleteNote`, `clearCompletedNotes`, `runNotepadItem`).
 
@@ -68,9 +68,9 @@ New `OutboundMessage` variant (host → webview):
 
 ## Done / filter / cleanup
 
-- `toggleNoteDone(id)` flips the note's `done` flag in `globalState` and re-posts `notepad:state`.
+- `toggleNoteDone(id)` flips the note's `done` flag in `globalState` and re-posts `notepad:notes`.
 - The filter (All / Active / Done) is purely client-side in `Notepad.tsx` — the host always sends the full note array; the webview decides what to render, matching how task filters already work as a client-side view over host-sent data. Filter state is local `useState` defaulting to **Active** each time the Notepad tab mounts — not persisted, so it doesn't carry a stale "Done" selection into the next session.
-- `clearCompletedNotes()` removes every note with `done: true` from the stored array in one `globalState` write, then re-posts `notepad:state`. No per-note confirmation; the button itself is the confirming action (consistent with it only being enabled when there's at least one done note to clear).
+- `clearCompletedNotes()` removes every note with `done: true` from the stored array in one `globalState` write, then re-posts `notepad:notes`. No per-note confirmation; the button itself is the confirming action (consistent with it only being enabled when there's at least one done note to clear).
 
 ## Deck integration ("notepad" run kind)
 
