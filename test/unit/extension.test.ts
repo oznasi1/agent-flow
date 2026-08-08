@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { commands, window, workspace, setConfig } from "../_mocks/vscode";
-import { fakeContext } from "../_helpers/factories";
+import { fakeContext as rawFakeContext } from "../_helpers/factories";
 
 // The connector's default answer, restored before every test (see beforeEach) so a
 // test that overrides it (e.g. "reads the connector's own label") can never leak its
@@ -30,7 +30,11 @@ const connectorStub = {
   taskUrl: vi.fn(() => ""),
   keyFromUrl: vi.fn(() => null),
 };
-const providerStub = { refresh: vi.fn(async () => undefined), takeTask: vi.fn(async () => undefined) };
+const providerStub = {
+  refresh: vi.fn(async () => undefined),
+  takeTask: vi.fn(async () => undefined),
+  postNotepad: vi.fn(() => undefined),
+};
 
 const trackSpy = vi.fn();
 const initSpy = vi.fn();
@@ -89,6 +93,30 @@ const cmd = (id: string) =>
   vi.mocked(commands.registerCommand).mock.calls.find((c) => c[0] === id)?.[1] as
     | ((...a: unknown[]) => Promise<unknown>)
     | undefined;
+
+// Every context this file hands to activate() gets disposed in afterEach below —
+// otherwise activate()'s notepadPoll setInterval (and anything else pushed onto
+// context.subscriptions) outlives the test that created it. Left running, ~30
+// undisposed intervals from this file alone fire 6s later while other test files
+// share the same worker thread, calling providerStub.postNotepad() long after the
+// mock module has moved on — a real, previously-unhandled TypeError under a
+// single-threaded run. Wrapping fakeContext here (instead of editing every call
+// site) also means any future test that calls it is covered automatically.
+const liveContexts: { subscriptions: { dispose(): void }[] }[] = [];
+const fakeContext: typeof rawFakeContext = (...args: Parameters<typeof rawFakeContext>) => {
+  const result = rawFakeContext(...args);
+  liveContexts.push(result.context);
+  return result;
+};
+
+afterEach(() => {
+  // Exercises the real production disposal path (nothing else in this file does):
+  // every disposable activate() pushed — commands, the interval, watchPlansAndSeed's
+  // handle — gets torn down exactly as VS Code would on deactivate.
+  for (const context of liveContexts.splice(0)) {
+    for (const sub of context.subscriptions) sub.dispose();
+  }
+});
 
 beforeEach(() => {
   connectorStub.signIn.mockResolvedValue(true);
