@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
+import { AgentActivity, CardAgent, DeckColumn, OutboundMessage, PendingResume, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
 import type { Flow } from "../engine/orchestrator/model";
 import { DeckCard, projectCards } from "./deckCards";
 import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
@@ -414,6 +414,7 @@ export function DeckApp(): JSX.Element {
    * no tile at all, the same way the strip itself renders nothing below. */
   const [reviewsSeen, setReviewsSeen] = React.useState(false);
   const [flows, setFlows] = React.useState<Flow[]>([]);
+  const [pendingResume, setPendingResume] = React.useState<PendingResume[]>([]);
   const [orchEnabled, setOrchEnabled] = React.useState(false);
   const [openFlowId, setOpenFlowId] = React.useState<string | null>(null);
   /** The flow list the last `deck:flows` post carried. The message handler below is
@@ -500,6 +501,7 @@ export function DeckApp(): JSX.Element {
           return fresh ? fresh.id : null;
         });
         setOrchEnabled(m.enabled);
+        setPendingResume(m.pendingResume);
       }
     };
     window.addEventListener("message", handler);
@@ -734,12 +736,17 @@ export function DeckApp(): JSX.Element {
           flows={flows}
           openId={openFlowId}
           runs={runs}
+          pendingResume={pendingResume}
           onClose={() => setOpenFlowId(null)}
           onCreate={() => send({ type: "flow:create" })}
           onOpen={(id) => setOpenFlowId(id)}
           onRename={(id, name) => send({ type: "flow:rename", id, name })}
           onSave={(flow) => send({ type: "flow:save", flow })}
           onDelete={(id) => send({ type: "flow:delete", id })}
+          onArm={(id, armed) => send({ type: "flow:arm", id, armed })}
+          onResumeApprove={(id) => send({ type: "flow:resumeApprove", id })}
+          onResumeDisarm={(id) => send({ type: "flow:resumeDisarm", id })}
+          onResetEdge={(id, edgeId) => send({ type: "flow:resetEdge", id, edgeId })}
         />
       )}
     </>

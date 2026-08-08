@@ -47,9 +47,10 @@ const flow = (over: Partial<Flow> = {}): Flow => ({
 });
 
 const props = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => ({
-  flows: [flow()], openId: "f1", runs: [],
+  flows: [flow()], openId: "f1", runs: [], pendingResume: [],
   onClose: vi.fn(), onCreate: vi.fn(), onOpen: vi.fn(),
   onRename: vi.fn(), onSave: vi.fn(), onDelete: vi.fn(),
+  onArm: vi.fn(), onResumeApprove: vi.fn(), onResumeDisarm: vi.fn(), onResetEdge: vi.fn(),
   ...over,
 });
 
@@ -88,14 +89,9 @@ describe("OrchestratorDrawer", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("states that the flow is not armed and that arming comes later", () => {
+  it("states that a disarmed flow is not armed", () => {
     render(<OrchestratorDrawer {...props()} />);
     expect(screen.getByText(/not armed/i)).toBeTruthy();
-  });
-
-  it("has no Arm control at all — arming is not built yet", () => {
-    render(<OrchestratorDrawer {...props()} />);
-    expect(screen.queryByRole("button", { name: /^arm/i })).toBeNull();
   });
 
   it("offers an empty state that explains the first move", () => {
@@ -786,5 +782,114 @@ describe("the inspector", () => {
     const { r } = open();
     r.rerender(<OrchestratorDrawer {...props({ flows: [flow({ nodes: wired().nodes, edges: [] })] })} />);
     expect(screen.getByText(/select a connection/i)).toBeTruthy();
+  });
+});
+
+describe("arming", () => {
+  it("offers Arm for a disarmed flow", () => {
+    const onArm = vi.fn();
+    render(<OrchestratorDrawer {...props({ onArm })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Arm" }));
+    expect(onArm).toHaveBeenCalledWith("f1", true);
+  });
+
+  // The brief's own snippet asserted this with `getByText(/armed/i)`, which is
+  // ambiguous the moment both controls render: the Arm button reads "Armed ·
+  // disarm" and the footer's own span reads "Armed · watching 0 nodes" — both
+  // are independent text-node leaves, so a bare /armed/i throws on multiple
+  // matches instead of passing. Scoping to the footer's own wording sidesteps
+  // that collision without losing the intent.
+  it("offers disarm for an armed flow, and says it is armed", () => {
+    const onArm = vi.fn();
+    render(<OrchestratorDrawer {...props({ onArm, flows: [flow({ armed: true })] })} />);
+    expect(screen.getByText(/armed · watching/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /disarm/i }));
+    expect(onArm).toHaveBeenCalledWith("f1", false);
+  });
+
+  it("no longer claims arming is coming in a later phase", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    expect(screen.queryByText(/next phase/i)).toBeNull();
+  });
+
+  it("Arm is the drawer's only filled control", () => {
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    const filled = container.querySelectorAll(".orch-arm");
+    expect(filled).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Arm" }).className).toContain("orch-arm");
+  });
+});
+
+describe("the resume banner", () => {
+  const pending = [{ flowId: "f1", flowName: "Ship the migration", lines: ["Ship the migration: the migration has landed"] }];
+
+  it("shows what is ready, and does not act on its own", () => {
+    render(<OrchestratorDrawer {...props({ pendingResume: pending, flows: [flow({ armed: true })] })} />);
+    const banner = screen.getByTestId("orch-resume");
+    expect(banner.textContent).toContain("the migration has landed");
+  });
+
+  it("approves", () => {
+    const onResumeApprove = vi.fn();
+    render(<OrchestratorDrawer {...props({ pendingResume: pending, flows: [flow({ armed: true })], onResumeApprove })} />);
+    fireEvent.click(screen.getByRole("button", { name: /^go$/i }));
+    expect(onResumeApprove).toHaveBeenCalledWith("f1");
+  });
+
+  // Same collision as above, one level worse: with an armed flow AND a pending
+  // resume both on screen, the drawer has TWO controls whose accessible name
+  // contains "disarm" — the Arm toggle ("Armed · disarm") and the banner's own
+  // button ("Disarm"). The brief's `{ name: /disarm/i }` matches both and
+  // throws. An exact, case-matched "Disarm" only matches the banner's button.
+  it("disarms instead", () => {
+    const onResumeDisarm = vi.fn();
+    render(<OrchestratorDrawer {...props({ pendingResume: pending, flows: [flow({ armed: true })], onResumeDisarm })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Disarm" }));
+    expect(onResumeDisarm).toHaveBeenCalledWith("f1");
+  });
+
+  it("shows no banner when nothing is pending", () => {
+    render(<OrchestratorDrawer {...props({ pendingResume: [] })} />);
+    expect(screen.queryByTestId("orch-resume")).toBeNull();
+  });
+
+  it("shows no banner for a different flow's pending resume", () => {
+    render(<OrchestratorDrawer {...props({ pendingResume: [{ ...pending[0], flowId: "other" }] })} />);
+    expect(screen.queryByTestId("orch-resume")).toBeNull();
+  });
+});
+
+describe("Reset", () => {
+  const firedFlow = () => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you: landed" }],
+  });
+
+  it("shows a fired rule's receipt in the inspector", () => {
+    render(<OrchestratorDrawer {...props({ flows: [firedFlow()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByTestId("orch-inspector").textContent).toContain("told you: landed");
+  });
+
+  it("resets it", () => {
+    const onResetEdge = vi.fn();
+    render(<OrchestratorDrawer {...props({ flows: [firedFlow()], onResetEdge })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    fireEvent.click(screen.getByRole("button", { name: /reset/i }));
+    expect(onResetEdge).toHaveBeenCalledWith("f1", "e1");
+  });
+
+  // The brief's own snippet rendered default props() here, whose default flow
+  // (flow(), from this file's top-of-file fixture) has NO edges at all — so
+  // getByTestId("orch-edge-e1") would throw "unable to find an element" before
+  // the real assertion ever runs. wired() is this file's existing fixture with
+  // exactly one unfired edge e1, which is what the test actually needs.
+  it("offers no Reset for a rule that has not fired", () => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.queryByRole("button", { name: /reset/i })).toBeNull();
   });
 });

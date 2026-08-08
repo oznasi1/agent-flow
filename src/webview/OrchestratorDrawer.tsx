@@ -2,7 +2,7 @@ import * as React from "react";
 import { describeCond, placeActivity } from "../engine/orchestrator/conditions";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
-import { AgentState, RunStatus } from "../types";
+import { AgentState, PendingResume, RunStatus } from "../types";
 
 /** The drag payload a Deck card carries. A NUL separator cannot appear in a
  * ticket key or a repo name, so parsing is unambiguous. */
@@ -141,12 +141,19 @@ export interface OrchestratorDrawerProps {
   /** Every card on the board, so the tray and canvas can resolve a node's live
    * state and the inspector can say what a condition is currently waiting on. */
   runs: RunStatus[];
+  /** Rules already met on an armed flow, reported rather than acted on — see
+   * `PendingResume`'s own doc comment for why this is a gate, not a courtesy. */
+  pendingResume: PendingResume[];
   onClose: () => void;
   onCreate: () => void;
   onOpen: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onSave: (flow: Flow) => void;
   onDelete: (id: string) => void;
+  onArm: (id: string, armed: boolean) => void;
+  onResumeApprove: (id: string) => void;
+  onResumeDisarm: (id: string) => void;
+  onResetEdge: (id: string, edgeId: string) => void;
 }
 
 export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | null {
@@ -199,6 +206,10 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   if (!flow) return null;
 
   const places = flow.nodes.filter((n) => n.kind !== "notify").length;
+  // Reported by the host on `deck:flows`, keyed by flow id — never a second
+  // source of truth for whether rules are met, only for whether the user has
+  // yet said "go" on what already is.
+  const resume = p.pendingResume.find((r) => r.flowId === flow.id) ?? null;
 
   const attachAt = (raw: string, x: number, y: number) => {
     const parsed = parseDrag(raw);
@@ -349,6 +360,24 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             if (next && next !== flow.name) p.onRename(flow.id, next);
           }}
         />
+        <div className="row" style={{ marginTop: 8 }}>
+          <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>
+            {places} {places === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
+            {flow.edges.length === 1 ? "rule" : "rules"}
+          </span>
+          <div className="sp" />
+          {/* The drawer's one filled control. Arm is the consent point for
+              everything a flow does, so it is the only thing here allowed to
+              be filled — armed is a state, not an invitation, so the fill goes
+              away and this becomes the quiet way back out (see .orch-arm.on). */}
+          <button
+            type="button"
+            className={`orch-arm${flow.armed ? " on" : ""}`}
+            onClick={() => p.onArm(flow.id, !flow.armed)}
+          >
+            {flow.armed ? "Armed · disarm" : "Arm"}
+          </button>
+        </div>
         {picking && (
           <div className="orch-flows">
             {p.flows.map((f) => (
@@ -362,6 +391,21 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       </div>
 
       <div className="orch-body">
+        {resume && (
+          // The gate the user asked for: an armed flow does not spend anything
+          // a condition made true while they were away without this "go" first.
+          // Not a courtesy banner, not red — nothing failed, a flow is waiting.
+          <div className="orch-resume" data-testid="orch-resume">
+            <div className="t">
+              {resume.lines.length === 1 ? "1 rule is ready" : `${resume.lines.length} rules are ready`}
+            </div>
+            <ul>{resume.lines.map((l, i) => <li key={i}>{l}</li>)}</ul>
+            <div className="row">
+              <button type="button" className="orch-mini" onClick={() => p.onResumeApprove(flow.id)}>Go</button>
+              <button type="button" className="orch-mini" onClick={() => p.onResumeDisarm(flow.id)}>Disarm</button>
+            </div>
+          </div>
+        )}
         <div className="orch-sect">
           <div className="orch-sect-hd">
             <span className="t">Agents</span>
@@ -551,19 +595,30 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               />
             </div>
             <div className="orch-obs">
-              {observation(edge) ?? "this card is not on the board right now"}
+              {edge.firedAt !== undefined ? (
+                <>
+                  <span className="fired">{edge.firedNote ?? "fired"}</span>
+                  <div className="sp" />
+                  <button type="button" className="orch-mini" onClick={() => p.onResetEdge(flow.id, edge.id)}>Reset</button>
+                </>
+              ) : (
+                <span>{observation(edge) ?? "this card is not on the board right now"}</span>
+              )}
             </div>
           </div>
         )}
       </div>
 
       <div className="orch-ft">
-        <span>
-          {places} {places === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
-          {flow.edges.length === 1 ? "rule" : "rules"} · not armed
+        <span className={`live${flow.armed ? " on" : ""}`}>
+          <span className="d" />
+          {flow.armed ? `Armed · watching ${places} ${places === 1 ? "node" : "nodes"}` : "Not armed"}
         </span>
         <div className="sp" />
-        <span>arming arrives in the next phase</span>
+        <span>
+          {places} {places === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
+          {flow.edges.length === 1 ? "rule" : "rules"}
+        </span>
       </div>
     </aside>
   );

@@ -135,6 +135,8 @@ describe("brand accent", () => {
       ".orch-graph.wiring .orch-node:not(.src)",
       ".orch-graph.wiring .orch-node:not(.src) .orch-port.in",
       ".orch-edge.sel",
+      ".orch-arm", ".orch-arm.on",
+      ".orch-ft .live.on .d",
     ],
   };
 

@@ -1371,6 +1371,17 @@ const mkFlow = (id: string, name: string): Flow => ({
   id, name, armed: false, createdAt: 1_000, nodes: [], edges: [],
 });
 
+/** A flow whose single edge `e1` has already fired — for the reset-through-
+ * DeckApp test below, which needs a real fired edge to click Reset on. */
+const firedFlow = (): Flow => ({
+  ...mkFlow("f1", "Ship the migration"),
+  nodes: [
+    { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+    { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
+  ],
+  edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you: landed" }],
+});
+
 // `pendingResume` defaults empty: the resume gate (Task 4) is host-side state
 // with no rendering yet (Task 6 wires the banner) — every existing fixture here
 // predates the field and has nothing to hold.
@@ -1562,5 +1573,35 @@ describe("the drawer's callbacks", () => {
     const dot = screen.getByTestId("orch-node-n1").querySelector(".d") as HTMLElement;
     // mkStatus's single-repo run has a working agent.
     expect(dot.style.background).toBe("var(--c-progress)");
+  });
+
+  // The point of these three is the exact `type` string on the wire — a typo in
+  // any of them is the failure mode, and nothing else in the suite would catch
+  // it: OrchestratorDrawer's own tests only see the callback, never the message
+  // DeckApp turns it into.
+  it("passes an arm through as flow:arm", () => {
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Arm" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:arm", id: "f1", armed: true });
+  });
+
+  it("passes a resume approval through as flow:resumeApprove", () => {
+    render(<DeckApp />);
+    host({
+      type: "deck:flows",
+      flows: [{ ...mkFlow("f1", "Ship the migration"), armed: true }],
+      enabled: true,
+      pendingResume: [{ flowId: "f1", flowName: "Ship the migration", lines: ["ready"] }],
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^go$/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:resumeApprove", id: "f1" });
+  });
+
+  it("passes a reset through as flow:resetEdge", () => {
+    render(<DeckApp />);
+    host(flowsMsg([firedFlow()]));
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    fireEvent.click(screen.getByRole("button", { name: /reset/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
   });
 });

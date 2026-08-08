@@ -154,5 +154,34 @@ export const ORCH_CSS = `
     border: 1px solid var(--edge); background: var(--vscode-input-background);
     color: var(--vscode-foreground); font: inherit; font-size: var(--t-body); }
   .orch-obs { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--hair);
-    font-size: var(--t-micro); color: var(--dim); }
+    font-size: var(--t-micro); color: var(--dim); display: flex; align-items: center; gap: 8px; }
+  .orch-obs .sp { flex: 1; }
+  /* A fired rule's receipt reads as done, the same colour the board's own Done
+     column uses — not a new claim of colour, the same one this codebase already
+     spends on "this finished". */
+  .orch-obs .fired { color: var(--c-done); }
+
+  /* The drawer's ONE filled control, and the phase that earns it: Arm is the
+     consent point for everything a flow does. Nothing else here may be filled. */
+  .orch-arm { height: 26px; padding: 0 13px; border-radius: var(--r-ctl);
+    border: 1px solid var(--brand); background: var(--brand); color: var(--brand-ink);
+    font-size: var(--t-body); font-weight: 600; cursor: pointer; }
+  .orch-arm:hover { filter: brightness(1.08); }
+  /* Armed is a state, not an invitation: the fill goes away and the control
+     becomes the quiet way back out. */
+  .orch-arm.on { background: transparent; color: var(--vscode-foreground);
+    border-color: color-mix(in srgb, var(--brand) 50%, var(--edge)); font-weight: 500; }
+
+  .orch-ft .live { display: inline-flex; align-items: center; gap: 6px; }
+  .orch-ft .live .d { width: 6px; height: 6px; border-radius: 50%; background: var(--dim); }
+  .orch-ft .live.on .d { background: var(--brand); }
+
+  /* The resume gate. Not red — nothing failed; a flow is waiting to be told to go. */
+  .orch-resume { flex: none; margin-bottom: 12px; padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--c-attn) 34%, var(--hair));
+    border-left: 2px solid var(--c-attn); border-radius: var(--r-card);
+    background: color-mix(in srgb, var(--c-attn) 5%, transparent); }
+  .orch-resume .t { font-size: var(--t-body); font-weight: 600; margin-bottom: 5px; }
+  .orch-resume ul { margin: 0 0 8px; padding-left: 18px; font-size: var(--t-micro); color: var(--dim); }
+  .orch-resume .row { display: flex; gap: 6px; }
 `;
