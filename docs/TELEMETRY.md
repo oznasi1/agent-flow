@@ -167,20 +167,20 @@ entry point:
 
 ### Settings snapshot
 
-`extension_activated` includes a 33-field reduction of your configuration,
+`extension_activated` includes a 34-field reduction of your configuration,
 built by `settingsSnapshot()`. Every field is either a boolean, a count, or a
 value drawn from a fixed, shipped set of choices — never a user-authored string:
 
 | Field | Values |
 |---|---|
-| `workspace_mode`, `open_in`, `explore_mode`, `worktree`, `remote_control`, `default_filter` | One of that setting's shipped choices, or the literal string `"invalid"` |
+| `workspace_mode`, `open_in`, `agent_surface`, `explore_mode`, `worktree`, `remote_control`, `default_filter` | One of that setting's shipped choices, or the literal string `"invalid"` |
 | `task_mode`, `review_mode` | `"ask"`, `"stock"` (pinned to a shipped mode), or `"custom"` |
 | `seed_agent`, `filters_size`, `filters_status`, `filters_repo`, `filters_search`, `pr_review_auto_fix`, `pr_facts`, `review_requests`, `open_agents`, `review_writes`, `stamp_label_on_write`, `track_open_windows` | `true` / `false` |
 | `batch_confirm_threshold`, `repo_blocklist_count`, `prompt_modes_count`, `review_modes_count`, `prompt_modes_overridden`, `prompt_modes_custom`, `prompt_modes_hidden`, `review_modes_overridden`, `review_modes_custom`, `review_modes_hidden` | Numbers |
 | `explore_prompts_customized`, `environments_customized`, `pr_review_prompt_customized` | `true` / `false` — *whether* the corresponding user-authored text was changed from the shipped default, never the text itself |
 
-**The `"invalid"` sentinel.** Six of the fields above (`workspace_mode`,
-`open_in`, `explore_mode`, `worktree`, `remote_control`, `default_filter`) can
+**The `"invalid"` sentinel.** Seven of the fields above (`workspace_mode`,
+`open_in`, `agent_surface`, `explore_mode`, `worktree`, `remote_control`, `default_filter`) can
 report the literal string `"invalid"` instead of a real value. VS Code's
 settings UI only ever offers the shipped choices for these, but a hand-edited
 `settings.json` can hold anything. When it does, the raw value is **never**

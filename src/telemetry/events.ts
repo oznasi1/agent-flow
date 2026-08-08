@@ -111,10 +111,10 @@ export type CommandId =
  * `*_fp` properties are matched by suffix and must be 16-char hex. */
 export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as const;
 
-/** The 33 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
+/** The 34 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
  *
- * `"invalid"` on the six enum-ish fields below (workspace_mode, open_in,
- * explore_mode, worktree, remote_control, default_filter) is a sentinel, not a
+ * `"invalid"` on the seven enum-ish fields below (workspace_mode, open_in,
+ * agent_surface, explore_mode, worktree, remote_control, default_filter) is a sentinel, not a
  * real setting value: settingsSnapshot.ts emits it whenever the underlying
  * AgentFlowConfig value isn't one of the shipped choices — e.g. a hand-edited
  * settings.json holding a value VS Code's own settings UI would never offer.
@@ -126,6 +126,7 @@ export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as c
 export interface SettingsSnapshot {
   workspace_mode: "auto" | "multiroot" | "per-window" | "ask" | "invalid";
   open_in: "ask" | "new-window" | "this-window" | "pick-existing" | "invalid";
+  agent_surface: "extension" | "terminal" | "invalid";
   explore_mode: "ask" | "jiraTicket" | "knowledge" | "debug" | "general" | "supervise" | "verify" | "invalid";
   /** A registered connector id, or "invalid". Validated against the registry, so
    * a contributor's connector is never silently reported as invalid. */

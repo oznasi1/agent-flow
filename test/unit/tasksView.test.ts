@@ -118,6 +118,7 @@ const CFG = {
   repoBlocklist: [] as string[],
   defaultFilter: "unassigned",
   seedAgent: true,
+  agentSurface: "extension" as const,
   workspaceMode: "auto" as const,
   openIn: "new-window" as const,
   taskMode: "plan",
