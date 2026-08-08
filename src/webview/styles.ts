@@ -277,4 +277,41 @@ export const CSS = `
     font-size: 12px; padding: 4px 12px; border-radius: 8px; border: none; cursor: pointer;
     background: var(--brand); color: var(--brand-ink); }
   .batch-launch:hover { background: color-mix(in srgb, var(--brand) 84%, var(--vscode-foreground)); }
+
+  .tabbar { display: flex; gap: 2px; margin: 8px 0 4px; border-bottom: 1px solid var(--vscode-panel-border); }
+  .tabbar button { background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 6px 10px; cursor: pointer; color: var(--vscode-descriptionForeground); font-size: var(--t-body); }
+  .tabbar button[aria-selected="true"] { color: var(--vscode-foreground);
+    border-bottom-color: var(--vscode-focusBorder); }
+
+  .notepad { padding: 4px 0 12px; }
+  .np-add { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+  .np-title-input, .np-body-input { width: 100%; padding: 5px 7px;
+    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, transparent); border-radius: var(--r-ctl); font-family: inherit; }
+  .np-body-row { display: flex; gap: 6px; align-items: flex-start; }
+  .np-body-row .np-body-input { flex: 1; resize: vertical; }
+  .np-add-btn { align-self: flex-start; }
+  .np-clear { background: none; border: none; cursor: pointer; font-size: var(--t-body);
+    color: var(--vscode-descriptionForeground); text-decoration: underline; }
+  .np-empty { padding: 14px 2px; color: var(--vscode-descriptionForeground); font-size: var(--t-body); }
+  .np-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .np-row { padding: 7px 8px; border: 1px solid var(--vscode-panel-border); border-radius: var(--r-card); }
+  .np-row.is-done .np-title { text-decoration: line-through; opacity: 0.6; }
+  .np-head { display: flex; align-items: center; gap: 7px; }
+  .np-title { flex: 1; }
+  .np-body { margin: 4px 0 0 24px; font-size: var(--t-body); color: var(--vscode-descriptionForeground);
+    white-space: pre-wrap; }
+  .np-actions { display: flex; gap: 8px; margin-top: 6px; }
+  .np-ghost { background: none; border: none; cursor: pointer; padding: 0; font-size: var(--t-body);
+    color: var(--vscode-textLink-foreground); }
+  /* Delete is destructive but routine, not a failure — red stays reserved for real
+     failures, so it reads no differently from the plain Edit action beside it. */
+  .np-ghost.danger { color: var(--vscode-descriptionForeground); }
+  .np-status { font-size: var(--t-micro); padding: 1px 6px; border-radius: var(--r-chip);
+    background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }
+  .np-status.st-running { background: var(--c-progress); color: var(--vscode-editor-background); }
+  .np-status.st-stale { background: var(--c-idle); color: var(--vscode-editor-background); }
+  /* st-finished deliberately inherits the neutral badge default above — a landed
+     run is not a state that needs a color to shout about. */
 `;
