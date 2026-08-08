@@ -1676,6 +1676,42 @@ Hold the in-flight drag position in a ref alongside the state, write it on every
 
 Set it in the same place `setDrag` is updated on a move, clear it on release, and have the release handler compare and save from `dragRef.current` rather than from the state value it closed over.
 
+- [ ] **Step 5b: Make the header chip report armed state**
+
+The spec promises the chip reads `⚡ Orchestrator · 1 armed`, and no earlier task builds it — the chip currently shows a plain flow count. With arming real, the count that matters is how many flows are armed, because that is the thing quietly spending your attention while the drawer is closed. This was found in Task 6's self-review; it belongs here because this task already touches `DeckApp.tsx`.
+
+In `src/webview/DeckApp.tsx`, compute the armed count from the flow array and render it in place of the plain count:
+
+```tsx
+  const armedCount = flows.filter((f) => f.armed).length;
+```
+
+```tsx
+            {armedCount > 0
+              ? <span className="ct">{armedCount} armed</span>
+              : flows.length > 0 && <span className="ct">{flows.length}</span>}
+```
+
+The chip must stay a chip — the board's primary verbs live on its cards, and a filled control in the header would outrank them. `orchestratorStyles.ts` already has an `.orch-chip.armed` rule from an earlier phase for the armed look; apply that class when `armedCount > 0` and check it does not spend `--brand` as a fill (if it does, that is a conflict with Arm being the one filled control — report it rather than papering over it).
+
+Add to `test/webview/DeckApp.test.tsx`, using its existing `deck:flows` helpers:
+
+```tsx
+it("reports the armed count on the chip, not the flow count", () => {
+  postFlows({ enabled: true, flows: [{ ...oneFlow(), armed: true }, oneFlow2()] });
+  expect(screen.getByRole("button", { name: /orchestrator/i }).textContent).toContain("1 armed");
+});
+
+it("shows a plain count when nothing is armed", () => {
+  postFlows({ enabled: true, flows: [oneFlow(), oneFlow2()] });
+  const chip = screen.getByRole("button", { name: /orchestrator/i }).textContent ?? "";
+  expect(chip).not.toContain("armed");
+  expect(chip).toContain("2");
+});
+```
+
+`oneFlow2()` is a second flow with a different id — add it beside the file's existing helper. Prove both bite by inverting the condition.
+
 - [ ] **Step 6: Update the README**
 
 The Deck's Orchestrator paragraph currently ends by saying nothing runs on its own yet. Replace that sentence — it is now false. Say what is true: an armed flow is checked on every refresh, a met rule fires once and tells you, the flow keeps advancing while the Deck is hidden, closing the Deck stops it, and coming back after a restart shows you what is ready before anything happens. Also state plainly that the only thing a rule can do in this build is notify you — launching the next agent comes later.
