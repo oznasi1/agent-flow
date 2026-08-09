@@ -300,14 +300,21 @@ describe("opening and closing a row for editing", () => {
 });
 
 describe("Delete", () => {
-  it("removes the focused rule", () => {
+  it("removes the focused rule, and moves focus to the row that slides up into its slot", () => {
     const onSave = vi.fn();
     render(<FlowList {...props({ flow: threeRules(), onSave })} />);
     const row2 = screen.getByTestId("flowlist-row-e2");
+    const row3 = screen.getByTestId("flowlist-row-e3");
     row2.focus();
     fireEvent.keyDown(row2, { key: "Delete" });
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
     expect(saved.edges.map((e) => e.id)).toEqual(["e1", "e3"]);
+    // Deleting the MIDDLE row of three: the row that stays focused is the one
+    // that slides UP into the deleted row's slot (e3, at index 2 before the
+    // delete) — not merely "some row still has tabindex 0", which index 0
+    // would satisfy by coincidence even if focus had silently dropped to
+    // <body>.
+    expect(document.activeElement).toBe(row3);
   });
 
   it("Delete on the first row removes exactly that rule and leaves the others intact", () => {
@@ -342,23 +349,36 @@ describe("Delete", () => {
   it("Delete on the LAST row focuses the row now above it, not one that no longer exists", () => {
     const onSave = vi.fn();
     render(<FlowList {...props({ flow: threeRules(), onSave })} />);
+    const row2 = screen.getByTestId("flowlist-row-e2");
     const row3 = screen.getByTestId("flowlist-row-e3");
     row3.focus();
     fireEvent.keyDown(row3, { key: "Delete" });
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
     expect(saved.edges.map((e) => e.id)).toEqual(["e1", "e2"]);
+    // There is no row below the last one to slide up — the row that stays
+    // focused is the one already just above it (e2), not the node being
+    // removed and not <body>.
+    expect(document.activeElement).toBe(row2);
   });
 
   it("moves focus to the row that slides into the deleted row's slot", () => {
     const onSave = vi.fn();
     const { rerender } = render(<FlowList {...props({ flow: threeRules(), onSave })} />);
     const row1 = screen.getByTestId("flowlist-row-e1");
+    const row2 = screen.getByTestId("flowlist-row-e2");
     row1.focus();
     fireEvent.keyDown(row1, { key: "Delete" });
+    // Focus moves imperatively, in the same handler that calls `onSave` —
+    // true before React has even re-rendered around the shorter array.
+    expect(document.activeElement).toBe(row2);
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
     rerender(<FlowList {...props({ flow: saved, onSave })} />);
-    // e2 now occupies row index 0 — the slot the deleted row vacated.
+    // e2 now occupies row index 0 — the slot the deleted row vacated — and is
+    // still the exact node focus already landed on, not merely A node with
+    // tabindex 0 (which index 0 would carry by default even if focus had
+    // silently dropped to <body> instead).
     expect(screen.getByTestId("flowlist-row-e2")).toHaveAttribute("tabindex", "0");
+    expect(document.activeElement).toBe(row2);
   });
 
   it("deleting the only remaining rule moves focus to the empty state, not <body>", () => {
@@ -377,6 +397,29 @@ describe("Delete", () => {
     expect(saved.edges).toEqual([]);
     rerender(<FlowList {...props({ flow: saved, onSave })} />);
     expect(document.activeElement).toBe(screen.getByTestId("flowlist-empty"));
+  });
+
+  // The test above alone does not pin the guard (`if (rows.length > 1)`)
+  // that skips focusing the row about to be removed when it is the LAST
+  // one: the `wasEmpty` effect's own `emptyRef.current?.focus()` refocuses
+  // onto the empty state regardless, so the FINAL `document.activeElement`
+  // is identical whether or not this guard exists — replacing it with
+  // `if (true)` still leaves that test green. What the guard actually
+  // decides is whether `onDeleteRule` calls `.focus()` on the doomed row at
+  // all before that happens; this pins THAT, directly, with a spy — the one
+  // observable difference `if (true)` makes here.
+  it("does not call focus on the row it is about to remove when it is the last one", () => {
+    const onSave = vi.fn();
+    const single = twoPlaces();
+    render(<FlowList {...props({ flow: single, onSave })} />);
+    const row1 = screen.getByTestId("flowlist-row-e1");
+    row1.focus();
+    // Attached AFTER the setup `focus()` above, so it counts only whatever
+    // `onDeleteRule` itself does next, not the test's own act of giving the
+    // row keyboard focus to begin with.
+    const focusSpy = vi.spyOn(row1, "focus");
+    fireEvent.keyDown(row1, { key: "Delete" });
+    expect(focusSpy).not.toHaveBeenCalled();
   });
 });
 
