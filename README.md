@@ -6,13 +6,13 @@
 </picture>
 
 <p><strong>A task pool in your sidebar.</strong> Take a Jira ticket and it opens the repos
-that ticket touches, with a Claude Code agent already briefed.</p>
+that ticket touches, with a coding agent already briefed — Claude Code, or GitHub Copilot.</p>
 
 [![CI](https://github.com/oznasi1/agent-flow/actions/workflows/ci.yml/badge.svg)](https://github.com/oznasi1/agent-flow/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![VS Code ^1.90.0](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC?logo=visualstudiocode&logoColor=white)
 
-<img src="media/screenshot.png" alt="The Agent Flow Deck task pool in the VS Code sidebar — segmented task, size and status lenses, a repo multiselect and a fuzzy title search, and per-card Take / Address PR actions" width="420" />
+<img src="media/screenshot.png" alt="The Agent Flow Deck panel in the VS Code sidebar. Its first row is a Tasks / Notepad tab bar with the open-window gauge and an Explore button trailing it; the project key and your name sit in VS Code's own view title bar above. Under Tasks: segmented task, size and status lenses, a repo multiselect and a fuzzy title search, then task cards with per-card Take and Address PR actions." width="420" />
 
 </div>
 
@@ -21,12 +21,22 @@ that ticket touches, with a Claude Code agent already briefed.</p>
 Agent Flow Deck turns *"what should I work on?"* into a workspace with an agent already primed.
 
 Pick a Jira task → it infers which repos the task touches → opens them as a workspace →
-seeds a task brief and pre-fills a Claude Code agent with the plan. You land ready to
+seeds a task brief and pre-fills your agent with the plan. You land ready to
 orchestrate, not ready to set up.
+
+**Which agent** is your choice: Claude Code by default, or **GitHub Copilot** with
+`agentFlow.agentProvider: copilot` (VS Code only — see
+[Where the session opens](#where-the-session-opens)). Everything below that says
+"the agent" means whichever one you've configured; the few places that are genuinely
+Claude-only say so.
 
 ## What it does
 
-- **Sidebar task pool** (webview) with filter tabs (My sprint · Unassigned · Mine ·
+- **Sidebar panel** with two tabs — **Tasks**, the pool of tickets, and
+  **[Notepad](#the-notepad--work-that-isnt-a-ticket)**, for work that never had one. The
+  project key and your name live in VS Code's own view title bar, and the open-window
+  gauge and **Explore** sit at the end of the tab row.
+- **Task pool** with filter tabs (My sprint · Unassigned · Mine ·
   Sprint · Backlog) and a size lens (S/M/L by original estimate). The size lens, status
   lens, and repo search can each be hidden if you don't use them (`agentFlow.filters.size` /
   `.status` / `.repo`, all on by default).
@@ -37,7 +47,8 @@ orchestrate, not ready to set up.
   local repo checkouts (backend *and* frontend).
 - **Open + seed** — writes `.pick-task/TASK.md` into each repo (git-excluded), generates a
   `<KEY>.code-workspace` (or one window per repo, or a per-task git worktree), and pre-fills
-  the Claude Code panel with your chosen prompt mode (you press Enter to start).
+  your agent — the Claude Code panel, Copilot Chat, or either one's CLI in a terminal —
+  with your chosen prompt mode (you press Enter to start).
 - **Address PR** — once a task reaches your PR-review status (default `PR initiated`), an
   **Address PR** button appears on the card. From the sidebar's task card it kicks off an agent
   **in a fresh worktree**; from a Deck card it re-seeds the workspace that run already has
@@ -58,7 +69,36 @@ orchestrate, not ready to set up.
   window** holding every task's worktrees with a Claude Code session seeded per task,
   stacked as tabs in one Claude group in the order you picked them. Every other destination
   *is* a single window, so it goes straight to the shared layout. Batches larger than
-  `agentFlow.batchLaunchConfirmThreshold` (default 6) ask first.
+  `agentFlow.batchLaunchConfirmThreshold` (default 6) ask first. (Under Copilot, a batch
+  writes every brief but seeds no chat panel — Copilot Chat is single-instance. See
+  [Where the session opens](#where-the-session-opens).)
+
+### The Notepad — work that isn't a ticket
+
+Not everything worth an agent has a Jira key. The panel's second tab, **Notepad**, is a
+plain list of things you want to do: a title, optional detail, a checkbox.
+
+<img src="media/notepad.png" alt="The Notepad tab of the Agent Flow Deck sidebar panel: an add-note form (title field, detail textarea, Add note button), an All / Active / Done segmented filter with a Clear completed button beside it, and three notes. Each note has a done checkbox, its title and detail, and a filled Start button with quiet edit and delete icon buttons; one note carries a blue rail and a Running badge, another a green rail and a Finished badge." width="420" />
+
+- **Notes are yours, not the workspace's.** They're stored in the editor's global state,
+  not per-workspace, so the same list is there whichever repo or workspace the panel
+  happens to be open against.
+- **Start** kicks off an agent from a note the same way **Explore** does: it asks where to
+  open and which repos to use, writes a `## Notepad:` brief from the note's title and
+  detail (with Explore's topic-agnostic prompt), and seeds your agent. The note stays in
+  the list afterwards — running it isn't the same as finishing it.
+- **The run lands on the Deck** like any other, and the note grows a badge tracking it:
+  **Running** while an agent is attached, **Stale** once nothing is, **Finished** when the
+  Deck records it as landed. Re-running a note replaces that note's previous run rather
+  than piling up a second record.
+- **Filter and clear.** The list opens on **Active**; **All** and **Done** are a click
+  away, and **Clear completed** removes every checked note in one action (it only appears
+  when there's something to clear).
+
+The fields are ordinary text inputs, so your operating system's own dictation — double-tap
+Control on macOS, `Win`+`H` on Windows — types straight into them. Agent Flow ships no
+microphone button of its own: a VS Code webview can't reach the microphone, and Electron
+can't run the Web Speech API.
 
 ### The Deck — your in-flight board
 
@@ -66,13 +106,16 @@ Once you've taken tasks, the **Deck** (open it with **"Open the Deck (in-flight)
 is the board of everything you've launched, in a classic pipeline —
 **In progress · Action required · In review · Done**.
 
-<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Done). Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a best-effort live agent status (working, idle, ended turn, parked, or merged), the PR and CI state, the Jira status, and Open / Diff actions. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button; a summary strip counts In progress, Action required and In review." />
+<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Done). Its header carries the title, three tiles counting In progress, Action required and In review, an Agents / Workspaces lens and a refresh reading 'synced 4s ago'. Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a live agent status (working, idle, ended turn, parked, or merged), the PR and CI state, the Jira status, and Open / Diff actions. In the Agents lens one ticket with two sessions renders as two cards, and a note started from the Notepad tab sits among them marked 'notepad'. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button." />
 
 The columns are a neutral git + Jira backbone; each **card** carries the true live state.
 A best-effort **Live signal** (read from your local Claude Code transcripts) tells `working ·
 Ns ago` from `idle`, `ended turn` (needs you), or `parked` — a card only reads `parked` when
 its transcript can't be read, or doesn't exist yet, which is the one route back to the git +
-Jira backbone. **Open** focuses the window if it's already open (never a duplicate) and
+Jira backbone. The live signal is **Claude Code only** — it reads Claude Code's own
+transcripts, and Copilot writes nothing equivalent, so a task launched under
+`agentFlow.agentProvider: copilot` still gets a card, with the git + Jira + PR
+backbone but no agent on it. **Open** focuses the window if it's already open (never a duplicate) and
 opens it fresh otherwise; **Diff** shows the working diff; **⋯** offers *Open in Jira* and
 *Forget*.
 
@@ -151,7 +194,7 @@ sort by **oldest** (what you owe most) or **smallest** (what you can clear befor
 standup). Expanding a row fetches which checks failed and how many review threads
 are still open, alongside the review decision and mergeability. **Review with agent**
 checks the PR out into a worktree and seeds
-Claude Code to review the diff and write its findings to
+your agent to review the diff and write its findings to
 `.pick-task/REVIEW-<number>.md`, which the row can then load into the review box.
 Turn the strip off with `agentFlow.reviewRequests`; it also goes dark whenever
 `agentFlow.prFacts` is off, since both lean on the same `gh` dependency.
@@ -167,7 +210,9 @@ you turn `agentFlow.stampLabelOnWrite` off.
 
 The **Marketplace** (open it with the puzzle-piece (`$(extensions)`) button beside the
 Deck's button in the sidebar title bar, or **"Open the Marketplace"**) is a
-searchable browser of everything Claude Code can do on this machine. It reads your local
+searchable browser of everything Claude Code can do on this machine — the one panel that is
+Claude-specific whatever `agentFlow.agentProvider` says, since it browses Claude Code's own
+plugin ecosystem. It reads your local
 `~/.claude` — the marketplaces you've added, the plugins you've installed, and the skills,
 slash commands, agents and hooks inside them — plus any skills or commands you wrote
 yourself in `~/.claude` or in the open workspace's `.claude/`.
@@ -222,9 +267,11 @@ marketplaces show up here on the next scan.
      ```
      …or in the Extensions view use **⋯ → Install from VSIX…**.
    - _(Once published, you'll also be able to install it from the VS Code Marketplace.)_
-2. **Install the [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)**
-   (`anthropic.claude-code`) — Agent Flow Deck seeds its agent panel. Without it, the task brief
-   is still written and used as a fallback.
+2. **Install a coding agent.** By default that's the
+   [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)
+   (`anthropic.claude-code`), whose panel Agent Flow Deck seeds. If you'd rather use
+   **GitHub Copilot**, install it and set `agentFlow.agentProvider` to `copilot` (VS Code
+   only). With neither, the task brief is still written and used as a fallback.
 3. **Open the Agent Flow Deck icon** in the activity bar. On first activation it offers a guided
    setup — enter your Jira site, project key, and repos directory, then sign in with an
    [Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens).
@@ -232,14 +279,17 @@ marketplaces show up here on the next scan.
 4. **Pick a task** from the pool. Click a card to expand it — the inferred repos are
    pre-selected; adjust them, then press **▶ Take**.
 5. **Land in a primed workspace.** Agent Flow Deck opens the task's repos, drops a
-   `.pick-task/TASK.md` brief into each, and pre-fills the Claude Code panel with your
+   `.pick-task/TASK.md` brief into each, and pre-fills your agent's panel with your
    prompt — press **Enter** to start.
 
 ## Requirements
 
 - **VS Code** (or Cursor) `^1.90.0`.
-- The **Claude Code** extension (`anthropic.claude-code`) — for the agent seed (optional;
-  the task brief is the guaranteed fallback).
+- A coding agent for the seed (optional; the task brief is the guaranteed fallback) —
+  the **Claude Code** extension (`anthropic.claude-code`), or **GitHub Copilot** with
+  `agentFlow.agentProvider: copilot` in VS Code. With
+  `agentFlow.agentSurface: terminal` it's that agent's CLI (`claude` or `copilot`)
+  on your `PATH` instead of its extension.
 - An **Atlassian API token** for your Jira Cloud account
   ([create one](https://id.atlassian.com/manage-profile/security/api-tokens)).
 - The **`gh` CLI**, signed in (`gh auth login`) — for the Deck's PR/CI state
@@ -426,14 +476,16 @@ src/
 ├── extension.ts        # activation, commands, first-run + seed-on-activation hooks
 ├── setup.ts            # guided first-run configuration wizard
 ├── tasksView.ts        # sidebar webview provider + the pick→confirm→open flow
+├── notepad.ts          # the Notepad's globalState store + run-status derivation
 ├── deckView.ts         # the Deck panel: in-flight runs, live signal, open/diff
 ├── marketplaceView.ts  # the Marketplace panel: scan, file reads, open/reveal/copy
+├── doctorView.ts       # the Doctor report: Jira + gh + agent-provider probes
 ├── config.ts           # settings accessor
 ├── types.ts            # shared host ↔ webview message types
-├── jira/
-│   ├── auth.ts         # JiraAuth interface + ApiTokenAuth (SecretStorage)
-│   ├── client.ts       # REST client: search, getIssue, transitions
-│   └── jql.ts          # the JQL behind each filter lens
+├── tasks/              # the task source, behind one connector interface
+│   ├── provider.ts     # TaskProvider + capabilities (what a source can do)
+│   ├── registry.ts     # which connector is active
+│   └── jira/           # the Jira connector: auth (SecretStorage), REST client, JQL
 ├── engine/             # the logic, kept out of the views so it can be tested directly
 │   ├── repos.ts        # discover local repo checkouts
 │   ├── infer.ts        # component/label/text → service matching
@@ -441,16 +493,30 @@ src/
 │   ├── workspace.ts    # briefs, .code-workspace, plan.json, open windows, agent seed
 │   ├── runs.ts         # what you've launched, for the Deck
 │   ├── transcript.ts   # best-effort live agent state from ~/.claude/projects
+│   ├── sessions.ts     # Claude Code's own registry of running sessions
+│   ├── pr/             # PR facts + the review queue, over the `gh` CLI
+│   ├── review/         # "Review with agent": search, sort, launch, store
 │   ├── claudeAssets.ts # scan ~/.claude: marketplaces, plugins, skills, commands, hooks
 │   ├── sections.ts     # the Marketplace's category order (Yours → size → Uncategorized)
 │   ├── fuzzy.ts        # the ranked fuzzy match behind the Marketplace's search
 │   └── markdown.ts     # the parse-to-tree markdown renderer behind the file preview
-└── webview/            # React UIs — task pool, Deck, Marketplace (three esbuild bundles)
+├── telemetry/          # anonymous usage events (see docs/TELEMETRY.md)
+└── webview/            # React UIs — task pool + Notepad, Deck, Marketplace
+                        # (three esbuild bundles)
 ```
 
-Auth is behind the `JiraAuth` interface: v1 ships the API-token provider; the OAuth
-web-flow provider (a `vscode.AuthenticationProvider` that opens the browser) drops in later
-with no changes to the client or UI.
+The task source sits behind the `TaskProvider` interface with a capability record, so a
+connector that has no sprints or no size estimates hides those lenses instead of faking
+them — see [docs/CONNECTORS.md](docs/CONNECTORS.md). Jira auth is behind `JiraAuth`: v1
+ships the API-token provider; the OAuth web-flow provider (a
+`vscode.AuthenticationProvider` that opens the browser) drops in later with no changes to
+the client or UI.
+
+The agent seed is one chokepoint in `engine/workspace.ts` that every launch path — take,
+batch, Explore, Notepad, Deck relaunch, Address PR, Review with agent — goes through. It
+resolves `agentFlow.agentProvider` × `agentFlow.agentSurface` **at seed time in the target
+window**, never from the plan file, so flipping either setting also changes plans already
+on disk.
 
 ## Develop / run
 
@@ -469,11 +535,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full command list and conventions
 ## Status
 
 v1 — task pool, filters, size lens, service inference, worktrees, open + seed, and status
-changes from a card, plus the **Deck** (the in-flight board) and the **Marketplace** (the
-read-only browser over `~/.claude`). The agent seed calls the Claude Code extension command
-(`claude-vscode.primaryEditor.open`) with a URI-handler and clipboard fallback; the seeded
-brief is the guaranteed fallback. Deferred: OAuth web sign-in, cloning not-yet-checked-out
-repos, multi-project.
+changes from a card, plus the **Notepad** (ticketless work), the **Deck** (the in-flight
+board) and the **Marketplace** (the read-only browser over `~/.claude`). Every launch path
+funnels through one seed chokepoint, which dispatches on `agentFlow.agentProvider` ×
+`agentFlow.agentSurface`: the Claude Code extension command
+(`claude-vscode.primaryEditor.open`) with a URI-handler and clipboard fallback, Copilot
+Chat's `workbench.action.chat.open`, or the matching CLI in an integrated terminal. The
+seeded brief is the guaranteed fallback under all four. Deferred: OAuth web sign-in,
+cloning not-yet-checked-out repos, multi-project.
 
 See [CHANGELOG.md](CHANGELOG.md) for the release history.
 
