@@ -62,9 +62,9 @@ export class DeckPanel {
    * and repopulated on every rebuild. A local card has no record on disk, so this
    * is the only place `run(key)` can resolve one for Open and Diff. */
   private readonly localRuns = new Map<string, Run>();
-  private prFacts: boolean; // seeded from config in the constructor; the only writer after that is deck:setPrFacts
-  private openAgents: boolean; // seeded from config in the constructor; the only writer after that is deck:setOpenAgents
-  private reviewQueue: boolean; // seeded from config in the constructor; the only writer after that is deck:setReviewQueue
+  private prFacts: boolean; // seeded from config in the constructor; re-seeded only by onConfigChanged
+  private openAgents: boolean; // seeded from config in the constructor; re-seeded only by onConfigChanged
+  private reviewQueue: boolean; // seeded from config in the constructor; re-seeded only by onConfigChanged
   private readonly prQueue = new RefreshQueue();
   private readonly pr: PrProvider = new GhProvider();
   private readonly reviewProvider: ReviewProvider = new GhReviewProvider();
@@ -128,9 +128,9 @@ export class DeckPanel {
     private readonly log: (m: string) => void,
   ) {
     this.panel = panel;
-    // Seed from the persisted setting; after this, only the webview's
-    // deck:setPrFacts toggle changes it — a later refresh must not stomp the
-    // user's in-session toggle by re-reading config on every tick.
+    // Seed from the persisted setting once; a later refresh must not stomp
+    // these by re-reading config on every tick — only onConfigChanged does that,
+    // and only for the key that actually changed.
     this.prFacts = getConfig().prFacts;
     this.openAgents = getConfig().openAgents;
     this.reviewQueue = getConfig().reviewRequests;
@@ -139,6 +139,11 @@ export class DeckPanel {
     this.panel.onDidDispose(() => this.dispose(), null, this.disposables);
     this.panel.onDidChangeViewState(
       () => (this.panel.visible ? this.startPolling() : this.stopPolling()),
+      null,
+      this.disposables,
+    );
+    vscode.workspace.onDidChangeConfiguration(
+      (e) => void this.onConfigChanged(e),
       null,
       this.disposables,
     );
@@ -866,6 +871,37 @@ export class DeckPanel {
     } finally {
       if (--this.busyDepth === 0) this.post({ type: "deck:loading", loading: false });
     }
+  }
+
+  /** The panel seeds these three from config once and then holds them, so a
+   * routine refresh cannot stomp them mid-session. With no toggles left on the
+   * header, a settings edit is the only way to change them — and without this
+   * listener it would do nothing until the panel was closed and reopened. */
+  private async onConfigChanged(e: vscode.ConfigurationChangeEvent): Promise<void> {
+    const cfg = getConfig();
+    let touched = false;
+    if (e.affectsConfiguration("agentFlow.prFacts")) {
+      this.prFacts = cfg.prFacts;
+      // The user may have run `gh auth login` since the last probe; a stale gap
+      // would otherwise keep PR facts dark for the rest of the session.
+      if (cfg.prFacts) {
+        this.ghGap = undefined;
+        this.ghProbe = null;
+      }
+      touched = true;
+    }
+    if (e.affectsConfiguration("agentFlow.openAgents")) {
+      this.openAgents = cfg.openAgents;
+      touched = true;
+    }
+    if (e.affectsConfiguration("agentFlow.reviewRequests")) {
+      this.reviewQueue = cfg.reviewRequests;
+      // Before the rebuild, not through it: switching off has to empty the strip
+      // now, not after a full board build.
+      this.postCachedReviews();
+      touched = true;
+    }
+    if (touched) await this.refreshBusy();
   }
 
   private async onMessage(m: InboundMessage): Promise<void> {

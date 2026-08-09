@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { window, ViewColumn, env, workspace, commands, setConfig, ConfigurationTarget } from "../_mocks/vscode";
+import { window, ViewColumn, env, workspace, commands, setConfig, ConfigurationTarget, fireConfigurationChanged } from "../_mocks/vscode";
 import { fakeContext } from "../_helpers/factories";
 import type { ChangedFile } from "../../src/engine/git";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
@@ -903,6 +903,71 @@ describe("DeckPanel open agents", () => {
     await settled();
     const built = builtLocal();
     expect(built.agents.map((a) => a.repo)).toEqual([built.run.repos[0].name]);
+  });
+});
+
+describe("DeckPanel settings without a reload", () => {
+  it("re-seeds prFacts from the setting and re-probes gh when it turns on", async () => {
+    h.prFacts = false;
+    show();
+    await settled();
+    h.probeGh.mockClear();
+
+    h.prFacts = true;
+    setConfig({ prFacts: true });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
+
+    // The re-probe is the point: the user may have run `gh auth login` since the
+    // last check, which is exactly why the removed deck:setPrFacts handler reset
+    // ghGap/ghProbe on the way on.
+    expect(h.probeGh).toHaveBeenCalled();
+  });
+
+  it("re-seeds openAgents from the setting", async () => {
+    h.openAgents = false;
+    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.openSessions = [sess()];
+    show();
+    await settled();
+    expect(builtFor("ASM-1").agents).toEqual([]);
+
+    h.openAgents = true;
+    setConfig({ openAgents: true });
+    fireConfigurationChanged("agentFlow.openAgents");
+    await settled();
+
+    expect(builtFor("ASM-1").agents).toHaveLength(1);
+  });
+
+  it("clears the review strip immediately when reviewRequests goes off", async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    h.reviewSearch.mockClear();
+
+    h.reviewRequests = false;
+    setConfig({ reviewRequests: false });
+    fireConfigurationChanged("agentFlow.reviewRequests");
+    await settled();
+
+    // Posted before the rebuild, not through it: switching off must empty the
+    // strip now rather than seconds later, which is why the removed
+    // deck:setReviewQueue handler called postCachedReviews() ahead of the refresh.
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({ enabled: false });
+    expect(h.reviewSearch).not.toHaveBeenCalled();
+  });
+
+  it("ignores a configuration change that touches none of its keys", async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    const before = posts(p).length;
+
+    fireConfigurationChanged("agentFlow.somethingElse");
+    await settled();
+
+    expect(posts(p)).toHaveLength(before);
   });
 });
 
