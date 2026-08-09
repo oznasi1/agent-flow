@@ -8,6 +8,7 @@ import {
   ACTION_LABEL,
   actionMismatch,
   COND_LABEL,
+  DEST_LABEL,
   endLabel,
   launchDestOf,
   modeValueOf,
@@ -16,6 +17,7 @@ import {
   notifyMessageOf,
   observationOf,
   OFFERED_CONDS,
+  OFFERED_DESTS,
   withAction,
   withCond,
   withDest,
@@ -511,6 +513,26 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     p.onSave(withoutEdge(flow, e.id));
   };
 
+  /** What `<FlowList>` writes through, below. `removeNode` (above) already
+   * clears `selEdge` before deleting a node and every edge touching it — the
+   * exact same hazard `nextId`'s re-minting creates: delete a node/edge, add
+   * one back, and the LOWEST free id (the one just freed) gets re-minted, so
+   * a stale `selEdge`/`sel` would point at whatever brand-new thing happens
+   * to land on that id. `deleteEdge` guards the canvas's own Delete button
+   * for the identical reason. But `FlowList`'s own Delete key calls `onSave`
+   * DIRECTLY — this file's own `p.onSave` prop, not `deleteEdge` — so a rule
+   * selected on the canvas, then deleted from the List view, left `selEdge`
+   * unguarded: switch back to Canvas, add a rule (re-minting that same
+   * freed id), and the inspector opens on a rule nobody clicked. Checked
+   * generically, by whether `selEdge` still names an edge in the flow ABOUT
+   * to be saved, rather than only for the one call site (`onDeleteRule`)
+   * known to remove edges today — the same guard then also covers whatever
+   * future control in `FlowList` removes an edge some other way. */
+  const onListSave = (next: Flow) => {
+    if (selEdge && !next.edges.some((e) => e.id === selEdge)) setSelEdge(null);
+    p.onSave(next);
+  };
+
   /** What actually renders. Expand does not touch `width` — see the
    * `expanded` state's own doc comment — so this ternary IS the whole
    * mechanism: collapsing needs no separate "restore" step because `width`
@@ -733,7 +755,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               flow={flow}
               runs={p.runs}
               promptModes={p.promptModes}
-              onSave={p.onSave}
+              onSave={onListSave}
               onResetEdge={(edgeId) => p.onResetEdge(flow.id, edgeId)}
             />
           </>
@@ -1003,9 +1025,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                       value={launchDest ?? "worktree"}
                       onChange={(ev) => setDest(edge, ev.currentTarget.value as LaunchDest)}
                     >
-                      <option value="worktree">worktree</option>
-                      <option value="new-window">new window</option>
-                      <option value="current-window">current window</option>
+                      {OFFERED_DESTS.map((d) => <option key={d} value={d}>{DEST_LABEL[d]}</option>)}
                     </select>
                   </>
                 )}

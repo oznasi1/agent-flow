@@ -225,6 +225,33 @@ describe("the canvas/list view toggle", () => {
     fireEvent.click(within(screen.getByTestId("flowlist-row-e1")).getByRole("button", { name: "Reset" }));
     expect(onResetEdge).toHaveBeenCalledWith("f1", "e1");
   });
+
+  // `removeNode`'s own guard already clears `selEdge` for the identical
+  // hazard (a re-minted id landing a stale selection on a rule nobody
+  // clicked, see its own comment) — but only for the canvas's OWN delete
+  // paths. FlowList's Delete key calls `onSave` directly, bypassing that
+  // guard entirely, until `onListSave`. `onSave` stays a mock (unchanged
+  // `flow` prop) so switching back to Canvas renders e1 exactly as it was —
+  // the only way to see the SELECTION itself cleared, not merely the row
+  // having disappeared from a shrunk list.
+  it("clears the canvas's edge selection when the list deletes that same rule", () => {
+    const wired = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "done" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    });
+    render(<OrchestratorDrawer {...props({ onSave: vi.fn(), flows: [wired] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.queryByText(/select a connection/i)).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    const row1 = screen.getByTestId("flowlist-row-e1");
+    row1.focus();
+    fireEvent.keyDown(row1, { key: "Delete" });
+    fireEvent.click(screen.getByRole("tab", { name: "Canvas" }));
+    expect(screen.getByText(/select a connection/i)).toBeTruthy();
+  });
 });
 
 describe("the tray", () => {

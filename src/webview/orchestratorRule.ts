@@ -65,6 +65,25 @@ export const ACTION_LABEL: Record<FlowAction, string> = {
   notify: "notify me",
 };
 
+/** How a launch destination reads as words — the closed row's own text and
+ * every open Destination `<select>`'s `<option>` text spend this exact
+ * `Record`, not three hand-typed copies of it. Before this lived here, it
+ * was written out four times across two files (a closed row's own text,
+ * two open Destination selects in flowList.tsx, and the inspector's in
+ * OrchestratorDrawer.tsx) — exactly the drift this module exists to stop
+ * (see this file's own header comment). */
+export const DEST_LABEL: Record<LaunchDest, string> = {
+  worktree: "worktree",
+  "new-window": "new window",
+  "current-window": "current window",
+};
+
+/** What every open Destination `<select>` offers, in order — paired with
+ * `DEST_LABEL` so a caller renders `OFFERED_DESTS.map(d => <option value={d}>
+ * {DEST_LABEL[d]}</option>)` instead of writing out the same three
+ * `<option>`s by hand. */
+export const OFFERED_DESTS: LaunchDest[] = ["worktree", "new-window", "current-window"];
+
 /** How a node's end reads in a rule's sentence. */
 export function endLabel(flow: Flow, id: string): string {
   const n = flow.nodes.find((x) => x.id === id);

@@ -21,6 +21,7 @@ import {
   ACTION_LABEL,
   actionMismatch,
   COND_LABEL,
+  DEST_LABEL,
   endLabel,
   launchDestOf,
   modeDisplayLabel,
@@ -28,6 +29,7 @@ import {
   nextEdgeId,
   notifyMessageOf,
   OFFERED_CONDS,
+  OFFERED_DESTS,
   withAction,
   withCond,
   withDest,
@@ -35,12 +37,6 @@ import {
   withNotifyMessage,
   withoutEdge,
 } from "./orchestratorRule";
-
-const DEST_LABEL: Record<LaunchDest, string> = {
-  worktree: "worktree",
-  "new-window": "new window",
-  "current-window": "current window",
-};
 
 export interface FlowListProps {
   flow: Flow;
@@ -166,9 +162,7 @@ function ruleSentence(
                   value={dest}
                   onChange={(ev) => onSave(withDest(flow, e, ev.currentTarget.value as LaunchDest))}
                 >
-                  <option value="worktree">worktree</option>
-                  <option value="new-window">new window</option>
-                  <option value="current-window">current window</option>
+                  {OFFERED_DESTS.map((d) => <option key={d} value={d}>{DEST_LABEL[d]}</option>)}
                 </select>
               ) : (
                 <span>{DEST_LABEL[dest]}</span>
@@ -398,9 +392,7 @@ function NewRuleBar(p: {
               value={dest}
               onChange={(ev) => setDest(ev.currentTarget.value as LaunchDest)}
             >
-              <option value="worktree">worktree</option>
-              <option value="new-window">new window</option>
-              <option value="current-window">current window</option>
+              {OFFERED_DESTS.map((d) => <option key={d} value={d}>{DEST_LABEL[d]}</option>)}
             </select>
           )}
         </>
