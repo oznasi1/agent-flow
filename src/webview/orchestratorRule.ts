@@ -100,8 +100,20 @@ export const NOTE_ARIA_LABEL = "Note";
  * never offered anywhere else. Saying only "note" or "optional note" leaves
  * that distinction to be guessed, and a user who guesses wrong either
  * retypes the same sentence into twenty rules' notes, or reaches for
- * settings to say something they needed only once. */
-export const NOTE_PLACEHOLDER = "Specific to this rule, once — the mode beside it is the reusable part";
+ * settings to say something they needed only once.
+ *
+ * Measured, not guessed: a first draft here ("Specific to this rule, once —
+ * the mode beside it is the reusable part", 69 chars) read fine in the
+ * inspector's own dedicated row but truncated mid-word in the LIST's tighter
+ * one — the note `<input>` there shares one flex row with WHEN/THEN/the mode
+ * select/"in a"/the destination select, not a row of its own. It cut off as
+ * "…the mode beside it is", losing exactly the half that names what "mode"
+ * actually is — worse than a short placeholder, since it reads as having
+ * finished explaining when it didn't. This 44-char version keeps the same
+ * specific/reusable contrast and was screenshotted at the drawer's default
+ * 560px width, in the LIST's own row (the binding constraint — the
+ * inspector's row has room to spare), to confirm it renders in full. */
+export const NOTE_PLACEHOLDER = "Specific to this rule — the mode is reusable";
 
 /** How many characters of a note a CLOSED row shows before an ellipsis takes
  * over. A closed row is for scanning a flow's rules at a glance — see this
