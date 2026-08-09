@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-08-09
+
 ### Added
 
 - **`agentFlow.agentProvider` — start sessions with GitHub Copilot.** Set it to
