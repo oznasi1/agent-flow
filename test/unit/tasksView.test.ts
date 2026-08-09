@@ -4001,10 +4001,14 @@ describe("remote control × the Copilot provider", () => {
     expect(lastOpen().remoteControl).toBe(false);
   });
 
-  it("agrees with takeBatch about a seedAgent-off launch", async () => {
-    // takeBatch resolves through resolveRemoteControlSetting, which has always honoured
-    // seedAgent. If the pre-flight predicate disagrees, the same user can launch one way
-    // and not the other — which is how the seedAgent regression first showed itself.
+  it("does not refuse a one-key takeBatch launch when seedAgent is off", async () => {
+    // NOTE: this drives only takeBatch, which resolves Remote Control through
+    // resolveRemoteControlSetting and never calls remoteControlBlocksLaunch — so it
+    // pins takeBatch's OWN seedAgent-off behavior, not agreement between the two
+    // pre-flight paths (that cross-path check would need a test that exercises
+    // remoteControlBlocksLaunch itself, e.g. via takeTask, alongside this one).
+    // Still valid as a regression guard: takeBatch's seedAgent-off handling has
+    // always honoured seedAgent, and this is what pins that.
     copilot({ remoteControl: "on", seedAgent: false });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(createWorktrees).mockImplementation((s, key) =>

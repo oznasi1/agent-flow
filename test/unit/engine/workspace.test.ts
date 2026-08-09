@@ -933,6 +933,40 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
         "Agent Flow Deck: opened workspace for ASM-1. Copilot prompt copied — paste it into the panel to start.",
       );
     });
+
+    it("tries the chat-open command exactly once when it is registered but throws, then falls back to the clipboard", async () => {
+      // Once CHAT_OPEN_CMD is found registered, a throw from executeCommand is a real
+      // failure on its merits (e.g. the still-unverified argument shape), not the
+      // activation race the 7x/700ms retry loop exists to ride out (that race is
+      // "command not yet registered", covered by the getCommands-throws test above).
+      // Retrying a call that fails on its merits would stall ~4.9s and could reopen
+      // the chat panel on every attempt — so this pins exactly ONE executeCommand
+      // call for CHAT_OPEN_CMD before the seeding path degrades to the clipboard.
+      commands.getCommands.mockResolvedValue([CHAT_OPEN_CMD]);
+      commands.executeCommand.mockImplementation((cmd: unknown) =>
+        cmd === CHAT_OPEN_CMD ? Promise.reject(new Error("bad argument shape")) : Promise.resolve(undefined),
+      );
+      setupMatchingPlan();
+      const { context } = fakeContext();
+      const logs: string[] = [];
+
+      vi.useFakeTimers();
+      try {
+        const pending = maybeSeedAgent(context, (m) => logs.push(m));
+        await vi.runAllTimersAsync();
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      const chatCalls = commands.executeCommand.mock.calls.filter((c) => c[0] === CHAT_OPEN_CMD);
+      expect(chatCalls).toHaveLength(1);
+      expect(logs.some((m) => m.includes("registered but threw"))).toBe(true);
+      expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        "Agent Flow Deck: opened workspace for ASM-1. Copilot prompt copied — paste it into the panel to start.",
+      );
+    });
   });
 
   // No editor command that opens a Copilot chat tab with a prefilled query has been

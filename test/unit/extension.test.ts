@@ -484,6 +484,56 @@ describe("activate", () => {
     );
   });
 
+  it("still activates and registers every command when the host-context setContext call REJECTS (real-host shape)", async () => {
+    // The two setContext tests above throw SYNCHRONOUSLY, which a plain try/catch
+    // already handles. The real VS Code host returns a Thenable from
+    // executeCommand — a rejection there would escape the synchronous try/catch as
+    // an unhandled rejection and never reach the log, unless a rejection handler is
+    // attached to the returned promise. This test is the one that would have caught
+    // that gap: it makes executeCommand RETURN a rejected promise instead of
+    // throwing, and asserts both that the failure is logged and that every
+    // registration after it still happens.
+    commands.executeCommand.mockImplementationOnce(() => Promise.reject(new Error("setContext boom (async)")));
+    const { context } = fakeContext();
+
+    expect(() => activate(context)).not.toThrow();
+    // Let the rejection's .then(undefined, ...) handler run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(commands.executeCommand).toHaveBeenNthCalledWith(
+      1,
+      "setContext",
+      "agentFlow.host.vscode",
+      expect.any(Boolean),
+    );
+
+    const output = window.createOutputChannel.mock.results[0]?.value as {
+      appendLine: ReturnType<typeof vi.fn>;
+    };
+    expect(output.appendLine).toHaveBeenCalledWith(
+      expect.stringContaining("could not set the host context key: setContext boom (async)"),
+    );
+
+    // Registrations after the setContext call still land — a lost rejection handler
+    // wouldn't break this (the promise rejecting doesn't throw synchronously either
+    // way), but it is the same "must not dispose later registrations" guarantee the
+    // sync-throw tests pin, restated for the async arm.
+    expect(window.registerWebviewViewProvider).toHaveBeenCalledWith("agentFlow.tasks", providerStub);
+    const ids = vi.mocked(commands.registerCommand).mock.calls.map((c) => c[0]);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "agentFlow.refresh",
+        "agentFlow.signIn",
+        "agentFlow.signOut",
+        "agentFlow.takeTask",
+        "agentFlow.setup",
+        "agentFlow.openDeck",
+        "agentFlow.openMarketplace",
+        "agentFlow.doctor",
+      ]),
+    );
+  });
+
   it("reports command_invoked with the matching command id for every registered command", async () => {
     const { context } = fakeContext();
     activate(context);

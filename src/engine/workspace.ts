@@ -27,8 +27,8 @@ const SEED_STAGGER_MS = 400;
  * self-explanatory and leaves the pre-typed prompt there to reuse. Typing sooner
  * than `bootMs` loses the prompt to a screen that isn't listening yet, and there is
  * no event to await, so it can only be measured by hand in a dev host. Claude's
- * 1500ms has been — this is what's shipped and observed working. Copilot's has
- * NOT: see the UNVERIFIED tag below, still to be measured before release. */
+ * 1500ms has been verified — this is what's shipped and observed working. Copilot's
+ * has NOT: see the UNVERIFIED tag below, still to be measured before release. */
 const CLI: Record<AgentProvider, { cmd: string; label: string; bootMs: number }> = {
   "claude-code": { cmd: "claude", label: "Claude", bootMs: 1500 },
   copilot: { cmd: "copilot", label: "Copilot", bootMs: 2000 }, // UNVERIFIED — measure in the dev host before release
@@ -752,7 +752,7 @@ async function seedViaTerminal(
  * open one Copilot chat per task instead (that dev-host spike hasn't been run), so
  * for now a batch skips the panel entirely and returns false immediately, which
  * sends the caller (seedAgentSession) down its existing `multi` fallback: the
- * "briefs are in .agentflow/" notification, clipboard withheld. Revisit once a
+ * "briefs are in .pick-task/" notification, clipboard withheld. Revisit once a
  * verified per-task command exists. */
 async function seedCopilotPanel(
   seedText: string,
@@ -765,21 +765,35 @@ async function seedCopilotPanel(
     return false;
   }
   for (let attempt = 1; attempt <= 7; attempt++) {
+    let cmds: string[];
     try {
-      const cmds = await vscode.commands.getCommands(true);
-      if (cmds.includes(CHAT_OPEN_CMD)) {
-        await vscode.commands.executeCommand(CHAT_OPEN_CMD, {
-          query: seedText,
-          isPartialQuery: true,
-          mode: "agent",
-        });
-        log(`seed ${key}: opened Copilot Chat via ${CHAT_OPEN_CMD} (attempt ${attempt})`);
-        return true;
-      }
+      cmds = await vscode.commands.getCommands(true);
     } catch (e) {
       log(`seed ${key}: copilot command attempt ${attempt} threw: ${e}`);
+      await delay(700);
+      continue;
     }
-    await delay(700);
+    if (!cmds.includes(CHAT_OPEN_CMD)) {
+      await delay(700);
+      continue;
+    }
+    // The command is registered, so any throw from here on is a real failure on its
+    // merits (e.g. the still-unverified argument shape) rather than the activation
+    // race this loop exists to ride out. Retrying it would stall ~4.9s and could
+    // reopen the chat panel on every attempt, so try exactly once and fall through
+    // to the clipboard fallback below.
+    try {
+      await vscode.commands.executeCommand(CHAT_OPEN_CMD, {
+        query: seedText,
+        isPartialQuery: true,
+        mode: "agent",
+      });
+      log(`seed ${key}: opened Copilot Chat via ${CHAT_OPEN_CMD} (attempt ${attempt})`);
+      return true;
+    } catch (e) {
+      log(`seed ${key}: ${CHAT_OPEN_CMD} is registered but threw — not retrying: ${e}`);
+      return false;
+    }
   }
   log(`seed ${key}: no chat command registered — falling back to the clipboard`);
   return false;

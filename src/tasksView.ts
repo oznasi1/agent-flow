@@ -1518,7 +1518,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // nothing opened, and take_completed records it as cancelled rather than failed.
     if (wantRemoteControl === null) return false;
 
-    const planMd = this.buildBrief(detail);
+    const planMd = this.buildBrief(detail, cfg.agentProvider);
     const result = await openWorkspace({
       ticket: { key: detail.key, summary: detail.summary, url: detail.url },
       planMd,
@@ -1722,7 +1722,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           key,
           task: {
             ticket: { key: detail.key, summary: detail.summary, url: detail.url },
-            planMd: this.buildBrief(detail),
+            planMd: this.buildBrief(detail, cfg.agentProvider),
             descriptionText: detail.descriptionText,
             services,
           },
@@ -1843,7 +1843,18 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       const more = failed.length > 5 ? ` (and ${failed.length - 5} more)` : "";
       this.toast("error", `${summary} Failed: ${shown}${more}${extra}${rcNote}`);
     } else {
-      this.toast("success", `${summary} A worktree + Claude session per task.${extra}${rcNote}`);
+      // Claude Code gets a live session per task either way. Copilot only does for a
+      // single-task launch — seedCopilotPanel refuses to seed a batch's windows (its
+      // chat panel is single-instance, see that function's comment), so a Copilot
+      // batch's guaranteed artifact is the worktree + brief, never a session. Say
+      // that instead of promising something the code cannot have created.
+      const perTaskNote =
+        cfg.agentProvider === "copilot"
+          ? isBatch
+            ? `A worktree + brief per task — ${providerLabel(cfg.agentProvider)} isn't seeded for a batch; open each brief to start it.`
+            : `A worktree + ${providerLabel(cfg.agentProvider)} session per task.`
+          : "A worktree + Claude session per task.";
+      this.toast("success", `${summary} ${perTaskNote}${extra}${rcNote}`);
     }
   }
 
@@ -2012,10 +2023,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return { kind: "existing", file: uris[0].fsPath };
   }
 
-  private buildBrief(detail: { key: string; summary: string; descriptionText: string }): string {
+  private buildBrief(detail: { key: string; summary: string; descriptionText: string }, provider: AgentProvider = "claude-code"): string {
     const desc = detail.descriptionText?.trim();
     const body = desc ? `## Ticket description\n\n${desc}` : "_(No description on the ticket.)_";
-    return `## ${detail.key}: ${detail.summary}\n\n${body}\n\n## Plan\n\n_The Claude Code prompt for this task says whether to plan first or implement._`;
+    return `## ${detail.key}: ${detail.summary}\n\n${body}\n\n## Plan\n\n_The ${providerLabel(provider)} prompt for this task says whether to plan first or implement._`;
   }
 
   private html(webview: vscode.Webview): string {
