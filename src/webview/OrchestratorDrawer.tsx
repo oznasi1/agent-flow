@@ -73,6 +73,16 @@ function persistWidth(w: number): void {
  * increment without needing many presses to reach a useful width. */
 const RESIZE_STEP = 16;
 
+/** "Full panel width" for the Expand toggle. Deliberately `window.innerWidth`
+ * itself, not `orchCeiling()`'s clamp: the ceiling's whole job is reserving
+ * room for a board column during an ORDINARY resize (see its own doc
+ * comment above), and Expand exists precisely to override that reservation
+ * when a graph genuinely needs the room — the escape hatch resize alone
+ * cannot offer, not a bigger ordinary resize. */
+function fullOrchWidth(): number {
+  return window.innerWidth;
+}
+
 /** The drag payload a Deck card carries. A NUL separator cannot appear in a
  * ticket key or a repo name, so parsing is unambiguous. */
 export const DRAG_SEP = "\0";
@@ -277,6 +287,17 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const [width, setWidth] = React.useState<number>(() =>
     clampOrchWidth(readPersistedWidth() ?? DEFAULT_ORCH_W),
   );
+  /** The escape hatch, for a graph big enough that resize's board-reserving
+   * ceiling still clips it. Deliberately NOT persisted alongside `width`
+   * (see `readPersistedWidth`/`persistWidth` above, which know nothing of
+   * this flag) and always starts `false`: reopening the drawer in a fresh
+   * session should land on a resized-but-board-visible view, never
+   * silently reopen with the board hidden because a PAST session happened
+   * to be mid-review of one large flow. Never touched by anything other
+   * than `toggleExpanded` below — in particular, expanding never writes
+   * into `width` itself, which is exactly what makes collapsing restore the
+   * user's own resized value for free (see `renderWidth` near the return). */
+  const [expanded, setExpanded] = React.useState(false);
   const [resizing, setResizing] = React.useState<{ startX: number; startW: number } | null>(null);
   /** Mirrors `dragRef` above, for the identical reason: `pointerup` can arrive
    * before React flushes the last `pointermove`'s `setWidth`, so the release
@@ -420,6 +441,15 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     setWidth(next);
     persistWidth(next);
   };
+
+  /** A pure boolean flip that never touches `width` — the functional-updater
+   * form so two activations landing in the same React batch (e.g. a rapid
+   * double click) still cancel out correctly instead of both reading the
+   * same stale `expanded` and racing to the same answer. Because expanding
+   * never writes into `width`, applying it again while already expanded is
+   * automatically idempotent: `renderWidth` below always recomputes
+   * `fullOrchWidth()` fresh, so there is nothing to compound or drift. */
+  const toggleExpanded = () => setExpanded((v) => !v);
 
   const startDrag = (id: string, e: React.PointerEvent) => {
     const node = flow.nodes.find((n) => n.id === id);
@@ -571,26 +601,40 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     p.onSave({ ...flow, edges: flow.edges.filter((x) => x.id !== e.id) });
   };
 
+  /** What actually renders. Expand does not touch `width` — see the
+   * `expanded` state's own doc comment — so this ternary IS the whole
+   * mechanism: collapsing needs no separate "restore" step because `width`
+   * was never overwritten to begin with. */
+  const renderWidth = expanded ? fullOrchWidth() : width;
+
   return (
-    <aside className="orch" aria-label="Orchestrator" style={{ ["--orch-w" as any]: `${width}px` }}>
+    <aside className="orch" aria-label="Orchestrator" style={{ ["--orch-w" as any]: `${renderWidth}px` }}>
       {/* role="separator" + aria-orientation is the ARIA shape App.tsx's own
           controls already use (role="tablist"/"group" with aria-selected/
           -pressed) — a real widget role plus the state attributes that make
           it usable without a mouse, not a bespoke pattern. Keyboard-resizable
           on purpose: this phase's whole point is that the drawer works
-          without one, so a grip only a mouse could move would contradict it. */}
-      <div
-        className="orch-grip"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize Orchestrator drawer"
-        aria-valuenow={Math.round(width)}
-        aria-valuemin={MIN_ORCH_W}
-        aria-valuemax={orchCeiling()}
-        tabIndex={0}
-        onPointerDown={startResize}
-        onKeyDown={onGripKeyDown}
-      />
+          without one, so a grip only a mouse could move would contradict it.
+          Hidden rather than merely disabled while expanded — not styled
+          inert, not in the DOM at all — because there is nothing to drag TO:
+          the drawer is already at its widest legal width, so a grip sitting
+          at the very edge of the viewport with nowhere further to go would
+          be a control that does nothing, not a quiet one. The Expand toggle
+          below (aria-pressed) is the one way back to a custom width. */}
+      {!expanded && (
+        <div
+          className="orch-grip"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize Orchestrator drawer"
+          aria-valuenow={Math.round(width)}
+          aria-valuemin={MIN_ORCH_W}
+          aria-valuemax={orchCeiling()}
+          tabIndex={0}
+          onPointerDown={startResize}
+          onKeyDown={onGripKeyDown}
+        />
+      )}
       <div className="orch-hd">
         <div className="row">
           <span className="eyebrow">Orchestrator</span>
@@ -611,6 +655,18 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             onClick={() => { p.onDelete(flow.id); p.onClose(); }}
           >
             Delete flow
+          </button>
+          {/* Same quiet `orch-mini` as its neighbours — Arm stays the surface's
+              only filled control (see its own comment below). aria-pressed
+              is the App.tsx idiom (its filter/size/status `.seg` groups use
+              exactly this attribute for on/off state) rather than a bespoke
+              one; CONTROLS_CSS's own on-state rule ("weight and foreground,
+              never a fill") is the visual language this borrows, even though
+              this button lives in a different sheet. The label stays
+              "Expand" in both states, the same way those `.seg` buttons never
+              rewrite their own text when pressed. */}
+          <button type="button" className="orch-mini" aria-pressed={expanded} onClick={toggleExpanded}>
+            Expand
           </button>
           <button type="button" className="orch-x" aria-label="Close" onClick={p.onClose}>✕</button>
         </div>

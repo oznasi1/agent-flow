@@ -1491,3 +1491,105 @@ describe("resizing", () => {
     expect(() => fireEvent.keyDown(grip(), { key: "ArrowLeft" })).not.toThrow();
   });
 });
+
+// The Expand toggle: a state on top of Task 3's width plumbing, not a second
+// mechanism — see OrchestratorDrawer.tsx's own comment on `renderWidth`.
+describe("expanding", () => {
+  const grip = () => screen.queryByRole("separator", { name: /resize/i });
+  const toggle = () => screen.getByRole("button", { name: "Expand" });
+  const widthOf = (container: HTMLElement) =>
+    (container.querySelector(".orch") as HTMLElement).style.getPropertyValue("--orch-w");
+
+  it("expanding sets the full (viewport) width", () => {
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    fireEvent.click(toggle());
+    expect(widthOf(container)).toBe(`${window.innerWidth}px`);
+  });
+
+  it("reports its state via aria-pressed", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    expect(toggle()).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle());
+    expect(toggle()).toHaveAttribute("aria-pressed", "true");
+  });
+
+  // Resized first to a width distinct from the 560px default (three
+  // ArrowLeft presses: 560 + 3*16 = 608), so a wrong implementation that
+  // collapses back to the DEFAULT rather than the user's own prior width
+  // cannot pass by coincidence.
+  it("collapsing restores the prior custom width, not the default", () => {
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    const g = grip()!;
+    fireEvent.keyDown(g, { key: "ArrowLeft" });
+    fireEvent.keyDown(g, { key: "ArrowLeft" });
+    fireEvent.keyDown(g, { key: "ArrowLeft" });
+    expect(widthOf(container)).toBe("608px");
+    fireEvent.click(toggle()); // expand
+    expect(widthOf(container)).toBe(`${window.innerWidth}px`);
+    fireEvent.click(toggle()); // collapse
+    expect(widthOf(container)).toBe("608px");
+  });
+
+  // "Expanding while already expanded" cannot be reached by clicking the
+  // SAME toggle twice through two separately-flushed fireEvent calls — the
+  // second click reads the now-updated state and collapses, which is
+  // correct toggle behaviour, not a re-expand. What CAN legitimately expand
+  // "again" is two activations landing in the same React batch (e.g. a
+  // rapid double click before a re-render) — driven here inside one act(),
+  // per this file's own convention for pointer/keyboard sequences whose
+  // ordering matters. The functional-updater form in `toggleExpanded`
+  // (`setExpanded(v => !v)`) makes two same-batch clicks a correct, complete
+  // round trip: expand then collapse, landing back on the exact prior
+  // custom width — not some drifted value a stale-closure implementation
+  // (`setExpanded(!expanded)`) would produce by having both clicks read the
+  // same pre-batch `false` and both "expand".
+  it("two activations landing in the same tick cancel out — no width drift", () => {
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    const g = grip()!;
+    fireEvent.keyDown(g, { key: "ArrowLeft" });
+    fireEvent.keyDown(g, { key: "ArrowLeft" });
+    expect(widthOf(container)).toBe("592px"); // 560 + 2*16
+    act(() => {
+      fireEvent.click(toggle());
+      fireEvent.click(toggle());
+    });
+    expect(widthOf(container)).toBe("592px");
+  });
+
+  // Decision: the grip does not make sense while expanded — there is
+  // nothing further to drag to — so it is removed from the DOM entirely
+  // (see OrchestratorDrawer.tsx's comment on the grip's conditional
+  // rendering), not merely disabled. It reappears the moment the drawer
+  // collapses.
+  it("hides the resize grip while expanded, and restores it on collapse", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    expect(grip()).not.toBeNull();
+    fireEvent.click(toggle());
+    expect(grip()).toBeNull();
+    fireEvent.click(toggle());
+    expect(grip()).not.toBeNull();
+  });
+
+  // Decision: `expanded` is session-only and is NOT part of what
+  // `persistWidth`/`readPersistedWidth` write or read — only the resized
+  // width is durable. A remount always starts collapsed, even when a
+  // custom width was persisted, so a past session left mid-review of one
+  // large flow can never silently reopen with the board hidden.
+  it("does not persist the expanded flag across a remount — only the width does", () => {
+    vi.mocked(vscodeApi.getState)
+      .mockReturnValueOnce({ orchWidth: 640 })
+      .mockReturnValueOnce({ orchWidth: 640 });
+    const first = render(<OrchestratorDrawer {...props()} />);
+    fireEvent.click(within(first.container).getByRole("button", { name: "Expand" }));
+    expect(widthOf(first.container)).toBe(`${window.innerWidth}px`);
+    first.unmount();
+
+    const second = render(<OrchestratorDrawer {...props()} />);
+    expect(widthOf(second.container)).toBe("640px");
+    expect(within(second.container).getByRole("button", { name: "Expand" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(within(second.container).queryByRole("separator", { name: /resize/i })).not.toBeNull();
+  });
+});
