@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-08-09
+
+### Changed
+
+- **The docs stop calling this a Claude Code-only tool.** The listing blurb, the
+  README and `agentFlow.seedAgent`'s description said the seeded agent was Claude
+  Code, which stopped being true in 0.10.0. They now say "your agent" wherever both
+  providers behave the same, and name the three places that really are Claude-only:
+  the Deck's live signal, the Marketplace, and Remote Control (whose setting now
+  says what `copilot` does to it).
+- **The Notepad is documented.** It shipped in 0.6.0 and the README never mentioned
+  it. There's now a section covering global storage, **Start**, the Running / Stale /
+  Finished badge, the filter and **Clear completed** — with a screenshot.
+- **Every screenshot re-shot from the current UI.** The sidebar one predated the
+  0.9.0 tab bar and still showed the removed in-panel header row; the Deck one
+  predated the 0.11.0 header redesign and still showed the four toggles and the two
+  removed tiles. The Deck shot now also shows the Agents lens doing its job — one
+  ticket with two sessions as two cards — and a Notepad run on the board.
+- **The README's architecture tree matches the source again** (`jira/` has been
+  `tasks/jira/` for several releases), and records that one seed chokepoint resolves
+  provider × surface at seed time.
+
+No code changed in this release.
+
 ## [0.11.0] — 2026-08-09
 
 ### Changed
