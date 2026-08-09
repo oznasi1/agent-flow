@@ -397,21 +397,37 @@ another. Deriving independently in three places would reintroduce exactly that.
 
 - [ ] **Step 1: Write the failing tests**
 
+Both test files already have local fixture builders. **Use them — do not add
+new ones.** Verified signatures, which differ between the two files:
+
+- `evaluate.test.ts`: `status(key, { merged?, agents?, unknownAgent? })` (its single repo is named `` `repo-${key}` ``), `place(id, runKey, join?)`, `planned(id, join?)`, `notify(id, join?)`, `edge(id, from, to, over?)`, `flowWith(nodes, edges, armed = true)`, `run(flow, statuses, maxLaunches?)`, `NOW`.
+- `runner.test.ts`: `place(id, runKey, join?)`, `notify(id, message, join?)` — note the **message** parameter, which `evaluate.test.ts`'s `notify` does not take — `edge(id, from, to, over?)`, `flowWith(nodes, edges)`, `NOW`.
+
 In `test/unit/engine/orchestrator/evaluate.test.ts`:
 
 ```ts
 it("carries the action derived from each fired edge's target", () => {
-  const flow: Flow = {
-    id: "f1", name: "f", armed: true, createdAt: 0,
-    nodes: [
-      { id: "a", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-      { id: "b", kind: "notify", x: 100, y: 0, join: "any", message: "hi" },
-    ],
-    edges: [{ id: "e1", from: "a", to: "b", cond: { kind: "pr-merged" } }],
-  };
-  const out = evaluateFlow({ flow, statuses: [mergedStatus("ASM-1", "agent-flow")], nowMs: 1 });
+  const flow = flowWith([place("a", "ASM-1"), notify("z")], [edge("e1", "a", "z")]);
+  const out = run(flow, [status("ASM-1", { merged: true })]);
   expect(out.fired).toHaveLength(1);
   expect(out.fired[0].action).toBe("notify");
+});
+
+// The derivation, not the record: `edge`'s default `action` is "notify", so an
+// edge pointing at PLANNED work must still come back as a launch.
+it("ignores the edge's stored action when deriving", () => {
+  const flow = flowWith([place("a", "ASM-1"), planned("z")], [edge("e1", "a", "z")]);
+  const out = run(flow, [status("ASM-1", { merged: true })]);
+  expect(out.fired[0].action).toBe("launch");
+});
+
+it("carries undefined for an edge pointing at nothing", () => {
+  const flow = flowWith([place("a", "ASM-1")], [edge("e1", "a", "gone")]);
+  const out = run(flow, [status("ASM-1", { merged: true })]);
+  // A dangling edge is reported as blocked/gone rather than fired, so assert on
+  // whichever list it lands in — but if it IS fired, its action must be
+  // undefined, never a guess.
+  for (const f of out.fired) expect(f.action).toBeUndefined();
 });
 ```
 
@@ -419,18 +435,32 @@ In `test/unit/engine/orchestrator/runner.test.ts`:
 
 ```ts
 // The whole point of carrying the action: `notifyLines` must announce what was
-// DECIDED, not re-derive from a copy that may have changed underneath it.
+// DECIDED, not re-derive it from a copy that may have changed underneath.
 it("announces a notify from the carried action, not the current graph", () => {
-  const flow = notifyFlow();                        // a -> b, b is a notify node
-  const fired = [{ edge: flow.edges[0], perform: true, action: "notify" as const }];
-  // The graph now says b is a place — a concurrent edit. The decision stands.
-  const edited: Flow = {
-    ...flow,
-    nodes: [flow.nodes[0], { id: "b", kind: "place", x: 100, y: 0, join: "any", runKey: "ASM-9", repo: "r" }],
-  };
-  expect(notifyLines(edited, fired)).toEqual(["f: a rule fired."]);
+  const flow = flowWith(
+    [place("a", "ASM-1"), notify("z", "the migration has landed")],
+    [edge("e1", "a", "z")],
+  );
+  const fired: FiredEdge[] = [{ edge: flow.edges[0], perform: true, action: "notify" }];
+  // The graph now says z is a place — a concurrent edit between the decision and
+  // this call. The decision stands, and the message is gone with the node.
+  const edited: Flow = { ...flow, nodes: [flow.nodes[0], place("z", "ASM-9")] };
+  expect(notifyLines(edited, fired)).toEqual(["Ship the migration: a rule fired."]);
+});
+
+// The inverse, so the test above cannot pass by ignoring `action` altogether.
+it("says nothing for a carried action that is not notify", () => {
+  const flow = flowWith(
+    [place("a", "ASM-1"), notify("z", "the migration has landed")],
+    [edge("e1", "a", "z")],
+  );
+  const fired: FiredEdge[] = [{ edge: flow.edges[0], perform: true, action: "launch" }];
+  expect(notifyLines(flow, fired)).toEqual([]);
 });
 ```
+
+Note the flow name in the expected string: `runner.test.ts`'s `flowWith` builds
+`"Ship the migration"`, not `"f"`.
 
 - [ ] **Step 2: Run to verify they fail**
 
@@ -523,24 +553,23 @@ nothing else.
 
 In `test/unit/deckView.test.ts`, alongside the existing acting tests:
 
-```ts
-// The action now comes from the node. An edge whose stored `action` says
-// "notify" but which points at planned work must LAUNCH — the record's copy is
-// a mirror, not an instruction.
-it("acts on the node's action, not the edge's stored copy", async () => {
-  const flow = flowWith({
-    nodes: [placeNode("a", "ASM-1", "agent-flow"), plannedNode("b", "ASM-2")],
-    edges: [{ id: "e1", from: "a", to: "b", cond: { kind: "pr-merged" }, action: "notify" }],
-  });
-  // ...arm, seed a merged PR, run one pass...
-  expect(openWorkspace).toHaveBeenCalledTimes(1);
-});
-```
+The behaviour to pin: **an edge whose stored `action` says `"notify"` but which
+points at planned work must LAUNCH.** The record's copy is a mirror, not an
+instruction.
 
-Note for the implementer: this test must be written against the harness already
-in `deckView.test.ts` (328 tests) — reuse its existing flow/status builders and
-its pass-driving helper rather than inventing new ones. If no builder with these
-names exists, use whatever that file actually provides and keep the assertion.
+**Written against the existing harness — this is not optional.**
+`deckView.test.ts` is 4700+ lines and has NO general flow builder: the
+`flowWith` at roughly line 4661 is a `const` local to one `describe`, taking
+`(action: "launch" | "notify")` and nothing else. Read the describe block that
+contains it, reuse that block's harness object (`h`, with `h.flows` and
+`h.readFlows`) and its pass-driving helper, and write the new test as a sibling
+inside it — widening the local `flowWith` if that is the least invasive route.
+
+Do **not** invent `placeNode`/`plannedNode`/`flowWith({nodes, edges})` builders;
+they do not exist, and a test written against fixtures you created yourself
+pins your fixtures rather than the code. Assert on the observable effect the
+surrounding block already asserts on for a launch (the `openWorkspace` spy),
+not on a mock shape.
 
 - [ ] **Step 2: Run to verify it fails**
 
