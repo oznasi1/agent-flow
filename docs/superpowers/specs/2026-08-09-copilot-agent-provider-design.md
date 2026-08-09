@@ -229,6 +229,45 @@ from tests.
 Telemetry reports the **effective** provider, so a Cursor user with `copilot` in synced
 settings reports `claude-code`. That is the honest answer: it is what ran.
 
+## Backward compatibility: the default path must not move
+
+This ships to thousands of users who will never set `agentProvider`. For them the feature
+must be **inert** — not "low risk", inert. `agentProvider` unset resolves to `claude-code`,
+which takes exactly the branches taken today, and nothing in the Deck, Doctor, telemetry,
+or UI changes.
+
+**The gate: the existing test suite must pass unmodified.** The ~40 seeding tests in
+`workspace.test.ts`, plus the `tasksView` and doctor tests, *are* the specification of
+today's behavior. If implementing a task requires editing one of them, that edit is a
+behavior change and must be called out and justified — never absorbed silently into the
+diff. The one sanctioned exception is a literal string that legitimately gained a provider
+name, and under `claude-code` that name is `"Claude Code"`, so even those assertions should
+come out identical.
+
+Three changes carry real regression risk, in order:
+
+1. **The pre-flight Remote Control abort** in `tasksView` is the only change that adds a new
+   *failure* path to an existing flow — everything else adds branches the default never
+   enters. The guard must be exactly `provider === "copilot" && remoteControl`, and a test
+   must assert that `claude-code` + Remote Control still launches normally. Get the operator
+   wrong here and Remote Control users cannot take tasks at all.
+2. **Parameterizing `seedViaTerminal`** edits shipping code rather than adding to it. Its
+   defaults are pinned — command `claude`, terminal name `Claude · ${key}`, delay 1500 ms —
+   and asserted at argument level, not merely "a terminal was created".
+3. **The webview's new `agentLabel`.** The webview renders before the extension's first
+   state post on some paths, so the label defaults to `"Claude Code"` inside the webview; a
+   tooltip must never be able to read `undefined`.
+
+Two smaller ones: `agent_provider` is an **additive** telemetry field — confirm the ingest
+tolerates it before release — and the activation-time `setContext` call is wrapped so a
+throw cannot break `activate()`, the same posture `watchPlansAndSeed` takes when its watcher
+fails.
+
+**Manual regression, on default settings, before release.** All six paths funnel through the
+seeding chokepoint, so all six get walked: take a task, batch launch, Deck relaunch, Explore,
+Notepad, and PR review. Each must open the Claude Code panel pre-filled exactly as it does
+today.
+
 ## Repo gates
 
 - `npm run typecheck`, `npm test`, and `npm run test:cov` (thresholds enforced).
