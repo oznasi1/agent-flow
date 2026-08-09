@@ -90,6 +90,14 @@ Reading must therefore be tolerant in both directions:
   file without it are both valid.
 - The field is **ignored** for behaviour. The action is always derived from the
   target node.
+- It is nonetheless **still written**, as a derived mirror of the node's kind.
+  This is the direction that is easy to get backwards: an older build's
+  `validEdge` *requires* `action`, so a file this build wrote without it would
+  have every edge dropped the next time the user opened an older version — a
+  downgrade, a second machine on the release channel, or a rollback. Writing the
+  derived value keeps old and new builds reading the same file. `writeFlow` is
+  the single choke point every save already goes through, so the mirror is
+  maintained in exactly one place.
 - Unknown fields already ride along untouched (`coerceFlow` spreads the record),
   so a file written by this build and then read by an older one still carries
   whatever that build needs.
