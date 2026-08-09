@@ -240,4 +240,11 @@ export const ORCH_CSS = `
      colour, and red is spent ONLY on a rule that tried and actually failed. */
   .fl-receipt .fired { color: var(--c-done); }
   .fl-receipt .err { color: var(--c-danger); }
+
+  /* Add a rule, from the keyboard (flowList.tsx's NewRuleBar). Dashed border
+     marks it as the "build one" affordance rather than a rule already on
+     disk — everything else about it (gap, wrap, the .orch-kw/.orch-sel it
+     borrows) is deliberately the same quiet language a row already speaks. */
+  .fl-newrule { border: 1px dashed var(--hair); border-radius: var(--r-card); padding: 8px 10px;
+    margin-top: 6px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: none; }
 `;

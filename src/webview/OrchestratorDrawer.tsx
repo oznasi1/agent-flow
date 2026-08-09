@@ -11,6 +11,8 @@ import {
   endLabel,
   launchDestOf,
   modeValueOf,
+  nextEdgeId,
+  nextNodeId,
   notifyMessageOf,
   observationOf,
   OFFERED_CONDS,
@@ -113,29 +115,27 @@ function parseDrag(raw: string): { runKey: string; repo: string } | null {
   return runKey && repo ? { runKey, repo } : null;
 }
 
-/** The next unused `${prefix}N` id, scanning past whatever is already taken
- * rather than trusting the live count. A count alone drifts the moment
- * anything is deleted: three edges minus the middle one is a list of length
- * two, so `length + 1` mints the id the untouched third edge already has.
- * One minting strategy for both node and edge ids — see `nextNodeId` and
- * `nextEdgeId` below — so this file never mints an id two different ways. */
-function nextId(prefix: string, taken: Set<string>): string {
-  let n = 1;
-  while (taken.has(`${prefix}${n}`)) n++;
-  return `${prefix}${n}`;
-}
-
-/** An id unique within this flow. Node ids are local to a flow. */
-function nextNodeId(flow: Flow): string {
-  return nextId("n", new Set(flow.nodes.map((x) => x.id)));
-}
-
-/** An id unique within this flow. Edge ids are local to a flow, and must stay
- * unique even after a delete: `deleteEdge`, `setCond` and the inspector's own
- * `flow.edges.find` all key off this id, so two edges sharing one silently
- * merge into whichever the code touches first. */
-function nextEdgeId(flow: Flow): string {
-  return nextId("e", new Set(flow.edges.map((x) => x.id)));
+/** The keyboard equivalent of dragging a Deck card onto the tray or canvas —
+ * the one node kind Task 6 found with no non-pointer way in. Every repo of
+ * every run currently on the board, minus whichever pairs are already a
+ * place node in this flow: offering one of those would be a selection that
+ * silently does nothing, since `attachAt` itself refuses the duplicate (see
+ * its own dedup check). Keyed in the exact string `attachAt`/`parseDrag`
+ * already agree on — DRAG_SEP-joined `runKey`+`repo` — so the picker built on
+ * this list calls `attachAt` itself rather than a second implementation of
+ * what a valid attach is. */
+function placeCandidates(flow: Flow, runs: RunStatus[]): { key: string; label: string }[] {
+  const out: { key: string; label: string }[] = [];
+  for (const r of runs) {
+    for (const repo of r.repos) {
+      const dup = flow.nodes.some(
+        (n) => n.kind === "place" && n.runKey === r.run.key && n.repo === repo.name,
+      );
+      if (dup) continue;
+      out.push({ key: `${r.run.key}${DRAG_SEP}${repo.name}`, label: `${r.run.key} · ${repo.name}` });
+    }
+  }
+  return out;
 }
 
 /** The tray shows what a condition can attach to: a place already on disk, or
@@ -669,17 +669,53 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           </div>
         )}
         {view === "list" ? (
-          // The keyboard path — see flowList.tsx's own header comment for why
-          // it exists and what it deliberately does not (yet) do. Same `flow`
-          // prop, same `onSave`/`onResetEdge` this canvas already uses: no
-          // second model, no second write path.
-          <FlowList
-            flow={flow}
-            runs={p.runs}
-            promptModes={p.promptModes}
-            onSave={p.onSave}
-            onResetEdge={(edgeId) => p.onResetEdge(flow.id, edgeId)}
-          />
+          <>
+            {/* Add a node, from the keyboard. Notify and planned work already had
+                an ordinary button each (see the identical bar in the canvas
+                branch below) — they just never rendered here, since this whole
+                bar was canvas-only before Task 6. A place had no keyboard route
+                at all: `attachAt` is reachable ONLY by drag-and-drop otherwise,
+                so this select is the one new thing here, and it calls that exact
+                function rather than a second copy of what a valid attach is
+                (see `placeCandidates`'s own doc comment). */}
+            <div className="orch-bar">
+              <span style={{ fontSize: "var(--t-micro)", letterSpacing: ".06em", textTransform: "uppercase", color: "var(--dim)" }}>
+                Add
+              </span>
+              <div className="sp" />
+              <button type="button" className="orch-mini" onClick={addNotify}>+ Notify</button>
+              <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
+              <select
+                className="orch-sel"
+                aria-label="Add a place"
+                value=""
+                onChange={(ev) => {
+                  const val = ev.currentTarget.value;
+                  if (val) attachAt(val, 24, 24 + flow.nodes.length * 88);
+                }}
+              >
+                <option value="">+ Add place…</option>
+                {placeCandidates(flow, p.runs).map((c) => (
+                  <option key={c.key} value={c.key}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+            {/* The keyboard path onto the same rules the canvas draws — see
+                flowList.tsx's own header comment for why it exists and what it
+                deliberately does not (yet) do. Same `flow` prop, same
+                `onSave`/`onResetEdge` this canvas already uses: no second
+                model, no second write path. Task 6 adds its own rule-building
+                controls inside FlowList itself, since building a RULE needs
+                nothing this file's closures hold that FlowList doesn't already
+                have in its props (`flow`, `promptModes`, `onSave`). */}
+            <FlowList
+              flow={flow}
+              runs={p.runs}
+              promptModes={p.promptModes}
+              onSave={p.onSave}
+              onResetEdge={(edgeId) => p.onResetEdge(flow.id, edgeId)}
+            />
+          </>
         ) : (
           <>
         <div className="orch-sect">

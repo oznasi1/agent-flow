@@ -1673,3 +1673,144 @@ describe("expanding", () => {
     expect(within(second.container).queryByRole("separator", { name: /resize/i })).not.toBeNull();
   });
 });
+
+// Task 6: the keyboard path can build a flow, not just edit one someone else
+// wired with a mouse. Adding a notify terminal and planned work already had
+// ordinary buttons (Task 4b) — they only ever rendered in the canvas branch,
+// so the gap this closes is that they now render in the List view too, plus
+// the one node kind with NO keyboard route at all until now: a place, which
+// could previously only arrive by dragging a Deck card onto the tray or
+// canvas.
+describe("the list view's add-node controls", () => {
+  const openList = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => {
+    render(<OrchestratorDrawer {...props(over)} />);
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+  };
+
+  it("offers + Notify, + Add planned work and a place picker in the list view", () => {
+    openList({ flows: [twoPlaces()] });
+    expect(screen.getByRole("button", { name: "+ Notify" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ Add planned work" })).toBeTruthy();
+    expect(screen.getByLabelText("Add a place")).toBeTruthy();
+  });
+
+  it("+ Notify works from the list view too, through the same addNotify the canvas uses", () => {
+    const onSave = vi.fn();
+    openList({ onSave, flows: [twoPlaces()] });
+    fireEvent.click(screen.getByRole("button", { name: "+ Notify" }));
+    const saved = onSave.mock.calls[0][0] as Flow;
+    expect(saved.nodes.filter((n) => n.kind === "notify")).toHaveLength(1);
+  });
+
+  it("+ Add planned work sends flow:addPlanned from the list view too", () => {
+    openList({ flows: [twoPlaces()] });
+    fireEvent.click(screen.getByRole("button", { name: "+ Add planned work" }));
+    expect(send).toHaveBeenCalledWith({ type: "flow:addPlanned", id: "f1" });
+  });
+
+  it("the place picker is an ordinary, keyboard-navigable select", () => {
+    openList({ flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
+    const select = screen.getByLabelText("Add a place") as HTMLSelectElement;
+    expect(select.tagName).toBe("SELECT");
+    expect(select).not.toHaveAttribute("tabindex", "-1");
+    expect(select).not.toBeDisabled();
+  });
+
+  it("choosing a run from the place picker adds it, through the same attachAt the drag path uses", () => {
+    const onSave = vi.fn();
+    openList({ onSave, flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
+    fireEvent.change(screen.getByLabelText("Add a place"), { target: { value: `ASM-1${DRAG_SEP}agent-flow` } });
+    const saved = onSave.mock.calls[0][0] as Flow;
+    expect(saved.nodes).toEqual([
+      expect.objectContaining({ kind: "place", runKey: "ASM-1", repo: "agent-flow" }),
+    ]);
+  });
+
+  it("excludes a run/repo pair already attached to this flow — choosing it again would silently do nothing", () => {
+    const already = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" }] });
+    openList({ flows: [already], runs: [runStatus("ASM-1", "agent-flow")] });
+    const options = Array.from(screen.getByLabelText("Add a place").querySelectorAll("option")).map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+    expect(options).not.toContain(`ASM-1${DRAG_SEP}agent-flow`);
+  });
+
+  it("offers every repo of a multi-repo run, not only whichever one an agent happens to be bound to", () => {
+    const twoRepo = runStatus("ASM-1", "web", {
+      repos: [
+        { name: "web", path: "/r/web", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
+        { name: "api", path: "/r/api", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
+      ],
+    });
+    openList({ flows: [flow()], runs: [twoRepo] });
+    const options = Array.from(screen.getByLabelText("Add a place").querySelectorAll("option")).map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+    expect(options).toContain(`ASM-1${DRAG_SEP}web`);
+    expect(options).toContain(`ASM-1${DRAG_SEP}api`);
+  });
+});
+
+describe("Arm is reachable by keyboard", () => {
+  // The spend confirmation Arm can trigger (`showWarningMessage(..., { modal:
+  // true }, ...)` in deckView.ts) is a native VS Code modal — VS Code owns its
+  // own keyboard handling for that, so there is nothing for THIS webview to
+  // prove about it beyond Arm itself being an ordinary, reachable control.
+  it("Arm is a real button, not styled inert", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    const btn = screen.getByRole("button", { name: "Arm" });
+    expect(btn.tagName).toBe("BUTTON");
+    expect(btn).not.toHaveAttribute("tabindex", "-1");
+    expect(btn).not.toBeDisabled();
+  });
+});
+
+describe("building a whole flow from the keyboard", () => {
+  // The claim the task makes: a place, a rule and its condition and action —
+  // constructed with no pointer gesture at all, from the List view alone.
+  // Every step below re-renders with the flow the previous step actually
+  // saved (the same pattern flowList.test.tsx's own delete tests use), since
+  // each control here reads the live `flow` prop, not a store this test fakes.
+  it("adds a place, adds a notify node, and wires a rule between them", () => {
+    const onSave = vi.fn();
+    const initial = props({ onSave, flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
+    const { rerender } = render(<OrchestratorDrawer {...initial} />);
+    const rerenderWith = (next: Flow) => rerender(<OrchestratorDrawer {...initial} flows={[next]} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+
+    // A place, from the keyboard picker.
+    fireEvent.change(screen.getByLabelText("Add a place"), { target: { value: `ASM-1${DRAG_SEP}agent-flow` } });
+    let saved = onSave.mock.calls.at(-1)![0] as Flow;
+    rerenderWith(saved);
+
+    // A notify terminal, from + Notify.
+    fireEvent.click(screen.getByRole("button", { name: "+ Notify" }));
+    saved = onSave.mock.calls.at(-1)![0] as Flow;
+    rerenderWith(saved);
+
+    expect(saved.nodes).toHaveLength(2);
+    const place = saved.nodes.find((n) => n.kind === "place")!;
+    const notify = saved.nodes.find((n) => n.kind === "notify")!;
+
+    // A rule between them, from FlowList's own NewRuleBar.
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: place.id } });
+    fireEvent.change(within(bar).getByLabelText("New rule condition"), { target: { value: "ci-passed" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: notify.id } });
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+
+    saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes).toHaveLength(2);
+    expect(saved.nodes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "place", runKey: "ASM-1", repo: "agent-flow" }),
+        expect.objectContaining({ kind: "notify" }),
+      ]),
+    );
+    expect(saved.edges).toHaveLength(1);
+    expect(saved.edges[0]).toMatchObject({
+      from: place.id, to: notify.id, cond: { kind: "ci-passed" }, action: "notify",
+    });
+  });
+});

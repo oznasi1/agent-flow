@@ -25,6 +25,7 @@ import {
   launchDestOf,
   modeDisplayLabel,
   modeValueOf,
+  nextEdgeId,
   notifyMessageOf,
   OFFERED_CONDS,
   withAction,
@@ -180,6 +181,164 @@ function ruleSentence(
   );
 }
 
+/** Add a rule, from the keyboard: the from-node, the to-node, the condition,
+ * the action, and — where the action needs them — the mode and destination.
+ * Ordinary form controls, the same as an open row's own.
+ *
+ * The target-kind guard is the SAME function the inspector and an open row
+ * already use to explain a mismatch after the fact (`actionMismatch`) — here
+ * it is asked BEFORE the rule exists rather than after, which is what turns
+ * an explanation into a refusal: "Add rule" stays disabled and no `onSave`
+ * happens while the chosen action and target disagree. Reusing the one
+ * function rather than a second copy of the same rule is what keeps this
+ * refusal from silently drifting apart from what the open row would say
+ * about the very same pairing a moment later. */
+function NewRuleBar(p: {
+  flow: Flow;
+  promptModes: FlowPromptMode[];
+  onSave: (f: Flow) => void;
+}): JSX.Element | null {
+  const { flow, promptModes, onSave } = p;
+  const [from, setFrom] = React.useState("");
+  const [to, setTo] = React.useState("");
+  // Narrowed to what `OFFERED_CONDS` actually offers — the two parameterised
+  // kinds (`agent-idle-over`, `ticket-status-is`) need a value this bar has no
+  // input for, same reason `OFFERED_CONDS` itself excludes them (see its own
+  // doc comment in orchestratorRule.ts) — so the type this state can ever
+  // hold never includes them, and building `{ kind: cond }` below is always a
+  // complete `Condition` with no cast needed.
+  const [cond, setCond] = React.useState<Exclude<Condition["kind"], "agent-idle-over" | "ticket-status-is">>(
+    "pr-merged",
+  );
+  const [action, setAction] = React.useState<FlowAction>("notify");
+  const [mode, setMode] = React.useState(promptModes[0]?.id ?? "");
+  const [dest, setDest] = React.useState<LaunchDest>("worktree");
+
+  // Only a non-`notify` node ever had an out-port on the canvas (see
+  // OrchestratorDrawer.tsx's own `orch-port out`, rendered for every node
+  // except a notify terminal) — a notify node can never be a rule's source
+  // here either, for the identical reason. No nodes at all, or nodes that are
+  // ALL notify terminals, leaves nothing to build a rule from; there is
+  // nothing useful this bar can offer in that case, so it renders nothing
+  // rather than a picker with an empty "From" list and a permanently disabled
+  // button.
+  const sources = flow.nodes.filter((n) => n.kind !== "notify");
+  if (sources.length === 0) return null;
+
+  // Excludes `from` itself (no self-loop) and any node `from` already has an
+  // edge to (the exact duplicate `finishWire`'s own wiring already refuses on
+  // the canvas) — not by target KIND, which is what `mismatch` below decides
+  // instead, with the one shared function, so this list and that guard can
+  // never quietly disagree about the same pairing.
+  const targets = flow.nodes.filter(
+    (n) => n.id !== from && !flow.edges.some((e) => e.from === from && e.to === n.id),
+  );
+
+  const draft: FlowEdge | null = from && to ? { id: "draft", from, to, cond: { kind: cond }, action } : null;
+  const mismatch = draft ? actionMismatch(flow, draft) : null;
+
+  const addRule = () => {
+    if (!draft || mismatch) return;
+    const id = nextEdgeId(flow);
+    const finalEdge: FlowEdge = { ...draft, id };
+    let next: Flow = { ...flow, edges: [...flow.edges, finalEdge] };
+    if (action === "seed") next = withMode(next, finalEdge, mode);
+    if (action === "launch") {
+      next = withMode(next, finalEdge, mode);
+      next = withDest(next, finalEdge, dest);
+    }
+    onSave(next);
+    setFrom("");
+    setTo("");
+    setCond("pr-merged");
+    setAction("notify");
+  };
+
+  return (
+    <div className="fl-newrule" data-testid="flowlist-newrule">
+      <span className="orch-kw">WHEN</span>
+      <select
+        className="orch-sel"
+        aria-label="From node"
+        value={from}
+        onChange={(ev) => { setFrom(ev.currentTarget.value); setTo(""); }}
+      >
+        <option value="">choose a node…</option>
+        {sources.map((n) => <option key={n.id} value={n.id}>{endLabel(flow, n.id)}</option>)}
+      </select>
+      <select
+        className="orch-sel"
+        aria-label="New rule condition"
+        value={cond}
+        onChange={(ev) =>
+          setCond(ev.currentTarget.value as Exclude<Condition["kind"], "agent-idle-over" | "ticket-status-is">)
+        }
+      >
+        {OFFERED_CONDS.map((k) => <option key={k} value={k}>{COND_LABEL[k]}</option>)}
+      </select>
+      <span className="orch-kw">THEN</span>
+      <select
+        className="orch-sel"
+        aria-label="New rule action"
+        value={action}
+        onChange={(ev) => setAction(ev.currentTarget.value as FlowAction)}
+      >
+        <option value="launch">{ACTION_LABEL.launch}</option>
+        <option value="seed">{ACTION_LABEL.seed}</option>
+        <option value="notify">{ACTION_LABEL.notify}</option>
+      </select>
+      <select
+        className="orch-sel"
+        aria-label="To node"
+        value={to}
+        onChange={(ev) => setTo(ev.currentTarget.value)}
+      >
+        <option value="">choose a node…</option>
+        {targets.map((n) => <option key={n.id} value={n.id}>{endLabel(flow, n.id)}</option>)}
+      </select>
+      {mismatch ? (
+        // Not red — see `actionMismatch`'s own doc comment: nothing has tried
+        // and failed, there is simply nothing yet to build.
+        <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>{mismatch}</span>
+      ) : action !== "notify" ? (
+        <>
+          <span className="orch-kw">USING</span>
+          <select
+            className="orch-sel"
+            aria-label="New rule mode"
+            value={mode}
+            onChange={(ev) => setMode(ev.currentTarget.value)}
+          >
+            {promptModes.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+          </select>
+          {action === "launch" && (
+            <select
+              className="orch-sel"
+              aria-label="New rule destination"
+              value={dest}
+              onChange={(ev) => setDest(ev.currentTarget.value as LaunchDest)}
+            >
+              <option value="worktree">worktree</option>
+              <option value="new-window">new window</option>
+              <option value="current-window">current window</option>
+            </select>
+          )}
+        </>
+      ) : null}
+      {/* `disabled` only for an INCOMPLETE draft (no from, or no to) — there is
+          nothing yet to attempt. A mismatched one stays clickable, same as the
+          tray's own drop handler stays a live target for a payload it is about
+          to refuse (see OrchestratorDrawer.tsx's "ignores a malformed payload"
+          case): the refusal itself is `addRule`'s own guard just below, right
+          before it would ever call `onSave`, not a control disabled out from
+          under a reason already printed a few pixels to its left. */}
+      <button type="button" className="orch-mini" disabled={!draft} onClick={addRule}>
+        + Add rule
+      </button>
+    </div>
+  );
+}
+
 export function FlowList(p: FlowListProps): JSX.Element {
   const { flow } = p;
 
@@ -305,7 +464,11 @@ export function FlowList(p: FlowListProps): JSX.Element {
     }
   };
 
-  if (rows.length === 0) {
+  // Both branches below now sit above the SAME `NewRuleBar` (rendered once,
+  // after this `if`) — there being no rows yet is no longer a dead end that
+  // sends you back to the canvas to make one, now that a rule can be built
+  // right here.
+  const body = rows.length === 0 ? (
     // Not a hint line on a card (the house rule those forbid) — an empty
     // state for the list itself, the same job `.orch-empty` does for the
     // canvas when a flow has no nodes yet.
@@ -314,14 +477,10 @@ export function FlowList(p: FlowListProps): JSX.Element {
     // the last rule lands focus here on purpose, deliberately, rather than
     // losing it to <body>), but not a stop an ordinary Tab press should
     // land on — there is nothing here to DO, only something to read.
-    return (
-      <div className="orch-empty" data-testid="flowlist-empty" ref={emptyRef} tabIndex={-1}>
-        No rules yet. Switch to Canvas and connect two nodes to add one.
-      </div>
-    );
-  }
-
-  return (
+    <div className="orch-empty" data-testid="flowlist-empty" ref={emptyRef} tabIndex={-1}>
+      No rules yet.
+    </div>
+  ) : (
     <div className="fl-list" role="list" aria-label="Rules" data-testid="orch-list">
       {rows.map((e, i) => {
         const open = openId === e.id;
@@ -369,5 +528,12 @@ export function FlowList(p: FlowListProps): JSX.Element {
         );
       })}
     </div>
+  );
+
+  return (
+    <>
+      {body}
+      <NewRuleBar flow={flow} promptModes={p.promptModes} onSave={p.onSave} />
+    </>
   );
 }

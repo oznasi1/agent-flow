@@ -452,3 +452,173 @@ describe("an impossible action", () => {
     expect(row.querySelector(".err")).toBeNull();
   });
 });
+
+/** Two places with no rule between them yet — what building the FIRST rule
+ * from the keyboard starts from. */
+const twoPlacesNoEdge = () =>
+  flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n2", kind: "place", x: 320, y: 0, join: "any", runKey: "ASM-2", repo: "agent-flow" },
+    ],
+  });
+
+/** A place and a planned node, no rule yet — the pairing a `launch` rule can
+ * be built onto. */
+const placeAndPlannedNoEdge = () =>
+  flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      {
+        id: "n2", kind: "planned", x: 320, y: 0, join: "any",
+        ticketKey: "ASM-12", repos: ["agent-flow"], mode: "quick", dest: "worktree",
+      },
+    ],
+  });
+
+describe("adding a rule from the keyboard", () => {
+  it("renders nothing when there is no node that could ever be a rule's source", () => {
+    render(<FlowList {...props({ flow: flow() })} />);
+    expect(screen.queryByTestId("flowlist-newrule")).toBeNull();
+  });
+
+  it("offers From, Condition, Action and To as ordinary form controls", () => {
+    render(<FlowList {...props({ flow: twoPlacesNoEdge() })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    expect(within(bar).getByLabelText("From node").tagName).toBe("SELECT");
+    expect(within(bar).getByLabelText("New rule condition").tagName).toBe("SELECT");
+    expect(within(bar).getByLabelText("New rule action").tagName).toBe("SELECT");
+    expect(within(bar).getByLabelText("To node").tagName).toBe("SELECT");
+  });
+
+  it("Add rule is disabled until both a from and a to are chosen", () => {
+    render(<FlowList {...props({ flow: twoPlacesNoEdge() })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    const addBtn = within(bar).getByRole("button", { name: "+ Add rule" });
+    expect(addBtn).toBeDisabled();
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    expect(addBtn).toBeDisabled();
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    expect(addBtn).not.toBeDisabled();
+  });
+
+  it("builds a rule with the chosen from, to, condition and action", () => {
+    const onSave = vi.fn();
+    render(<FlowList {...props({ flow: twoPlacesNoEdge(), onSave })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    fireEvent.change(within(bar).getByLabelText("New rule condition"), { target: { value: "ci-failed" } });
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes).toEqual(twoPlacesNoEdge().nodes); // nodes untouched
+    expect(saved.edges).toHaveLength(1);
+    expect(saved.edges[0]).toMatchObject({ from: "n1", to: "n2", cond: { kind: "ci-failed" }, action: "notify" });
+  });
+
+  it("the To list excludes the chosen From node and any node it already has a rule to", () => {
+    const wired = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n2", kind: "place", x: 0, y: 88, join: "any", runKey: "ASM-2", repo: "r" },
+        { id: "n3", kind: "place", x: 0, y: 176, join: "any", runKey: "ASM-3", repo: "r" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    });
+    render(<FlowList {...props({ flow: wired })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    const values = Array.from(within(bar).getByLabelText("To node").querySelectorAll("option")).map(
+      (o) => (o as HTMLOptionElement).value,
+    );
+    expect(values).not.toContain("n1"); // no self-loop
+    expect(values).not.toContain("n2"); // the exact duplicate finishWire itself refuses
+    expect(values).toContain("n3");
+  });
+
+  it("changing From clears whatever To was already chosen", () => {
+    render(<FlowList {...props({ flow: twoPlacesNoEdge() })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    expect(within(bar).getByLabelText("To node")).toHaveValue("n2");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n2" } });
+    expect(within(bar).getByLabelText("To node")).toHaveValue("");
+  });
+
+  it("resets the whole form once a rule is added", () => {
+    render(<FlowList {...props({ flow: twoPlacesNoEdge() })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    expect(within(bar).getByLabelText("From node")).toHaveValue("");
+    expect(within(bar).getByLabelText("To node")).toHaveValue("");
+  });
+
+  it("a launch rule cannot be created pointing at a place — the same reason the inspector gives", () => {
+    const onSave = vi.fn();
+    render(<FlowList {...props({ flow: twoPlacesNoEdge(), onSave })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    fireEvent.change(within(bar).getByLabelText("New rule action"), { target: { value: "launch" } });
+    expect(bar.textContent).toMatch(/launch needs planned work/i);
+    // Not disabled — see the button's own comment: the refusal is `addRule`'s
+    // guard, exercised by clicking, not a control withheld from the user.
+    const addBtn = within(bar).getByRole("button", { name: "+ Add rule" });
+    expect(addBtn).not.toBeDisabled();
+    fireEvent.click(addBtn);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("the mirror: a seed rule cannot be created pointing at planned work", () => {
+    const onSave = vi.fn();
+    render(<FlowList {...props({ flow: placeAndPlannedNoEdge(), onSave })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    fireEvent.change(within(bar).getByLabelText("New rule action"), { target: { value: "seed" } });
+    expect(bar.textContent).toMatch(/seed needs a place/i);
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("builds a launch rule, writing the mode and destination onto the target planned node, not the edge", () => {
+    const onSave = vi.fn();
+    render(<FlowList {...props({ flow: placeAndPlannedNoEdge(), onSave })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    fireEvent.change(within(bar).getByLabelText("New rule action"), { target: { value: "launch" } });
+    fireEvent.change(within(bar).getByLabelText("New rule mode"), { target: { value: "careful" } });
+    fireEvent.change(within(bar).getByLabelText("New rule destination"), { target: { value: "new-window" } });
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0]).toMatchObject({ from: "n1", to: "n2", action: "launch" });
+    expect(saved.edges[0].mode).toBeUndefined();
+    const target = saved.nodes.find((n) => n.id === "n2") as { mode: string; dest: string };
+    expect(target.mode).toBe("careful");
+    expect(target.dest).toBe("new-window");
+  });
+
+  it("builds a seed rule, writing the chosen mode onto the edge", () => {
+    const onSave = vi.fn();
+    render(<FlowList {...props({ flow: twoPlacesNoEdge(), onSave })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    fireEvent.change(within(bar).getByLabelText("New rule action"), { target: { value: "seed" } });
+    fireEvent.change(within(bar).getByLabelText("New rule mode"), { target: { value: "careful" } });
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0]).toMatchObject({ from: "n1", to: "n2", action: "seed", mode: "careful" });
+  });
+
+  it("offers no mode or destination clause for a notify rule", () => {
+    render(<FlowList {...props({ flow: twoPlacesNoEdge() })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    expect(within(bar).queryByLabelText("New rule mode")).toBeNull();
+    expect(within(bar).queryByLabelText("New rule destination")).toBeNull();
+  });
+});
