@@ -8,11 +8,14 @@
 //     toggles the conditions read from; covering them hides the state.
 //  2. There is NO scrim. A modal veil would block the drag the drawer exists to
 //     receive — the board stays fully live while the drawer is open.
-// Width is a fixed 560px in this phase: resize and expand were cut from Phase 2a
-// and tracked as a known gap, not built here. Do not reintroduce a var(--orch-w,
-// 560px) indirection speculatively — nothing sets that variable yet, and
-// tokens.test.ts's orphan-usage check is what caught it last time. A real resize
-// task can add the variable back once something actually sets it inline.
+// Width is user-resizable: a grip on the drawer's left border (this task), and
+// on top of that plumbing, an expand toggle (Task 4). --orch-w carries the live
+// value. It is declared right here, locally, with the phase-1 pixel figure as
+// its default — so tokens.test.ts's orphan-usage check sees a real declaration
+// in this sheet and never needs --orch-w added to the RUNTIME_ONLY allowlist.
+// OrchestratorDrawer.tsx then overrides it with an inline style carrying the
+// current (dragged, arrow-keyed, or persisted) width — the override direction
+// only works because the default already exists here to be overridden.
 export const ORCH_CSS = `
   .orch-chip { gap: 6px; }
   .orch-chip .ic { font-size: 12px; line-height: 1; }
@@ -23,10 +26,21 @@ export const ORCH_CSS = `
      weight alone, never a fill of its own. */
   .orch-chip.armed .ct { color: var(--vscode-foreground); font-weight: 600; }
 
-  .orch { position: fixed; top: 53px; right: 0; bottom: 0; width: 560px; z-index: 40;
+  .orch { position: fixed; top: 53px; right: 0; bottom: 0; --orch-w: 560px; width: var(--orch-w); z-index: 40;
     display: flex; flex-direction: column;
     background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
     border-left: 1px solid var(--hair); box-shadow: -14px 0 34px -12px rgba(0,0,0,.45); }
+
+  /* The resize grip, centred ON the left border rather than beside it — half
+     outside the drawer's box, half inside — so it never nudges the header,
+     body, or footer's own layout. Never brand-tinted: this surface's one
+     filled/accented control is Arm (.orch-arm below); a resize handle earning
+     the same treatment would read as a second primary control on one surface. */
+  .orch-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 9px; z-index: 1;
+    background: transparent; border: 0; padding: 0; cursor: ew-resize; }
+  .orch-grip:hover { background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
+  .orch-grip:focus-visible { outline: none;
+    box-shadow: inset 0 0 0 1px var(--vscode-focusBorder); }
 
   .orch-hd { flex: none; padding: 13px 16px 11px; border-bottom: 1px solid var(--hair); }
   .orch-hd .row { display: flex; align-items: center; gap: 8px; }

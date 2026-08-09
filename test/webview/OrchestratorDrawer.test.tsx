@@ -42,6 +42,17 @@ if (typeof window !== "undefined" && !window.DragEvent) {
   window.DragEvent = DragEventPolyfill;
 }
 
+// The grip persists its width through vscodeApi.getState/setState — the first
+// consumer of either in this webview. Mocked the same way `send` is mocked in
+// DeckApp.test.tsx etc: a plain vi.fn() pair, so each resize test can script
+// exactly what a prior session left behind (or nothing, or garbage) without a
+// real acquireVsCodeApi() (which does not exist under jsdom).
+vi.mock("../../src/webview/vscodeApi", () => ({
+  vscodeApi: { getState: vi.fn(() => undefined), setState: vi.fn() },
+}));
+
+import { vscodeApi } from "../../src/webview/vscodeApi";
+
 const flow = (over: Partial<Flow> = {}): Flow => ({
   id: "f1", name: "Ship the migration", armed: false, createdAt: 1_000, nodes: [], edges: [], ...over,
 });
@@ -1349,5 +1360,134 @@ describe("an errored rule", () => {
     render(<OrchestratorDrawer {...props({ flows: [erroredFlow({ armed: false })] })} />);
     expect(screen.getByText("Not armed")).toBeTruthy();
     expect(screen.queryByText(/stalled/i)).toBeNull();
+  });
+});
+
+// The grip that resizes the drawer. `.orch`'s width lives in `--orch-w`, set as
+// an inline style on the `<aside>` — reading `orch.style.getPropertyValue` is
+// the width itself, not a proxy for it.
+describe("resizing", () => {
+  const grip = () => screen.getByRole("separator", { name: /resize/i });
+  const widthOf = (container: HTMLElement) =>
+    (container.querySelector(".orch") as HTMLElement).style.getPropertyValue("--orch-w");
+
+  it("exposes the grip as a focusable vertical separator", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    const g = grip();
+    expect(g).toHaveAttribute("aria-orientation", "vertical");
+    expect(g.tabIndex).toBe(0);
+  });
+
+  it("starts at the 560px default when nothing is stored", () => {
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    expect(widthOf(container)).toBe("560px");
+  });
+
+  // pointerDown is fired on its own (its implicit act() flush is what lets the
+  // resize effect above actually attach its window listeners), and the move +
+  // up pair is driven inside one manual act() together — the same split the
+  // node-drag tests above use for their StrictMode and stale-ref races. Not
+  // exercising either race here (there is no async gap between this grip's
+  // move and up), but matching the split keeps the listener attached before
+  // the move it needs to observe, rather than dispatching a move no listener
+  // is there yet to catch.
+  it("dragging the grip changes the width", () => {
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    fireEvent.pointerDown(grip(), { clientX: 300 });
+    act(() => {
+      // Left border pulled 40px further left grows the (right-anchored) drawer
+      // by 40px: 560 + (300 - 260) = 600.
+      fireEvent.pointerMove(window, { clientX: 260 });
+      fireEvent.pointerUp(window);
+    });
+    expect(widthOf(container)).toBe("600px");
+  });
+
+  it("persists the width via vscodeApi.setState once the drag ends", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    fireEvent.pointerDown(grip(), { clientX: 300 });
+    act(() => {
+      fireEvent.pointerMove(window, { clientX: 260 });
+      fireEvent.pointerUp(window);
+    });
+    expect(vscodeApi.setState).toHaveBeenCalledWith({ orchWidth: 600 });
+  });
+
+  it("clamps the width at the floor", () => {
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    fireEvent.pointerDown(grip(), { clientX: 300 });
+    act(() => {
+      // Dragged hugely toward "narrower" — far past the 420px floor.
+      fireEvent.pointerMove(window, { clientX: 900 });
+      fireEvent.pointerUp(window);
+    });
+    expect(widthOf(container)).toBe("420px");
+  });
+
+  // The ceiling is read from window.innerWidth at drag time (not baked in at
+  // mount), so this shrinks the viewport AFTER mounting at the default width,
+  // then drags hugely toward "wider" — isolating the live clamp from whatever
+  // clamping mounting itself might also apply.
+  it("clamps the width at the ceiling, derived from the viewport", () => {
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    const prevWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
+    try {
+      fireEvent.pointerDown(grip(), { clientX: 300 });
+      act(() => {
+        fireEvent.pointerMove(window, { clientX: -900 });
+        fireEvent.pointerUp(window);
+      });
+      // Ceiling = max(420, innerWidth - 340) = max(420, 460) = 460.
+      expect(widthOf(container)).toBe("460px");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: prevWidth });
+    }
+  });
+
+  it("resizes with arrow keys — ArrowLeft grows, ArrowRight shrinks", () => {
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    fireEvent.keyDown(grip(), { key: "ArrowLeft" });
+    expect(widthOf(container)).toBe("576px");
+    fireEvent.keyDown(grip(), { key: "ArrowRight" });
+    fireEvent.keyDown(grip(), { key: "ArrowRight" });
+    expect(widthOf(container)).toBe("544px");
+    expect(vscodeApi.setState).toHaveBeenLastCalledWith({ orchWidth: 544 });
+  });
+
+  it("ignores keys other than the two arrow keys", () => {
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    fireEvent.keyDown(grip(), { key: "Enter" });
+    expect(widthOf(container)).toBe("560px");
+  });
+
+  it("honours a stored width from a previous session on mount", () => {
+    vi.mocked(vscodeApi.getState).mockReturnValueOnce({ orchWidth: 620 });
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    expect(widthOf(container)).toBe("620px");
+  });
+
+  it("falls back to the default width when the stored value is corrupt", () => {
+    // A future version's shape, or a hand-edited value — either way, not the
+    // number this version expects.
+    vi.mocked(vscodeApi.getState).mockReturnValueOnce({ orchWidth: "wide" } as never);
+    expect(() => render(<OrchestratorDrawer {...props()} />)).not.toThrow();
+    expect(widthOf(document.body)).toBe("560px");
+  });
+
+  it("falls back to the default width when getState itself throws", () => {
+    vi.mocked(vscodeApi.getState).mockImplementationOnce(() => {
+      throw new Error("state store unavailable");
+    });
+    expect(() => render(<OrchestratorDrawer {...props()} />)).not.toThrow();
+    expect(widthOf(document.body)).toBe("560px");
+  });
+
+  it("does not throw when persisting the width fails", () => {
+    vi.mocked(vscodeApi.setState).mockImplementationOnce(() => {
+      throw new Error("state store unavailable");
+    });
+    render(<OrchestratorDrawer {...props()} />);
+    expect(() => fireEvent.keyDown(grip(), { key: "ArrowLeft" })).not.toThrow();
   });
 });

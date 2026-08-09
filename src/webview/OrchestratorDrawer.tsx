@@ -3,6 +3,75 @@ import { describeCond, placeActivity } from "../engine/orchestrator/conditions";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, Flow, FlowAction, FlowEdge, FlowNode, isSettled, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { AgentState, FlowPromptMode, PendingResume, RunStatus } from "../types";
+import { vscodeApi } from "./vscodeApi";
+
+/** The width before any drag or arrow-key resize, and the fallback for a
+ * missing or corrupt stored value. Matches the default this same figure
+ * carries in `--orch-w` (orchestratorStyles.ts), so the very first paint —
+ * before this file's state can even be read — already agrees with it. */
+const DEFAULT_ORCH_W = 560;
+
+/** Floor: narrow enough to give more room to the board, but the header row —
+ * the flow switcher, "Delete flow", the close button, and the name field —
+ * must not wrap or clip at it. 420px is the narrowest that still holds that
+ * row comfortably.
+ *
+ * Ceiling: derived from the viewport, not a fixed pixel, so a maximized
+ * editor and a half-screen one don't share one number. `deckStyles.ts`'s
+ * board column is 318px wide (`.col { flex: 0 0 318px }`); reserving
+ * somewhat more than that keeps at least one board column visible beside the
+ * drawer — the whole reason resize won over an expand-only drawer (see this
+ * file's own header comment and the mockup it points at). */
+const MIN_ORCH_W = 420;
+const BOARD_MARGIN = 340;
+
+/** Recomputed on every drag move and every arrow-key press, not cached at
+ * mount: the viewport can change (a window resize, a panel dragged wider)
+ * while the drawer is open. */
+function orchCeiling(): number {
+  return Math.max(MIN_ORCH_W, window.innerWidth - BOARD_MARGIN);
+}
+
+function clampOrchWidth(w: number): number {
+  return Math.min(orchCeiling(), Math.max(MIN_ORCH_W, w));
+}
+
+/** What this file persists across a reload — a single small object, not a
+ * shared state blob: nothing else in the webview calls `vscodeApi.getState`/
+ * `setState` yet, so this is the pattern's first use, not an addition to an
+ * existing one. */
+interface OrchPersisted {
+  orchWidth?: number;
+}
+
+/** Read defensively: a value written by a future version of `OrchPersisted`,
+ * or one that got corrupted, must fall back to the default rather than throw
+ * or hand back garbage for `--orch-w` to render. */
+function readPersistedWidth(): number | null {
+  let stored: unknown;
+  try {
+    stored = vscodeApi.getState<OrchPersisted>();
+  } catch {
+    return null;
+  }
+  if (!stored || typeof stored !== "object") return null;
+  const w = (stored as OrchPersisted).orchWidth;
+  return typeof w === "number" && Number.isFinite(w) ? w : null;
+}
+
+/** Best-effort: a webview host that rejects the write is not a reason to
+ * throw out of a keypress or a pointer release. */
+function persistWidth(w: number): void {
+  try {
+    vscodeApi.setState({ orchWidth: w });
+  } catch {
+    // Losing persistence is not worse than losing the drawer over it.
+  }
+}
+
+/** Arrow-key step. Two grid units (see `GRID` in layout.ts) — a visible
+ * increment without needing many presses to reach a useful width. */
+const RESIZE_STEP = 16;
 
 /** The drag payload a Deck card carries. A NUL separator cannot appear in a
  * ticket key or a repo name, so parsing is unambiguous. */
@@ -205,6 +274,43 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const [sel, setSel] = React.useState<string | null>(null);
   const [wiring, setWiring] = React.useState<string | null>(null);
   const [selEdge, setSelEdge] = React.useState<string | null>(null);
+  const [width, setWidth] = React.useState<number>(() =>
+    clampOrchWidth(readPersistedWidth() ?? DEFAULT_ORCH_W),
+  );
+  const [resizing, setResizing] = React.useState<{ startX: number; startW: number } | null>(null);
+  /** Mirrors `dragRef` above, for the identical reason: `pointerup` can arrive
+   * before React flushes the last `pointermove`'s `setWidth`, so the release
+   * handler reads this ref (written synchronously in `move`) rather than the
+   * `width` this effect closed over. */
+  const resizeRef = React.useRef<number | null>(null);
+
+  // Same shape as the drag effect above, and for the same reason: one pointer
+  // handler pair on `window`, live while a resize is in progress, torn down
+  // the moment it ends. The persist happens in `up`, once, not on every move —
+  // a disk write per pixel would be as wasteful here as it would be for a
+  // dragged node.
+  React.useEffect(() => {
+    if (!resizing) return;
+    const move = (e: PointerEvent) => {
+      // Pulling the left border further LEFT (a smaller clientX) grows the
+      // drawer, since it is anchored to the right edge of the panel.
+      const next = clampOrchWidth(resizing.startW + (resizing.startX - e.clientX));
+      resizeRef.current = next;
+      setWidth(next);
+    };
+    const up = () => {
+      const finalWidth = resizeRef.current ?? resizing.startW;
+      resizeRef.current = null;
+      setResizing(null);
+      persistWidth(finalWidth);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+  }, [resizing]);
 
   // One pointer handler, and a save only on release — a save per pointermove would
   // be a disk write per pixel. Guarded on `flow` too: hooks must run unconditionally
@@ -295,6 +401,24 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       // An edge whose end is gone can never be evaluated, so it goes with it.
       edges: flow.edges.filter((e) => e.from !== id && e.to !== id),
     });
+  };
+
+  const startResize = (e: React.PointerEvent) => {
+    setResizing({ startX: e.clientX, startW: width });
+  };
+
+  /** ArrowLeft grows the drawer, ArrowRight shrinks it — the same mapping the
+   * pointer drag uses (see the resize effect's `move` above): pulling the
+   * left border further left is what makes the drawer wider. Persisted
+   * immediately, the same as a released drag, rather than waiting for the
+   * grip to lose focus — an arrow press IS the whole gesture, there is no
+   * separate "release" to persist on. */
+  const onGripKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const next = clampOrchWidth(e.key === "ArrowLeft" ? width + RESIZE_STEP : width - RESIZE_STEP);
+    setWidth(next);
+    persistWidth(next);
   };
 
   const startDrag = (id: string, e: React.PointerEvent) => {
@@ -448,7 +572,25 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   };
 
   return (
-    <aside className="orch" aria-label="Orchestrator">
+    <aside className="orch" aria-label="Orchestrator" style={{ ["--orch-w" as any]: `${width}px` }}>
+      {/* role="separator" + aria-orientation is the ARIA shape App.tsx's own
+          controls already use (role="tablist"/"group" with aria-selected/
+          -pressed) — a real widget role plus the state attributes that make
+          it usable without a mouse, not a bespoke pattern. Keyboard-resizable
+          on purpose: this phase's whole point is that the drawer works
+          without one, so a grip only a mouse could move would contradict it. */}
+      <div
+        className="orch-grip"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize Orchestrator drawer"
+        aria-valuenow={Math.round(width)}
+        aria-valuemin={MIN_ORCH_W}
+        aria-valuemax={orchCeiling()}
+        tabIndex={0}
+        onPointerDown={startResize}
+        onKeyDown={onGripKeyDown}
+      />
       <div className="orch-hd">
         <div className="row">
           <span className="eyebrow">Orchestrator</span>
