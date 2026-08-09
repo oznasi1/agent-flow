@@ -111,6 +111,34 @@ describe("rows", () => {
     const row = screen.getByTestId("flowlist-row-e1");
     expect(row.textContent).toContain("notify me");
   });
+
+  it("shows a launch or seed rule's note, truncated, after the mode", () => {
+    const longNote = "x".repeat(60);
+    render(<FlowList {...props({ flow: placeAndPlanned({ note: longNote }) })} />);
+    const row = screen.getByTestId("flowlist-row-e1");
+    // Truncated to 40 chars plus an ellipsis — the full 60-char note never
+    // reaches a closed row, which is for scanning, not reading.
+    expect(row.textContent).toContain(`${"x".repeat(40)}…`);
+    expect(row.textContent).not.toContain(longNote);
+    const modeIdx = row.textContent!.indexOf("Quick pass");
+    const noteIdx = row.textContent!.indexOf("x".repeat(40));
+    expect(modeIdx).toBeGreaterThan(-1);
+    expect(noteIdx).toBeGreaterThan(modeIdx);
+  });
+
+  it("shows a short note in full, with no ellipsis", () => {
+    render(<FlowList {...props({ flow: placeAndPlanned({ note: "keep an eye on this" }) })} />);
+    const row = screen.getByTestId("flowlist-row-e1");
+    expect(row.textContent).toContain("keep an eye on this");
+    expect(row.textContent).not.toContain("…");
+  });
+
+  it("shows no note text at all on a closed row when the rule carries none", () => {
+    render(<FlowList {...props({ flow: placeAndPlanned() })} />);
+    const row = screen.getByTestId("flowlist-row-e1");
+    expect(row.textContent).not.toContain("…");
+    expect(row.textContent).not.toContain("“"); // the opening curly quote a note would be wrapped in
+  });
 });
 
 describe("roving tabindex and keyboard navigation", () => {
@@ -313,6 +341,48 @@ describe("opening and closing a row for editing", () => {
     fireEvent.blur(box);
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
     expect(saved.nodes.find((n) => n.id === "n2")).toMatchObject({ message: "the migration has landed" });
+  });
+
+  it("offers a note for an open launch or seed row, but not for notify", () => {
+    const launching = placeAndPlanned();
+    const r1 = render(<FlowList {...props({ flow: launching })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    expect(screen.getByLabelText("Note")).toBeTruthy();
+    r1.unmount();
+
+    const seeding = twoPlaces({ action: "seed", mode: "quick" });
+    const r2 = render(<FlowList {...props({ flow: seeding })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    expect(screen.getByLabelText("Note")).toBeTruthy();
+    r2.unmount();
+
+    render(<FlowList {...props({ flow: twoPlaces() })} />); // action: notify
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    expect(screen.queryByLabelText("Note")).toBeNull();
+  });
+
+  it("edits the note on blur through the open row's own input", () => {
+    const onSave = vi.fn();
+    const launching = placeAndPlanned();
+    render(<FlowList {...props({ flow: launching, onSave })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const box = screen.getByLabelText("Note");
+    fireEvent.change(box, { target: { value: "watch for the flaky upload test" } });
+    fireEvent.blur(box);
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0].note).toBe("watch for the flaky upload test");
+  });
+
+  it("switching the open row's action to notify clears the note, the same way it clears the mode", () => {
+    const onSave = vi.fn();
+    const seeding = twoPlaces({ action: "seed", mode: "careful", note: "keep an eye on this one" });
+    render(<FlowList {...props({ flow: seeding, onSave })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "notify" } });
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0].action).toBe("notify");
+    expect(saved.edges[0].mode).toBeUndefined();
+    expect(saved.edges[0].note).toBeUndefined();
   });
 });
 

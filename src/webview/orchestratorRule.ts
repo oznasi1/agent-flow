@@ -22,6 +22,7 @@ import {
   LaunchDest,
   PlannedNode,
 } from "../engine/orchestrator/model";
+import { hasNote } from "../engine/prompt";
 import { FlowPromptMode, RunStatus } from "../types";
 
 /** The drawer's own wording for a condition. `describeCond` says what a place
@@ -83,6 +84,43 @@ export const DEST_LABEL: Record<LaunchDest, string> = {
  * {DEST_LABEL[d]}</option>)` instead of writing out the same three
  * `<option>`s by hand. */
 export const OFFERED_DESTS: LaunchDest[] = ["worktree", "new-window", "current-window"];
+
+/** The aria-label both presentations' note `<input>` shares — see `withNote`'s
+ * own doc comment for why this field exists at all. Centralised for the same
+ * reason `ACTION_LABEL` is: a second, hand-typed "Note" in the other file is
+ * exactly the copy this module exists to keep from drifting. */
+export const NOTE_ARIA_LABEL = "Note";
+
+/** The note input's placeholder, in both presentations — the one place this
+ * phase's whole burden of explaining "mode" vs. "note" gets paid. `mode`
+ * sits right beside this field and means something a user can easily
+ * mistake this for: a reusable, named instruction, configured once in
+ * `agentFlow.promptModes` and shared by every rule that picks it. A note is
+ * the opposite of that — typed here, once, for exactly this transition, and
+ * never offered anywhere else. Saying only "note" or "optional note" leaves
+ * that distinction to be guessed, and a user who guesses wrong either
+ * retypes the same sentence into twenty rules' notes, or reaches for
+ * settings to say something they needed only once. */
+export const NOTE_PLACEHOLDER = "Specific to this rule, once — the mode beside it is the reusable part";
+
+/** How many characters of a note a CLOSED row shows before an ellipsis takes
+ * over. A closed row is for scanning a flow's rules at a glance — see this
+ * file's own header comment on why the sentence is spent on `THEN`/`USING`
+ * words, not a form — and a note long enough to wrap a row onto three lines
+ * would defeat that. The inspector's own input, and an OPEN list row's, are
+ * where the whole note actually lives, uncut. */
+const NOTE_TRUNCATE_AT = 40;
+
+/** A rule's note, as a closed row shows it — empty when there is none, by
+ * `hasNote`'s own rule (a whitespace-only note counts as none, the same test
+ * `composeAgentPrompt` uses to decide whether to spend it on the prompt at
+ * all; showing one here while the engine silently drops it there would be
+ * its own small drift). */
+export function truncatedNote(note: string | undefined): string {
+  if (!hasNote(note)) return "";
+  const trimmed = note.trim();
+  return trimmed.length > NOTE_TRUNCATE_AT ? `${trimmed.slice(0, NOTE_TRUNCATE_AT)}…` : trimmed;
+}
 
 /** How a node's end reads in a rule's sentence. */
 export function endLabel(flow: Flow, id: string): string {
@@ -180,7 +218,15 @@ export function withCond(flow: Flow, edgeId: string, kind: Condition["kind"]): F
  * which is never created without one, so there is nothing to write there
  * just for switching the verb. Clearing it here matters for the same reason
  * `notify`'s clear does: a launch edge left carrying a `mode` would be a
- * second, unread source of truth for a fact the node alone owns. */
+ * second, unread source of truth for a fact the node alone owns.
+ *
+ * `note`, unlike `mode`, is cleared for `notify` ALONE — `launch` and `seed`
+ * both spend a note (see `FlowEdge.note`'s own doc comment: "for `launch`
+ * and `seed` only"), so switching between the two acting verbs must not
+ * throw away text the user just typed for the other one. Only `notify` has
+ * nowhere to spend it — its own words live on its notify node — which is
+ * exactly the persisted-but-unread state this clears, the same reasoning
+ * `mode`'s own clear already follows. */
 export function withAction(
   flow: Flow,
   edgeId: string,
@@ -191,6 +237,12 @@ export function withAction(
     const edge = flow.edges.find((x) => x.id === edgeId);
     const mode = edge?.mode ?? promptModes[0]?.id;
     return { ...flow, edges: flow.edges.map((x) => (x.id === edgeId ? { ...x, action, mode } : x)) };
+  }
+  if (action === "notify") {
+    return {
+      ...flow,
+      edges: flow.edges.map((x) => (x.id === edgeId ? { ...x, action, mode: undefined, note: undefined } : x)),
+    };
   }
   return {
     ...flow,
@@ -225,6 +277,19 @@ export function withDest(flow: Flow, edge: FlowEdge, dest: LaunchDest): Flow {
     ...flow,
     nodes: flow.nodes.map((n) => (n.id === edge.to && n.kind === "planned" ? { ...n, dest } : n)),
   };
+}
+
+/** Write a rule's once-off note. Unlike `withMode`, there is exactly ONE home
+ * for this fact regardless of `edge.action` — a launch's mode moves to its
+ * target node because a place has no mode field to share, but nothing about
+ * a note is ever read from a node: `composeAgentPrompt` (prompt.ts) takes it
+ * only as its own second argument, wherever the caller reads it from. So
+ * this always writes the edge, for both `launch` and `seed` alike — the one
+ * thing `withAction` still has to do on its own is clear it for `notify`
+ * (see that function's own doc comment), since this function has no action
+ * to check and just writes whatever it is given. */
+export function withNote(flow: Flow, edge: FlowEdge, note: string): Flow {
+  return { ...flow, edges: flow.edges.map((x) => (x.id === edge.id ? { ...x, note } : x)) };
 }
 
 export function withNotifyMessage(flow: Flow, edge: FlowEdge, message: string): Flow {

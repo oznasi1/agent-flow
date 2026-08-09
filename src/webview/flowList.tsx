@@ -27,13 +27,17 @@ import {
   modeDisplayLabel,
   modeValueOf,
   nextEdgeId,
+  NOTE_ARIA_LABEL,
+  NOTE_PLACEHOLDER,
   notifyMessageOf,
   OFFERED_CONDS,
   OFFERED_DESTS,
+  truncatedNote,
   withAction,
   withCond,
   withDest,
   withMode,
+  withNote,
   withNotifyMessage,
   withoutEdge,
 } from "./orchestratorRule";
@@ -148,6 +152,22 @@ function ruleSentence(
             </select>
           ) : (
             <span>{modeDisplayLabel(promptModes, modeValue)}</span>
+          )}
+          {/* The note, right after the mode — a closed row shows it
+              truncated (`truncatedNote`, empty for none), an open row edits
+              it directly, same `withNote` the inspector writes through.
+              Prose, so no mono; never a second filled control. */}
+          {open ? (
+            <input
+              className="orch-msg"
+              aria-label={NOTE_ARIA_LABEL}
+              key={e.id}
+              defaultValue={e.note ?? ""}
+              placeholder={NOTE_PLACEHOLDER}
+              onBlur={(ev) => onSave(withNote(flow, e, ev.currentTarget.value))}
+            />
+          ) : (
+            truncatedNote(e.note) && <span>&ldquo;{truncatedNote(e.note)}&rdquo;</span>
           )}
           {/* A place already exists, so `seed` has nothing to pick a
               destination for — only `launch` opens one, same as the

@@ -14,6 +14,8 @@ import {
   modeValueOf,
   nextEdgeId,
   nextNodeId,
+  NOTE_ARIA_LABEL,
+  NOTE_PLACEHOLDER,
   notifyMessageOf,
   observationOf,
   OFFERED_CONDS,
@@ -22,6 +24,7 @@ import {
   withCond,
   withDest,
   withMode,
+  withNote,
   withNotifyMessage,
   withoutEdge,
 } from "./orchestratorRule";
@@ -508,6 +511,8 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
 
   const setNotifyMessage = (e: FlowEdge, message: string) => p.onSave(withNotifyMessage(flow, e, message));
 
+  const setNote = (e: FlowEdge, note: string) => p.onSave(withNote(flow, e, note));
+
   const deleteEdge = (e: FlowEdge) => {
     setSelEdge(null);
     p.onSave(withoutEdge(flow, e.id));
@@ -992,44 +997,69 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>{mismatch}</span>
               </div>
             ) : (
-              <div className="orch-clause">
-                <span className="orch-kw">USING</span>
-                <select
-                  className="orch-sel"
-                  aria-label="Mode"
-                  value={modeValue}
-                  onChange={(ev) => setMode(edge, ev.currentTarget.value)}
-                >
-                  {/* An option for whatever the store actually holds, when it names
-                      no configured mode — an absent one, or one since deleted. Without
-                      this, a `<select>` whose value matches no option falls back to
-                      showing its first option selected, which would show a mode that
-                      will run while the one on disk is the one `modeFor` will refuse. */}
-                  {!modeExists && (
-                    <option value={modeValue}>
-                      {modeValue ? `${modeValue} (not configured)` : "(no mode set)"}
-                    </option>
+              <>
+                <div className="orch-clause">
+                  <span className="orch-kw">USING</span>
+                  <select
+                    className="orch-sel"
+                    aria-label="Mode"
+                    value={modeValue}
+                    onChange={(ev) => setMode(edge, ev.currentTarget.value)}
+                  >
+                    {/* An option for whatever the store actually holds, when it names
+                        no configured mode — an absent one, or one since deleted. Without
+                        this, a `<select>` whose value matches no option falls back to
+                        showing its first option selected, which would show a mode that
+                        will run while the one on disk is the one `modeFor` will refuse. */}
+                    {!modeExists && (
+                      <option value={modeValue}>
+                        {modeValue ? `${modeValue} (not configured)` : "(no mode set)"}
+                      </option>
+                    )}
+                    {p.promptModes.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                  {/* A place already exists, so `seed` has nothing to pick a
+                      destination for — only `launch` opens one. */}
+                  {edge.action === "launch" && (
+                    <>
+                      <span style={{ fontSize: "var(--t-body)" }}>in a</span>
+                      <select
+                        className="orch-sel"
+                        aria-label="Destination"
+                        value={launchDest ?? "worktree"}
+                        onChange={(ev) => setDest(edge, ev.currentTarget.value as LaunchDest)}
+                      >
+                        {OFFERED_DESTS.map((d) => <option key={d} value={d}>{DEST_LABEL[d]}</option>)}
+                      </select>
+                    </>
                   )}
-                  {p.promptModes.map((m) => (
-                    <option key={m.id} value={m.id}>{m.label}</option>
-                  ))}
-                </select>
-                {/* A place already exists, so `seed` has nothing to pick a
-                    destination for — only `launch` opens one. */}
-                {edge.action === "launch" && (
-                  <>
-                    <span style={{ fontSize: "var(--t-body)" }}>in a</span>
-                    <select
-                      className="orch-sel"
-                      aria-label="Destination"
-                      value={launchDest ?? "worktree"}
-                      onChange={(ev) => setDest(edge, ev.currentTarget.value as LaunchDest)}
-                    >
-                      {OFFERED_DESTS.map((d) => <option key={d} value={d}>{DEST_LABEL[d]}</option>)}
-                    </select>
-                  </>
-                )}
-              </div>
+                </div>
+                {/* The note: a second row under USING, not squeezed onto the
+                    mode/destination line — a blank `.orch-kw` spacer (same
+                    40px width, no text) lines this input up under the
+                    select above it rather than under the WHEN/THEN keywords.
+                    Prose, so no mono; and never a second filled control —
+                    Arm alone earns that (see the house rule this file's own
+                    header, and orchestratorStyles.ts's `.orch-arm`, both
+                    say). `key={edge.id}` matches the notify-message input
+                    just above: an uncontrolled field that must reset to the
+                    NEW edge's own value the moment `selEdge` changes, rather
+                    than keep showing whatever the previous edge's input last
+                    held. */}
+                <div className="orch-clause">
+                  <span className="orch-kw" />
+                  <input
+                    className="orch-msg"
+                    aria-label={NOTE_ARIA_LABEL}
+                    key={edge.id}
+                    defaultValue={edge.note ?? ""}
+                    placeholder={NOTE_PLACEHOLDER}
+                    onBlur={(ev) => setNote(edge, ev.currentTarget.value)}
+                  />
+                </div>
+              </>
             )}
             {/* Reset is offered for an ERRORED edge, not only a fired one. An edge
                 carrying `error` with no `firedAt` is settled in `evaluate.ts`, so it

@@ -1254,6 +1254,62 @@ describe("the acting verbs", () => {
     expect(matches.length).toBe(2);
     for (const m of matches) expect(m.getAttribute("style")).toContain("mono");
   });
+
+  it("offers a note for launch and for seed, but not for notify", () => {
+    const launching = placeAndPlanned();
+    launching.edges[0] = { ...launching.edges[0], action: "launch" };
+    const r1 = render(<OrchestratorDrawer {...props({ flows: [launching] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByLabelText("Note")).toBeTruthy();
+    r1.unmount();
+
+    const seeding = twoPlacesWired();
+    seeding.edges[0] = { ...seeding.edges[0], action: "seed", mode: "quick" };
+    const r2 = render(<OrchestratorDrawer {...props({ flows: [seeding] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByLabelText("Note")).toBeTruthy();
+    r2.unmount();
+
+    render(<OrchestratorDrawer {...props({ flows: [twoPlacesWired()] })} />); // action: notify
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.queryByLabelText("Note")).toBeNull();
+  });
+
+  it("typing a note saves it on the edge, on blur", () => {
+    const launching = placeAndPlanned();
+    launching.edges[0] = { ...launching.edges[0], action: "launch" };
+    const onSave = openInspector(launching);
+    const box = screen.getByLabelText("Note");
+    fireEvent.change(box, { target: { value: "watch for the flaky upload test" } });
+    fireEvent.blur(box);
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0].note).toBe("watch for the flaky upload test");
+  });
+
+  it("selecting notify clears the note, the same way it already clears the mode", () => {
+    const withNote = twoPlacesWired();
+    withNote.edges[0] = { ...withNote.edges[0], action: "seed", mode: "careful", note: "keep an eye on this one" };
+    const onSave = openInspector(withNote);
+    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "notify" } });
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0].action).toBe("notify");
+    expect(saved.edges[0].mode).toBeUndefined();
+    expect(saved.edges[0].note).toBeUndefined();
+  });
+
+  it("switching from seed to launch leaves an existing note alone", () => {
+    // twoPlacesWired's target is a place, so switching to `launch` here is
+    // itself a mismatch (see `actionMismatch`) — irrelevant to this test,
+    // which is only about whether `withAction`'s own edge write drops the
+    // note, not about what the inspector renders for a mismatched pairing.
+    const seeding = twoPlacesWired();
+    seeding.edges[0] = { ...seeding.edges[0], action: "seed", mode: "careful", note: "keep an eye on this one" };
+    const onSave = openInspector(seeding);
+    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "launch" } });
+    const afterLaunch = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(afterLaunch.edges[0].action).toBe("launch");
+    expect(afterLaunch.edges[0].note).toBe("keep an eye on this one");
+  });
 });
 
 describe("arming", () => {
