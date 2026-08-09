@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { window, ViewColumn, env, workspace, commands, setConfig, ConfigurationTarget } from "../_mocks/vscode";
+import { window, ViewColumn, env, workspace, commands, setConfig, ConfigurationTarget, fireConfigurationChanged } from "../_mocks/vscode";
 import { DEFAULT_PROMPT_MODES } from "../../src/config";
 import { composeAgentPrompt } from "../../src/engine/prompt";
 import { fakeContext } from "../_helpers/factories";
@@ -8,6 +8,7 @@ import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, Review
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
 import type { Flow } from "../../src/engine/orchestrator/model";
+import type { AgentProvider } from "../../src/config";
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
 // builder, and a stubbed workspace opener.
@@ -58,16 +59,17 @@ const h = vi.hoisted(() => ({
   reviewWrites: false as boolean,
   stampLabelOnWrite: true as boolean,
   seedAgent: true as boolean,
+  agentProvider: "claude-code" as AgentProvider,
   reviewSubmit: vi.fn(async (_repo: string, _number: number, _verb: ReviewVerb, _body: string): Promise<{ ok: true } | { ok: false; message: string }> => ({ ok: true })),
   repos: [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }] as ServiceRef[],
   reviewRequests: true as boolean,
   // Every Claude Code session open on this machine (Task 8) — the registry
   // readOpenSessions reads, stubbed here rather than touching real ~/.claude/sessions.
   openSessions: [] as OpenSession[],
-  // Per-session live activity (Task 8) — stubbed so the liveSignal-on case can
-  // assert a real, known AgentActivity is threaded through to the right
-  // CardAgent, without this suite re-testing readSessionActivity's own parsing
-  // of a real transcript file (engine/transcript.test.ts already does that).
+  // Per-session live activity (Task 8) — stubbed so a test can assert a real,
+  // known AgentActivity is threaded through to the right CardAgent, without
+  // this suite re-testing readSessionActivity's own parsing of a real
+  // transcript file (engine/transcript.test.ts already does that).
   sessionActivity: vi.fn((_projectsRoot: string, _cwd: string, _sessionId: string, _nowMs: number): AgentActivity => (
     { state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" }
   )),
@@ -203,8 +205,9 @@ vi.mock("../../src/engine/sessions", async (importActual) => ({
   defaultSessionsDir: () => "/sessions",
 }));
 // UNKNOWN_ACTIVITY stays real (deckView.ts imports it directly, and it is the
-// exact value the liveSignal-off case asserts against) — only the transcript
-// read itself, which would otherwise hit a real (absent) file, is replaced.
+// exact value the unreadable-transcript case asserts against) — only the
+// transcript read itself, which would otherwise hit a real (absent) file, is
+// replaced.
 vi.mock("../../src/engine/transcript", async (importActual) => ({
   ...(await importActual<typeof import("../../src/engine/transcript")>()),
   readSessionActivity: (projectsRoot: string, cwd: string, sessionId: string, nowMs: number) =>
@@ -306,6 +309,7 @@ vi.mock("../../src/config", async (importActual) => {
       reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: ["vendored"],
       reviewWrites: h.reviewWrites, stampLabelOnWrite: h.stampLabelOnWrite,
       prReviewPrompt: h.prReviewPrompt, prReviewAutoFix: h.prReviewAutoFix, seedAgent: h.seedAgent,
+      agentProvider: h.agentProvider,
       prReviewStatus: "PR initiated",
       // Sourced from the real getConfig() (itself driven by the globally-mocked
       // vscode module) rather than hardcoded here, so a test's setConfig({
@@ -332,12 +336,19 @@ vi.mock("../../src/config", async (importActual) => {
     }),
   };
 });
-import { DeckPanel, POLL_MS } from "../../src/deckView";
+import { DeckPanel, POLL_MS, reviewProvenance } from "../../src/deckView";
 // The real constant, through the partial mock above (which spreads the actual module):
 // a test that restated the number could not catch the call site passing a literal.
 import { LOCK_TTL_MS } from "../../src/engine/orchestrator/lock";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
 import { TaskAuthError } from "../../src/tasks/provider";
+
+describe("reviewProvenance", () => {
+  it("stamps the drafting agent's name", () => {
+    expect(reviewProvenance("claude-code")).toBe("_Drafted with Claude Code via Agent Flow Deck._");
+    expect(reviewProvenance("copilot")).toBe("_Drafted with Copilot via Agent Flow Deck._");
+  });
+});
 
 // createdAt is *now*, not the epoch: a run minted in 1970 is older than any
 // abandonment window, so the retire sweep would carry off every fixture that
@@ -481,6 +492,7 @@ beforeEach(() => {
   }));
   h.reviewWrites = false;
   h.stampLabelOnWrite = true;
+  h.agentProvider = "claude-code";
   h.reviewSubmit.mockClear().mockResolvedValue({ ok: true });
   h.branch = "ASM-5641-team-table";
   h.flows = [];
@@ -555,7 +567,6 @@ describe("DeckPanel", () => {
     expect(runsPost).toBeTruthy();
     expect(runsPost.runs).toHaveLength(1);
     expect(runsPost.runs[0].run.key).toBe("ASM-1");
-    expect(runsPost.liveSignal).toBe(true);
   });
 
   it("posts the configured PR-review status so cards can gate the button", async () => {
@@ -591,18 +602,6 @@ describe("DeckPanel", () => {
     // that would happily produce a card for the review run too.
     expect(msg.runs).toHaveLength(1);
     expect(msg.runs[0].run.key).toBe("ASM-1");
-  });
-
-  it("re-posts with liveSignal off when toggled", async () => {
-    show();
-    const p = lastPanel();
-    await p._fire({ type: "deck:setLive", on: false });
-    const runsPost = posts(p).reverse().find((m) => m.type === "deck:runs");
-    expect(runsPost.liveSignal).toBe(false);
-    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({
-      ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
-      liveSignal: false, openIdentities: expect.any(Set), prs: {},
-    }));
   });
 
   it("inspect open re-opens the repo path via the editor", async () => {
@@ -821,7 +820,7 @@ describe("DeckPanel", () => {
     expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({
       ticket: { status: "In Review", category: "indeterminate" },
       projectsRoot: expect.any(String), nowMs: expect.any(Number),
-      liveSignal: true, openIdentities: expect.any(Set), prs: {},
+      openIdentities: expect.any(Set), prs: {},
     }));
   });
 
@@ -842,7 +841,7 @@ describe("DeckPanel", () => {
     await p._fire({ type: "deck:refresh" });
     expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({
       ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
-      liveSignal: true, openIdentities: expect.any(Set), prs: {},
+      openIdentities: expect.any(Set), prs: {},
     }));
     expect(log).not.toHaveBeenCalledWith(expect.stringContaining("ticket status"));
   });
@@ -873,10 +872,13 @@ describe("DeckPanel", () => {
     expect(loads.at(-1)).toBe(false);
   });
 
-  it("brackets a prFacts toggle with the busy indicator", async () => {
+  it("brackets a prFacts change with the busy indicator", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:setPrFacts", on: false });
+    h.prFacts = false;
+    setConfig({ prFacts: false });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
     const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
     expect(loads).toContain(true);
     expect(loads.at(-1)).toBe(false);
@@ -974,19 +976,19 @@ describe("DeckPanel open agents", () => {
     expect(builtFor("ASM-1").agents).toEqual([]);
   });
 
-  it("marks every attached agent's activity unknown when the live signal is off, while still listing the session", async () => {
-    // liveSignal off must not drop the session from the card — the registry
-    // still knows it's open; only its transcript goes unread.
+  it("still lists an attached session when its transcript is unreadable", async () => {
+    // The registry knows the session is open; only the transcript goes unread.
+    // That is now the sole route to an unknown activity, and it must not drop the
+    // session from the card.
     h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
     h.openSessions = [sess()];
+    h.sessionActivity.mockReturnValue({ state: "unknown", lastActivityMs: null, slug: null });
     show();
-    const p = lastPanel();
-    await p._fire({ type: "deck:setLive", on: false });
+    await settled();
     const agents = builtFor("ASM-1").agents;
     expect(agents).toHaveLength(1);
     expect(agents[0].session.name).toBe("svc-7e");
     expect(agents[0].activity).toEqual({ state: "unknown", lastActivityMs: null, slug: null });
-    expect(h.sessionActivity).not.toHaveBeenCalled();
   });
 
   it("reads the session's own live activity when the live signal is on, keyed to that session", async () => {
@@ -1016,18 +1018,11 @@ describe("DeckPanel open agents", () => {
     h.openSessions = [sess()];
     show();
     await settled();
-    const p = lastPanel();
-    await p._fire({ type: "deck:setOpenAgents", on: true });
+    h.openAgents = true;
+    setConfig({ openAgents: true });
+    fireConfigurationChanged("agentFlow.openAgents");
     await settled();
     expect(builtFor("ASM-1").agents).toHaveLength(1);
-  });
-
-  it("tells the webview which way the toggle is set", async () => {
-    h.openAgents = false;
-    show();
-    await settled();
-    const run = posts(lastPanel()).filter((m) => m.type === "deck:runs").at(-1)!;
-    expect(run.openAgents).toBe(false);
   });
 
   it("tags each agent with the run repo whose directory it runs in", async () => {
@@ -1057,6 +1052,71 @@ describe("DeckPanel open agents", () => {
     await settled();
     const built = builtLocal();
     expect(built.agents.map((a) => a.repo)).toEqual([built.run.repos[0].name]);
+  });
+});
+
+describe("DeckPanel settings without a reload", () => {
+  it("re-seeds prFacts from the setting and re-probes gh when it turns on", async () => {
+    h.prFacts = false;
+    show();
+    await settled();
+    h.probeGh.mockClear();
+
+    h.prFacts = true;
+    setConfig({ prFacts: true });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
+
+    // The re-probe is the point: the user may have run `gh auth login` since the
+    // last check, which is exactly why the removed deck:setPrFacts handler reset
+    // ghGap/ghProbe on the way on.
+    expect(h.probeGh).toHaveBeenCalled();
+  });
+
+  it("re-seeds openAgents from the setting", async () => {
+    h.openAgents = false;
+    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.openSessions = [sess()];
+    show();
+    await settled();
+    expect(builtFor("ASM-1").agents).toEqual([]);
+
+    h.openAgents = true;
+    setConfig({ openAgents: true });
+    fireConfigurationChanged("agentFlow.openAgents");
+    await settled();
+
+    expect(builtFor("ASM-1").agents).toHaveLength(1);
+  });
+
+  it("clears the review strip immediately when reviewRequests goes off", async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    h.reviewSearch.mockClear();
+
+    h.reviewRequests = false;
+    setConfig({ reviewRequests: false });
+    fireConfigurationChanged("agentFlow.reviewRequests");
+    await settled();
+
+    // Posted before the rebuild, not through it: switching off must empty the
+    // strip now rather than seconds later, which is why the removed
+    // deck:setReviewQueue handler called postCachedReviews() ahead of the refresh.
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({ enabled: false });
+    expect(h.reviewSearch).not.toHaveBeenCalled();
+  });
+
+  it("ignores a configuration change that touches none of its keys", async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    const before = posts(p).length;
+
+    fireConfigurationChanged("agentFlow.somethingElse");
+    await settled();
+
+    expect(posts(p)).toHaveLength(before);
   });
 });
 
@@ -1148,25 +1208,64 @@ describe("retire sweep", () => {
 });
 
 describe("board grouping", () => {
-  it("persists the grouping globally and echoes it back on the next post", async () => {
+  it("seeds the lens on ready, ahead of the board build", async () => {
+    // Asserted without settling, same idiom as the cached-reviews test above:
+    // the seed post happens synchronously inside onMessage, before its first
+    // await, so at this instant a board post cannot have happened yet.
+    setConfig({ deckGrouping: "workspaces" });
     show();
     await settled();
     const p = lastPanel();
+    p.webview.postMessage.mockClear();
+    const ready = p._fire({ type: "deck:ready" });
+
+    const early = posts(p);
+    expect(early.find((m) => m.type === "deck:grouping")).toEqual({ type: "deck:grouping", grouping: "workspaces" });
+    expect(early.find((m) => m.type === "deck:runs")).toBeUndefined();
+
+    await ready;
+    await settled();
+  });
+
+  it("persists a lens change without rebuilding the board", async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    const boardsBefore = posts(p).filter((m) => m.type === "deck:runs").length;
+
     await p._fire({ type: "deck:setGrouping", grouping: "workspaces" });
     await settled();
+
     // getConfiguration hands out a fresh stub per call, so the write is asserted
     // across every stub this pass produced rather than against one of them.
     const updates = workspace.getConfiguration.mock.results
       .flatMap((r) => (r.value as { update: { mock: { calls: unknown[][] } } }).update.mock.calls);
     expect(updates).toContainEqual(["deckGrouping", "workspaces", ConfigurationTarget.Global]);
-    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)!.grouping).toBe("workspaces");
+    // deckGrouping is display-only — the webview draws both lenses from the run
+    // list it already holds, so a rebuild here spends git per repo and a connector
+    // round trip per run to produce the identical board.
+    expect(posts(p).filter((m) => m.type === "deck:runs")).toHaveLength(boardsBefore);
   });
 
-  it("posts the grouping the setting already holds, without being asked", async () => {
-    setConfig({ deckGrouping: "workspaces" });
+  it("re-posts the lens when the setting changes under the panel", async () => {
     show();
     await settled();
-    expect(posts(lastPanel()).filter((m) => m.type === "deck:runs").at(-1)!.grouping).toBe("workspaces");
+    const p = lastPanel();
+
+    setConfig({ deckGrouping: "workspaces" });
+    fireConfigurationChanged("agentFlow.deckGrouping");
+    await settled();
+
+    expect(posts(p).at(-1)).toEqual({ type: "deck:grouping", grouping: "workspaces" });
+  });
+
+  it("no longer carries the lens on the board post", async () => {
+    // Control state on deck:runs is what made every toggle flip back before it
+    // settled: that message costs a full rebuild, so one already in flight when
+    // the user clicks lands carrying a pre-click snapshot.
+    show();
+    await settled();
+    expect(posts(lastPanel()).find((m) => m.type === "deck:runs")).not.toHaveProperty("grouping");
   });
 });
 
@@ -1302,15 +1401,13 @@ describe("DeckPanel local cards", () => {
     expect(h.buildRunStatus).not.toHaveBeenCalled();
   });
 
-  it("still makes local cards with the live signal off", async () => {
-    // The registry knows a session is open without any transcript being read, so
-    // the card appears — its agents just report unknown.
+  it("still makes local cards when a transcript is unreadable", async () => {
+    // The registry knows a session is open without its transcript being read, so
+    // the card appears — its agent just reports unknown.
     h.runs = [];
     h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.sessionActivity.mockReturnValue({ state: "unknown", lastActivityMs: null, slug: null });
     show();
-    await settled();
-    const p = lastPanel();
-    await p._fire({ type: "deck:setLive", on: false });
     await settled();
     const built = builtLocal();
     expect(built.agents).toHaveLength(1);
@@ -1433,7 +1530,7 @@ describe("DeckPanel PR facts", () => {
       // still requires this key to match the literal value.
       expect.objectContaining({
         ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
-        liveSignal: expect.any(Boolean), openIdentities: expect.any(Set), prs: h.prEntries,
+        openIdentities: expect.any(Set), prs: h.prEntries,
       }),
     );
   });
@@ -1562,7 +1659,7 @@ describe("DeckPanel PR facts", () => {
     expect(h.writePrEntry).not.toHaveBeenCalled();
   });
 
-  it("fetches nothing when prFacts is off, reports it to the webview, and keeps the map empty", async () => {
+  it("fetches nothing when prFacts is off and keeps the map empty", async () => {
     h.prFacts = false;
     h.prEntries = { svc: { facts: null, fetchedAt: Date.now() } };
     show();
@@ -1575,10 +1672,9 @@ describe("DeckPanel PR facts", () => {
       // still pins that key to the literal value).
       expect.objectContaining({
         ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
-        liveSignal: expect.any(Boolean), openIdentities: expect.any(Set), prs: {},
+        openIdentities: expect.any(Set), prs: {},
       }),
     );
-    expect(posts(lastPanel()).find((m) => m.type === "deck:runs")).toMatchObject({ prFacts: false });
   });
 
   it("fetches nothing and notes a missing gh", async () => {
@@ -1615,19 +1711,34 @@ describe("DeckPanel PR facts", () => {
     // — the cached probe result must not survive the round trip.
     show();
     await settled();
-    const p = lastPanel();
-    await p._fire({ type: "deck:setPrFacts", on: false });
+    h.prFacts = false;
+    setConfig({ prFacts: false });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
     h.probeGh.mockClear();
-    await p._fire({ type: "deck:setPrFacts", on: true });
+    h.prFacts = true;
+    setConfig({ prFacts: true });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
     expect(h.probeGh).toHaveBeenCalled();
   });
 
-  it("toggles prFacts from the webview", async () => {
+  it("applies a prFacts change from settings", async () => {
+    // prFacts no longer has a payload field of its own on deck:runs — ghNote is
+    // the one field left that reads this.prFacts on the host, so it stands in
+    // for the removed field as the observable proof the change landed.
+    h.probeGh.mockResolvedValue({ kind: "signed-out", detail: "not signed in" });
     show();
     await settled();
     const p = lastPanel();
-    await p._fire({ type: "deck:setPrFacts", on: false });
-    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)).toMatchObject({ prFacts: false });
+    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)?.ghNote).toMatch(/not signed in/i);
+
+    h.prFacts = false;
+    setConfig({ prFacts: false });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
+
+    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)?.ghNote).toBeNull();
   });
 
   it("forgets a run's PR facts alongside its run record", async () => {
@@ -1692,14 +1803,15 @@ describe("DeckPanel PR facts", () => {
     expect(h.buildRunStatus).toHaveBeenCalledWith(
       expect.objectContaining({
         ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
-        liveSignal: expect.any(Boolean), openIdentities: expect.any(Set), prs: { svc: svcEntry },
+        openIdentities: expect.any(Set), prs: { svc: svcEntry },
       }),
     );
   });
 
   it("does not let a probe orphaned by a toggle overwrite a fresher one (F6)", async () => {
     // Two probes end up in flight: the one this test lets resolve late must not
-    // win over the one started by the re-probe on `deck:setPrFacts on: true`.
+    // win over the one started by the re-probe when prFacts comes back on
+    // through a settings change.
     let resolveFirst!: (v: GhGap | null) => void;
     let resolveSecond!: (v: GhGap | null) => void;
     h.probeGh
@@ -1708,8 +1820,13 @@ describe("DeckPanel PR facts", () => {
     show();
     await settled(); // starts the first probe (left pending)
     const p = lastPanel();
-    await p._fire({ type: "deck:setPrFacts", on: false });
-    await p._fire({ type: "deck:setPrFacts", on: true }); // resets ghProbe, starts a second probe
+    h.prFacts = false;
+    setConfig({ prFacts: false });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
+    h.prFacts = true;
+    setConfig({ prFacts: true });
+    fireConfigurationChanged("agentFlow.prFacts"); // resets ghProbe, starts a second probe
     await settled();
 
     resolveSecond(null); // the fresh probe: the user just ran `gh auth login`
@@ -1861,18 +1978,14 @@ describe("DeckPanel review strip", () => {
     expect(posts(p).find((m) => m.type === "deck:reviews")).toMatchObject({ enabled: true });
   });
 
-  it("carries the review-queue toggle on deck:runs so the webview can render its pill", async () => {
-    const p = await showAndWarm();
-    expect(posts(p).find((m) => m.type === "deck:runs")).toMatchObject({ reviewQueue: true });
-    await p._fire({ type: "deck:setReviewQueue", on: false });
-    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)).toMatchObject({ reviewQueue: false });
-  });
-
   it("stops searching and clears the strip when the review queue is toggled off", async () => {
     const p = await showAndWarm();
     expect(h.reviewSearch).toHaveBeenCalledTimes(1);
 
-    await p._fire({ type: "deck:setReviewQueue", on: false });
+    h.reviewRequests = false;
+    setConfig({ reviewRequests: false });
+    fireConfigurationChanged("agentFlow.reviewRequests");
+    await settled();
     expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({
       requests: [], issueCount: 0, enabled: false,
     });
@@ -1880,14 +1993,19 @@ describe("DeckPanel review strip", () => {
   });
 
   // The regression this guards: reading `getConfig().reviewRequests` inside
-  // reviewsEnabled() rather than the session field. The setting stays true here,
-  // so a config read would quietly re-enable the strip on the very next poll and
-  // the toggle would appear to do nothing.
-  it("keeps the toggle's answer across a refresh, rather than re-reading the setting", async () => {
+  // reviewsEnabled() rather than the session field. A routine refresh must not
+  // re-seed it — only a configuration event does — so a poll tick cannot
+  // silently undo what the user last set.
+  it("re-reads reviewRequests on a configuration change but not on a routine refresh", async () => {
     h.reviewRequests = true;
     const p = await showAndWarm();
-    await p._fire({ type: "deck:setReviewQueue", on: false });
+
+    h.reviewRequests = false;
+    setConfig({ reviewRequests: false });
     await p._fire({ type: "deck:refresh" });
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({ enabled: true });
+
+    fireConfigurationChanged("agentFlow.reviewRequests");
     await settled();
     expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({ enabled: false });
     expect(h.reviewSearch).toHaveBeenCalledTimes(1);
@@ -1899,8 +2017,13 @@ describe("DeckPanel review strip", () => {
   // flipping the pill twice is not a reason to spend another `gh api graphql`.
   it("restores the queue from cache when toggled back on, without a fresh search", async () => {
     const p = await showAndWarm();
-    await p._fire({ type: "deck:setReviewQueue", on: false });
-    await p._fire({ type: "deck:setReviewQueue", on: true });
+    h.reviewRequests = false;
+    setConfig({ reviewRequests: false });
+    fireConfigurationChanged("agentFlow.reviewRequests");
+    await settled();
+    h.reviewRequests = true;
+    setConfig({ reviewRequests: true });
+    fireConfigurationChanged("agentFlow.reviewRequests");
     await settled();
     expect(h.reviewSearch).toHaveBeenCalledTimes(1);
     const last = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
@@ -1968,7 +2091,10 @@ describe("DeckPanel review strip", () => {
     const p = await showAndWarm();
     expect(posts(p).find((m) => m.type === "deck:reviews").requests).toHaveLength(1);
 
-    await p._fire({ type: "deck:setPrFacts", on: false });
+    h.prFacts = false;
+    setConfig({ prFacts: false });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
     const cleared = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
     expect(cleared).toMatchObject({ requests: [], issueCount: 0, enabled: false });
 
@@ -2172,6 +2298,29 @@ describe("DeckPanel review launch", () => {
     await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
     expect(h.launchReview).toHaveBeenCalled();
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(true);
+  });
+
+  it("still names Claude Code pre-seeded in the launch toast by default", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Claude Code pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
+  it("names Copilot in the launch toast when Copilot is configured", async () => {
+    h.agentProvider = "copilot";
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Copilot pre-seeded — press Enter to start."),
+      }),
+    );
   });
 
   it("refreshes after a successful launch, so the row picks up its new run", async () => {
@@ -2380,6 +2529,17 @@ describe("DeckPanel review submit", () => {
     await p._fire(submitMsg({ verb: "comment", body: "the retry budget is unbounded", fromDraft: true }));
     expect(h.reviewSubmit.mock.calls[0][3]).toBe(
       "the retry budget is unbounded\n\n_Drafted with Claude Code via Agent Flow Deck._",
+    );
+  });
+
+  it("names Copilot in the provenance line when Copilot is configured", async () => {
+    h.reviewWrites = true;
+    h.stampLabelOnWrite = true;
+    h.agentProvider = "copilot";
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "comment", body: "the retry budget is unbounded", fromDraft: true }));
+    expect(h.reviewSubmit.mock.calls[0][3]).toBe(
+      "the retry budget is unbounded\n\n_Drafted with Copilot via Agent Flow Deck._",
     );
   });
 

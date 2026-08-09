@@ -29,7 +29,12 @@ export const DECK_CSS = `
     --rv-row-h: 26px;
   }
 
-  .hd { flex: none; display: flex; align-items: center; gap: 14px;
+  /* Wraps, always. The row is the panel's widest object and gains controls over
+     time; without this it clips its right end off-screen instead of folding.
+     gap's shorthand form sets row-gap and column-gap in one value, so it is
+     also the safe way to give them different sizes — a separate row-gap
+     declaration ahead of a shorthand gap would be silently overwritten. */
+  .hd { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
     padding: 13px 20px; border-bottom: 1px solid var(--hair); }
   /* The gloss sits under the label, not beside it: stacked, the two lines read as one
      title block instead of a sentence that happens to change weight mid-way. Free
@@ -38,9 +43,14 @@ export const DECK_CSS = `
     line-height: 1.3; }
   .hd .title .sub { display: block; color: var(--dim); font-weight: 400; font-size: 12px;
     letter-spacing: 0; line-height: 1.3; }
-  .stats { display: flex; align-items: stretch; gap: 6px; }
-  /* Sentence case, matching the column headers: these four tiles and those four
-     headers name the same four things, and used to do it in two different cases. */
+  /* Wraps under the title rather than clipping: the tiles are an unshrinkable
+     block on their own, and a header that only folded around them (via .hd's
+     own flex-wrap) would still lose its right edge below ~400px. */
+  .stats { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
+  /* Sentence case, matching the column headers: these three tiles name three of
+     the board's four columns — Done has no tile, since a done card needs
+     nothing counted for you — and name the ones they share the same way, which
+     used to differ in case. */
   .stat { display: flex; flex-direction: column; gap: 2px; padding: 4px 11px 5px; border-radius: 8px;
     border: 1px solid var(--edge); background: var(--vscode-editorWidget-background, transparent); }
   .stat .n { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.05;
@@ -51,8 +61,8 @@ export const DECK_CSS = `
   .stat.attn .l { color: color-mix(in srgb, var(--c-attn) 70%, var(--dim)); }
   .hd .sp { flex: 1; }
 
-  /* Two toggles that answer the same question — how much should the board trust? —
-     read as one object rather than three separate pills next to the refresh control. */
+  /* The header's one remaining .ctls user is the Agents/Workspaces lens: a joined
+     frame reads as one control with two positions rather than two loose buttons. */
   .ctls { display: inline-flex; flex: none; border: 1px solid var(--edge); border-radius: var(--r-ctl); overflow: hidden; }
   .ctls .ctl { border: 0; border-radius: 0; }
   .ctls .ctl + .ctl { box-shadow: inset 1px 0 0 var(--edge); }
@@ -65,20 +75,11 @@ export const DECK_CSS = `
     transition: color .12s ease, background-color .12s ease; }
   .ctl:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
   .ctl.on { color: var(--vscode-foreground); }
-  .switch { width: 24px; height: 14px; border-radius: 10px; background: var(--vscode-input-background);
-    border: 1px solid var(--hair); position: relative; flex: none; transition: background .15s; }
-  .switch::after { content: ""; position: absolute; top: 1px; left: 1px; width: 10px; height: 10px;
-    border-radius: 50%; background: var(--dim); transition: transform .15s, background .15s; }
-  /* The one place besides .act.primary that spends --brand, and the same rule that
-     lets it: a filled control is off-limits everywhere else because it would read
-     as a second verb next to Open, but an on-state track isn't asking to be
-     pressed — it's reporting whether Live signal or PR facts already is. At
-     24×14px it reads as a status light, not a button, so the accent here restates
-     state rather than diluting the one-primary-per-surface rule. */
-  .ctl.on .switch { background: var(--brand); border-color: var(--brand); }
-  .ctl.on .switch::after { transform: translateX(10px); background: var(--brand-ink); }
+  /* With the switch tracks gone, .act.primary is the only surface left that spends
+     --brand — every control on this board that isn't it stays monochrome, which is
+     exactly the one-primary-per-surface rule the switch used to need an exception to. */
   /* A segmented control, not a switch: .ctls already draws the joined frame, so
-     the active side only needs to read as pressed. No .switch inside these. */
+     the active side only needs to read as pressed. */
   .ctls.seg .ctl.on { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
   /* tabular-nums, not mono: "synced 4s ago" is a sentence, but its number ticks every
      second and must not reflow the control while it does. */

@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { getConfig, AgentFlowConfig, ExploreAction } from "./config";
+import { getConfig, providerLabel, AgentFlowConfig, AgentProvider, ExploreAction } from "./config";
 import {
   isTaskNetworkError,
   serializeCaps,
@@ -50,6 +50,11 @@ const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 // globalState, not workspaceState: a notepad belongs to the user, not to whichever
 // repo happens to be open. Same storage the install-reported flag uses.
 const NOTEPAD_KEY = "agentFlow.notepad";
+
+/** Said in two places — the pre-flight refusal at the top of every launch, and the
+ * `resolveRemoteControl` backstop behind it. One constant so the two can never drift. */
+const RC_NEEDS_CLAUDE =
+  "Remote Control needs Claude Code. Set agentFlow.agentProvider to claude-code, or turn agentFlow.remoteControl off.";
 
 /** Shared by `explore()` and `runNotepadItem` for turning free text into a run
  * key fragment: lowercase, dashes for anything non-alphanumeric, capped at 40
@@ -192,7 +197,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
     this.post({ type: "state", authed, configured, project: info.scopeValue, me,
       prReviewStatus: cfg.prReviewStatus, filters: cfg.filters,
-      sourceLabel: info.label, caps: serializeCaps(this.provider().caps),
+      sourceLabel: info.label, agentLabel: providerLabel(cfg.agentProvider), caps: serializeCaps(this.provider().caps),
       liveCount: cfg.trackOpenWindows ? this.liveWindows().length : undefined });
   }
 
@@ -917,6 +922,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (!args) return undefined;
 
     const wantRemoteControl = await this.resolveRemoteControl(cfg);
+    if (wantRemoteControl === null) return undefined; // refused — the caller opens nothing
 
     return { target, services, args, wantRemoteControl };
   }
@@ -925,6 +931,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * agent for investigation/knowledge — a Jira ticket can come out of it later. */
   public async explore(): Promise<void> {
     const cfg = getConfig();
+    if (this.remoteControlBlocksLaunch(cfg)) return;
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
     if (repos.length === 0) {
       this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
@@ -1003,7 +1010,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     });
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.seededInPlace);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, cfg.agentProvider, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     const what = env
       ? `to verify on ${env}`
@@ -1023,6 +1030,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (!note) return;
 
     const cfg = getConfig();
+    if (this.remoteControlBlocksLaunch(cfg)) return;
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
     if (repos.length === 0) {
       this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
@@ -1079,7 +1087,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, lastRunKey: key } : n)));
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.seededInPlace);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, cfg.agentProvider, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
   }
@@ -1277,7 +1285,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * action. Dismissing the picker means "no", not "cancel": by the time this runs, the
    * destination (and any worktrees) are already settled and the launch is committed —
    * abandoning it over an optional toggle would be the worse failure. */
-  private async resolveRemoteControl(cfg: AgentFlowConfig): Promise<boolean> {
+  private async resolveRemoteControlSetting(cfg: AgentFlowConfig): Promise<boolean> {
     if (cfg.remoteControl === "off") return false;
     // seedAgent off means no plan file ever carries the decision (openWorkspace's guard),
     // so nothing could ever seed /remote-control — asking would promise what can't be kept.
@@ -1297,6 +1305,62 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return p?.yes === true;
   }
 
+  /** Remote Control seeds `/remote-control <key>`, a Claude Code slash command Copilot
+   * has no equivalent for — Copilot would take it as literal prompt text and start a
+   * session that silently does the wrong thing. `remoteControl: "on"` under Copilot is
+   * therefore refused, rather than silently dropping one of the two things the user
+   * turned on.
+   *
+   * Refused HERE, at the very top of a launch entry point: this is a settings-only
+   * synchronous check, so it lands ahead of every picker, every worktree and every
+   * window. Refusing later (which is what the resolveRemoteControl backstop does)
+   * would already have created worktrees for a launch that never happens.
+   *
+   * Only `"on"` is refused. `"ask"` is handled in resolveRemoteControl, which declines
+   * to offer a toggle it could not honour and proceeds without Remote Control — a
+   * Copilot user is never blocked from taking a task by an "ask" setting. `"off"` and
+   * every Claude Code configuration return false here before anything else is read,
+   * so those paths are untouched. `cfg.agentProvider` is host-guarded by
+   * readAgentProvider, so none of this can fire in Cursor.
+   *
+   * The `seedAgent` clause mirrors resolveRemoteControlSetting's own precondition
+   * above, and has to: with seeding off, no plan file ever carries the decision, so
+   * `/remote-control` could never reach Copilot in the first place and there is
+   * nothing to refuse. Without the clause this predicate would be stricter than the
+   * resolver it stands in front of, and a Copilot user with seeding off — who never
+   * opted into any of this — would be locked out of every launch. */
+  private remoteControlBlocksLaunch(cfg: AgentFlowConfig): boolean {
+    if (cfg.agentProvider !== "copilot" || cfg.remoteControl !== "on" || !cfg.seedAgent) {
+      return false;
+    }
+    this.toast("error", RC_NEEDS_CLAUDE);
+    return true;
+  }
+
+  /** The Remote Control answer for this launch, or null when the launch must not
+   * proceed.
+   *
+   * The null is reached in normal operation, from takeBatch: that is the one launch
+   * entry point with no `remoteControlBlocksLaunch` call at the top, because whether
+   * it resolves Remote Control at all depends on `shared`, which is not known until
+   * after the destination pick. Everywhere else the pre-flight predicate has already
+   * refused the pair, so the null is also the backstop that keeps a future entry point
+   * added without a pre-flight call from seeding a broken session. */
+  private async resolveRemoteControl(cfg: AgentFlowConfig): Promise<boolean | null> {
+    // "ask" under Copilot: putting up a toggle we could only refuse is a broken offer,
+    // so the picker never appears and the launch simply proceeds without it.
+    if (cfg.agentProvider === "copilot" && cfg.remoteControl === "ask") {
+      this.log("Remote Control not offered — it needs Claude Code; launching without it");
+      return false;
+    }
+    const on = await this.resolveRemoteControlSetting(cfg);
+    if (on && cfg.agentProvider === "copilot") {
+      this.toast("error", RC_NEEDS_CLAUDE);
+      return null;
+    }
+    return on;
+  }
+
   /** Which folders (if any) the user wants added to an existing-workspace destination.
    *  Duplicates are skipped without asking — a folder by that name is already there, so
    *  there is no real question, only noise. Only genuinely new repos prompt.
@@ -1304,7 +1368,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    *  Never returns undefined: dismissing the prompt means "leave the workspace as-is",
    *  not "abort". By the time this runs the worktrees exist and the launch is committed,
    *  so abandoning it over a folder-list question is the worse failure — the same
-   *  reasoning resolveRemoteControl documents. `declined` is true only when a prompt
+   *  reasoning resolveRemoteControlSetting documents. `declined` is true only when a prompt
    *  actually appeared and the answer wasn't yes — never when there was nothing to ask. */
   private async resolveWorkspaceAdditions(
     file: string,
@@ -1359,7 +1423,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** Toast fragment announcing the pre-seed, shared by `launch()` and `explore()`. With
    * Remote Control applied, Enter only connects the bridge — the task itself starts on
    * the later paste + Enter — so the plain "press Enter to start" copy would be wrong. */
-  private seededNote(seedAgent: boolean, remoteControl: boolean, seededInPlace = false): string {
+  private seededNote(
+    seedAgent: boolean,
+    remoteControl: boolean,
+    provider: AgentProvider,
+    seededInPlace = false,
+  ): string {
     // Seeding into this window with seeding off is the one destination that ends with
     // NOTHING to show: no window opened, no session started, only briefs on disk. Every
     // other destination at least leaves a window behind, so silence reads as success.
@@ -1368,9 +1437,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ? " This window is untouched — agentFlow.seedAgent is off, so no session was seeded."
         : "";
     }
+    const agent = providerLabel(provider);
     return remoteControl
-      ? " Claude Code pre-seeded with /remote-control — Enter to connect, then paste."
-      : " Claude Code pre-seeded — press Enter to start.";
+      ? ` ${agent} pre-seeded with /remote-control — Enter to connect, then paste.`
+      : ` ${agent} pre-seeded — press Enter to start.`;
   }
 
   /** Where a completed open put the session, for the success toast. "This window" is
@@ -1444,8 +1514,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       : { foldersToAdd: [], skipped: [], declined: false };
 
     const wantRemoteControl = await this.resolveRemoteControl(cfg);
+    // Refused. `false` is this function's "the user backed out at one of my own
+    // pickers" answer, which is what a refusal is from the caller's point of view:
+    // nothing opened, and take_completed records it as cancelled rather than failed.
+    if (wantRemoteControl === null) return false;
 
-    const planMd = briefMarkdown(detail);
+    const planMd = briefMarkdown(detail, providerLabel(cfg.agentProvider));
     const result = await openWorkspace({
       ticket: { key: detail.key, summary: detail.summary, url: detail.url },
       planMd,
@@ -1464,7 +1538,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     });
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.seededInPlace);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, cfg.agentProvider, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     if (result.mergeFailed) {
       this.toast(
@@ -1514,6 +1588,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * from a collapsed card sends no selection and is still a card Take. */
   public async takeTask(key: string, source: TakeSource, preselected?: string[]): Promise<void> {
     const cfg = getConfig();
+    // Ahead of take_started deliberately: the take never begins, so the funnel gets
+    // neither a start nor a terminator rather than a phantom "cancelled".
+    if (this.remoteControlBlocksLaunch(cfg)) return;
     const flow = startFlow();
     const taskFp = fingerprint(key);
     let destination: DestinationProp | undefined;
@@ -1580,7 +1657,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
     if (keys.length > cfg.batchLaunchConfirmThreshold) {
       const go = await vscode.window.showWarningMessage(
-        `Launch ${keys.length} tasks in parallel? That's ${keys.length} Claude Code sessions.`,
+        `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${providerLabel(cfg.agentProvider)} sessions.`,
         { modal: true },
         "Launch",
       );
@@ -1616,6 +1693,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const rcSkipped = isBatch && cfg.remoteControl !== "off";
     if (rcSkipped) this.log("takeBatch: Remote Control skipped — one clipboard, several sessions");
     const wantRemoteControl = isBatch || shared ? false : await this.resolveRemoteControl(cfg);
+    // Refused. This is the ONE launch entry point with no `remoteControlBlocksLaunch`
+    // call at the top, and deliberately so: a real batch, and a one-key batch to a
+    // shared destination, never resolve Remote Control at all, so a blanket refusal
+    // would block Copilot launches that work fine today. Refusing here instead costs
+    // nothing — the worktree loop below has not run yet, so there is still no side
+    // effect to leave behind.
+    if (wantRemoteControl === null) return;
 
     const resolved: { task: BatchTask; key: string }[] = [];
     const failed: string[] = [];
@@ -1639,7 +1723,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           key,
           task: {
             ticket: { key: detail.key, summary: detail.summary, url: detail.url },
-            planMd: briefMarkdown(detail),
+            planMd: briefMarkdown(detail, providerLabel(cfg.agentProvider)),
             descriptionText: detail.descriptionText,
             services,
           },
@@ -1760,7 +1844,23 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       const more = failed.length > 5 ? ` (and ${failed.length - 5} more)` : "";
       this.toast("error", `${summary} Failed: ${shown}${more}${extra}${rcNote}`);
     } else {
-      this.toast("success", `${summary} A worktree + Claude session per task.${extra}${rcNote}`);
+      // Claude Code gets a live session per task either way. Copilot's chat panel is
+      // single-instance, so seedCopilotPanel refuses to seed more than one session into
+      // the SAME window (see that function's comment) — but that only bites a shared
+      // window on the extension surface, and only when there's actually more than one
+      // task sharing it. Separate windows each get their own panel (runSeedPass there
+      // only ever sees that one window's plan), the terminal surface seeds via a real
+      // terminal per task regardless of `multi`, and a one-key "batch" landing in a
+      // shared window is really a single-task launch — runSeedPass sees just its own
+      // plan there too. All three still get a live session per task; only a real
+      // multi-task batch sharing a window on the extension surface actually can't.
+      const perTaskNote =
+        cfg.agentProvider === "copilot"
+          ? isBatch && shared && cfg.agentSurface !== "terminal"
+            ? `A worktree + brief per task — ${providerLabel(cfg.agentProvider)} isn't seeded for a batch; open each brief to start it.`
+            : `A worktree + ${providerLabel(cfg.agentProvider)} session per task.`
+          : "A worktree + Claude session per task.";
+      this.toast("success", `${summary} ${perTaskNote}${extra}${rcNote}`);
     }
   }
 
@@ -1804,6 +1904,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * checks out its branch, assesses readiness, and (when prReviewAutoFix) implements the
    * requested changes. Surfaced on a card whose status matches cfg.prReviewStatus. */
   public async addressPr(key: string, preselected?: string[]): Promise<void> {
+    // Its own read rather than hoisting the `const cfg` below: that one is deliberately
+    // taken AFTER resolveKickoff's pickers, and moving it would change which settings
+    // snapshot the Claude Code path sees.
+    if (this.remoteControlBlocksLaunch(getConfig())) return;
     const resolved = await this.resolveKickoff(key, preselected);
     if (!resolved) return;
     const { detail, services, target } = resolved;

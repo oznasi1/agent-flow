@@ -11,7 +11,7 @@ import { writeRun, defaultRunsDir } from "./runs";
 import { gitState } from "./git";
 import { ensureGitExcluded } from "./gitExclude";
 import { windowIdentity, type CurrentWindow } from "./presence";
-import { readAgentSurface } from "../config";
+import { providerLabel, readAgentProvider, readAgentSurface, type AgentProvider } from "../config";
 
 export const BRIEF_DIR = ".pick-task";
 export const BRIEF_FILE = "TASK.md";
@@ -21,14 +21,18 @@ const PLAN_TTL_MS = 15 * 60 * 1000; // seed handshake valid for 15 min
 /** Pause between sessions when one window seeds a whole batch (see maybeSeedAgent). */
 const SEED_STAGGER_MS = 400;
 
-/** The CLI that terminal-surface seeding runs. Fixed on purpose — see the spec's
- * "Out of scope": a missing binary shows as `command not found` in the terminal,
- * which is self-explanatory and leaves the pre-typed prompt there to reuse. */
-const CLI_CMD = "claude";
-/** How long the CLI's TUI needs before it will accept typed input. Typing sooner
- * loses the prompt to a screen that isn't listening yet. Verified by hand in the
- * dev host — there is no event to await. */
-const CLI_BOOT_MS = 1500;
+/** The CLI each provider's terminal surface runs, and how long its TUI needs before
+ * it will accept typed input. Fixed commands on purpose — see the spec's "Out of
+ * scope": a missing binary shows as `command not found` in the terminal, which is
+ * self-explanatory and leaves the pre-typed prompt there to reuse. Typing sooner
+ * than `bootMs` loses the prompt to a screen that isn't listening yet, and there is
+ * no event to await, so it can only be measured by hand in a dev host. Claude's
+ * 1500ms has been verified — this is what's shipped and observed working. Copilot's
+ * has NOT: see the UNVERIFIED tag below, still to be measured before release. */
+const CLI: Record<AgentProvider, { cmd: string; label: string; bootMs: number }> = {
+  "claude-code": { cmd: "claude", label: "Claude", bootMs: 1500 },
+  copilot: { cmd: "copilot", label: "Copilot", bootMs: 2000 }, // UNVERIFIED — measure in the dev host before release
+};
 
 /** Wrap text so the terminal delivers it as a *paste*. renderPrompt appends the
  * relevant-files block after a blank line, so most task prompts are multi-line,
@@ -44,6 +48,13 @@ const CLAUDE_OPEN_CMD = "claude-vscode.primaryEditor.open";
 // Claude Code's "Open in New Tab". Unlike primaryEditor.open it joins the existing
 // Claude tab group, so a batch's sessions stack in one column instead of one per launch.
 const CLAUDE_NEW_TAB_CMD = "claude-vscode.editor.open";
+
+// VS Code's built-in chat command, which GitHub Copilot Chat serves.
+// `isPartialQuery: true` fills the input without submitting, so Copilot honors the
+// same "we pre-fill, you press Enter" contract as the Claude Code panel.
+// Documented shape, not yet confirmed in a dev host — that verification pass is
+// still outstanding.
+const CHAT_OPEN_CMD = "workbench.action.chat.open";
 
 export interface TicketRef {
   key: string;
@@ -682,7 +693,7 @@ async function runSeedPass(context: vscode.ExtensionContext, log: (m: string) =>
     const plan = due[i];
     const match = plan.matches.find((m) => canon(m.matchPath) === identity)!;
     await context.globalState.update(seededGuard(plan, identity), true);
-    await seedClaudeCode({
+    await seedAgentSession({
       prompt: match.prompt,
       key: plan.key,
       matchPath: match.matchPath,
@@ -732,6 +743,7 @@ export function watchPlansAndSeed(
  * then type the prompt without submitting it. Returns false if the terminal
  * could not be driven, so the caller can fall back to the clipboard. */
 async function seedViaTerminal(
+  provider: AgentProvider,
   seedText: string,
   key: string,
   matchPath: string,
@@ -743,10 +755,11 @@ async function seedViaTerminal(
     // not a valid cwd, and no single directory is "the" repo for a multiroot
     // window — omitting cwd lets VS Code default to the window's first root.
     const cwd = matchPath.endsWith(".code-workspace") ? undefined : matchPath;
-    const terminal = vscode.window.createTerminal({ name: `Claude · ${key}`, cwd });
+    const { cmd, label, bootMs } = CLI[provider];
+    const terminal = vscode.window.createTerminal({ name: `${label} · ${key}`, cwd });
     terminal.show();
-    terminal.sendText(CLI_CMD, true);
-    await delay(CLI_BOOT_MS);
+    terminal.sendText(cmd, true);
+    await delay(bootMs);
     terminal.sendText(bracketedPaste(seedText), false);
     log(`seed ${key}: typed the prompt into a terminal${cwd ? ` in ${cwd}` : ""}`);
     return true;
@@ -756,6 +769,67 @@ async function seedViaTerminal(
   }
 }
 
+/** Open Copilot Chat with the prompt pre-filled and unsubmitted. Polls for the
+ * command the same way the Claude Code path does: Agent Flow and the chat extension
+ * both activate on `onStartupFinished`, so the same activation race applies.
+ *
+ * There is no URI-handler rung here — Copilot publishes no documented
+ * open-with-prompt URI — so a false return means the caller should fall back to the
+ * clipboard.
+ *
+ * `multi`: Copilot's chat panel is single-instance, so a batch of N tasks calling
+ * this command would each overwrite the previous prompt — the user would silently
+ * end up with only the last task seeded. There is no verified editor-tab command to
+ * open one Copilot chat per task instead (that dev-host spike hasn't been run), so
+ * for now a batch skips the panel entirely and returns false immediately, which
+ * sends the caller (seedAgentSession) down its existing `multi` fallback: the
+ * "briefs are in .pick-task/" notification, clipboard withheld. Revisit once a
+ * verified per-task command exists. */
+async function seedCopilotPanel(
+  seedText: string,
+  key: string,
+  log: (m: string) => void,
+  multi = false,
+): Promise<boolean> {
+  if (multi) {
+    log(`seed ${key}: per-task Copilot chat tabs are not wired up yet — batch falls back to the briefs`);
+    return false;
+  }
+  for (let attempt = 1; attempt <= 7; attempt++) {
+    let cmds: string[];
+    try {
+      cmds = await vscode.commands.getCommands(true);
+    } catch (e) {
+      log(`seed ${key}: copilot command attempt ${attempt} threw: ${e}`);
+      await delay(700);
+      continue;
+    }
+    if (!cmds.includes(CHAT_OPEN_CMD)) {
+      await delay(700);
+      continue;
+    }
+    // The command is registered, so any throw from here on is a real failure on its
+    // merits (e.g. the still-unverified argument shape) rather than the activation
+    // race this loop exists to ride out. Retrying it would stall ~4.9s and could
+    // reopen the chat panel on every attempt, so try exactly once and fall through
+    // to the clipboard fallback below.
+    try {
+      await vscode.commands.executeCommand(CHAT_OPEN_CMD, {
+        query: seedText,
+        isPartialQuery: true,
+        mode: "agent",
+      });
+      log(`seed ${key}: opened Copilot Chat via ${CHAT_OPEN_CMD} (attempt ${attempt})`);
+      return true;
+    } catch (e) {
+      log(`seed ${key}: ${CHAT_OPEN_CMD} is registered but threw — not retrying: ${e}`);
+      return false;
+    }
+  }
+  log(`seed ${key}: no chat command registered — falling back to the clipboard`);
+  return false;
+}
+
 /** Open the Claude Code panel with the prompt pre-filled. Polls for the verified
  * command (handles the activation race), then the URI handler, then clipboard.
  *
@@ -763,7 +837,7 @@ async function seedViaTerminal(
  * prompt travels on the clipboard — the slash command is `local-jsx`, so Claude Code
  * cannot stack it ahead of a prompt in one submission, and the panel takes a single
  * buffer with a single Enter. */
-async function seedClaudeCode(opts: {
+async function seedAgentSession(opts: {
   prompt: string;
   key: string;
   matchPath: string;
@@ -772,6 +846,26 @@ async function seedClaudeCode(opts: {
   multi?: boolean;
 }): Promise<void> {
   const { prompt, key, matchPath, log, remoteControl = false, multi = false } = opts;
+
+  // `/remote-control` is a Claude Code slash command; Copilot would seed it as literal
+  // prompt text. tasksView already refuses the combination pre-flight, but a plan file
+  // written under Claude Code can outlive a flip to Copilot — the plan does not carry
+  // the provider, it is re-read here — so the block is repeated at the last moment
+  // before anything is seeded. Refuse rather than silently drop one of the two.
+  // Only this exact pair is refused: an ordinary Copilot seed falls straight through.
+  // The advice has to name re-taking the task, not just the settings change: the
+  // caller sets this plan's `seeded:` guard BEFORE calling us (see runSeedPass), and
+  // nothing clears it short of PLAN_TTL_MS — so fixing the setting and reloading would
+  // find the plan already consumed and seed nothing. Telling the user to reload would
+  // be telling them to do something that cannot work.
+  if (remoteControl && readAgentProvider() === "copilot") {
+    log(`seed ${key}: refused — Remote Control needs Claude Code`);
+    vscode.window.showErrorMessage(
+      `Agent Flow Deck: ${key} not seeded — Remote Control needs Claude Code. Set agentFlow.agentProvider to claude-code (or turn agentFlow.remoteControl off), then take ${key} again — reloading this window won't re-seed it.`,
+    );
+    return;
+  }
+
   const seedText = remoteControl ? `/remote-control ${key}` : prompt;
   // Write it before the panel opens so it's already there to paste.
   if (remoteControl) await vscode.env.clipboard.writeText(prompt);
@@ -784,17 +878,19 @@ async function seedClaudeCode(opts: {
     );
   };
 
-  // The surface is read here, in the target window, at seed time — never carried
-  // in the plan file. Flipping the setting therefore also affects plans already
-  // on disk, which is what a preference should do.
+  // Both settings are read here, in the target window, at seed time — never carried
+  // in the plan file. Flipping either therefore also affects plans already on disk,
+  // which is what a preference should do.
+  const provider = readAgentProvider();
+
   if (readAgentSurface() === "terminal") {
-    if (await seedViaTerminal(seedText, key, matchPath, log)) {
+    if (await seedViaTerminal(provider, seedText, key, matchPath, log)) {
       announceRemoteControl();
       return;
     }
-    // Terminal seeding failed — skip the extension attempts (this user does not
-    // use the panel) and land on the clipboard fallback at the end.
-  } else {
+    // Terminal seeding failed — skip the panel attempts (this user does not use the
+    // panel) and land on the clipboard fallback at the end.
+  } else if (provider === "claude-code") {
     // 1 — verified command claude-vscode.primaryEditor.open(session, prompt);
     //     poll because our extension and Claude Code both activate onStartupFinished.
     const preferred = multi ? [CLAUDE_NEW_TAB_CMD, CLAUDE_OPEN_CMD] : [CLAUDE_OPEN_CMD];
@@ -826,21 +922,24 @@ async function seedClaudeCode(opts: {
     } catch (e) {
       log(`seed ${key}: URI failed: ${e}`);
     }
+  } else if (await seedCopilotPanel(seedText, key, log, multi)) {
+    announceRemoteControl();
+    return;
   }
 
   // 3 — fallback. One clipboard can't carry N prompts, so a batch gets a pointer to
   // the briefs instead — they hold the same context and sit in the window's roots.
   if (multi) {
     vscode.window.showInformationMessage(
-      `Agent Flow Deck: couldn't start Claude Code for ${key}. Its brief is in ${BRIEF_DIR}/${BRIEF_FILE} — open it to start the task.`,
+      `Agent Flow Deck: couldn't start ${providerLabel(provider)} for ${key}. Its brief is in ${BRIEF_DIR}/${BRIEF_FILE} — open it to start the task.`,
     );
-    log(`seed ${key}: no Claude Code available — pointed at the brief (batch, clipboard withheld)`);
+    log(`seed ${key}: no ${providerLabel(provider)} available — pointed at the brief (batch, clipboard withheld)`);
     return;
   }
   if (remoteControl) log(`seed ${key}: Remote Control dropped — the clipboard is needed for the prompt`);
   await vscode.env.clipboard.writeText(prompt);
   vscode.window.showInformationMessage(
-    `Agent Flow Deck: opened workspace for ${key}. Claude Code prompt copied — paste it into the panel to start.`,
+    `Agent Flow Deck: opened workspace for ${key}. ${providerLabel(provider)} prompt copied — paste it into the panel to start.`,
   );
   log(`seed ${key}: fell back to clipboard`);
 }

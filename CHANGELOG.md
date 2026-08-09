@@ -5,6 +5,59 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.11.0] — 2026-08-09
+
+### Changed
+
+- **The In-flight header is information again.** It was one non-wrapping row of a
+  title, five stat tiles, four toggle switches, a lens and refresh — so below about
+  1200px its right end was clipped off the panel rather than folded. It now carries
+  the title, three tiles naming the board's own columns, the Agents/Workspaces lens
+  and refresh, and the row wraps, so it cannot clip again however narrow the panel
+  or wide the font.
+- **The "To review" and "Total" tiles are gone.** "To review" restated a count the
+  review strip renders on its own directly below; "Total" was the sum of the three
+  tiles beside it, over a board displaying every card it counted.
+- **The Live signal toggle is gone and the signal is always on.** It had no backing
+  setting and reset to on every time the panel opened, so nothing changes for anyone.
+  Cards still fall back to `parked · git + <source> only` when a transcript is
+  unreadable or missing, which is now the only route to that state.
+- **PR facts, Open agents and Review queue lost their header buttons**, not their
+  settings. `agentFlow.prFacts`, `agentFlow.openAgents` and
+  `agentFlow.reviewRequests` are unchanged — same keys, same defaults — and now take
+  effect the moment you change them, with no need to reopen the panel.
+
+### Fixed
+
+- **Controls no longer flip back before they settle.** Control state was echoed to
+  the panel only on the board post, which costs a full rebuild (git per repo plus a
+  task-source round trip per run). A rebuild already in flight when you clicked
+  landed carrying a pre-click value and visibly reverted the control, before the
+  real value arrived seconds later. The lens now has its own message and the
+  webview owns it.
+- **Switching between Agents and Workspaces is instant.** It used to trigger a full
+  board rebuild to redraw a board the panel already had the data for.
+
+## [0.10.0] — 2026-08-09
+
+### Added
+
+- **`agentFlow.agentProvider` — start sessions with GitHub Copilot.** Set it to
+  `copilot` and a taken task opens Copilot Chat in agent mode with the prompt
+  pre-filled, or runs the `copilot` CLI when `agentFlow.agentSurface` is
+  `terminal`. VS Code only — Cursor and other forks fall back to Claude Code.
+  A **batch** launch under Copilot does not seed the chat panel (it's
+  single-instance, so a second prompt would overwrite the first); it writes
+  every task's brief and points a notification at them instead. Remote Control
+  needs Claude Code: with `agentFlow.remoteControl` set to `on`, taking a task
+  under Copilot is refused before anything is created; set to `ask`, the picker
+  isn't offered and the launch proceeds without it. Copilot sessions don't show
+  up as live agents on the Deck, and **Doctor** now reports on whichever
+  provider is configured. Defaults to `claude-code`, so nothing changes unless
+  you ask for it.
+
 ## [0.9.0] — 2026-08-08
 
 ### Changed

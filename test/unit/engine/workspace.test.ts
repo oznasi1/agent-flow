@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
 import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
@@ -490,6 +490,30 @@ describe("maybeSeedAgent", () => {
     }
   });
 
+  it("names Claude Code in the batch fallback notification by default", async () => {
+    vi.useFakeTimers();
+    try {
+      withWorkspaceFile();
+      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readFileSync.mockImplementation((p) =>
+        String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
+      );
+      commands.getCommands.mockResolvedValue([]); // no Claude command at all
+      env.openExternal.mockResolvedValue(false); // URI handler fails too
+      const { context } = fakeContext();
+
+      const pending = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await pending;
+
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Agent Flow Deck: couldn't start Claude Code for ASM-1."),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("serializes overlapping passes so a batch is never seeded twice", async () => {
     vi.useFakeTimers();
     try {
@@ -572,6 +596,26 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
 
       expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
       expect(window.showInformationMessage).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("names Claude Code in the clipboard-fallback notification by default", async () => {
+    vi.useFakeTimers();
+    try {
+      setupMatchingPlan();
+      commands.getCommands.mockResolvedValue([]);
+      env.openExternal.mockResolvedValue(false);
+      const { context } = fakeContext();
+
+      const p = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await p;
+
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        "Agent Flow Deck: opened workspace for ASM-1. Claude Code prompt copied — paste it into the panel to start.",
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -708,6 +752,79 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     });
   });
 
+  describe("seedAgentSession — copilot terminal", () => {
+    beforeEach(() => {
+      env.uriScheme = "vscode";
+      setConfig({ agentProvider: "copilot", agentSurface: "terminal" });
+      window.createTerminal.mockClear();
+    });
+
+    afterEach(() => {
+      env.uriScheme = "cursor";
+      setConfig({ agentProvider: undefined, agentSurface: undefined });
+    });
+
+    it("names the terminal for Copilot and runs the copilot CLI", async () => {
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal).toHaveBeenCalledTimes(1);
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Copilot · ASM-1" });
+      expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "copilot", true);
+    });
+
+    it("pre-types the prompt on the Copilot terminal only after its own boot delay, without submitting it", async () => {
+      // Tied to the terminal actually named for Copilot (not "whichever terminal
+      // was created first") and to copilot's own 2000ms bootMs, so this goes red
+      // if the copilot branch ever falls back to claude's CLI/table entry or its
+      // 1500ms delay.
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      vi.useFakeTimers();
+      try {
+        const pending = maybeSeedAgent(context, () => {});
+
+        // Flush the synchronous-through-microtasks work — seedPass chaining,
+        // globalState.update, terminal creation, and the CLI sendText — which all
+        // happens before the boot-delay setTimeout is armed.
+        await vi.advanceTimersByTimeAsync(0);
+
+        const i = window.createTerminal.mock.calls.findIndex((c) => c[0]?.name === "Copilot · ASM-1");
+        expect(i).toBeGreaterThanOrEqual(0);
+        const t = terminalAt(i);
+        expect(t.sendText).toHaveBeenNthCalledWith(1, "copilot", true);
+        expect(t.sendText).toHaveBeenCalledTimes(1); // paste not typed yet — still inside the boot delay
+
+        await vi.advanceTimersByTimeAsync(1999); // one tick short of copilot's 2000ms bootMs
+        expect(t.sendText).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(1); // bootMs elapses
+        expect(t.sendText).toHaveBeenCalledTimes(2);
+        const [text, addNewLine] = t.sendText.mock.calls[1];
+        expect(addNewLine).toBe(false);
+        expect(text).toContain("[200~");
+
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("uses Claude's terminal name and CLI when the provider is unset", async () => {
+      setConfig({ agentProvider: undefined });
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Claude · ASM-1" });
+      expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "claude", true);
+    });
+  });
+
   it("uses the extension panel and no terminal when agentSurface is unset", async () => {
     setConfig({ agentSurface: undefined });
     window.createTerminal.mockClear();
@@ -719,6 +836,236 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
 
     expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
     expect(window.createTerminal).not.toHaveBeenCalled();
+  });
+
+  describe("seedAgentSession — copilot panel", () => {
+    const CHAT_OPEN_CMD = "workbench.action.chat.open";
+
+    beforeEach(() => {
+      env.uriScheme = "vscode";
+      setConfig({ agentProvider: "copilot", agentSurface: undefined });
+      commands.getCommands.mockResolvedValue([CHAT_OPEN_CMD]);
+    });
+
+    afterEach(() => {
+      env.uriScheme = "cursor";
+      setConfig({ agentProvider: undefined });
+    });
+
+    it("opens chat with the prompt prefilled and unsubmitted", async () => {
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(commands.executeCommand).toHaveBeenCalledWith(
+        CHAT_OPEN_CMD,
+        expect.objectContaining({ isPartialQuery: true, mode: "agent" }),
+      );
+      const arg = commands.executeCommand.mock.calls.find((c) => c[0] === CHAT_OPEN_CMD)?.[1] as {
+        query: string;
+      };
+      expect(arg.query).toContain("do it");
+    });
+
+    it("never calls Claude Code's open command", async () => {
+      // Asserted on the command id alone, independent of argument shape: Claude's
+      // real call is executeCommand(cmd, undefined, seedText), and expect.anything()
+      // never matches `undefined` — an argument-shaped matcher here would be
+      // trivially true even if this branch called Claude's command directly.
+      // Covers both Claude command ids: the multi-session path prefers
+      // "claude-vscode.editor.open" over "claude-vscode.primaryEditor.open".
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      const claudeCmdIds = new Set([CLAUDE_OPEN_CMD, "claude-vscode.editor.open"]);
+      const claudeCalls = commands.executeCommand.mock.calls.filter((c) => claudeCmdIds.has(String(c[0])));
+      expect(claudeCalls).toEqual([]);
+    });
+
+    it("falls back to the clipboard when no chat command is registered", async () => {
+      commands.getCommands.mockResolvedValue([]);
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(env.clipboard.writeText).toHaveBeenCalled();
+      expect(window.showInformationMessage).toHaveBeenCalled();
+    });
+
+    it("names Copilot, not Claude Code, in the clipboard-fallback notification", async () => {
+      commands.getCommands.mockResolvedValue([]);
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        "Agent Flow Deck: opened workspace for ASM-1. Copilot prompt copied — paste it into the panel to start.",
+      );
+    });
+
+    it("does not try the Claude Code URI handler", async () => {
+      commands.getCommands.mockResolvedValue([]);
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(env.openExternal).not.toHaveBeenCalled();
+    });
+
+    it("degrades to the clipboard when the chat-open command probe throws on every attempt", async () => {
+      // Exercises seedCopilotPanel's own catch (workspace.ts:779-781): the probe
+      // itself rejects — not merely "the command isn't registered yet" — and the
+      // seeding path must still degrade the same way as "no chat command", not
+      // hang or leave an unhandled rejection.
+      commands.getCommands.mockRejectedValue(new Error("registry unavailable"));
+      setupMatchingPlan();
+      const { context } = fakeContext();
+      const logs: string[] = [];
+
+      vi.useFakeTimers();
+      try {
+        const pending = maybeSeedAgent(context, (m) => logs.push(m));
+        await vi.runAllTimersAsync();
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      // The catch really ran — on the very first polling attempt, not just
+      // "eventually gave up" — which is what proves the rejection was caught
+      // rather than left to surface as an unhandled rejection.
+      expect(logs.some((m) => m.includes("copilot command attempt 1 threw"))).toBe(true);
+      // It never managed to open Copilot Chat.
+      expect(commands.executeCommand).not.toHaveBeenCalledWith(CHAT_OPEN_CMD, expect.anything());
+      // The seeding path degrades exactly like "no chat command registered": the
+      // prompt lands on the clipboard and the user is told to paste it.
+      expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        "Agent Flow Deck: opened workspace for ASM-1. Copilot prompt copied — paste it into the panel to start.",
+      );
+    });
+
+    it("tries the chat-open command exactly once when it is registered but throws, then falls back to the clipboard", async () => {
+      // Once CHAT_OPEN_CMD is found registered, a throw from executeCommand is a real
+      // failure on its merits (e.g. the still-unverified argument shape), not the
+      // activation race the 7x/700ms retry loop exists to ride out (that race is
+      // "command not yet registered", covered by the getCommands-throws test above).
+      // Retrying a call that fails on its merits would stall ~4.9s and could reopen
+      // the chat panel on every attempt — so this pins exactly ONE executeCommand
+      // call for CHAT_OPEN_CMD before the seeding path degrades to the clipboard.
+      commands.getCommands.mockResolvedValue([CHAT_OPEN_CMD]);
+      commands.executeCommand.mockImplementation((cmd: unknown) =>
+        cmd === CHAT_OPEN_CMD ? Promise.reject(new Error("bad argument shape")) : Promise.resolve(undefined),
+      );
+      setupMatchingPlan();
+      const { context } = fakeContext();
+      const logs: string[] = [];
+
+      vi.useFakeTimers();
+      try {
+        const pending = maybeSeedAgent(context, (m) => logs.push(m));
+        await vi.runAllTimersAsync();
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      const chatCalls = commands.executeCommand.mock.calls.filter((c) => c[0] === CHAT_OPEN_CMD);
+      expect(chatCalls).toHaveLength(1);
+      expect(logs.some((m) => m.includes("registered but threw"))).toBe(true);
+      expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        "Agent Flow Deck: opened workspace for ASM-1. Copilot prompt copied — paste it into the panel to start.",
+      );
+    });
+  });
+
+  // No editor command that opens a Copilot chat tab with a prefilled query has been
+  // verified to exist (Task 2's dev-host spike hasn't run), so a Copilot batch must
+  // degrade to the brief notification rather than ever touching the single-instance
+  // panel command — that would silently overwrite every task's prompt but the last.
+  describe("seedAgentSession — copilot batch", () => {
+    const CHAT_OPEN_CMD = "workbench.action.chat.open";
+
+    beforeEach(() => {
+      env.uriScheme = "vscode";
+      setConfig({ agentProvider: "copilot", agentSurface: undefined });
+      commands.getCommands.mockResolvedValue([CHAT_OPEN_CMD]);
+    });
+
+    afterEach(() => {
+      env.uriScheme = "cursor";
+      setConfig({ agentProvider: undefined });
+    });
+
+    /** Seed two matching plans in one pass (the file's batch pattern — see
+     * "seeds every plan matching this window" above), with the polling delay
+     * faked away so the test doesn't burn real seconds. */
+    const seedTwoTasks = async (key1: string, key2: string) => {
+      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+      readdirSync.mockReturnValue([`${key1}-1.json`, `${key2}-1.json`] as never);
+      readFileSync.mockImplementation((p) =>
+        String(p).includes(key1)
+          ? planJson({
+              key: key1,
+              seq: 0,
+              matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: `Start ${key1}` }],
+            })
+          : planJson({
+              key: key2,
+              seq: 1,
+              matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: `Start ${key2}` }],
+            }),
+      );
+      const { context } = fakeContext();
+      vi.useFakeTimers();
+      try {
+        const pending = maybeSeedAgent(context, () => {});
+        await vi.runAllTimersAsync();
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+
+    it("never reuses the single-instance panel for a batch", async () => {
+      await seedTwoTasks("ASM-1", "ASM-2");
+      expect(commands.executeCommand).not.toHaveBeenCalledWith(CHAT_OPEN_CMD, expect.anything());
+    });
+
+    it("returns false immediately, without polling for a chat command", async () => {
+      // The multi guard short-circuits before the poll loop — proven here by asserting
+      // getCommands is never even called, not just that its result goes unused.
+      await seedTwoTasks("ASM-1", "ASM-2");
+      expect(commands.getCommands).not.toHaveBeenCalled();
+    });
+
+    it("points at the briefs for each task, with the clipboard withheld", async () => {
+      // One clipboard can't carry two prompts — this is the fallback maybeSeedAgent's
+      // multi path already uses for Claude Code, and a Copilot batch must land here too.
+      await seedTwoTasks("ASM-1", "ASM-2");
+      expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining(BRIEF_DIR));
+      expect(window.showInformationMessage).toHaveBeenCalledTimes(2); // one per task
+      expect(env.clipboard.writeText).not.toHaveBeenCalled();
+    });
+
+    // Task 5 routes a Copilot batch onto this exact notification, so it must name
+    // Copilot rather than the Claude Code wording that shipped before providers existed.
+    it("names Copilot, not Claude Code, in the batch fallback notification", async () => {
+      await seedTwoTasks("ASM-1", "ASM-2");
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Agent Flow Deck: couldn't start Copilot for ASM-1."),
+      );
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Agent Flow Deck: couldn't start Copilot for ASM-2."),
+      );
+    });
   });
 });
 
@@ -747,6 +1094,85 @@ describe("seedClaudeCode — remote control", () => {
     expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "/remote-control ASM-1");
     expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
     expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining("Remote Control"));
+  });
+
+  // The seed-time backstop. tasksView refuses the combination pre-flight, but a plan
+  // file written under Claude Code can outlive a flip to Copilot, and the plan does
+  // not carry the provider — it is re-read here, in the target window.
+  describe("the Copilot provider", () => {
+    beforeEach(() => {
+      env.uriScheme = "vscode";
+      setConfig({ agentProvider: "copilot" });
+      window.createTerminal.mockClear();
+    });
+
+    afterEach(() => {
+      env.uriScheme = "cursor";
+      setConfig({ agentProvider: undefined });
+    });
+
+    it("refuses to seed Remote Control, opening no session at all", async () => {
+      seedPlan({ remoteControl: true });
+      const { context } = fakeContext();
+
+      await maybeSeedAgent(context, () => {});
+
+      expect(commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.chat.open", expect.anything());
+      expect(window.createTerminal).not.toHaveBeenCalled();
+      // Refusing means refusing everything: no half-seed via the clipboard fallback,
+      // and no "press Enter to connect" notice for a session that never opened.
+      expect(env.clipboard.writeText).not.toHaveBeenCalled();
+      expect(window.showInformationMessage).not.toHaveBeenCalled();
+      expect(window.showErrorMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Remote Control needs Claude Code"),
+      );
+    });
+
+    it("tells the user to re-take the task, not to reload", async () => {
+      // runSeedPass sets this plan's `seeded:` guard BEFORE calling seedAgentSession
+      // and nothing clears it before the TTL, so "fix the setting and reload" would be
+      // advice that cannot work. The message must not imply it.
+      seedPlan({ remoteControl: true });
+      const { context } = fakeContext();
+
+      await maybeSeedAgent(context, () => {});
+
+      const msg = String(window.showErrorMessage.mock.calls[0][0]);
+      expect(msg).toContain("take ASM-1 again");
+      expect(msg).toContain("reloading this window won't re-seed it");
+    });
+
+    it("really has consumed the plan, so the advice above is the only thing that works", async () => {
+      // Pins the premise rather than trusting it: seed once (refused), then flip to
+      // Claude Code and seed again from the SAME plan and window. Nothing happens —
+      // which is exactly why the message cannot promise a reload will help.
+      seedPlan({ remoteControl: true });
+      const { context } = fakeContext();
+      await maybeSeedAgent(context, () => {});
+
+      setConfig({ agentProvider: undefined }); // the user "fixes the setting"
+      commands.executeCommand.mockClear();
+      await maybeSeedAgent(context, () => {}); // and reloads
+
+      expect(commands.executeCommand).not.toHaveBeenCalledWith(
+        CLAUDE_OPEN_CMD,
+        undefined,
+        "/remote-control ASM-1",
+      );
+    });
+
+    it("still seeds a plan that does not ask for Remote Control", async () => {
+      // The regression guard on the backstop's condition: `remoteControl &&` must be
+      // load-bearing, or every Copilot seed would be refused.
+      seedPlan({ remoteControl: false });
+      commands.getCommands.mockResolvedValue(["workbench.action.chat.open"]);
+      const { context } = fakeContext();
+
+      await maybeSeedAgent(context, () => {});
+
+      expect(commands.executeCommand).toHaveBeenCalledWith("workbench.action.chat.open", expect.anything());
+      expect(window.showErrorMessage).not.toHaveBeenCalled();
+    });
   });
 
   it("seeds the prompt and leaves the clipboard alone when not requested", async () => {

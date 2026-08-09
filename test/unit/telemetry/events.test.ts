@@ -22,7 +22,7 @@ const SAMPLES = [
   { name: "extension_installed" },
   {
     name: "extension_activated", is_first_ever: true, has_jira_auth: false, is_configured: true,
-    workspace_mode: "auto", open_in: "ask", agent_surface: "extension", explore_mode: "ask", task_source: "jira", worktree: "ask",
+    workspace_mode: "auto", open_in: "ask", agent_provider: "claude-code", agent_surface: "extension", explore_mode: "ask", task_source: "jira", worktree: "ask",
     remote_control: "off", default_filter: "mysprint", task_mode: "ask",
     seed_agent: true, filters_size: true, filters_status: true, filters_repo: true,
     filters_search: true, pr_review_auto_fix: true, pr_facts: true, review_requests: true,

@@ -26,6 +26,7 @@ const makeReq = (over: Partial<LaunchRequest> = {}): LaunchRequest => ({
   workspaceDir: "/ws",
   seedAgent: true,
   workspaceMode: "per-window",
+  agentName: "Claude Code",
   ...over,
 });
 

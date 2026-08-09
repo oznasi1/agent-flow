@@ -206,10 +206,11 @@ function Skeleton(): JSX.Element {
 }
 
 /** The queue of PRs waiting on you, above the board. Renders nothing at zero — an
- * empty rail over the columns is noise; the header's "To review" stat carries the
- * zero instead. Two exceptions, both of which have something to say that the stat
- * tile cannot: `loading` (a first search is running, nothing cached behind it) and
- * `stale` (a search failed with nothing cached, so "0" would be a lie). */
+ * empty rail over the columns is noise, and nothing else on the header shows a
+ * review count for it to defer to. Two exceptions, both of which have something
+ * to say that a bare zero cannot: `loading` (a first search is running, nothing
+ * cached behind it) and `stale` (a search failed with nothing cached, so "0"
+ * would be a lie). */
 export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
   if (p.requests.length === 0 && !p.loading && !p.stale) return null;
   const shown = p.requests.length;

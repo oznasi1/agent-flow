@@ -119,6 +119,7 @@ const CFG = {
   repoBlocklist: [] as string[],
   defaultFilter: "unassigned",
   seedAgent: true,
+  agentProvider: "claude-code" as const,
   agentSurface: "extension" as const,
   workspaceMode: "auto" as const,
   openIn: "new-window" as const,
@@ -358,14 +359,21 @@ describe("ready", () => {
   it("reports authed state with the current user and auto-fetches", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
+  });
+
+  it("names Copilot in the posted state's agentLabel when configured", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot" });
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", agentLabel: "Copilot" }));
   });
 
   it("reports unauthed state and does not fetch", async () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
   });
 
@@ -373,7 +381,7 @@ describe("ready", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, baseUrl: "", project: "" });
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: false, project: "", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: false, project: "", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
   });
 
@@ -393,7 +401,7 @@ describe("ready", () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
     // A state is posted before (and regardless of) the /myself round-trip…
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     // …and the task list — the real payload — still loads.
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
@@ -401,7 +409,7 @@ describe("ready", () => {
   it("re-establishes state and fetches on retry", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "retry" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
 
@@ -467,7 +475,7 @@ describe("state — liveCount", () => {
     ]);
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane",
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane",
       prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true } });
     const stateMsg = posted().find((m) => m.type === "state") as { liveCount?: number };
     expect(stateMsg.liveCount).toBeUndefined();
@@ -479,7 +487,7 @@ describe("fetch", () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "fetch", filter: "mine", size: "any" });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
   });
 
   it("toggles loading and posts tasks with a services guess", async () => {
@@ -1635,7 +1643,7 @@ describe("error handling", () => {
     clientStub.fetchTasks.mockRejectedValue(new JiraAuthError("expired"));
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mine", size: "any" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
     expect(posted()).toContainEqual({ type: "loading", loading: false });
     // Auth errors re-gate (no persistent error banner — the sign-in screen is the cue).
@@ -1665,6 +1673,29 @@ describe("takeTask", () => {
       }),
     );
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success" }));
+  });
+
+  it("still says Claude Code pre-seeded by default", async () => {
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(posted()).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Claude Code pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
+  it("names Copilot in the pre-seeded toast", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot" });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(posted()).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Copilot pre-seeded — press Enter to start."),
+      }),
+    );
   });
 
   it("errors when no repos are checked out", async () => {
@@ -2857,6 +2888,32 @@ describe("takeBatch", () => {
     expect(openWorkspace).toHaveBeenCalledTimes(2);
   });
 
+  it("still names Claude Code sessions in the batch confirmation by default", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, batchLaunchConfirmThreshold: 1 });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]); // 2 > 1 → confirm
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      "Launch 2 tasks in parallel? That's 2 Claude Code sessions.",
+      { modal: true },
+      "Launch",
+    );
+  });
+
+  it("names Copilot in the batch launch confirmation", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, batchLaunchConfirmThreshold: 1, agentProvider: "copilot" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]); // 2 > 1 → confirm
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      "Launch 2 tasks in parallel? That's 2 Copilot sessions.",
+      { modal: true },
+      "Launch",
+    );
+  });
+
   it("skips a task whose worktree creation falls back to the main checkout and reports it failed", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(createWorktrees).mockImplementation((s) => s); // fallback: path stays === repoRef.path
@@ -3394,6 +3451,92 @@ describe("takeBatch", () => {
     const toast = posted().find((m) => m.type === "toast") as { message: string };
     expect(toast.message).toContain("Left team.code-workspace unchanged.");
   });
+
+  // Only a shared window on the extension surface actually can't seed a batch: a
+  // separate-windows layout gives each window its own single-task plan (multi=false
+  // there regardless), and the terminal surface seeds via a real terminal per task
+  // ignoring `multi` entirely. The perTaskNote text must track that exactly, not
+  // `isBatch` alone — see the four tests below.
+  it("says a shared, extension-surface Copilot batch isn't seeded and points at the brief", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: true } as never);
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe(
+      "Launched 2 of 2 in one shared window. A worktree + brief per task — Copilot isn't seeded for a batch; open each brief to start it.",
+    );
+  });
+
+  it("does not claim a separate-windows Copilot batch is unseeded", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    // The describe block's own beforeEach already answers the layout pick with
+    // { shared: false } — separate windows, one per task.
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in parallel. A worktree + Copilot session per task.");
+    expect(toast.message).not.toContain("isn't seeded");
+  });
+
+  it("does not claim a shared, terminal-surface Copilot batch is unseeded", async () => {
+    vi.mocked(getConfig).mockReturnValue({
+      ...CFG,
+      agentProvider: "copilot",
+      agentSurface: "terminal",
+      openIn: "new-window",
+    });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: true } as never);
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in one shared window. A worktree + Copilot session per task.");
+    expect(toast.message).not.toContain("isn't seeded");
+  });
+
+  it("keeps the Claude Code per-task note byte-identical for a shared batch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" }); // default agentProvider: claude-code
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: true } as never);
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in one shared window. A worktree + Claude session per task.");
+  });
+
+  it("keeps the Claude Code per-task note byte-identical across separate windows", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" }); // default agentProvider: claude-code
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    // Default layout pick answer from the describe's beforeEach: { shared: false }.
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in parallel. A worktree + Claude session per task.");
+  });
+
+  // A one-key "batch" to a shared, non-"new" destination is `shared === true` with
+  // `isBatch === false` — modeled on "skips Remote Control without asking for a
+  // one-key batch to a shared (non-new) destination" above. runSeedPass sees only
+  // this one task's plan for the window either way, so it seeds regardless of
+  // surface — the gate must require isBatch too, or this real single-task launch
+  // would wrongly get the multi-task "isn't seeded" claim.
+  it("does not claim a one-key batch to a shared (non-new) destination is unseeded under Copilot", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot", openIn: "this-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(currentWindow).mockReturnValue({
+      identity: "/repos/api",
+      kind: "folder",
+      roots: [{ name: "api", path: "/repos/api" }],
+    });
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 1 of 1 in one shared window. A worktree + Copilot session per task.");
+    expect(toast.message).not.toContain("isn't seeded");
+  });
 });
 
 describe("live-window open targets", () => {
@@ -3818,6 +3961,184 @@ describe("remote control", () => {
     expect(lastOpen().remoteControl).toBe(true);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
     expect(toast.message).not.toContain("Remote Control skipped");
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+});
+
+// ── Remote Control × the Copilot provider ───────────────────────────────────
+// Remote Control seeds `/remote-control <key>`, a Claude Code slash command Copilot
+// would take as literal prompt text. The combination is refused pre-flight.
+//
+// `agentProvider` reaches the view through getConfig(), which this file mocks, so the
+// tests set it there rather than through env.uriScheme: readAgentProvider has already
+// applied the VS Code host guard by the time getConfig() returns, which is exactly why
+// "copilot" here models a real VS Code install and can never arise in Cursor.
+//
+// Only `remoteControl: "on"` is refused, and it is refused at the top of each entry
+// point — before pickers, worktrees and windows, so a refusal leaves nothing behind.
+// `"ask"` is never refused: the picker is simply not offered and the launch proceeds
+// without Remote Control, so a Copilot user is never blocked from taking a task.
+//
+// The "leaves Claude Code alone" / "off" / "real batch" cases are REGRESSION GUARDS for
+// the flows that exist today — they were green before the block was written.
+describe("remote control × the Copilot provider", () => {
+  const lastOpen = () =>
+    vi.mocked(openWorkspace).mock.calls[vi.mocked(openWorkspace).mock.calls.length - 1][0];
+  const errorToast = (posted: () => OutboundMessage[]) =>
+    posted().find((m) => m.type === "toast" && m.level === "error") as { message: string } | undefined;
+  const copilot = (over: Partial<ReturnType<typeof getConfig>> = {}) =>
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot" as const, ...over });
+
+  it("refuses a Take before creating any worktree, and before any picker", async () => {
+    // The whole point of refusing at the top: no orphan worktrees for a launch that
+    // never happens, and no prompts for a launch already known to be impossible.
+    copilot({ remoteControl: "on", worktree: "always" });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(clientStub.getDetail).not.toHaveBeenCalled(); // not even the Jira read
+  });
+
+  it("emits no take funnel events for a refused Take", async () => {
+    // Refused before take_started, so the funnel gets neither a start nor a
+    // terminator — better than a phantom "cancelled" nobody chose.
+    copilot({ remoteControl: "on" });
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(trackSpy.mock.calls.map((c) => (c[0] as { name: string }).name)).not.toContain("take_started");
+  });
+
+  it("refuses addressPr before creating any worktree", async () => {
+    // addressPr forces a worktree (forceWorktree), so it is the flow with the most to
+    // leave behind if the refusal lands late.
+    copilot({ remoteControl: "on" });
+    const { provider, posted } = setup();
+    await provider.addressPr("ASM-1", ["account-service"]);
+    expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("refuses an Explore and opens nothing", async () => {
+    // resolveKickoffTarget's call site — the one that must return undefined, not false.
+    copilot({ remoteControl: "on", exploreMode: "knowledge" });
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("the retry path" as never);
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send, posted } = setup();
+    await send({ type: "explore" });
+    expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("refuses a one-key batch and opens nothing", async () => {
+    // takeBatch's call site — a one-key batch is the only shape there that resolves
+    // Remote Control at all, so it is the only one that can be refused.
+    copilot({ remoteControl: "on" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(openWorkspace).not.toHaveBeenCalled();
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+
+  it("never refuses on \"ask\" — it launches without Remote Control instead", async () => {
+    // A toggle we could only refuse is a broken offer, so it is not offered. The
+    // launch must still happen: an "ask" setting may never block a Copilot user.
+    copilot({ remoteControl: "ask" });
+    const { provider, posted, logged } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(window.showQuickPick).not.toHaveBeenCalled(); // the picker never appears
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1); // the launch proceeds
+    expect(lastOpen().remoteControl).toBe(false); // …just without Remote Control
+    expect(logged.join("\n")).toContain("Remote Control not offered");
+  });
+
+  it("still shows the \"ask\" picker under Claude Code", async () => {
+    // The guard on the "ask" short-circuit: dropping its `agentProvider` clause would
+    // silently stop offering Remote Control to every Claude Code user.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
+    const { provider, logged } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    expect(lastOpen().remoteControl).toBe(true);
+    expect(logged.join("\n")).not.toContain("Remote Control not offered");
+  });
+
+  it("does not refuse when seedAgent is off — nothing could ever seed the slash command", async () => {
+    // The pre-flight predicate has to carry resolveRemoteControlSetting's own
+    // precondition (:1291). With seedAgent off no plan file carries the decision, so
+    // `/remote-control` can never be seeded and there is nothing to refuse — this user
+    // launched fine before the block existed and must still launch now.
+    copilot({ remoteControl: "on", seedAgent: false });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(lastOpen().remoteControl).toBe(false);
+  });
+
+  it("does not refuse a one-key takeBatch launch when seedAgent is off", async () => {
+    // NOTE: this drives only takeBatch, which resolves Remote Control through
+    // resolveRemoteControlSetting and never calls remoteControlBlocksLaunch — so it
+    // pins takeBatch's OWN seedAgent-off behavior, not agreement between the two
+    // pre-flight paths (that cross-path check would need a test that exercises
+    // remoteControlBlocksLaunch itself, e.g. via takeTask, alongside this one).
+    // Still valid as a regression guard: takeBatch's seedAgent-off handling has
+    // always honoured seedAgent, and this is what pins that.
+    copilot({ remoteControl: "on", seedAgent: false });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+
+  it("leaves Claude Code + Remote Control alone", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(lastOpen().remoteControl).toBe(true);
+  });
+
+  it("does not fire when Remote Control is off", async () => {
+    copilot({ remoteControl: "off" });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(lastOpen().remoteControl).toBe(false);
+  });
+
+  it("does not fire for a real batch, which never resolves Remote Control at all", async () => {
+    // The `isBatch || shared ? false : …` short-circuit means resolveRemoteControl is
+    // never reached — so a Copilot batch with the setting on still launches.
+    copilot({ remoteControl: "on" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: false } as never); // layout pick
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
     vi.mocked(createWorktrees).mockImplementation((s) => s);
   });
 });

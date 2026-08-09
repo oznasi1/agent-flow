@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { getConfig } from "./config";
+import { getConfig, providerLabel, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { Flow, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
@@ -32,7 +32,7 @@ import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, w
 import { sortRequests } from "./engine/review/sort";
 import { inferTicket, localRunFor } from "./engine/localRuns";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
-import { readSessionActivity, UNKNOWN_ACTIVITY } from "./engine/transcript";
+import { readSessionActivity } from "./engine/transcript";
 import { canon } from "./engine/paths";
 import { CardAgent, FlowPromptMode, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
 
@@ -49,8 +49,10 @@ const GH_NOTES: Record<GhGap["kind"], string> = {
 
 /** Appended to a review body the agent drafted, when provenance stamping is on.
  * Posting an agent's words as unmarked human review is the kind of thing worth
- * being straight about with teammates. */
-export const REVIEW_PROVENANCE = "_Drafted with Claude Code via Agent Flow Deck._";
+ * being straight about with teammates — which means naming the agent that actually
+ * drafted it. */
+export const reviewProvenance = (p: AgentProvider): string =>
+  `_Drafted with ${providerLabel(p)} via Agent Flow Deck._`;
 
 const VERB_LABEL: Record<ReviewVerb, string> = {
   approve: "Approve",
@@ -113,15 +115,14 @@ export class DeckPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly disposables: vscode.Disposable[] = [];
   private timer: ReturnType<typeof setInterval> | undefined;
-  private liveSignal = true;
   private readonly ticketCache = new Map<string, { at: number; status: string | null; category: string | null }>();
   /** The last refresh's synthetic runs for places no tracked run claimed — cleared
    * and repopulated on every rebuild. A local card has no record on disk, so this
    * is the only place `run(key)` can resolve one for Open and Diff. */
   private readonly localRuns = new Map<string, Run>();
-  private prFacts: boolean; // seeded from config in the constructor; the only writer after that is deck:setPrFacts
-  private openAgents: boolean; // seeded from config in the constructor; the only writer after that is deck:setOpenAgents
-  private reviewQueue: boolean; // seeded from config in the constructor; the only writer after that is deck:setReviewQueue
+  private prFacts: boolean; // seeded from config in the constructor; re-seeded only by onConfigChanged
+  private openAgents: boolean; // seeded from config in the constructor; re-seeded only by onConfigChanged
+  private reviewQueue: boolean; // seeded from config in the constructor; re-seeded only by onConfigChanged
   private readonly prQueue = new RefreshQueue();
   private readonly pr: PrProvider = new GhProvider();
   private readonly reviewProvider: ReviewProvider = new GhReviewProvider();
@@ -215,9 +216,9 @@ export class DeckPanel {
     private readonly log: (m: string) => void,
   ) {
     this.panel = panel;
-    // Seed from the persisted setting; after this, only the webview's
-    // deck:setPrFacts toggle changes it — a later refresh must not stomp the
-    // user's in-session toggle by re-reading config on every tick.
+    // Seed from the persisted setting once; a later refresh must not stomp
+    // these by re-reading config on every tick — only onConfigChanged does that,
+    // and only for the key that actually changed.
     this.prFacts = getConfig().prFacts;
     this.openAgents = getConfig().openAgents;
     this.reviewQueue = getConfig().reviewRequests;
@@ -250,6 +251,11 @@ export class DeckPanel {
         if (this.panel.visible || this.hasArmedFlow()) this.startPolling();
         else this.stopPolling();
       },
+      null,
+      this.disposables,
+    );
+    vscode.workspace.onDidChangeConfiguration(
+      (e) => void this.onConfigChanged(e),
       null,
       this.disposables,
     );
@@ -803,6 +809,9 @@ export class DeckPanel {
         // `takeBatch` makes — one repo means one window, and anything else is one
         // multiroot window for the task rather than a window per repo.
         workspaceMode: node.repos.length === 1 || cfg.workspaceMode === "per-window" ? "per-window" : "multiroot",
+        // The brief names the agent that will read it, so a Copilot user's
+        // flow-launched run must not be handed a brief that says Claude Code.
+        agentName: providerLabel(cfg.agentProvider),
       },
       { createWorktrees, openWorkspace, log: this.log },
     );
@@ -950,10 +959,11 @@ export class DeckPanel {
     if (this.ghProbe === null) {
       const p = (this.ghProbe = probeGh());
       void p.then((gap) => {
-        // A probe orphaned by a toggle (deck:setPrFacts resets ghProbe and starts
-        // a fresh one) must not win if it resolves after the fresh probe already
-        // has — that would let a stale gap clobber a fresh pass right after the
-        // user ran `gh auth login`, defeating the whole point of re-probing.
+        // A probe orphaned by a settings change (onConfigChanged resets ghProbe
+        // and starts a fresh one when prFacts turns back on) must not win if it
+        // resolves after the fresh probe already has — that would let a stale
+        // gap clobber a fresh pass right after the user ran `gh auth login`,
+        // defeating the whole point of re-probing.
         if (this.ghProbe !== p) return;
         this.ghGap = gap;
         // The note names the kind; only the log can say which gh we tried and
@@ -1001,10 +1011,10 @@ export class DeckPanel {
   }
 
   /** Is the review strip live? Two gates, not three: the session's own Review
-   * queue toggle (seeded from the persistent `reviewRequests` setting, then
-   * owned by `deck:setReviewQueue` — re-reading config here would stomp the
-   * toggle on every poll tick), and `ghReady()` — which already folds the
-   * session PR-facts toggle and a usable gh together, so there is no condition
+   * queue flag (seeded from the persistent `reviewRequests` setting, then held
+   * until `onConfigChanged` re-seeds it — re-reading config here would stomp
+   * the flag on every poll tick), and `ghReady()` — which already folds the
+   * session PR-facts flag and a usable gh together, so there is no condition
    * here that varies independently of PR facts. */
   private reviewsEnabled(): boolean {
     return this.reviewQueue && this.ghReady();
@@ -1107,8 +1117,9 @@ export class DeckPanel {
       // here used to leave the webview's last posted rows on screen exactly as
       // they were: frozen, but with their write buttons still live, so a click
       // could still reach the provider from a strip the user believed they had
-      // just switched off. `enabled: false` also lets the webview drop the "To
-      // review" stat tile instead of showing a hollow "0 To review".
+      // just switched off. `enabled: false` travels alongside the emptied
+      // `requests` for the same reason: it marks this as "off," not "empty,"
+      // for whatever downstream reads the flag.
       this.post({
         type: "deck:reviews", requests: [], issueCount: 0, sort: this.reviewSort,
         stale: false, reviewWrites: getConfig().reviewWrites, enabled: false, loading: false,
@@ -1191,7 +1202,7 @@ export class DeckPanel {
     }
     this.toast(
       "success",
-      `Reviewing ${req.repoName}#${req.number} in a worktree.${cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : ""}`,
+      `Reviewing ${req.repoName}#${req.number} in a worktree.${cfg.seedAgent ? ` ${providerLabel(cfg.agentProvider)} pre-seeded — press Enter to start.` : ""}`,
     );
     await this.refreshBusy(); // picks up the new run so the row shows "reviewing"
   }
@@ -1279,7 +1290,7 @@ export class DeckPanel {
         return;
       }
       const text = fromDraft && cfg.stampLabelOnWrite && body.trim()
-        ? `${body.trim()}\n\n${REVIEW_PROVENANCE}`
+        ? `${body.trim()}\n\n${reviewProvenance(cfg.agentProvider)}`
         : body;
       this.log(`deck: submitting ${verb} on ${req.repo}#${req.number}`);
       const res = await this.reviewProvider.submit(req.repo, req.number, verb, text);
@@ -1378,7 +1389,7 @@ export class DeckPanel {
             session: s,
             // Addressed by sessionId, so two sessions in one worktree report
             // their own states rather than sharing the newest transcript's.
-            activity: this.liveSignal ? readSessionActivity(projectsRoot, s.cwd, s.sessionId, now) : UNKNOWN_ACTIVITY,
+            activity: readSessionActivity(projectsRoot, s.cwd, s.sessionId, now),
             repo: repo.name,
           });
         }
@@ -1402,7 +1413,7 @@ export class DeckPanel {
         run.key,
         sessions.map((s) => ({
           session: s,
-          activity: this.liveSignal ? readSessionActivity(projectsRoot, s.cwd, s.sessionId, now) : UNKNOWN_ACTIVITY,
+          activity: readSessionActivity(projectsRoot, s.cwd, s.sessionId, now),
           repo: run.repos[0]?.name,
         })),
       );
@@ -1447,7 +1458,7 @@ export class DeckPanel {
       }
       const status = buildRunStatus({
         run, ticket, projectsRoot, nowMs: now,
-        liveSignal: this.liveSignal, openIdentities, prs,
+        openIdentities, prs,
         agents: agentsByKey.get(run.key) ?? [],
       });
       // A local card has no record on disk — `removeRun` would be a no-op but
@@ -1600,16 +1611,11 @@ export class DeckPanel {
       this.post({
         type: "deck:runs",
         runs,
-        liveSignal: this.liveSignal,
-        prFacts: this.prFacts,
-        openAgents: this.openAgents,
-        reviewQueue: this.reviewQueue,
         ghNote: this.prFacts && this.ghGap ? GH_NOTES[this.ghGap.kind] : null,
         // Read fresh on every post rather than cached in a field: it is a plain
         // string setting a user can edit mid-session, and the board re-posts often
         // enough that this is the whole of "keep it live".
         prReviewStatus: getConfig().prReviewStatus,
-        grouping: getConfig().deckGrouping,
         staleCount: this.staleCount,
         sourceLabel: this.connector.info().label,
       });
@@ -1641,6 +1647,42 @@ export class DeckPanel {
     }
   }
 
+  /** The panel seeds these three from config once and then holds them, so a
+   * routine refresh cannot stomp them mid-session. With no toggles left on the
+   * header, a settings edit is the only way to change them — and without this
+   * listener it would do nothing until the panel was closed and reopened. */
+  private async onConfigChanged(e: vscode.ConfigurationChangeEvent): Promise<void> {
+    const cfg = getConfig();
+    let touched = false;
+    if (e.affectsConfiguration("agentFlow.prFacts")) {
+      this.prFacts = cfg.prFacts;
+      // The user may have run `gh auth login` since the last probe; a stale gap
+      // would otherwise keep PR facts dark for the rest of the session.
+      if (cfg.prFacts) {
+        this.ghGap = undefined;
+        this.ghProbe = null;
+      }
+      touched = true;
+    }
+    if (e.affectsConfiguration("agentFlow.openAgents")) {
+      this.openAgents = cfg.openAgents;
+      touched = true;
+    }
+    if (e.affectsConfiguration("agentFlow.reviewRequests")) {
+      this.reviewQueue = cfg.reviewRequests;
+      // Before the rebuild, not through it: switching off has to empty the strip
+      // now, not after a full board build.
+      this.postCachedReviews();
+      touched = true;
+    }
+    // Posted, not refreshed: display-only, and this is what keeps a settings-page
+    // edit landing now that the lens no longer rides along on every board post.
+    if (e.affectsConfiguration("agentFlow.deckGrouping")) {
+      this.post({ type: "deck:grouping", grouping: cfg.deckGrouping });
+    }
+    if (touched) await this.refreshBusy();
+  }
+
   private async onMessage(m: InboundMessage): Promise<void> {
     switch (m.type) {
       case "deck:ready":
@@ -1651,48 +1693,24 @@ export class DeckPanel {
         // strip on screen with the first paint; with no cache to post, the same
         // call posts `loading: true`, so the strip still has something to say
         // while the first search runs.
+        this.post({ type: "deck:grouping", grouping: getConfig().deckGrouping });
         this.postCachedReviews();
         await this.refreshBusy();
         break;
       case "deck:refresh":
         await this.refreshBusy();
         break;
-      case "deck:setLive":
-        this.liveSignal = m.on;
-        await this.refreshBusy();
-        break;
-      case "deck:setPrFacts":
-        this.prFacts = m.on;
-        if (m.on) {
-          // Re-probe: the user may have run `gh auth login` since the last check.
-          this.ghGap = undefined;
-          this.ghProbe = null;
-        }
-        await this.refreshBusy();
-        break;
-      case "deck:setOpenAgents":
-        this.openAgents = m.on;
-        await this.refreshBusy();
-        break;
       case "deck:clearStale":
         await this.clearStale();
         break;
       case "deck:setGrouping":
-        // Persisted, unlike the three trust toggles beside it: a view preference
-        // re-picked on every panel open is a daily papercut.
+        // Persisted, so the lens survives a reload — but not refreshed: the
+        // webview derives both lenses from the run list it already holds, so a
+        // rebuild here would redraw an identical board at the cost of git per
+        // repo and a connector round trip per run.
         await vscode.workspace
           .getConfiguration("agentFlow")
           .update("deckGrouping", m.grouping, vscode.ConfigurationTarget.Global);
-        await this.refreshBusy();
-        break;
-      case "deck:setReviewQueue":
-        this.reviewQueue = m.on;
-        // Post before the refresh, not only through it: switching *off* must
-        // clear the rows now rather than after a full board rebuild, and
-        // switching back on should put the cached queue (or the pending state)
-        // up immediately for the same reason `deck:ready` does.
-        this.postCachedReviews();
-        await this.refreshBusy();
         break;
       case "deck:inspect":
         await this.inspect(m.key, m.action, m.repo);
@@ -1819,7 +1837,13 @@ export class DeckPanel {
           // Warn and name, rather than refuse: a flow with one dead rule and three
           // live ones is still worth arming, and silence is how a user ends up
           // waiting forever on something that can never happen.
-          const dead = unfirableRules(flow, { liveSignal: this.liveSignal, prFacts: this.prFacts });
+          // `liveSignal: true` unconditionally: the header toggle for it is gone and
+          // the live signal is always on now, so no rule can be unfirable for want of
+          // it. `armability` keeps the dimension because it is a pure module and a
+          // future toggle would want it back — but its "needs Live signal" branch is
+          // unreachable from here today. See the note in the ledger: collapsing that
+          // branch is a deliberate follow-up, not something to fold into a merge.
+          const dead = unfirableRules(flow, { liveSignal: true, prFacts: this.prFacts });
           if (dead.length > 0) {
             const live = dead.filter((d) => d.needs === "live-signal").length;
             const pr = dead.filter((d) => d.needs === "pr-facts").length;

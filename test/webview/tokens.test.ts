@@ -129,12 +129,12 @@ describe("brand accent", () => {
       // the sidebar spends the brand hue.
       ".cb",
     ],
-    // `.ctl.on .switch::after` was removed from this list: under the tightened
-    // detector it turns out to spend only `var(--brand-ink)` (the knob's own
-    // ink colour), never `var(--brand)` itself — see deckStyles.ts's own
-    // `.ctl.on .switch::after` rule. The substring detector had been counting
-    // that as a --brand spend for as long as this list has existed.
-    deck: [".act.primary", ".act.primary:hover", ".ctl.on .switch"],
+    // `.ctl.on .switch` is gone from this list because the rule itself is gone:
+    // the header redesign moved the trust toggles into settings, and `.switch`
+    // no longer appears in deckStyles.ts at all. (It had already lost its
+    // `::after` sibling here, which the tightened detector showed spends only
+    // `var(--brand-ink)`, never `var(--brand)`.)
+    deck: [".act.primary", ".act.primary:hover"],
     marketplace: [".btn.pri", ".btn.pri:hover"],
     controls: [],
     orchestrator: [

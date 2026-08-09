@@ -66,12 +66,13 @@ Once you've taken tasks, the **Deck** (open it with **"Open the Deck (in-flight)
 is the board of everything you've launched, in a classic pipeline —
 **In progress · Action required · In review · Done**.
 
-<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Done). Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a best-effort live agent status (working, idle, ended turn, parked, or merged), the PR and CI state, the Jira status, and Open / Diff actions. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button; a summary strip counts each column and the Live-signal and PR-facts toggles are on." />
+<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Done). Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a best-effort live agent status (working, idle, ended turn, parked, or merged), the PR and CI state, the Jira status, and Open / Diff actions. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button; a summary strip counts In progress, Action required and In review." />
 
 The columns are a neutral git + Jira backbone; each **card** carries the true live state.
 A best-effort **Live signal** (read from your local Claude Code transcripts) tells `working ·
-Ns ago` from `idle`, `ended turn` (needs you), or `parked` — turn it off and cards fall back
-to git + Jira only. **Open** focuses the window if it's already open (never a duplicate) and
+Ns ago` from `idle`, `ended turn` (needs you), or `parked` — a card only reads `parked` when
+its transcript can't be read, or doesn't exist yet, which is the one route back to the git +
+Jira backbone. **Open** focuses the window if it's already open (never a duplicate) and
 opens it fresh otherwise; **Diff** shows the working diff; **⋯** offers *Open in Jira* and
 *Forget*.
 
@@ -101,7 +102,8 @@ a ticket somebody else owns) and for its pull request, so a worktree Claude Code
 made on its own lands on the board as complete as one you took. It disappears
 the moment you close its last agent — **⋯** → **Track it** pins it to the runs
 store first, and from there it behaves exactly like a task you took, **Forget**
-included. Turn it off with the **Open agents** toggle or `agentFlow.openAgents`.
+included. Turn it off with `agentFlow.openAgents`, which the board picks up
+immediately — no need to close and reopen the panel.
 
 Each card also carries the **PR state** of every repo it touches, read from GitHub
 with the `gh` CLI: the PR number, CI (failing check names link to their runs, or a
@@ -110,8 +112,8 @@ mergeability. A PR that needs a human decision — failing required checks,
 requested changes, or a conflict — pulls its card into **Action required**, even while
 the agent is still working, because an agent can't know CI broke until you tell
 it. A merged PR moves the card to **Done** and is the only thing that makes a card
-say *merged*. Turn it off with the **PR facts** toggle or `agentFlow.prFacts`, and
-cards fall back to the git + Jira backbone.
+say *merged*. Turn it off with `agentFlow.prFacts`, applied the moment you save
+the setting, and cards fall back to the git + Jira backbone.
 
 An **Orchestrator** drawer (off by default, `agentFlow.orchestrator`) lets you wire the
 agents already on the board into a *flow*: drag a card in, connect two nodes, and put a
@@ -151,8 +153,8 @@ are still open, alongside the review decision and mergeability. **Review with ag
 checks the PR out into a worktree and seeds
 Claude Code to review the diff and write its findings to
 `.pick-task/REVIEW-<number>.md`, which the row can then load into the review box.
-Turn the strip off with `agentFlow.reviewRequests`; it shares the **PR facts**
-toggle and the same `gh` dependency.
+Turn the strip off with `agentFlow.reviewRequests`; it also goes dark whenever
+`agentFlow.prFacts` is off, since both lean on the same `gh` dependency.
 
 With `agentFlow.reviewWrites` on (**off by default**), the expanded row also
 submits: **Approve**, **Comment**, or **Request changes** — each disabled while a
@@ -307,8 +309,9 @@ repo, so they never get committed.
 | `agentFlow.provenanceLabel` | `claude-code` | Label stamped on Jira writes when enabled. |
 | `agentFlow.stampLabelOnWrite` | `true` | Whether to stamp the provenance label on a Jira write, and whether a review body submitted from the Deck is marked as agent-drafted (a fixed line, distinct from `agentFlow.provenanceLabel`). |
 | `agentFlow.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
-| `agentFlow.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
-| `agentFlow.agentSurface` | `extension` | Where a session starts: the Claude Code extension panel, or `terminal` to run the `claude` CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter. |
+| `agentFlow.seedAgent` | `true` | Pre-fill the agent's panel after opening. |
+| `agentFlow.agentProvider` | `claude-code` | Which agent starts a session. `copilot` uses GitHub Copilot and works **only in VS Code** — in Cursor and other forks a stored `copilot` value falls back to Claude Code. Copilot sessions do not appear as live agents on the Deck (which reads Claude Code's session files), and **Doctor** reports on whichever provider is configured. |
+| `agentFlow.agentSurface` | `extension` | Where a session starts: the agent's chat panel, or `terminal` to run its CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter. |
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
 | `agentFlow.prFacts` | `true` | Read each in-flight task's PR state from GitHub via the `gh` CLI and show it on the Deck's cards. |
 | `agentFlow.openAgents` | `true` | Show every Claude Code session open on this machine on the Deck: as agents on the card that owns their directory, and as a `local` card of its own for a place Agent Flow Deck never launched. Read from `~/.claude/sessions`. |
@@ -362,6 +365,12 @@ clipboard can't hold a different prompt for each window — and so does any laun
 plan file with no clipboard paste to attach to. Either way the toast says Remote Control
 was skipped, so you're never left waiting for a `/remote-control` prompt.
 
+Remote Control needs Claude Code — Copilot has no equivalent slash command. Under
+`agentFlow.agentProvider: copilot`, setting `agentFlow.remoteControl` to `on` refuses
+the launch outright, with an error toast and before anything (a worktree, a window) is
+created. Set to `ask`, the picker simply isn't offered and the launch proceeds without
+Remote Control — a Copilot user is never blocked over a toggle it can't honor.
+
 ### Where a task opens
 
 `agentFlow.openIn` controls where a task you take gets opened: `ask` (ask each time),
@@ -391,18 +400,24 @@ this off.
 
 ### Where the session opens
 
-Two settings, two different questions. `agentFlow.openIn` decides **which window** a
-task lands in. `agentFlow.agentSurface` decides **what starts the session** once it's
-there:
+Three settings answer three different questions. `agentFlow.openIn` decides **which
+window** a task lands in. `agentFlow.agentProvider` decides **which agent** starts the
+session — Claude Code, or Copilot in VS Code. `agentFlow.agentSurface` decides **what
+starts the session** once it's there:
 
-- `extension` (default) — the Claude Code extension panel, prompt pre-filled.
-- `terminal` — an integrated terminal named `Claude · <KEY>` running the `claude`
-  CLI, prompt pre-typed.
+- `extension` (default) — the agent's chat panel, prompt pre-filled: the Claude Code
+  panel, or Copilot Chat in agent mode when `agentFlow.agentProvider` is `copilot`.
+- `terminal` — an integrated terminal named `Claude · <KEY>` (or `Copilot · <KEY>`)
+  running the agent's CLI (`claude`, or `copilot`), prompt pre-typed.
 
 Either way you press Enter to start, and both work for every launch path: taking a
-task, batch launches, Explore, Notepad, and **Address PR**. Terminal mode needs
-`claude` on your `PATH`; if it isn't, the terminal says `command not found` and the
-prompt is still sitting there to reuse.
+task, batch launches, Explore, Notepad, and **Address PR** — with one exception. A
+**batch** launch under Copilot's `extension` surface does not seed the chat panel at
+all: Copilot Chat is single-instance, so a second task's prompt would silently
+overwrite the first. Instead the batch writes every task's brief as usual and shows a
+notification pointing at them; there is no per-task Copilot chat tab. Terminal mode
+needs `claude` (or `copilot`) on your `PATH`; if it isn't, the terminal says
+`command not found` and the prompt is still sitting there to reuse.
 
 ## Architecture
 

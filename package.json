@@ -2,7 +2,7 @@
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
   "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a Claude Code agent already briefed.",
-  "version": "0.9.0",
+  "version": "0.11.0",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",
   "license": "MIT",
@@ -114,8 +114,12 @@
       "properties": {
         "agentFlow.taskSource": {
           "type": "string",
-          "enum": ["jira"],
-          "enumDescriptions": ["Atlassian Jira Cloud"],
+          "enum": [
+            "jira"
+          ],
+          "enumDescriptions": [
+            "Atlassian Jira Cloud"
+          ],
           "default": "jira",
           "description": "Where Agent Flow reads tasks from. Each source has its own settings under agentFlow.<source>.*. Requires a window reload."
         },
@@ -196,6 +200,20 @@
           "default": true,
           "description": "After opening a workspace, pre-fill the Claude Code panel with the task plan (you press Enter to start)."
         },
+        "agentFlow.agentProvider": {
+          "type": "string",
+          "enum": [
+            "claude-code",
+            "copilot"
+          ],
+          "enumDescriptions": [
+            "Claude Code",
+            "GitHub Copilot — VS Code only"
+          ],
+          "default": "claude-code",
+          "when": "agentFlow.host.vscode",
+          "markdownDescription": "Which agent Agent Flow starts a session with. `copilot` works only in VS Code — in Cursor and other forks it falls back to Claude Code. Note that Copilot sessions do **not** appear as live agents on the Deck, which reads Claude Code's session files."
+        },
         "agentFlow.agentSurface": {
           "type": "string",
           "enum": [
@@ -203,11 +221,11 @@
             "terminal"
           ],
           "enumDescriptions": [
-            "The Claude Code extension panel",
-            "The `claude` CLI in an integrated terminal"
+            "The agent's chat panel",
+            "The agent's CLI in an integrated terminal"
           ],
           "default": "extension",
-          "description": "Where Agent Flow starts a session: the Claude Code extension panel, or the `claude` CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter to start."
+          "description": "Where Agent Flow starts a session: the agent's chat panel, or its CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter to start."
         },
         "agentFlow.workspaceMode": {
           "type": "string",

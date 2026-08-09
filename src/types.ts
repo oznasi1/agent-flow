@@ -163,7 +163,7 @@ export interface AgentActivity {
 }
 
 /** One open Claude Code session attached to a card, with its own live state.
- * `activity` is UNKNOWN_ACTIVITY when the Live signal is off — the registry
+ * `activity` is UNKNOWN_ACTIVITY when the transcript cannot be read — the registry
  * still knows the session is open, it is only the transcript that goes unread. */
 export interface CardAgent {
   session: OpenSession;
@@ -396,10 +396,6 @@ export type InboundMessage =
   // The Deck (separate webview panel)
   | { type: "deck:ready" }
   | { type: "deck:refresh" }
-  | { type: "deck:setLive"; on: boolean }
-  | { type: "deck:setPrFacts"; on: boolean }
-  | { type: "deck:setOpenAgents"; on: boolean }
-  | { type: "deck:setReviewQueue"; on: boolean }
   | { type: "deck:setGrouping"; grouping: "agents" | "workspaces" }
   | { type: "deck:clearStale" }
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
@@ -461,6 +457,11 @@ export type OutboundMessage =
       /** The task source's user-facing name — every "Sign in to X" string reads
        * this rather than hardcoding a tracker. */
       sourceLabel: string;
+      /** The seeded agent's user-facing name — "Claude Code" or "Copilot" — so no
+       * tooltip in the webview has to hardcode which agent is configured. Optional
+       * so a handcrafted `state` message (tests, older hosts) need not carry it;
+       * the webview falls back to its own default when absent. */
+      agentLabel?: string;
       /** Which optional affordances to render. Flat booleans: the capability
        * objects on TaskProvider cannot be structured-cloned. */
       caps: SerializedCaps }
@@ -500,10 +501,12 @@ export type OutboundMessage =
   // diff protocol would buy nothing but a chance to desynchronise.
   | { type: "notepad:notes"; notes: NotepadItemView[] }
   // The Deck
-  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; reviewQueue: boolean; ghNote: string | null; prReviewStatus: string;
-      // Which lens to render. Echoed on every post rather than sent once, so a
-      // reload or a settings-page edit lands without a separate message.
-      grouping: "agents" | "workspaces";
+  /** The lens, seeded once on ready and re-sent only if the setting changes under
+   * the panel. Deliberately not a field on deck:runs: that message costs a full
+   * board rebuild, so one already in flight when the user flips the lens lands
+   * carrying a pre-click value and visibly reverts the control. */
+  | { type: "deck:grouping"; grouping: "agents" | "workspaces" }
+  | { type: "deck:runs"; runs: RunStatus[]; ghNote: string | null; prReviewStatus: string;
       // How many runs would retire right now if both retirement windows were
       // ignored. Drives the Clear stale button, which is hidden at zero.
       staleCount: number;
@@ -521,10 +524,15 @@ export type OutboundMessage =
       stale: boolean; // the last fetch failed; these are the previous results
       reviewWrites: boolean; // agentFlow.reviewWrites — the strip's box and verbs render only when true
       // false when the strip has been switched off (reviewRequests, PR facts, or
-      // gh going unusable) — distinct from a genuine empty queue. Lets the webview
-      // drop the "To review" stat tile entirely rather than showing "0 To review",
-      // and actively clears any rows it was rendering rather than leaving them
+      // gh going unusable) — distinct from a genuine empty queue, so a future
+      // reader can tell "no rows because it's off" from "no rows because the
+      // queue is empty." Paired with an emptied requests array, which is what
+      // actually clears any rows the strip was rendering rather than leaving them
       // frozen (and their write buttons clickable) with nothing ever told to stop.
+      // The webview itself doesn't read this field — DeckApp's handler destructures
+      // every other property off this message but not `enabled` — because an empty
+      // `requests` array already renders as nothing. It stays on the wire and in the
+      // type because host-side tests assert it to pin down *why* the strip is empty.
       enabled: boolean;
       // The strip is on and a first search is still in flight, with nothing cached
       // to render in the meantime. Distinct from `enabled: true` with an empty

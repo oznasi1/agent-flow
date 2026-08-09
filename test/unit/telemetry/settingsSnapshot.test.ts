@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AgentFlowConfig, DEFAULT_PROMPT_MODES, DEFAULT_REVIEW_REQUEST_MODES, getConfig } from "../../../src/config";
 import {
-  AGENT_SURFACES, DEFAULT_FILTER_VALUES, EXPLORE_MODES, OPEN_IN_MODES, REMOTE_CONTROL_MODES,
+  AGENT_PROVIDERS, AGENT_SURFACES, DEFAULT_FILTER_VALUES, EXPLORE_MODES, OPEN_IN_MODES, REMOTE_CONTROL_MODES,
   settingsSnapshot, WORKSPACE_MODES, WORKTREE_MODES,
 } from "../../../src/telemetry/settingsSnapshot";
 import { STOCK_REVIEW_MODES } from "../../../src/telemetry/events";
@@ -203,6 +203,16 @@ describe("settingsSnapshot", () => {
       settingsSnapshot({ ...getConfig(), agentSurface: "tmux" as never }).agent_surface,
     ).toBe("invalid");
   });
+
+  it("reports agent_provider", () => {
+    expect(settingsSnapshot({ ...getConfig(), agentProvider: "copilot" }).agent_provider).toBe("copilot");
+  });
+
+  it("collapses an unrecognized agentProvider to invalid", () => {
+    expect(
+      settingsSnapshot({ ...getConfig(), agentProvider: "codex" as never }).agent_provider,
+    ).toBe("invalid");
+  });
 });
 
 describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
@@ -254,6 +264,16 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
   it("keeps agentFlow.agentSurface's enum and enumDescriptions the same length", () => {
     expect(props["agentFlow.agentSurface"].enumDescriptions?.length).toBe(
       props["agentFlow.agentSurface"].enum?.length,
+    );
+  });
+
+  it("keeps AGENT_PROVIDERS equal to agentFlow.agentProvider's manifest enum", () => {
+    expect([...AGENT_PROVIDERS]).toEqual(props["agentFlow.agentProvider"].enum);
+  });
+
+  it("keeps agentFlow.agentProvider's enum and enumDescriptions the same length", () => {
+    expect(props["agentFlow.agentProvider"].enumDescriptions?.length).toBe(
+      props["agentFlow.agentProvider"].enum?.length,
     );
   });
 

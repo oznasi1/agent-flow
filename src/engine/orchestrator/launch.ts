@@ -27,6 +27,11 @@ export interface LaunchRequest {
    * caller). Deciding the layout is config-owning policy; the launcher must not invent
    * it, so the caller (which has config access) supplies it here. */
   workspaceMode: WorkspaceMode;
+  /** The resolved label of the agent that will read this run's brief ("Claude Code",
+   * "GitHub Copilot"). Supplied by the caller for the same reason `workspaceMode` is:
+   * `providerLabel` lives in `config.ts`, which imports `vscode`, and this module must
+   * not. Without it a flow-launched brief would name Claude Code to a Copilot user. */
+  agentName: string;
 }
 
 export interface LaunchDeps {
@@ -47,7 +52,7 @@ export type LaunchOutcome =
  * inside one try: that guarantee must hold regardless of what an injected dep does,
  * not only for the one call (`openWorkspace`) known to be async. */
 export async function launchPlanned(req: LaunchRequest, deps: LaunchDeps): Promise<LaunchOutcome> {
-  const { node, detail, repos, promptTemplate, workspaceDir, seedAgent, workspaceMode } = req;
+  const { node, detail, repos, promptTemplate, workspaceDir, seedAgent, workspaceMode, agentName } = req;
 
   try {
     // Two sources of truth for "which ticket" meet here: the node the user wired and
@@ -118,7 +123,7 @@ export async function launchPlanned(req: LaunchRequest, deps: LaunchDeps): Promi
 
     await deps.openWorkspace({
       ticket: { key: detail.key, summary: detail.summary, url: detail.url },
-      planMd: briefMarkdown(detail),
+      planMd: briefMarkdown(detail, agentName),
       descriptionText: detail.descriptionText,
       services,
       mode: workspaceMode,

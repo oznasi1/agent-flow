@@ -52,9 +52,9 @@ function allMerged(prs: PrEntryMap): boolean {
   return facts.length > 0 && facts.every((f) => f.state === "MERGED");
 }
 
-function stateView(r: RunStatus, live: boolean, sourceLabel: string): { text: string; tone: Tone } {
+function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Tone } {
   if (r.column === "done") return { text: allMerged(r.prs) ? "merged" : "done", tone: "merged" };
-  if (!live || r.agent.state === "unknown") return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
+  if (r.agent.state === "unknown") return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
     case "needs-you": return { text: `ended turn · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
@@ -189,8 +189,8 @@ function workspaceLabel(run: Run): string | undefined {
   return run.workspaceFile?.split(/[\\/]/).pop()?.replace(/\.code-workspace$/, "");
 }
 
-function Card({ r, live, prReviewStatus, onForget, agent, column, sourceLabel }: {
-  r: RunStatus; live: boolean; prReviewStatus: string; onForget: (key: string) => void;
+function Card({ r, prReviewStatus, onForget, agent, column, sourceLabel }: {
+  r: RunStatus; prReviewStatus: string; onForget: (key: string) => void;
   /** Non-null on the Agents board: this card is that one session, and its state
    * line, name and action target come from the agent rather than the run. */
   agent: CardAgent | null;
@@ -202,7 +202,7 @@ function Card({ r, live, prReviewStatus, onForget, agent, column, sourceLabel }:
   // The agent's own activity when this card is an agent; the run's reduction
   // otherwise. `column` is threaded in rather than read off `r` for the same
   // reason: on the Agents board both are per-session.
-  const sv = stateView({ ...r, agent: agent ? agent.activity : r.agent, column }, live, sourceLabel);
+  const sv = stateView({ ...r, agent: agent ? agent.activity : r.agent, column }, sourceLabel);
   // A ticketless run has no tracked issue behind it: the key is a local slug, and
   // openExternal("") is a button that does nothing.
   const tracked = isTicketRun(r.run);
@@ -369,16 +369,12 @@ function Card({ r, live, prReviewStatus, onForget, agent, column, sourceLabel }:
 
 export function DeckApp(): JSX.Element {
   const [runs, setRuns] = React.useState<RunStatus[]>([]);
-  const [live, setLive] = React.useState(true);
-  const [prFacts, setPrFacts] = React.useState(true);
-  const [openAgents, setOpenAgents] = React.useState(true);
   const [ghNote, setGhNote] = React.useState<string | null>(null);
   const [prReviewStatus, setPrReviewStatus] = React.useState("");
   const [syncedAt, setSyncedAt] = React.useState<number | null>(null);
   const [, forceTick] = React.useState(0);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string; action?: { label: string; url: string } }[]>([]);
   const [busy, setBusy] = React.useState(false);
-  const [reviewQueue, setReviewQueue] = React.useState(true);
   const [grouping, setGrouping] = React.useState<"agents" | "workspaces">("agents");
   const [staleCount, setStaleCount] = React.useState(0);
   // See DEFAULT_SOURCE_LABEL's own comment for why "Jira" rather than "".
@@ -409,13 +405,6 @@ export function DeckApp(): JSX.Element {
    * inline "check the PR before trying again" line; cleared on `"ok"`, left
    * alone on `"cancelled"` (nothing was attempted, so nothing to warn about). */
   const [submitFailed, setSubmitFailed] = React.useState<Record<string, boolean>>({});
-  /** Mirrors the host's own `enabled` flag on `deck:reviews`: true once a post
-   * with the feature on has landed, false again the moment it posts `enabled:
-   * false` (the setting turned off, PR facts turned off, or gh going unusable).
-   * The stat tile needs this, not just `issueCount === 0` — "0 To review" is
-   * information about an enabled, empty queue; a switched-off strip should show
-   * no tile at all, the same way the strip itself renders nothing below. */
-  const [reviewsSeen, setReviewsSeen] = React.useState(false);
   const [flows, setFlows] = React.useState<Flow[]>([]);
   const [pendingResume, setPendingResume] = React.useState<PendingResume[]>([]);
   const [promptModes, setPromptModes] = React.useState<FlowPromptMode[]>([]);
@@ -437,16 +426,13 @@ export function DeckApp(): JSX.Element {
       const m = ev.data;
       if (m.type === "deck:runs") {
         setRuns(m.runs);
-        setLive(m.liveSignal);
-        setPrFacts(m.prFacts);
-        setOpenAgents(m.openAgents);
-        setReviewQueue(m.reviewQueue);
-        setGrouping(m.grouping);
         setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
         setPrReviewStatus(m.prReviewStatus);
         setSourceLabel(m.sourceLabel);
         setSyncedAt(Date.now());
+      } else if (m.type === "deck:grouping") {
+        setGrouping(m.grouping);
       } else if (m.type === "toast") {
         const id = ++toastSeq;
         setToasts((t) => [...t.slice(-2), { id, level: m.level, message: m.message, action: m.action }]);
@@ -458,7 +444,6 @@ export function DeckApp(): JSX.Element {
         // own scroller, so the board keeps its share of the window without the queue
         // ever being hidden — which also means the collapse state is purely the user's,
         // with no seeded-once ref and no setState nested inside another's updater.
-        setReviewsSeen(m.enabled);
         setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale, reviewWrites: m.reviewWrites, loading: m.loading });
       } else if (m.type === "deck:reviewDetail") {
         setDetails((d) => ({ ...d, [m.id]: m.detail }));
@@ -539,11 +524,6 @@ export function DeckApp(): JSX.Element {
   // armed — that is the thing quietly spending your attention while the drawer
   // is closed, not how many flows merely exist.
   const armedCount = flows.filter((f) => f.armed).length;
-  const toggleLive = () => {
-    const next = !live;
-    setLive(next);
-    send({ type: "deck:setLive", on: next });
-  };
 
   const forget = React.useCallback((key: string) => {
     // Optimistic: the card leaves now rather than after a full refresh (a connector
@@ -557,20 +537,13 @@ export function DeckApp(): JSX.Element {
     <>
       <div className="hd">
         <div className="title">In-flight<span className="sub">everything you've launched</span></div>
+        {/* The three board columns and nothing else. "To review" lived here too,
+            six pixels above the review strip that renders its own count; "Total"
+            was the sum of these three, over a board showing every card it counted. */}
         <div className="stats">
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "progress").length}</span><span className="l">In progress</span></div>
           <div className={`stat ${needs > 0 ? "attn" : ""}`}><span className="n">{needs}</span><span className="l">Action required</span></div>
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "review").length}</span><span className="l">In review</span></div>
-          {reviewsSeen && (
-            // A spinning glyph where the number goes, not "0": on a cold start the
-            // count is genuinely unknown for the few seconds the first `gh` search
-            // takes, and "0 To review" is a claim we cannot back yet.
-            <div className="stat">
-              <span className="n">{reviews.loading ? <span className="spin on" aria-label="checking">⟳</span> : reviews.issueCount}</span>
-              <span className="l">To review</span>
-            </div>
-          )}
-          <div className="stat"><span className="n">{cards.length}</span><span className="l">Total</span></div>
         </div>
         <div className="sp" />
         {orchEnabled && (
@@ -589,35 +562,6 @@ export function DeckApp(): JSX.Element {
               : flows.length > 0 && <span className="ct">{flows.length}</span>}
           </button>
         )}
-        {/* Both toggles answer the same question — how much should the board trust? —
-            so they read as one segmented control rather than two loose pills. Buttons,
-            not divs: these are controls, and :focus-visible only reaches them here. */}
-        <div className="ctls">
-          <button type="button" className={`ctl ${live ? "on" : ""}`} onClick={toggleLive} title={`Best-effort live signal from Claude Code transcripts. Off → git + ${sourceLabel} only.`}>
-            <span className="switch" />Live signal
-          </button>
-          <button type="button" className={`ctl ${prFacts ? "on" : ""}`} onClick={() => { const next = !prFacts; setPrFacts(next); send({ type: "deck:setPrFacts", on: next }); }} title={`Read each task's PR state from GitHub with the gh CLI. Off → git + ${sourceLabel} only.`}>
-            <span className="switch" />PR facts
-          </button>
-          <button
-            type="button"
-            className={`ctl ${openAgents ? "on" : ""}`}
-            onClick={() => { const next = !openAgents; setOpenAgents(next); send({ type: "deck:setOpenAgents", on: next }); }}
-            title="Show every Claude Code session open on this machine, read from ~/.claude/sessions. Off → only what Agent Flow Deck launched."
-          >
-            <span className="switch" />Open agents
-          </button>
-          {/* Off stops the `gh` search outright — distinct from the strip's own
-              collapse caret, which only folds rows already fetched. */}
-          <button
-            type="button"
-            className={`ctl ${reviewQueue ? "on" : ""}`}
-            onClick={() => { const next = !reviewQueue; setReviewQueue(next); send({ type: "deck:setReviewQueue", on: next }); }}
-            title="Open PRs that ask for your review, read with the gh CLI. Off → no query, no queue."
-          >
-            <span className="switch" />Review queue
-          </button>
-        </div>
         {/* A lens, not a trust toggle: both sides show everything, one card per
             agent or one per launched task. Persisted, so it survives a reload. */}
         <div className="ctls seg">
@@ -716,7 +660,7 @@ export function DeckApp(): JSX.Element {
                 </div>
                 <div className="col-body">
                   {list.map((c) => (
-                    <Card key={c.id} r={c.status} live={live} prReviewStatus={prReviewStatus}
+                    <Card key={c.id} r={c.status} prReviewStatus={prReviewStatus}
                       onForget={forget} agent={c.agent} column={c.column} sourceLabel={sourceLabel} />
                   ))}
                 </div>
