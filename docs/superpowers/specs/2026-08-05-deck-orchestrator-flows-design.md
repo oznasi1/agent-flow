@@ -85,6 +85,7 @@ export interface FlowEdge {
   mode?: string;           // prompt mode id, for launch and seed
   firedAt?: number;
   firedNote?: string;      // "opened bite-me-3a" — the receipt the drawer shows
+  note?: string;           // once-off text for launch/seed only; see "Notes" below
   error?: string;          // the action threw; never retried until Reset
 }
 ```
@@ -168,7 +169,36 @@ Two honest limitations to state in the UI, not hide:
 |---|---|
 | `launch` | The take path that already opens a workspace and seeds an agent, driven from the planned node's stored config rather than from prompts. |
 | `seed` | The Address PR re-seed in `deckView.ts` — a new agent in a place that already exists. |
-| `notify` | A Deck toast plus the header chip's count. No writes anywhere. |
+| `notify` | Each fired edge's message goes to `vscode.window.showInformationMessage` — see "Notifications" below. No writes anywhere. |
+
+### A rule's own note
+
+`launch` and `seed` edges (not `notify` — its words live on its own notify node) can carry
+a free-text `note`, set in the inspector or the list row. `composeAgentPrompt`
+(`src/engine/prompt.ts`) folds it into the prompt mode's template at `{note}` if the
+template has one, or appended just before `{files}` otherwise; no note is a byte-identical
+prompt to today, and a note containing `$&` or a literal `{brief}` survives verbatim
+(slice-based insertion, not `String.replace`, so the note is never interpreted as a
+replacement pattern or re-substituted). A template that uses `{note}` with no note set
+loses the literal token rather than shipping it to the agent.
+
+Reusable instructions belong in the prompt mode itself, which the edge already picks from;
+the note is for what is specific to just this one transition. The first-launch spend
+confirmation names the note, when there is one, alongside the ticket, the repos and the
+mode — `hasNote` is the single predicate both that modal and `composeAgentPrompt` use to
+decide whether a note counts, so a whitespace-only note can never show as "will be told to
+the agent" in the confirmation while actually being dropped from the prompt.
+
+### Notifications
+
+An unattended flow fires precisely when nobody is looking at the Deck, so a toast alone —
+invisible unless the panel is open and focused — is not enough for the things a person
+needs to actually see. A fired `notify` and a failed `launch` or `seed` both now also raise
+a VS Code notification (`deckView.ts`) — `notify` through `showInformationMessage`, a
+failure through `showErrorMessage` — non-modal either way, and both persist in the
+Notifications bell until dismissed. A **successful** launch or seed stays a Deck toast
+only — the window it just opened is its own announcement, and a notification on top of that
+would be noise.
 
 ## The latch
 
@@ -393,9 +423,9 @@ cheaper to live with than to fix.
 - **An unanswered spend confirmation stalls its own panel's flows.** The in-flight guard
   (`advanceInFlight`) means that panel runs no further passes until its modal is answered.
   Other windows are unaffected, because the asking happens outside the lock — see above.
-- **Two `notify` edges into one node toast twice.** The act-once-per-target rule deliberately
-  covers only spending actions (`launch`, `seed`); a duplicate toast is cheap, and collapsing
-  it would hide the fact that two distinct rules both became true.
+- **Two `notify` edges into one node raise the notification twice.** The act-once-per-target
+  rule deliberately covers only spending actions (`launch`, `seed`); a duplicate notification
+  is cheap, and collapsing it would hide the fact that two distinct rules both became true.
 - **A `writeFlow` that throws right after a real launch relaunches it, and pays again.** The
   act-then-record comment at that site in `advanceUnderLock` guarantees atomicity across
   *outcomes* within one pass — a crash between deciding two edges' fates cannot leave one

@@ -250,7 +250,7 @@
         },
         "agentFlow.promptModes": {
           "type": "array",
-          "markdownDescription": "Prompt modes offered when taking a task. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`. Add your own (e.g. a `spike` mode). Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"tdd\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you.",
+          "markdownDescription": "Prompt modes offered when taking a task. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`, `{note}`. Add your own (e.g. a `spike` mode). Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"tdd\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you.",
           "items": {
             "type": "object",
             "required": [
@@ -271,7 +271,7 @@
               },
               "prompt": {
                 "type": "string",
-                "description": "Template with {key} {summary} {url} {brief} {files}. Omit to keep a built-in mode's prompt; required when adding a mode of your own."
+                "description": "Template with {key} {summary} {url} {brief} {files} {note}. Omit to keep a built-in mode's prompt; required when adding a mode of your own."
               },
               "hidden": {
                 "type": "boolean",

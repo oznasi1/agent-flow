@@ -120,7 +120,10 @@ clean tree, a Jira status. The drawer resizes by dragging its edge or pressing *
 and switching to **List** gives the same flow a keyboard path — build, wire, edit and arm
 it without a pointer. Each connection can **launch** the next agent in a fresh
 worktree, **seed** a second agent into a place that already exists, or **notify** you,
-and the drawer says what each condition is waiting on right now. **Arm** a flow and it
+and the drawer says what each condition is waiting on right now. A **launch** or **seed**
+rule can also carry a note of its own, folded into whichever prompt mode it uses: put
+anything reusable in the prompt mode, and save the note for what is specific to just this
+one rule. **Arm** a flow and it
 is checked on every Deck refresh; a rule that is met fires exactly once and tells you,
 rather than firing again on every later pass. It keeps advancing while the Deck is
 hidden — an armed flow that only ran while you were looking at the board would not be
