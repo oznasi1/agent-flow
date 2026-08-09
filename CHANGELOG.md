@@ -5,6 +5,24 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`agentFlow.agentProvider` — start sessions with GitHub Copilot.** Set it to
+  `copilot` and a taken task opens Copilot Chat in agent mode with the prompt
+  pre-filled, or runs the `copilot` CLI when `agentFlow.agentSurface` is
+  `terminal`. VS Code only — Cursor and other forks fall back to Claude Code.
+  A **batch** launch under Copilot does not seed the chat panel (it's
+  single-instance, so a second prompt would overwrite the first); it writes
+  every task's brief and points a notification at them instead. Remote Control
+  needs Claude Code: with `agentFlow.remoteControl` set to `on`, taking a task
+  under Copilot is refused before anything is created; set to `ask`, the picker
+  isn't offered and the launch proceeds without it. Copilot sessions don't show
+  up as live agents on the Deck, and **Doctor** now reports on whichever
+  provider is configured. Defaults to `claude-code`, so nothing changes unless
+  you ask for it.
+
 ## [0.9.0] — 2026-08-08
 
 ### Changed
