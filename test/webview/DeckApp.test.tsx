@@ -36,7 +36,7 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
 
 const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated",
                  grouping: "agents" | "workspaces" = "agents", sourceLabel = "Jira"): OutboundMessage =>
-  ({ type: "deck:runs", runs, liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: null, prReviewStatus, grouping, staleCount: 0, sourceLabel });
+  ({ type: "deck:runs", runs, prFacts: true, openAgents: true, reviewQueue: true, ghNote: null, prReviewStatus, grouping, staleCount: 0, sourceLabel });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
@@ -123,14 +123,6 @@ describe("DeckApp", () => {
     host(runsMsg([mkStatus()]));
     fireEvent.click(screen.getByText("ASM-1"));
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
-  });
-
-  it("toggles the live signal and falls back to the parked label", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByText(/Live signal/i));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:setLive", on: false });
-    expect(screen.getByText(/parked · git \+ Jira only/i)).toBeInTheDocument();
   });
 
   it("labels a working agent with elapsed time", () => {
@@ -562,7 +554,7 @@ describe("DeckApp PR-facts chrome", () => {
 
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], liveSignal: true, prFacts: true, openAgents: true, reviewQueue: true, ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", grouping: "agents", staleCount: 0, sourceLabel: "Jira" });
+    host({ type: "deck:runs", runs: [mkStatus()], prFacts: true, openAgents: true, reviewQueue: true, ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", grouping: "agents", staleCount: 0, sourceLabel: "Jira" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 
@@ -1259,7 +1251,6 @@ describe("DeckApp — source label", () => {
 
   it("renders the chrome's Jira strings byte-for-byte before any deck:runs arrives — the defaulted first paint", () => {
     render(<DeckApp />);
-    expect(screen.getByTitle("Best-effort live signal from Claude Code transcripts. Off → git + Jira only.")).toBeInTheDocument();
     expect(screen.getByTitle("Read each task's PR state from GitHub with the gh CLI. Off → git + Jira only.")).toBeInTheDocument();
     expect(screen.getByTitle("Re-read git, Jira and PR state now")).toBeInTheDocument();
     expect(document.querySelector(".note")!.textContent).toBe("git + Jira backbone · best-effort live from ~/.claude/projects");
@@ -1268,7 +1259,6 @@ describe("DeckApp — source label", () => {
   it("renders the chrome's Jira strings byte-for-byte once a Jira-labeled deck:runs lands", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    expect(screen.getByTitle("Best-effort live signal from Claude Code transcripts. Off → git + Jira only.")).toBeInTheDocument();
     expect(screen.getByTitle("Read each task's PR state from GitHub with the gh CLI. Off → git + Jira only.")).toBeInTheDocument();
     expect(screen.getByTitle("Re-read git, Jira and PR state now")).toBeInTheDocument();
     expect(document.querySelector(".note")!.textContent).toBe("git + Jira backbone · best-effort live from ~/.claude/projects");
@@ -1289,17 +1279,9 @@ describe("DeckApp — source label", () => {
     expect(screen.getByTitle("Open ASM-5641 in Jira")).toBeInTheDocument();
   });
 
-  it("renders the exact parked string with Jira when live signal is off", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByText(/Live signal/i));
-    expect(screen.getByText("parked · git + Jira only")).toBeInTheDocument();
-  });
-
   it("templates every one of those strings off a non-Jira sourceLabel — proving the label actually reaches the render", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()], "PR initiated", "agents", "Acme"));
-    expect(screen.getByTitle("Best-effort live signal from Claude Code transcripts. Off → git + Acme only.")).toBeInTheDocument();
     expect(screen.getByTitle("Read each task's PR state from GitHub with the gh CLI. Off → git + Acme only.")).toBeInTheDocument();
     expect(screen.getByTitle("Re-read git, Acme and PR state now")).toBeInTheDocument();
     expect(document.querySelector(".note")!.textContent).toBe("git + Acme backbone · best-effort live from ~/.claude/projects");
@@ -1307,7 +1289,10 @@ describe("DeckApp — source label", () => {
     expect(screen.getByTitle("Acme status: In Progress")).toBeInTheDocument();
     fireEvent.click(screen.getByTitle(/more actions/i));
     expect(screen.getByText("Open in Acme")).toBeInTheDocument();
-    fireEvent.click(screen.getByText(/Live signal/i));
+    // A fresh deck:runs post with an unknown agent activity is the only way left
+    // to reach the parked string — the live signal is unconditional now, so
+    // there is no toggle to click.
+    host(runsMsg([mkStatus({ agent: { state: "unknown", lastActivityMs: null, slug: null } })], "PR initiated", "agents", "Acme"));
     expect(screen.getByText("parked · git + Acme only")).toBeInTheDocument();
     // No trace of the shipped default anywhere on the rendered board.
     expect(document.body.textContent).not.toMatch(/Jira/);

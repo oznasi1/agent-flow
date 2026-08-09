@@ -23,7 +23,7 @@ import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, w
 import { sortRequests } from "./engine/review/sort";
 import { inferTicket, localRunFor } from "./engine/localRuns";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
-import { readSessionActivity, UNKNOWN_ACTIVITY } from "./engine/transcript";
+import { readSessionActivity } from "./engine/transcript";
 import { canon } from "./engine/paths";
 import { CardAgent, InboundMessage, OpenSession, OutboundMessage, PrEntry, PrEntryMap, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
 
@@ -56,7 +56,6 @@ export class DeckPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly disposables: vscode.Disposable[] = [];
   private timer: ReturnType<typeof setInterval> | undefined;
-  private liveSignal = true;
   private readonly ticketCache = new Map<string, { at: number; status: string | null; category: string | null }>();
   /** The last refresh's synthetic runs for places no tracked run claimed — cleared
    * and repopulated on every rebuild. A local card has no record on disk, so this
@@ -615,7 +614,7 @@ export class DeckPanel {
             session: s,
             // Addressed by sessionId, so two sessions in one worktree report
             // their own states rather than sharing the newest transcript's.
-            activity: this.liveSignal ? readSessionActivity(projectsRoot, s.cwd, s.sessionId, now) : UNKNOWN_ACTIVITY,
+            activity: readSessionActivity(projectsRoot, s.cwd, s.sessionId, now),
             repo: repo.name,
           });
         }
@@ -639,7 +638,7 @@ export class DeckPanel {
         run.key,
         sessions.map((s) => ({
           session: s,
-          activity: this.liveSignal ? readSessionActivity(projectsRoot, s.cwd, s.sessionId, now) : UNKNOWN_ACTIVITY,
+          activity: readSessionActivity(projectsRoot, s.cwd, s.sessionId, now),
           repo: run.repos[0]?.name,
         })),
       );
@@ -684,7 +683,7 @@ export class DeckPanel {
       }
       const status = buildRunStatus({
         run, ticket, projectsRoot, nowMs: now,
-        liveSignal: this.liveSignal, openIdentities, prs,
+        openIdentities, prs,
         agents: agentsByKey.get(run.key) ?? [],
       });
       // A local card has no record on disk — `removeRun` would be a no-op but
@@ -837,7 +836,6 @@ export class DeckPanel {
       this.post({
         type: "deck:runs",
         runs,
-        liveSignal: this.liveSignal,
         prFacts: this.prFacts,
         openAgents: this.openAgents,
         reviewQueue: this.reviewQueue,
@@ -918,10 +916,6 @@ export class DeckPanel {
         await this.refreshBusy();
         break;
       case "deck:refresh":
-        await this.refreshBusy();
-        break;
-      case "deck:setLive":
-        this.liveSignal = m.on;
         await this.refreshBusy();
         break;
       case "deck:setPrFacts":

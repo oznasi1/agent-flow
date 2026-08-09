@@ -56,10 +56,10 @@ const h = vi.hoisted(() => ({
   // Every Claude Code session open on this machine (Task 8) — the registry
   // readOpenSessions reads, stubbed here rather than touching real ~/.claude/sessions.
   openSessions: [] as OpenSession[],
-  // Per-session live activity (Task 8) — stubbed so the liveSignal-on case can
-  // assert a real, known AgentActivity is threaded through to the right
-  // CardAgent, without this suite re-testing readSessionActivity's own parsing
-  // of a real transcript file (engine/transcript.test.ts already does that).
+  // Per-session live activity (Task 8) — stubbed so a test can assert a real,
+  // known AgentActivity is threaded through to the right CardAgent, without
+  // this suite re-testing readSessionActivity's own parsing of a real
+  // transcript file (engine/transcript.test.ts already does that).
   sessionActivity: vi.fn((_projectsRoot: string, _cwd: string, _sessionId: string, _nowMs: number): AgentActivity => (
     { state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" }
   )),
@@ -139,8 +139,9 @@ vi.mock("../../src/engine/sessions", async (importActual) => ({
   defaultSessionsDir: () => "/sessions",
 }));
 // UNKNOWN_ACTIVITY stays real (deckView.ts imports it directly, and it is the
-// exact value the liveSignal-off case asserts against) — only the transcript
-// read itself, which would otherwise hit a real (absent) file, is replaced.
+// exact value the unreadable-transcript case asserts against) — only the
+// transcript read itself, which would otherwise hit a real (absent) file, is
+// replaced.
 vi.mock("../../src/engine/transcript", async (importActual) => ({
   ...(await importActual<typeof import("../../src/engine/transcript")>()),
   readSessionActivity: (projectsRoot: string, cwd: string, sessionId: string, nowMs: number) =>
@@ -401,7 +402,6 @@ describe("DeckPanel", () => {
     expect(runsPost).toBeTruthy();
     expect(runsPost.runs).toHaveLength(1);
     expect(runsPost.runs[0].run.key).toBe("ASM-1");
-    expect(runsPost.liveSignal).toBe(true);
   });
 
   it("posts the configured PR-review status so cards can gate the button", async () => {
@@ -437,18 +437,6 @@ describe("DeckPanel", () => {
     // that would happily produce a card for the review run too.
     expect(msg.runs).toHaveLength(1);
     expect(msg.runs[0].run.key).toBe("ASM-1");
-  });
-
-  it("re-posts with liveSignal off when toggled", async () => {
-    show();
-    const p = lastPanel();
-    await p._fire({ type: "deck:setLive", on: false });
-    const runsPost = posts(p).reverse().find((m) => m.type === "deck:runs");
-    expect(runsPost.liveSignal).toBe(false);
-    expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({
-      ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
-      liveSignal: false, openIdentities: expect.any(Set), prs: {},
-    }));
   });
 
   it("inspect open re-opens the repo path via the editor", async () => {
@@ -667,7 +655,7 @@ describe("DeckPanel", () => {
     expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({
       ticket: { status: "In Review", category: "indeterminate" },
       projectsRoot: expect.any(String), nowMs: expect.any(Number),
-      liveSignal: true, openIdentities: expect.any(Set), prs: {},
+      openIdentities: expect.any(Set), prs: {},
     }));
   });
 
@@ -688,7 +676,7 @@ describe("DeckPanel", () => {
     await p._fire({ type: "deck:refresh" });
     expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({
       ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
-      liveSignal: true, openIdentities: expect.any(Set), prs: {},
+      openIdentities: expect.any(Set), prs: {},
     }));
     expect(log).not.toHaveBeenCalledWith(expect.stringContaining("ticket status"));
   });
@@ -820,19 +808,19 @@ describe("DeckPanel open agents", () => {
     expect(builtFor("ASM-1").agents).toEqual([]);
   });
 
-  it("marks every attached agent's activity unknown when the live signal is off, while still listing the session", async () => {
-    // liveSignal off must not drop the session from the card — the registry
-    // still knows it's open; only its transcript goes unread.
+  it("still lists an attached session when its transcript is unreadable", async () => {
+    // The registry knows the session is open; only the transcript goes unread.
+    // That is now the sole route to an unknown activity, and it must not drop the
+    // session from the card.
     h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
     h.openSessions = [sess()];
+    h.sessionActivity.mockReturnValue({ state: "unknown", lastActivityMs: null, slug: null });
     show();
-    const p = lastPanel();
-    await p._fire({ type: "deck:setLive", on: false });
+    await settled();
     const agents = builtFor("ASM-1").agents;
     expect(agents).toHaveLength(1);
     expect(agents[0].session.name).toBe("svc-7e");
     expect(agents[0].activity).toEqual({ state: "unknown", lastActivityMs: null, slug: null });
-    expect(h.sessionActivity).not.toHaveBeenCalled();
   });
 
   it("reads the session's own live activity when the live signal is on, keyed to that session", async () => {
@@ -1213,15 +1201,13 @@ describe("DeckPanel local cards", () => {
     expect(h.buildRunStatus).not.toHaveBeenCalled();
   });
 
-  it("still makes local cards with the live signal off", async () => {
-    // The registry knows a session is open without any transcript being read, so
-    // the card appears — its agents just report unknown.
+  it("still makes local cards when a transcript is unreadable", async () => {
+    // The registry knows a session is open without its transcript being read, so
+    // the card appears — its agent just reports unknown.
     h.runs = [];
     h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.sessionActivity.mockReturnValue({ state: "unknown", lastActivityMs: null, slug: null });
     show();
-    await settled();
-    const p = lastPanel();
-    await p._fire({ type: "deck:setLive", on: false });
     await settled();
     const built = builtLocal();
     expect(built.agents).toHaveLength(1);
@@ -1344,7 +1330,7 @@ describe("DeckPanel PR facts", () => {
       // still requires this key to match the literal value.
       expect.objectContaining({
         ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
-        liveSignal: expect.any(Boolean), openIdentities: expect.any(Set), prs: h.prEntries,
+        openIdentities: expect.any(Set), prs: h.prEntries,
       }),
     );
   });
@@ -1486,7 +1472,7 @@ describe("DeckPanel PR facts", () => {
       // still pins that key to the literal value).
       expect.objectContaining({
         ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
-        liveSignal: expect.any(Boolean), openIdentities: expect.any(Set), prs: {},
+        openIdentities: expect.any(Set), prs: {},
       }),
     );
     expect(posts(lastPanel()).find((m) => m.type === "deck:runs")).toMatchObject({ prFacts: false });
@@ -1603,7 +1589,7 @@ describe("DeckPanel PR facts", () => {
     expect(h.buildRunStatus).toHaveBeenCalledWith(
       expect.objectContaining({
         ticket: null, projectsRoot: expect.any(String), nowMs: expect.any(Number),
-        liveSignal: expect.any(Boolean), openIdentities: expect.any(Set), prs: { svc: svcEntry },
+        openIdentities: expect.any(Set), prs: { svc: svcEntry },
       }),
     );
   });

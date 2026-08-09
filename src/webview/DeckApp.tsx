@@ -50,9 +50,9 @@ function allMerged(prs: PrEntryMap): boolean {
   return facts.length > 0 && facts.every((f) => f.state === "MERGED");
 }
 
-function stateView(r: RunStatus, live: boolean, sourceLabel: string): { text: string; tone: Tone } {
+function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Tone } {
   if (r.column === "done") return { text: allMerged(r.prs) ? "merged" : "done", tone: "merged" };
-  if (!live || r.agent.state === "unknown") return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
+  if (r.agent.state === "unknown") return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
     case "needs-you": return { text: `ended turn · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
@@ -187,8 +187,8 @@ function workspaceLabel(run: Run): string | undefined {
   return run.workspaceFile?.split(/[\\/]/).pop()?.replace(/\.code-workspace$/, "");
 }
 
-function Card({ r, live, prReviewStatus, onForget, agent, column, sourceLabel }: {
-  r: RunStatus; live: boolean; prReviewStatus: string; onForget: (key: string) => void;
+function Card({ r, prReviewStatus, onForget, agent, column, sourceLabel }: {
+  r: RunStatus; prReviewStatus: string; onForget: (key: string) => void;
   /** Non-null on the Agents board: this card is that one session, and its state
    * line, name and action target come from the agent rather than the run. */
   agent: CardAgent | null;
@@ -200,7 +200,7 @@ function Card({ r, live, prReviewStatus, onForget, agent, column, sourceLabel }:
   // The agent's own activity when this card is an agent; the run's reduction
   // otherwise. `column` is threaded in rather than read off `r` for the same
   // reason: on the Agents board both are per-session.
-  const sv = stateView({ ...r, agent: agent ? agent.activity : r.agent, column }, live, sourceLabel);
+  const sv = stateView({ ...r, agent: agent ? agent.activity : r.agent, column }, sourceLabel);
   // A ticketless run has no tracked issue behind it: the key is a local slug, and
   // openExternal("") is a button that does nothing.
   const tracked = isTicketRun(r.run);
@@ -355,7 +355,6 @@ function Card({ r, live, prReviewStatus, onForget, agent, column, sourceLabel }:
 
 export function DeckApp(): JSX.Element {
   const [runs, setRuns] = React.useState<RunStatus[]>([]);
-  const [live, setLive] = React.useState(true);
   const [prFacts, setPrFacts] = React.useState(true);
   const [openAgents, setOpenAgents] = React.useState(true);
   const [ghNote, setGhNote] = React.useState<string | null>(null);
@@ -408,7 +407,6 @@ export function DeckApp(): JSX.Element {
       const m = ev.data;
       if (m.type === "deck:runs") {
         setRuns(m.runs);
-        setLive(m.liveSignal);
         setPrFacts(m.prFacts);
         setOpenAgents(m.openAgents);
         setReviewQueue(m.reviewQueue);
@@ -474,11 +472,6 @@ export function DeckApp(): JSX.Element {
     ? projectCards(runs)
     : runs.map((r) => ({ id: `w:${r.run.key}`, status: r, agent: null, column: r.column }));
   const needs = cards.filter((c) => c.column === "needs").length;
-  const toggleLive = () => {
-    const next = !live;
-    setLive(next);
-    send({ type: "deck:setLive", on: next });
-  };
 
   const forget = React.useCallback((key: string) => {
     // Optimistic: the card leaves now rather than after a full refresh (a connector
@@ -512,9 +505,6 @@ export function DeckApp(): JSX.Element {
             so they read as one segmented control rather than two loose pills. Buttons,
             not divs: these are controls, and :focus-visible only reaches them here. */}
         <div className="ctls">
-          <button type="button" className={`ctl ${live ? "on" : ""}`} onClick={toggleLive} title={`Best-effort live signal from Claude Code transcripts. Off → git + ${sourceLabel} only.`}>
-            <span className="switch" />Live signal
-          </button>
           <button type="button" className={`ctl ${prFacts ? "on" : ""}`} onClick={() => { const next = !prFacts; setPrFacts(next); send({ type: "deck:setPrFacts", on: next }); }} title={`Read each task's PR state from GitHub with the gh CLI. Off → git + ${sourceLabel} only.`}>
             <span className="switch" />PR facts
           </button>
@@ -635,7 +625,7 @@ export function DeckApp(): JSX.Element {
                 </div>
                 <div className="col-body">
                   {list.map((c) => (
-                    <Card key={c.id} r={c.status} live={live} prReviewStatus={prReviewStatus}
+                    <Card key={c.id} r={c.status} prReviewStatus={prReviewStatus}
                       onForget={forget} agent={c.agent} column={c.column} sourceLabel={sourceLabel} />
                   ))}
                 </div>

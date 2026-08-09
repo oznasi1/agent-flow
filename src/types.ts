@@ -153,7 +153,7 @@ export interface AgentActivity {
 }
 
 /** One open Claude Code session attached to a card, with its own live state.
- * `activity` is UNKNOWN_ACTIVITY when the Live signal is off — the registry
+ * `activity` is UNKNOWN_ACTIVITY when the transcript cannot be read — the registry
  * still knows the session is open, it is only the transcript that goes unread. */
 export interface CardAgent {
   session: OpenSession;
@@ -375,7 +375,6 @@ export type InboundMessage =
   // The Deck (separate webview panel)
   | { type: "deck:ready" }
   | { type: "deck:refresh" }
-  | { type: "deck:setLive"; on: boolean }
   | { type: "deck:setPrFacts"; on: boolean }
   | { type: "deck:setOpenAgents"; on: boolean }
   | { type: "deck:setReviewQueue"; on: boolean }
@@ -449,7 +448,7 @@ export type OutboundMessage =
   // diff protocol would buy nothing but a chance to desynchronise.
   | { type: "notepad:notes"; notes: NotepadItemView[] }
   // The Deck
-  | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; reviewQueue: boolean; ghNote: string | null; prReviewStatus: string;
+  | { type: "deck:runs"; runs: RunStatus[]; prFacts: boolean; openAgents: boolean; reviewQueue: boolean; ghNote: string | null; prReviewStatus: string;
       // Which lens to render. Echoed on every post rather than sent once, so a
       // reload or a settings-page edit lands without a separate message.
       grouping: "agents" | "workspaces";
