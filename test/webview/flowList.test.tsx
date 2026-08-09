@@ -204,6 +204,16 @@ describe("opening and closing a row for editing", () => {
     expect(row1.classList.contains("open")).toBe(false);
   });
 
+  it("stops a click inside the sentence from bubbling up to the row's own click handler", () => {
+    render(<FlowList {...props({ flow: threeRules() })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1")); // open it
+    const condition = screen.getByLabelText("Condition");
+    const spy = vi.spyOn(Event.prototype, "stopPropagation");
+    fireEvent.click(condition);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
   it("the condition, action, mode and destination controls are ordinary form controls, reachable in order", () => {
     const launching = placeAndPlanned();
     render(<FlowList {...props({ flow: launching })} />);
@@ -263,6 +273,11 @@ describe("opening and closing a row for editing", () => {
     fireEvent.click(row);
     const select = within(row).getByLabelText("Mode") as HTMLSelectElement;
     expect(select.value).toBe("deleted-mode");
+  });
+
+  it("shows '(no mode set)' for a seed rule that has never had a mode written to it", () => {
+    render(<FlowList {...props({ flow: twoPlaces({ action: "seed" }) })} />);
+    expect(screen.getByTestId("flowlist-row-e1").textContent).toContain("(no mode set)");
   });
 
   it("edits the notify message on blur through the open row's own input", () => {
@@ -344,6 +359,24 @@ describe("Delete", () => {
     rerender(<FlowList {...props({ flow: saved, onSave })} />);
     // e2 now occupies row index 0 — the slot the deleted row vacated.
     expect(screen.getByTestId("flowlist-row-e2")).toHaveAttribute("tabindex", "0");
+  });
+
+  it("deleting the only remaining rule moves focus to the empty state, not <body>", () => {
+    // The one-row case: `i + 1 < rows.length` and `i - 1` both degenerate to
+    // `i` itself, which is the node about to be removed — there is no OTHER
+    // row to hand focus to. Without the guard in `onDeleteRule`, this would
+    // focus the row being deleted and the browser would drop focus to
+    // <body> the instant it unmounted.
+    const onSave = vi.fn();
+    const single = twoPlaces();
+    const { rerender } = render(<FlowList {...props({ flow: single, onSave })} />);
+    const row1 = screen.getByTestId("flowlist-row-e1");
+    row1.focus();
+    fireEvent.keyDown(row1, { key: "Delete" });
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges).toEqual([]);
+    rerender(<FlowList {...props({ flow: saved, onSave })} />);
+    expect(document.activeElement).toBe(screen.getByTestId("flowlist-empty"));
   });
 });
 

@@ -84,7 +84,7 @@ export function notifyMessageOf(flow: Flow, e: FlowEdge): string {
  * exactly this node (see `PlannedNode`'s own doc comment: "an armed launch
  * cannot stop to ask"), never on the edge, so every read of them goes
  * through here rather than a cast at each call site. */
-export function plannedTargetOf(flow: Flow, e: FlowEdge): PlannedNode | undefined {
+function plannedTargetOf(flow: Flow, e: FlowEdge): PlannedNode | undefined {
   const n = flow.nodes.find((x) => x.id === e.to);
   return n && n.kind === "planned" ? n : undefined;
 }

@@ -196,8 +196,25 @@ export function FlowList(p: FlowListProps): JSX.Element {
    * would otherwise match more than one element. */
   const [openId, setOpenId] = React.useState<string | null>(null);
   const rowRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+  /** Where focus goes once the last rule is deleted and the empty state
+   * below replaces the row list entirely. There is no row left to hand
+   * focus to at that point — see `onDeleteRule`'s own comment — so this is
+   * the deliberate landing spot, focused by the effect right below, rather
+   * than letting the browser drop focus to <body> when the row that held it
+   * unmounts. */
+  const emptyRef = React.useRef<HTMLDivElement | null>(null);
+  const wasEmpty = React.useRef(flow.edges.length === 0);
 
   const rows = flow.edges;
+  React.useEffect(() => {
+    // Fires only on the transition INTO empty — never on mount with an
+    // already-empty flow (nothing to steal focus FROM in that case) and
+    // never again while it stays empty (each edge in `rows.length` only
+    // changes when a delete — the only mutation this file makes to the
+    // edge count — actually happens).
+    if (!wasEmpty.current && rows.length === 0) emptyRef.current?.focus();
+    wasEmpty.current = rows.length === 0;
+  }, [rows.length]);
   // Clamped on every read, not just after a delete: it is cheap, and it means
   // nothing else in this file has to remember to re-clamp it.
   const focusedIndex = Math.min(focusedIndexRaw, Math.max(rows.length - 1, 0));
@@ -215,16 +232,26 @@ export function FlowList(p: FlowListProps): JSX.Element {
 
   const onDeleteRule = (i: number, e: FlowEdge) => {
     if (openId === e.id) setOpenId(null);
-    // The DOM node that survives the delete — the row sliding UP into this
-    // slot (`i + 1`, in the array as it stands right NOW, before removal) if
-    // there is one, else the row that was already just above it. Focusing it
+    // Only when a row actually survives: the row sliding UP into this slot
+    // (`i + 1`, in the array as it stands right NOW, before removal) if there
+    // is one, else the row that was already just above it. Focusing it
     // before calling `onSave` matters: React reconciles the shorter array by
     // key, so this exact node keeps the DOM focus it already has rather than
     // the browser dropping focus to <body> the instant the deleted row's own
     // node unmounts.
-    const stays = i + 1 < rows.length ? i + 1 : Math.max(i - 1, 0);
-    rowRefs.current[stays]?.focus();
-    setFocusedIndexRaw(i + 1 < rows.length ? i : Math.max(i - 1, 0));
+    //
+    // When this is the LAST row (`rows.length === 1`), that computation
+    // degenerates to `i` itself — the very node being deleted — so it is
+    // skipped entirely here. There is nothing left to focus among the rows;
+    // the list is about to be replaced by the empty state, and the effect
+    // above hands focus to THAT once it exists, rather than leaving the
+    // about-to-unmount node as the last thing focus touched (which is
+    // exactly what silently drops focus to <body> the instant it goes away).
+    if (rows.length > 1) {
+      const stays = i + 1 < rows.length ? i + 1 : Math.max(i - 1, 0);
+      rowRefs.current[stays]?.focus();
+      setFocusedIndexRaw(i + 1 < rows.length ? i : Math.max(i - 1, 0));
+    }
     p.onSave(withoutEdge(flow, e.id));
   };
 
@@ -282,8 +309,13 @@ export function FlowList(p: FlowListProps): JSX.Element {
     // Not a hint line on a card (the house rule those forbid) — an empty
     // state for the list itself, the same job `.orch-empty` does for the
     // canvas when a flow has no nodes yet.
+    //
+    // `tabIndex={-1}`: focusable by the `emptyRef` effect above (deleting
+    // the last rule lands focus here on purpose, deliberately, rather than
+    // losing it to <body>), but not a stop an ordinary Tab press should
+    // land on — there is nothing here to DO, only something to read.
     return (
-      <div className="orch-empty" data-testid="flowlist-empty">
+      <div className="orch-empty" data-testid="flowlist-empty" ref={emptyRef} tabIndex={-1}>
         No rules yet. Switch to Canvas and connect two nodes to add one.
       </div>
     );

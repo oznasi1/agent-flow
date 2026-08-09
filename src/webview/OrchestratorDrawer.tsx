@@ -5,6 +5,7 @@ import { Condition, Flow, FlowAction, FlowEdge, FlowNode, isSettled, LaunchDest,
 import { AgentState, FlowPromptMode, PendingResume, RunStatus } from "../types";
 import { FlowList } from "./flowList";
 import {
+  ACTION_LABEL,
   actionMismatch,
   COND_LABEL,
   endLabel,
@@ -872,9 +873,9 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 value={edge.action}
                 onChange={(ev) => setAction(edge, ev.currentTarget.value as FlowAction)}
               >
-                <option value="launch">launch</option>
-                <option value="seed">seed</option>
-                <option value="notify">notify me</option>
+                <option value="launch">{ACTION_LABEL.launch}</option>
+                <option value="seed">{ACTION_LABEL.seed}</option>
+                <option value="notify">{ACTION_LABEL.notify}</option>
               </select>
               {/* The target's name — an identifier, so mono — is part of the
                   sentence for the two acting verbs ("THEN launch ASM-12"), but
