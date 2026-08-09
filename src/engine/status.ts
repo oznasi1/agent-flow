@@ -33,8 +33,6 @@ export interface BuildRunStatusInput {
   ticket: TicketInfo | null;
   projectsRoot: string;
   nowMs: number;
-  /** Off → no transcript is read and every agent reads as unknown. */
-  liveSignal?: boolean;
   openIdentities?: ReadonlySet<string>;
   prs?: PrEntryMap;
   /** Open sessions in this run's directories. */
@@ -42,10 +40,9 @@ export interface BuildRunStatusInput {
 }
 
 /** Reconcile a durable Run with every observable source into the status a card
- * renders. `liveSignal` off (or no transcript) leaves the git + Jira backbone. */
+ * renders. No transcript (unreadable or missing) leaves the git + Jira backbone. */
 export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
   const { run, ticket, projectsRoot, nowMs } = i;
-  const liveSignal = i.liveSignal ?? true;
   const agents = i.agents ?? [];
   const prs = i.prs ?? {};
   const repos = run.repos.map((r) => gitState(r.name, r.path));
@@ -53,12 +50,10 @@ export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
   // sessionId, so two in one worktree report two states — and the per-repo read
   // covers a repo with no session open, which is what stops a tracked card whose
   // agent has since exited from dropping to parked.
-  const agent = liveSignal
-    ? mostActive([
-        ...agents.map((a) => a.activity),
-        ...run.repos.map((r) => readAgentActivity(projectsRoot, r.path, r.branch ?? null, nowMs)),
-      ])
-    : UNKNOWN_ACTIVITY;
+  const agent = mostActive([
+    ...agents.map((a) => a.activity),
+    ...run.repos.map((r) => readAgentActivity(projectsRoot, r.path, r.branch ?? null, nowMs)),
+  ]);
   const pr = prSignals(prs);
   const column = deriveBucket({
     ticketCategory: ticket?.category ?? null,

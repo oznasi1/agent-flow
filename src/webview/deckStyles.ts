@@ -43,9 +43,14 @@ export const DECK_CSS = `
     line-height: 1.3; }
   .hd .title .sub { display: block; color: var(--dim); font-weight: 400; font-size: 12px;
     letter-spacing: 0; line-height: 1.3; }
-  .stats { display: flex; align-items: stretch; gap: 6px; }
-  /* Sentence case, matching the column headers: these four tiles and those four
-     headers name the same four things, and used to do it in two different cases. */
+  /* Wraps under the title rather than clipping: the tiles are an unshrinkable
+     block on their own, and a header that only folded around them (via .hd's
+     own flex-wrap) would still lose its right edge below ~400px. */
+  .stats { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
+  /* Sentence case, matching the column headers: these three tiles name three of
+     the board's four columns — Done has no tile, since a done card needs
+     nothing counted for you — and name the ones they share the same way, which
+     used to differ in case. */
   .stat { display: flex; flex-direction: column; gap: 2px; padding: 4px 11px 5px; border-radius: 8px;
     border: 1px solid var(--edge); background: var(--vscode-editorWidget-background, transparent); }
   .stat .n { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.05;

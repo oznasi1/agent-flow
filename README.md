@@ -66,12 +66,13 @@ Once you've taken tasks, the **Deck** (open it with **"Open the Deck (in-flight)
 is the board of everything you've launched, in a classic pipeline —
 **In progress · Action required · In review · Done**.
 
-<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Done). Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a best-effort live agent status (working, idle, ended turn, parked, or merged), the PR and CI state, the Jira status, and Open / Diff actions. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button; a summary strip counts each column and the Live-signal and PR-facts toggles are on." />
+<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Done). Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a best-effort live agent status (working, idle, ended turn, parked, or merged), the PR and CI state, the Jira status, and Open / Diff actions. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button; a summary strip counts In progress, Action required and In review." />
 
 The columns are a neutral git + Jira backbone; each **card** carries the true live state.
 A best-effort **Live signal** (read from your local Claude Code transcripts) tells `working ·
-Ns ago` from `idle`, `ended turn` (needs you), or `parked` — turn it off and cards fall back
-to git + Jira only. **Open** focuses the window if it's already open (never a duplicate) and
+Ns ago` from `idle`, `ended turn` (needs you), or `parked` — a card only reads `parked` when
+its transcript can't be read, or doesn't exist yet, which is the one route back to the git +
+Jira backbone. **Open** focuses the window if it's already open (never a duplicate) and
 opens it fresh otherwise; **Diff** shows the working diff; **⋯** offers *Open in Jira* and
 *Forget*.
 
@@ -101,7 +102,8 @@ a ticket somebody else owns) and for its pull request, so a worktree Claude Code
 made on its own lands on the board as complete as one you took. It disappears
 the moment you close its last agent — **⋯** → **Track it** pins it to the runs
 store first, and from there it behaves exactly like a task you took, **Forget**
-included. Turn it off with the **Open agents** toggle or `agentFlow.openAgents`.
+included. Turn it off with `agentFlow.openAgents`, which the board picks up
+immediately — no need to close and reopen the panel.
 
 Each card also carries the **PR state** of every repo it touches, read from GitHub
 with the `gh` CLI: the PR number, CI (failing check names link to their runs, or a
@@ -110,8 +112,8 @@ mergeability. A PR that needs a human decision — failing required checks,
 requested changes, or a conflict — pulls its card into **Action required**, even while
 the agent is still working, because an agent can't know CI broke until you tell
 it. A merged PR moves the card to **Done** and is the only thing that makes a card
-say *merged*. Turn it off with the **PR facts** toggle or `agentFlow.prFacts`, and
-cards fall back to the git + Jira backbone.
+say *merged*. Turn it off with `agentFlow.prFacts`, applied the moment you save
+the setting, and cards fall back to the git + Jira backbone.
 
 Above the columns sits your **review queue** — every open PR that asks for your
 review, found with one `gh` search. PRs in archived repositories are left out:
@@ -126,8 +128,8 @@ are still open, alongside the review decision and mergeability. **Review with ag
 checks the PR out into a worktree and seeds
 Claude Code to review the diff and write its findings to
 `.pick-task/REVIEW-<number>.md`, which the row can then load into the review box.
-Turn the strip off with `agentFlow.reviewRequests`; it shares the **PR facts**
-toggle and the same `gh` dependency.
+Turn the strip off with `agentFlow.reviewRequests`; it also goes dark whenever
+`agentFlow.prFacts` is off, since both lean on the same `gh` dependency.
 
 With `agentFlow.reviewWrites` on (**off by default**), the expanded row also
 submits: **Approve**, **Comment**, or **Request changes** — each disabled while a

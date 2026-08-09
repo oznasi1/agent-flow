@@ -473,6 +473,10 @@ export type OutboundMessage =
       // queue is empty." Paired with an emptied requests array, which is what
       // actually clears any rows the strip was rendering rather than leaving them
       // frozen (and their write buttons clickable) with nothing ever told to stop.
+      // The webview itself doesn't read this field — DeckApp's handler destructures
+      // every other property off this message but not `enabled` — because an empty
+      // `requests` array already renders as nothing. It stays on the wire and in the
+      // type because host-side tests assert it to pin down *why* the strip is empty.
       enabled: boolean;
       // The strip is on and a first search is still in flight, with nothing cached
       // to render in the meantime. Distinct from `enabled: true` with an empty
