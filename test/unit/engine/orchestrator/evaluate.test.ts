@@ -301,3 +301,31 @@ describe("evaluateFlow — the launch cap", () => {
     expect(second.deferred).toBe(0);
   });
 });
+
+describe("evaluateFlow — the carried action", () => {
+  it("carries the action derived from each fired edge's target", () => {
+    const flow = flowWith([place("a", "ASM-1"), notify("z")], [edge("e1", "a", "z")]);
+    const out = run(flow, [status("ASM-1", { merged: true })]);
+    expect(out.fired).toHaveLength(1);
+    expect(out.fired[0].action).toBe("notify");
+  });
+
+  // The derivation, not the record: `edge`'s default `action` is "notify", so an
+  // edge pointing at PLANNED work must still come back as a launch.
+  it("ignores the edge's stored action when deriving", () => {
+    const flow = flowWith([place("a", "ASM-1"), planned("z")], [edge("e1", "a", "z")]);
+    const out = run(flow, [status("ASM-1", { merged: true })]);
+    expect(out.fired[0].action).toBe("launch");
+  });
+
+  it("carries undefined for an edge pointing at nothing", () => {
+    const flow = flowWith([place("a", "ASM-1")], [edge("e1", "a", "gone")]);
+    const out = run(flow, [status("ASM-1", { merged: true })]);
+    // A dangling edge's target does not exist, so `evaluateFlow`'s main loop
+    // `continue`s past it before it ever reaches `fired` — it is neither fired
+    // nor blocked. Asserted directly rather than by looping over `out.fired`,
+    // which is empty here and would let an assertion inside the loop pin nothing.
+    expect(out.fired).toEqual([]);
+    expect(out.blocked).toEqual([]);
+  });
+});

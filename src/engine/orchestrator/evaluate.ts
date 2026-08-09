@@ -5,7 +5,9 @@
 // and the cap testable without launching a window.
 import { RunStatus } from "../../types";
 import { CondContext, evalCond, placeActivity } from "./conditions";
-import { Condition, Flow, FlowEdge, findNode, incomingEdges, isPlace, isSettled, isSpendAction } from "./model";
+import {
+  Condition, Flow, FlowAction, FlowEdge, edgeAction, findNode, incomingEdges, isPlace, isSettled, isSpendAction,
+} from "./model";
 
 /** How many acting edges (`launch` or `seed`) may fire in one pass. A badly wired
  * graph should not be able to storm your window manager; the remainder is reported
@@ -33,6 +35,12 @@ export interface FiredEdge {
   /** Should the runner perform this edge's action, or only stamp it as fired? An
    * "all" junction stamps every incoming edge but acts once. */
   perform: boolean;
+  /** The action this edge performs, derived ONCE here from the target node.
+   * Carried rather than re-derived downstream so `applyFired`, `notifyLines`
+   * and `deckView`'s dispatch all answer the same question against the same
+   * copy of the graph — the discipline `notifyLines` already spells out.
+   * `undefined` when the target is missing or of an unknown kind. */
+  action: FlowAction | undefined;
 }
 
 /** Why an armed flow is not advancing — surfaced in the drawer's footer, because
@@ -100,8 +108,10 @@ export function evaluateFlow(i: EvalInput): EvalResult {
   // A launch or seed is what costs something — a window, an agent session. A
   // notify is a toast, never capped. Only ever asked of the edge that performs.
   // `isSpendAction` is the one place this question is answered — see its own
-  // comment in `model.ts` for why it must not be re-spelled here.
-  const costsSlot = (e: FlowEdge) => isSpendAction(e.action);
+  // comment in `model.ts` for why it must not be re-spelled here. The action
+  // itself comes from `edgeAction`, the target's derivation, not the edge's own
+  // (possibly stale) stored copy — see `FiredEdge.action`'s doc comment.
+  const costsSlot = (e: FlowEdge) => isSpendAction(edgeAction(i.flow, e));
 
   // Cap decisions are made in the same pass as candidate selection, in flow
   // order, so an "all" junction can see how many slots are already spent by
@@ -127,7 +137,7 @@ export function evaluateFlow(i: EvalInput): EvalResult {
         continue;
       }
       if (costsSlot(edge)) acting++;
-      fired.push({ edge, perform: true });
+      fired.push({ edge, perform: true, action: edgeAction(i.flow, edge) });
       continue;
     }
 
@@ -165,7 +175,7 @@ export function evaluateFlow(i: EvalInput): EvalResult {
       continue;
     }
     if (costsSlot(performer)) acting++;
-    for (const e of pending) fired.push({ edge: e, perform: e === performer });
+    for (const e of pending) fired.push({ edge: e, perform: e === performer, action: edgeAction(i.flow, e) });
   }
 
   return { fired, blocked, deferred };

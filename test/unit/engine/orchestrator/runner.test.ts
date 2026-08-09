@@ -18,7 +18,7 @@ const flowWith = (nodes: FlowNode[], edges: FlowEdge[]): Flow =>
 describe("applyFired", () => {
   it("stamps firedAt and a note on a performed edge", () => {
     const flow = flowWith([place("a", "ASM-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
-    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
+    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "notify" }], NOW);
     expect(out.edges[0].firedAt).toBe(NOW);
     expect(out.edges[0].firedNote).toBeTruthy();
   });
@@ -26,7 +26,7 @@ describe("applyFired", () => {
   it("does not mutate the flow it is given", () => {
     const flow = flowWith([place("a", "ASM-1"), notify("z", "done")], [edge("e1", "a", "z")]);
     const before = JSON.stringify(flow);
-    applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
+    applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "notify" }], NOW);
     expect(JSON.stringify(flow)).toBe(before);
   });
 
@@ -37,7 +37,7 @@ describe("applyFired", () => {
     );
     const out = applyFired(
       flow,
-      [{ edge: flow.edges[0], perform: true }, { edge: flow.edges[1], perform: false }],
+      [{ edge: flow.edges[0], perform: true, action: "notify" }, { edge: flow.edges[1], perform: false, action: "notify" }],
       NOW,
     );
     expect(out.edges.map((e) => e.firedAt)).toEqual([NOW, NOW]);
@@ -50,7 +50,7 @@ describe("applyFired", () => {
     );
     const out = applyFired(
       flow,
-      [{ edge: flow.edges[0], perform: true }, { edge: flow.edges[1], perform: false }],
+      [{ edge: flow.edges[0], perform: true, action: "notify" }, { edge: flow.edges[1], perform: false, action: "notify" }],
       NOW,
     );
     expect(out.edges[0].firedNote).not.toBe(out.edges[1].firedNote);
@@ -60,14 +60,14 @@ describe("applyFired", () => {
 
   it("leaves an edge that did not fire completely alone", () => {
     const flow = flowWith([place("a", "ASM-1"), notify("y", "one"), notify("z", "two")], [edge("e1", "a", "y"), edge("e2", "a", "z")]);
-    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
+    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "notify" }], NOW);
     expect(out.edges[1].firedAt).toBeUndefined();
     expect(out.edges[1].firedNote).toBeUndefined();
   });
 
   it("keeps every other field of the flow and of each edge", () => {
     const flow = flowWith([place("a", "ASM-1"), notify("z", "done")], [edge("e1", "a", "z", { cond: { kind: "ci-failed" } })]);
-    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
+    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "notify" }], NOW);
     expect(out.name).toBe("Ship the migration");
     expect(out.armed).toBe(true);
     expect(out.edges[0].cond).toEqual({ kind: "ci-failed" });
@@ -83,7 +83,7 @@ describe("applyFired", () => {
     // Defensive: the runner is handed edges by the evaluator, but a stale
     // EvalResult must not be able to invent an edge.
     const flow = flowWith([place("a", "ASM-1"), notify("z", "done")], [edge("e1", "a", "z")]);
-    const out = applyFired(flow, [{ edge: edge("ghost", "a", "z"), perform: true }], NOW);
+    const out = applyFired(flow, [{ edge: edge("ghost", "a", "z"), perform: true, action: "notify" }], NOW);
     expect(out.edges).toHaveLength(1);
     expect(out.edges[0].firedAt).toBeUndefined();
   });
@@ -95,8 +95,10 @@ describe("applyFired", () => {
     // look already-done forever and never run. `error` is settled too (see
     // isSettled), so it still cannot re-fire in a loop, but the drawer surfaces it
     // and offers Reset, and a Reset makes it genuinely run later.
+    // The target `b` is a `place`, whose derived action is `seed` — see
+    // `actionFor` in model.ts — regardless of the edge's own stored `action`.
     const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
-    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
+    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "seed" }], NOW);
     expect(out.edges[0].error).toBeTruthy();
     // The latch must NOT read as a success.
     expect(out.edges[0].firedAt).toBeUndefined();
@@ -105,7 +107,7 @@ describe("applyFired", () => {
 
   it("names the action it could not perform, and never claims it ran", () => {
     const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "seed" })]);
-    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
+    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "seed" }], NOW);
     expect(out.edges[0].error).toBe("seed was not performed");
     expect(out.edges[0].error).not.toMatch(/success|ran|done|told you/i);
   });
@@ -116,7 +118,7 @@ describe("applyFired", () => {
     const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
     const out = applyFired(
       flow,
-      [{ edge: flow.edges[0], perform: true }],
+      [{ edge: flow.edges[0], perform: true, action: "seed" }],
       NOW,
       new Map([["e1", { ok: true, note: "launched ASM-12 in aws-ops" } as const]]),
     );
@@ -129,7 +131,7 @@ describe("applyFired", () => {
     const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
     const out = applyFired(
       flow,
-      [{ edge: flow.edges[0], perform: true }],
+      [{ edge: flow.edges[0], perform: true, action: "seed" }],
       NOW,
       new Map([["e1", { ok: false, error: "Couldn't launch ASM-12: no worktree" } as const]]),
     );
@@ -144,7 +146,7 @@ describe("applyFired", () => {
     const flow = flowWith([place("a", "ASM-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
     const out = applyFired(
       flow,
-      [{ edge: flow.edges[0], perform: true }],
+      [{ edge: flow.edges[0], perform: true, action: "notify" }],
       NOW,
       new Map([["e1", { ok: false, error: "nonsense" } as const]]),
     );
@@ -152,22 +154,24 @@ describe("applyFired", () => {
     expect(out.edges[0].firedNote).toBe("told you: the migration has landed");
   });
 
-  it("branches on the edge it actually performed, not on the flow's current copy of it", () => {
-    // `hit.edge` is the vintage the caller (`deckView.ts`) rebinds to `fresh`
-    // before ever calling `performEdge` — the vintage `outcomes` is keyed to,
-    // and the vintage a launch or seed actually ran against. `flow`, this
-    // function's own first argument, can be a LATER read (`atWrite` in
+  it("branches on the action it actually performed, not on the flow's current copy of it", () => {
+    // `hit.action` is the vintage the caller (`deckView.ts`) carried from
+    // evaluation, before ever calling `performEdge` — the vintage `outcomes` is
+    // keyed to, and the vintage a launch or seed actually ran against. `flow`,
+    // this function's own first argument, can be a LATER read (`atWrite` in
     // `deckView.ts`, re-read after the act so a concurrent edit's other fields
     // pass through) — and if that concurrent edit ALSO changed this exact
-    // edge's action, the two copies disagree about what kind of edge this is.
-    // Trusting `flow`'s copy here would silently discard a real launch's
-    // outcome for a generic "told you" note, because the flow now says this
-    // edge is a `notify`.
+    // edge's action, `flow`'s copy and `hit.action` disagree about what kind of
+    // edge this is. Trusting `flow`'s copy here would silently discard a real
+    // launch's outcome for a generic "told you" note, because the flow now says
+    // this edge is a `notify`. `e1`'s stored `action` fields (on both `flow`'s
+    // edge and `performed`) are the legacy mirror and are irrelevant to this
+    // branch — only `hit.action`, set explicitly below to `seed`, decides it.
     const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "notify" })]);
     const performed = edge("e1", "a", "b", { action: "launch" }); // same id, the earlier (acted-on) vintage
     const out = applyFired(
       flow,
-      [{ edge: performed, perform: true }],
+      [{ edge: performed, perform: true, action: "seed" }],
       NOW,
       new Map([["e1", { ok: true, note: "launched ASM-12 in aws-ops" } as const]]),
     );
@@ -186,7 +190,7 @@ describe("applyFired", () => {
     );
     const out = applyFired(
       flow,
-      [{ edge: flow.edges[0], perform: true }, { edge: flow.edges[1], perform: false }],
+      [{ edge: flow.edges[0], perform: true, action: "seed" }, { edge: flow.edges[1], perform: false, action: "seed" }],
       NOW,
     );
     expect(out.edges[1].error).toBeUndefined();
@@ -198,7 +202,7 @@ describe("applyFired", () => {
 describe("notifyLines", () => {
   it("names the flow and the notify node's own message", () => {
     const flow = flowWith([place("a", "ASM-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
-    const lines = notifyLines(flow, [{ edge: flow.edges[0], perform: true }]);
+    const lines = notifyLines(flow, [{ edge: flow.edges[0], perform: true, action: "notify" }]);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("Ship the migration");
     expect(lines[0]).toContain("the migration has landed");
@@ -206,21 +210,22 @@ describe("notifyLines", () => {
 
   it("says nothing for a stamped-only edge — it performed nothing", () => {
     const flow = flowWith([place("a", "ASM-1"), notify("z", "done", "all")], [edge("e1", "a", "z")]);
-    expect(notifyLines(flow, [{ edge: flow.edges[0], perform: false }])).toEqual([]);
+    expect(notifyLines(flow, [{ edge: flow.edges[0], perform: false, action: "notify" }])).toEqual([]);
   });
 
   it("says nothing for an action that is not notify", () => {
-    // launch and seed do not exist in this phase; if one appears in a
-    // hand-edited flow it must not produce a toast claiming it ran.
+    // The target `b` is a `place`, whose derived action is `seed`; if one
+    // appears in a hand-edited flow it must not produce a toast claiming it ran.
     const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
-    expect(notifyLines(flow, [{ edge: flow.edges[0], perform: true }])).toEqual([]);
+    expect(notifyLines(flow, [{ edge: flow.edges[0], perform: true, action: "seed" }])).toEqual([]);
   });
 
   it("falls back gracefully when the target is not a notify node", () => {
     const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b")]);
-    // action is notify but the target is a place — a hand-edited flow. One line,
-    // no crash, and no invented message.
-    const lines = notifyLines(flow, [{ edge: flow.edges[0], perform: true }]);
+    // The carried action is notify but the target is a place — a hand-edited
+    // flow, since a `place` target would normally derive `seed`. One line, no
+    // crash, and no invented message.
+    const lines = notifyLines(flow, [{ edge: flow.edges[0], perform: true, action: "notify" }]);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("Ship the migration");
   });
@@ -231,23 +236,33 @@ describe("notifyLines", () => {
       [edge("e1", "a", "y"), edge("e2", "a", "z")],
     );
     const lines = notifyLines(flow, [
-      { edge: flow.edges[0], perform: true },
-      { edge: flow.edges[1], perform: true },
+      { edge: flow.edges[0], perform: true, action: "notify" },
+      { edge: flow.edges[1], perform: true, action: "notify" },
     ]);
     expect(lines).toHaveLength(2);
   });
 
-  it("decides `action` from the flow's own edge, not from the FiredEdge's — the two can differ", () => {
-    // The caller (deckView's `advanceUnderLock`) re-reads the store immediately
-    // before writing, so a `FiredEdge.edge` it evaluated a moment earlier can be a
-    // stale copy by the time it gets here — this is the exact shape a caller that
-    // did NOT rebind its `FiredEdge`s to the fresh copy would hand in. `applyFired`
-    // decides "is this a notify" from `flow.edges`; this must agree, or an edge
-    // that became a `launch` before the write gets announced here as a notify
-    // that told you something, while `applyFired` is stamping it as an unperformed
-    // launch instead.
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
-    const stale = edge("e1", "a", "b", { action: "notify" }); // same id, stale action
-    expect(notifyLines(flow, [{ edge: stale, perform: true }])).toEqual([]);
+  // The whole point of carrying the action: `notifyLines` must announce what was
+  // DECIDED, not re-derive it from a copy that may have changed underneath.
+  it("announces a notify from the carried action, not the current graph", () => {
+    const flow = flowWith(
+      [place("a", "ASM-1"), notify("z", "the migration has landed")],
+      [edge("e1", "a", "z")],
+    );
+    const fired: FiredEdge[] = [{ edge: flow.edges[0], perform: true, action: "notify" }];
+    // The graph now says z is a place — a concurrent edit between the decision and
+    // this call. The decision stands, and the message is gone with the node.
+    const edited: Flow = { ...flow, nodes: [flow.nodes[0], place("z", "ASM-9")] };
+    expect(notifyLines(edited, fired)).toEqual(["Ship the migration: a rule fired."]);
+  });
+
+  // The inverse, so the test above cannot pass by ignoring `action` altogether.
+  it("says nothing for a carried action that is not notify", () => {
+    const flow = flowWith(
+      [place("a", "ASM-1"), notify("z", "the migration has landed")],
+      [edge("e1", "a", "z")],
+    );
+    const fired: FiredEdge[] = [{ edge: flow.edges[0], perform: true, action: "launch" }];
+    expect(notifyLines(flow, fired)).toEqual([]);
   });
 });

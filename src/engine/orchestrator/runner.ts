@@ -22,7 +22,7 @@ export type ActOutcome =
  * another edge into the same target already did" are different, and the drawer
  * shows whichever it is told.
  *
- * A PERFORMED edge whose action — AS ACTUALLY PERFORMED, `hit.edge.action`, not
+ * A PERFORMED edge whose action — AS ACTUALLY PERFORMED, `hit.action`, not
  * necessarily `flow`'s own current copy of it (see the branch below) — is not
  * `notify` — a `launch` or a `seed` — is stamped from `outcomes`, keyed by edge
  * id. A success takes `firedAt` and the caller's note; a failure takes `error`
@@ -48,23 +48,23 @@ export function applyFired(
     edges: flow.edges.map((e) => {
       const hit = byId.get(e.id);
       if (!hit) return { ...e };
-      // Branch on `hit.edge.action` — the vintage the caller actually PERFORMED
+      // Branch on `hit.action` — the vintage the caller actually PERFORMED
       // against, and the vintage `outcomes` is keyed to — never on `e.action`,
       // this function's OWN `flow` argument's current copy. In `deckView.ts`,
       // `flow` can be `atWrite`: read AFTER the act, specifically so a
       // concurrent `flow:save`'s other fields pass through to the write. If
       // that same concurrent edit changed THIS edge's action too, `e.action`
-      // and `hit.edge.action` disagree about what kind of edge this is — and
+      // and `hit.action` disagree about what kind of edge this is — and
       // branching on `e.action` would silently discard a real launch's outcome
       // for a generic "told you" note (if the flow now says `notify`), or
       // mislabel a genuinely-fired notify as an unperformed launch (if the flow
       // now says `launch`). The stamp must describe what was actually done,
-      // which only `hit.edge` knows. Every OTHER field below still comes from
-      // `e`/`flow` — only which branch to take, and which verb the fallback
-      // error below names, come from `hit.edge`.
-      if (hit.perform && hit.edge.action !== "notify") {
+      // which only `hit.action` — carried from evaluation, once — knows. Every
+      // OTHER field below still comes from `e`/`flow` — only which branch to
+      // take, and which verb the fallback error below names, come from `hit`.
+      if (hit.perform && hit.action !== "notify") {
         const outcome = outcomes?.get(e.id);
-        if (!outcome) return { ...e, error: `${hit.edge.action} was not performed` };
+        if (!outcome) return { ...e, error: `${hit.action} was not performed` };
         if (!outcome.ok) return { ...e, error: outcome.error };
         return { ...e, firedAt: nowMs, firedNote: outcome.note };
       }
@@ -93,17 +93,13 @@ function performedNote(flow: Flow, hit: FiredEdge): string {
  * happened. */
 export function notifyLines(flow: Flow, fired: FiredEdge[]): string[] {
   const out: string[] = [];
-  // Indexed once, not read off `f.edge` per item: `f.edge` is the edge object
-  // evaluation captured, which can be a stale copy by the time the caller re-reads
-  // the store immediately before writing (Task 5's guard against two windows
-  // racing). `applyFired` decides "is this a notify" from `flow.edges` — the copy
-  // the caller actually writes — and this must agree, or a `launch` that a
-  // concurrent edit turned this edge into between evaluation and the write gets
-  // announced here as a notify that told you something, while `applyFired` stamps
-  // it as an unperformed launch with an error. Same question, same copy.
-  const byId = new Map(flow.edges.map((e) => [e.id, e]));
+  // Reads the action the DECISION carried, not one re-derived from `flow` —
+  // `flow` here can be the copy the caller re-read immediately before writing,
+  // and re-deriving would let a concurrent edit make this announce one thing
+  // while `applyFired` stamps another. Same question, same copy; the copy is
+  // now the FiredEdge itself.
   for (const f of fired) {
-    if (!f.perform || byId.get(f.edge.id)?.action !== "notify") continue;
+    if (!f.perform || f.action !== "notify") continue;
     const target = findNode(flow, f.edge.to);
     const message = target && target.kind === "notify" ? target.message : null;
     out.push(message ? `${flow.name}: ${message}` : `${flow.name}: a rule fired.`);
