@@ -43,8 +43,113 @@ describe("edgePath", () => {
 });
 
 describe("labelPoint", () => {
+  const boxAt = (x: number, y: number): Box => ({ x, y, w: NODE_W, h: NODE_H });
+  const inside = (p: { x: number; y: number }, b: Box) =>
+    p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
+
   it("is the midpoint of the two anchors", () => {
     expect(labelPoint({ x: 0, y: 0 }, { x: 100, y: 50 })).toEqual({ x: 50, y: 25 });
+  });
+
+  it("is the chord midpoint when nothing is in the way", () => {
+    expect(labelPoint({ x: 0, y: 0 }, { x: 100, y: 40 })).toEqual({ x: 50, y: 20 });
+  });
+
+  it("is the chord midpoint when no obstacles are given at all", () => {
+    // The argument is optional so existing callers keep working unchanged.
+    expect(labelPoint({ x: 0, y: 0 }, { x: 200, y: 0 }, [])).toEqual({ x: 100, y: 0 });
+  });
+
+  it("steps off a node that sits on the midpoint", () => {
+    // A long edge passing a same-row node: the midpoint lands inside it.
+    const blocker = boxAt(60, -22); // straddles y=0, centred near x=144
+    const p = labelPoint({ x: 0, y: 0 }, { x: 288, y: 0 }, [blocker]);
+    expect(inside(p, blocker)).toBe(false);
+  });
+
+  it("stays as close to its own line as clearing allows", () => {
+    // Nudged, not relocated: the whole point is the label still reads as
+    // belonging to this edge. One node's height is the ceiling on the detour.
+    const blocker = boxAt(60, -22);
+    const p = labelPoint({ x: 0, y: 0 }, { x: 288, y: 0 }, [blocker]);
+    expect(Math.abs(p.y)).toBeLessThanOrEqual(NODE_H + 16);
+    expect(p.x).toBe(144); // unchanged along the chord
+  });
+
+  it("clears every obstacle, not just the first", () => {
+    // `b` sits exactly where escaping `a` upward would land, so an implementation
+    // that stopped at the first box it cleared would come to rest inside the
+    // second. That is the whole property under test: the escape has to be clear
+    // of ALL of them, not merely of the one that pushed it.
+    const a = boxAt(60, -22);
+    const b = boxAt(60, 22);
+    const p = labelPoint({ x: 0, y: 0 }, { x: 288, y: 0 }, [a, b]);
+    expect(inside(p, a)).toBe(false);
+    expect(inside(p, b)).toBe(false);
+  });
+
+  it("ignores obstacles the midpoint was never on", () => {
+    const far = boxAt(1000, 1000);
+    expect(labelPoint({ x: 0, y: 0 }, { x: 100, y: 0 }, [far])).toEqual({ x: 50, y: 0 });
+  });
+
+  it("terminates on a pathological pile of obstacles rather than looping", () => {
+    // A render path must not hang. Boxed in on purpose: it returns SOMETHING,
+    // promptly. `tidy` in this file is bounded for the same reason.
+    const wall = Array.from({ length: 40 }, (_, i) => boxAt(60, -22 - i * 8));
+    const p = labelPoint({ x: 0, y: 0 }, { x: 288, y: 0 }, wall);
+    expect(Number.isFinite(p.x)).toBe(true);
+    expect(Number.isFinite(p.y)).toBe(true);
+  });
+
+  it("offsets perpendicular to a diagonal chord, not merely vertically", () => {
+    // The normal of a sloped edge is sloped: a vertical-only nudge would drift
+    // off the line and orphan the label, which is the defect being fixed.
+    const p = labelPoint({ x: 0, y: 0 }, { x: 200, y: 200 }, [boxAt(16, 78)]);
+    expect(p.x).not.toBe(100);
+  });
+
+  it("returns from negative direction when it clears first", () => {
+    // Obstacle positioned so that stepping in negative direction clears before positive.
+    // For a horizontal chord, we try: positive then negative at each distance.
+    // With blocker at y=-10, effective range is y in [-18, 42].
+    // Negative direction: -8, -16, -24 (escapes at -24 < -18)
+    // Positive direction: 8, 16, 24, 32, 40, 48 (escapes at 48 > 42)
+    // So negative escapes first.
+    const blocker = boxAt(60, -10);
+    const p = labelPoint({ x: 0, y: 0 }, { x: 288, y: 0 }, [blocker]);
+    expect(inside(p, blocker)).toBe(false);
+    expect(p.y).toBeLessThan(0);
+  });
+
+  it("returns after hitting the step limit rather than hanging", () => {
+    // Create obstacles dense enough that we might exceed the step limit.
+    // With step size 8 and 24 boxes at 8-pixel spacing, we have 192 pixels of obstacles.
+    // After maxSteps iterations, we return what we have even if still colliding.
+    const wall = Array.from({ length: 24 }, (_, i) => boxAt(60, -22 - i * 8));
+    const p = labelPoint({ x: 0, y: 0 }, { x: 288, y: 0 }, wall);
+    expect(Number.isFinite(p.x)).toBe(true);
+    expect(Number.isFinite(p.y)).toBe(true);
+    // Should have stepped significantly to avoid at least one obstacle
+    expect(Math.abs(p.y)).toBeGreaterThan(0);
+  });
+
+  it("handles a zero-length chord gracefully", () => {
+    // Degenerate case: both points are the same, so the chord has no direction.
+    // The function should return the midpoint (which is the same point).
+    const p = labelPoint({ x: 100, y: 50 }, { x: 100, y: 50 }, [boxAt(50, 0)]);
+    expect(p).toEqual({ x: 100, y: 50 });
+  });
+
+  it("bounds stepping and returns a finite point even if trapped", () => {
+    // Create a wall so dense that stepping alone can't escape within maxSteps.
+    // With step size 8 and maxSteps=16, we can reach ±128 pixels.
+    // A wall spanning from y=-140 to y=+152 (boxes spaced 8 pixels apart, 32 boxes)
+    // ensures that even the maximum step can't escape.
+    const wall = Array.from({ length: 32 }, (_, i) => boxAt(20, -140 + i * 8));
+    const p = labelPoint({ x: 0, y: 0 }, { x: 288, y: 0 }, wall);
+    expect(Number.isFinite(p.x)).toBe(true);
+    expect(Number.isFinite(p.y)).toBe(true);
   });
 });
 

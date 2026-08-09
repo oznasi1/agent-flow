@@ -29,8 +29,100 @@ export function edgePath(a: Point, b: Point): string {
   return `M${a.x},${a.y} C${a.x + dx},${a.y} ${b.x - dx},${b.y} ${b.x},${b.y}`;
 }
 
-export function labelPoint(a: Point, b: Point): Point {
-  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+/**
+ * Position of an edge label: starts at the chord midpoint, then steps
+ * perpendicular to the chord to avoid obstacles.
+ *
+ * Why perpendicular: the normal to a chord keeps the label visually attached
+ * to its edge. A vertical-only nudge on a diagonal edge would drift off the
+ * line and orphan the label from the edge it names — which is the defect
+ * being fixed.
+ *
+ * Why bounded: `tidy` in this file bounds its relaxation by node count
+ * rather than "until fixed", because a graph with cycles needs to terminate
+ * instead of hanging the webview. The same reasoning applies here: a dense
+ * graph can have obstacles stacked taller than expected. The loop checks
+ * both directions equally at each distance, keeping the label as close to
+ * the line as possible before giving up.
+ */
+export function labelPoint(a: Point, b: Point, obstacles?: Box[]): Point {
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+
+  if (!obstacles || obstacles.length === 0) {
+    return mid;
+  }
+
+  // Margin around boxes when checking for collision
+  const margin = 8;
+
+  // Check if a point is inside any obstacle (with margin inflated)
+  const pointInObstacle = (p: Point): boolean => {
+    for (const box of obstacles) {
+      if (p.x >= box.x - margin && p.x <= box.x + box.w + margin &&
+          p.y >= box.y - margin && p.y <= box.y + box.h + margin) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // If the midpoint is clear, return it
+  if (!pointInObstacle(mid)) {
+    return mid;
+  }
+
+  // Calculate the normal to the chord (perpendicular direction)
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const length = Math.sqrt(dx * dx + dy * dy);
+
+  // Avoid division by zero for zero-length chords
+  if (length === 0) {
+    return mid;
+  }
+
+  // Normal vector perpendicular to chord direction.
+  // If chord direction is (dx, dy), perpendicular is (-dy, dx).
+  const nx = -dy / length;
+  const ny = dx / length;
+
+  // Step size (matching GRID = 8 pixels)
+  const stepSize = GRID;
+
+  // Maximum steps to prevent infinite loops. Similar to tidy(), this is
+  // bounded to handle pathological cases instead of hanging the webview.
+  // With step size 8, 16 steps = 128 pixels, enough for several overlapping nodes.
+  const maxSteps = 16;
+
+  // Try increasingly large offsets, alternating directions.
+  // This keeps the label as close to its line as possible by checking
+  // both directions at each distance.
+  for (let i = 1; i <= maxSteps; i++) {
+    // Try positive direction
+    let candidate: Point = {
+      x: mid.x + nx * stepSize * i,
+      y: mid.y + ny * stepSize * i
+    };
+    if (!pointInObstacle(candidate)) {
+      return candidate;
+    }
+
+    // Try negative direction
+    candidate = {
+      x: mid.x - nx * stepSize * i,
+      y: mid.y - ny * stepSize * i
+    };
+    if (!pointInObstacle(candidate)) {
+      return candidate;
+    }
+  }
+
+  // If still colliding after max steps, return the last candidate
+  // to ensure we always return a finite point.
+  return {
+    x: mid.x + nx * stepSize * maxSteps,
+    y: mid.y + ny * stepSize * maxSteps
+  };
 }
 
 /** Snap a dragged coordinate to the grid, clamped at the canvas edge. */
