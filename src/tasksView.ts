@@ -1320,18 +1320,31 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * Copilot user is never blocked from taking a task by an "ask" setting. `"off"` and
    * every Claude Code configuration return false here before anything else is read,
    * so those paths are untouched. `cfg.agentProvider` is host-guarded by
-   * readAgentProvider, so none of this can fire in Cursor. */
+   * readAgentProvider, so none of this can fire in Cursor.
+   *
+   * The `seedAgent` clause mirrors resolveRemoteControlSetting's own precondition
+   * above, and has to: with seeding off, no plan file ever carries the decision, so
+   * `/remote-control` could never reach Copilot in the first place and there is
+   * nothing to refuse. Without the clause this predicate would be stricter than the
+   * resolver it stands in front of, and a Copilot user with seeding off — who never
+   * opted into any of this — would be locked out of every launch. */
   private remoteControlBlocksLaunch(cfg: AgentFlowConfig): boolean {
-    if (cfg.agentProvider !== "copilot" || cfg.remoteControl !== "on") return false;
+    if (cfg.agentProvider !== "copilot" || cfg.remoteControl !== "on" || !cfg.seedAgent) {
+      return false;
+    }
     this.toast("error", RC_NEEDS_CLAUDE);
     return true;
   }
 
   /** The Remote Control answer for this launch, or null when the launch must not
-   * proceed. Returns null only as a BACKSTOP: `remoteControlBlocksLaunch` already
-   * refused the "on" + Copilot pair at the top of every entry point, so reaching the
-   * null here means a new caller was added without one. Kept — and kept in the return
-   * type — so that new caller fails loudly instead of seeding a broken session. */
+   * proceed.
+   *
+   * The null is reached in normal operation, from takeBatch: that is the one launch
+   * entry point with no `remoteControlBlocksLaunch` call at the top, because whether
+   * it resolves Remote Control at all depends on `shared`, which is not known until
+   * after the destination pick. Everywhere else the pre-flight predicate has already
+   * refused the pair, so the null is also the backstop that keeps a future entry point
+   * added without a pre-flight call from seeding a broken session. */
   private async resolveRemoteControl(cfg: AgentFlowConfig): Promise<boolean | null> {
     // "ask" under Copilot: putting up a toggle we could only refuse is a broken offer,
     // so the picker never appears and the launch simply proceeds without it.

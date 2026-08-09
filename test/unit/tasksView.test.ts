@@ -3932,6 +3932,35 @@ describe("remote control × the Copilot provider", () => {
     expect(logged.join("\n")).not.toContain("Remote Control not offered");
   });
 
+  it("does not refuse when seedAgent is off — nothing could ever seed the slash command", async () => {
+    // The pre-flight predicate has to carry resolveRemoteControlSetting's own
+    // precondition (:1291). With seedAgent off no plan file carries the decision, so
+    // `/remote-control` can never be seeded and there is nothing to refuse — this user
+    // launched fine before the block existed and must still launch now.
+    copilot({ remoteControl: "on", seedAgent: false });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(lastOpen().remoteControl).toBe(false);
+  });
+
+  it("agrees with takeBatch about a seedAgent-off launch", async () => {
+    // takeBatch resolves through resolveRemoteControlSetting, which has always honoured
+    // seedAgent. If the pre-flight predicate disagrees, the same user can launch one way
+    // and not the other — which is how the seedAgent regression first showed itself.
+    copilot({ remoteControl: "on", seedAgent: false });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+
   it("leaves Claude Code + Remote Control alone", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
     const { provider, posted } = setup();
