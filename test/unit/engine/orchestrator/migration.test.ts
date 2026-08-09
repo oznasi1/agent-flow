@@ -105,4 +105,24 @@ describe("writeFlow's derived-action mirror", () => {
     const written = JSON.parse(io.files["/flows/fmsm1way7-7bbm.json"]);
     expect(written.edges.map((e: { action: string }) => e.action)).toEqual(["launch", "notify"]);
   });
+
+  // `finishWire` in OrchestratorDrawer.tsx creates every new wire as `notify`
+  // regardless of its target's kind, so "a settled notify rule pointing at a
+  // place" is an ordinary leftover shape, not a corrupted one. If `writeFlow`
+  // derived over a stored value that disagrees with its target, the file
+  // would say the target's action instead — and the NEXT read would see
+  // stored and derived agree, latching nothing. `latchActionMismatches` can
+  // only ever catch a disagreement that `writeFlow` let survive.
+  it("preserves a stored action that disagrees with its target, rather than overwriting it", () => {
+    const io = fakeIo();
+    const flow = JSON.parse(LEGACY) as Flow;
+    // n1 is a `place`; a `notify` edge pointing at it disagrees with the
+    // `seed` its target implies. Settled, so `latchActionMismatches` itself
+    // would not touch it either — this is purely about what `writeFlow` does
+    // to the stored value.
+    flow.edges = [{ id: "e9", from: "n2", to: "n1", cond: { kind: "ci-passed" }, action: "notify", firedAt: 5 }];
+    writeFlow(io, "/flows", flow);
+    const written = JSON.parse(io.files["/flows/fmsm1way7-7bbm.json"]);
+    expect(written.edges[0].action).toBe("notify");
+  });
 });

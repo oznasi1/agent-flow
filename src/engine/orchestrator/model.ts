@@ -75,11 +75,24 @@ export interface FlowEdge {
   from: string; // node id
   to: string; // node id
   cond: Condition;
-  /** DERIVED, and never read to decide behaviour — `edgeAction` is. It stays on
-   * the record for one reason: an OLDER build's `validEdge` *requires* it and
-   * DROPS any edge without it, so a file this build wrote without the field
-   * would lose every rule after a downgrade or a rollback. `writeFlow` keeps it
-   * in step with the target node's kind. */
+  /** Mirrors the action its target implies — see `edgeAction`/`actionFor` — but
+   * is NOT simply overwritten with that mirror: `writeFlow` writes `e.action ??
+   * derived`, preserving a stored value that disagrees with the target, because
+   * that disagreement is exactly what `latchActionMismatches` (`store.ts`) needs
+   * to see on the next read to latch the edge instead of silently reinterpreting
+   * it. The field also stays on the record for compatibility: an OLDER build's
+   * `validEdge` *requires* it and DROPS any edge without it, so a file this
+   * build wrote without the field would lose every rule after a downgrade or a
+   * rollback — an edge THIS build created has no stored value yet, so it always
+   * falls through to the derived one.
+   *
+   * As of this task it is still read directly for behaviour at several call
+   * sites — `evaluate.ts`'s and `deckView.ts`'s spend-slot checks, `deckView.ts`'s
+   * `spendTarget`/`performAction`, and the webview's rule labels/mode/dest
+   * resolution in `orchestratorRule.ts` — because moving each of those onto
+   * `edgeAction` is later work in this phase (see the phase plan's Tasks 2 and
+   * 3), not this one. Do not read this comment as "nothing does" until that
+   * work lands. */
   action?: FlowAction;
   /** A PromptMode id, for `seed` only. A launch's prompt and destination live on the
    * `planned` node it targets, which carries its whole launch configuration — see
@@ -142,8 +155,15 @@ export function isSettled(e: FlowEdge): boolean {
  * hand would otherwise be silently treated as free by whichever site got
  * missed. `notify` is the only non-spending action today, but this is written
  * as an allowlist, not a `!== "notify"` negation, so a NEW action defaults to
- * "does not spend" until someone deliberately adds it here. */
-export function isSpendAction(action: FlowAction): boolean {
+ * "does not spend" until someone deliberately adds it here.
+ *
+ * Takes `FlowAction | undefined` — `FlowEdge.action` is optional now (see its
+ * own doc comment) — and answers `false` for `undefined`: an edge with no
+ * derivable action cannot spend anything, the same as an edge with a known
+ * non-spending one. Accepting the optional type here, rather than making
+ * every caller check `e.action !== undefined` first, is what keeps this the
+ * ONE place the question is answered. */
+export function isSpendAction(action: FlowAction | undefined): boolean {
   return action === "launch" || action === "seed";
 }
 

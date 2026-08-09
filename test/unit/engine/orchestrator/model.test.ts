@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isSettled, isSpendAction, findNode, incomingEdges,
-  actionFor,
+  actionFor, edgeAction,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -76,6 +76,12 @@ describe("isSpendAction", () => {
   it("is false for notify", () => {
     expect(isSpendAction("notify")).toBe(false);
   });
+
+  // `FlowEdge.action` is optional now — an edge with no derivable action
+  // cannot spend anything, the same as one with a known non-spending action.
+  it("is false for undefined", () => {
+    expect(isSpendAction(undefined)).toBe(false);
+  });
 });
 
 describe("findNode", () => {
@@ -120,5 +126,26 @@ describe("actionFor", () => {
   it("derives nothing from an unknown kind", () => {
     expect(actionFor("teleport")).toBeUndefined();
     expect(actionFor("")).toBeUndefined();
+  });
+});
+
+describe("edgeAction", () => {
+  const flow: Flow = {
+    ...emptyFlow("f1", "f", 0),
+    nodes: [planned("n1"), place("n2"), notify("n3")],
+  };
+
+  // The action is what the edge's TARGET implies — `e.to`, not `e.from`. A
+  // swap of the two here is a mutation that ships green if this is only ever
+  // exercised indirectly through `store.ts`'s call sites, both of which
+  // happen to read `e.to` correctly; asserting it directly, with `from` and
+  // `to` naming DIFFERENT node kinds, pins the direction on its own.
+  it("reads the target (e.to), not the source (e.from)", () => {
+    expect(edgeAction(flow, edge("e1", "n1", "n2"))).toBe("seed");
+    expect(edgeAction(flow, edge("e2", "n2", "n1"))).toBe("launch");
+  });
+
+  it("is undefined when the target is missing", () => {
+    expect(edgeAction(flow, edge("e1", "n1", "nope"))).toBeUndefined();
   });
 });

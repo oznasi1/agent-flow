@@ -3,7 +3,7 @@
 // and every rule here testable without a temp directory.
 import * as os from "os";
 import * as path from "path";
-import { ACTION_MISMATCH_PREFIX, actionFor, Flow, FlowEdge, FlowNode, isSettled } from "./model";
+import { ACTION_MISMATCH_PREFIX, edgeAction, Flow, FlowEdge, FlowNode, isSettled } from "./model";
 
 /** The only IO surface. Implementations return null / throw only from `readDir`;
  * `readFile` returns null for anything it cannot read, so one unreadable file
@@ -120,7 +120,7 @@ function latchActionMismatches(flow: Flow): Flow {
     ...flow,
     edges: flow.edges.map((e) => {
       if (e.action === undefined || isSettled(e)) return e;
-      const derived = actionFor(flow.nodes.find((n) => n.id === e.to)?.kind ?? "");
+      const derived = edgeAction(flow, e);
       // Nothing derived means a missing or unknown target, which `evaluate.ts`
       // already reports as "gone". Absence is not disagreement.
       if (derived === undefined || derived === e.action) return e;
@@ -133,17 +133,30 @@ function latchActionMismatches(flow: Flow): Flow {
 }
 
 export function writeFlow(io: FlowIo, dir: string, flow: Flow): void {
-  // Keep `action` in step with the node each edge points at. Written for
-  // COMPATIBILITY only (see `FlowEdge.action`): an older build requires the
-  // field and drops edges that lack it, so a file we wrote without it would
-  // lose every rule on a downgrade. Derived from the target, never carried
-  // over from the edge, so this cannot preserve a stale disagreement.
+  // Keep `action` in step with the node each edge points at — EXCEPT where a
+  // stored value already disagrees with it. That disagreement must survive
+  // the write, not just the read: `latchActionMismatches` only runs in
+  // `coerceFlow`, on the NEXT read, and it works by comparing the stored
+  // value against the derived one. Overwriting the stored value here, always,
+  // would make the two agree before that comparison ever runs again — erasing
+  // the mismatch instead of latching it.
+  //
+  // Concretely: a settled `{ action: "notify", firedAt: ... }` edge left
+  // pointing at a `place` is an ORDINARY shape, not a corrupted one —
+  // `OrchestratorDrawer.tsx`'s `finishWire` creates every new wire as
+  // `notify` regardless of its target's kind. If this function derived over
+  // it, the file would say `action: "seed"`; the next read would see stored
+  // and derived agree and latch nothing; and a user who then clicked Reset on
+  // an armed flow with `launchConfirmedAt` already set would open a PAID
+  // agent session where the shipping build only ever showed a toast.
+  //
+  // `e.action ?? derived` still gives an edge THIS build created (which has
+  // no stored action yet) the derived value, which is what keeps an older
+  // build's `validEdge` — which still requires the field — from dropping it
+  // on a downgrade or a rollback. Only a PRE-EXISTING disagreement survives.
   const normalised: Flow = {
     ...flow,
-    edges: flow.edges.map((e) => {
-      const derived = actionFor(flow.nodes.find((n) => n.id === e.to)?.kind ?? "");
-      return derived === undefined ? e : { ...e, action: derived };
-    }),
+    edges: flow.edges.map((e) => ({ ...e, action: e.action ?? edgeAction(flow, e) })),
   };
   io.writeFile(fileFor(dir, flow.id), JSON.stringify(normalised, null, 2) + "\n");
 }

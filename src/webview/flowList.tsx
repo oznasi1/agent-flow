@@ -106,7 +106,13 @@ function ruleSentence(
         <select
           className="orch-sel"
           aria-label="Action"
-          value={e.action}
+          // `e.action` can be `undefined` (a flow read right after an upgrade,
+          // before its next `writeFlow`, can lack the field entirely — see
+          // `FlowEdge.action`'s own doc comment). A defined fallback keeps this
+          // a controlled input and keeps it reading the same as the closed
+          // row's span below, rather than the two disagreeing about what an
+          // actionless edge is.
+          value={e.action ?? "notify"}
           onChange={(ev) => onSave(withAction(flow, e.id, ev.currentTarget.value as FlowAction, promptModes))}
         >
           <option value="launch">{ACTION_LABEL.launch}</option>
@@ -114,15 +120,15 @@ function ruleSentence(
           <option value="notify">{ACTION_LABEL.notify}</option>
         </select>
       ) : (
-        <span>{e.action !== undefined ? ACTION_LABEL[e.action] : ""}</span>
+        <span>{ACTION_LABEL[e.action ?? "notify"]}</span>
       )}
       {/* Same rule the inspector follows: notify already reads complete on
           its own ("THEN notify me"); the other two verbs need the target's
           identifier — mono, house style for an identifier — to finish the
           clause. */}
-      {e.action !== "notify" && <span style={{ fontFamily: "var(--mono)" }}>{endLabel(flow, e.to)}</span>}
+      {(e.action ?? "notify") !== "notify" && <span style={{ fontFamily: "var(--mono)" }}>{endLabel(flow, e.to)}</span>}
 
-      {e.action === "notify" ? (
+      {(e.action ?? "notify") === "notify" ? (
         open ? (
           <input
             className="orch-msg"
