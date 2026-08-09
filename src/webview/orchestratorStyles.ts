@@ -216,4 +216,27 @@ export const ORCH_CSS = `
   .orch-resume .t { font-size: var(--t-body); font-weight: 600; margin-bottom: 5px; }
   .orch-resume ul { margin: 0 0 8px; padding-left: 18px; font-size: var(--t-micro); color: var(--dim); }
   .orch-resume .row { display: flex; gap: 6px; }
+
+  /* The keyboard path onto the same rules the canvas draws (flowList.tsx).
+     Fills the body the same way the tray+graph+inspector block does when
+     Canvas is selected, so switching views never changes the drawer's own
+     size or position. */
+  .fl-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; }
+  .fl-row { border: 1px solid var(--hair); border-radius: var(--r-card); padding: 8px 10px;
+    background: var(--vscode-editor-background); cursor: pointer; }
+  .fl-row:hover { border-color: color-mix(in srgb, var(--vscode-foreground) 26%, transparent); }
+  /* Roving tabindex (see flowList.tsx's own comment on rowTabIndex): only
+     the current row is ever a real Tab stop, so its focus ring is this
+     surface's one visible "you are here" — never a fill, matching the grip's
+     own focus-visible rule below it in this file. */
+  .fl-row:focus { outline: none; box-shadow: inset 0 0 0 1px var(--vscode-focusBorder); }
+  .fl-row.open { border-color: color-mix(in srgb, var(--vscode-foreground) 30%, var(--hair)); }
+  .fl-sentence { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .fl-receipt { margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--hair);
+    display: flex; align-items: center; gap: 8px; font-size: var(--t-micro); color: var(--dim); }
+  /* Same two licences as the inspector's .orch-obs, and for the same reasons:
+     "fired" borrows the board's own Done colour rather than a new claim of
+     colour, and red is spent ONLY on a rule that tried and actually failed. */
+  .fl-receipt .fired { color: var(--c-done); }
+  .fl-receipt .err { color: var(--c-danger); }
 `;
