@@ -24,17 +24,39 @@ import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prompt";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, type MergeCandidate } from "./engine/workspace";
 import { briefMarkdown } from "./engine/brief";
-import { readLiveWindows, windowIdentity, defaultWindowsDir, PresenceRecord } from "./engine/presence";
+import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, PresenceRecord, type CurrentWindow } from "./engine/presence";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
-import { Filter, InboundMessage, Task, OutboundMessage, PromptMode, ServiceRef, Size, WorkspaceMode } from "./types";
+import { newNote, noteStatus, sanitizeNotes } from "./notepad";
+import {
+  Filter,
+  InboundMessage,
+  NotepadItem,
+  NotepadItemView,
+  Task,
+  OutboundMessage,
+  PromptMode,
+  ServiceRef,
+  Size,
+  WorkspaceMode,
+} from "./types";
 import { track, trackError, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
 import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, PromptModeProp, RepoSource, TakeSource } from "./telemetry/events";
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
+// globalState, not workspaceState: a notepad belongs to the user, not to whichever
+// repo happens to be open. Same storage the install-reported flag uses.
+const NOTEPAD_KEY = "agentFlow.notepad";
+
+/** Shared by `explore()` and `runNotepadItem` for turning free text into a run
+ * key fragment: lowercase, dashes for anything non-alphanumeric, capped at 40
+ * chars so a long topic or title can't produce an unbounded filename. */
+function slugify(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+}
 
 /** Which engine operation a webview message represents, for operation_failed.
  * Messages absent from this map report as "jira_fetch" only if they read the task
@@ -56,6 +78,7 @@ const MESSAGE_OPS: Partial<Record<InboundMessage["type"], Op>> = {
   removeFromSprint: "jira_write",
   setComponent: "jira_write",
   explore: "workspace_write",
+  "notepad:run": "workspace_write",
   runDoctor: "jira_fetch",
 };
 
@@ -157,6 +180,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   private postState(authed: boolean, configured: boolean, me: string | null): void {
     const cfg = getConfig();
     const info = this.connector.info();
+    // VS Code renders the view's own title bar directly above the webview, so the
+    // panel's identity belongs there rather than repeated in the first row of our
+    // content. Set here, not in resolveWebviewView: postState is the one path that
+    // re-runs on every auth, config and refresh change, so the bar cannot go stale.
+    // The fallback matters — an unconfigured first run has no project key, and a
+    // blank bar holding nothing but three action icons reads as a broken render.
+    if (this.view) {
+      this.view.title = info.scopeValue || "Tasks";
+      this.view.description = me ?? undefined;
+    }
     this.post({ type: "state", authed, configured, project: info.scopeValue, me,
       prReviewStatus: cfg.prReviewStatus, filters: cfg.filters,
       sourceLabel: info.label, caps: serializeCaps(this.provider().caps),
@@ -222,6 +255,60 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     await this.context.workspaceState.update(SPRINT_ORDER_KEY, order);
   }
 
+  private notes(): NotepadItem[] {
+    return sanitizeNotes(this.context.globalState.get<unknown>(NOTEPAD_KEY, []));
+  }
+
+  private async saveNotes(notes: NotepadItem[]): Promise<void> {
+    await this.context.globalState.update(NOTEPAD_KEY, notes);
+    this.postNotepad();
+  }
+
+  /** Post every note with its derived run status. Public because the poll tick in
+   * extension.ts drives it too — a badge must not sit stale while the panel is open. */
+  public postNotepad(): void {
+    const notes = this.notes();
+    // Skip both directory reads entirely when nothing has ever been launched:
+    // the common case is a notepad of plain items with no runs behind them.
+    const anyRun = notes.some((n) => n.lastRunKey);
+    const runs = anyRun ? readRuns(defaultRunsDir()) : [];
+    const livePlaces = anyRun
+      ? new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys())
+      : new Set<string>();
+    const view: NotepadItemView[] = notes.map((n) => {
+      const runStatus = noteStatus(n, runs, livePlaces);
+      return runStatus ? { ...n, runStatus } : { ...n };
+    });
+    this.post({ type: "notepad:notes", notes: view });
+  }
+
+  private async addNote(title: string, body: string): Promise<void> {
+    // A note with neither a title nor a body is nothing at all — silently ignored
+    // rather than toasted: the webview already disables the button, so reaching
+    // here means a stale view, not a user who needs telling.
+    if (!title.trim() && !body.trim()) return;
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    await this.saveNotes([...this.notes(), newNote(title, body, id, Date.now())]);
+  }
+
+  private async updateNote(id: string, title: string, body: string): Promise<void> {
+    await this.saveNotes(
+      this.notes().map((n) => (n.id === id ? { ...n, title: title.trim(), body: body.trim() } : n)),
+    );
+  }
+
+  private async toggleNoteDone(id: string): Promise<void> {
+    await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, done: !n.done } : n)));
+  }
+
+  private async deleteNote(id: string): Promise<void> {
+    await this.saveNotes(this.notes().filter((n) => n.id !== id));
+  }
+
+  private async clearCompletedNotes(): Promise<void> {
+    await this.saveNotes(this.notes().filter((n) => !n.done));
+  }
+
   public async refresh(): Promise<void> {
     await this.postInitialState();
   }
@@ -241,6 +328,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       authed = false;
     }
     this.postState(authed, configured, null);
+    this.postNotepad();
     if (!configured || !authed) return;
 
     const provider = this.provider();
@@ -391,6 +479,30 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
         case "explore": {
           await this.explore();
+          break;
+        }
+        case "notepad:add": {
+          await this.addNote(m.title, m.body);
+          break;
+        }
+        case "notepad:update": {
+          await this.updateNote(m.id, m.title, m.body);
+          break;
+        }
+        case "notepad:toggleDone": {
+          await this.toggleNoteDone(m.id);
+          break;
+        }
+        case "notepad:delete": {
+          await this.deleteNote(m.id);
+          break;
+        }
+        case "notepad:clearCompleted": {
+          await this.clearCompletedNotes();
+          break;
+        }
+        case "notepad:run": {
+          await this.runNotepadItem(m.id);
           break;
         }
         case "reorder": {
@@ -752,6 +864,63 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return typed?.trim() || undefined;
   }
 
+  /** Shared kickoff tail for `explore()` and `runNotepadItem`: pick a destination,
+   * resolve the repo set for it (skipping the picker for an existing/live-folder
+   * destination that already fixes its own repos), turn the destination into
+   * `openWorkspace` args, and resolve the Remote Control toggle. `pickerLabel` and
+   * `argsLabel` are the only two points where the two callers' copy differs.
+   * Returns undefined on any cancellation, at which point the caller must open
+   * nothing. */
+  private async resolveKickoffTarget(
+    cfg: AgentFlowConfig,
+    repos: ServiceRef[],
+    pickerLabel: string,
+    argsLabel: string,
+  ): Promise<
+    | {
+        target: OpenTarget;
+        services: ServiceRef[];
+        args: { mode: WorkspaceMode; openIn: "new" | "current"; existingWorkspaceFile?: string; existingFolder?: string; currentWindow?: CurrentWindow };
+        wantRemoteControl: boolean;
+      }
+    | undefined
+  > {
+    const target = await this.chooseOpenTarget(cfg);
+    if (!target) return undefined;
+
+    let services: ServiceRef[];
+    if (target.kind === "existing" || target.kind === "live-folder") {
+      services = this.servicesFromExistingDestination(target, repos);
+      if (services.length === 0) {
+        this.toast("error", "That workspace has no repos to open.");
+        return undefined;
+      }
+    } else {
+      const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
+        repos.map((r) => ({
+          label: r.name,
+          detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
+          repo: r,
+        })),
+        {
+          canPickMany: true,
+          title: `${pickerLabel} — pick the repos to open`,
+          placeHolder: "Space to toggle · Enter to open",
+          ignoreFocusOut: true,
+        },
+      );
+      if (!picks || picks.length === 0) return undefined;
+      services = picks.map((p) => p.repo);
+    }
+
+    const args = await this.targetToOpenArgs(target, services.length, argsLabel, cfg);
+    if (!args) return undefined;
+
+    const wantRemoteControl = await this.resolveRemoteControl(cfg);
+
+    return { target, services, args, wantRemoteControl };
+  }
+
   /** Explore flow: pick repos freely (no ticket), open a workspace, and seed a Claude Code
    * agent for investigation/knowledge — a Jira ticket can come out of it later. */
   public async explore(): Promise<void> {
@@ -800,40 +969,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
 
     // Destination first — an existing workspace / live folder already fixes its repos.
-    const target = await this.chooseOpenTarget(cfg);
-    if (!target) return;
+    const kickoff = await this.resolveKickoffTarget(cfg, repos, "Explore", "Explore");
+    if (!kickoff) return;
+    const { services, args, wantRemoteControl } = kickoff;
 
-    let services: ServiceRef[];
-    if (target.kind === "existing" || target.kind === "live-folder") {
-      services = this.servicesFromExistingDestination(target, repos);
-      if (services.length === 0) {
-        this.toast("error", "That workspace has no repos to open.");
-        return;
-      }
-    } else {
-      const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
-        repos.map((r) => ({
-          label: r.name,
-          detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
-          repo: r,
-        })),
-        {
-          canPickMany: true,
-          title: "Explore — pick the repos to open",
-          placeHolder: "Space to toggle · Enter to open",
-          ignoreFocusOut: true,
-        },
-      );
-      if (!picks || picks.length === 0) return;
-      services = picks.map((p) => p.repo);
-    }
-
-    const args = await this.targetToOpenArgs(target, services.length, "Explore", cfg);
-    if (!args) return;
-
-    const wantRemoteControl = await this.resolveRemoteControl(cfg);
-
-    const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
     const slug = slugify(topic) || "explore";
     const serviceNames = services.map((s) => s.name).join(", ");
     const key = env ? `verify-${slugify(env) || "env"}-${slug}` : `explore-${slug}`;
@@ -858,14 +997,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       openIn: args.openIn,
       existingWorkspaceFile: args.existingWorkspaceFile,
       existingFolder: args.existingFolder,
+      currentWindow: args.currentWindow,
       remoteControl: wantRemoteControl,
       kind: "explore",
     });
 
-    const where = result.workspaceFile
-      ? `workspace ${result.workspaceFile.split("/").pop()}`
-      : `${result.opened.length} window(s)`;
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
+    const where = this.openedWhere(result, cfg.seedAgent);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     const what = env
       ? `to verify on ${env}`
@@ -873,6 +1011,77 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ? "to check on your other tasks"
         : "to explore";
     this.toast("success", `Opened ${where} ${what}. Brief seeded in each repo.${seeded}${rcNote}`);
+  }
+
+  /** Launch an agent for one notepad item. Same shape as explore(): pick repos and
+   * a destination, open a workspace, seed a brief — the note supplies the topic and
+   * the brief body, so there is no input box to show. The run is written with
+   * `kind: "notepad"` into the same store the Deck reads, which is the whole of the
+   * Deck integration: the board gains a second origin, not a second data path. */
+  public async runNotepadItem(id: string): Promise<void> {
+    const note = this.notes().find((n) => n.id === id);
+    if (!note) return;
+
+    const cfg = getConfig();
+    const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+    if (repos.length === 0) {
+      this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
+      return;
+    }
+
+    const kickoff = await this.resolveKickoffTarget(cfg, repos, "Notepad", "Notepad");
+    if (!kickoff) return;
+    const { services, args, wantRemoteControl } = kickoff;
+
+    // The generic explore action's prompt/slackDm — a notepad run has no action to
+    // choose (there is no Explore-style picker for it), so it borrows the one action
+    // meant to be topic-agnostic. Selected by stable id, not list position, so
+    // reordering agentFlow.exploreActions can never silently swap in a different
+    // template here.
+    const generic = cfg.exploreActions.find((a) => a.id === "general");
+    const topic = note.title.trim() || "Notepad item";
+    // Slugged from the note's own title, not from the display fallback above — an
+    // untitled note must key as "notepad-note-<id>", not "notepad-notepad-item-<id>".
+    // The note's own id is included (not just the title slug) because two notes can
+    // share a title — or both be untitled — and would otherwise collide on the same
+    // run-store key, silently overwriting each other's run record. Re-running the
+    // SAME note still reuses this exact key, which is intended: it replaces that
+    // note's own previous run rather than accumulating orphaned records.
+    const key = `notepad-${slugify(note.title.trim()) || "note"}-${note.id}`;
+    const planMd =
+      `## Notepad: ${topic}\n\n_No ticket — an item you wrote in the Agent Flow notepad. ` +
+      `If it turns into tracked work, open a ticket afterwards._` +
+      (note.body.trim() ? `\n\n${note.body.trim()}` : "");
+
+    const result = await openWorkspace({
+      ticket: { key, summary: topic, url: "" },
+      planMd,
+      descriptionText: note.body,
+      services,
+      mode: args.mode,
+      promptTemplate: applyExploreVars(injectSlackDm(generic?.prompt ?? "", generic?.slackDm ?? false), {
+        env: undefined,
+        services: services.map((s) => s.name).join(", "),
+      }),
+      workspaceDir: cfg.workspaceDir,
+      seedAgent: cfg.seedAgent,
+      openIn: args.openIn,
+      existingWorkspaceFile: args.existingWorkspaceFile,
+      existingFolder: args.existingFolder,
+      currentWindow: args.currentWindow,
+      remoteControl: wantRemoteControl,
+      kind: "notepad",
+    });
+
+    // Point the note at its run so the badge has something to derive from. Written
+    // after the launch, not before: a cancelled picker must leave no pointer to a
+    // run that was never created.
+    await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, lastRunKey: key } : n)));
+
+    const where = this.openedWhere(result, cfg.seedAgent);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.seededInPlace);
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
+    this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
   }
 
   /** One repo → its own window; multiple → per the workspaceMode setting (asking if configured). */
@@ -1150,11 +1359,31 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** Toast fragment announcing the pre-seed, shared by `launch()` and `explore()`. With
    * Remote Control applied, Enter only connects the bridge — the task itself starts on
    * the later paste + Enter — so the plain "press Enter to start" copy would be wrong. */
-  private seededNote(seedAgent: boolean, remoteControl: boolean): string {
-    if (!seedAgent) return "";
+  private seededNote(seedAgent: boolean, remoteControl: boolean, seededInPlace = false): string {
+    // Seeding into this window with seeding off is the one destination that ends with
+    // NOTHING to show: no window opened, no session started, only briefs on disk. Every
+    // other destination at least leaves a window behind, so silence reads as success.
+    if (!seedAgent) {
+      return seededInPlace
+        ? " This window is untouched — agentFlow.seedAgent is off, so no session was seeded."
+        : "";
+    }
     return remoteControl
       ? " Claude Code pre-seeded with /remote-control — Enter to connect, then paste."
       : " Claude Code pre-seeded — press Enter to start.";
+  }
+
+  /** Where a completed open put the session, for the success toast. "This window" is
+   *  its own case because nothing was opened — reporting "1 window(s)" would imply one
+   *  appeared. With seeding off it opened nothing AND seeded nothing, so even "in this
+   *  window" overclaims; seededNote carries the explanation. */
+  private openedWhere(
+    result: { seededInPlace?: boolean; workspaceFile?: string; opened: string[] },
+    seedAgent: boolean,
+  ): string {
+    if (result.seededInPlace) return seedAgent ? "in this window" : "nothing";
+    if (result.workspaceFile) return `workspace ${result.workspaceFile.split("/").pop()}`;
+    return `${result.opened.length} window(s)`;
   }
 
   /** Open + seed a resolved kick-off: worktree decision → workspace mode → brief →
@@ -1229,14 +1458,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       openIn: args.openIn,
       existingWorkspaceFile: args.existingWorkspaceFile,
       existingFolder: args.existingFolder,
+      currentWindow: args.currentWindow,
       foldersToAdd: additions.foldersToAdd,
       remoteControl: wantRemoteControl,
     });
 
-    const where = result.workspaceFile
-      ? `workspace ${result.workspaceFile.split("/").pop()}`
-      : `${result.opened.length} window(s)`;
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl);
+    const where = this.openedWhere(result, cfg.seedAgent);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     if (result.mergeFailed) {
       this.toast(
@@ -1425,8 +1653,18 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
     let launched = 0;
     let extra = "";
+    let seededInPlace = false;
     if (shared && resolved.length) {
       try {
+        // This window can lose its identity between the destination pick and here: the
+        // prompt-mode pick, the layout pick and createWorktrees for every task all run
+        // in between. openSharedWorkspace has no "current" destination without it and
+        // would fall through to the new-window path, spawning a window nobody asked for
+        // — so fail the batch the way the catch below does. A single take cancels at the
+        // same point, for the same reason.
+        const here = target.kind === "current" ? currentWindow() : undefined;
+        if (target.kind === "current" && !here) throw new Error("this window can no longer hold a session");
+
         // Same guarantee as a single take: the workspace file is the user's artifact.
         const additions =
           target.kind === "existing"
@@ -1449,9 +1687,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           seedAgent: cfg.seedAgent,
           // OpenTarget and SharedTarget are the same four shapes — no cast needed.
           target,
+          // The shared-window batch needs the same "here" the single take does.
+          currentWindow: here,
           foldersToAdd: additions.foldersToAdd,
         });
         launched = resolved.length;
+        seededInPlace = !!result.seededInPlace;
         if (result.mergeFailed) extra = " That workspace's folders couldn't be parsed — the worktrees weren't added.";
         else if (result.unaddedFolders?.length) {
           extra = ` ${result.unaddedFolders.join(", ")} couldn't be added as roots to that window — the briefs are still in place.`;
@@ -1509,7 +1750,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       if (!isBatch) extra += this.remoteControlNote(wantRemoteControl, appliedRemoteControl);
     }
 
-    const where = shared ? "in one shared window" : "in parallel";
+    // A batch seeded into this window opened nothing — "in one shared window" would
+    // imply one appeared.
+    const where = !shared ? "in parallel" : seededInPlace ? "in this window" : "in one shared window";
     const summary = `Launched ${launched} of ${keys.length} ${where}.`;
     const rcNote = isBatch && rcSkipped ? " Remote Control skipped — one clipboard can't serve several sessions." : "";
     if (failed.length) {
@@ -1572,14 +1815,27 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * window you already have open. Live windows appear only in the interactive "ask"
    * flow (a specific open window is inherently a per-take choice). */
   private async chooseOpenTarget(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
+    // A window with no identity can't be named by a plan match, so it can't hold a
+    // seeded session — "this window" is not offered, and the setting can't force it.
+    const here = currentWindow();
     if (cfg.openIn === "new-window") return { kind: "new" };
-    if (cfg.openIn === "this-window") return { kind: "current" };
+    if (cfg.openIn === "this-window") {
+      if (here) return { kind: "current" };
+      this.toast(
+        "info",
+        "This window has no saved workspace file and no single folder, so it can't hold a session — opening a new window instead.",
+      );
+      return { kind: "new" };
+    }
     if (cfg.openIn === "pick-existing") return this.pickExistingWorkspace(cfg);
 
     type PickTarget = OpenTarget | { kind: "existing-pick" };
+    const thisWindow: { label: string; detail: string; target: PickTarget }[] = here
+      ? [{ label: "$(window) This window", detail: "Start a session here — keeps this window's folders", target: { kind: "current" } }]
+      : [];
     const base: { label: string; detail: string; target: PickTarget }[] = [
       { label: "$(empty-window) New window", detail: "Open the task in a separate window", target: { kind: "new" } },
-      { label: "$(window) This window", detail: "Open it in the current window (replaces what's here)", target: { kind: "current" } },
+      ...thisWindow,
       { label: "$(folder-library) Existing workspace…", detail: "Open the task into a .code-workspace you already have", target: { kind: "existing-pick" } },
     ];
     const live = cfg.trackOpenWindows ? this.liveWindowItems() : [];
@@ -1619,10 +1875,21 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     count: number,
     label: string,
     cfg: AgentFlowConfig,
-  ): Promise<{ mode: WorkspaceMode; openIn: "new" | "current"; existingWorkspaceFile?: string; existingFolder?: string } | undefined> {
+  ): Promise<
+    | { mode: WorkspaceMode; openIn: "new" | "current"; existingWorkspaceFile?: string; existingFolder?: string; currentWindow?: CurrentWindow }
+    | undefined
+  > {
     if (target.kind === "existing") return { mode: "multiroot", openIn: "new", existingWorkspaceFile: target.file };
     if (target.kind === "live-folder") return { mode: "per-window", openIn: "new", existingFolder: target.folder };
-    if (target.kind === "current") return { mode: count === 1 ? "per-window" : "multiroot", openIn: "current" };
+    if (target.kind === "current") {
+      // The window's own shape is the mode — nothing is being laid out, so the repo
+      // count has no say. A window that lost its identity between the pick and here
+      // has no seed destination left, so the take cancels rather than opening something
+      // the user didn't choose.
+      const here = currentWindow();
+      if (!here) return undefined;
+      return { mode: here.kind === "workspace" ? "multiroot" : "per-window", openIn: "current", currentWindow: here };
+    }
     const mode = await this.chooseWorkspaceMode(count, cfg.workspaceMode, label);
     if (!mode) return undefined;
     return { mode, openIn: "new" };

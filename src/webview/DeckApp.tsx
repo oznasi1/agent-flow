@@ -213,6 +213,9 @@ function Card({ r, live, prReviewStatus, onForget, agent, column, sourceLabel }:
   // is kind: "explore" but Track it never renames it off its local- place-hash, so
   // that prefix reads as "explore" here too — it is exactly what the record now is.
   const explore = r.run.key.startsWith("explore-") || r.run.key.startsWith("local-");
+  // Exact, not prefix-matched: unlike `explore` above (whose key prefix is the only
+  // signal a Track'd place leaves behind), a notepad run always carries its kind.
+  const notepad = runKind(r.run) === "notepad";
   // A place with an agent open in it that Agent Flow Deck never launched. It has no
   // record on disk, so there is nothing to Forget — closing its agents is what
   // removes it.
@@ -281,7 +284,7 @@ function Card({ r, live, prReviewStatus, onForget, agent, column, sourceLabel }:
             {r.run.key}
           </button>
         ) : (
-          <span className="key untracked" title={r.run.key}>{local ? "local" : explore ? "explore" : r.run.key}</span>
+          <span className="key untracked" title={r.run.key}>{local ? "local" : explore ? "explore" : notepad ? "notepad" : r.run.key}</span>
         )}
       </div>
       <div className="c-title" title={r.run.summary}>

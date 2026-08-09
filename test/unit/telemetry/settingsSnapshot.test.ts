@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AgentFlowConfig, DEFAULT_PROMPT_MODES, DEFAULT_REVIEW_REQUEST_MODES, getConfig } from "../../../src/config";
 import {
-  DEFAULT_FILTER_VALUES, EXPLORE_MODES, OPEN_IN_MODES, REMOTE_CONTROL_MODES,
+  AGENT_SURFACES, DEFAULT_FILTER_VALUES, EXPLORE_MODES, OPEN_IN_MODES, REMOTE_CONTROL_MODES,
   settingsSnapshot, WORKSPACE_MODES, WORKTREE_MODES,
 } from "../../../src/telemetry/settingsSnapshot";
 import { STOCK_REVIEW_MODES } from "../../../src/telemetry/events";
@@ -196,6 +196,13 @@ describe("settingsSnapshot", () => {
     expect(settingsSnapshot({ ...getConfig(), taskSource: "jira" }).task_source).toBe("jira");
     expect(settingsSnapshot({ ...getConfig(), taskSource: "acme" }).task_source).toBe("invalid");
   });
+
+  it("reports the agent surface, collapsing an unknown value to invalid", () => {
+    expect(settingsSnapshot({ ...getConfig(), agentSurface: "terminal" }).agent_surface).toBe("terminal");
+    expect(
+      settingsSnapshot({ ...getConfig(), agentSurface: "tmux" as never }).agent_surface,
+    ).toBe("invalid");
+  });
 });
 
 describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
@@ -238,6 +245,16 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
 
   it("keeps REMOTE_CONTROL_MODES equal to agentFlow.remoteControl's manifest enum", () => {
     expect([...REMOTE_CONTROL_MODES]).toEqual(props["agentFlow.remoteControl"].enum);
+  });
+
+  it("keeps AGENT_SURFACES equal to agentFlow.agentSurface's manifest enum", () => {
+    expect([...AGENT_SURFACES]).toEqual(props["agentFlow.agentSurface"].enum);
+  });
+
+  it("keeps agentFlow.agentSurface's enum and enumDescriptions the same length", () => {
+    expect(props["agentFlow.agentSurface"].enumDescriptions?.length).toBe(
+      props["agentFlow.agentSurface"].enum?.length,
+    );
   });
 
   it("keeps DEFAULT_FILTER_VALUES equal to agentFlow.defaultFilter's manifest enum", () => {

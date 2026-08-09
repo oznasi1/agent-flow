@@ -125,6 +125,9 @@ describe("brand accent", () => {
       ".take", ".take:hover",
       ".gate .btn", ".gate .btn:hover",
       ".batch-launch", ".batch-launch:hover",
+      // Notepad restyle (direction B): the checkbox tint is the one new place
+      // the sidebar spends the brand hue.
+      ".cb",
     ],
     // `.ctl.on .switch::after` was removed from this list: under the tightened
     // detector it turns out to spend only `var(--brand-ink)` (the knob's own
@@ -238,5 +241,27 @@ describe("CONTROLS_CSS", () => {
     // theme fill token directly. Asserting the absence of one specific variable let
     // any other fill token through.
     expect(on![1]).not.toMatch(/background:\s*var\(--vscode-/);
+  });
+});
+
+describe("notepad fields", () => {
+  // The panel has one focus language: suppress the UA outline, move focus onto the
+  // control's own border (see .text-search:focus-within). The notepad's two fields
+  // were the only ones that skipped it and fell through to the global :focus-visible
+  // rule in tokens.ts — a detached halo, 2px off the field, at the wrong radius.
+  it("focus on the field's own border, not the global outline", () => {
+    const focus = ruleBlocks(CSS).find((r) => r.selector === ".np-title-input:focus, .np-body-input:focus");
+    expect(focus).toBeDefined();
+    expect(focus!.body).toMatch(/outline:\s*none/);
+    expect(focus!.body).toMatch(/border-color:\s*var\(--vscode-focusBorder\)/);
+  });
+
+  // Load-bearing: without a resting border the focused one materializes out of
+  // nothing, which reads as the field jumping rather than lighting up.
+  it("carry a resting border for that focus border to replace", () => {
+    const rest = ruleBlocks(CSS).find((r) => r.selector === ".np-title-input, .np-body-input");
+    expect(rest).toBeDefined();
+    expect(rest!.body).not.toMatch(/border:\s*1px solid var\(--vscode-input-border,\s*transparent\)/);
+    expect(rest!.body).toMatch(/border:\s*1px solid var\(--vscode-input-border,\s*var\(--hair\)\)/);
   });
 });

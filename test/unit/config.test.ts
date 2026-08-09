@@ -483,6 +483,25 @@ describe("getConfig — remoteControl", () => {
   });
 });
 
+describe("getConfig — agentSurface", () => {
+  it("defaults to the extension panel when unset", () => {
+    setConfig({ agentSurface: undefined });
+    expect(getConfig().agentSurface).toBe("extension");
+  });
+
+  it("reads terminal when set", () => {
+    setConfig({ agentSurface: "terminal" });
+    expect(getConfig().agentSurface).toBe("terminal");
+  });
+
+  it("falls back to extension for an unrecognized value", () => {
+    // A typo in settings.json must not silently disable seeding — it degrades
+    // to the default surface, the same way remoteControl degrades to "off".
+    setConfig({ agentSurface: "tmux" });
+    expect(getConfig().agentSurface).toBe("extension");
+  });
+});
+
 describe("PR facts settings", () => {
   it("defaults prFacts on and the TTL to 120 seconds", () => {
     const c = getConfig();

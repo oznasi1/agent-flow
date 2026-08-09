@@ -5,7 +5,68 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.0] — 2026-08-08
+
+### Changed
+
+- **Tabs at the top of the sidebar.** `Tasks | Notepad` is now the panel's first
+  row, with the project key and your name moved into the view's own title bar —
+  so the panel no longer says "Tasks" twice, and it's a row shorter on both
+  tabs. The window gauge and **Explore** trail the tabs on that same row.
+
+### Fixed
+
+- **Notepad fields focus like every other input.** The title and detail fields
+  lit up with a detached outline in the theme's focus hue, offset from the field
+  and at the wrong corner radius. They now move focus onto their own border,
+  matching the task search and the repo picker.
+
+## [0.8.0] — 2026-08-08
+
+### Added
+
+- **`agentFlow.agentSurface` — open a session in the terminal.** Set it to
+  `terminal` and a taken task starts the `claude` CLI in an integrated terminal
+  named for the ticket, with the prompt pre-typed and waiting on your Enter,
+  instead of the Claude Code extension panel. Applies to every launch path —
+  take, batch, Explore, Notepad and **Address PR**. Defaults to `extension`, so
+  nothing changes unless you ask for it.
+
+## [0.7.0] — 2026-08-08
+
+### Changed
+
+- **"This window" no longer replaces the window.** Taking a task into the window
+  you're already in starts a Claude session there and leaves everything else
+  alone — the folders, the open editors, and any session already running stay
+  put. It used to swap the window's folder set and reload the extension host,
+  throwing all of that away. A batch opened into one shared window behaves the
+  same way.
+- **A window with nothing to seed is no longer offered.** An empty window, or an
+  untitled multi-root window with no saved `.code-workspace`, can't be named by
+  the seed handshake, so **This window** is hidden there and
+  `agentFlow.openIn: this-window` opens a new window instead.
+## [0.6.0] — 2026-08-08
+
+### Added
+
+- **Notepad tab.** A second tab in the Tasks panel holding freeform items that
+  aren't tied to any ticket, saved globally so the same list follows you across
+  every workspace. Notes can be checked off, filtered (Active by default), and
+  cleared once done. The fields are ordinary text inputs, so your operating
+  system's own dictation (double-tap Control on macOS, Win+H on Windows) types
+  straight into them.
+- **Kick off an agent from a note.** **Start** on a note opens a workspace and
+  seeds a brief from it, the same way Explore does. The run appears on the Deck
+  board like any other, and the note shows whether it is running, stale, or
+  finished.
+
+### Changed
+
+- **Notepad restyled to match the rest of the panel.** Text links are now real
+  buttons — a filled Start (formerly "Run agent") and quiet icon-only Edit and
+  Delete — status badges are outline pills instead of filled ones, and notes
+  render as a hairline-separated list with a status rail instead of boxed cards.
 
 ## [0.5.0] — 2026-08-07
 

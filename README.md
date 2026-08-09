@@ -303,6 +303,7 @@ repo, so they never get committed.
 | `agentFlow.stampLabelOnWrite` | `true` | Whether to stamp the provenance label on a Jira write, and whether a review body submitted from the Deck is marked as agent-drafted (a fixed line, distinct from `agentFlow.provenanceLabel`). |
 | `agentFlow.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
 | `agentFlow.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
+| `agentFlow.agentSurface` | `extension` | Where a session starts: the Claude Code extension panel, or `terminal` to run the `claude` CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter. |
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
 | `agentFlow.prFacts` | `true` | Read each in-flight task's PR state from GitHub via the `gh` CLI and show it on the Deck's cards. |
 | `agentFlow.openAgents` | `true` | Show every Claude Code session open on this machine on the Deck: as agents on the card that owns their directory, and as a `local` card of its own for a place Agent Flow Deck never launched. Read from `~/.claude/sessions`. |
@@ -359,13 +360,20 @@ was skipped, so you're never left waiting for a `/remote-control` prompt.
 ### Where a task opens
 
 `agentFlow.openIn` controls where a task you take gets opened: `ask` (ask each time),
-`new-window`, `this-window` (reuse the current window), or `pick-existing` — pick an
-existing `.code-workspace` file to open the task into. Repos the workspace already has a
-folder for (matched by name) are skipped automatically and named in the toast — a
-worktree keeps its repo's bare name, so adding it anyway would grow a second root by
-that name. Anything genuinely new is added only after you approve it in a prompt;
-declining leaves the file byte-identical. Either way the workspace's existing folders,
-settings, and formatting are preserved and it opens as a multi-root workspace.
+`new-window`, `this-window` (start a session in the window you're already in), or
+`pick-existing` — pick an existing `.code-workspace` file to open the task into. Repos
+the workspace already has a folder for (matched by name) are skipped automatically and
+named in the toast — a worktree keeps its repo's bare name, so adding it anyway would
+grow a second root by that name. Anything genuinely new is added only after you approve
+it in a prompt; declining leaves the file byte-identical. Either way the workspace's
+existing folders, settings, and formatting are preserved and it opens as a multi-root
+workspace.
+
+`this-window` never replaces what's open. The window keeps its folders, its editors and
+any session already running in it, and the task's agent starts alongside them. A window
+Agent Flow can't name — an empty one, or several folders with no saved
+`.code-workspace` — can't hold a seeded session, so **This window** isn't offered there
+and `this-window` opens a new window instead.
 
 When taking a task (or starting an Explore session) with `agentFlow.openIn` set to
 `ask`, Agent Flow Deck also lists the windows you already have open — a repo folder or a
@@ -375,6 +383,21 @@ behavior above); choosing an open **folder** window focuses it and seeds the age
 (a folder window can't gain root folders, so any other repos the task touches keep their
 briefs but aren't added as roots). Set `agentFlow.trackOpenWindows` to `false` to turn
 this off.
+
+### Where the session opens
+
+Two settings, two different questions. `agentFlow.openIn` decides **which window** a
+task lands in. `agentFlow.agentSurface` decides **what starts the session** once it's
+there:
+
+- `extension` (default) — the Claude Code extension panel, prompt pre-filled.
+- `terminal` — an integrated terminal named `Claude · <KEY>` running the `claude`
+  CLI, prompt pre-typed.
+
+Either way you press Enter to start, and both work for every launch path: taking a
+task, batch launches, Explore, Notepad, and **Address PR**. Terminal mode needs
+`claude` on your `PATH`; if it isn't, the terminal says `command not found` and the
+prompt is still sitting there to reuse.
 
 ## Architecture
 

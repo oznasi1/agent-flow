@@ -81,8 +81,10 @@ export interface Run {
    * this, not the url, is what keeps them out of Jira polling and the columns.
    * "local" is the one kind that is never written to the runs store: it marks a
    * place discovered from an open Claude Code session, and stops being true the
-   * moment Track it lands. */
-  kind?: "task" | "explore" | "review" | "local";
+   * moment Track it lands.
+   * "notepad" is a run launched from the Notepad tab: ticketless like "explore",
+   * but distinguishable from it so the board can label it for what it is. */
+  kind?: "task" | "explore" | "review" | "local" | "notepad";
   mode: WorkspaceMode;
   workspaceFile?: string; // multi-root .code-workspace, when mode === "multiroot"
   repos: { name: string; path: string; isGit: boolean; branch?: string }[];
@@ -96,12 +98,14 @@ export interface Run {
   finishedAt?: number;
 }
 
-const RUN_KINDS = new Set(["task", "explore", "review", "local"]);
+const RUN_KINDS = new Set(["task", "explore", "review", "local", "notepad"]);
 
 /** A run's kind, tolerant of an old record with no field and of a hand-edited
  * one with a value we don't know. */
-export function runKind(run: Run): "task" | "explore" | "review" | "local" {
-  return RUN_KINDS.has(run.kind as string) ? (run.kind as "task" | "explore" | "review" | "local") : "task";
+export function runKind(run: Run): "task" | "explore" | "review" | "local" | "notepad" {
+  return RUN_KINDS.has(run.kind as string)
+    ? (run.kind as "task" | "explore" | "review" | "local" | "notepad")
+    : "task";
 }
 
 /** One open Claude Code session, as ~/.claude/sessions/<pid>.json records it.
@@ -332,6 +336,34 @@ export interface PendingResume {
   lines: string[];
 }
 
+// ── The Notepad: local, ticketless scratch items ────────────────────────────
+
+/** One notepad item, exactly as persisted in globalState. Deliberately global
+ * rather than per-workspace: these are the user's scratch items, not a repo's.
+ * `lastRunKey` is the key of the most recent run launched from this note — the
+ * only run-related field stored, since everything else is derived at read time. */
+export interface NotepadItem {
+  id: string;
+  title: string;
+  body: string;
+  done: boolean;
+  createdAt: number; // epoch ms
+  lastRunKey?: string;
+}
+
+/** A note's most recent run, as far as the two cheap signals can tell:
+ * "running" — a Claude Code session is open in one of its repos right now;
+ * "stale" — launched, but nothing attached to it at the moment;
+ * "finished" — the Deck's retire sweep stamped it landed.
+ * Absent entirely when there is no run record to speak for (never launched, or
+ * the Deck already retired it — guessing which would be dishonest). */
+export type NotepadRunStatus = "running" | "stale" | "finished";
+
+/** What crosses the wire: the stored note plus its derived status. The status is
+ * computed host-side per post and never persisted — the webview cannot read the
+ * runs store itself (it must not import a module that touches `fs`). */
+export type NotepadItemView = NotepadItem & { runStatus?: NotepadRunStatus };
+
 // Messages: webview → host
 export type InboundMessage =
   | { type: "ready" }
@@ -343,6 +375,13 @@ export type InboundMessage =
   | { type: "changeStatus"; key: string }
   | { type: "addToMySprint"; key: string }
   | { type: "explore" }
+  // The Notepad tab (same webview as the task pool, second view)
+  | { type: "notepad:add"; title: string; body: string }
+  | { type: "notepad:update"; id: string; title: string; body: string }
+  | { type: "notepad:toggleDone"; id: string }
+  | { type: "notepad:delete"; id: string }
+  | { type: "notepad:clearCompleted" }
+  | { type: "notepad:run"; id: string }
   | { type: "openExternal"; url: string }
   | { type: "signIn" }
   | { type: "runSetup" }
@@ -446,6 +485,11 @@ export type OutboundMessage =
   // the command exists.
   | { type: "error"; message: string; canRetry: boolean; canRunDoctor?: boolean }
   | { type: "loading"; loading: boolean }
+  // Every note, with each one's derived run status. Posted on `ready`, after every
+  // mutation, and on a poll tick so a badge cannot go stale while the panel sits
+  // open. The whole array every time: it is a handful of small records, and a
+  // diff protocol would buy nothing but a chance to desynchronise.
+  | { type: "notepad:notes"; notes: NotepadItemView[] }
   // The Deck
   | { type: "deck:runs"; runs: RunStatus[]; liveSignal: boolean; prFacts: boolean; openAgents: boolean; reviewQueue: boolean; ghNote: string | null; prReviewStatus: string;
       // Which lens to render. Echoed on every post rather than sent once, so a

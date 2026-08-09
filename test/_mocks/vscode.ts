@@ -85,6 +85,17 @@ export function makeWebviewPanel() {
   };
 }
 
+/** A fake Terminal. `sendText` records `(text, addNewLine)` pairs so a test can
+ * assert both what was typed and whether it was submitted — the distinction the
+ * "you press Enter" contract turns on. */
+export function makeTerminal() {
+  return {
+    sendText: vi.fn((_text: string, _addNewLine?: boolean) => {}),
+    show: vi.fn((_preserveFocus?: boolean) => {}),
+    dispose: vi.fn(),
+  };
+}
+
 export const window = {
   showInputBox: vi.fn(async (_opts?: unknown): Promise<string | undefined> => undefined),
   showQuickPick: vi.fn(async (_items?: unknown, _opts?: unknown): Promise<any> => undefined),
@@ -94,6 +105,7 @@ export const window = {
   createOutputChannel: vi.fn((_name: string) => ({ appendLine: vi.fn(), dispose: vi.fn() })),
   registerWebviewViewProvider: vi.fn((_id: string, _provider: unknown) => ({ dispose: vi.fn() })),
   createWebviewPanel: vi.fn((_id: string, _title: string, _col: unknown, _opts?: unknown) => makeWebviewPanel()),
+  createTerminal: vi.fn((_opts?: { name?: string; cwd?: string }) => makeTerminal()),
   showTextDocument: vi.fn(async (_doc: unknown, _opts?: unknown): Promise<any> => undefined),
   showOpenDialog: vi.fn(async (_opts?: unknown): Promise<any[] | undefined> => undefined),
   onDidChangeWindowState: vi.fn((_cb: (e: unknown) => void) => ({ dispose: vi.fn() })),

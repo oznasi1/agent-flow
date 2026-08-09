@@ -8,10 +8,6 @@ export const CSS = `
     background: var(--vscode-sideBar-background); }
   #root { padding: 8px 8px 20px; }
 
-  .header { display: flex; align-items: center; gap: 8px; padding: 4px 4px 10px; }
-  .header .title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: var(--t-title); }
-  .header .me { color: var(--vscode-descriptionForeground); font-size: 11px; margin-left: 8px; }
-
   /* The mark is the sidebar's status display: lit dots are open Agent Flow
      windows. Unlit and texture dots ride the theme foreground so the ring keeps
      its shape on any background, and sit just under it rather than at a quarter
@@ -144,21 +140,23 @@ export const CSS = `
   /* One quiet secondary language for every non-Take action: Explore (the pool's
      escape hatch), Address PR (which gives up its green — green means Done on the
      Deck, and a PR waiting on you is the opposite of done) and the sprint actions.
-     Explore is the only one pushed to the row's far side; the other three are the
-     only ones that must never wrap their own label. */
-  .explore, .address-pr, .sprint-add, .sprint-remove {
+     Explore is pushed to the tab row's far side by its .tabbar-trail wrapper, not
+     by anything in this group; the other three are the only ones that must never
+     wrap their own label. */
+  .explore, .address-pr, .sprint-add, .sprint-remove, .quiet {
     display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-body); font-weight: 500;
     height: 24px; padding: 0 10px; border-radius: var(--r-ctl); cursor: pointer;
     border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
     transition: background-color .12s ease, border-color .12s ease; }
-  .explore { margin-left: auto; }
   .address-pr, .sprint-add, .sprint-remove { white-space: nowrap; }
-  .sprint-remove { color: var(--dim); }
-  .explore:hover, .address-pr:hover, .sprint-add:hover, .sprint-remove:hover {
+  .sprint-remove, .quiet.dim { color: var(--dim); }
+  .explore:hover, .address-pr:hover, .sprint-add:hover, .sprint-remove:hover, .quiet:hover {
     background: var(--vscode-toolbar-hoverBackground);
     border-color: color-mix(in srgb, var(--vscode-foreground) 30%, transparent); }
+  .quiet:disabled { opacity: .45; cursor: default; }
+  .quiet:disabled:hover { background: transparent; border-color: var(--edge); }
   /* Icon-only: a square of the same height, so the row reads as one set of controls. */
-  .sprint-remove.icon-only { width: 24px; padding: 0; justify-content: center; }
+  .sprint-remove.icon-only, .quiet.icon-only { width: 24px; padding: 0; justify-content: center; }
 
   .detail { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--vscode-panel-border); }
   .detail-loading { font-size: 11px; color: var(--vscode-descriptionForeground); }
@@ -277,4 +275,68 @@ export const CSS = `
     font-size: 12px; padding: 4px 12px; border-radius: 8px; border: none; cursor: pointer;
     background: var(--brand); color: var(--brand-ink); }
   .batch-launch:hover { background: color-mix(in srgb, var(--brand) 84%, var(--vscode-foreground)); }
+
+  /* The panel's first row, and its title element — the VS Code view title bar above
+     it carries the project and user (tasksView.postState), so nothing repeats here.
+     Tab styling is scoped to [role="tab"] because the trailing group holds a real
+     button (Explore) that must keep the shared .explore language, not become a tab. */
+  .tabbar { display: flex; align-items: center; gap: 2px; margin: 0 0 10px;
+    border-bottom: 1px solid var(--vscode-panel-border); }
+  .tabbar-tabs { display: inline-flex; align-items: center; gap: 2px; }
+  .tabbar button[role="tab"] { background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 5px 10px 7px; cursor: pointer; color: var(--dim); font-size: var(--t-body); font-weight: 500; }
+  .tabbar button[role="tab"][aria-selected="true"] { color: var(--vscode-foreground); font-weight: 600;
+    border-bottom-color: var(--vscode-focusBorder); }
+  .tabbar-trail { margin-left: auto; display: inline-flex; align-items: center; gap: 7px;
+    padding-bottom: 4px; }
+
+  /* Restyled to the product's own control language (direction B — compact rows,
+     see .superpowers/sdd/notepad-ui/brief.md): real buttons instead of text
+     links, an outline .status pill instead of a filled one, and a hairline list
+     with a status rail instead of boxed cards — the same shape a task card
+     already uses to signal state, just thinner. */
+  .notepad { padding: 4px 0 12px; }
+  .np-add { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+  /* One focus language for the whole panel: suppress the UA outline and move focus
+     onto the control's own border, exactly as .text-search:focus-within does. The
+     resting hairline is load-bearing — without it the border appears out of nothing
+     on focus, which reads as the field jumping rather than lighting up. */
+  .np-title-input, .np-body-input { width: 100%; padding: 5px 7px;
+    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, var(--hair)); border-radius: var(--r-ctl);
+    font-family: inherit; font-size: var(--t-body); }
+  .np-title-input:focus, .np-body-input:focus { outline: none;
+    border-color: var(--vscode-focusBorder); }
+  .np-body-input { resize: vertical; }
+  /* Each field carries its own mic immediately to its right, so which field a
+     dictation session fills is never ambiguous. */
+  .np-field-row { display: flex; gap: 6px; align-items: flex-start; }
+  .np-field-row > input, .np-field-row > textarea { flex: 1; }
+  .np-add-btn { align-self: flex-start; }
+  .np-empty { padding: 14px 2px; color: var(--dim); font-size: var(--t-body); }
+
+  .np-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hair); }
+  .np-item { position: relative; padding: 8px 2px 9px 11px; border-bottom: 1px solid var(--hair); }
+  .np-item::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 9px; width: 2px;
+    border-radius: 1px; background: var(--rail, transparent); }
+  .np-item.r-running { --rail: var(--c-progress); }
+  .np-item.r-stale   { --rail: var(--c-idle); }
+  .np-item.r-done    { --rail: var(--c-done); }
+  .cb { width: 13px; height: 13px; margin: 0; accent-color: var(--brand); flex: none; cursor: pointer; }
+  .np-top { display: flex; align-items: center; gap: 7px; }
+  .np-top .np-title { flex: 1; }
+  .np-title { font-size: var(--t-body); line-height: 1.35; }
+  .np-item.is-done .np-title { text-decoration: line-through; opacity: .5; }
+  .np-body { margin: 3px 0 6px 20px; font-size: var(--t-body); color: var(--dim); white-space: pre-wrap; }
+  .np-acts { display: flex; align-items: center; gap: 6px; margin: 6px 0 0 20px; }
+  /* A checked-off note drops Start from filled brand teal to the quiet language —
+     a finished item must not out-shout an active one — but it stays clickable. */
+  .np-item.is-done .take { background: transparent; color: var(--dim); border: 1px solid var(--edge);
+    font-weight: 500; padding: 2px 10px 2px 8px; }
+  .np-item.is-done .take:hover { background: var(--vscode-toolbar-hoverBackground); }
+
+  /* The add form's edit-in-place row shares its layout with a note's own edit
+     state (NoteRow, while editing). */
+  .edit { display: flex; flex-direction: column; gap: 6px; }
+  .edit .row { display: flex; gap: 6px; }
 `;

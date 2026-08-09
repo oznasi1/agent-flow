@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
 import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
-import { commands, env, window, workspace } from "../../_mocks/vscode";
+import { commands, env, setConfig, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
 vi.mock("fs");
@@ -37,6 +37,9 @@ beforeEach(() => {
   execSync.mockReset().mockReturnValue(""); // git ls-files → no files
   // `open -a` succeeds by invoking its callback with no error.
   exec.mockReset().mockImplementation(((_cmd: string, cb: (e: unknown) => void) => cb(null)) as never);
+  // The config store persists across tests, so clear the surface: leaving it on
+  // "terminal" would divert every one of the ~40 extension-panel seeding tests.
+  setConfig({ agentSurface: undefined });
 });
 
 const baseReq = (over: Partial<OpenRequest> = {}): OpenRequest => ({
@@ -91,6 +94,24 @@ describe("openWorkspace — multiroot", () => {
       expect.objectContaining({ forceNewWindow: true }),
     );
     expect(result.opened).toEqual(["/ws/ASM-1.code-workspace"]);
+  });
+
+  // The same-window reuse branch is gone: openFolder is only ever reached as the
+  // fallback for a failed `open -a`, and only ever with forceNewWindow: true. Aimed at
+  // the request that USED to take the deleted branch — a plain baseReq() never reached
+  // it even before the deletion, so it would guard nothing.
+  it("never asks openFolder to reuse the current window", async () => {
+    exec.mockImplementation(((_cmd: string, cb: (e: unknown) => void) => cb(new Error("no app"))) as never);
+    await openWorkspace(
+      baseReq({
+        openIn: "current",
+        currentWindow: { identity: "/repos/account-service", kind: "folder", roots: [{ name: "account-service", path: "/repos/account-service" }] },
+      }),
+    );
+    const reuse = commands.executeCommand.mock.calls.filter(
+      (c) => c[0] === "vscode.openFolder" && (c[2] as { forceNewWindow?: boolean })?.forceNewWindow === false,
+    );
+    expect(reuse).toEqual([]);
   });
 
   it("does not write a plan file when seedAgent is off", async () => {
@@ -503,17 +524,19 @@ describe("maybeSeedAgent", () => {
 });
 
 describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
-  const setupMatchingPlan = () => {
+  const planJson = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      key: "ASM-1",
+      createdAt: Date.now(),
+      seedAgent: true,
+      matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "do it" }],
+      ...over,
+    });
+
+  const setupMatchingPlan = (over: Record<string, unknown> = {}) => {
     workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
     readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
-    readFileSync.mockReturnValue(
-      JSON.stringify({
-        key: "ASM-1",
-        createdAt: Date.now(),
-        seedAgent: true,
-        matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "do it" }],
-      }),
-    );
+    readFileSync.mockReturnValue(planJson(over));
   };
 
   it("falls back to the URI handler when the command never registers", async () => {
@@ -552,6 +575,150 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  /** Drive one seed pass to completion with the CLI boot delay faked away. */
+  const seedWithTimers = async (context: Parameters<typeof maybeSeedAgent>[0]) => {
+    vi.useFakeTimers();
+    try {
+      const pending = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  };
+
+  /** The terminal object handed back by the i-th createTerminal call. */
+  const terminalAt = (i = 0) => window.createTerminal.mock.results[i].value;
+
+  const BRACKET_ON = "\u001b[200~";
+  const BRACKET_OFF = "\u001b[201~";
+
+  describe("terminal surface", () => {
+    beforeEach(() => {
+      window.createTerminal.mockClear();
+      setConfig({ agentSurface: "terminal" });
+    });
+
+    it("runs claude in a terminal named for the ticket and types the prompt unsubmitted", async () => {
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal).toHaveBeenCalledTimes(1);
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Claude · ASM-1" });
+      const t = terminalAt();
+      expect(t.show).toHaveBeenCalled();
+      // First send runs the CLI (submitted); second types the prompt (NOT submitted).
+      expect(t.sendText.mock.calls[0]).toEqual(["claude", true]);
+      expect(t.sendText.mock.calls[1][1]).toBe(false);
+      expect(t.sendText.mock.calls[1][0]).toContain("do it");
+      // Never touches the extension panel.
+      expect(commands.executeCommand).not.toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+    });
+
+    it("wraps the prompt in bracketed paste so a multi-line prompt is not submitted early", async () => {
+      // renderPrompt appends "\n\nRelevant files: …" whenever a task has file
+      // mentions, so this is the common case, not an edge case. Without the
+      // markers the TUI would submit at the blank line and drop the file list.
+      const prompt = "Start ASM-1\n\nRelevant files: @a.ts";
+      setupMatchingPlan({ matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt }] });
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(terminalAt().sendText.mock.calls[1][0]).toBe(`${BRACKET_ON}${prompt}${BRACKET_OFF}`);
+    });
+
+    it("uses a folder matchPath as the terminal cwd", async () => {
+      workspace.workspaceFile = undefined;
+      workspace.workspaceFolders = [{ uri: { fsPath: "/repos/api" } }];
+      readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+      readFileSync.mockReturnValue(
+        planJson({ matches: [{ matchPath: "/repos/api", prompt: "do it" }] }),
+      );
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ cwd: "/repos/api" });
+    });
+
+    it("omits cwd when the match is a .code-workspace file", async () => {
+      // A workspace file is not a directory. Omitting cwd lets VS Code default to
+      // the window's first root, which is the right answer for a multiroot window.
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal.mock.calls[0][0]?.cwd).toBeUndefined();
+    });
+
+    it("falls back to the clipboard when creating the terminal throws", async () => {
+      setupMatchingPlan();
+      window.createTerminal.mockImplementationOnce(() => {
+        throw new Error("no terminal for you");
+      });
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
+      expect(window.showInformationMessage).toHaveBeenCalled();
+    });
+
+    it("types /remote-control and leaves the prompt on the clipboard", async () => {
+      // Same contract as the panel: the slash command cannot be stacked ahead of
+      // a prompt in one submission, so the prompt travels by clipboard.
+      setupMatchingPlan({ remoteControl: true });
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
+      expect(terminalAt().sendText.mock.calls[1][0]).toBe(
+        `${BRACKET_ON}/remote-control ASM-1${BRACKET_OFF}`,
+      );
+      expect(terminalAt().sendText.mock.calls[1][1]).toBe(false);
+      // The user is told what to press.
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Remote Control"),
+      );
+    });
+
+    it("gives each task in a batch its own named terminal", async () => {
+      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readFileSync.mockImplementation((p) =>
+        String(p).includes("ASM-1")
+          ? planJson({ key: "ASM-1", seq: 0 })
+          : planJson({ key: "ASM-2", seq: 1 }),
+      );
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal.mock.calls.map((c) => c[0]?.name)).toEqual([
+        "Claude · ASM-1",
+        "Claude · ASM-2",
+      ]);
+    });
+  });
+
+  it("uses the extension panel and no terminal when agentSurface is unset", async () => {
+    setConfig({ agentSurface: undefined });
+    window.createTerminal.mockClear();
+    setupMatchingPlan();
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+    expect(window.createTerminal).not.toHaveBeenCalled();
   });
 });
 
@@ -1041,6 +1208,87 @@ describe("openWorkspace — remote control", () => {
     const result = await openWorkspace(baseReq({ seedAgent: false, remoteControl: true }));
     expect(result.remoteControl).toBe(false);
     expect(writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"))).toBeUndefined();
+  });
+});
+
+describe("openWorkspace — this window", () => {
+  const folderWindow = { identity: "/repos/account-service", kind: "folder" as const, roots: [{ name: "account-service", path: "/repos/account-service" }] };
+
+  it("seeds this window without opening or reloading anything", async () => {
+    const result = await openWorkspace(
+      baseReq({ openIn: "current", currentWindow: folderWindow }),
+    );
+
+    // The whole point: no `open -a`, and no vscode.openFolder in either direction.
+    expect(exec).not.toHaveBeenCalled();
+    expect(commands.executeCommand).not.toHaveBeenCalledWith("vscode.openFolder", expect.anything(), expect.anything());
+
+    expect(result.seededInPlace).toBe(true);
+    expect(result.opened).toEqual(["/repos/account-service"]);
+  });
+
+  it("names this window's identity as the single plan match", async () => {
+    await openWorkspace(baseReq({ openIn: "current", currentWindow: folderWindow }));
+    const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
+    const plan = JSON.parse(String(planWrite![1]));
+    expect(plan.matches).toHaveLength(1);
+    expect(plan.matches[0].matchPath).toBe("/repos/account-service");
+  });
+
+  // Two repos would normally be laid out as a multiroot workspace file. Here the window
+  // already exists and is not being laid out, so nothing is written and nothing is opened.
+  it("writes no .code-workspace even for a multi-repo take", async () => {
+    const result = await openWorkspace(
+      baseReq({ openIn: "current", currentWindow: folderWindow }),
+    );
+    expect(writeArg((p) => p.endsWith(".code-workspace"))).toBeUndefined();
+    expect(result.workspaceFile).toBeUndefined();
+  });
+
+  it("takes the mode from the window's own shape, not the repo count", async () => {
+    const wsWindow = { identity: "/ws/team.code-workspace", kind: "workspace" as const, roots: [{ name: "api", path: "/repos/api" }] };
+    const folder = await openWorkspace(baseReq({ openIn: "current", currentWindow: folderWindow }));
+    const ws = await openWorkspace(baseReq({ openIn: "current", currentWindow: wsWindow }));
+    expect(folder.mode).toBe("per-window");
+    expect(ws.mode).toBe("multiroot");
+  });
+
+  // One match means the single-window guard passes, so a multi-repo take can offer
+  // Remote Control here — it couldn't when "current" produced one match per repo.
+  it("keeps Remote Control available for a multi-repo take", async () => {
+    const result = await openWorkspace(
+      baseReq({ openIn: "current", currentWindow: folderWindow, remoteControl: true }),
+    );
+    expect(result.remoteControl).toBe(true);
+  });
+
+  it("uses an absolute brief path so {brief} resolves outside this window's roots", async () => {
+    await openWorkspace(
+      baseReq({
+        openIn: "current",
+        currentWindow: folderWindow,
+        promptTemplate: "Brief: {brief}",
+      }),
+    );
+    const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
+    const plan = JSON.parse(String(planWrite![1]));
+    expect(plan.matches[0].prompt).toContain("/repos/account-service/.pick-task/TASK.md");
+  });
+
+  it("mentions files under a root and drops files outside every root", async () => {
+    execSync.mockReturnValue("src/export.py\n"); // git ls-files result
+    await openWorkspace(
+      baseReq({
+        openIn: "current",
+        currentWindow: folderWindow, // only account-service is a root; centaur is not
+        descriptionText: "fix `src/export.py`",
+        promptTemplate: "Go{files}",
+      }),
+    );
+    const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
+    const prompt = String(JSON.parse(String(planWrite![1])).matches[0].prompt);
+    expect(prompt).toContain("@account-service/src/export.py");
+    expect(prompt).not.toContain("@centaur/");
   });
 });
 
