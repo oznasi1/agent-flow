@@ -3831,8 +3831,13 @@ describe("remote control", () => {
 // applied the VS Code host guard by the time getConfig() returns, which is exactly why
 // "copilot" here models a real VS Code install and can never arise in Cursor.
 //
-// The last three cases are REGRESSION GUARDS for the flows that exist today — they
-// were green before the block was written and must stay green.
+// Only `remoteControl: "on"` is refused, and it is refused at the top of each entry
+// point — before pickers, worktrees and windows, so a refusal leaves nothing behind.
+// `"ask"` is never refused: the picker is simply not offered and the launch proceeds
+// without Remote Control, so a Copilot user is never blocked from taking a task.
+//
+// The "leaves Claude Code alone" / "off" / "real batch" cases are REGRESSION GUARDS for
+// the flows that exist today — they were green before the block was written.
 describe("remote control × the Copilot provider", () => {
   const lastOpen = () =>
     vi.mocked(openWorkspace).mock.calls[vi.mocked(openWorkspace).mock.calls.length - 1][0];
@@ -3841,11 +3846,36 @@ describe("remote control × the Copilot provider", () => {
   const copilot = (over: Partial<ReturnType<typeof getConfig>> = {}) =>
     vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot" as const, ...over });
 
-  it("refuses a Take and opens nothing", async () => {
-    copilot({ remoteControl: "on" });
+  it("refuses a Take before creating any worktree, and before any picker", async () => {
+    // The whole point of refusing at the top: no orphan worktrees for a launch that
+    // never happens, and no prompts for a launch already known to be impossible.
+    copilot({ remoteControl: "on", worktree: "always" });
     const { provider, posted } = setup();
     await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(clientStub.getDetail).not.toHaveBeenCalled(); // not even the Jira read
+  });
+
+  it("emits no take funnel events for a refused Take", async () => {
+    // Refused before take_started, so the funnel gets neither a start nor a
+    // terminator — better than a phantom "cancelled" nobody chose.
+    copilot({ remoteControl: "on" });
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(trackSpy.mock.calls.map((c) => (c[0] as { name: string }).name)).not.toContain("take_started");
+  });
+
+  it("refuses addressPr before creating any worktree", async () => {
+    // addressPr forces a worktree (forceWorktree), so it is the flow with the most to
+    // leave behind if the refusal lands late.
+    copilot({ remoteControl: "on" });
+    const { provider, posted } = setup();
+    await provider.addressPr("ASM-1", ["account-service"]);
+    expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(createWorktrees).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 
@@ -3875,6 +3905,31 @@ describe("remote control × the Copilot provider", () => {
     expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
     expect(openWorkspace).not.toHaveBeenCalled();
     vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+
+  it("never refuses on \"ask\" — it launches without Remote Control instead", async () => {
+    // A toggle we could only refuse is a broken offer, so it is not offered. The
+    // launch must still happen: an "ask" setting may never block a Copilot user.
+    copilot({ remoteControl: "ask" });
+    const { provider, posted, logged } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(window.showQuickPick).not.toHaveBeenCalled(); // the picker never appears
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1); // the launch proceeds
+    expect(lastOpen().remoteControl).toBe(false); // …just without Remote Control
+    expect(logged.join("\n")).toContain("Remote Control not offered");
+  });
+
+  it("still shows the \"ask\" picker under Claude Code", async () => {
+    // The guard on the "ask" short-circuit: dropping its `agentProvider` clause would
+    // silently stop offering Remote Control to every Claude Code user.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
+    const { provider, logged } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    expect(lastOpen().remoteControl).toBe(true);
+    expect(logged.join("\n")).not.toContain("Remote Control not offered");
   });
 
   it("leaves Claude Code + Remote Control alone", async () => {

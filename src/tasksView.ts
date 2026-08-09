@@ -50,6 +50,11 @@ const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 // repo happens to be open. Same storage the install-reported flag uses.
 const NOTEPAD_KEY = "agentFlow.notepad";
 
+/** Said in two places — the pre-flight refusal at the top of every launch, and the
+ * `resolveRemoteControl` backstop behind it. One constant so the two can never drift. */
+const RC_NEEDS_CLAUDE =
+  "Remote Control needs Claude Code. Set agentFlow.agentProvider to claude-code, or turn agentFlow.remoteControl off.";
+
 /** Shared by `explore()` and `runNotepadItem` for turning free text into a run
  * key fragment: lowercase, dashes for anything non-alphanumeric, capped at 40
  * chars so a long topic or title can't produce an unbounded filename. */
@@ -925,6 +930,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * agent for investigation/knowledge — a Jira ticket can come out of it later. */
   public async explore(): Promise<void> {
     const cfg = getConfig();
+    if (this.remoteControlBlocksLaunch(cfg)) return;
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
     if (repos.length === 0) {
       this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
@@ -1023,6 +1029,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (!note) return;
 
     const cfg = getConfig();
+    if (this.remoteControlBlocksLaunch(cfg)) return;
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
     if (repos.length === 0) {
       this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
@@ -1299,24 +1306,42 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
   /** Remote Control seeds `/remote-control <key>`, a Claude Code slash command Copilot
    * has no equivalent for — Copilot would take it as literal prompt text and start a
-   * session that silently does the wrong thing. Refuse the combination rather than
-   * silently dropping one of the two things the user turned on, and refuse it here,
-   * before a destination is chosen, so nobody is left with an opened window and
-   * nothing in it.
+   * session that silently does the wrong thing. `remoteControl: "on"` under Copilot is
+   * therefore refused, rather than silently dropping one of the two things the user
+   * turned on.
    *
-   * The condition is deliberately "resolved ON *and* copilot": every other
-   * combination — Claude Code either way, Copilot with Remote Control off or
-   * declined — is untouched. `cfg.agentProvider` is already host-guarded by
-   * readAgentProvider, so this can never fire in Cursor.
+   * Refused HERE, at the very top of a launch entry point: this is a settings-only
+   * synchronous check, so it lands ahead of every picker, every worktree and every
+   * window. Refusing later (which is what the resolveRemoteControl backstop does)
+   * would already have created worktrees for a launch that never happens.
    *
-   * Returns null when the launch must not proceed. */
+   * Only `"on"` is refused. `"ask"` is handled in resolveRemoteControl, which declines
+   * to offer a toggle it could not honour and proceeds without Remote Control — a
+   * Copilot user is never blocked from taking a task by an "ask" setting. `"off"` and
+   * every Claude Code configuration return false here before anything else is read,
+   * so those paths are untouched. `cfg.agentProvider` is host-guarded by
+   * readAgentProvider, so none of this can fire in Cursor. */
+  private remoteControlBlocksLaunch(cfg: AgentFlowConfig): boolean {
+    if (cfg.agentProvider !== "copilot" || cfg.remoteControl !== "on") return false;
+    this.toast("error", RC_NEEDS_CLAUDE);
+    return true;
+  }
+
+  /** The Remote Control answer for this launch, or null when the launch must not
+   * proceed. Returns null only as a BACKSTOP: `remoteControlBlocksLaunch` already
+   * refused the "on" + Copilot pair at the top of every entry point, so reaching the
+   * null here means a new caller was added without one. Kept — and kept in the return
+   * type — so that new caller fails loudly instead of seeding a broken session. */
   private async resolveRemoteControl(cfg: AgentFlowConfig): Promise<boolean | null> {
+    // "ask" under Copilot: putting up a toggle we could only refuse is a broken offer,
+    // so the picker never appears and the launch simply proceeds without it.
+    if (cfg.agentProvider === "copilot" && cfg.remoteControl === "ask") {
+      this.log("Remote Control not offered — it needs Claude Code; launching without it");
+      return false;
+    }
     const on = await this.resolveRemoteControlSetting(cfg);
     if (on && cfg.agentProvider === "copilot") {
-      this.toast(
-        "error",
-        "Remote Control needs Claude Code. Set agentFlow.agentProvider to claude-code, or turn agentFlow.remoteControl off.",
-      );
+      this.toast("error", RC_NEEDS_CLAUDE);
       return null;
     }
     return on;
@@ -1543,6 +1568,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * from a collapsed card sends no selection and is still a card Take. */
   public async takeTask(key: string, source: TakeSource, preselected?: string[]): Promise<void> {
     const cfg = getConfig();
+    // Ahead of take_started deliberately: the take never begins, so the funnel gets
+    // neither a start nor a terminator rather than a phantom "cancelled".
+    if (this.remoteControlBlocksLaunch(cfg)) return;
     const flow = startFlow();
     const taskFp = fingerprint(key);
     let destination: DestinationProp | undefined;
@@ -1645,7 +1673,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const rcSkipped = isBatch && cfg.remoteControl !== "off";
     if (rcSkipped) this.log("takeBatch: Remote Control skipped — one clipboard, several sessions");
     const wantRemoteControl = isBatch || shared ? false : await this.resolveRemoteControl(cfg);
-    if (wantRemoteControl === null) return; // refused — no worktrees, no windows
+    // Refused. This is the ONE launch entry point with no `remoteControlBlocksLaunch`
+    // call at the top, and deliberately so: a real batch, and a one-key batch to a
+    // shared destination, never resolve Remote Control at all, so a blanket refusal
+    // would block Copilot launches that work fine today. Refusing here instead costs
+    // nothing — the worktree loop below has not run yet, so there is still no side
+    // effect to leave behind.
+    if (wantRemoteControl === null) return;
 
     const resolved: { task: BatchTask; key: string }[] = [];
     const failed: string[] = [];
@@ -1834,6 +1868,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * checks out its branch, assesses readiness, and (when prReviewAutoFix) implements the
    * requested changes. Surfaced on a card whose status matches cfg.prReviewStatus. */
   public async addressPr(key: string, preselected?: string[]): Promise<void> {
+    // Its own read rather than hoisting the `const cfg` below: that one is deliberately
+    // taken AFTER resolveKickoff's pickers, and moving it would change which settings
+    // snapshot the Claude Code path sees.
+    if (this.remoteControlBlocksLaunch(getConfig())) return;
     const resolved = await this.resolveKickoff(key, preselected);
     if (!resolved) return;
     const { detail, services, target } = resolved;

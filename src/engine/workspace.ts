@@ -808,10 +808,15 @@ async function seedAgentSession(opts: {
   // the provider, it is re-read here — so the block is repeated at the last moment
   // before anything is seeded. Refuse rather than silently drop one of the two.
   // Only this exact pair is refused: an ordinary Copilot seed falls straight through.
+  // The advice has to name re-taking the task, not just the settings change: the
+  // caller sets this plan's `seeded:` guard BEFORE calling us (see runSeedPass), and
+  // nothing clears it short of PLAN_TTL_MS — so fixing the setting and reloading would
+  // find the plan already consumed and seed nothing. Telling the user to reload would
+  // be telling them to do something that cannot work.
   if (remoteControl && readAgentProvider() === "copilot") {
     log(`seed ${key}: refused — Remote Control needs Claude Code`);
     vscode.window.showErrorMessage(
-      `Agent Flow Deck: ${key} not seeded — Remote Control needs Claude Code. Set agentFlow.agentProvider to claude-code, or turn agentFlow.remoteControl off.`,
+      `Agent Flow Deck: ${key} not seeded — Remote Control needs Claude Code. Set agentFlow.agentProvider to claude-code (or turn agentFlow.remoteControl off), then take ${key} again — reloading this window won't re-seed it.`,
     );
     return;
   }

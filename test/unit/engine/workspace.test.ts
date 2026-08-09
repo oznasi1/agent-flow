@@ -976,6 +976,39 @@ describe("seedClaudeCode — remote control", () => {
       );
     });
 
+    it("tells the user to re-take the task, not to reload", async () => {
+      // runSeedPass sets this plan's `seeded:` guard BEFORE calling seedAgentSession
+      // and nothing clears it before the TTL, so "fix the setting and reload" would be
+      // advice that cannot work. The message must not imply it.
+      seedPlan({ remoteControl: true });
+      const { context } = fakeContext();
+
+      await maybeSeedAgent(context, () => {});
+
+      const msg = String(window.showErrorMessage.mock.calls[0][0]);
+      expect(msg).toContain("take ASM-1 again");
+      expect(msg).toContain("reloading this window won't re-seed it");
+    });
+
+    it("really has consumed the plan, so the advice above is the only thing that works", async () => {
+      // Pins the premise rather than trusting it: seed once (refused), then flip to
+      // Claude Code and seed again from the SAME plan and window. Nothing happens —
+      // which is exactly why the message cannot promise a reload will help.
+      seedPlan({ remoteControl: true });
+      const { context } = fakeContext();
+      await maybeSeedAgent(context, () => {});
+
+      setConfig({ agentProvider: undefined }); // the user "fixes the setting"
+      commands.executeCommand.mockClear();
+      await maybeSeedAgent(context, () => {}); // and reloads
+
+      expect(commands.executeCommand).not.toHaveBeenCalledWith(
+        CLAUDE_OPEN_CMD,
+        undefined,
+        "/remote-control ASM-1",
+      );
+    });
+
     it("still seeds a plan that does not ask for Remote Control", async () => {
       // The regression guard on the backstop's condition: `remoteControl &&` must be
       // load-bearing, or every Copilot seed would be refused.
