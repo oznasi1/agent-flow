@@ -3802,6 +3802,22 @@ describe("a met launch rule acts", () => {
     );
   });
 
+  it("treats a whitespace-only note as no note at all in the spend confirmation", async () => {
+    // composeAgentPrompt (Task 1) already ignores a whitespace-only note when
+    // building the agent's actual prompt. The modal must agree — showing it here
+    // as if the agent will be told something would misrepresent what the user
+    // is being asked to approve.
+    const { send } = await warmed([launchFlow({
+      launchConfirmedAt: undefined,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", note: "   " }],
+    })]);
+    await send({ type: "deck:refresh" });
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[0]).toBe(
+      'Ship the migration is ready to launch ASM-12 in aws-ops with the "Implementation" prompt, unattended. It will keep launching on its own from now on.',
+    );
+  });
+
   it("disarms on Disarm, and never launches on any later pass", async () => {
     (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
       async (_m: string, _o: unknown, ...items: string[]) => items[1], // "Disarm"
@@ -4731,6 +4747,18 @@ describe("a met seed rule acts", () => {
 
   it("reads exactly as it did before notes existed when the seed edge has none", async () => {
     const { send } = await warmed([seedFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[0]).toBe(
+      'Ship the migration is ready to seed another agent into bite-me with the "Implementation" prompt, unattended. It will keep seeding on its own from now on.',
+    );
+  });
+
+  it("treats a whitespace-only note as no note at all in the seed spend confirmation", async () => {
+    const { send } = await warmed([seedFlow({
+      launchConfirmedAt: undefined,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "seed", mode: "implementation", note: "\n\t " }],
+    })]);
     await send({ type: "deck:refresh" });
     const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
     expect(call[0]).toBe(

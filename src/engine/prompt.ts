@@ -51,6 +51,18 @@ export function prReviewTemplate(prompt: string, autoFix: boolean): string {
   return autoFix ? insertBeforeFiles(prompt, " " + PR_REVIEW_AUTOFIX_CLAUSE) : prompt;
 }
 
+/** Is `note` non-empty once whitespace is stripped? THE one predicate for "does
+ * this note count" — `composeAgentPrompt` below uses it to decide whether the
+ * agent's prompt gets anything, and any caller that tells a human what the agent
+ * will be told (the Deck's spend-confirmation modal, at the time of writing) must
+ * use this SAME predicate, not a hand-rolled truthiness check, or the two can
+ * drift: a whitespace-only note would then show as present in a confirmation
+ * while `composeAgentPrompt` silently drops it from the actual prompt — the
+ * modal misrepresenting the very thing it is asking the user to approve. */
+export function hasNote(note: string | undefined): note is string {
+  return !!note && note.trim() !== "";
+}
+
 /** Compose a rule's optional note into the agent's prompt template.
  * - If {note} is in the template, substitute the note there (slice-based, every occurrence).
  * - If no {note} but a note exists, append it before {files} (so files block stays last).
@@ -63,7 +75,7 @@ export function prReviewTemplate(prompt: string, autoFix: boolean): string {
  * `$1`, `$'` in the note — user-authored free text makes this corruption reachable. */
 export function composeAgentPrompt(template: string, note?: string): string {
   // No note or empty/whitespace-only note: return unchanged (except for the {note} removal exception)
-  if (!note || note.trim() === "") {
+  if (!hasNote(note)) {
     // EXCEPTION: If the template contains {note} but there's no note, remove the {note} tokens.
     // This is knowingly inconsistent with "return unchanged" but necessary because an agent
     // must never receive the literal {note} placeholder text.

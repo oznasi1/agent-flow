@@ -25,7 +25,7 @@ import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntr
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
 import { discoverRepos } from "./engine/repos";
-import { composeAgentPrompt, prReviewTemplate } from "./engine/prompt";
+import { composeAgentPrompt, hasNote, prReviewTemplate } from "./engine/prompt";
 import { launchReview, resolveReviewMode, reviewRunKey } from "./engine/review/launch";
 import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
@@ -655,7 +655,12 @@ export class DeckPanel {
     // What the agent will actually be told is material to this consent, so a note
     // rides along in the same sentence as the prompt mode — absent, it contributes
     // nothing, so today's wording (and every existing assertion on it) survives.
-    const noteClause = target.note ? ` and the note "${notePreview(target.note)}"` : "";
+    // Gated on `hasNote`, the SAME predicate `composeAgentPrompt` uses to decide
+    // whether the note reaches the prompt at all: a whitespace-only note must not
+    // show here as if it will be told to the agent when composeAgentPrompt would
+    // silently drop it — that would be this consent gate misrepresenting what it
+    // is asking the user to approve.
+    const noteClause = hasNote(target.note) ? ` and the note "${notePreview(target.note)}"` : "";
     const message = target.action === "launch"
       ? (() => {
           const mode = cfg.promptModes.find((m) => m.id === target.node.mode);
