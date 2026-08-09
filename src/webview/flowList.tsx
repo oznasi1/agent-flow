@@ -71,6 +71,10 @@ function ruleSentence(
   const modeValue = modeValueOf(flow, e);
   const modeExists = modeValue !== "" && promptModes.some((m) => m.id === modeValue);
   const dest = launchDestOf(flow, e) ?? "worktree";
+  // Computed once here rather than at each of the two spots below that would
+  // otherwise call it themselves — both a closed row's presence check and
+  // its rendered text want the exact same string.
+  const noteText = truncatedNote(e.note);
 
   const setCond = (kind: Condition["kind"]) => {
     const next = withCond(flow, e.id, kind);
@@ -167,7 +171,7 @@ function ruleSentence(
               onBlur={(ev) => onSave(withNote(flow, e, ev.currentTarget.value))}
             />
           ) : (
-            truncatedNote(e.note) && <span>&ldquo;{truncatedNote(e.note)}&rdquo;</span>
+            noteText && <span>&ldquo;{noteText}&rdquo;</span>
           )}
           {/* A place already exists, so `seed` has nothing to pick a
               destination for — only `launch` opens one, same as the
