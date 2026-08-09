@@ -284,8 +284,9 @@ repo, so they never get committed.
 | `agentFlow.provenanceLabel` | `claude-code` | Label stamped on Jira writes when enabled. |
 | `agentFlow.stampLabelOnWrite` | `true` | Whether to stamp the provenance label on a Jira write, and whether a review body submitted from the Deck is marked as agent-drafted (a fixed line, distinct from `agentFlow.provenanceLabel`). |
 | `agentFlow.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
-| `agentFlow.seedAgent` | `true` | Pre-fill the Claude Code panel after opening. |
-| `agentFlow.agentSurface` | `extension` | Where a session starts: the Claude Code extension panel, or `terminal` to run the `claude` CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter. |
+| `agentFlow.seedAgent` | `true` | Pre-fill the agent's panel after opening. |
+| `agentFlow.agentProvider` | `claude-code` | Which agent starts a session. `copilot` uses GitHub Copilot and works **only in VS Code** — in Cursor and other forks a stored `copilot` value falls back to Claude Code. Copilot sessions do not appear as live agents on the Deck (which reads Claude Code's session files), and **Doctor** reports on whichever provider is configured. |
+| `agentFlow.agentSurface` | `extension` | Where a session starts: the agent's chat panel, or `terminal` to run its CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter. |
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
 | `agentFlow.prFacts` | `true` | Read each in-flight task's PR state from GitHub via the `gh` CLI and show it on the Deck's cards. |
 | `agentFlow.openAgents` | `true` | Show every Claude Code session open on this machine on the Deck: as agents on the card that owns their directory, and as a `local` card of its own for a place Agent Flow Deck never launched. Read from `~/.claude/sessions`. |
@@ -338,6 +339,12 @@ clipboard can't hold a different prompt for each window — and so does any laun
 plan file with no clipboard paste to attach to. Either way the toast says Remote Control
 was skipped, so you're never left waiting for a `/remote-control` prompt.
 
+Remote Control needs Claude Code — Copilot has no equivalent slash command. Under
+`agentFlow.agentProvider: copilot`, setting `agentFlow.remoteControl` to `on` refuses
+the launch outright, with an error toast and before anything (a worktree, a window) is
+created. Set to `ask`, the picker simply isn't offered and the launch proceeds without
+Remote Control — a Copilot user is never blocked over a toggle it can't honor.
+
 ### Where a task opens
 
 `agentFlow.openIn` controls where a task you take gets opened: `ask` (ask each time),
@@ -367,18 +374,24 @@ this off.
 
 ### Where the session opens
 
-Two settings, two different questions. `agentFlow.openIn` decides **which window** a
-task lands in. `agentFlow.agentSurface` decides **what starts the session** once it's
-there:
+Three settings answer three different questions. `agentFlow.openIn` decides **which
+window** a task lands in. `agentFlow.agentProvider` decides **which agent** starts the
+session — Claude Code, or Copilot in VS Code. `agentFlow.agentSurface` decides **what
+starts the session** once it's there:
 
-- `extension` (default) — the Claude Code extension panel, prompt pre-filled.
-- `terminal` — an integrated terminal named `Claude · <KEY>` running the `claude`
-  CLI, prompt pre-typed.
+- `extension` (default) — the agent's chat panel, prompt pre-filled: the Claude Code
+  panel, or Copilot Chat in agent mode when `agentFlow.agentProvider` is `copilot`.
+- `terminal` — an integrated terminal named `Claude · <KEY>` (or `Copilot · <KEY>`)
+  running the agent's CLI (`claude`, or `copilot`), prompt pre-typed.
 
 Either way you press Enter to start, and both work for every launch path: taking a
-task, batch launches, Explore, Notepad, and **Address PR**. Terminal mode needs
-`claude` on your `PATH`; if it isn't, the terminal says `command not found` and the
-prompt is still sitting there to reuse.
+task, batch launches, Explore, Notepad, and **Address PR** — with one exception. A
+**batch** launch under Copilot's `extension` surface does not seed the chat panel at
+all: Copilot Chat is single-instance, so a second task's prompt would silently
+overwrite the first. Instead the batch writes every task's brief as usual and shows a
+notification pointing at them; there is no per-task Copilot chat tab. Terminal mode
+needs `claude` (or `copilot`) on your `PATH`; if it isn't, the terminal says
+`command not found` and the prompt is still sitting there to reuse.
 
 ## Architecture
 

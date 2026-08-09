@@ -30,6 +30,7 @@ const CFG = {
   workspaceDir: "/ws",
   repoBlocklist: ["skipme"],
   prFacts: true,
+  agentProvider: "claude-code" as const,
 };
 
 const fakeConnector = (over: Partial<TaskConnector> = {}): TaskConnector =>

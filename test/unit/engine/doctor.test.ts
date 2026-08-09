@@ -20,6 +20,8 @@ const healthy = (): DoctorInputs => ({
   claudeCode: { installed: true, version: "2.1.220" },
   claudeProjectsReadable: true,
   runs: 7,
+  agentProvider: "claude-code",
+  copilotChat: { available: false },
 });
 
 const find = (inputs: DoctorInputs, label: string) => {
@@ -237,6 +239,36 @@ describe("runChecks — Claude Code", () => {
     // now reads the connector's own label, like its siblings' row labels do.
     const c = find({ ...healthy(), sourceLabel: "Acme Tracker", claudeProjectsReadable: false }, "Claude session files");
     expect(c.detail).toContain("git and Acme Tracker");
+  });
+});
+
+describe("agent checks by provider", () => {
+  it("reports Copilot Chat availability under the copilot provider", () => {
+    const checks = runChecks({ ...healthy(), agentProvider: "copilot", copilotChat: { available: true } });
+    expect(checks.find((c) => c.label === "Copilot Chat available")?.status).toBe("ok");
+    expect(checks.find((c) => c.label === "Claude Code installed")).toBeUndefined();
+    expect(checks.find((c) => c.label === "Claude Code version")).toBeUndefined();
+  });
+
+  it("offers the Copilot Chat extension when it isn't available", () => {
+    const checks = runChecks({ ...healthy(), agentProvider: "copilot", copilotChat: { available: false } });
+    const row = checks.find((c) => c.label === "Copilot Chat available");
+    expect(row?.status).toBe("fail");
+    expect(row?.action).toEqual({ kind: "extension", id: "github.copilot-chat", label: "Show extension" });
+  });
+
+  it("keeps the Claude Code rows under the default provider", () => {
+    const checks = runChecks({ ...healthy(), agentProvider: "claude-code" });
+    expect(checks.find((c) => c.label === "Claude Code installed")).toBeDefined();
+    expect(checks.find((c) => c.label === "Copilot Chat available")).toBeUndefined();
+  });
+
+  it("keeps the Claude session-files row under either provider", () => {
+    // The Deck's live signal reads ~/.claude/projects no matter which agent seeds
+    // sessions, so this row is not provider-dependent.
+    for (const agentProvider of ["claude-code", "copilot"] as const) {
+      expect(runChecks({ ...healthy(), agentProvider }).find((c) => c.label === "Claude session files")).toBeDefined();
+    }
   });
 });
 

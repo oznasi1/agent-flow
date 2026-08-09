@@ -406,6 +406,11 @@ export type OutboundMessage =
       /** The task source's user-facing name — every "Sign in to X" string reads
        * this rather than hardcoding a tracker. */
       sourceLabel: string;
+      /** The seeded agent's user-facing name — "Claude Code" or "Copilot" — so no
+       * tooltip in the webview has to hardcode which agent is configured. Optional
+       * so a handcrafted `state` message (tests, older hosts) need not carry it;
+       * the webview falls back to its own default when absent. */
+      agentLabel?: string;
       /** Which optional affordances to render. Flat booleans: the capability
        * objects on TaskProvider cannot be structured-cloned. */
       caps: SerializedCaps }

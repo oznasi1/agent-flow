@@ -131,6 +131,35 @@ export function readAgentSurface(
   return c.get<string>("agentSurface") === "terminal" ? "terminal" : "extension";
 }
 
+/** Which agent Agent Flow starts a session with. */
+export type AgentProvider = "claude-code" | "copilot";
+
+/** The VS Code family, by uri scheme: `vscode`, `vscode-insiders`, and any other
+ * `vscode*` build. Cursor is `cursor`, Windsurf is `windsurf`. Preferred over
+ * `env.appName`, which is localized, and it is the signal the seeding path already
+ * reads. */
+export function isVSCodeHost(): boolean {
+  return (vscode.env.uriScheme ?? "").startsWith("vscode");
+}
+
+/** Read the agent. Anything unrecognized — including undefined — means Claude Code,
+ * so a typo in settings.json degrades rather than breaking seeding. `copilot`
+ * additionally requires a VS Code host: settings sync carries values between
+ * editors and Cursor has no Copilot, so the value degrades there instead of failing
+ * at seed time. This runtime guard — not the manifest `when` clause — is what makes
+ * the behavior correct. Called with no argument from the seeding path, which reads
+ * at seed time rather than capturing at activation. */
+export function readAgentProvider(
+  c: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration("agentFlow"),
+): AgentProvider {
+  return c.get<string>("agentProvider") === "copilot" && isVSCodeHost() ? "copilot" : "claude-code";
+}
+
+/** The agent's name, for copy that tells the user what was just seeded. */
+export function providerLabel(p: AgentProvider): string {
+  return p === "copilot" ? "Copilot" : "Claude Code";
+}
+
 /** One Explore action as seen by the flow: id + picker label + resolved prompt + Slack toggle. */
 export interface ExploreAction {
   id: string;
@@ -213,6 +242,9 @@ export interface AgentFlowConfig {
   repoBlocklist: string[];
   defaultFilter: string;
   seedAgent: boolean;
+  // Which agent a seeded session starts: Claude Code, or GitHub Copilot. `copilot`
+  // is VS Code only and degrades to claude-code elsewhere — see readAgentProvider.
+  agentProvider: AgentProvider;
   // Where a seeded session opens: the Claude Code extension panel, or the `claude`
   // CLI in an integrated terminal.
   agentSurface: AgentSurface;
@@ -414,6 +446,7 @@ export function getConfig(): AgentFlowConfig {
     })(),
     defaultFilter: c.get<string>("defaultFilter") || "mysprint",
     seedAgent: c.get<boolean>("seedAgent") ?? true,
+    agentProvider: readAgentProvider(c),
     agentSurface: readAgentSurface(c),
     workspaceMode: (c.get<AgentFlowConfig["workspaceMode"]>("workspaceMode")) || "auto",
     openIn: (c.get<AgentFlowConfig["openIn"]>("openIn")) || "ask",

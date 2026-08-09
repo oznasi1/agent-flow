@@ -5,6 +5,7 @@ import type { ChangedFile } from "../../src/engine/git";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
+import type { AgentProvider } from "../../src/config";
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
 // builder, and a stubbed workspace opener.
@@ -50,6 +51,7 @@ const h = vi.hoisted(() => ({
   reviewWrites: false as boolean,
   stampLabelOnWrite: true as boolean,
   seedAgent: true as boolean,
+  agentProvider: "claude-code" as AgentProvider,
   reviewSubmit: vi.fn(async (_repo: string, _number: number, _verb: ReviewVerb, _body: string): Promise<{ ok: true } | { ok: false; message: string }> => ({ ok: true })),
   repos: [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }] as ServiceRef[],
   reviewRequests: true as boolean,
@@ -203,6 +205,7 @@ vi.mock("../../src/config", async (importActual) => {
       reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: [],
       reviewWrites: h.reviewWrites, stampLabelOnWrite: h.stampLabelOnWrite,
       prReviewPrompt: h.prReviewPrompt, prReviewAutoFix: h.prReviewAutoFix, seedAgent: h.seedAgent,
+      agentProvider: h.agentProvider,
       prReviewStatus: "PR initiated",
       // Sourced from the real getConfig() (itself driven by the globally-mocked
       // vscode module) rather than hardcoded here, so a test's setConfig({
@@ -218,9 +221,16 @@ vi.mock("../../src/config", async (importActual) => {
     }),
   };
 });
-import { DeckPanel } from "../../src/deckView";
+import { DeckPanel, reviewProvenance } from "../../src/deckView";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
 import { TaskAuthError } from "../../src/tasks/provider";
+
+describe("reviewProvenance", () => {
+  it("stamps the drafting agent's name", () => {
+    expect(reviewProvenance("claude-code")).toBe("_Drafted with Claude Code via Agent Flow Deck._");
+    expect(reviewProvenance("copilot")).toBe("_Drafted with Copilot via Agent Flow Deck._");
+  });
+});
 
 // createdAt is *now*, not the epoch: a run minted in 1970 is older than any
 // abandonment window, so the retire sweep would carry off every fixture that
@@ -362,6 +372,7 @@ beforeEach(() => {
   }));
   h.reviewWrites = false;
   h.stampLabelOnWrite = true;
+  h.agentProvider = "claude-code";
   h.reviewSubmit.mockClear().mockResolvedValue({ ok: true });
   h.branch = "ASM-5641-team-table";
   // Confirm by default: resolve the label passed as the modal's sole action item,
@@ -2135,6 +2146,29 @@ describe("DeckPanel review launch", () => {
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(true);
   });
 
+  it("still names Claude Code pre-seeded in the launch toast by default", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Claude Code pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
+  it("names Copilot in the launch toast when Copilot is configured", async () => {
+    h.agentProvider = "copilot";
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Copilot pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
   it("refreshes after a successful launch, so the row picks up its new run", async () => {
     // The busy-indicator pair is this file's existing signal for "a refresh ran"
     // (see "brackets a forget/prFacts toggle with the busy indicator" above) — reused
@@ -2341,6 +2375,17 @@ describe("DeckPanel review submit", () => {
     await p._fire(submitMsg({ verb: "comment", body: "the retry budget is unbounded", fromDraft: true }));
     expect(h.reviewSubmit.mock.calls[0][3]).toBe(
       "the retry budget is unbounded\n\n_Drafted with Claude Code via Agent Flow Deck._",
+    );
+  });
+
+  it("names Copilot in the provenance line when Copilot is configured", async () => {
+    h.reviewWrites = true;
+    h.stampLabelOnWrite = true;
+    h.agentProvider = "copilot";
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "comment", body: "the retry budget is unbounded", fromDraft: true }));
+    expect(h.reviewSubmit.mock.calls[0][3]).toBe(
+      "the retry budget is unbounded\n\n_Drafted with Copilot via Agent Flow Deck._",
     );
   });
 
