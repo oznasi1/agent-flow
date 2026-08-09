@@ -51,6 +51,48 @@ export function prReviewTemplate(prompt: string, autoFix: boolean): string {
   return autoFix ? insertBeforeFiles(prompt, " " + PR_REVIEW_AUTOFIX_CLAUSE) : prompt;
 }
 
+/** Compose a rule's optional note into the agent's prompt template.
+ * - If {note} is in the template, substitute the note there (slice-based, every occurrence).
+ * - If no {note} but a note exists, append it before {files} (so files block stays last).
+ * - If no note or only whitespace: return the template unchanged, byte for byte.
+ * - Exception: if {note} is in the template but there is no note, remove the token
+ *   (an agent must never receive the literal {note} placeholder). This is inconsistent
+ *   with "return unchanged" but necessary to prevent shipping broken templates.
+ *
+ * Uses slice-based insertion throughout to avoid String.replace interpreting `$&`,
+ * `$1`, `$'` in the note — user-authored free text makes this corruption reachable. */
+export function composeAgentPrompt(template: string, note?: string): string {
+  // No note or empty/whitespace-only note: return unchanged (except for the {note} removal exception)
+  if (!note || note.trim() === "") {
+    // EXCEPTION: If the template contains {note} but there's no note, remove the {note} tokens.
+    // This is knowingly inconsistent with "return unchanged" but necessary because an agent
+    // must never receive the literal {note} placeholder text.
+    if (template.includes("{note}")) {
+      let result = template;
+      let index = 0;
+      while ((index = result.indexOf("{note}", index)) !== -1) {
+        result = result.slice(0, index) + result.slice(index + 6); // 6 = "{note}".length
+      }
+      return result;
+    }
+    return template;
+  }
+
+  // Template has {note}: substitute it there with the note (slice-based, every occurrence)
+  if (template.includes("{note}")) {
+    let result = template;
+    let index = 0;
+    while ((index = result.indexOf("{note}", index)) !== -1) {
+      result = result.slice(0, index) + note + result.slice(index + 6); // 6 = "{note}".length
+      index += note.length; // Move past the inserted note to avoid revisiting
+    }
+    return result;
+  }
+
+  // No {note} but note exists: use insertBeforeFiles to append (before {files})
+  return insertBeforeFiles(template, "\n\n" + note);
+}
+
 /** Fill the Explore-only placeholders in a seeded template: `{services}` (the repos
  * picked for the session) and `{env}` (the environment, for actions that ask for
  * one). Substituted here rather than in renderPrompt so no other prompt path has to

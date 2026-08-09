@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderPrompt, injectSlackDm, insertBeforeFiles, SLACK_DM_SENTENCE, applyExploreVars, prReviewTemplate, PR_REVIEW_AUTOFIX_CLAUSE, type PromptVars } from "../../../src/engine/prompt";
+import { renderPrompt, injectSlackDm, insertBeforeFiles, SLACK_DM_SENTENCE, applyExploreVars, prReviewTemplate, PR_REVIEW_AUTOFIX_CLAUSE, composeAgentPrompt, type PromptVars } from "../../../src/engine/prompt";
 
 const V: PromptVars = {
   key: "ASM-5412",
@@ -127,5 +127,53 @@ describe("prReviewTemplate", () => {
     expect(prReviewTemplate("Assess the PR for {key}.{files}", false)).toBe(
       "Assess the PR for {key}.{files}",
     );
+  });
+});
+
+describe("composeAgentPrompt", () => {
+  it("returns the template untouched when there is no note", () => {
+    expect(composeAgentPrompt("do {key}")).toBe("do {key}");
+    expect(composeAgentPrompt("do {key}", undefined)).toBe("do {key}");
+  });
+
+  it("returns the template untouched for an empty or whitespace-only note", () => {
+    // A user who focused the field and typed nothing must not change the prompt.
+    expect(composeAgentPrompt("do {key}", "")).toBe("do {key}");
+    expect(composeAgentPrompt("do {key}", "   \n ")).toBe("do {key}");
+  });
+
+  it("substitutes at {note} when the template has one", () => {
+    expect(composeAgentPrompt("a {note} b", "on staging")).toBe("a on staging b");
+  });
+
+  it("keeps the relevant-files block last when it appends", () => {
+    // The template author put {files} at the end on purpose.
+    const out = composeAgentPrompt("work on {key}\n\n{files}", "on staging");
+    expect(out.indexOf("on staging")).toBeLessThan(out.indexOf("{files}"));
+  });
+
+  it("appends when the template has neither {note} nor {files}", () => {
+    const out = composeAgentPrompt("work on {key}", "on staging");
+    expect(out).toContain("work on {key}");
+    expect(out).toContain("on staging");
+  });
+
+  it("does not interpret a dollar sequence in the note", () => {
+    // String.replace would turn `$&` into the matched text. The note is user
+    // free text, so this is reachable, and silent corruption is the worst case.
+    expect(composeAgentPrompt("a {note} b", "cost $& total")).toContain("cost $& total");
+    expect(composeAgentPrompt("a {note} b", "use $1 here")).toContain("use $1 here");
+    expect(composeAgentPrompt("plain", "cost $& total")).toContain("cost $& total");
+  });
+
+  it("leaves brace placeholders inside a note uninterpolated", () => {
+    // The composed result never goes back through renderPrompt.
+    expect(composeAgentPrompt("a {note} b", "mention {brief} literally"))
+      .toContain("mention {brief} literally");
+  });
+
+  it("does not leave a {note} placeholder behind when there is no note", () => {
+    // A mode author who added {note} must not ship the literal token to an agent.
+    expect(composeAgentPrompt("a {note} b")).not.toContain("{note}");
   });
 });
