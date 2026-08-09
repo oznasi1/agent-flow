@@ -602,6 +602,87 @@ describe("adding a rule from the keyboard", () => {
     expect(target.dest).toBe("new-window");
   });
 
+  // The regression: creating a launch rule used to write NewRuleBar's own
+  // generic seed (promptModes[0], "worktree") onto the target node no matter
+  // what it already had — silently replacing the mode and destination the
+  // user answered four QuickPicks for in Add planned work. `n2` here is
+  // deliberately given neither promptModes[0]'s id ("quick") nor the
+  // hardcoded "worktree" default, so either one leaking through fails this
+  // test. Mode/Destination are never touched — this is exactly the "add a
+  // launch rule and don't bother with the USING clause" path, which used to
+  // be silent data loss.
+  it("creating a launch rule preserves the target's existing mode and destination when neither is touched", () => {
+    const onSave = vi.fn();
+    const untouched = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        {
+          id: "n2", kind: "planned", x: 320, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["agent-flow"], mode: "careful", dest: "new-window",
+        },
+      ],
+    });
+    render(<FlowList {...props({ flow: untouched, onSave })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    fireEvent.change(within(bar).getByLabelText("New rule action"), { target: { value: "launch" } });
+    // The USING clause's own selects already read back the target's real
+    // values, not a generic default — pinning the display half of the fix,
+    // not only the write half `addRule` performs below.
+    expect(within(bar).getByLabelText("New rule mode")).toHaveValue("careful");
+    expect(within(bar).getByLabelText("New rule destination")).toHaveValue("new-window");
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    const target = saved.nodes.find((n) => n.id === "n2") as { mode: string; dest: string };
+    expect(target.mode).toBe("careful");
+    expect(target.dest).toBe("new-window");
+  });
+
+  // The other half of the same bug: a SECOND rule must not carry over the
+  // first rule's mode/destination onto a different target that has its own.
+  it("a second launch rule does not inherit the previous rule's mode and destination", () => {
+    const onSave = vi.fn();
+    const twoPlanned = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        {
+          id: "n2", kind: "planned", x: 320, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["agent-flow"], mode: "careful", dest: "new-window",
+        },
+        {
+          id: "n3", kind: "planned", x: 320, y: 88, join: "any",
+          ticketKey: "ASM-13", repos: ["agent-flow"], mode: "quick", dest: "current-window",
+        },
+      ],
+    });
+    const { rerender } = render(<FlowList {...props({ flow: twoPlanned, onSave })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    // First rule: n1 -> n2 (mode "careful", dest "new-window").
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    fireEvent.change(within(bar).getByLabelText("New rule action"), { target: { value: "launch" } });
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    let saved = onSave.mock.calls.at(-1)![0] as Flow;
+
+    // Second rule, built on the flow the first rule actually produced: n1 -> n3.
+    rerender(<FlowList {...props({ flow: saved, onSave })} />);
+    const bar2 = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar2).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar2).getByLabelText("To node"), { target: { value: "n3" } });
+    fireEvent.change(within(bar2).getByLabelText("New rule action"), { target: { value: "launch" } });
+    expect(within(bar2).getByLabelText("New rule mode")).toHaveValue("quick");
+    expect(within(bar2).getByLabelText("New rule destination")).toHaveValue("current-window");
+    fireEvent.click(within(bar2).getByRole("button", { name: "+ Add rule" }));
+    saved = onSave.mock.calls.at(-1)![0] as Flow;
+    const n2After = saved.nodes.find((n) => n.id === "n2") as { mode: string; dest: string };
+    const n3After = saved.nodes.find((n) => n.id === "n3") as { mode: string; dest: string };
+    expect(n2After.mode).toBe("careful"); // untouched by the second rule
+    expect(n2After.dest).toBe("new-window");
+    expect(n3After.mode).toBe("quick"); // its own, not n2's leftover
+    expect(n3After.dest).toBe("current-window");
+  });
+
   it("builds a seed rule, writing the chosen mode onto the edge", () => {
     const onSave = vi.fn();
     render(<FlowList {...props({ flow: twoPlacesNoEdge(), onSave })} />);

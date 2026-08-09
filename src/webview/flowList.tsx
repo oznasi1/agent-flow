@@ -211,6 +211,13 @@ function NewRuleBar(p: {
     "pr-merged",
   );
   const [action, setAction] = React.useState<FlowAction>("notify");
+  // Seeded from nothing in particular — there is no `to` chosen yet for
+  // either to describe anything about. The moment a `to` (or the action) IS
+  // chosen, the "To node"/"New rule action" handlers below reseed both from
+  // `modeValueOf`/`launchDestOf` — what that node's own launch config, or
+  // this brand-new edge, already says — rather than leaving these generic
+  // defaults to be written over it. See `addRule`'s own comment for why that
+  // distinction matters.
   const [mode, setMode] = React.useState(promptModes[0]?.id ?? "");
   const [dest, setDest] = React.useState<LaunchDest>("worktree");
 
@@ -226,7 +233,31 @@ function NewRuleBar(p: {
     setTo("");
     setCond("pr-merged");
     setAction("notify");
+    setMode(promptModes[0]?.id ?? "");
+    setDest("worktree");
+    // eslint has no opinion in this repo (no config), but the omission of
+    // `promptModes` is deliberate anyway: a config push mid-edit changing
+    // which modes exist is not "the flow changed", and re-running this on
+    // every `promptModes` identity change would be a second, unrelated
+    // reason for a draft to reset.
   }, [flow.id]);
+
+  /** What a freshly chosen `to`/`action` pairing already says about its mode
+   * and destination — read through the SAME `modeValueOf`/`launchDestOf`
+   * every other presentation of a rule uses, on a throwaway edge shaped like
+   * the one about to be created. For `launch`, that means the target
+   * PLANNED node's own `mode`/`dest` — set once, at Add planned work's four
+   * QuickPicks, and never silently overwritten by a hardcoded default just
+   * because a NEW rule happened to be the thing that wrote next. For `seed`,
+   * there is no pre-existing value to protect (the mode lives on the edge
+   * itself, which does not exist yet), so this reduces to the same
+   * first-configured-mode fallback `withAction` already uses when an
+   * existing edge is switched to `seed`. */
+  const seedModeAndDest = (toId: string, act: FlowAction) => {
+    const probe: FlowEdge = { id: "draft", from, to: toId, cond: { kind: cond }, action: act };
+    setMode(modeValueOf(flow, probe) || promptModes[0]?.id || "");
+    setDest(launchDestOf(flow, probe) ?? "worktree");
+  };
 
   // Only a non-`notify` node ever had an out-port on the canvas (see
   // OrchestratorDrawer.tsx's own `orch-port out`, rendered for every node
@@ -271,6 +302,12 @@ function NewRuleBar(p: {
     const id = nextEdgeId(flow);
     const finalEdge: FlowEdge = { ...draft, id };
     let next: Flow = { ...flow, edges: [...flow.edges, finalEdge] };
+    // `mode`/`dest` are seeded from the target's own truth the moment `to`
+    // (or `action`) is chosen — see `seedModeAndDest` — so this write is a
+    // no-op in the common case and an explicit, visible override in the
+    // uncommon one. It is never a hardcoded default landing on a node whose
+    // mode and destination were already chosen at Add planned work's own
+    // QuickPicks; that silent overwrite was the bug this replaced.
     if (action === "seed") next = withMode(next, finalEdge, mode);
     if (action === "launch") {
       next = withMode(next, finalEdge, mode);
@@ -281,6 +318,12 @@ function NewRuleBar(p: {
     setTo("");
     setCond("pr-merged");
     setAction("notify");
+    // Reset too, not left to carry into the NEXT rule: `to` above always
+    // clears back to "", so the next rule's own "To node" pick will reseed
+    // these the moment it's made — but resetting here as well means nothing
+    // is left showing a stale value in the gap before that pick happens.
+    setMode(promptModes[0]?.id ?? "");
+    setDest("worktree");
   };
 
   return (
@@ -310,7 +353,11 @@ function NewRuleBar(p: {
         className="orch-sel"
         aria-label="New rule action"
         value={action}
-        onChange={(ev) => setAction(ev.currentTarget.value as FlowAction)}
+        onChange={(ev) => {
+          const val = ev.currentTarget.value as FlowAction;
+          setAction(val);
+          seedModeAndDest(to, val);
+        }}
       >
         <option value="launch">{ACTION_LABEL.launch}</option>
         <option value="seed">{ACTION_LABEL.seed}</option>
@@ -320,7 +367,11 @@ function NewRuleBar(p: {
         className="orch-sel"
         aria-label="To node"
         value={to}
-        onChange={(ev) => setTo(ev.currentTarget.value)}
+        onChange={(ev) => {
+          const val = ev.currentTarget.value;
+          setTo(val);
+          seedModeAndDest(val, action);
+        }}
       >
         <option value="">choose a node…</option>
         {targets.map((n) => <option key={n.id} value={n.id}>{endLabel(flow, n.id)}</option>)}
