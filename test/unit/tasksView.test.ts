@@ -3450,6 +3450,71 @@ describe("takeBatch", () => {
     const toast = posted().find((m) => m.type === "toast") as { message: string };
     expect(toast.message).toContain("Left team.code-workspace unchanged.");
   });
+
+  // Only a shared window on the extension surface actually can't seed a batch: a
+  // separate-windows layout gives each window its own single-task plan (multi=false
+  // there regardless), and the terminal surface seeds via a real terminal per task
+  // ignoring `multi` entirely. The perTaskNote text must track that exactly, not
+  // `isBatch` alone — see the four tests below.
+  it("says a shared, extension-surface Copilot batch isn't seeded and points at the brief", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: true } as never);
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe(
+      "Launched 2 of 2 in one shared window. A worktree + brief per task — Copilot isn't seeded for a batch; open each brief to start it.",
+    );
+  });
+
+  it("does not claim a separate-windows Copilot batch is unseeded", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    // The describe block's own beforeEach already answers the layout pick with
+    // { shared: false } — separate windows, one per task.
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in parallel. A worktree + Copilot session per task.");
+    expect(toast.message).not.toContain("isn't seeded");
+  });
+
+  it("does not claim a shared, terminal-surface Copilot batch is unseeded", async () => {
+    vi.mocked(getConfig).mockReturnValue({
+      ...CFG,
+      agentProvider: "copilot",
+      agentSurface: "terminal",
+      openIn: "new-window",
+    });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: true } as never);
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in one shared window. A worktree + Copilot session per task.");
+    expect(toast.message).not.toContain("isn't seeded");
+  });
+
+  it("keeps the Claude Code per-task note byte-identical for a shared batch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" }); // default agentProvider: claude-code
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: true } as never);
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in one shared window. A worktree + Claude session per task.");
+  });
+
+  it("keeps the Claude Code per-task note byte-identical across separate windows", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" }); // default agentProvider: claude-code
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    // Default layout pick answer from the describe's beforeEach: { shared: false }.
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in parallel. A worktree + Claude session per task.");
+  });
 });
 
 describe("live-window open targets", () => {

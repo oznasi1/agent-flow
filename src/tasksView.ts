@@ -1843,14 +1843,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       const more = failed.length > 5 ? ` (and ${failed.length - 5} more)` : "";
       this.toast("error", `${summary} Failed: ${shown}${more}${extra}${rcNote}`);
     } else {
-      // Claude Code gets a live session per task either way. Copilot only does for a
-      // single-task launch — seedCopilotPanel refuses to seed a batch's windows (its
-      // chat panel is single-instance, see that function's comment), so a Copilot
-      // batch's guaranteed artifact is the worktree + brief, never a session. Say
-      // that instead of promising something the code cannot have created.
+      // Claude Code gets a live session per task either way. Copilot's chat panel is
+      // single-instance, so seedCopilotPanel refuses to seed more than one session into
+      // the SAME window (see that function's comment) — but that only bites a shared
+      // window on the extension surface. Separate windows each get their own panel
+      // (runSeedPass there only ever sees that one window's plan), and the terminal
+      // surface seeds via a real terminal per task regardless of `multi` — so both
+      // still get a live session per task. Only shared + extension actually can't.
       const perTaskNote =
         cfg.agentProvider === "copilot"
-          ? isBatch
+          ? shared && cfg.agentSurface !== "terminal"
             ? `A worktree + brief per task — ${providerLabel(cfg.agentProvider)} isn't seeded for a batch; open each brief to start it.`
             : `A worktree + ${providerLabel(cfg.agentProvider)} session per task.`
           : "A worktree + Claude session per task.";
