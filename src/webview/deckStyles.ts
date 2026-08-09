@@ -51,8 +51,8 @@ export const DECK_CSS = `
   .stat.attn .l { color: color-mix(in srgb, var(--c-attn) 70%, var(--dim)); }
   .hd .sp { flex: 1; }
 
-  /* Two toggles that answer the same question — how much should the board trust? —
-     read as one object rather than three separate pills next to the refresh control. */
+  /* The header's one remaining .ctls user is the Agents/Workspaces lens: a joined
+     frame reads as one control with two positions rather than two loose buttons. */
   .ctls { display: inline-flex; flex: none; border: 1px solid var(--edge); border-radius: var(--r-ctl); overflow: hidden; }
   .ctls .ctl { border: 0; border-radius: 0; }
   .ctls .ctl + .ctl { box-shadow: inset 1px 0 0 var(--edge); }
@@ -65,20 +65,11 @@ export const DECK_CSS = `
     transition: color .12s ease, background-color .12s ease; }
   .ctl:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
   .ctl.on { color: var(--vscode-foreground); }
-  .switch { width: 24px; height: 14px; border-radius: 10px; background: var(--vscode-input-background);
-    border: 1px solid var(--hair); position: relative; flex: none; transition: background .15s; }
-  .switch::after { content: ""; position: absolute; top: 1px; left: 1px; width: 10px; height: 10px;
-    border-radius: 50%; background: var(--dim); transition: transform .15s, background .15s; }
-  /* The one place besides .act.primary that spends --brand, and the same rule that
-     lets it: a filled control is off-limits everywhere else because it would read
-     as a second verb next to Open, but an on-state track isn't asking to be
-     pressed — it's reporting whether Live signal or PR facts already is. At
-     24×14px it reads as a status light, not a button, so the accent here restates
-     state rather than diluting the one-primary-per-surface rule. */
-  .ctl.on .switch { background: var(--brand); border-color: var(--brand); }
-  .ctl.on .switch::after { transform: translateX(10px); background: var(--brand-ink); }
+  /* With the switch tracks gone, .act.primary is the only surface left that spends
+     --brand — every control on this board that isn't it stays monochrome, which is
+     exactly the one-primary-per-surface rule the switch used to need an exception to. */
   /* A segmented control, not a switch: .ctls already draws the joined frame, so
-     the active side only needs to read as pressed. No .switch inside these. */
+     the active side only needs to read as pressed. */
   .ctls.seg .ctl.on { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
   /* tabular-nums, not mono: "synced 4s ago" is a sentence, but its number ticks every
      second and must not reflow the control while it does. */

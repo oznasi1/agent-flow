@@ -186,10 +186,11 @@ export class DeckPanel {
     if (this.ghProbe === null) {
       const p = (this.ghProbe = probeGh());
       void p.then((gap) => {
-        // A probe orphaned by a toggle (deck:setPrFacts resets ghProbe and starts
-        // a fresh one) must not win if it resolves after the fresh probe already
-        // has — that would let a stale gap clobber a fresh pass right after the
-        // user ran `gh auth login`, defeating the whole point of re-probing.
+        // A probe orphaned by a settings change (onConfigChanged resets ghProbe
+        // and starts a fresh one when prFacts turns back on) must not win if it
+        // resolves after the fresh probe already has — that would let a stale
+        // gap clobber a fresh pass right after the user ran `gh auth login`,
+        // defeating the whole point of re-probing.
         if (this.ghProbe !== p) return;
         this.ghGap = gap;
         // The note names the kind; only the log can say which gh we tried and
@@ -237,10 +238,10 @@ export class DeckPanel {
   }
 
   /** Is the review strip live? Two gates, not three: the session's own Review
-   * queue toggle (seeded from the persistent `reviewRequests` setting, then
-   * owned by `deck:setReviewQueue` — re-reading config here would stomp the
-   * toggle on every poll tick), and `ghReady()` — which already folds the
-   * session PR-facts toggle and a usable gh together, so there is no condition
+   * queue flag (seeded from the persistent `reviewRequests` setting, then held
+   * until `onConfigChanged` re-seeds it — re-reading config here would stomp
+   * the flag on every poll tick), and `ghReady()` — which already folds the
+   * session PR-facts flag and a usable gh together, so there is no condition
    * here that varies independently of PR facts. */
   private reviewsEnabled(): boolean {
     return this.reviewQueue && this.ghReady();
@@ -836,9 +837,6 @@ export class DeckPanel {
       this.post({
         type: "deck:runs",
         runs,
-        prFacts: this.prFacts,
-        openAgents: this.openAgents,
-        reviewQueue: this.reviewQueue,
         ghNote: this.prFacts && this.ghGap ? GH_NOTES[this.ghGap.kind] : null,
         // Read fresh on every post rather than cached in a field: it is a plain
         // string setting a user can edit mid-session, and the board re-posts often
@@ -918,19 +916,6 @@ export class DeckPanel {
       case "deck:refresh":
         await this.refreshBusy();
         break;
-      case "deck:setPrFacts":
-        this.prFacts = m.on;
-        if (m.on) {
-          // Re-probe: the user may have run `gh auth login` since the last check.
-          this.ghGap = undefined;
-          this.ghProbe = null;
-        }
-        await this.refreshBusy();
-        break;
-      case "deck:setOpenAgents":
-        this.openAgents = m.on;
-        await this.refreshBusy();
-        break;
       case "deck:clearStale":
         await this.clearStale();
         break;
@@ -940,15 +925,6 @@ export class DeckPanel {
         await vscode.workspace
           .getConfiguration("agentFlow")
           .update("deckGrouping", m.grouping, vscode.ConfigurationTarget.Global);
-        await this.refreshBusy();
-        break;
-      case "deck:setReviewQueue":
-        this.reviewQueue = m.on;
-        // Post before the refresh, not only through it: switching *off* must
-        // clear the rows now rather than after a full board rebuild, and
-        // switching back on should put the cached queue (or the pending state)
-        // up immediately for the same reason `deck:ready` does.
-        this.postCachedReviews();
         await this.refreshBusy();
         break;
       case "deck:inspect":

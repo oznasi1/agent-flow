@@ -355,15 +355,12 @@ function Card({ r, prReviewStatus, onForget, agent, column, sourceLabel }: {
 
 export function DeckApp(): JSX.Element {
   const [runs, setRuns] = React.useState<RunStatus[]>([]);
-  const [prFacts, setPrFacts] = React.useState(true);
-  const [openAgents, setOpenAgents] = React.useState(true);
   const [ghNote, setGhNote] = React.useState<string | null>(null);
   const [prReviewStatus, setPrReviewStatus] = React.useState("");
   const [syncedAt, setSyncedAt] = React.useState<number | null>(null);
   const [, forceTick] = React.useState(0);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string; action?: { label: string; url: string } }[]>([]);
   const [busy, setBusy] = React.useState(false);
-  const [reviewQueue, setReviewQueue] = React.useState(true);
   const [grouping, setGrouping] = React.useState<"agents" | "workspaces">("agents");
   const [staleCount, setStaleCount] = React.useState(0);
   // See DEFAULT_SOURCE_LABEL's own comment for why "Jira" rather than "".
@@ -407,9 +404,6 @@ export function DeckApp(): JSX.Element {
       const m = ev.data;
       if (m.type === "deck:runs") {
         setRuns(m.runs);
-        setPrFacts(m.prFacts);
-        setOpenAgents(m.openAgents);
-        setReviewQueue(m.reviewQueue);
         setGrouping(m.grouping);
         setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
@@ -501,32 +495,6 @@ export function DeckApp(): JSX.Element {
           <div className="stat"><span className="n">{cards.length}</span><span className="l">Total</span></div>
         </div>
         <div className="sp" />
-        {/* Both toggles answer the same question — how much should the board trust? —
-            so they read as one segmented control rather than two loose pills. Buttons,
-            not divs: these are controls, and :focus-visible only reaches them here. */}
-        <div className="ctls">
-          <button type="button" className={`ctl ${prFacts ? "on" : ""}`} onClick={() => { const next = !prFacts; setPrFacts(next); send({ type: "deck:setPrFacts", on: next }); }} title={`Read each task's PR state from GitHub with the gh CLI. Off → git + ${sourceLabel} only.`}>
-            <span className="switch" />PR facts
-          </button>
-          <button
-            type="button"
-            className={`ctl ${openAgents ? "on" : ""}`}
-            onClick={() => { const next = !openAgents; setOpenAgents(next); send({ type: "deck:setOpenAgents", on: next }); }}
-            title="Show every Claude Code session open on this machine, read from ~/.claude/sessions. Off → only what Agent Flow Deck launched."
-          >
-            <span className="switch" />Open agents
-          </button>
-          {/* Off stops the `gh` search outright — distinct from the strip's own
-              collapse caret, which only folds rows already fetched. */}
-          <button
-            type="button"
-            className={`ctl ${reviewQueue ? "on" : ""}`}
-            onClick={() => { const next = !reviewQueue; setReviewQueue(next); send({ type: "deck:setReviewQueue", on: next }); }}
-            title="Open PRs that ask for your review, read with the gh CLI. Off → no query, no queue."
-          >
-            <span className="switch" />Review queue
-          </button>
-        </div>
         {/* A lens, not a trust toggle: both sides show everything, one card per
             agent or one per launched task. Persisted, so it survives a reload. */}
         <div className="ctls seg">

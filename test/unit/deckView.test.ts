@@ -707,10 +707,13 @@ describe("DeckPanel", () => {
     expect(loads.at(-1)).toBe(false);
   });
 
-  it("brackets a prFacts toggle with the busy indicator", async () => {
+  it("brackets a prFacts change with the busy indicator", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:setPrFacts", on: false });
+    h.prFacts = false;
+    setConfig({ prFacts: false });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
     const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
     expect(loads).toContain(true);
     expect(loads.at(-1)).toBe(false);
@@ -850,18 +853,11 @@ describe("DeckPanel open agents", () => {
     h.openSessions = [sess()];
     show();
     await settled();
-    const p = lastPanel();
-    await p._fire({ type: "deck:setOpenAgents", on: true });
+    h.openAgents = true;
+    setConfig({ openAgents: true });
+    fireConfigurationChanged("agentFlow.openAgents");
     await settled();
     expect(builtFor("ASM-1").agents).toHaveLength(1);
-  });
-
-  it("tells the webview which way the toggle is set", async () => {
-    h.openAgents = false;
-    show();
-    await settled();
-    const run = posts(lastPanel()).filter((m) => m.type === "deck:runs").at(-1)!;
-    expect(run.openAgents).toBe(false);
   });
 
   it("tags each agent with the run repo whose directory it runs in", async () => {
@@ -1459,7 +1455,7 @@ describe("DeckPanel PR facts", () => {
     expect(h.writePrEntry).not.toHaveBeenCalled();
   });
 
-  it("fetches nothing when prFacts is off, reports it to the webview, and keeps the map empty", async () => {
+  it("fetches nothing when prFacts is off and keeps the map empty", async () => {
     h.prFacts = false;
     h.prEntries = { svc: { facts: null, fetchedAt: Date.now() } };
     show();
@@ -1475,7 +1471,6 @@ describe("DeckPanel PR facts", () => {
         openIdentities: expect.any(Set), prs: {},
       }),
     );
-    expect(posts(lastPanel()).find((m) => m.type === "deck:runs")).toMatchObject({ prFacts: false });
   });
 
   it("fetches nothing and notes a missing gh", async () => {
@@ -1512,19 +1507,34 @@ describe("DeckPanel PR facts", () => {
     // — the cached probe result must not survive the round trip.
     show();
     await settled();
-    const p = lastPanel();
-    await p._fire({ type: "deck:setPrFacts", on: false });
+    h.prFacts = false;
+    setConfig({ prFacts: false });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
     h.probeGh.mockClear();
-    await p._fire({ type: "deck:setPrFacts", on: true });
+    h.prFacts = true;
+    setConfig({ prFacts: true });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
     expect(h.probeGh).toHaveBeenCalled();
   });
 
-  it("toggles prFacts from the webview", async () => {
+  it("applies a prFacts change from settings", async () => {
+    // prFacts no longer has a payload field of its own on deck:runs — ghNote is
+    // the one field left that reads this.prFacts on the host, so it stands in
+    // for the removed field as the observable proof the change landed.
+    h.probeGh.mockResolvedValue({ kind: "signed-out", detail: "not signed in" });
     show();
     await settled();
     const p = lastPanel();
-    await p._fire({ type: "deck:setPrFacts", on: false });
-    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)).toMatchObject({ prFacts: false });
+    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)?.ghNote).toMatch(/not signed in/i);
+
+    h.prFacts = false;
+    setConfig({ prFacts: false });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
+
+    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)?.ghNote).toBeNull();
   });
 
   it("forgets a run's PR facts alongside its run record", async () => {
@@ -1596,7 +1606,8 @@ describe("DeckPanel PR facts", () => {
 
   it("does not let a probe orphaned by a toggle overwrite a fresher one (F6)", async () => {
     // Two probes end up in flight: the one this test lets resolve late must not
-    // win over the one started by the re-probe on `deck:setPrFacts on: true`.
+    // win over the one started by the re-probe when prFacts comes back on
+    // through a settings change.
     let resolveFirst!: (v: GhGap | null) => void;
     let resolveSecond!: (v: GhGap | null) => void;
     h.probeGh
@@ -1605,8 +1616,13 @@ describe("DeckPanel PR facts", () => {
     show();
     await settled(); // starts the first probe (left pending)
     const p = lastPanel();
-    await p._fire({ type: "deck:setPrFacts", on: false });
-    await p._fire({ type: "deck:setPrFacts", on: true }); // resets ghProbe, starts a second probe
+    h.prFacts = false;
+    setConfig({ prFacts: false });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
+    h.prFacts = true;
+    setConfig({ prFacts: true });
+    fireConfigurationChanged("agentFlow.prFacts"); // resets ghProbe, starts a second probe
     await settled();
 
     resolveSecond(null); // the fresh probe: the user just ran `gh auth login`
@@ -1758,18 +1774,14 @@ describe("DeckPanel review strip", () => {
     expect(posts(p).find((m) => m.type === "deck:reviews")).toMatchObject({ enabled: true });
   });
 
-  it("carries the review-queue toggle on deck:runs so the webview can render its pill", async () => {
-    const p = await showAndWarm();
-    expect(posts(p).find((m) => m.type === "deck:runs")).toMatchObject({ reviewQueue: true });
-    await p._fire({ type: "deck:setReviewQueue", on: false });
-    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)).toMatchObject({ reviewQueue: false });
-  });
-
   it("stops searching and clears the strip when the review queue is toggled off", async () => {
     const p = await showAndWarm();
     expect(h.reviewSearch).toHaveBeenCalledTimes(1);
 
-    await p._fire({ type: "deck:setReviewQueue", on: false });
+    h.reviewRequests = false;
+    setConfig({ reviewRequests: false });
+    fireConfigurationChanged("agentFlow.reviewRequests");
+    await settled();
     expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({
       requests: [], issueCount: 0, enabled: false,
     });
@@ -1777,14 +1789,19 @@ describe("DeckPanel review strip", () => {
   });
 
   // The regression this guards: reading `getConfig().reviewRequests` inside
-  // reviewsEnabled() rather than the session field. The setting stays true here,
-  // so a config read would quietly re-enable the strip on the very next poll and
-  // the toggle would appear to do nothing.
-  it("keeps the toggle's answer across a refresh, rather than re-reading the setting", async () => {
+  // reviewsEnabled() rather than the session field. A routine refresh must not
+  // re-seed it — only a configuration event does — so a poll tick cannot
+  // silently undo what the user last set.
+  it("re-reads reviewRequests on a configuration change but not on a routine refresh", async () => {
     h.reviewRequests = true;
     const p = await showAndWarm();
-    await p._fire({ type: "deck:setReviewQueue", on: false });
+
+    h.reviewRequests = false;
+    setConfig({ reviewRequests: false });
     await p._fire({ type: "deck:refresh" });
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({ enabled: true });
+
+    fireConfigurationChanged("agentFlow.reviewRequests");
     await settled();
     expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({ enabled: false });
     expect(h.reviewSearch).toHaveBeenCalledTimes(1);
@@ -1796,8 +1813,13 @@ describe("DeckPanel review strip", () => {
   // flipping the pill twice is not a reason to spend another `gh api graphql`.
   it("restores the queue from cache when toggled back on, without a fresh search", async () => {
     const p = await showAndWarm();
-    await p._fire({ type: "deck:setReviewQueue", on: false });
-    await p._fire({ type: "deck:setReviewQueue", on: true });
+    h.reviewRequests = false;
+    setConfig({ reviewRequests: false });
+    fireConfigurationChanged("agentFlow.reviewRequests");
+    await settled();
+    h.reviewRequests = true;
+    setConfig({ reviewRequests: true });
+    fireConfigurationChanged("agentFlow.reviewRequests");
     await settled();
     expect(h.reviewSearch).toHaveBeenCalledTimes(1);
     const last = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
@@ -1865,7 +1887,10 @@ describe("DeckPanel review strip", () => {
     const p = await showAndWarm();
     expect(posts(p).find((m) => m.type === "deck:reviews").requests).toHaveLength(1);
 
-    await p._fire({ type: "deck:setPrFacts", on: false });
+    h.prFacts = false;
+    setConfig({ prFacts: false });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
     const cleared = posts(p).filter((m) => m.type === "deck:reviews").at(-1);
     expect(cleared).toMatchObject({ requests: [], issueCount: 0, enabled: false });
 

@@ -127,7 +127,7 @@ describe("brand accent", () => {
       // the sidebar spends the brand hue.
       ".cb",
     ],
-    deck: [".act.primary", ".act.primary:hover", ".ctl.on .switch", ".ctl.on .switch::after"],
+    deck: [".act.primary", ".act.primary:hover"],
     marketplace: [".btn.pri", ".btn.pri:hover"],
     controls: [],
   };

@@ -36,7 +36,7 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
 
 const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated",
                  grouping: "agents" | "workspaces" = "agents", sourceLabel = "Jira"): OutboundMessage =>
-  ({ type: "deck:runs", runs, prFacts: true, openAgents: true, reviewQueue: true, ghNote: null, prReviewStatus, grouping, staleCount: 0, sourceLabel });
+  ({ type: "deck:runs", runs, ghNote: null, prReviewStatus, grouping, staleCount: 0, sourceLabel });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
@@ -520,41 +520,9 @@ describe("DeckApp PR-facts chrome", () => {
     expect(screen.queryByText("merged")).toBeNull();
   });
 
-  it("toggles PR facts", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByText("PR facts"));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:setPrFacts", on: false });
-  });
-
-  it("posts deck:setOpenAgents when the toggle is clicked", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByRole("button", { name: /open agents/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:setOpenAgents", on: false });
-  });
-
-  it("posts deck:setReviewQueue when the toggle is clicked", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByRole("button", { name: /review queue/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:setReviewQueue", on: false });
-  });
-
-  // The host owns this flag — it is seeded from the setting, so a panel opened with
-  // reviewRequests already false must show the pill off rather than defaulting to on
-  // and lying about it until the user clicks.
-  it("reflects the host's review-queue state on the pill", () => {
-    render(<DeckApp />);
-    host({ ...runsMsg([mkStatus()]), reviewQueue: false } as OutboundMessage);
-    expect(screen.getByRole("button", { name: /review queue/i }).className).not.toMatch(/\bon\b/);
-    host(runsMsg([mkStatus()]));
-    expect(screen.getByRole("button", { name: /review queue/i }).className).toMatch(/\bon\b/);
-  });
-
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], prFacts: true, openAgents: true, reviewQueue: true, ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", grouping: "agents", staleCount: 0, sourceLabel: "Jira" });
+    host({ type: "deck:runs", runs: [mkStatus()], ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", grouping: "agents", staleCount: 0, sourceLabel: "Jira" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 
@@ -616,9 +584,9 @@ describe("DeckApp PR-facts chrome", () => {
 
   it("renders no agents row for a card with none", () => {
     // Not screen.queryByRole("button", { name: /agent/ }) — the header's own
-    // "Open agents" toggle always renders and its accessible name matches that
-    // pattern too, so an unscoped query would pass even if AgentsRow leaked an
-    // empty control. Scope to the card's own markup instead.
+    // grouping lens always renders an "Agents" button, whose accessible name
+    // matches that pattern too, so an unscoped query would pass even if
+    // AgentsRow leaked an empty control. Scope to the card's own markup instead.
     const { container } = render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [] })]));
     expect(container.querySelector(".c-agents")).toBeNull();
@@ -1099,9 +1067,9 @@ describe("Agents view", () => {
     expect(screen.getAllByText("ASM-1")).toHaveLength(1);
   });
 
-  it("collapses to one card per run when Open agents is off", () => {
+  it("collapses to one card per run when there are no agents to show", () => {
     render(<DeckApp />);
-    host({ ...runsMsg([mkStatus({ agents: [] })]), openAgents: false } as OutboundMessage);
+    host(runsMsg([mkStatus({ agents: [] })]));
     expect(screen.getAllByText("ASM-1")).toHaveLength(1);
   });
 
@@ -1251,7 +1219,6 @@ describe("DeckApp — source label", () => {
 
   it("renders the chrome's Jira strings byte-for-byte before any deck:runs arrives — the defaulted first paint", () => {
     render(<DeckApp />);
-    expect(screen.getByTitle("Read each task's PR state from GitHub with the gh CLI. Off → git + Jira only.")).toBeInTheDocument();
     expect(screen.getByTitle("Re-read git, Jira and PR state now")).toBeInTheDocument();
     expect(document.querySelector(".note")!.textContent).toBe("git + Jira backbone · best-effort live from ~/.claude/projects");
   });
@@ -1259,7 +1226,6 @@ describe("DeckApp — source label", () => {
   it("renders the chrome's Jira strings byte-for-byte once a Jira-labeled deck:runs lands", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    expect(screen.getByTitle("Read each task's PR state from GitHub with the gh CLI. Off → git + Jira only.")).toBeInTheDocument();
     expect(screen.getByTitle("Re-read git, Jira and PR state now")).toBeInTheDocument();
     expect(document.querySelector(".note")!.textContent).toBe("git + Jira backbone · best-effort live from ~/.claude/projects");
   });
@@ -1282,7 +1248,6 @@ describe("DeckApp — source label", () => {
   it("templates every one of those strings off a non-Jira sourceLabel — proving the label actually reaches the render", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()], "PR initiated", "agents", "Acme"));
-    expect(screen.getByTitle("Read each task's PR state from GitHub with the gh CLI. Off → git + Acme only.")).toBeInTheDocument();
     expect(screen.getByTitle("Re-read git, Acme and PR state now")).toBeInTheDocument();
     expect(document.querySelector(".note")!.textContent).toBe("git + Acme backbone · best-effort live from ~/.claude/projects");
     expect(screen.getByTitle("Open ASM-1 in Acme")).toBeInTheDocument();
