@@ -3310,7 +3310,10 @@ describe("an armed flow advances on refresh", () => {
     expect(msg?.flows[0]?.edges[0]?.firedAt).toBeTypeOf("number");
   });
 
-  it("stamps a met rule and posts a toast naming the flow", async () => {
+  it("stamps a met rule and notifies naming the flow, not as a webview toast", async () => {
+    // A fired notify has to reach the human even when the Deck panel is not the
+    // focused tab — a webview toast is invisible then. `showInformationMessage`
+    // persists in the Notifications bell instead.
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
     // Warm the resume gate first (Task 4) — see the test above.
@@ -3322,8 +3325,8 @@ describe("an armed flow advances on refresh", () => {
     await send({ type: "deck:refresh" });
     const written = h.writeFlow.mock.calls.at(-1)?.[2] as Flow | undefined;
     expect(written?.edges[0].firedAt).toBeTypeOf("number");
-    const toast = posts(p).find((m) => m.type === "toast" && /Ship the migration/.test(m.message));
-    expect(toast).toBeTruthy();
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/Ship the migration/));
+    expect(posts(p).some((m) => m.type === "toast" && /Ship the migration/.test(m.message ?? ""))).toBe(false);
   });
 
   it("fires once and not again on the next refresh", async () => {
@@ -3510,7 +3513,7 @@ describe("an armed flow advances on refresh", () => {
         ],
       });
       h.flows = [twoRules()];
-      const { p, send } = await warmed();
+      const { send } = await warmed();
       let reads = 0;
       h.readFlows.mockImplementation(() => (++reads === 1 ? [twoRules()] : [twoRules({ e1Fired: true })]));
       h.writeFlow.mockClear();
@@ -3519,8 +3522,8 @@ describe("an armed flow advances on refresh", () => {
       expect(w.edges.find((e) => e.id === "e1")!.firedAt).toBe(111);
       expect(w.edges.find((e) => e.id === "e2")!.firedAt).not.toBe(111);
       expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBeTypeOf("number");
-      // One toast, for e2's message only — e1's was the other window's to post.
-      const messages = posts(p).filter((m) => m.type === "toast").map((m) => m.message as string);
+      // One notification, for e2's message only — e1's was the other window's to post.
+      const messages = (window.showInformationMessage as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string);
       expect(messages.filter((t) => /also merged/.test(t))).toHaveLength(1);
       expect(messages.filter((t) => /the migration has landed/.test(t))).toHaveLength(0);
     });
@@ -3892,6 +3895,17 @@ describe("a met launch rule acts", () => {
     expect(posts(p).some((m) => m.type === "toast" && /ASM-12/.test(m.message ?? ""))).toBe(true);
   });
 
+  it("does not notify for a successful launch — the opened window already announces it", async () => {
+    // A successful launch already announces itself by opening a window; a
+    // notification on top would be noise. Assert the call COUNT is zero, not
+    // merely that a toast happened — that would pass even if a notification
+    // also fired alongside it.
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(lastWrite().edges[0].firedAt).toBeTypeOf("number"); // the launch really did succeed
+    expect(window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
   it("asks the launcher for the node, the ticket, the repos and the resolved prompt", async () => {
     const { send } = await warmed([launchFlow()]);
     await send({ type: "deck:refresh" });
@@ -3946,6 +3960,12 @@ describe("a met launch rule acts", () => {
     expect(w.nodes.find((n) => n.id === "n2")!.kind).toBe("planned");
     // No toast claims a launch that never happened…
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(false);
+    // …but the failure — "Couldn't create a git worktree in aws-ops — not
+    // launching ASM-12" is exactly the class of message that must not die
+    // inside an unfocused panel — reaches the human as a notification too.
+    expect(window.showInformationMessage).toHaveBeenCalledWith(
+      expect.stringContaining("Couldn't create a git worktree in aws-ops"),
+    );
     // …and the failure is not retried on the next poll: twenty windows is how that ends.
     h.launchPlanned.mockClear();
     await send({ type: "deck:refresh" });
@@ -4031,7 +4051,7 @@ describe("a met launch rule acts", () => {
     // The defer is per rule, not per pass: a notify that fired in the same pass has
     // already been announced, so leaving it unstamped would announce it again forever.
     h.getDetail.mockRejectedValue(new Error("Jira said 503"));
-    const { p, send } = await warmed([launchFlow({
+    const { send } = await warmed([launchFlow({
       nodes: [
         { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
         {
@@ -4051,7 +4071,7 @@ describe("a met launch rule acts", () => {
     const deferredEdge = w.edges.find((e) => e.id === "e1")!;
     expect(deferredEdge.firedAt).toBeUndefined();
     expect(deferredEdge.error).toBeUndefined();
-    expect(posts(p).some((m) => m.type === "toast" && /the migration has landed/.test(m.message ?? ""))).toBe(true);
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/the migration has landed/));
   });
 
   it("never routes a seed rule through the launcher — see \"a met seed rule acts\" below for its own path", async () => {
@@ -4079,7 +4099,7 @@ describe("a met launch rule acts", () => {
   });
 
   it("fires a notify rule with no confirmation at all — notify spends nothing", async () => {
-    const { p, send } = await warmed([launchFlow({
+    const { send } = await warmed([launchFlow({
       launchConfirmedAt: undefined,
       nodes: [
         { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
@@ -4091,7 +4111,7 @@ describe("a met launch rule acts", () => {
     expect(window.showWarningMessage).not.toHaveBeenCalled();
     expect(lastWrite().edges[0].firedAt).toBeTypeOf("number");
     expect(lastWrite().launchConfirmedAt).toBeUndefined();
-    expect(posts(p).some((m) => m.type === "toast" && /the migration has landed/.test(m.message ?? ""))).toBe(true);
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/the migration has landed/));
   });
 
   it("launches ONCE for an \"all\" junction, not once per incoming edge", async () => {
@@ -4378,7 +4398,7 @@ describe("a met launch rule acts", () => {
         { id: "e2", from: "n2", to: "n3", cond: { kind: "pr-merged" }, action: "notify" },
       ],
     });
-    const { p, send } = await warmed([chain()]);
+    const { send } = await warmed([chain()]);
     await send({ type: "deck:refresh" });
     // e1 fired: n2 is now a place, bound to the run the launch returned.
     let w = lastWrite();
@@ -4398,7 +4418,7 @@ describe("a met launch rule acts", () => {
     await send({ type: "deck:refresh" });
     w = lastWrite();
     expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBeTypeOf("number");
-    expect(posts(p).some((m) => m.type === "toast" && /chain complete/.test(m.message ?? ""))).toBe(true);
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/chain complete/));
   });
 });
 

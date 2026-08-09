@@ -92,7 +92,8 @@ function notePreview(note: string): string {
 }
 
 /** One acting edge, decided. `promote` turns a launched planned node into the place
- * the rest of the chain observes; `receipt` is the toast, which exists only when there
+ * the rest of the chain observes; `receipt` is the toast (an error receipt also
+ * escalates to a notification — see the acting loop), which exists only when there
  * is something honest to say. */
 interface EdgeDone {
   kind: "done";
@@ -593,13 +594,30 @@ export class DeckPanel {
         let next = applyFired(atWrite, stamping, nowMs, outcomes);
         for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo);
         writeFlow(this.flowIo, this.flowsDir, next);
-        // `next`, not `fresh`: the toast should describe what was actually just
+        // `next`, not `fresh`: the message should describe what was actually just
         // written — same reasoning as building `next` from `atWrite` above — and
         // `next` already carries the promotions too.
+        //
+        // A `notify` rule's whole point is reaching a human who is not looking at
+        // the Deck — an unattended flow fired it precisely because nobody is
+        // watching. A webview toast is invisible unless the panel happens to be
+        // open and focused, so this goes through `showInformationMessage`
+        // instead, which persists in the Notifications bell. Non-modal — this is
+        // an announcement, not a question, and a modal here would steal focus
+        // from whatever the user actually is doing.
         for (const line of notifyLines(next, stamping)) {
-          this.post({ type: "toast", level: "info", message: line });
+          void vscode.window.showInformationMessage(line);
         }
-        for (const r of receipts) this.toast(r.level, r.message);
+        for (const r of receipts) {
+          // A successful launch or seed already announces itself by opening a
+          // window; a notification on top of the toast would be noise. A
+          // failure has no such announcement — "Couldn't create a git worktree
+          // in bite-me — not launching ASM-12" is exactly the message that must
+          // not die inside an unfocused panel — so it escalates past the toast
+          // to the same non-modal notification `notify` uses above.
+          this.toast(r.level, r.message);
+          if (r.level === "error") void vscode.window.showInformationMessage(r.message);
+        }
       } catch (e) {
         this.log(`deck: flow ${flow.id} failed to advance: ${e}`);
       }
