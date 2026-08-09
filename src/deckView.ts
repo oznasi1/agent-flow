@@ -5,7 +5,7 @@ import * as path from "path";
 import { getConfig } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { Flow, FlowEdge, PlaceNode, PlannedNode, emptyFlow, findNode, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
+import { Flow, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId } from "./engine/orchestrator/flowIo";
 import { LOCK_TTL_MS, acquire, release } from "./engine/orchestrator/lock";
@@ -57,6 +57,20 @@ const VERB_LABEL: Record<ReviewVerb, string> = {
   comment: "Comment",
   "request-changes": "Request changes",
 };
+
+/** The next unused `n<N>` node id, scanning past whatever is already taken rather
+ * than trusting the live count — the same scheme (and the same reasoning)
+ * OrchestratorDrawer.tsx's own `nextNodeId` uses for a node the webview mints
+ * itself. Kept as a second, host-side copy rather than an import: that file is
+ * a webview entry point, built into its own bundle, and importing it here would
+ * drag its React/JSX toolchain into the extension host for one four-line
+ * function. */
+function nextPlannedNodeId(flow: Flow): string {
+  const taken = new Set(flow.nodes.map((n) => n.id));
+  let i = 1;
+  while (taken.has(`n${i}`)) i++;
+  return `n${i}`;
+}
 
 /** What a performing edge (`launch` or `seed`) is about to spend money on, resolved
  * just far enough for the once-per-flow confirmation to name it. A `launch` has a
@@ -1729,6 +1743,11 @@ export class DeckPanel {
         this.postFlows();
         return;
       }
+      case "flow:addPlanned": {
+        if (!getConfig().orchestrator) return;
+        await this.addPlanned(m.id);
+        return;
+      }
       case "flow:delete": {
         if (!getConfig().orchestrator) return;
         // The same membership check `flow:save` and `flow:rename` make, for the same
@@ -1825,6 +1844,110 @@ export class DeckPanel {
         break;
       }
     }
+  }
+
+  /**
+   * The missing ticket picker (Task 4b): the ONLY way a `planned` node comes into
+   * being. The webview cannot build one itself — it has no task connector, and the
+   * whole point of building this host-side is that a native `showQuickPick` is
+   * fully keyboard-operable for free. Asks four questions in sequence — which
+   * ticket, which repos, which prompt mode, which destination — and appends the
+   * resolved `PlannedNode` in one write.
+   *
+   * Cancelling ANY step aborts the whole thing and writes nothing. That is not a
+   * courtesy: a node written with an `undefined` field in it would still be a
+   * `PlannedNode` as far as `flow:save`'s types are concerned, and Phase 3's
+   * launcher (`performEdge` → `launchPlanned`) would then refuse it at spend
+   * time with a confusing "no repos" or "mode not configured" message, on an
+   * armed rule the user meant to abandon, not to half-build. Each step therefore
+   * has its own early return — a single guard after all four would leave three
+   * of them able to leak a partial node.
+   *
+   * Never round-trips a partial node through the webview: `flow:save` already
+   * owns "write a whole flow," and sending a half-built node across the wire to
+   * be completed later would be a second source of truth for the same graph.
+   */
+  private async addPlanned(flowId: string): Promise<void> {
+    // An unauthenticated source must not produce an empty picker with no
+    // explanation — say so and stop before anything is asked.
+    if (!(await this.connector.isAuthenticated())) {
+      this.toast("error", `Sign in to ${this.connector.info().label} to add planned work.`);
+      return;
+    }
+    // "all" / "any": the fullest candidate list this connector can offer. Unlike
+    // the task pool's own fetch, there is no lens the user picked for this — the
+    // picker is a one-off lookup, not a persisted view — so nothing here narrows
+    // it further on their behalf.
+    const tasks = await this.connector.provider().list("all", "any");
+    if (tasks.length === 0) {
+      this.toast("error", `No tickets available from ${this.connector.info().label}.`);
+      return;
+    }
+    const ticketPick = await vscode.window.showQuickPick(
+      tasks.map((t) => ({ label: t.key, description: t.summary, task: t })),
+      { title: "Add planned work — which ticket?", placeHolder: "Pick a ticket", ignoreFocusOut: true },
+    );
+    if (!ticketPick) return;
+
+    const cfg = getConfig();
+    const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+    const repoPicks = await vscode.window.showQuickPick(
+      repos.map((r) => ({ label: r.name, detail: r.isGit ? r.path : `${r.path}  (not a git repo)`, repo: r })),
+      {
+        canPickMany: true,
+        title: "Add planned work — which repos?",
+        placeHolder: "Space to toggle · Enter to continue",
+        ignoreFocusOut: true,
+      },
+    );
+    // Cancelled (undefined) or nothing toggled on (empty array) are the same
+    // refusal here: a launch that fires on no repos is nothing to launch into
+    // (see launchPlanned's own identical check on `node.repos.length`).
+    if (!repoPicks || repoPicks.length === 0) return;
+
+    const modePick = await vscode.window.showQuickPick(
+      cfg.promptModes.map((mode) => ({ label: mode.label, detail: mode.detail, mode })),
+      { title: "Add planned work — which prompt mode?", placeHolder: "Pick a prompt mode", ignoreFocusOut: true },
+    );
+    if (!modePick) return;
+
+    const DEST_OPTIONS: { label: string; dest: LaunchDest }[] = [
+      { label: "Worktree", dest: "worktree" },
+      { label: "New window", dest: "new-window" },
+      { label: "Current window", dest: "current-window" },
+    ];
+    const destPick = await vscode.window.showQuickPick(DEST_OPTIONS, {
+      title: "Add planned work — where does it launch?",
+      placeHolder: "Pick a destination",
+      ignoreFocusOut: true,
+    });
+    if (!destPick) return;
+
+    // Re-read, not the caller's stale copy: four modals were just up, in which
+    // time the flow could have been renamed, deleted, or edited from another
+    // window — the same reasoning every other flow:* handler in this file
+    // re-reads for before it writes.
+    const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flowId);
+    if (!flow) return;
+    const node: PlannedNode = {
+      // Same minting scheme as the webview's own `nextNodeId` (OrchestratorDrawer.tsx):
+      // the lowest unused "n<N>", scanning past whatever is already taken rather than
+      // trusting the live count, which drifts the moment anything is deleted.
+      id: nextPlannedNodeId(flow),
+      // The same fixed slot the tray's own drop path attaches a place at
+      // (`attachAt(raw, 24, 24 + flow.nodes.length * 88)` in OrchestratorDrawer.tsx) —
+      // so this node lands in its own spot rather than on top of an existing one.
+      x: 24,
+      y: 24 + flow.nodes.length * 88,
+      join: "any",
+      kind: "planned",
+      ticketKey: ticketPick.task.key,
+      repos: repoPicks.map((p) => p.repo.name),
+      mode: modePick.mode.id,
+      dest: destPick.dest,
+    };
+    writeFlow(this.flowIo, this.flowsDir, { ...flow, nodes: [...flow.nodes, node] });
+    this.postFlows();
   }
 
   /**

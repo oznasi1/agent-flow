@@ -3,7 +3,7 @@ import { describeCond, placeActivity } from "../engine/orchestrator/conditions";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, Flow, FlowAction, FlowEdge, FlowNode, isSettled, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { AgentState, FlowPromptMode, PendingResume, RunStatus } from "../types";
-import { vscodeApi } from "./vscodeApi";
+import { send, vscodeApi } from "./vscodeApi";
 
 /** The width before any drag or arrow-key resize, and the fallback for a
  * missing or corrupt stored value. Matches the default this same figure
@@ -497,6 +497,15 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       nodes: [...flow.nodes, { id: nextNodeId(flow), kind: "notify", x: 320, y: 24, join: "any", message: "say something" }],
     });
 
+  // Unlike every other node this drawer builds, a `planned` node cannot be
+  // assembled here: it names a ticket, and the webview has no task connector
+  // to ask for one — it must not import `fs`/`os`/`path`/`child_process`, even
+  // transitively, and a connector reaches all four. So this sends only the
+  // flow's own id; the host runs the actual picker (a sequence of native
+  // QuickPicks) and appends the whole node in one write. See deckView.ts's
+  // `addPlanned`.
+  const addPlanned = () => send({ type: "flow:addPlanned", id: flow.id });
+
   const onTidy = () => p.onSave({ ...flow, nodes: tidy(flow) });
 
   const edge = flow.edges.find((e) => e.id === selEdge) ?? null;
@@ -771,6 +780,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           <div className="sp" />
           <button type="button" className="orch-mini" onClick={onTidy}>Tidy</button>
           <button type="button" className="orch-mini" onClick={addNotify}>+ Notify</button>
+          <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
         </div>
         <div
           ref={graphRef}

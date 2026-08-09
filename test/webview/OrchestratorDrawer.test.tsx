@@ -49,9 +49,15 @@ if (typeof window !== "undefined" && !window.DragEvent) {
 // real acquireVsCodeApi() (which does not exist under jsdom).
 vi.mock("../../src/webview/vscodeApi", () => ({
   vscodeApi: { getState: vi.fn(() => undefined), setState: vi.fn() },
+  // The missing ticket picker (Task 4b): unlike every other node this drawer
+  // builds, a `planned` node needs a task connector the webview cannot reach,
+  // so its control sends a message directly (via `send`) rather than going
+  // through `onSave` like `addNotify` does. A plain vi.fn(), the same way
+  // `send` is mocked in DeckApp.test.tsx.
+  send: vi.fn(),
 }));
 
-import { vscodeApi } from "../../src/webview/vscodeApi";
+import { vscodeApi, send } from "../../src/webview/vscodeApi";
 
 const flow = (over: Partial<Flow> = {}): Flow => ({
   id: "f1", name: "Ship the migration", armed: false, createdAt: 1_000, nodes: [], edges: [], ...over,
@@ -478,6 +484,29 @@ describe("the canvas", () => {
     fireEvent.click(screen.getByRole("button", { name: "+ Notify" }));
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.nodes.filter((n) => n.kind === "notify")).toHaveLength(1);
+  });
+
+  // The missing ticket picker (Task 4b). Unlike every node above, a `planned`
+  // node needs a task connector this webview cannot reach — nothing reachable
+  // from src/webview/ may import fs/os/path/child_process, even transitively —
+  // so this control only names the open flow to the host and lets deckView.ts's
+  // native QuickPick sequence resolve the rest. It is an ordinary <button>, the
+  // same as "+ Notify" beside it, which is what makes it keyboard-reachable for
+  // free: no custom tab handling, no non-default tabIndex, nothing a screen
+  // reader or a Tab key would treat differently from any other control on this
+  // bar.
+  it("offers an Add planned work control beside + Notify, as an ordinary keyboard-reachable button", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    const btn = screen.getByRole("button", { name: "+ Add planned work" });
+    expect(btn.tagName).toBe("BUTTON");
+    expect(btn).not.toHaveAttribute("tabindex", "-1");
+    expect(btn).not.toBeDisabled();
+  });
+
+  it("sends flow:addPlanned with the open flow's id — the host builds the node, not this webview", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Add planned work" }));
+    expect(send).toHaveBeenCalledWith({ type: "flow:addPlanned", id: "f1" });
   });
 
   it("a card dropped on the canvas lands where it was dropped", () => {

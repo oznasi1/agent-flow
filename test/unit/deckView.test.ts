@@ -3,7 +3,7 @@ import { window, ViewColumn, env, workspace, commands, setConfig, ConfigurationT
 import { DEFAULT_PROMPT_MODES } from "../../src/config";
 import { fakeContext } from "../_helpers/factories";
 import type { ChangedFile } from "../../src/engine/git";
-import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef } from "../../src/types";
+import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef, Task } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
 import type { Flow } from "../../src/engine/orchestrator/model";
@@ -143,6 +143,16 @@ const h = vi.hoisted(() => ({
   // so the re-mint-on-collision path is reachable. A constant would make the
   // retry loop indistinguishable from a refusal.
   idSeq: 0,
+  // The candidate list the missing ticket picker (Task 4b) reads from
+  // `provider().list(...)`. One ticket by default — enough for the picker to
+  // have something to show without a test having to name a task it never uses.
+  taskList: vi.fn(async (_lens: string, _size: string, _max?: number): Promise<Task[]> => [
+    {
+      key: "ASM-9", summary: "Ship the migration", status: "", statusCategory: "new", priority: "",
+      assignee: "Unassigned", labels: [], components: [], sprint: null, inOpenSprint: false,
+      updated: "", url: "https://jira/browse/ASM-9", estimateSeconds: null,
+    },
+  ]),
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -371,7 +381,7 @@ function fakeConnector(authed = false, label = "Jira"): TaskConnector {
     isAuthenticated: async () => authed,
     signIn: async () => true,
     signOut: async () => undefined,
-    provider: () => ({ status: h.getStatus, detail: h.getDetail }) as unknown as TaskProvider,
+    provider: () => ({ status: h.getStatus, detail: h.getDetail, list: h.taskList }) as unknown as TaskProvider,
     probe: async () => ({}),
     taskUrl: (key: string) => `https://jira${BROWSE}${key}`,
     keyFromUrl: (url: string) => {
@@ -499,6 +509,13 @@ beforeEach(() => {
     key, summary: "do it", url: `https://jira/browse/${key}`, descriptionText: "the description",
     labels: [], components: [], status: null, statusCategory: null,
   }));
+  h.taskList.mockClear().mockResolvedValue([
+    {
+      key: "ASM-9", summary: "Ship the migration", status: "", statusCategory: "new", priority: "",
+      assignee: "Unassigned", labels: [], components: [], sprint: null, inOpenSprint: false,
+      updated: "", url: "https://jira/browse/ASM-9", estimateSeconds: null,
+    },
+  ]);
   // Confirm by default: resolve the label passed as the modal's sole action item,
   // rather than vscode's own mock default of `undefined` (which reads as "declined"
   // for every other suite in this file). Individual tests override this per case.
@@ -3029,8 +3046,194 @@ describe("orchestrator flows", () => {
     const { send } = await openPanel();
     await send({ type: "flow:create" });
     await send({ type: "flow:delete", id: "f1" });
+    await send({ type: "flow:addPlanned", id: "f1" });
     expect(h.writeFlow).not.toHaveBeenCalled();
     expect(h.removeFlow).not.toHaveBeenCalled();
+    // Not even the first question gets asked — the setting gate is checked
+    // before the connector is ever touched.
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+  });
+
+  describe("flow:addPlanned — the missing ticket picker (Task 4b)", () => {
+    // `openPanel()` above defaults to an UNAUTHENTICATED connector (`show()`'s
+    // own default), which is exactly right for every other flow:* handler —
+    // none of them ever touch the connector — but wrong for this one. Every
+    // test below that means to get past the auth gate needs its own panel.
+    const openAuthedPanel = async () => {
+      show(true);
+      await settled();
+      const p = lastPanel();
+      return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+    };
+
+    const TASK = {
+      key: "ASM-9", summary: "Ship the migration", status: "", statusCategory: "new" as const, priority: "",
+      assignee: "Unassigned", labels: [], components: [], sprint: null, inOpenSprint: false,
+      updated: "", url: "https://jira/browse/ASM-9", estimateSeconds: null,
+    };
+    const REPO = { name: "aws-ops", path: "/repos/aws-ops", isGit: true };
+    // The real default, unset by any test — resolveModes falls back to it with
+    // no setConfig override needed, exactly as the earlier promptModes test
+    // (line ~2918) already relies on.
+    const MODE = DEFAULT_PROMPT_MODES[0];
+
+    const quickPick = () => window.showQuickPick as ReturnType<typeof vi.fn>;
+
+    /** Script all four pickers to succeed, in ticket → repos → mode → dest order. */
+    const pickAllFour = () => {
+      quickPick()
+        .mockResolvedValueOnce({ label: TASK.key, description: TASK.summary, task: TASK })
+        .mockResolvedValueOnce([{ label: REPO.name, detail: REPO.path, repo: REPO }])
+        .mockResolvedValueOnce({ label: MODE.label, detail: MODE.detail, mode: MODE })
+        .mockResolvedValueOnce({ label: "Worktree", dest: "worktree" });
+    };
+
+    it("asks ticket, repos, mode, then destination, and appends a planned node carrying all four answers", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "Ship it")];
+      h.discoverRepos.mockReturnValueOnce([REPO]);
+      pickAllFour();
+      const { send } = await openAuthedPanel();
+      await send({ type: "flow:addPlanned", id: "f1" });
+      expect(quickPick()).toHaveBeenCalledTimes(4);
+      const saved = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      expect(saved.nodes).toHaveLength(1);
+      expect(saved.nodes[0]).toMatchObject({
+        kind: "planned", join: "any", ticketKey: "ASM-9", repos: ["aws-ops"], mode: MODE.id, dest: "worktree",
+      });
+    });
+
+    it("posts the flow it just appended to, so the drawer sees the new node", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "Ship it")];
+      h.discoverRepos.mockReturnValueOnce([REPO]);
+      pickAllFour();
+      const { p, send } = await openAuthedPanel();
+      await send({ type: "flow:addPlanned", id: "f1" });
+      const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { flows: Flow[] };
+      expect(msg.flows.find((f) => f.id === "f1")?.nodes).toHaveLength(1);
+    });
+
+    it("cancelling the ticket picker writes nothing and never opens the repos, mode, or destination picker", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "n")];
+      quickPick().mockResolvedValueOnce(undefined); // ticket picker dismissed
+      const { send } = await openAuthedPanel();
+      await send({ type: "flow:addPlanned", id: "f1" });
+      expect(quickPick()).toHaveBeenCalledTimes(1);
+      expect(h.writeFlow).not.toHaveBeenCalled();
+    });
+
+    it("cancelling the repos picker writes nothing and never opens the mode or destination picker", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "n")];
+      quickPick()
+        .mockResolvedValueOnce({ label: TASK.key, task: TASK })
+        .mockResolvedValueOnce(undefined); // repos picker dismissed
+      const { send } = await openAuthedPanel();
+      await send({ type: "flow:addPlanned", id: "f1" });
+      expect(quickPick()).toHaveBeenCalledTimes(2);
+      expect(h.writeFlow).not.toHaveBeenCalled();
+    });
+
+    it("picking no repos at all (an empty multi-select) is treated as a cancel, and writes nothing", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "n")];
+      quickPick()
+        .mockResolvedValueOnce({ label: TASK.key, task: TASK })
+        .mockResolvedValueOnce([]); // Enter with nothing toggled on
+      const { send } = await openAuthedPanel();
+      await send({ type: "flow:addPlanned", id: "f1" });
+      expect(quickPick()).toHaveBeenCalledTimes(2);
+      expect(h.writeFlow).not.toHaveBeenCalled();
+    });
+
+    it("cancelling the prompt-mode picker writes nothing and never opens the destination picker", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "n")];
+      quickPick()
+        .mockResolvedValueOnce({ label: TASK.key, task: TASK })
+        .mockResolvedValueOnce([{ label: REPO.name, repo: REPO }])
+        .mockResolvedValueOnce(undefined); // mode picker dismissed
+      const { send } = await openAuthedPanel();
+      await send({ type: "flow:addPlanned", id: "f1" });
+      expect(quickPick()).toHaveBeenCalledTimes(3);
+      expect(h.writeFlow).not.toHaveBeenCalled();
+    });
+
+    it("cancelling the destination picker writes nothing, even with every other answer already given", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "n")];
+      quickPick()
+        .mockResolvedValueOnce({ label: TASK.key, task: TASK })
+        .mockResolvedValueOnce([{ label: REPO.name, repo: REPO }])
+        .mockResolvedValueOnce({ label: MODE.label, mode: MODE })
+        .mockResolvedValueOnce(undefined); // destination picker dismissed
+      const { send } = await openAuthedPanel();
+      await send({ type: "flow:addPlanned", id: "f1" });
+      expect(quickPick()).toHaveBeenCalledTimes(4);
+      expect(h.writeFlow).not.toHaveBeenCalled();
+    });
+
+    it("toasts and writes nothing when the connector is not authenticated, without opening any picker", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "n")];
+      // openPanel() (the outer describe's helper) is the unauthenticated default.
+      const { p, send } = await openPanel();
+      await send({ type: "flow:addPlanned", id: "f1" });
+      expect(quickPick()).not.toHaveBeenCalled();
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      expect(posts(p)).toContainEqual(
+        expect.objectContaining({ type: "toast", level: "error", message: expect.stringContaining("Sign in") }),
+      );
+    });
+
+    it("toasts and writes nothing when the connector has no tickets to offer, without opening any picker", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "n")];
+      h.taskList.mockResolvedValueOnce([]);
+      const { p, send } = await openAuthedPanel();
+      await send({ type: "flow:addPlanned", id: "f1" });
+      expect(quickPick()).not.toHaveBeenCalled();
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      expect(posts(p)).toContainEqual(
+        expect.objectContaining({ type: "toast", level: "error", message: expect.stringContaining("No tickets") }),
+      );
+    });
+
+    it("refuses when the flow was deleted while the pickers were open", async () => {
+      // The same re-read-before-write every other flow:* handler in this file
+      // does: the four modals were up long enough for another window (or a
+      // flow:delete from this one) to remove the flow entirely.
+      setConfig({ orchestrator: true });
+      h.flows = []; // "f1" is not on disk by the time the write would happen
+      pickAllFour();
+      const { send } = await openAuthedPanel();
+      await send({ type: "flow:addPlanned", id: "f1" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+    });
+
+    it("positions the new node the way the tray's own drop path does, so it never lands on an existing node", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [{
+        ...mkFlow("f1", "n"),
+        nodes: [
+          { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+          { id: "n2", kind: "notify", x: 24, y: 112, join: "any", message: "hi" },
+        ],
+      }];
+      pickAllFour();
+      const { send } = await openAuthedPanel();
+      await send({ type: "flow:addPlanned", id: "f1" });
+      const saved = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      const added = saved.nodes.find((n) => n.kind === "planned")!;
+      // The same fixed formula OrchestratorDrawer.tsx's tray-drop `attachAt`
+      // call uses: `24, 24 + flow.nodes.length * 88` — two existing nodes puts
+      // this one at y=200, past both.
+      expect(added.x).toBe(24);
+      expect(added.y).toBe(200);
+      expect(saved.nodes.some((n) => n.id !== added.id && n.x === added.x && n.y === added.y)).toBe(false);
+    });
   });
 });
 

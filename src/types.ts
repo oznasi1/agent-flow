@@ -420,6 +420,15 @@ export type InboundMessage =
   | { type: "flow:create" }
   | { type: "flow:rename"; id: string; name: string }
   | { type: "flow:save"; flow: Flow }
+  // The missing ticket picker (Task 4b): the webview cannot build a `planned`
+  // node itself — it has no task connector — so this only names WHICH flow to
+  // append one to. The host resolves ticket, repos, prompt mode and
+  // destination through a sequence of native QuickPicks (fully keyboard-
+  // operable for free) and writes the whole node in one go; see deckView.ts's
+  // `addPlanned`. Never carries a partial node across the wire — `flow:save`
+  // already owns "write a whole flow", and a half-built node would be a
+  // second source of truth for the same graph.
+  | { type: "flow:addPlanned"; id: string }
   | { type: "flow:delete"; id: string }
   // Arm/disarm a flow (Task 5). Arming warns and names any rule that can never
   // fire with a data source switched off, rather than refusing to arm.
