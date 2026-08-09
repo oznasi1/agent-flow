@@ -900,6 +900,39 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
 
       expect(env.openExternal).not.toHaveBeenCalled();
     });
+
+    it("degrades to the clipboard when the chat-open command probe throws on every attempt", async () => {
+      // Exercises seedCopilotPanel's own catch (workspace.ts:779-781): the probe
+      // itself rejects — not merely "the command isn't registered yet" — and the
+      // seeding path must still degrade the same way as "no chat command", not
+      // hang or leave an unhandled rejection.
+      commands.getCommands.mockRejectedValue(new Error("registry unavailable"));
+      setupMatchingPlan();
+      const { context } = fakeContext();
+      const logs: string[] = [];
+
+      vi.useFakeTimers();
+      try {
+        const pending = maybeSeedAgent(context, (m) => logs.push(m));
+        await vi.runAllTimersAsync();
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+
+      // The catch really ran — on the very first polling attempt, not just
+      // "eventually gave up" — which is what proves the rejection was caught
+      // rather than left to surface as an unhandled rejection.
+      expect(logs.some((m) => m.includes("copilot command attempt 1 threw"))).toBe(true);
+      // It never managed to open Copilot Chat.
+      expect(commands.executeCommand).not.toHaveBeenCalledWith(CHAT_OPEN_CMD, expect.anything());
+      // The seeding path degrades exactly like "no chat command registered": the
+      // prompt lands on the clipboard and the user is told to paste it.
+      expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        "Agent Flow Deck: opened workspace for ASM-1. Copilot prompt copied — paste it into the panel to start.",
+      );
+    });
   });
 
   // No editor command that opens a Copilot chat tab with a prefilled query has been
