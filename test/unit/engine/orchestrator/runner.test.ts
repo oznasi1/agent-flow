@@ -118,7 +118,7 @@ describe("applyFired", () => {
     const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
     const out = applyFired(
       flow,
-      [{ edge: flow.edges[0], perform: true, action: "seed" }],
+      [{ edge: flow.edges[0], perform: true, action: "launch" }],
       NOW,
       new Map([["e1", { ok: true, note: "launched ASM-12 in aws-ops" } as const]]),
     );

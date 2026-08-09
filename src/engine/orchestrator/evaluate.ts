@@ -36,10 +36,18 @@ export interface FiredEdge {
    * "all" junction stamps every incoming edge but acts once. */
   perform: boolean;
   /** The action this edge performs, derived ONCE here from the target node.
-   * Carried rather than re-derived downstream so `applyFired`, `notifyLines`
-   * and `deckView`'s dispatch all answer the same question against the same
-   * copy of the graph — the discipline `notifyLines` already spells out.
-   * `undefined` when the target is missing or of an unknown kind. */
+   * Carried rather than re-derived downstream so `applyFired` and `notifyLines`
+   * answer the same question against the same copy of the graph — the
+   * discipline `notifyLines` already spells out. `undefined` when the target
+   * is missing or of an unknown kind.
+   *
+   * `deckView.ts`'s own dispatch, `spendTarget` and `performEdge` do NOT yet
+   * read this field — they still decide off `edge.action`, the edge's stored
+   * mirror (see its doc comment in `model.ts`). Moving them onto this carried
+   * value is Task 3's work, not this one; until it lands, an edge whose stored
+   * `action` disagrees with its target's derived one is decided one way here
+   * and another way there. Do not read this comment as "deckView agrees"
+   * until that work lands. */
   action: FlowAction | undefined;
 }
 

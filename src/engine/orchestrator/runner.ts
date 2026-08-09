@@ -22,10 +22,11 @@ export type ActOutcome =
  * another edge into the same target already did" are different, and the drawer
  * shows whichever it is told.
  *
- * A PERFORMED edge whose action — AS ACTUALLY PERFORMED, `hit.action`, not
- * necessarily `flow`'s own current copy of it (see the branch below) — is not
- * `notify` — a `launch` or a `seed` — is stamped from `outcomes`, keyed by edge
- * id. A success takes `firedAt` and the caller's note; a failure takes `error`
+ * A PERFORMED edge whose CARRIED action — `hit.action`, decided once at
+ * evaluation, not necessarily `flow`'s own current copy of it (see the branch
+ * below) — is not `notify` — a `launch` or a `seed` — is stamped from
+ * `outcomes`, keyed by edge id. A success takes `firedAt` and the caller's
+ * note; a failure takes `error`
  * and NO `firedAt`, and the difference matters in three ways:
  *  - `isSettled` counts `error`, so it still cannot re-fire in a loop;
  *  - the drawer surfaces an errored edge and offers Reset for it, so it is not a
@@ -48,20 +49,27 @@ export function applyFired(
     edges: flow.edges.map((e) => {
       const hit = byId.get(e.id);
       if (!hit) return { ...e };
-      // Branch on `hit.action` — the vintage the caller actually PERFORMED
-      // against, and the vintage `outcomes` is keyed to — never on `e.action`,
-      // this function's OWN `flow` argument's current copy. In `deckView.ts`,
-      // `flow` can be `atWrite`: read AFTER the act, specifically so a
-      // concurrent `flow:save`'s other fields pass through to the write. If
-      // that same concurrent edit changed THIS edge's action too, `e.action`
-      // and `hit.action` disagree about what kind of edge this is — and
-      // branching on `e.action` would silently discard a real launch's outcome
-      // for a generic "told you" note (if the flow now says `notify`), or
-      // mislabel a genuinely-fired notify as an unperformed launch (if the flow
-      // now says `launch`). The stamp must describe what was actually done,
-      // which only `hit.action` — carried from evaluation, once — knows. Every
-      // OTHER field below still comes from `e`/`flow` — only which branch to
-      // take, and which verb the fallback error below names, come from `hit`.
+      // Branch on `hit.action` — the action evaluation decided ONCE, and the
+      // vintage `outcomes` is keyed to — never on `e.action`, this function's
+      // OWN `flow` argument's current copy. In `deckView.ts`, `flow` can be
+      // `atWrite`: read AFTER the act, specifically so a concurrent
+      // `flow:save`'s other fields pass through to the write. If that same
+      // concurrent edit changed THIS edge's action too, `e.action` and
+      // `hit.action` disagree about what kind of edge this is — and branching
+      // on `e.action` would silently discard a real launch's outcome for a
+      // generic "told you" note (if the flow now says `notify`), or mislabel a
+      // genuinely-fired notify as an unperformed launch (if the flow now says
+      // `launch`). The stamp must describe what evaluation decided, which only
+      // `hit.action` — carried from there, once — knows. Every OTHER field
+      // below still comes from `e`/`flow` — only which branch to take, and
+      // which verb the fallback error below names, come from `hit`.
+      //
+      // NOTE: `hit.action` is not yet what the caller actually PERFORMED
+      // against — `deckView.ts`'s `performEdge` still acts on `edge.action`
+      // (the edge's stored mirror, rebound to a fresh read before it acts —
+      // see `advanceUnderLock`), not on this carried value. The two can
+      // disagree for an edge whose stored action no longer matches its
+      // target; reconciling that is Task 3's job, not this function's.
       if (hit.perform && hit.action !== "notify") {
         const outcome = outcomes?.get(e.id);
         if (!outcome) return { ...e, error: `${hit.action} was not performed` };

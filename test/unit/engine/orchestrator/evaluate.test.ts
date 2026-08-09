@@ -318,14 +318,44 @@ describe("evaluateFlow — the carried action", () => {
     expect(out.fired[0].action).toBe("launch");
   });
 
-  it("carries undefined for an edge pointing at nothing", () => {
-    const flow = flowWith([place("a", "ASM-1")], [edge("e1", "a", "gone")]);
+  // A dangling edge (target does not exist) is neither fired nor blocked —
+  // `evaluateFlow`'s main loop `continue`s past it before it ever reaches
+  // `fired` — so `action` is never even asked about that shape; the existing
+  // "ignores an edge whose target does not exist" test above already pins
+  // that. The reachable half of `FiredEdge.action`'s doc comment — "undefined
+  // when the target is ... of an unknown kind" — is this one instead:
+  // `store.ts`'s `validNode` admits an unknown `kind` string on purpose, so a
+  // flow written by a NEWER build still renders here rather than losing the
+  // node. Such a target passes the `!target` check, is not a spend action,
+  // and must land in `fired` with `action: undefined` rather than guess.
+  it("carries undefined for a target of an unknown kind", () => {
+    const unknown = { id: "z", kind: "teleport", x: 0, y: 0, join: "any" } as unknown as FlowNode;
+    const flow = flowWith([place("a", "ASM-1"), unknown], [edge("e1", "a", "z")]);
     const out = run(flow, [status("ASM-1", { merged: true })]);
-    // A dangling edge's target does not exist, so `evaluateFlow`'s main loop
-    // `continue`s past it before it ever reaches `fired` — it is neither fired
-    // nor blocked. Asserted directly rather than by looping over `out.fired`,
-    // which is empty here and would let an assertion inside the loop pin nothing.
-    expect(out.fired).toEqual([]);
-    expect(out.blocked).toEqual([]);
+    expect(out.fired).toHaveLength(1);
+    expect(out.fired[0].action).toBeUndefined();
+  });
+
+  it("caps by the derived action, not the edge's stored one", () => {
+    // Both edges keep `edge()`'s default stored action, "notify" — deliberately
+    // mismatched with their `planned` targets, which derive "launch". The cap
+    // must see the DERIVED action, or an edge that spends nothing on paper
+    // (because its stored field says so) dodges the cap entirely.
+    const flow = flowWith(
+      [place("a", "ASM-1"), planned("z1"), place("b", "ASM-2"), planned("z2")],
+      [edge("e1", "a", "z1"), edge("e2", "b", "z2")],
+    );
+    const r = run(flow, [status("ASM-1", { merged: true }), status("ASM-2", { merged: true })], 1);
+    expect(r.fired.map((f) => f.edge.id)).toEqual(["e1"]);
+    expect(r.deferred).toBe(1);
+  });
+
+  it("carries the derived action for every edge of an \"all\" junction, not just the performer", () => {
+    const flow = flowWith(
+      [place("a", "ASM-1"), place("b", "ASM-2"), notify("z", "all")],
+      [edge("e1", "a", "z"), edge("e2", "b", "z")],
+    );
+    const out = run(flow, [status("ASM-1", { merged: true }), status("ASM-2", { merged: true })]);
+    expect(out.fired.map((f) => f.action)).toEqual(["notify", "notify"]);
   });
 });

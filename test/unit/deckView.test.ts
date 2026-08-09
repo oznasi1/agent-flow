@@ -5055,6 +5055,17 @@ describe("the resume gate", () => {
     setConfig({ orchestrator: true });
     h.flows = [{
       ...armedFlow(),
+      // n2 must actually BE planned work, not a notify node stored as "launch":
+      // the latter derives to "notify" (its target's real kind), which is a
+      // genuine notify rule and correctly gets a "told you" line — see Task 2's
+      // fix for the deckView.test.ts fixture that used to assert the opposite.
+      nodes: [
+        armedFlow().nodes[0],
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
     }];
     h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
