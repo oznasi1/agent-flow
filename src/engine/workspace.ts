@@ -801,6 +801,21 @@ async function seedAgentSession(opts: {
   multi?: boolean;
 }): Promise<void> {
   const { prompt, key, matchPath, log, remoteControl = false, multi = false } = opts;
+
+  // `/remote-control` is a Claude Code slash command; Copilot would seed it as literal
+  // prompt text. tasksView already refuses the combination pre-flight, but a plan file
+  // written under Claude Code can outlive a flip to Copilot — the plan does not carry
+  // the provider, it is re-read here — so the block is repeated at the last moment
+  // before anything is seeded. Refuse rather than silently drop one of the two.
+  // Only this exact pair is refused: an ordinary Copilot seed falls straight through.
+  if (remoteControl && readAgentProvider() === "copilot") {
+    log(`seed ${key}: refused — Remote Control needs Claude Code`);
+    vscode.window.showErrorMessage(
+      `Agent Flow Deck: ${key} not seeded — Remote Control needs Claude Code. Set agentFlow.agentProvider to claude-code, or turn agentFlow.remoteControl off.`,
+    );
+    return;
+  }
+
   const seedText = remoteControl ? `/remote-control ${key}` : prompt;
   // Write it before the panel opens so it's already there to paste.
   if (remoteControl) await vscode.env.clipboard.writeText(prompt);

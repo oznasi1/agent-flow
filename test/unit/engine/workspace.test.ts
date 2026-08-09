@@ -944,6 +944,52 @@ describe("seedClaudeCode — remote control", () => {
     expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining("Remote Control"));
   });
 
+  // The seed-time backstop. tasksView refuses the combination pre-flight, but a plan
+  // file written under Claude Code can outlive a flip to Copilot, and the plan does
+  // not carry the provider — it is re-read here, in the target window.
+  describe("the Copilot provider", () => {
+    beforeEach(() => {
+      env.uriScheme = "vscode";
+      setConfig({ agentProvider: "copilot" });
+      window.createTerminal.mockClear();
+    });
+
+    afterEach(() => {
+      env.uriScheme = "cursor";
+      setConfig({ agentProvider: undefined });
+    });
+
+    it("refuses to seed Remote Control, opening no session at all", async () => {
+      seedPlan({ remoteControl: true });
+      const { context } = fakeContext();
+
+      await maybeSeedAgent(context, () => {});
+
+      expect(commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.chat.open", expect.anything());
+      expect(window.createTerminal).not.toHaveBeenCalled();
+      // Refusing means refusing everything: no half-seed via the clipboard fallback,
+      // and no "press Enter to connect" notice for a session that never opened.
+      expect(env.clipboard.writeText).not.toHaveBeenCalled();
+      expect(window.showInformationMessage).not.toHaveBeenCalled();
+      expect(window.showErrorMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Remote Control needs Claude Code"),
+      );
+    });
+
+    it("still seeds a plan that does not ask for Remote Control", async () => {
+      // The regression guard on the backstop's condition: `remoteControl &&` must be
+      // load-bearing, or every Copilot seed would be refused.
+      seedPlan({ remoteControl: false });
+      commands.getCommands.mockResolvedValue(["workbench.action.chat.open"]);
+      const { context } = fakeContext();
+
+      await maybeSeedAgent(context, () => {});
+
+      expect(commands.executeCommand).toHaveBeenCalledWith("workbench.action.chat.open", expect.anything());
+      expect(window.showErrorMessage).not.toHaveBeenCalled();
+    });
+  });
+
   it("seeds the prompt and leaves the clipboard alone when not requested", async () => {
     seedPlan({ remoteControl: false });
     const { context } = fakeContext();

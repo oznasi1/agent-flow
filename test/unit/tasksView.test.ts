@@ -3822,6 +3822,96 @@ describe("remote control", () => {
   });
 });
 
+// ── Remote Control × the Copilot provider ───────────────────────────────────
+// Remote Control seeds `/remote-control <key>`, a Claude Code slash command Copilot
+// would take as literal prompt text. The combination is refused pre-flight.
+//
+// `agentProvider` reaches the view through getConfig(), which this file mocks, so the
+// tests set it there rather than through env.uriScheme: readAgentProvider has already
+// applied the VS Code host guard by the time getConfig() returns, which is exactly why
+// "copilot" here models a real VS Code install and can never arise in Cursor.
+//
+// The last three cases are REGRESSION GUARDS for the flows that exist today — they
+// were green before the block was written and must stay green.
+describe("remote control × the Copilot provider", () => {
+  const lastOpen = () =>
+    vi.mocked(openWorkspace).mock.calls[vi.mocked(openWorkspace).mock.calls.length - 1][0];
+  const errorToast = (posted: () => OutboundMessage[]) =>
+    posted().find((m) => m.type === "toast" && m.level === "error") as { message: string } | undefined;
+  const copilot = (over: Partial<ReturnType<typeof getConfig>> = {}) =>
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot" as const, ...over });
+
+  it("refuses a Take and opens nothing", async () => {
+    copilot({ remoteControl: "on" });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("refuses an Explore and opens nothing", async () => {
+    // resolveKickoffTarget's call site — the one that must return undefined, not false.
+    copilot({ remoteControl: "on", exploreMode: "knowledge" });
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("the retry path" as never);
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send, posted } = setup();
+    await send({ type: "explore" });
+    expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("refuses a one-key batch and opens nothing", async () => {
+    // takeBatch's call site — a one-key batch is the only shape there that resolves
+    // Remote Control at all, so it is the only one that can be refused.
+    copilot({ remoteControl: "on" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(openWorkspace).not.toHaveBeenCalled();
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+
+  it("leaves Claude Code + Remote Control alone", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(lastOpen().remoteControl).toBe(true);
+  });
+
+  it("does not fire when Remote Control is off", async () => {
+    copilot({ remoteControl: "off" });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(lastOpen().remoteControl).toBe(false);
+  });
+
+  it("does not fire for a real batch, which never resolves Remote Control at all", async () => {
+    // The `isBatch || shared ? false : …` short-circuit means resolveRemoteControl is
+    // never reached — so a Copilot batch with the setting on still launches.
+    copilot({ remoteControl: "on" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: false } as never); // layout pick
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+});
+
 // ── capability gating ───────────────────────────────────────────────────────
 // Everything above drives the shipped Jira connector, which declares every optional
 // capability. These drive the Task 7 fixture connector, which declares none — so a

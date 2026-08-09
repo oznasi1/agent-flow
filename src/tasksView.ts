@@ -916,6 +916,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (!args) return undefined;
 
     const wantRemoteControl = await this.resolveRemoteControl(cfg);
+    if (wantRemoteControl === null) return undefined; // refused — the caller opens nothing
 
     return { target, services, args, wantRemoteControl };
   }
@@ -1276,7 +1277,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * action. Dismissing the picker means "no", not "cancel": by the time this runs, the
    * destination (and any worktrees) are already settled and the launch is committed —
    * abandoning it over an optional toggle would be the worse failure. */
-  private async resolveRemoteControl(cfg: AgentFlowConfig): Promise<boolean> {
+  private async resolveRemoteControlSetting(cfg: AgentFlowConfig): Promise<boolean> {
     if (cfg.remoteControl === "off") return false;
     // seedAgent off means no plan file ever carries the decision (openWorkspace's guard),
     // so nothing could ever seed /remote-control — asking would promise what can't be kept.
@@ -1296,6 +1297,31 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return p?.yes === true;
   }
 
+  /** Remote Control seeds `/remote-control <key>`, a Claude Code slash command Copilot
+   * has no equivalent for — Copilot would take it as literal prompt text and start a
+   * session that silently does the wrong thing. Refuse the combination rather than
+   * silently dropping one of the two things the user turned on, and refuse it here,
+   * before a destination is chosen, so nobody is left with an opened window and
+   * nothing in it.
+   *
+   * The condition is deliberately "resolved ON *and* copilot": every other
+   * combination — Claude Code either way, Copilot with Remote Control off or
+   * declined — is untouched. `cfg.agentProvider` is already host-guarded by
+   * readAgentProvider, so this can never fire in Cursor.
+   *
+   * Returns null when the launch must not proceed. */
+  private async resolveRemoteControl(cfg: AgentFlowConfig): Promise<boolean | null> {
+    const on = await this.resolveRemoteControlSetting(cfg);
+    if (on && cfg.agentProvider === "copilot") {
+      this.toast(
+        "error",
+        "Remote Control needs Claude Code. Set agentFlow.agentProvider to claude-code, or turn agentFlow.remoteControl off.",
+      );
+      return null;
+    }
+    return on;
+  }
+
   /** Which folders (if any) the user wants added to an existing-workspace destination.
    *  Duplicates are skipped without asking — a folder by that name is already there, so
    *  there is no real question, only noise. Only genuinely new repos prompt.
@@ -1303,7 +1329,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    *  Never returns undefined: dismissing the prompt means "leave the workspace as-is",
    *  not "abort". By the time this runs the worktrees exist and the launch is committed,
    *  so abandoning it over a folder-list question is the worse failure — the same
-   *  reasoning resolveRemoteControl documents. `declined` is true only when a prompt
+   *  reasoning resolveRemoteControlSetting documents. `declined` is true only when a prompt
    *  actually appeared and the answer wasn't yes — never when there was nothing to ask. */
   private async resolveWorkspaceAdditions(
     file: string,
@@ -1443,6 +1469,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       : { foldersToAdd: [], skipped: [], declined: false };
 
     const wantRemoteControl = await this.resolveRemoteControl(cfg);
+    // Refused. `false` is this function's "the user backed out at one of my own
+    // pickers" answer, which is what a refusal is from the caller's point of view:
+    // nothing opened, and take_completed records it as cancelled rather than failed.
+    if (wantRemoteControl === null) return false;
 
     const planMd = this.buildBrief(detail);
     const result = await openWorkspace({
@@ -1615,6 +1645,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const rcSkipped = isBatch && cfg.remoteControl !== "off";
     if (rcSkipped) this.log("takeBatch: Remote Control skipped — one clipboard, several sessions");
     const wantRemoteControl = isBatch || shared ? false : await this.resolveRemoteControl(cfg);
+    if (wantRemoteControl === null) return; // refused — no worktrees, no windows
 
     const resolved: { task: BatchTask; key: string }[] = [];
     const failed: string[] = [];
