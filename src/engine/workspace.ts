@@ -11,7 +11,7 @@ import { writeRun, defaultRunsDir } from "./runs";
 import { gitState } from "./git";
 import { ensureGitExcluded } from "./gitExclude";
 import { windowIdentity, type CurrentWindow } from "./presence";
-import { readAgentSurface } from "../config";
+import { readAgentProvider, readAgentSurface, type AgentProvider } from "../config";
 
 export const BRIEF_DIR = ".pick-task";
 export const BRIEF_FILE = "TASK.md";
@@ -21,14 +21,16 @@ const PLAN_TTL_MS = 15 * 60 * 1000; // seed handshake valid for 15 min
 /** Pause between sessions when one window seeds a whole batch (see maybeSeedAgent). */
 const SEED_STAGGER_MS = 400;
 
-/** The CLI that terminal-surface seeding runs. Fixed on purpose — see the spec's
- * "Out of scope": a missing binary shows as `command not found` in the terminal,
- * which is self-explanatory and leaves the pre-typed prompt there to reuse. */
-const CLI_CMD = "claude";
-/** How long the CLI's TUI needs before it will accept typed input. Typing sooner
- * loses the prompt to a screen that isn't listening yet. Verified by hand in the
- * dev host — there is no event to await. */
-const CLI_BOOT_MS = 1500;
+/** The CLI each provider's terminal surface runs, and how long its TUI needs before
+ * it will accept typed input. Fixed commands on purpose — see the spec's "Out of
+ * scope": a missing binary shows as `command not found` in the terminal, which is
+ * self-explanatory and leaves the pre-typed prompt there to reuse. Typing sooner
+ * than `bootMs` loses the prompt to a screen that isn't listening yet, and there is
+ * no event to await, so both delays are verified by hand in the dev host. */
+const CLI: Record<AgentProvider, { cmd: string; label: string; bootMs: number }> = {
+  "claude-code": { cmd: "claude", label: "Claude", bootMs: 1500 },
+  copilot: { cmd: "copilot", label: "Copilot", bootMs: 2000 }, // UNVERIFIED — measure in the dev host before release
+};
 
 /** Wrap text so the terminal delivers it as a *paste*. renderPrompt appends the
  * relevant-files block after a blank line, so most task prompts are multi-line,
@@ -651,7 +653,7 @@ async function runSeedPass(context: vscode.ExtensionContext, log: (m: string) =>
     const plan = due[i];
     const match = plan.matches.find((m) => canon(m.matchPath) === identity)!;
     await context.globalState.update(seededGuard(plan, identity), true);
-    await seedClaudeCode({
+    await seedAgentSession({
       prompt: match.prompt,
       key: plan.key,
       matchPath: match.matchPath,
@@ -701,6 +703,7 @@ export function watchPlansAndSeed(
  * then type the prompt without submitting it. Returns false if the terminal
  * could not be driven, so the caller can fall back to the clipboard. */
 async function seedViaTerminal(
+  provider: AgentProvider,
   seedText: string,
   key: string,
   matchPath: string,
@@ -712,10 +715,11 @@ async function seedViaTerminal(
     // not a valid cwd, and no single directory is "the" repo for a multiroot
     // window — omitting cwd lets VS Code default to the window's first root.
     const cwd = matchPath.endsWith(".code-workspace") ? undefined : matchPath;
-    const terminal = vscode.window.createTerminal({ name: `Claude · ${key}`, cwd });
+    const { cmd, label, bootMs } = CLI[provider];
+    const terminal = vscode.window.createTerminal({ name: `${label} · ${key}`, cwd });
     terminal.show();
-    terminal.sendText(CLI_CMD, true);
-    await delay(CLI_BOOT_MS);
+    terminal.sendText(cmd, true);
+    await delay(bootMs);
     terminal.sendText(bracketedPaste(seedText), false);
     log(`seed ${key}: typed the prompt into a terminal${cwd ? ` in ${cwd}` : ""}`);
     return true;
@@ -732,7 +736,7 @@ async function seedViaTerminal(
  * prompt travels on the clipboard — the slash command is `local-jsx`, so Claude Code
  * cannot stack it ahead of a prompt in one submission, and the panel takes a single
  * buffer with a single Enter. */
-async function seedClaudeCode(opts: {
+async function seedAgentSession(opts: {
   prompt: string;
   key: string;
   matchPath: string;
@@ -753,17 +757,19 @@ async function seedClaudeCode(opts: {
     );
   };
 
-  // The surface is read here, in the target window, at seed time — never carried
-  // in the plan file. Flipping the setting therefore also affects plans already
-  // on disk, which is what a preference should do.
+  // Both settings are read here, in the target window, at seed time — never carried
+  // in the plan file. Flipping either therefore also affects plans already on disk,
+  // which is what a preference should do.
+  const provider = readAgentProvider();
+
   if (readAgentSurface() === "terminal") {
-    if (await seedViaTerminal(seedText, key, matchPath, log)) {
+    if (await seedViaTerminal(provider, seedText, key, matchPath, log)) {
       announceRemoteControl();
       return;
     }
-    // Terminal seeding failed — skip the extension attempts (this user does not
-    // use the panel) and land on the clipboard fallback at the end.
-  } else {
+    // Terminal seeding failed — skip the panel attempts (this user does not use the
+    // panel) and land on the clipboard fallback at the end.
+  } else if (provider === "claude-code") {
     // 1 — verified command claude-vscode.primaryEditor.open(session, prompt);
     //     poll because our extension and Claude Code both activate onStartupFinished.
     const preferred = multi ? [CLAUDE_NEW_TAB_CMD, CLAUDE_OPEN_CMD] : [CLAUDE_OPEN_CMD];
@@ -795,6 +801,10 @@ async function seedClaudeCode(opts: {
     } catch (e) {
       log(`seed ${key}: URI failed: ${e}`);
     }
+  } else {
+    // Copilot + panel is filled in by a later task; until then this falls through
+    // to the clipboard fallback rather than opening the wrong agent's panel.
+    log(`seed ${key}: copilot panel seeding is not wired up yet — using the clipboard`);
   }
 
   // 3 — fallback. One clipboard can't carry N prompts, so a batch gets a pointer to

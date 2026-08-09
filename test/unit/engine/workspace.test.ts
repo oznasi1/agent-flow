@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
 import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
@@ -688,6 +688,52 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
         "Claude · ASM-1",
         "Claude · ASM-2",
       ]);
+    });
+  });
+
+  describe("seedAgentSession — copilot terminal", () => {
+    beforeEach(() => {
+      env.uriScheme = "vscode";
+      setConfig({ agentProvider: "copilot", agentSurface: "terminal" });
+      window.createTerminal.mockClear();
+    });
+
+    afterEach(() => {
+      env.uriScheme = "cursor";
+      setConfig({ agentProvider: undefined, agentSurface: undefined });
+    });
+
+    it("names the terminal for Copilot and runs the copilot CLI", async () => {
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal).toHaveBeenCalledTimes(1);
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Copilot · ASM-1" });
+      expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "copilot", true);
+    });
+
+    it("still pre-types the prompt without submitting it", async () => {
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      const [text, addNewLine] = terminalAt(0).sendText.mock.calls[1];
+      expect(addNewLine).toBe(false);
+      expect(text).toContain("[200~");
+    });
+
+    it("uses Claude's terminal name and CLI when the provider is unset", async () => {
+      setConfig({ agentProvider: undefined });
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Claude · ASM-1" });
+      expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "claude", true);
     });
   });
 
