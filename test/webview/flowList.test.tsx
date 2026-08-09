@@ -475,6 +475,30 @@ describe("a fired rule", () => {
     expect(onResetEdge).toHaveBeenCalledWith("e1");
   });
 
+  // Without its own tabIndex, Reset is a native Tab stop on EVERY settled
+  // row regardless of which one is current — exactly the cost the roving
+  // tabindex exists to avoid (see `rowTabIndex`'s own doc comment): a flow
+  // with several fired rules would cost one extra Tab press per row just to
+  // get past the list, on top of the single stop the list itself should
+  // cost.
+  it("a non-current row's Reset is not a Tab stop; the current row's is", () => {
+    const twoFired = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "landed" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "one" },
+        { id: "e2", from: "n1", to: "n2", cond: { kind: "ci-passed" }, action: "notify", firedAt: 6, firedNote: "two" },
+      ],
+    });
+    render(<FlowList {...props({ flow: twoFired })} />);
+    const row1 = screen.getByTestId("flowlist-row-e1"); // current by default (focusedIndex 0)
+    const row2 = screen.getByTestId("flowlist-row-e2");
+    expect(within(row1).getByRole("button", { name: "Reset" })).toHaveAttribute("tabindex", "0");
+    expect(within(row2).getByRole("button", { name: "Reset" })).toHaveAttribute("tabindex", "-1");
+  });
+
   it("an unfired rule offers no Reset", () => {
     render(<FlowList {...props({ flow: twoPlaces() })} />);
     expect(within(screen.getByTestId("flowlist-row-e1")).queryByRole("button", { name: "Reset" })).toBeNull();

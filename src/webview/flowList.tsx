@@ -599,7 +599,21 @@ export function FlowList(p: FlowListProps): JSX.Element {
                 ) : (
                   <span className="fired">{e.firedNote ?? "fired"}</span>
                 )}
-                <button type="button" className="orch-mini" onClick={() => p.onResetEdge(e.id)}>
+                {/* `tabIndex` follows the SAME roving rule the row itself
+                    follows (`rowTabIndex`) — without it, this button is a
+                    native Tab stop regardless of whether its row is the
+                    current one, which is exactly the cost the roving
+                    tabindex exists to avoid (see `rowTabIndex`'s own doc
+                    comment): a flow with five fired rules would cost five
+                    extra Tab presses just to get past the list, one per
+                    Reset button, on top of the one stop the list itself is
+                    supposed to cost. */}
+                <button
+                  type="button"
+                  className="orch-mini"
+                  tabIndex={rowTabIndex(i)}
+                  onClick={() => p.onResetEdge(e.id)}
+                >
                   Reset
                 </button>
               </div>
