@@ -621,4 +621,51 @@ describe("adding a rule from the keyboard", () => {
     expect(within(bar).queryByLabelText("New rule mode")).toBeNull();
     expect(within(bar).queryByLabelText("New rule destination")).toBeNull();
   });
+
+  // A stale draft: `from`/`to` are plain component state, so nothing stops
+  // them outliving the flow they were chosen from unless something clears
+  // them — same shape as Phase 3's Task 6 mode-select bug, where what was
+  // shown and what was stored had quietly drifted apart.
+  it("switching the open flow clears a part-built draft", () => {
+    const flowA = twoPlacesNoEdge(); // id "f1", nodes n1/n2
+    const flowB = flow({
+      id: "f2",
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "OTHER-1", repo: "other-repo" },
+        { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "done" },
+      ],
+    });
+    const { rerender } = render(<FlowList {...props({ flow: flowA })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    expect(within(bar).getByLabelText("From node")).toHaveValue("n1");
+
+    rerender(<FlowList {...props({ flow: flowB })} />);
+    const bar2 = screen.getByTestId("flowlist-newrule");
+    expect(within(bar2).getByLabelText("From node")).toHaveValue("");
+    expect(within(bar2).getByLabelText("To node")).toHaveValue("");
+  });
+
+  // The route in without the reset above: `from`/`to` keep naming nodes that
+  // WERE in this same flow (same `flow.id`, so the reset effect above never
+  // fires) but no longer are — e.g. a node removed from the tray while the
+  // draft still points at it. `actionMismatch` has nothing to say about this
+  // (notify never mismatches on target kind), so `addRule`'s own guard is the
+  // only thing standing between this state and a dangling edge on disk.
+  it("addRule refuses when from or to names a node that is not in the current flow, and calls onSave zero times", () => {
+    const onSave = vi.fn();
+    const original = twoPlacesNoEdge(); // id "f1", nodes n1/n2
+    const { rerender } = render(<FlowList {...props({ flow: original, onSave })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+
+    // n2 is gone — same flow id, fewer nodes. The draft's own state still names it.
+    const shrunk: Flow = { ...original, nodes: original.nodes.filter((n) => n.id !== "n2") };
+    rerender(<FlowList {...props({ flow: shrunk, onSave })} />);
+    const bar2 = screen.getByTestId("flowlist-newrule");
+    fireEvent.click(within(bar2).getByRole("button", { name: "+ Add rule" }));
+    expect(onSave).toHaveBeenCalledTimes(0);
+  });
 });

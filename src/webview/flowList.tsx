@@ -214,6 +214,20 @@ function NewRuleBar(p: {
   const [mode, setMode] = React.useState(promptModes[0]?.id ?? "");
   const [dest, setDest] = React.useState<LaunchDest>("worktree");
 
+  // A half-built rule belongs to the flow you were looking at when you
+  // started it — switching flows (the "Flows · N ▾" switcher, still visible
+  // while List is open) must not leave a draft's `from`/`to` pointing at node
+  // ids that belong to whichever flow was open a moment ago. Keyed on
+  // `flow.id`, not `flow` itself: every OTHER edit to the open flow (adding a
+  // node, adding a rule) is a new `Flow` object too, and clearing the draft
+  // on each of THOSE would undo the very thing this bar just did.
+  React.useEffect(() => {
+    setFrom("");
+    setTo("");
+    setCond("pr-merged");
+    setAction("notify");
+  }, [flow.id]);
+
   // Only a non-`notify` node ever had an out-port on the canvas (see
   // OrchestratorDrawer.tsx's own `orch-port out`, rendered for every node
   // except a notify terminal) — a notify node can never be a rule's source
@@ -238,7 +252,22 @@ function NewRuleBar(p: {
   const mismatch = draft ? actionMismatch(flow, draft) : null;
 
   const addRule = () => {
-    if (!draft || mismatch) return;
+    // `actionMismatch` only checks the TARGET's kind (a launch needs planned
+    // work, a seed needs a place) — it has nothing to say about `from`/`to`
+    // naming nodes that are not in THIS flow at all, and `notify` gives it no
+    // kind to object to regardless. That gap is real, not hypothetical: `from`
+    // and `to` are plain component state, and the effect above only clears
+    // them when `flow.id` itself changes — every node/edge id still belongs to
+    // whichever flow was open when the select was touched. Checked here again,
+    // not folded into `actionMismatch`, because this is a different question
+    // (does the node exist at all?) from the one that function answers (is
+    // its kind the right one?) — and because a caller of `actionMismatch` for
+    // an edge that already exists in `flow.edges` (the inspector, an open
+    // list row) can never hit this case: its `from`/`to` are read off that
+    // very edge, which cannot reference a node this same flow lacks.
+    const fromExists = flow.nodes.some((n) => n.id === from);
+    const toExists = flow.nodes.some((n) => n.id === to);
+    if (!draft || mismatch || !fromExists || !toExists) return;
     const id = nextEdgeId(flow);
     const finalEdge: FlowEdge = { ...draft, id };
     let next: Flow = { ...flow, edges: [...flow.edges, finalEdge] };
