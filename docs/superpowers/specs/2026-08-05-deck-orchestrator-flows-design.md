@@ -325,6 +325,45 @@ Two smaller races carried from the same phase, both now closed too, in `advanceU
   not from the `FiredEdge.edge` reference evaluation captured, which could be a stale object
   if the edge's action changed between evaluation and the write.
 
+## The canvas and the keyboard path: shipped in Phase 4
+
+- **Label placement.** `labelPoint` (`layout.ts`) starts at the chord midpoint and, when that
+  point lands inside a node's box, steps along the chord's own **normal** by the minimum
+  distance that clears every obstacle, alternating directions and growing the offset one
+  increment at a time. The normal, not a vertical nudge, because a vertical-only offset on a
+  diagonal edge drifts off the line and orphans the label from the edge it names. Two
+  alternatives were considered and rejected: **hover-only** reveal, because it merely defers
+  the collision — selecting the offending edge reproduces it, so the label still has to sit
+  somewhere while inspected — and **orthogonal lane routing**, because it needs a real router
+  to be worth building, and the widened drawer this phase also ships makes the collision rare
+  enough that the router's cost isn't earned.
+- **Resize and expand.** The drawer's width is a CSS custom property (`--orch-w`) dragged from
+  the left edge or nudged by `ArrowLeft`/`ArrowRight` on the resize grip, clamped between a
+  420px floor and a viewport-derived ceiling that keeps one board column visible. The chosen
+  width is persisted through the webview's own `setState`/`getState` (`OrchPersisted`,
+  `OrchestratorDrawer.tsx`) — no new host protocol — so it survives a remount. **Expand** is
+  the escape hatch for a graph big enough to want the whole panel: it renders at
+  `window.innerWidth`, deliberately not the resize ceiling's board-reserving clamp, and is
+  deliberately **session-only** — plain `useState`, never written to `OrchPersisted` — because
+  the resize width is the considered choice and expand is a momentary one; collapsing it must
+  restore the width the user actually chose, not silently adopt whatever was last full-screened.
+- **The ticket picker.** Before this phase, nothing in the drawer could create a `planned`
+  node — the model and the `launch` action existed since Phase 3, but there was no UI path to
+  populate one, so `launch` was built and tested yet unreachable end to end. `flow:addPlanned`
+  (`deckView.ts`) closes that gap with a chain of native `showQuickPick`s — ticket, then repos
+  (multi-select), then prompt mode, then destination — sourced from the same connector and repo
+  discovery the rest of the extension already uses, each step refusing plainly (a toast, no
+  picker) rather than opening an empty one when there is nothing to choose from.
+- **The list view.** `FlowList` (`flowList.tsx`) renders each rule as its own
+  WHEN/THEN/USING row and reads and writes through the exact `Flow` object and the exact
+  `onSave`/`onResetEdge` callbacks the canvas already uses — one model, two presentations, not
+  a second copy that can drift. A roving-tabindex row list, arrow keys to move, Enter/Space to
+  open a row's own `<select>`s, and a keyboard-only "add a node" bar and `NewRuleBar` mean a
+  flow can be attached, wired, edited and reset from the keyboard alone. **Arm** itself was
+  never canvas-only — it is one ordinary button above the Canvas/List toggle, reachable by Tab
+  regardless of which view is open — so arming, not only building, has always had a keyboard
+  path; what this phase adds is the ability to reach that point without a pointer at all.
+
 ## Known limitations
 
 Decisions, not a bug list — each one was looked at and left as it is, with the reason it is
@@ -364,27 +403,27 @@ cheaper to live with than to fix.
 
 ## Carried forward from Phase 2a's reviews
 
-Three things deliberately left as they are, each with a known consequence. None blocks a
-merge; all three are cheap and belong in 2b.
+Three things were flagged as deliberately left for 2b. Two are now fixed — recorded here
+rather than deleted outright, since a reader hunting for why the drawer used to pop open
+unprompted, or why a dragged node used to land one move short, should still find the answer.
 
-- **The drawer opens unprompted on the first `deck:flows` post that carries any flow.** The
-  auto-open rule treats a flow as "fresh" when it was not in the previous list, and on the
-  first post the previous list is `[]` — so every saved flow reads as new. Mild today (the
-  setting is off by default, the drawer is non-modal), but it means opening the Deck pops the
-  drawer for anyone with a saved flow. Fix by seeding the seen-set from the first post, or by
-  opening only when a create was actually requested.
-- **A `pointerup` can save a one-event-stale node position.** Lifting `onSave` out of the
-  `setDrag` updater — which was correct, and fixed a real double-write — means the release
-  handler reads the drag position from its effect closure rather than from the updater's
-  argument. `pointermove` is InputContinuous priority and `pointerup` is Discrete, so a
-  release arriving before React flushes the final move saves the previous position. `snap()`
-  hides it unless that move crossed a grid line. Fix with a `dragRef` read in the release
-  handler.
+- **Fixed in 2b.** The drawer used to open unprompted on the first `deck:flows` post that
+  carried any flow, because the auto-open rule's "is this fresh?" check compared against an
+  empty previous list on that first post, so every saved flow read as new. `DeckApp.tsx` now
+  gates on `seenFlowsRef`: nothing is ever "fresh" against a post that hasn't landed yet, so
+  the first post can never auto-open anything.
+- **Fixed in 2b.** A `pointerup` used to save a one-event-stale node position: lifting `onSave`
+  out of the `setDrag` updater (correct, and it fixed a real double-write) left the release
+  handler reading the drag position from its effect closure rather than from the last move.
+  `OrchestratorDrawer.tsx` now writes a `dragRef` synchronously on every `pointermove` and
+  reads that ref, not the closed-over state, in the `pointerup` handler — the exact fix this
+  entry used to ask for.
 - **The webview import-graph guard is narrower than its name.** `test/webview/webviewGraph.test.ts`
   walks relative imports only: it skips bare npm specifiers, so a webview-reachable package
   that requires `fs` passes the test and still fails the build. It also matches `import`
   syntax, not `require()` or dynamic `import()`. Adequate for this ESM/TS repo; worth widening
-  if a dependency ever enters the webview graph.
+  if a dependency ever enters the webview graph. Still open — nothing in Phase 3 or 4 touched
+  this guard.
 
 ## What Phase 1 forced into Phase 2's contract
 
@@ -438,7 +477,9 @@ extension shippable.
    and the toasts. This is the phase that needs the most care in review.
 4. **The canvas proper** — port-to-port wiring, node dragging, Tidy, expand and resize,
    plus the list view. Phase 2's drawer can be the list view first; the canvas replaces it
-   as the default once it works.
+   as the default once it works. **Shipped** — see "The canvas and the keyboard path:
+   shipped in Phase 4" above; the canvas stayed the default view throughout, with List as
+   a toggle rather than a first cut later replaced.
 
 ## Multiple flows
 
