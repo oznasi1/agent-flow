@@ -3515,6 +3515,27 @@ describe("takeBatch", () => {
     const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
     expect(toast.message).toBe("Launched 2 of 2 in parallel. A worktree + Claude session per task.");
   });
+
+  // A one-key "batch" to a shared, non-"new" destination is `shared === true` with
+  // `isBatch === false` — modeled on "skips Remote Control without asking for a
+  // one-key batch to a shared (non-new) destination" above. runSeedPass sees only
+  // this one task's plan for the window either way, so it seeds regardless of
+  // surface — the gate must require isBatch too, or this real single-task launch
+  // would wrongly get the multi-task "isn't seeded" claim.
+  it("does not claim a one-key batch to a shared (non-new) destination is unseeded under Copilot", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot", openIn: "this-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(currentWindow).mockReturnValue({
+      identity: "/repos/api",
+      kind: "folder",
+      roots: [{ name: "api", path: "/repos/api" }],
+    });
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 1 of 1 in one shared window. A worktree + Copilot session per task.");
+    expect(toast.message).not.toContain("isn't seeded");
+  });
 });
 
 describe("live-window open targets", () => {
