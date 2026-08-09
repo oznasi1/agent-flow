@@ -17,7 +17,7 @@ export type CheckStatus = "fail" | "warn" | "skip" | "ok";
  *  of `DoctorInputs.sourceLabel`) — so a Jira user still reads "Jira" while this
  *  module, and the literal union below, stay free of any one source's name. The
  *  other four groups are fixed: every source shares them. */
-export type DoctorGroup = "source" | "Local" | "GitHub" | "Claude Code" | "State";
+export type DoctorGroup = "source" | "Local" | "GitHub" | "Claude Code" | "Copilot" | "State";
 
 /** What fixes a failing check. Resolved by the view — this module names the intent
  *  and never touches `vscode`. */
@@ -73,6 +73,13 @@ export interface DoctorInputs {
   claudeCode: { installed: boolean; version: string | null };
   claudeProjectsReadable: boolean;
   runs: number;
+  /** Which agent seeds sessions — decides whether the Claude Code rows or the
+   *  Copilot row appear. Already host-guarded by readAgentProvider, so this is
+   *  never "copilot" in Cursor. */
+  agentProvider: "claude-code" | "copilot";
+  /** Probed by command registration, not extension id: chat is built into VS Code
+   *  and Copilot ships bundled in some builds, so an id check would false-negative. */
+  copilotChat: { available: boolean };
 }
 
 const SIGN_IN: DoctorAction = { kind: "command", command: "agentFlow.signIn", label: "Sign in" };
@@ -82,7 +89,7 @@ const RANK: Record<CheckStatus, number> = { fail: 0, warn: 1, skip: 2, ok: 3 };
 
 /** Every check, most decisive first, so the QuickPick opens on the thing to fix. */
 export function runChecks(i: DoctorInputs): Check[] {
-  const checks: Check[] = [...sourceChecks(i), ...localChecks(i), ...ghChecks(i), ...claudeChecks(i), ...stateChecks(i)];
+  const checks: Check[] = [...sourceChecks(i), ...localChecks(i), ...ghChecks(i), ...agentChecks(i), ...stateChecks(i)];
   // A stable sort keeps the authored group order inside one status, so the report
   // reads top-to-bottom the way the check set is documented.
   return checks
@@ -234,6 +241,30 @@ function ghChecks(i: DoctorInputs): Check[] {
   ];
 }
 
+/** Picks the Claude Code rows or the Copilot row by which agent is configured.
+ *  The Claude session-files row runs either way — it's about the Deck's live
+ *  signal, which reads `~/.claude/projects` regardless of which agent seeds
+ *  sessions. */
+function agentChecks(i: DoctorInputs): Check[] {
+  return i.agentProvider === "copilot" ? [...copilotChecks(i), ...claudeSessionChecks(i)] : claudeChecks(i);
+}
+
+function copilotChecks(i: DoctorInputs): Check[] {
+  return [
+    {
+      group: "Copilot",
+      label: "Copilot Chat available",
+      status: i.copilotChat.available ? "ok" : "fail",
+      detail: i.copilotChat.available
+        ? "workbench.action.chat.open is registered"
+        : "no chat command is registered — GitHub Copilot Chat isn't available in this window",
+      ...(i.copilotChat.available
+        ? {}
+        : { action: { kind: "extension", id: "github.copilot-chat", label: "Show extension" } }),
+    },
+  ];
+}
+
 function claudeChecks(i: DoctorInputs): Check[] {
   const out: Check[] = [];
   const { installed, version } = i.claudeCode;
@@ -265,16 +296,22 @@ function claudeChecks(i: DoctorInputs): Check[] {
     });
   }
 
-  out.push({
-    group: "Claude Code",
-    label: "Claude session files",
-    status: i.claudeProjectsReadable ? "ok" : "warn",
-    detail: i.claudeProjectsReadable
-      ? "~/.claude/projects is readable"
-      : `~/.claude/projects is unreadable — the Deck's live signal falls back to git and ${i.sourceLabel}`,
-  });
+  out.push(...claudeSessionChecks(i));
 
   return out;
+}
+
+function claudeSessionChecks(i: DoctorInputs): Check[] {
+  return [
+    {
+      group: "Claude Code",
+      label: "Claude session files",
+      status: i.claudeProjectsReadable ? "ok" : "warn",
+      detail: i.claudeProjectsReadable
+        ? "~/.claude/projects is readable"
+        : `~/.claude/projects is unreadable — the Deck's live signal falls back to git and ${i.sourceLabel}`,
+    },
+  ];
 }
 
 function stateChecks(i: DoctorInputs): Check[] {
@@ -330,5 +367,5 @@ export function formatReport(checks: Check[], sourceLabel: string): string {
 }
 
 function groupOrder(g: DoctorGroup): number {
-  return ["source", "Local", "GitHub", "Claude Code", "State"].indexOf(g);
+  return ["source", "Local", "GitHub", "Claude Code", "Copilot", "State"].indexOf(g);
 }

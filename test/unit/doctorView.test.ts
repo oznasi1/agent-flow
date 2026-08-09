@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { commands, env, extensions, window, Uri } from "../_mocks/vscode";
-import { collectInputs, showDoctor, probeClaudeExtension, type DoctorDeps } from "../../src/doctorView";
+import { collectInputs, showDoctor, probeClaudeExtension, probeCopilotChat, type DoctorDeps } from "../../src/doctorView";
 import { formatReport, runChecks } from "../../src/engine/doctor";
 
 /** Every seam healthy. Each test spoils exactly one. */
@@ -16,6 +16,7 @@ const deps = (over: Partial<DoctorDeps> = {}): DoctorDeps => ({
     workspaceDir: "/ws",
     repoBlocklist: [],
     prFacts: true,
+    agentProvider: "claude-code",
   }),
   hasCredentials: async () => true,
   probe: async () => ({
@@ -28,6 +29,7 @@ const deps = (over: Partial<DoctorDeps> = {}): DoctorDeps => ({
   repos: () => ({ repos: 3, gitRepos: 3 }),
   claudeExtension: () => ({ installed: true, version: "2.1.220" }),
   claudeProjectsReadable: () => true,
+  copilotChat: async () => ({ available: false }),
   runs: () => 4,
   log: () => undefined,
   ...over,
@@ -92,6 +94,25 @@ describe("collectInputs — local and tooling probes", () => {
     );
     expect(i.reposRoot).toEqual({ path: "/repos", exists: true, repos: 3, gitRepos: 3 });
     expect(i.workspaceDir).toEqual({ path: "/ws", exists: false, writable: false });
+  });
+});
+
+describe("collectInputs — the agent provider", () => {
+  it("forwards the configured provider", async () => {
+    const cfg = deps().config;
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "copilot" }) }));
+    expect(i.agentProvider).toBe("copilot");
+  });
+
+  it("probes Copilot Chat only when the provider is copilot", async () => {
+    const copilotChat = vi.fn(async () => ({ available: true }));
+    const cfg = deps().config;
+    await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "claude-code" }), copilotChat }));
+    expect(copilotChat).not.toHaveBeenCalled();
+
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "copilot" }), copilotChat }));
+    expect(copilotChat).toHaveBeenCalled();
+    expect(i.copilotChat).toEqual({ available: true });
   });
 });
 
@@ -183,5 +204,22 @@ describe("probeClaudeExtension", () => {
   it("reports installed-but-unversioned rather than guessing", () => {
     extensions.getExtension.mockReturnValue({ packageJSON: {} } as never);
     expect(probeClaudeExtension()).toEqual({ installed: true, version: null });
+  });
+});
+
+describe("probeCopilotChat", () => {
+  it("is available when the chat-open command is registered", async () => {
+    commands.getCommands.mockResolvedValue(["workbench.action.chat.open", "other.command"]);
+    await expect(probeCopilotChat()).resolves.toEqual({ available: true });
+  });
+
+  it("is unavailable when no chat command is registered — an extension id would false-negative here", async () => {
+    commands.getCommands.mockResolvedValue(["some.other.command"]);
+    await expect(probeCopilotChat()).resolves.toEqual({ available: false });
+  });
+
+  it("treats a failed command lookup as unavailable rather than throwing", async () => {
+    commands.getCommands.mockRejectedValue(new Error("boom"));
+    await expect(probeCopilotChat()).resolves.toEqual({ available: false });
   });
 });
