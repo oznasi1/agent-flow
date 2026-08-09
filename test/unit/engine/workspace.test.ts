@@ -776,6 +776,71 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
     expect(window.createTerminal).not.toHaveBeenCalled();
   });
+
+  describe("seedAgentSession — copilot panel", () => {
+    const CHAT_OPEN_CMD = "workbench.action.chat.open";
+
+    beforeEach(() => {
+      env.uriScheme = "vscode";
+      setConfig({ agentProvider: "copilot", agentSurface: undefined });
+      commands.getCommands.mockResolvedValue([CHAT_OPEN_CMD]);
+    });
+
+    afterEach(() => {
+      env.uriScheme = "cursor";
+      setConfig({ agentProvider: undefined });
+    });
+
+    it("opens chat with the prompt prefilled and unsubmitted", async () => {
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(commands.executeCommand).toHaveBeenCalledWith(
+        CHAT_OPEN_CMD,
+        expect.objectContaining({ isPartialQuery: true, mode: "agent" }),
+      );
+      const arg = commands.executeCommand.mock.calls.find((c) => c[0] === CHAT_OPEN_CMD)?.[1] as {
+        query: string;
+      };
+      expect(arg.query).toContain("do it");
+    });
+
+    it("never calls Claude Code's open command", async () => {
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(commands.executeCommand).not.toHaveBeenCalledWith(
+        CLAUDE_OPEN_CMD,
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it("falls back to the clipboard when no chat command is registered", async () => {
+      commands.getCommands.mockResolvedValue([]);
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(env.clipboard.writeText).toHaveBeenCalled();
+      expect(window.showInformationMessage).toHaveBeenCalled();
+    });
+
+    it("does not try the Claude Code URI handler", async () => {
+      commands.getCommands.mockResolvedValue([]);
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(env.openExternal).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("seedClaudeCode — remote control", () => {

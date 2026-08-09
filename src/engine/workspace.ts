@@ -49,6 +49,13 @@ const CLAUDE_OPEN_CMD = "claude-vscode.primaryEditor.open";
 // Claude tab group, so a batch's sessions stack in one column instead of one per launch.
 const CLAUDE_NEW_TAB_CMD = "claude-vscode.editor.open";
 
+// VS Code's built-in chat command, which GitHub Copilot Chat serves.
+// `isPartialQuery: true` fills the input without submitting, so Copilot honors the
+// same "we pre-fill, you press Enter" contract as the Claude Code panel.
+// Documented shape, not yet confirmed in a dev host — that verification pass is
+// still outstanding.
+const CHAT_OPEN_CMD = "workbench.action.chat.open";
+
 export interface TicketRef {
   key: string;
   summary: string;
@@ -731,6 +738,39 @@ async function seedViaTerminal(
   }
 }
 
+/** Open Copilot Chat with the prompt pre-filled and unsubmitted. Polls for the
+ * command the same way the Claude Code path does: Agent Flow and the chat extension
+ * both activate on `onStartupFinished`, so the same activation race applies.
+ *
+ * There is no URI-handler rung here — Copilot publishes no documented
+ * open-with-prompt URI — so a false return means the caller should fall back to the
+ * clipboard. */
+async function seedCopilotPanel(
+  seedText: string,
+  key: string,
+  log: (m: string) => void,
+): Promise<boolean> {
+  for (let attempt = 1; attempt <= 7; attempt++) {
+    try {
+      const cmds = await vscode.commands.getCommands(true);
+      if (cmds.includes(CHAT_OPEN_CMD)) {
+        await vscode.commands.executeCommand(CHAT_OPEN_CMD, {
+          query: seedText,
+          isPartialQuery: true,
+          mode: "agent",
+        });
+        log(`seed ${key}: opened Copilot Chat via ${CHAT_OPEN_CMD} (attempt ${attempt})`);
+        return true;
+      }
+    } catch (e) {
+      log(`seed ${key}: copilot command attempt ${attempt} threw: ${e}`);
+    }
+    await delay(700);
+  }
+  log(`seed ${key}: no chat command registered — falling back to the clipboard`);
+  return false;
+}
+
 /** Open the Claude Code panel with the prompt pre-filled. Polls for the verified
  * command (handles the activation race), then the URI handler, then clipboard.
  *
@@ -803,10 +843,9 @@ async function seedAgentSession(opts: {
     } catch (e) {
       log(`seed ${key}: URI failed: ${e}`);
     }
-  } else {
-    // Copilot + panel is filled in by a later task; until then this falls through
-    // to the clipboard fallback rather than opening the wrong agent's panel.
-    log(`seed ${key}: copilot panel seeding is not wired up yet — using the clipboard`);
+  } else if (await seedCopilotPanel(seedText, key, log)) {
+    announceRemoteControl();
+    return;
   }
 
   // 3 — fallback. One clipboard can't carry N prompts, so a batch gets a pointer to
