@@ -397,12 +397,13 @@ export function DeckApp(): JSX.Element {
       const m = ev.data;
       if (m.type === "deck:runs") {
         setRuns(m.runs);
-        setGrouping(m.grouping);
         setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
         setPrReviewStatus(m.prReviewStatus);
         setSourceLabel(m.sourceLabel);
         setSyncedAt(Date.now());
+      } else if (m.type === "deck:grouping") {
+        setGrouping(m.grouping);
       } else if (m.type === "toast") {
         const id = ++toastSeq;
         setToasts((t) => [...t.slice(-2), { id, level: m.level, message: m.message, action: m.action }]);

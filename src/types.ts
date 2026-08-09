@@ -445,10 +445,12 @@ export type OutboundMessage =
   // diff protocol would buy nothing but a chance to desynchronise.
   | { type: "notepad:notes"; notes: NotepadItemView[] }
   // The Deck
+  /** The lens, seeded once on ready and re-sent only if the setting changes under
+   * the panel. Deliberately not a field on deck:runs: that message costs a full
+   * board rebuild, so one already in flight when the user flips the lens lands
+   * carrying a pre-click value and visibly reverts the control. */
+  | { type: "deck:grouping"; grouping: "agents" | "workspaces" }
   | { type: "deck:runs"; runs: RunStatus[]; ghNote: string | null; prReviewStatus: string;
-      // Which lens to render. Echoed on every post rather than sent once, so a
-      // reload or a settings-page edit lands without a separate message.
-      grouping: "agents" | "workspaces";
       // How many runs would retire right now if both retirement windows were
       // ignored. Drives the Clear stale button, which is hidden at zero.
       staleCount: number;
@@ -466,9 +468,10 @@ export type OutboundMessage =
       stale: boolean; // the last fetch failed; these are the previous results
       reviewWrites: boolean; // agentFlow.reviewWrites — the strip's box and verbs render only when true
       // false when the strip has been switched off (reviewRequests, PR facts, or
-      // gh going unusable) — distinct from a genuine empty queue. Lets the webview
-      // drop the "To review" stat tile entirely rather than showing "0 To review",
-      // and actively clears any rows it was rendering rather than leaving them
+      // gh going unusable) — distinct from a genuine empty queue, so a future
+      // reader can tell "no rows because it's off" from "no rows because the
+      // queue is empty." Paired with an emptied requests array, which is what
+      // actually clears any rows the strip was rendering rather than leaving them
       // frozen (and their write buttons clickable) with nothing ever told to stop.
       enabled: boolean;
       // The strip is on and a first search is still in flight, with nothing cached

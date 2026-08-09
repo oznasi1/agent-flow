@@ -344,8 +344,9 @@ export class DeckPanel {
       // here used to leave the webview's last posted rows on screen exactly as
       // they were: frozen, but with their write buttons still live, so a click
       // could still reach the provider from a strip the user believed they had
-      // just switched off. `enabled: false` also lets the webview drop the "To
-      // review" stat tile instead of showing a hollow "0 To review".
+      // just switched off. `enabled: false` travels alongside the emptied
+      // `requests` for the same reason: it marks this as "off," not "empty,"
+      // for whatever downstream reads the flag.
       this.post({
         type: "deck:reviews", requests: [], issueCount: 0, sort: this.reviewSort,
         stale: false, reviewWrites: getConfig().reviewWrites, enabled: false, loading: false,
@@ -842,7 +843,6 @@ export class DeckPanel {
         // string setting a user can edit mid-session, and the board re-posts often
         // enough that this is the whole of "keep it live".
         prReviewStatus: getConfig().prReviewStatus,
-        grouping: getConfig().deckGrouping,
         staleCount: this.staleCount,
         sourceLabel: this.connector.info().label,
       });
@@ -897,6 +897,11 @@ export class DeckPanel {
       this.postCachedReviews();
       touched = true;
     }
+    // Posted, not refreshed: display-only, and this is what keeps a settings-page
+    // edit landing now that the lens no longer rides along on every board post.
+    if (e.affectsConfiguration("agentFlow.deckGrouping")) {
+      this.post({ type: "deck:grouping", grouping: cfg.deckGrouping });
+    }
     if (touched) await this.refreshBusy();
   }
 
@@ -910,6 +915,7 @@ export class DeckPanel {
         // strip on screen with the first paint; with no cache to post, the same
         // call posts `loading: true`, so the strip still has something to say
         // while the first search runs.
+        this.post({ type: "deck:grouping", grouping: getConfig().deckGrouping });
         this.postCachedReviews();
         await this.refreshBusy();
         break;
@@ -920,12 +926,13 @@ export class DeckPanel {
         await this.clearStale();
         break;
       case "deck:setGrouping":
-        // Persisted, unlike the three trust toggles beside it: a view preference
-        // re-picked on every panel open is a daily papercut.
+        // Persisted, so the lens survives a reload — but not refreshed: the
+        // webview derives both lenses from the run list it already holds, so a
+        // rebuild here would redraw an identical board at the cost of git per
+        // repo and a connector round trip per run.
         await vscode.workspace
           .getConfiguration("agentFlow")
           .update("deckGrouping", m.grouping, vscode.ConfigurationTarget.Global);
-        await this.refreshBusy();
         break;
       case "deck:inspect":
         await this.inspect(m.key, m.action, m.repo);

@@ -34,9 +34,8 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   ...over,
 });
 
-const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated",
-                 grouping: "agents" | "workspaces" = "agents", sourceLabel = "Jira"): OutboundMessage =>
-  ({ type: "deck:runs", runs, ghNote: null, prReviewStatus, grouping, staleCount: 0, sourceLabel });
+const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated", sourceLabel = "Jira"): OutboundMessage =>
+  ({ type: "deck:runs", runs, ghNote: null, prReviewStatus, staleCount: 0, sourceLabel });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
@@ -551,7 +550,7 @@ describe("DeckApp PR-facts chrome", () => {
 
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", grouping: "agents", staleCount: 0, sourceLabel: "Jira" });
+    host({ type: "deck:runs", runs: [mkStatus()], ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", staleCount: 0, sourceLabel: "Jira" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 
@@ -560,14 +559,16 @@ describe("DeckApp PR-facts chrome", () => {
   // which grouping it is about rather than relying on the default.
   it("names a single agent instead of counting to one", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })], "PR initiated", "workspaces"));
+    host({ type: "deck:grouping", grouping: "workspaces" });
+    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })]));
     expect(screen.getByText("svc-7e")).toBeTruthy();
     expect(screen.queryByText(/1 agent/)).toBeNull();
   });
 
   it("counts several agents and lists them when expanded", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })], "PR initiated", "workspaces"));
+    host({ type: "deck:grouping", grouping: "workspaces" });
+    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
     const disclosure = screen.getByRole("button", { name: /2 agents/ });
     expect(screen.queryByText("svc-fa")).toBeNull();
     fireEvent.click(disclosure);
@@ -582,13 +583,15 @@ describe("DeckApp PR-facts chrome", () => {
     // its session name, so it earns .id; "N agents" is prose about a count and
     // must not carry the identifier styling, even though both sit in .ag-label.
     const solo = render(<DeckApp />);
-    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })], "PR initiated", "workspaces"));
+    host({ type: "deck:grouping", grouping: "workspaces" });
+    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })]));
     const soloLabel = solo.container.querySelector(".ag-label")!;
     expect(soloLabel.classList.contains("id")).toBe(true);
     solo.unmount();
 
     const many = render(<DeckApp />);
-    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })], "PR initiated", "workspaces"));
+    host({ type: "deck:grouping", grouping: "workspaces" });
+    host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
     const manyLabel = many.container.querySelector(".ag-label")!;
     expect(manyLabel.classList.contains("id")).toBe(false);
   });
@@ -602,7 +605,8 @@ describe("DeckApp PR-facts chrome", () => {
       session: { pid: 1, sessionId: "svc-7e", cwd: "/r/svc", startedAt: 0, name: "svc-7e" },
       activity: { state: "working", lastActivityMs: Date.now(), slug: null },
     };
-    host(runsMsg([mkStatus({ agents: [noStart, mkAgent("svc-fa", "idle", Date.now() - 60_000)] })], "PR initiated", "workspaces"));
+    host({ type: "deck:grouping", grouping: "workspaces" });
+    host(runsMsg([mkStatus({ agents: [noStart, mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
     fireEvent.click(screen.getByRole("button", { name: /2 agents/ }));
     const rows = [...container.querySelectorAll(".ag-row")];
     const zeroRow = rows.find((r) => r.textContent?.includes("svc-7e"))!;
@@ -1061,8 +1065,8 @@ describe("Agents view", () => {
 
   it("shows the workspace view's nested agents row instead when grouping is workspaces", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ agents: [{ ...mkAgent("agent-flow-2e", "working", 100), repo: "svc" }] })],
-                 "PR initiated", "workspaces"));
+    host({ type: "deck:grouping", grouping: "workspaces" });
+    host(runsMsg([mkStatus({ agents: [{ ...mkAgent("agent-flow-2e", "working", 100), repo: "svc" }] })]));
     // The collapsed agents row, not a card per agent.
     expect(screen.getByTitle(/sessions open in this directory/i)).toBeInTheDocument();
     expect(screen.getAllByText("ASM-1")).toHaveLength(1);
@@ -1070,18 +1074,20 @@ describe("Agents view", () => {
 
   it("shows the session slug as a tooltip on an expanded agent row", () => {
     render(<DeckApp />);
+    host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({
       agents: [{ ...mkAgent("agent-flow-2e", "working", 100), activity: { state: "working", lastActivityMs: 100, slug: "export-streaming-fix" } }],
-    })], "PR initiated", "workspaces"));
+    })]));
     fireEvent.click(screen.getByTitle(/sessions open in this directory/i));
     expect(screen.getByTitle("export-streaming-fix")).toBeInTheDocument();
   });
 
   it("has no title on an expanded agent row when no slug is known yet", () => {
     const { container } = render(<DeckApp />);
+    host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({
       agents: [mkAgent("agent-flow-2e", "working", 100)],
-    })], "PR initiated", "workspaces"));
+    })]));
     fireEvent.click(screen.getByTitle(/sessions open in this directory/i));
     expect(container.querySelector(".ag-name")).not.toHaveAttribute("title");
   });
@@ -1184,6 +1190,14 @@ describe("Agents view", () => {
     fireEvent.click(screen.getByRole("button", { name: "Workspaces" }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:setGrouping", grouping: "workspaces" });
   });
+
+  it("takes the lens from its own seed message and keeps it across board posts", () => {
+    render(<DeckApp />);
+    host({ type: "deck:grouping", grouping: "workspaces" });
+    host(runsMsg([mkStatus()]));
+
+    expect(screen.getByText("Workspaces").closest("button")).toHaveClass("on");
+  });
 });
 
 // The Deck's own copy of Task 13's promise: every "Jira"-shaped string on the
@@ -1232,7 +1246,7 @@ describe("DeckApp — source label", () => {
 
   it("templates every one of those strings off a non-Jira sourceLabel — proving the label actually reaches the render", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus()], "PR initiated", "agents", "Acme"));
+    host(runsMsg([mkStatus()], "PR initiated", "Acme"));
     expect(screen.getByTitle("Re-read git, Acme and PR state now")).toBeInTheDocument();
     expect(document.querySelector(".note")!.textContent).toBe("git + Acme backbone · best-effort live from ~/.claude/projects");
     expect(screen.getByTitle("Open ASM-1 in Acme")).toBeInTheDocument();
@@ -1242,7 +1256,7 @@ describe("DeckApp — source label", () => {
     // A fresh deck:runs post with an unknown agent activity is the only way left
     // to reach the parked string — the live signal is unconditional now, so
     // there is no toggle to click.
-    host(runsMsg([mkStatus({ agent: { state: "unknown", lastActivityMs: null, slug: null } })], "PR initiated", "agents", "Acme"));
+    host(runsMsg([mkStatus({ agent: { state: "unknown", lastActivityMs: null, slug: null } })], "PR initiated", "Acme"));
     expect(screen.getByText("parked · git + Acme only")).toBeInTheDocument();
     // No trace of the shipped default anywhere on the rendered board.
     expect(document.body.textContent).not.toMatch(/Jira/);
@@ -1250,7 +1264,7 @@ describe("DeckApp — source label", () => {
 
   it("templates the inferred-key card title off a non-Jira sourceLabel too", () => {
     render(<DeckApp />);
-    host(runsMsg([localCard()], "PR initiated", "agents", "Acme"));
+    host(runsMsg([localCard()], "PR initiated", "Acme"));
     expect(screen.getByTitle("Open ASM-5641 in Acme")).toBeInTheDocument();
     expect(screen.queryByTitle(/in Jira/)).not.toBeInTheDocument();
   });

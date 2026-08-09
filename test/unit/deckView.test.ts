@@ -1043,25 +1043,64 @@ describe("retire sweep", () => {
 });
 
 describe("board grouping", () => {
-  it("persists the grouping globally and echoes it back on the next post", async () => {
+  it("seeds the lens on ready, ahead of the board build", async () => {
+    // Asserted without settling, same idiom as the cached-reviews test above:
+    // the seed post happens synchronously inside onMessage, before its first
+    // await, so at this instant a board post cannot have happened yet.
+    setConfig({ deckGrouping: "workspaces" });
     show();
     await settled();
     const p = lastPanel();
+    p.webview.postMessage.mockClear();
+    const ready = p._fire({ type: "deck:ready" });
+
+    const early = posts(p);
+    expect(early.find((m) => m.type === "deck:grouping")).toEqual({ type: "deck:grouping", grouping: "workspaces" });
+    expect(early.find((m) => m.type === "deck:runs")).toBeUndefined();
+
+    await ready;
+    await settled();
+  });
+
+  it("persists a lens change without rebuilding the board", async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    const boardsBefore = posts(p).filter((m) => m.type === "deck:runs").length;
+
     await p._fire({ type: "deck:setGrouping", grouping: "workspaces" });
     await settled();
+
     // getConfiguration hands out a fresh stub per call, so the write is asserted
     // across every stub this pass produced rather than against one of them.
     const updates = workspace.getConfiguration.mock.results
       .flatMap((r) => (r.value as { update: { mock: { calls: unknown[][] } } }).update.mock.calls);
     expect(updates).toContainEqual(["deckGrouping", "workspaces", ConfigurationTarget.Global]);
-    expect(posts(p).filter((m) => m.type === "deck:runs").at(-1)!.grouping).toBe("workspaces");
+    // deckGrouping is display-only — the webview draws both lenses from the run
+    // list it already holds, so a rebuild here spends git per repo and a connector
+    // round trip per run to produce the identical board.
+    expect(posts(p).filter((m) => m.type === "deck:runs")).toHaveLength(boardsBefore);
   });
 
-  it("posts the grouping the setting already holds, without being asked", async () => {
-    setConfig({ deckGrouping: "workspaces" });
+  it("re-posts the lens when the setting changes under the panel", async () => {
     show();
     await settled();
-    expect(posts(lastPanel()).filter((m) => m.type === "deck:runs").at(-1)!.grouping).toBe("workspaces");
+    const p = lastPanel();
+
+    setConfig({ deckGrouping: "workspaces" });
+    fireConfigurationChanged("agentFlow.deckGrouping");
+    await settled();
+
+    expect(posts(p).at(-1)).toEqual({ type: "deck:grouping", grouping: "workspaces" });
+  });
+
+  it("no longer carries the lens on the board post", async () => {
+    // Control state on deck:runs is what made every toggle flip back before it
+    // settled: that message costs a full rebuild, so one already in flight when
+    // the user clicks lands carrying a pre-click snapshot.
+    show();
+    await settled();
+    expect(posts(lastPanel()).find((m) => m.type === "deck:runs")).not.toHaveProperty("grouping");
   });
 });
 
