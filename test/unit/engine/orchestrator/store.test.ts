@@ -162,7 +162,6 @@ describe("readFlows — a store it cannot trust", () => {
           { from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify" }, // no id
           { id: "e5", to: "z", cond: { kind: "pr-merged" }, action: "notify" }, // no from
           { id: "e6", from: "a", cond: { kind: "pr-merged" }, action: "notify" }, // no to
-          { id: "e7", from: "a", to: "z", cond: { kind: "pr-merged" } }, // no action
           { id: "e8", from: "a", to: "z", cond: { kind: "pr-merged" }, action: null }, // action not a string
           null, // not an object at all
           "e10",
@@ -171,6 +170,20 @@ describe("readFlows — a store it cannot trust", () => {
       }),
     });
     expect(readFlows(io, DIR)[0].edges.map((e) => e.id)).toEqual(["keeper"]);
+  });
+
+  // `action` used to be required here too, and dropping this case silently
+  // deleted every rule in every flow file on disk once the shipping build
+  // stopped writing it — see migration.test.ts, which owns this behaviour.
+  it("keeps an edge with no action at all", () => {
+    const p = path.join(DIR, "f1.json");
+    const { io } = fakeIo({
+      [p]: JSON.stringify({
+        ...flow(),
+        edges: [{ id: "e7", from: "a", to: "z", cond: { kind: "pr-merged" } }],
+      }),
+    });
+    expect(readFlows(io, DIR)[0].edges.map((e) => e.id)).toEqual(["e7"]);
   });
 
   it("drops a node the canvas could not place, and keeps the rest", () => {

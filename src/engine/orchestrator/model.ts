@@ -63,17 +63,24 @@ export type Condition =
   | { kind: "agent-idle-over"; minutes: number }
   | { kind: "ticket-status-is"; status: string };
 
-/** What an edge does when its condition is met. `launch` starts a planned node;
- * `seed` opens another agent in a place that already exists; `notify` only tells
- * you. Nothing here instructs a running agent — that is impossible. */
-export type FlowAction = "launch" | "seed" | "notify";
+/** What a rule does when its condition is met, derived from the node it points
+ * at — see `actionFor`. `run` executes a command node's command.
+ *
+ * Nothing here instructs a RUNNING agent; that remains impossible (see the
+ * spec's out-of-scope note on `tell`). */
+export type FlowAction = "launch" | "seed" | "notify" | "run";
 
 export interface FlowEdge {
   id: string;
   from: string; // node id
   to: string; // node id
   cond: Condition;
-  action: FlowAction;
+  /** DERIVED, and never read to decide behaviour — `edgeAction` is. It stays on
+   * the record for one reason: an OLDER build's `validEdge` *requires* it and
+   * DROPS any edge without it, so a file this build wrote without the field
+   * would lose every rule after a downgrade or a rollback. `writeFlow` keeps it
+   * in step with the target node's kind. */
+  action?: FlowAction;
   /** A PromptMode id, for `seed` only. A launch's prompt and destination live on the
    * `planned` node it targets, which carries its whole launch configuration — see
    * `PlannedNode`. Two homes for one fact is deliberate here: a place has no mode
@@ -162,3 +169,32 @@ export function findNode(flow: Flow, id: string): FlowNode | undefined {
 export function incomingEdges(flow: Flow, nodeId: string): FlowEdge[] {
   return flow.edges.filter((e) => e.to === nodeId);
 }
+
+/** The action a node kind implies. This is the single source of truth for "what
+ * does this rule do", replacing the copy that used to live on the edge — the
+ * drawer already refused every pairing except these, which is the tell that the
+ * edge's copy was always redundant.
+ *
+ * Takes a `string`, not `FlowNode["kind"]`: `store.ts`'s `validNode` admits an
+ * unknown kind on purpose so a flow written by a newer build still renders, and
+ * such a node must derive NO action rather than fall through to a wrong one. */
+export function actionFor(kind: string): FlowAction | undefined {
+  switch (kind) {
+    case "planned": return "launch";
+    case "place": return "seed";
+    case "notify": return "notify";
+    case "command": return "run";
+    default: return undefined;
+  }
+}
+
+/** The action this edge performs: the one its TARGET implies. `undefined` when
+ * the target is missing or of a kind this build does not know. */
+export function edgeAction(flow: Flow, e: FlowEdge): FlowAction | undefined {
+  return actionFor(findNode(flow, e.to)?.kind ?? "");
+}
+
+/** The opening words of the error stamped on an edge whose stored action
+ * disagrees with its target. Exported so the migration, the drawer's copy, and
+ * the tests all name it once. */
+export const ACTION_MISMATCH_PREFIX = "This rule's action no longer matches where it points";

@@ -3,7 +3,7 @@
 // and every rule here testable without a temp directory.
 import * as os from "os";
 import * as path from "path";
-import { Flow, FlowEdge, FlowNode } from "./model";
+import { ACTION_MISMATCH_PREFIX, actionFor, Flow, FlowEdge, FlowNode, isSettled } from "./model";
 
 /** The only IO surface. Implementations return null / throw only from `readDir`;
  * `readFile` returns null for anything it cannot read, so one unreadable file
@@ -59,7 +59,11 @@ function validEdge(v: unknown): v is FlowEdge {
   return (
     typeof e.id === "string" &&
     typeof e.from === "string" && typeof e.to === "string" &&
-    typeof e.action === "string" &&
+    // `action` is deliberately NOT required. It used to be, and an edge failing
+    // this check is DROPPED — so requiring a field this build no longer writes
+    // would silently delete every rule in every flow file already on disk.
+    // When present it must still be a string, so genuine garbage is caught.
+    (e.action === undefined || typeof e.action === "string") &&
     !!e.cond && typeof e.cond === "object" &&
     typeof (e.cond as { kind?: unknown }).kind === "string"
   );
@@ -92,11 +96,56 @@ function coerceFlow(v: unknown): Flow | null {
   const f = v as Partial<Flow>;
   if (typeof f.id !== "string" || !VALID_FLOW_ID.test(f.id)) return null;
   if (!Array.isArray(f.nodes) || !Array.isArray(f.edges)) return null;
-  return { ...(v as Flow), nodes: f.nodes.filter(validNode), edges: f.edges.filter(validEdge) };
+  const shaped = { ...(v as Flow), nodes: f.nodes.filter(validNode), edges: f.edges.filter(validEdge) };
+  return latchActionMismatches(shaped);
+}
+
+/** Latch any edge whose stored action disagrees with the action its target now
+ * implies. The collapse is one-to-one for `launch` and `seed` — the drawer
+ * refused every other pairing — but NOT for `notify`: nothing ever stopped a
+ * notify rule from pointing at a `place`, and deriving the action from the
+ * target would silently turn that into a `seed`, opening a paid agent session
+ * where the user asked for a toast.
+ *
+ * The edge is kept, not dropped: the user's wiring is not ours to discard. It is
+ * stamped with an `error`, which `isSettled` treats as terminal, so an armed
+ * flow will not fire it and the drawer's existing stalled-rule affordance
+ * surfaces it. Reset is how the user accepts the new reading. A latched rule
+ * costs one click; a migration that spends money on a guess does not come back.
+ *
+ * Only unsettled edges are touched — an edge that already ran or already failed
+ * is history, and rewriting its receipt would blame this migration for it. */
+function latchActionMismatches(flow: Flow): Flow {
+  return {
+    ...flow,
+    edges: flow.edges.map((e) => {
+      if (e.action === undefined || isSettled(e)) return e;
+      const derived = actionFor(flow.nodes.find((n) => n.id === e.to)?.kind ?? "");
+      // Nothing derived means a missing or unknown target, which `evaluate.ts`
+      // already reports as "gone". Absence is not disagreement.
+      if (derived === undefined || derived === e.action) return e;
+      return {
+        ...e,
+        error: `${ACTION_MISMATCH_PREFIX}: it was saved as "${e.action}" but where it points now means "${derived}". Reset the rule to accept that, or point it somewhere else.`,
+      };
+    }),
+  };
 }
 
 export function writeFlow(io: FlowIo, dir: string, flow: Flow): void {
-  io.writeFile(fileFor(dir, flow.id), JSON.stringify(flow, null, 2) + "\n");
+  // Keep `action` in step with the node each edge points at. Written for
+  // COMPATIBILITY only (see `FlowEdge.action`): an older build requires the
+  // field and drops edges that lack it, so a file we wrote without it would
+  // lose every rule on a downgrade. Derived from the target, never carried
+  // over from the edge, so this cannot preserve a stale disagreement.
+  const normalised: Flow = {
+    ...flow,
+    edges: flow.edges.map((e) => {
+      const derived = actionFor(flow.nodes.find((n) => n.id === e.to)?.kind ?? "");
+      return derived === undefined ? e : { ...e, action: derived };
+    }),
+  };
+  io.writeFile(fileFor(dir, flow.id), JSON.stringify(normalised, null, 2) + "\n");
 }
 
 /** Every flow in the store, newest first. Malformed files are skipped, not fatal;

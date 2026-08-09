@@ -64,6 +64,10 @@ export const ACTION_LABEL: Record<FlowAction, string> = {
   launch: "launch",
   seed: "seed",
   notify: "notify me",
+  // Inert until Task 4 gives a command node somewhere to point at — nothing
+  // offers this action yet, but `FlowAction` is a `Record` key here and must
+  // stay exhaustive.
+  run: "run",
 };
 
 /** How a launch destination reads as words — the closed row's own text and

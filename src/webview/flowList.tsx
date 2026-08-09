@@ -114,7 +114,7 @@ function ruleSentence(
           <option value="notify">{ACTION_LABEL.notify}</option>
         </select>
       ) : (
-        <span>{ACTION_LABEL[e.action]}</span>
+        <span>{e.action !== undefined ? ACTION_LABEL[e.action] : ""}</span>
       )}
       {/* Same rule the inspector follows: notify already reads complete on
           its own ("THEN notify me"); the other two verbs need the target's

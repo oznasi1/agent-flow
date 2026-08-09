@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isSettled, isSpendAction, findNode, incomingEdges,
+  actionFor,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -103,5 +104,21 @@ describe("incomingEdges", () => {
 
   it("is empty for a node nothing points at", () => {
     expect(incomingEdges(flow, "a")).toEqual([]);
+  });
+});
+
+describe("actionFor", () => {
+  it("maps every node kind to its action", () => {
+    expect(actionFor("planned")).toBe("launch");
+    expect(actionFor("place")).toBe("seed");
+    expect(actionFor("notify")).toBe("notify");
+    expect(actionFor("command")).toBe("run");
+  });
+
+  // The store admits an unknown `kind` string on purpose, so a flow written by a
+  // NEWER build still renders here. It must derive no action rather than guess.
+  it("derives nothing from an unknown kind", () => {
+    expect(actionFor("teleport")).toBeUndefined();
+    expect(actionFor("")).toBeUndefined();
   });
 });

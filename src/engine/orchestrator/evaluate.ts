@@ -101,7 +101,7 @@ export function evaluateFlow(i: EvalInput): EvalResult {
   // notify is a toast, never capped. Only ever asked of the edge that performs.
   // `isSpendAction` is the one place this question is answered — see its own
   // comment in `model.ts` for why it must not be re-spelled here.
-  const costsSlot = (e: FlowEdge) => isSpendAction(e.action);
+  const costsSlot = (e: FlowEdge) => e.action !== undefined && isSpendAction(e.action);
 
   // Cap decisions are made in the same pass as candidate selection, in flow
   // order, so an "all" junction can see how many slots are already spent by

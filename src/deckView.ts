@@ -481,7 +481,7 @@ export class DeckPanel {
         // target a deferred target can never also have a successful stamp to drop.
         const actedTargets = new Set<string>();
         const firing = unclaimed.map((f) => {
-          if (!f.perform || !isSpendAction(f.edge.action)) return f;
+          if (!f.perform || f.edge.action === undefined || !isSpendAction(f.edge.action)) return f;
           if (actedTargets.has(f.edge.to)) return { ...f, perform: false };
           actedTargets.add(f.edge.to);
           return f;
@@ -525,7 +525,7 @@ export class DeckPanel {
         for (const f of firing) {
           // A stamped-only sibling performs nothing, and a notify's whole action is
           // the toast `notifyLines` produces below.
-          if (!f.perform || !isSpendAction(f.edge.action)) continue;
+          if (!f.perform || f.edge.action === undefined || !isSpendAction(f.edge.action)) continue;
           // Re-read and check `armed` immediately before THIS edge, not once for the
           // whole flow: a launch or seed is its own `await`, and up to three of them
           // can run in one pass (the per-pass cap), each one long enough for
@@ -669,7 +669,7 @@ export class DeckPanel {
     // pre-filtering by action, so this guard is the only place that question is
     // asked on this path. What follows resolves WHAT it spends on, which
     // `isSpendAction` deliberately knows nothing about.
-    if (!isSpendAction(edge.action)) return undefined;
+    if (edge.action === undefined || !isSpendAction(edge.action)) return undefined;
     if (edge.action === "launch") {
       const node = this.plannedTarget(flow, edge);
       return node ? { action: "launch", node, note: edge.note } : undefined;
