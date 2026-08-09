@@ -7,6 +7,32 @@ import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
 import { isPrReviewStatus } from "./helpers";
 
+/** The Orchestrator's mark: one node on the left feeding two on the right
+ * through elbow connectors — the drawer's own object, drawn. It replaced a ⚡
+ * emoji, which rendered in the platform's own colour and weight (so it could
+ * not take the chip's tint) and said "fast" about a surface whose whole point
+ * is a graph.
+ *
+ * Squares, not circles: a node in this product is a place on disk, and a
+ * rectangle reads as a thing rather than a state. Orthogonal connectors rather
+ * than diagonals, matching the canvas's own edges. 1.3px strokes on a 16-unit
+ * grid at 14px, which is the weight the sidebar's glyphs already use, and
+ * `currentColor` throughout so the mark inherits whatever the chip resolves to
+ * — including the armed state and the hover.
+ *
+ * Local to this file rather than in icons.tsx: that file is the SIDEBAR's
+ * shared glyphs (see its own header), and this is the Deck's first and so far
+ * only one. It moves there the moment a second surface needs it. */
+const OrchestratorIcon = (): JSX.Element => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <rect x="1.2" y="6.1" width="4" height="3.8" rx="1.1" stroke="currentColor" strokeWidth="1.3" />
+    <rect x="10.8" y="1.6" width="4" height="3.8" rx="1.1" stroke="currentColor" strokeWidth="1.3" />
+    <rect x="10.8" y="10.6" width="4" height="3.8" rx="1.1" stroke="currentColor" strokeWidth="1.3" />
+    <path d="M5.2 8h2.6a1 1 0 0 0 1-1V4.5a1 1 0 0 1 1-1h1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+    <path d="M5.2 8h2.6a1 1 0 0 1 1 1v2.5a1 1 0 0 0 1 1h1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+  </svg>
+);
+
 let toastSeq = 0;
 
 // Everything on, and the shipped Jira label — what a first paint renders before
@@ -555,7 +581,7 @@ export function DeckApp(): JSX.Element {
               else setOpenFlowId((cur) => (cur ? null : flows[0].id));
             }}
           >
-            <span className="ic">⚡</span>
+            <OrchestratorIcon />
             <span>Orchestrator</span>
             {armedCount > 0
               ? <span className="ct">{armedCount} armed</span>

@@ -25,14 +25,45 @@
 export const ORCH_ANIM_MS = 180;
 
 export const ORCH_CSS = `
-  .orch-chip { gap: 6px; }
-  .orch-chip .ic { font-size: 12px; line-height: 1; }
-  .orch-chip .ct { font-family: var(--mono); font-size: var(--t-micro); color: var(--dim); }
+  /* Brand-toned, and the only control in the Deck header that carries a hue.
+     It earned one: every other header control is a lens over what is already
+     on the board, and this is the way into a surface that acts on its own.
+
+     A TINT, not a fill. \`.take\` and \`.act.primary\` are this product's filled
+     brand controls, and they are per-card primaries — a solid slab up here
+     would read as a third one competing with them from the chrome. So the
+     hue arrives as a hairline, a label, and a 12% wash: unmistakably the
+     brand, without claiming to be the page's primary action.
+
+     It also has to survive beside the header's one other accent, the amber
+     \`.stat.attn\` tile. Amber means "a card needs you" and teal means "this
+     is the Orchestrator"; they read as two different kinds of thing rather
+     than two alarms, which a second amber or a second fill would not. */
+  .orch-chip { gap: 6px; color: var(--brand);
+    border-color: color-mix(in srgb, var(--brand) 45%, transparent);
+    background: color-mix(in srgb, var(--brand) 12%, transparent); }
+  .orch-chip svg { display: block; }
+  .orch-chip .ct { font-family: var(--mono); font-size: var(--t-micro);
+    color: color-mix(in srgb, var(--brand) 80%, var(--dim)); }
+  /* Deepens the same hue rather than switching to the theme's generic toolbar
+     hover, which would drop the tint on the way in and read as the chip
+     losing its identity under the pointer. Matches how \`.take\` and
+     \`.btn.pri\` escalate: same hue, more of it.
+
+     \`color\` is restated here on purpose. \`.ctl:hover\` in deckStyles.ts sets
+     \`color: var(--vscode-foreground)\` at the same specificity as this rule;
+     ORCH_CSS is appended after DECK_CSS (see deck.tsx) so this sheet wins the
+     tie, but only for properties it actually declares — omitting \`color\`
+     would hand the label back to the generic hover and drop the hue. */
+  .orch-chip:hover { color: var(--brand);
+    background: color-mix(in srgb, var(--brand) 20%, transparent);
+    border-color: color-mix(in srgb, var(--brand) 65%, transparent); }
   /* Armed is what is quietly spending your attention while the drawer is
-     closed — worth reading at a glance, but the chip stays a chip: Arm is the
-     drawer's one filled control, so this earns weight through contrast and
-     weight alone, never a fill of its own. */
-  .orch-chip.armed .ct { color: var(--vscode-foreground); font-weight: 600; }
+     closed — worth reading at a glance. Still no fill: the chip is already
+     the header's one tinted control, so the armed state escalates within
+     that treatment (full-strength hue, more weight) rather than by becoming
+     a different kind of object. */
+  .orch-chip.armed .ct { color: var(--brand); font-weight: 600; }
 
   .orch { position: fixed; top: 53px; right: 0; bottom: 0; --orch-w: 560px; width: var(--orch-w); z-index: 40;
     display: flex; flex-direction: column;

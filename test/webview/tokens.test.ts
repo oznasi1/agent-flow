@@ -138,6 +138,14 @@ describe("brand accent", () => {
     marketplace: [".btn.pri", ".btn.pri:hover"],
     controls: [],
     orchestrator: [
+      // The Deck header's Orchestrator chip. A deliberate addition, and the
+      // reason this list is worth keeping: it is the first --brand spend in
+      // the header, and it is a TINT (hairline, label, 12% wash) rather than
+      // the fill `.act.primary`/`.take` use, so it does not put a second
+      // filled primary on the board. `.armed .ct` and `:hover` are the same
+      // treatment at full strength; see the rules themselves in
+      // orchestratorStyles.ts for why the hover restates `color`.
+      ".orch-chip", ".orch-chip .ct", ".orch-chip:hover", ".orch-chip.armed .ct",
       ".orch-tray.over", ".orch-node.sel", ".orch-graph.over",
       ".orch-port:hover",
       ".orch-graph.wiring .orch-node:not(.src)",
