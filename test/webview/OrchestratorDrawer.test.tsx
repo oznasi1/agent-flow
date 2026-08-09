@@ -1572,6 +1572,50 @@ describe("resizing", () => {
   });
 });
 
+// Resize and Expand fix a graph too wide for the drawer to FIT; neither says
+// anything when one still doesn't fit, which was half of the original
+// defect ("clips with no affordance"). This cue is the other half.
+describe("the clipped-edge fade", () => {
+  const grip = () => screen.getByRole("separator", { name: /resize/i });
+
+  it("appears when a node's own right edge falls past the graph's visible width", () => {
+    // Default width is 560px (see "resizing" above); GRAPH_H_INSET (34) puts
+    // the graph's own inner width at 526. A place node is NODE_W (168) wide,
+    // so x=500 puts its right edge at 668 — comfortably past the fold.
+    const wide = flow({
+      nodes: [{ id: "n1", kind: "place", x: 500, y: 24, join: "any", runKey: "ASM-1", repo: "r" }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [wide] })} />);
+    expect(screen.getByTestId("orch-graph-fade")).toBeTruthy();
+  });
+
+  it("does not appear when every node comfortably fits", () => {
+    const fits = flow({
+      nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [fits] })} />);
+    expect(screen.queryByTestId("orch-graph-fade")).toBeNull();
+  });
+
+  it("does not appear on an empty flow — never decoration on a graph with nothing to clip", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    expect(screen.queryByTestId("orch-graph-fade")).toBeNull();
+  });
+
+  it("disappears once the drawer is widened enough to clear the node it was warning about", () => {
+    // x=368 + NODE_W (168) = 536, ten pixels past the default 526px inner
+    // width — clipped at the default width, cleared by a single ArrowLeft
+    // (+16px, see RESIZE_STEP): 542 >= 536.
+    const barelyClipped = flow({
+      nodes: [{ id: "n1", kind: "place", x: 368, y: 24, join: "any", runKey: "ASM-1", repo: "r" }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [barelyClipped] })} />);
+    expect(screen.getByTestId("orch-graph-fade")).toBeTruthy();
+    fireEvent.keyDown(grip(), { key: "ArrowLeft" });
+    expect(screen.queryByTestId("orch-graph-fade")).toBeNull();
+  });
+});
+
 // The Expand toggle: a state on top of Task 3's width plumbing, not a second
 // mechanism — see OrchestratorDrawer.tsx's own comment on `renderWidth`.
 describe("expanding", () => {

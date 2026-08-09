@@ -517,6 +517,27 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * was never overwritten to begin with. */
   const renderWidth = expanded ? fullOrchWidth() : width;
 
+  /** `.orch-body`'s own left+right padding (16px each, see orchestratorStyles.ts)
+   * plus `.orch-graph`'s own 1px border on each side — the fixed horizontal
+   * cost between the drawer's own width and the graph's actual content box.
+   * A formula, not a measurement: `graphRef.current?.getBoundingClientRect()`
+   * is genuinely 0×0 under jsdom (every other use of that ref in this file
+   * already works around the same fact — see `startDrag`'s and the drop
+   * handlers' own comments), so a DOM-measured width would make this cue
+   * untestable rather than merely imprecise. `renderWidth` already IS the
+   * one true width — resize and Expand both write into it — so deriving the
+   * graph's inner width from it, once, is exact today and stays exact the
+   * day either changes without this cue silently going stale. */
+  const GRAPH_H_INSET = 34;
+  /** Does any node's own right edge fall past the graph's visible width? Not
+   * "is the drawer narrow" — a flow with every node comfortably left of the
+   * fold is not clipping anything just because the drawer itself is narrow,
+   * and resize/Expand already exist for the case where nodes genuinely don't
+   * fit. This is the one thing resize and Expand fix the FITTING of but not
+   * the SILENCE of (see this file's own task brief): a clipped node with no
+   * cue at all that anything is hidden. */
+  const clippedRight = flow.nodes.some((n) => posOf(n).x + boxOf(n).w > renderWidth - GRAPH_H_INSET);
+
   return (
     <aside className="orch" aria-label="Orchestrator" style={{ ["--orch-w" as any]: `${renderWidth}px` }}>
       {/* role="separator" + aria-orientation is the ARIA shape App.tsx's own
@@ -869,6 +890,15 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               </button>
             );
           })}
+          {/* Resize and Expand fix the FITTING of a graph too wide for the
+              drawer; neither fixes the SILENCE when one still doesn't fit —
+              "clips with no affordance" was half of the original defect (see
+              this task's own brief). Shown only when `clippedRight` says a
+              node's own right edge genuinely falls past the graph's visible
+              width, never as decoration on a graph that already fits.
+              `aria-hidden`: purely a visual cue about layout, nothing a
+              screen reader has a node-level fact to announce. */}
+          {clippedRight && <div className="orch-graph-fade" data-testid="orch-graph-fade" aria-hidden="true" />}
         </div>
         {!edge ? (
           <div className="orch-insp none" data-testid="orch-inspector">

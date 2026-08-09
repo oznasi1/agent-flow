@@ -38,7 +38,19 @@ export const ORCH_CSS = `
      the same treatment would read as a second primary control on one surface. */
   .orch-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 9px; z-index: 1;
     background: transparent; border: 0; padding: 0; cursor: ew-resize; }
-  .orch-grip:hover { background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
+  /* A permanent, quiet affordance — three 1px dots, dim and low-opacity at
+     rest — not merely a hover/focus tint. A grip that is pixel-identical to
+     a plain border until touched is a control that fixes a clipped graph
+     while being itself undiscoverable; the fix for one silence must not be
+     another. Kept well short of Arm's own weight (a flat fill, brand-toned)
+     so this never reads as competing with the surface's one filled control. */
+  .orch-grip::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 21px;
+    transform: translate(-50%, -50%); pointer-events: none;
+    background-image: radial-gradient(circle, var(--dim) 1px, transparent 1.4px);
+    background-size: 3px 7px; background-repeat: repeat-y; opacity: .6; }
+  .orch-grip:hover, .orch-grip:focus-visible { background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
+  .orch-grip:hover::after, .orch-grip:focus-visible::after { opacity: .9; }
   .orch-grip:focus-visible { outline: none;
     box-shadow: inset 0 0 0 1px var(--vscode-focusBorder); }
 
@@ -116,6 +128,15 @@ export const ORCH_CSS = `
     background-image: radial-gradient(color-mix(in srgb, var(--vscode-foreground) 13%, transparent) 1px, transparent 0);
     background-size: 16px 16px; }
   .orch-graph.over { border-color: var(--brand); }
+  /* The cue half of the original defect: resize and Expand fix a graph too
+     wide for the drawer to FIT, but neither says anything when one still
+     doesn't — a node clipped at the overflow:hidden edge with nothing to
+     mark it. Fades to the graph's own background (not a new colour), and
+     only ever renders when OrchestratorDrawer.tsx's clippedRight says a
+     node's own right edge genuinely falls past the visible width — never on
+     a graph that already fits, where it would be pure decoration. */
+  .orch-graph-fade { position: absolute; top: 1px; right: 1px; bottom: 1px; width: 28px;
+    pointer-events: none; background: linear-gradient(to right, transparent, var(--vscode-editor-background)); }
   .orch-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
   .orch-bar .sp { flex: 1; }
 
