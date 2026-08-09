@@ -714,15 +714,42 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "copilot", true);
     });
 
-    it("still pre-types the prompt without submitting it", async () => {
+    it("pre-types the prompt on the Copilot terminal only after its own boot delay, without submitting it", async () => {
+      // Tied to the terminal actually named for Copilot (not "whichever terminal
+      // was created first") and to copilot's own 2000ms bootMs, so this goes red
+      // if the copilot branch ever falls back to claude's CLI/table entry or its
+      // 1500ms delay.
       setupMatchingPlan();
       const { context } = fakeContext();
 
-      await seedWithTimers(context);
+      vi.useFakeTimers();
+      try {
+        const pending = maybeSeedAgent(context, () => {});
 
-      const [text, addNewLine] = terminalAt(0).sendText.mock.calls[1];
-      expect(addNewLine).toBe(false);
-      expect(text).toContain("[200~");
+        // Flush the synchronous-through-microtasks work — seedPass chaining,
+        // globalState.update, terminal creation, and the CLI sendText — which all
+        // happens before the boot-delay setTimeout is armed.
+        await vi.advanceTimersByTimeAsync(0);
+
+        const i = window.createTerminal.mock.calls.findIndex((c) => c[0]?.name === "Copilot · ASM-1");
+        expect(i).toBeGreaterThanOrEqual(0);
+        const t = terminalAt(i);
+        expect(t.sendText).toHaveBeenNthCalledWith(1, "copilot", true);
+        expect(t.sendText).toHaveBeenCalledTimes(1); // paste not typed yet — still inside the boot delay
+
+        await vi.advanceTimersByTimeAsync(1999); // one tick short of copilot's 2000ms bootMs
+        expect(t.sendText).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(1); // bootMs elapses
+        expect(t.sendText).toHaveBeenCalledTimes(2);
+        const [text, addNewLine] = t.sendText.mock.calls[1];
+        expect(addNewLine).toBe(false);
+        expect(text).toContain("[200~");
+
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("uses Claude's terminal name and CLI when the provider is unset", async () => {

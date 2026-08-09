@@ -26,7 +26,9 @@ const SEED_STAGGER_MS = 400;
  * scope": a missing binary shows as `command not found` in the terminal, which is
  * self-explanatory and leaves the pre-typed prompt there to reuse. Typing sooner
  * than `bootMs` loses the prompt to a screen that isn't listening yet, and there is
- * no event to await, so both delays are verified by hand in the dev host. */
+ * no event to await, so it can only be measured by hand in a dev host. Claude's
+ * 1500ms has been — this is what's shipped and observed working. Copilot's has
+ * NOT: see the UNVERIFIED tag below, still to be measured before release. */
 const CLI: Record<AgentProvider, { cmd: string; label: string; bootMs: number }> = {
   "claude-code": { cmd: "claude", label: "Claude", bootMs: 1500 },
   copilot: { cmd: "copilot", label: "Copilot", bootMs: 2000 }, // UNVERIFIED — measure in the dev host before release
