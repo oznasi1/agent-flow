@@ -112,6 +112,21 @@ describe("rows", () => {
     expect(row.textContent).toContain("notify me");
   });
 
+  // `coerceFlow` never fills `action` in, and a bare read never calls
+  // `writeFlow` — so an edge with NO stored action, pointing at planned work,
+  // is reachable on the ordinary read path, not just a hypothetical. It must
+  // read as the launch its target implies, not as a defaulted-to-notify rule:
+  // that used to render "notify me" with an empty quoted message, suppress
+  // the target identifier, and drop the mode/destination clause entirely —
+  // wrong in every particular, not merely incomplete.
+  it("derives the action from the target rather than defaulting to notify, when the edge has none stored", () => {
+    render(<FlowList {...props({ flow: placeAndPlanned({ action: undefined }) })} />);
+    const row = screen.getByTestId("flowlist-row-e1");
+    expect(row.textContent).toContain("launch"); // the derived action
+    expect(row.textContent).toContain("ASM-12"); // the target identifier, not suppressed
+    expect(row.textContent).not.toContain("notify me");
+  });
+
   it("shows a launch or seed rule's note, truncated, after the mode", () => {
     const longNote = "x".repeat(60);
     render(<FlowList {...props({ flow: placeAndPlanned({ note: longNote }) })} />);

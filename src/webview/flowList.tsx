@@ -15,7 +15,7 @@
 // living in this file. A second copy, even a faithful one today, is exactly
 // the drift "one model, two presentations" is warning against.
 import * as React from "react";
-import { Condition, Flow, FlowAction, FlowEdge, isSettled, LaunchDest } from "../engine/orchestrator/model";
+import { Condition, edgeAction, Flow, FlowAction, FlowEdge, isSettled, LaunchDest } from "../engine/orchestrator/model";
 import { FlowPromptMode, RunStatus } from "../types";
 import {
   ACTION_LABEL,
@@ -75,6 +75,19 @@ function ruleSentence(
   // otherwise call it themselves — both a closed row's presence check and
   // its rendered text want the exact same string.
   const noteText = truncatedNote(e.note);
+  // What this rule actually reads as: the edge's own stored action when it
+  // has one, else what a fresh read of its target derives — never a guessed
+  // verb. `e.action` is optional now (a flow read right after an upgrade,
+  // before its next `writeFlow`, can lack the field entirely — see
+  // `FlowEdge.action`'s own doc comment), and a fixed fallback here (this
+  // used to default to `"notify"`) was worse than leaving it unresolved: a
+  // `planned` or `place` target read as a complete, wrong `notify` rule —
+  // empty quoted message, no target identifier, no mode/destination clause —
+  // rather than an incomplete one. `undefined` below means the same thing it
+  // means everywhere else in this module: a missing or unknown target, and
+  // every read of `resolvedAction` treats that as "cannot say", never as a
+  // reason to pick a verb.
+  const resolvedAction = e.action ?? edgeAction(flow, e);
 
   const setCond = (kind: Condition["kind"]) => {
     const next = withCond(flow, e.id, kind);
@@ -106,13 +119,14 @@ function ruleSentence(
         <select
           className="orch-sel"
           aria-label="Action"
-          // `e.action` can be `undefined` (a flow read right after an upgrade,
-          // before its next `writeFlow`, can lack the field entirely — see
-          // `FlowEdge.action`'s own doc comment). A defined fallback keeps this
-          // a controlled input and keeps it reading the same as the closed
-          // row's span below, rather than the two disagreeing about what an
-          // actionless edge is.
-          value={e.action ?? "notify"}
+          // `resolvedAction` can still be `undefined` here — a missing or
+          // unknown target, same as `edgeAction`'s own doc comment — and
+          // there is no fourth `<option>` for that. Falling back to
+          // `"notify"` ONLY in this open, editable control is not the same
+          // mistake the closed row below no longer makes: this is a value the
+          // very next `onChange` overwrites, not a claim about what the rule
+          // already does.
+          value={resolvedAction ?? "notify"}
           onChange={(ev) => onSave(withAction(flow, e.id, ev.currentTarget.value as FlowAction, promptModes))}
         >
           <option value="launch">{ACTION_LABEL.launch}</option>
@@ -120,15 +134,20 @@ function ruleSentence(
           <option value="notify">{ACTION_LABEL.notify}</option>
         </select>
       ) : (
-        <span>{ACTION_LABEL[e.action ?? "notify"]}</span>
+        // "?" for "cannot say", not a guessed verb — the same reading
+        // `endLabel` gives a node it cannot find.
+        <span>{resolvedAction !== undefined ? ACTION_LABEL[resolvedAction] : "?"}</span>
       )}
       {/* Same rule the inspector follows: notify already reads complete on
           its own ("THEN notify me"); the other two verbs need the target's
           identifier — mono, house style for an identifier — to finish the
-          clause. */}
-      {(e.action ?? "notify") !== "notify" && <span style={{ fontFamily: "var(--mono)" }}>{endLabel(flow, e.to)}</span>}
+          clause. An unresolved action has no verb to finish either way, so it
+          gets neither the identifier nor the notify reading below. */}
+      {resolvedAction !== undefined && resolvedAction !== "notify" && (
+        <span style={{ fontFamily: "var(--mono)" }}>{endLabel(flow, e.to)}</span>
+      )}
 
-      {(e.action ?? "notify") === "notify" ? (
+      {resolvedAction === "notify" ? (
         open ? (
           <input
             className="orch-msg"
@@ -140,6 +159,13 @@ function ruleSentence(
         ) : (
           <span>&ldquo;{notifyMessageOf(flow, e)}&rdquo;</span>
         )
+      ) : resolvedAction === undefined ? (
+        // Not red — nothing has tried and failed, matching the inspector's
+        // own reasoning for `mismatch` just below: this is "cannot say", the
+        // same dim, low-key treatment a mismatch gets, not an error.
+        <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>
+          this rule&rsquo;s action can&rsquo;t be determined
+        </span>
       ) : mismatch ? (
         // Not red — nothing has tried and failed yet, matching the inspector's
         // own reasoning for the identical case (see actionMismatch's doc
@@ -181,8 +207,13 @@ function ruleSentence(
           )}
           {/* A place already exists, so `seed` has nothing to pick a
               destination for — only `launch` opens one, same as the
-              inspector. */}
-          {e.action === "launch" && (
+              inspector. `resolvedAction`, not raw `e.action`: this branch is
+              only reached once `resolvedAction` is neither `"notify"` nor
+              undefined, so it is exactly `"launch"` or `"seed"` here — but an
+              actionless edge whose target derives `"launch"` still needs this
+              clause, and raw `e.action` would be `undefined`, not
+              `"launch"`. */}
+          {resolvedAction === "launch" && (
             <>
               <span style={{ fontSize: "var(--t-body)" }}>in a</span>
               {open ? (
