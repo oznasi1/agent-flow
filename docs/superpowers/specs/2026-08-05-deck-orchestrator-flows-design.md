@@ -328,10 +328,12 @@ Two smaller races carried from the same phase, both now closed too, in `advanceU
 ## The canvas and the keyboard path: shipped in Phase 4
 
 - **Label placement.** `labelPoint` (`layout.ts`) starts at the chord midpoint and, when that
-  point lands inside a node's box, steps along the chord's own **normal** by the minimum
-  distance that clears every obstacle, alternating directions and growing the offset one
-  increment at a time. The normal, not a vertical nudge, because a vertical-only offset on a
-  diagonal edge drifts off the line and orphans the label from the edge it names. Two
+  point lands inside a node's box, steps along the chord's own **normal**, alternating
+  directions and growing the offset one increment at a time, until the point itself clears
+  every obstacle's box — a point-in-box test, not a true clearance check, and bounded at 16
+  steps, after which it returns the last candidate even if that one still lands inside a box.
+  The normal, not a vertical nudge, because a vertical-only offset on a diagonal edge drifts
+  off the line and orphans the label from the edge it names. Two
   alternatives were considered and rejected: **hover-only** reveal, because it merely defers
   the collision — selecting the offending edge reproduces it, so the label still has to sit
   somewhere while inspected — and **orthogonal lane routing**, because it needs a real router
@@ -352,15 +354,19 @@ Two smaller races carried from the same phase, both now closed too, in `advanceU
   populate one, so `launch` was built and tested yet unreachable end to end. `flow:addPlanned`
   (`deckView.ts`) closes that gap with a chain of native `showQuickPick`s — ticket, then repos
   (multi-select), then prompt mode, then destination — sourced from the same connector and repo
-  discovery the rest of the extension already uses, each step refusing plainly (a toast, no
-  picker) rather than opening an empty one when there is nothing to choose from.
+  discovery the rest of the extension already uses. The ticket, repos and destination steps each
+  refuse plainly (a toast, no picker) rather than opening an empty one when there is nothing to
+  choose from; the prompt-mode step in between asks unconditionally, with no such guard —
+  harmless in practice, not by design: `promptModes` (`config.ts`) falls back to the built-in
+  defaults whenever the configured list resolves empty, so that picker can never actually be
+  empty for a guard to refuse.
 - **The list view.** `FlowList` (`flowList.tsx`) renders each rule as its own
   WHEN/THEN/USING row and reads and writes through the exact `Flow` object and the exact
   `onSave`/`onResetEdge` callbacks the canvas already uses — one model, two presentations, not
   a second copy that can drift. A roving-tabindex row list, arrow keys to move, Enter/Space to
   open a row's own `<select>`s, and a keyboard-only "add a node" bar and `NewRuleBar` mean a
   flow can be attached, wired, edited and reset from the keyboard alone. **Arm** itself was
-  never canvas-only — it is one ordinary button above the Canvas/List toggle, reachable by Tab
+  never canvas-only — it is one ordinary button below the Canvas/List toggle, reachable by Tab
   regardless of which view is open — so arming, not only building, has always had a keyboard
   path; what this phase adds is the ability to reach that point without a pointer at all.
 
