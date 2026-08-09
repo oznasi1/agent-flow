@@ -119,6 +119,7 @@ const CFG = {
   repoBlocklist: [] as string[],
   defaultFilter: "unassigned",
   seedAgent: true,
+  agentProvider: "claude-code" as const,
   agentSurface: "extension" as const,
   workspaceMode: "auto" as const,
   openIn: "new-window" as const,

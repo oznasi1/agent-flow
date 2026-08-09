@@ -6,7 +6,7 @@ import { MarketplacePanel } from "./marketplaceView";
 import { maybeSeedAgent, watchPlansAndSeed } from "./engine/workspace";
 import { BASE_SCHEME, TaskBaseContentProvider } from "./engine/diffView";
 import { windowIdentity, writePresence, removePresence, defaultWindowsDir } from "./engine/presence";
-import { getConfig } from "./config";
+import { getConfig, isVSCodeHost } from "./config";
 import { maybeRunSetup, runSetup } from "./setup";
 import { showDoctor, defaultDeps } from "./doctorView";
 import { disposeTelemetry, initTelemetry, track } from "./telemetry/telemetry";
@@ -51,6 +51,16 @@ export function activate(context: vscode.ExtensionContext): void {
   const connector = resolveConnector(context, log);
   const provider = new TasksViewProvider(context, connector, log);
   log("Agent Flow Deck activated");
+
+  // Gates the `when` clause on agentFlow.agentProvider so the Copilot choice does not
+  // render in Cursor's settings UI. Cosmetic only — readAgentProvider enforces the
+  // same rule at seed time. Wrapped because an uncaught throw here disposes every
+  // registration that follows it.
+  try {
+    void vscode.commands.executeCommand("setContext", "agentFlow.host.vscode", isVSCodeHost());
+  } catch (e) {
+    log(`could not set the host context key: ${e instanceof Error ? e.message : String(e)}`);
+  }
 
   // Telemetry must come up before the commands below so `command_invoked` can
   // use it. A throw here must NEVER escape activate() — see the comment on the
