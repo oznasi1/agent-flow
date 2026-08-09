@@ -4,6 +4,7 @@ import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../eng
 import { Condition, Flow, FlowAction, FlowEdge, FlowNode, isSettled, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { AgentState, FlowPromptMode, PendingResume, RunStatus } from "../types";
 import { FlowList } from "./flowList";
+import { ORCH_ANIM_MS } from "./orchestratorStyles";
 import {
   ACTION_LABEL,
   actionMismatch,
@@ -220,7 +221,19 @@ export interface OrchestratorDrawerProps {
 }
 
 export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | null {
-  const flow = p.flows.find((f) => f.id === p.openId);
+  const openFlow = p.flows.find((f) => f.id === p.openId);
+  /** The flow the drawer keeps painting while it slides back out. Closing sets
+   * `openId` to null, which on its own unmounts the aside in the same frame —
+   * and an element that is already gone cannot be animated out. So the last
+   * open flow is held for exactly as long as the slide takes, then dropped.
+   *
+   * Frozen and unreachable for that span (see `closing` on the `<aside>`): a
+   * drawer on its way out must not answer a role query, a screen reader, or a
+   * Tab. The click that closed it has already sent focus back to the chip. */
+  const [exiting, setExiting] = React.useState<Flow | null>(null);
+  const lastFlow = React.useRef<Flow | null>(null);
+  const flow = openFlow ?? exiting;
+  const closing = !openFlow && exiting !== null;
   /** Canvas ⇄ list. The canvas is a board built from divs and pointer events —
    * no usable keyboard story — so `FlowList` (flowList.tsx) exists as the
    * keyboard path onto the exact same `Flow`. Canvas stays the default: this
@@ -293,6 +306,32 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       window.removeEventListener("pointerup", up);
     };
   }, [resizing]);
+
+  // Remember what is open, so the close can still draw it. Keyed on `openFlow`,
+  // which changes identity on every host post while the drawer is open — that is
+  // wanted: the frame the slide-out paints should be the flow as it last was,
+  // not as it was when it opened.
+  React.useEffect(() => {
+    if (openFlow) lastFlow.current = openFlow;
+  }, [openFlow]);
+
+  // Start the slide-out. Keyed on `p.openId` alone, NOT on `openFlow`: a flow
+  // can also disappear from under an open drawer without anything being
+  // closed — the host posts a list that no longer contains it, because another
+  // window deleted it. `openFlow` drops to undefined there while `openId`
+  // stays put, and that case must unmount at once rather than animate: sliding
+  // out a record that no longer exists would be a picture of something the
+  // drawer cannot show. (The Delete button in this drawer is not that path —
+  // it calls `onClose` itself, so it animates like any other close.)
+  React.useEffect(() => {
+    if (p.openId !== null) return;
+    const prev = lastFlow.current;
+    if (!prev) return;
+    lastFlow.current = null;
+    setExiting(prev);
+    const t = window.setTimeout(() => setExiting(null), ORCH_ANIM_MS);
+    return () => window.clearTimeout(t);
+  }, [p.openId]);
 
   // One pointer handler, and a save only on release — a save per pointermove would
   // be a disk write per pixel. Guarded on `flow` too: hooks must run unconditionally
@@ -566,7 +605,17 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const clippedRight = flow.nodes.some((n) => posOf(n).x + boxOf(n).w > renderWidth - GRAPH_H_INSET);
 
   return (
-    <aside className="orch" aria-label="Orchestrator" style={{ ["--orch-w" as any]: `${renderWidth}px` }}>
+    <aside
+      className={`orch${closing ? " closing" : ""}`}
+      aria-label="Orchestrator"
+      /* Hidden from the accessibility tree for the length of the slide-out,
+         not merely dimmed: for those milliseconds this is a picture of a
+         drawer that has already been dismissed. Left off entirely while
+         open — `aria-hidden={false}` is not the same as absent to every
+         screen reader, and this element is the drawer's own landmark. */
+      aria-hidden={closing || undefined}
+      style={{ ["--orch-w" as any]: `${renderWidth}px` }}
+    >
       {/* role="separator" + aria-orientation is the ARIA shape App.tsx's own
           controls already use (role="tablist"/"group" with aria-selected/
           -pressed) — a real widget role plus the state attributes that make

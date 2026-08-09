@@ -16,6 +16,14 @@
 // OrchestratorDrawer.tsx then overrides it with an inline style carrying the
 // current (dragged, arrow-keyed, or persisted) width — the override direction
 // only works because the default already exists here to be overridden.
+/** How long the drawer's slide takes, in ms. Declared HERE, beside the
+ * keyframes it drives, and imported by `OrchestratorDrawer.tsx` rather than
+ * duplicated there: that file holds the closing drawer mounted for exactly
+ * this long, so a number that drifted from the CSS would either cut the
+ * slide off mid-flight or park an invisible drawer in the DOM. This module
+ * imports nothing, so the dependency only ever points one way. */
+export const ORCH_ANIM_MS = 180;
+
 export const ORCH_CSS = `
   .orch-chip { gap: 6px; }
   .orch-chip .ic { font-size: 12px; line-height: 1; }
@@ -29,7 +37,48 @@ export const ORCH_CSS = `
   .orch { position: fixed; top: 53px; right: 0; bottom: 0; --orch-w: 560px; width: var(--orch-w); z-index: 40;
     display: flex; flex-direction: column;
     background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
-    border-left: 1px solid var(--hair); box-shadow: -14px 0 34px -12px rgba(0,0,0,.45); }
+    border-left: 1px solid var(--hair); box-shadow: -14px 0 34px -12px rgba(0,0,0,.45);
+    animation: orch-in ${ORCH_ANIM_MS}ms cubic-bezier(.22,.61,.36,1) both; }
+
+  /* The drawer is anchored to the right edge, so it arrives and leaves along
+     that edge — a panel that slid up, faded, or scaled would be inventing a
+     second story about where this surface lives. The distance is the drawer's
+     own width, so the slide starts fully off-screen no matter how wide the
+     user has dragged it, and the opacity ramp is short and front-loaded: it
+     exists to soften the shadow's arrival, not to make the panel read as
+     translucent on the way in.
+
+     \`both\` matters. Without it the first painted frame is the drawer at its
+     final position, and the animation then jumps it back off-screen — one
+     frame of flash on every open. */
+  @keyframes orch-in {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  /* Closing. \`OrchestratorDrawer.tsx\` keeps the aside mounted for exactly
+     ORCH_ANIM_MS after \`openId\` drops, drawing the flow it last held, and
+     that span is what this animates. Inert throughout — \`pointer-events\`
+     off, and the element carries \`aria-hidden\` — because a drawer already
+     on its way out must not take a click that was meant for the board
+     behind it.
+
+     The declared \`opacity: 0\` is the reduced-motion fallback, and it is load
+     bearing. tokens.ts's reset carries a global
+     \`* { animation: none !important }\` for users who have asked the system
+     for less motion, which suppresses \`orch-out\` outright — and the unmount
+     is a JS timer, so without this the drawer would sit fully visible in
+     place for ORCH_ANIM_MS after the user dismissed it. A running animation
+     outranks a declared value, so while \`orch-out\` plays this is inert and
+     the keyframes own the fade; it only takes effect when they are gone.
+     (The query itself is deliberately not written here — tokens.test.ts
+     asserts no surface sheet carries a motion reset of its own, and the
+     shared one in tokens.ts is the only place that should.) */
+  .orch.closing { animation-name: orch-out; pointer-events: none; opacity: 0; }
+  @keyframes orch-out {
+    from { transform: translateX(0); opacity: 1; }
+    to { transform: translateX(100%); opacity: 0; }
+  }
 
   /* The resize grip, centred ON the left border rather than beside it — half
      outside the drawer's box, half inside — so it never nudges the header,

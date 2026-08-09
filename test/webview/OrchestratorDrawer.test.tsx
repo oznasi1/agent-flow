@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import * as React from "react";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { OrchestratorDrawer, DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
+import { ORCH_ANIM_MS } from "../../src/webview/orchestratorStyles";
 import type { Flow } from "../../src/engine/orchestrator/model";
 import { anchor, edgePath, GRID, labelPoint, NODE_H, NODE_W } from "../../src/engine/orchestrator/layout";
 import type { PrEntryMap, RunStatus } from "../../src/types";
@@ -1939,5 +1940,90 @@ describe("building a whole flow from the keyboard", () => {
     expect(saved.edges[0]).toMatchObject({
       from: place.id, to: notify.id, cond: { kind: "ci-passed" }, action: "notify",
     });
+  });
+});
+
+// The drawer slides in and out along the right edge it is anchored to. The exit
+// is the half that needs code rather than a stylesheet: closing drops `openId`,
+// which would unmount the aside in the same frame and leave nothing to animate,
+// so the drawer holds the flow it last had for exactly ORCH_ANIM_MS.
+describe("the open and close animation", () => {
+  const aside = (c: HTMLElement) => c.querySelector(".orch") as HTMLElement | null;
+
+  it("arrives with the slide-in animation, not the closing one", () => {
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    expect(aside(container)!.className).not.toContain("closing");
+  });
+
+  it("keeps painting the drawer while it slides out, then drops it", () => {
+    vi.useFakeTimers();
+    try {
+      const { container, rerender } = render(<OrchestratorDrawer {...props()} />);
+      expect(aside(container)).not.toBeNull();
+
+      rerender(<OrchestratorDrawer {...props({ openId: null })} />);
+      // Still in the DOM, or there would be nothing for the CSS to animate.
+      const closing = aside(container);
+      expect(closing).not.toBeNull();
+      expect(closing!.className).toContain("closing");
+
+      // Just short of the animation's end it is still there; one tick past it,
+      // gone. Both halves are asserted so a timer that never fires and a timer
+      // that fires instantly are each caught.
+      act(() => { vi.advanceTimersByTime(ORCH_ANIM_MS - 1); });
+      expect(aside(container)).not.toBeNull();
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(aside(container)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The name field is the flow's, and it must still read correctly through the
+  // slide-out: this is the drawer the user just dismissed, not a blank shell.
+  it("draws the flow it last held, not an empty drawer", () => {
+    vi.useFakeTimers();
+    try {
+      const { container, rerender } = render(<OrchestratorDrawer {...props()} />);
+      rerender(<OrchestratorDrawer {...props({ openId: null })} />);
+      expect(within(aside(container)!).getByLabelText("Flow name")).toHaveValue("Ship the migration");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Inert for those milliseconds: a drawer already dismissed must not answer a
+  // role query, a screen reader, or a Tab. `queryByRole` honours aria-hidden,
+  // so this is also what keeps every existing "the drawer is closed" assertion
+  // in DeckApp.test.tsx true across this change.
+  it("is hidden from the accessibility tree while closing", () => {
+    vi.useFakeTimers();
+    try {
+      const { container, rerender } = render(<OrchestratorDrawer {...props()} />);
+      expect(screen.queryByRole("complementary", { name: "Orchestrator" })).not.toBeNull();
+      rerender(<OrchestratorDrawer {...props({ openId: null })} />);
+      expect(aside(container)).not.toBeNull();
+      expect(aside(container)!.getAttribute("aria-hidden")).toBe("true");
+      expect(screen.queryByRole("complementary", { name: "Orchestrator" })).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // While OPEN the attribute must be absent, not "false": this element is the
+  // drawer's own landmark, and `aria-hidden="false"` is not equivalent to no
+  // attribute at all for every screen reader.
+  it("carries no aria-hidden at all while open", () => {
+    const { container } = render(<OrchestratorDrawer {...props()} />);
+    expect(aside(container)!.hasAttribute("aria-hidden")).toBe(false);
+  });
+
+  // A flow that disappears from under the drawer — another window deleted it,
+  // and the host posts a list without it — is not a close. `openId` still
+  // names it, so there is no dismissal to animate and nothing on disk to draw.
+  it("vanishes at once when the open flow disappears from the list", () => {
+    const { container, rerender } = render(<OrchestratorDrawer {...props()} />);
+    rerender(<OrchestratorDrawer {...props({ flows: [] })} />);
+    expect(aside(container)).toBeNull();
   });
 });
