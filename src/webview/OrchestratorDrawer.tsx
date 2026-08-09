@@ -659,7 +659,14 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             const a = flow.nodes.find((n) => n.id === e.from);
             const b = flow.nodes.find((n) => n.id === e.to);
             if (!a || !b) return null;
-            const mid = labelPoint(anchor(boxOf(a), "out"), anchor(boxOf(b), "in"));
+            // Every other node is a potential obstacle for this edge's label —
+            // except the edge's own two endpoints. A label is allowed to sit
+            // near the nodes it is about; excluding them keeps a short edge's
+            // label where it belongs instead of shoving it off its own line.
+            const obstacles = flow.nodes
+              .filter((n) => n.id !== e.from && n.id !== e.to)
+              .map((n) => boxOf(n));
+            const mid = labelPoint(anchor(boxOf(a), "out"), anchor(boxOf(b), "in"), obstacles);
             return (
               <button
                 type="button"

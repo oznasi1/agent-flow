@@ -615,6 +615,104 @@ describe("wiring", () => {
     expect(path?.getAttribute("d")).toBe(expectedPath);
   });
 
+  // The defect this fixes: an edge reaching a farther column had its label
+  // land on an intermediate node in the same row, covering that node's own
+  // title (observed as "ASM-12" rendering as "A_M-12"). n3 sits exactly on
+  // the raw chord midpoint between n1 and n2's ports; it is nobody's
+  // endpoint on e1, so it must be in the obstacle list and the label must
+  // step off of it.
+  it("steps a label off an intermediate node the chord passes through", () => {
+    const withObstacle = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n3", kind: "place", x: 344, y: 24, join: "any", runKey: "ASM-12", repo: "r" },
+        { id: "n2", kind: "notify", x: 624, y: 24, join: "any", message: "landed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    });
+
+    const fromBox = { x: 24, y: 24, w: NODE_W, h: NODE_H };
+    const toBox = { x: 624, y: 24, w: NODE_W, h: NODE_H };
+    const obstacleBox = { x: 344, y: 24, w: NODE_W, h: NODE_H };
+    const from = anchor(fromBox, "out");
+    const to = anchor(toBox, "in");
+    const rawMid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+    const expectedMid = labelPoint(from, to, [obstacleBox]);
+    // Sanity: this fixture actually exercises the obstacle path — the raw
+    // midpoint really does sit on n3, so the expected point must differ from
+    // it. If it didn't, the fixture (not the rule) would be at fault.
+    expect(expectedMid).not.toEqual(rawMid);
+
+    render(<OrchestratorDrawer {...props({ flows: [withObstacle] })} />);
+    const label = screen.getByTestId("orch-edge-e1");
+    expect(label.style.left).toBe(`${expectedMid.x}px`);
+    expect(label.style.top).toBe(`${expectedMid.y}px`);
+
+    // And directly: the rendered point must not fall inside n3's box.
+    const lx = parseFloat(label.style.left);
+    const ly = parseFloat(label.style.top);
+    expect(lx >= obstacleBox.x && lx <= obstacleBox.x + obstacleBox.w &&
+      ly >= obstacleBox.y && ly <= obstacleBox.y + obstacleBox.h).toBe(false);
+  });
+
+  // Same three-node shape, but the third node sits well clear of the chord
+  // (a different row entirely). Its box is still in the obstacle list — this
+  // pins that a harmless obstacle leaves the label exactly where it started.
+  it("leaves the label at the chord midpoint when no obstacle is in the way", () => {
+    const clear = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n3", kind: "place", x: 344, y: 400, join: "any", runKey: "ASM-12", repo: "r" },
+        { id: "n2", kind: "notify", x: 624, y: 24, join: "any", message: "landed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    });
+
+    const fromBox = { x: 24, y: 24, w: NODE_W, h: NODE_H };
+    const toBox = { x: 624, y: 24, w: NODE_W, h: NODE_H };
+    const from = anchor(fromBox, "out");
+    const to = anchor(toBox, "in");
+    const rawMid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+
+    render(<OrchestratorDrawer {...props({ flows: [clear] })} />);
+    const label = screen.getByTestId("orch-edge-e1");
+    expect(label.style.left).toBe(`${rawMid.x}px`);
+    expect(label.style.top).toBe(`${rawMid.y}px`);
+  });
+
+  // The design rule: an edge's own two endpoints are never obstacles for its
+  // own label. n1 and n2 are placed close enough that the raw chord midpoint
+  // sits inside BOTH of their boxes — if the endpoints were wrongly included
+  // in the obstacle list, the label would be pushed off of it. Since they
+  // are excluded, the label stays exactly on the raw midpoint.
+  it("does not push a short edge's label away from its own endpoints", () => {
+    const adjacent = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n2", kind: "notify", x: 80, y: 24, join: "any", message: "landed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    });
+
+    const fromBox = { x: 24, y: 24, w: NODE_W, h: NODE_H };
+    const toBox = { x: 80, y: 24, w: NODE_W, h: NODE_H };
+    const from = anchor(fromBox, "out");
+    const to = anchor(toBox, "in");
+    const rawMid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+    // Sanity: the raw midpoint really does land inside both endpoint boxes,
+    // so this fixture actually exercises the exclusion rule rather than
+    // passing vacuously.
+    const inBox = (p: { x: number; y: number }, b: { x: number; y: number; w: number; h: number }) =>
+      p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h;
+    expect(inBox(rawMid, fromBox)).toBe(true);
+    expect(inBox(rawMid, toBox)).toBe(true);
+
+    render(<OrchestratorDrawer {...props({ flows: [adjacent] })} />);
+    const label = screen.getByTestId("orch-edge-e1");
+    expect(label.style.left).toBe(`${rawMid.x}px`);
+    expect(label.style.top).toBe(`${rawMid.y}px`);
+  });
+
   // "Red only for a real failure" is a house rule (see orchestratorStyles.ts's
   // own comment on .orch-edge.bad); it needs its own test on each side, or the
   // rule erodes the first time someone "simplifies" BAD_CONDS.
