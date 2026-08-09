@@ -60,10 +60,11 @@ export const ORCH_CSS = `
   .orch-mini { height: 20px; padding: 0 7px; font-size: var(--t-micro); border-radius: var(--r-chip);
     border: 1px solid var(--edge); background: transparent; color: var(--dim); cursor: pointer; }
   .orch-mini:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
-  /* The Expand toggle's pressed state. Weight and foreground only, the same
-     on-state language CONTROLS_CSS's .seg already uses ("never a fill") —
-     Arm stays the one filled control on this whole surface. */
-  .orch-mini[aria-pressed="true"] { color: var(--vscode-foreground); font-weight: 600; }
+  /* The Expand toggle's pressed state, and the Canvas/List view tabs'
+     selected state — same on-state language, weight and foreground only, the
+     same rule CONTROLS_CSS's .seg already follows ("never a fill"). Arm stays
+     the one filled control on this whole surface. */
+  .orch-mini[aria-pressed="true"], .orch-mini[aria-selected="true"] { color: var(--vscode-foreground); font-weight: 600; }
 
   .orch-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
     padding: 14px 16px 18px; }

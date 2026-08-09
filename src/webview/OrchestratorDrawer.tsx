@@ -1,8 +1,25 @@
 import * as React from "react";
-import { describeCond, placeActivity } from "../engine/orchestrator/conditions";
+import { placeActivity } from "../engine/orchestrator/conditions";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, Flow, FlowAction, FlowEdge, FlowNode, isSettled, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { AgentState, FlowPromptMode, PendingResume, RunStatus } from "../types";
+import { FlowList } from "./flowList";
+import {
+  actionMismatch,
+  COND_LABEL,
+  endLabel,
+  launchDestOf,
+  modeValueOf,
+  notifyMessageOf,
+  observationOf,
+  OFFERED_CONDS,
+  withAction,
+  withCond,
+  withDest,
+  withMode,
+  withNotifyMessage,
+  withoutEdge,
+} from "./orchestratorRule";
 import { send, vscodeApi } from "./vscodeApi";
 
 /** The width before any drag or arrow-key resize, and the fallback for a
@@ -165,79 +182,9 @@ const STATE_HUE: Record<AgentState, string> = {
   unknown: "var(--dim)",
 };
 
-/** The drawer's own wording for a condition. `describeCond` says what a place
- * currently looks like; this says what the rule is. Both are needed and they are
- * not the same sentence. */
-export const COND_LABEL: Record<Condition["kind"], string> = {
-  "pr-merged": "PR is merged",
-  "ci-passed": "CI passed",
-  "ci-failed": "CI failed",
-  "review-approved": "review approved",
-  "changes-requested": "changes requested",
-  "threads-resolved": "0 unresolved threads",
-  "pr-conflicting": "branch conflicts",
-  "agent-ended-turn": "agent ended its turn",
-  "agent-idle-over": "agent idle over…",
-  "no-agent-left": "no agent left",
-  "tree-clean": "tree is clean",
-  "has-uncommitted": "has uncommitted work",
-  "nothing-to-push": "nothing to push",
-  "ticket-done": "ticket reached done",
-  "ticket-status-is": "ticket status is…",
-};
-
 /** Conditions that describe something being wrong. The only edges allowed a
  * danger tint — colour here is attention debt, not decoration. */
 const BAD_CONDS = new Set<Condition["kind"]>(["ci-failed", "changes-requested", "pr-conflicting"]);
-
-/** What the inspector offers. `agent-idle-over` and `ticket-status-is` each carry
- * a parameter (a minute count, a status name) and this phase has no input for
- * one — offering them would create a rule waiting on a fixed 10 minutes or on the
- * empty string, which never matches. They stay in `COND_LABEL` because a flow
- * hand-edited on disk can still hold one and its edge must still render. */
-export const OFFERED_CONDS: Condition["kind"][] = (
-  Object.keys(COND_LABEL) as Condition["kind"][]
-).filter((k) => k !== "agent-idle-over" && k !== "ticket-status-is");
-
-/** How a node's end reads in the inspector's title. */
-function endLabel(flow: Flow, id: string): string {
-  const n = flow.nodes.find((x) => x.id === id);
-  if (!n) return "?";
-  return n.kind === "place" ? n.runKey : n.kind === "planned" ? n.ticketKey : "notify";
-}
-
-/** The message the edge's notify target carries, or empty when the target is
- * not a notify node. */
-function notifyMessageOf(flow: Flow, e: FlowEdge): string {
-  const n = flow.nodes.find((x) => x.id === e.to);
-  return n && n.kind === "notify" ? n.message : "";
-}
-
-/** The edge's target, narrowed to a planned node — or `undefined` when it
- * points at anything else. A launch's prompt mode and destination live on
- * exactly this node (see `PlannedNode`'s own doc comment: "an armed launch
- * cannot stop to ask"), never on the edge, so every read and write of them
- * goes through here rather than a cast at each call site. */
-function plannedTargetOf(flow: Flow, e: FlowEdge): PlannedNode | undefined {
-  const n = flow.nodes.find((x) => x.id === e.to);
-  return n && n.kind === "planned" ? n : undefined;
-}
-
-/** Why `launch` or `seed` on this edge would never run, given the kind of node
- * it actually points at — or `null` when the pairing is fine. This is exactly
- * what `deckView.ts`'s `performEdge`/`performSeed` refuse at evaluation time
- * ("a launch rule must point at planned work" / "a seed rule must point at a
- * place"); saying it here means a mis-wired rule is visible the moment it is
- * made, not only once armed and it comes back as a stalled edge. */
-function actionMismatch(flow: Flow, e: FlowEdge): string | null {
-  if (e.action === "launch" && !plannedTargetOf(flow, e)) {
-    return "a launch needs planned work — this points at something already there.";
-  }
-  if (e.action === "seed" && flow.nodes.find((x) => x.id === e.to)?.kind !== "place") {
-    return "a seed needs a place that already exists — this points at planned work.";
-  }
-  return null;
-}
 
 export interface OrchestratorDrawerProps {
   flows: Flow[];
@@ -268,6 +215,14 @@ export interface OrchestratorDrawerProps {
 
 export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | null {
   const flow = p.flows.find((f) => f.id === p.openId);
+  /** Canvas ⇄ list. The canvas is a board built from divs and pointer events —
+   * no usable keyboard story — so `FlowList` (flowList.tsx) exists as the
+   * keyboard path onto the exact same `Flow`. Canvas stays the default: this
+   * toggle only ever narrows what a mouse user already had, it does not
+   * change it. Never persisted alongside `width` — reopening the drawer in a
+   * fresh session should land on the canvas, not silently reopen on whichever
+   * view a past session happened to be reading. */
+  const [view, setView] = React.useState<"canvas" | "list">("canvas");
   const [picking, setPicking] = React.useState(false);
   const [over, setOver] = React.useState(false);
   const [overGraph, setOverGraph] = React.useState(false);
@@ -518,11 +473,12 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * `launch`, which together guarantee a planned target exists — but nothing
    * in the type system knows that at the render site, so the fallback is
    * purely to satisfy `LaunchDest`'s type, never a value the user can see. */
-  const launchDest = edge && edge.action === "launch" ? plannedTargetOf(flow, edge)?.dest : undefined;
+  const launchDest = edge ? launchDestOf(flow, edge) : undefined;
   /** The Mode select's value. A launch's mode lives on its target planned
-   * node (never on the edge — see `setMode`'s own doc comment); a seed's
-   * lives on the edge, because a place has no mode field of its own. */
-  const modeValue = edge ? (edge.action === "launch" ? plannedTargetOf(flow, edge)?.mode : edge.mode) ?? "" : "";
+   * node (never on the edge — see `withMode`'s own doc comment in
+   * orchestratorRule.ts); a seed's lives on the edge, because a place has no
+   * mode field of its own. */
+  const modeValue = edge ? modeValueOf(flow, edge) : "";
   /** Does `modeValue` name a mode that still exists? A `<select>` whose `value`
    * matches none of its `<option>`s does not render blank — the browser falls
    * back to showing its FIRST option, selected, while the store still holds the
@@ -532,82 +488,26 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * `<option>` this gates, below. */
   const modeExists = modeValue !== "" && p.promptModes.some((m) => m.id === modeValue);
 
-  /** What the source place looks like right now, in `describeCond`'s words. Null
-   * when the node's run is not on the board — a claim we cannot make. */
-  const observation = (e: FlowEdge): string | null => {
-    const from = flow.nodes.find((n) => n.id === e.from);
-    if (!from || from.kind !== "place") return null;
-    const status = p.runs.find((r) => r.run.key === from.runKey);
-    if (!status) return null;
-    return describeCond(e.cond, { status, repo: from.repo, nowMs: Date.now() });
-  };
-
   const setCond = (e: FlowEdge, kind: Condition["kind"]) => {
-    // Only bare kinds are reachable from the dropdown (see OFFERED_CONDS), so the
-    // parameterised arms cannot be constructed here without a value to put in them.
-    if (kind === "agent-idle-over" || kind === "ticket-status-is") return;
-    const cond: Condition = { kind };
-    p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, cond } : x)) });
+    const next = withCond(flow, e.id, kind);
+    // `withCond` returns `flow` itself (the same reference) for the two
+    // parameterised kinds the dropdown never offers — see its own doc
+    // comment. Checking identity here, rather than re-deriving the guard,
+    // is what keeps that one rule living in exactly one place.
+    if (next !== flow) p.onSave(next);
   };
 
-  /** Change what the edge does. `notify` and `launch` both clear `edge.mode` —
-   * `FlowEdge.mode` belongs to `seed` alone (see its own doc comment in
-   * model.ts): a launch's mode already lives on the target `PlannedNode`,
-   * which is never created without one, so there is nothing to write there
-   * just for switching the verb. Clearing it here matters for the same reason
-   * `notify`'s clear does: a launch edge left carrying a `mode` would be a
-   * second, unread source of truth for a fact the node alone owns — one
-   * field diverging from the other with nothing to say which one is real. */
-  const setAction = (e: FlowEdge, action: FlowAction) => {
-    if (action === "seed") {
-      const mode = e.mode ?? p.promptModes[0]?.id;
-      p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, action, mode } : x)) });
-      return;
-    }
-    p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, action, mode: undefined } : x)) });
-  };
+  const setAction = (e: FlowEdge, action: FlowAction) => p.onSave(withAction(flow, e.id, action, p.promptModes));
 
-  /** Write a chosen prompt mode where the engine actually spends it — and
-   * ONLY there, never in both places. `performSeed` in deckView.ts reads
-   * `edge.mode`, because a place has no mode field of its own for a seed's
-   * mode to live in instead. `performEdge` reads a launch's mode from
-   * `node.mode` on the target PLANNED node, never from the edge — so a
-   * launch's selection is written to the node alone. Mirroring it onto
-   * `edge.mode` too was tried and reverted: two homes for one fact is the
-   * exact bug class a reviewer already caught once in this plan (a launch
-   * node's `ticketKey` and a fetched detail's `key`, nothing reconciling
-   * them), and every fixture happening to agree is not the same as the
-   * write path enforcing it. */
-  const setMode = (e: FlowEdge, mode: string) => {
-    if (e.action === "launch") {
-      p.onSave({
-        ...flow,
-        nodes: flow.nodes.map((n) => (n.id === e.to && n.kind === "planned" ? { ...n, mode } : n)),
-      });
-      return;
-    }
-    p.onSave({ ...flow, edges: flow.edges.map((x) => (x.id === e.id ? { ...x, mode } : x)) });
-  };
+  const setMode = (e: FlowEdge, mode: string) => p.onSave(withMode(flow, e, mode));
 
-  /** A launch's destination lives on its target planned node — `LaunchDest`
-   * has no edge-level counterpart in the model (`FlowEdge` carries no `dest`
-   * field at all), because it is the node's own launch configuration, not a
-   * property of any one rule that triggers it. */
-  const setDest = (e: FlowEdge, dest: LaunchDest) =>
-    p.onSave({
-      ...flow,
-      nodes: flow.nodes.map((n) => (n.id === e.to && n.kind === "planned" ? { ...n, dest } : n)),
-    });
+  const setDest = (e: FlowEdge, dest: LaunchDest) => p.onSave(withDest(flow, e, dest));
 
-  const setNotifyMessage = (e: FlowEdge, message: string) =>
-    p.onSave({
-      ...flow,
-      nodes: flow.nodes.map((n) => (n.id === e.to && n.kind === "notify" ? { ...n, message } : n)),
-    });
+  const setNotifyMessage = (e: FlowEdge, message: string) => p.onSave(withNotifyMessage(flow, e, message));
 
   const deleteEdge = (e: FlowEdge) => {
     setSelEdge(null);
-    p.onSave({ ...flow, edges: flow.edges.filter((x) => x.id !== e.id) });
+    p.onSave(withoutEdge(flow, e.id));
   };
 
   /** What actually renders. Expand does not touch `width` — see the
@@ -679,6 +579,36 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           </button>
           <button type="button" className="orch-x" aria-label="Close" onClick={p.onClose}>✕</button>
         </div>
+        {/* The keyboard path onto this same flow: a canvas built from divs and
+            pointer events has no usable keyboard story on its own (see
+            flowList.tsx's own header comment), so List is not a second editor,
+            it is the other way to reach the one this drawer already has.
+            `role="tablist"`/`role="tab"`/`aria-selected` is App.tsx's own idiom
+            for exactly this shape (see its Tasks/Notepad tabbar) — followed
+            here rather than invented fresh. Quiet `orch-mini` styling, same as
+            every neighbouring control on this header: Arm alone is filled. */}
+        <div className="row" style={{ marginTop: 6 }}>
+          <span role="tablist" aria-label="Flow view" style={{ display: "flex", gap: 6 }}>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "canvas"}
+              className="orch-mini"
+              onClick={() => setView("canvas")}
+            >
+              Canvas
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={view === "list"}
+              className="orch-mini"
+              onClick={() => setView("list")}
+            >
+              List
+            </button>
+          </span>
+        </div>
         {/* Rename on blur, not per keystroke: every keystroke would be a disk
             write and a re-post, and the field would fight the re-render. */}
         <input
@@ -737,6 +667,20 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             </div>
           </div>
         )}
+        {view === "list" ? (
+          // The keyboard path — see flowList.tsx's own header comment for why
+          // it exists and what it deliberately does not (yet) do. Same `flow`
+          // prop, same `onSave`/`onResetEdge` this canvas already uses: no
+          // second model, no second write path.
+          <FlowList
+            flow={flow}
+            runs={p.runs}
+            promptModes={p.promptModes}
+            onSave={p.onSave}
+            onResetEdge={(edgeId) => p.onResetEdge(flow.id, edgeId)}
+          />
+        ) : (
+          <>
         <div className="orch-sect">
           <div className="orch-sect-hd">
             <span className="t">Agents</span>
@@ -1021,10 +965,12 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   <button type="button" className="orch-mini" onClick={() => p.onResetEdge(flow.id, edge.id)}>Reset</button>
                 </>
               ) : (
-                <span>{observation(edge) ?? "this card is not on the board right now"}</span>
+                <span>{observationOf(flow, edge, p.runs) ?? "this card is not on the board right now"}</span>
               )}
             </div>
           </div>
+        )}
+          </>
         )}
       </div>
 

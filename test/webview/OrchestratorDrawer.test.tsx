@@ -176,6 +176,57 @@ describe("OrchestratorDrawer", () => {
 const drop = (el: Element, payload: string) =>
   fireEvent.drop(el, { dataTransfer: { getData: () => payload, dropEffect: "copy" } });
 
+// Task 5: the keyboard path. The toggle itself lives in this file (it is
+// part of the drawer's own header, not flowList.tsx's concern); flowList.tsx
+// and its own test file cover what the list view renders and how its rows
+// behave once it is showing.
+describe("the canvas/list view toggle", () => {
+  it("defaults to the canvas — the toggle only ever narrows what a mouse user already had", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    expect(screen.getByTestId("orch-canvas")).toBeTruthy();
+    expect(screen.queryByTestId("orch-list")).toBeNull();
+    expect(screen.getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "List" })).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("switches to the list view and reports aria-selected on both tabs", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    expect(screen.queryByTestId("orch-canvas")).toBeNull();
+    expect(screen.getByRole("tab", { name: "List" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("renders the same flow's rules in the list — one model, two presentations", () => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()] })} />);
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    expect(screen.getByTestId("flowlist-row-e1")).toBeTruthy();
+  });
+
+  it("switches back to the canvas", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Canvas" }));
+    expect(screen.getByTestId("orch-canvas")).toBeTruthy();
+    expect(screen.queryByTestId("orch-list")).toBeNull();
+  });
+
+  it("a rule reset from the list goes through the same onResetEdge the canvas uses", () => {
+    const onResetEdge = vi.fn();
+    const fired = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you" }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [fired], onResetEdge })} />);
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    fireEvent.click(within(screen.getByTestId("flowlist-row-e1")).getByRole("button", { name: "Reset" }));
+    expect(onResetEdge).toHaveBeenCalledWith("f1", "e1");
+  });
+});
+
 describe("the tray", () => {
   it("adds a place node when a card is dropped", () => {
     const onSave = vi.fn();
