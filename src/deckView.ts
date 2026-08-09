@@ -613,10 +613,22 @@ export class DeckPanel {
           // window; a notification on top of the toast would be noise. A
           // failure has no such announcement — "Couldn't create a git worktree
           // in bite-me — not launching ASM-12" is exactly the message that must
-          // not die inside an unfocused panel — so it escalates past the toast
-          // to the same non-modal notification `notify` uses above.
+          // not die inside an unfocused panel — so it escalates past the toast.
+          //
+          // `showErrorMessage`, not `showInformationMessage`: this is the first
+          // use of it in this file, chosen deliberately rather than copied.
+          // orchestratorStyles.ts's own house rule reserves red "ONLY on a rule
+          // that tried and actually failed" — this is that rule's exact case,
+          // and an error latches (no retry until the user Resets it), so this
+          // is at most one red notification per rule, not a loop that stacks.
+          // It also has to read as visibly different from a `notify` firing —
+          // otherwise "told you something" and "failed and stopped" collapse
+          // into the same information notification, reproducing one layer out
+          // the exact ambiguity ("I can see notify, but not who it notifies")
+          // this task exists to fix. Still non-modal — no options argument —
+          // an unattended flow's failure must not steal focus either.
           this.toast(r.level, r.message);
-          if (r.level === "error") void vscode.window.showInformationMessage(r.message);
+          if (r.level === "error") void vscode.window.showErrorMessage(r.message);
         }
       } catch (e) {
         this.log(`deck: flow ${flow.id} failed to advance: ${e}`);

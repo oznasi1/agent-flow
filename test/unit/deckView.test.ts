@@ -3327,6 +3327,9 @@ describe("an armed flow advances on refresh", () => {
     expect(written?.edges[0].firedAt).toBeTypeOf("number");
     expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/Ship the migration/));
     expect(posts(p).some((m) => m.type === "toast" && /Ship the migration/.test(m.message ?? ""))).toBe(false);
+    // A notify telling you something is not a failure, and must not borrow the
+    // red-error notification reserved for a rule that actually failed.
+    expect(window.showErrorMessage).not.toHaveBeenCalled();
   });
 
   it("fires once and not again on the next refresh", async () => {
@@ -3904,6 +3907,7 @@ describe("a met launch rule acts", () => {
     await send({ type: "deck:refresh" });
     expect(lastWrite().edges[0].firedAt).toBeTypeOf("number"); // the launch really did succeed
     expect(window.showInformationMessage).not.toHaveBeenCalled();
+    expect(window.showErrorMessage).not.toHaveBeenCalled();
   });
 
   it("asks the launcher for the node, the ticket, the repos and the resolved prompt", async () => {
@@ -3962,10 +3966,15 @@ describe("a met launch rule acts", () => {
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(false);
     // …but the failure — "Couldn't create a git worktree in aws-ops — not
     // launching ASM-12" is exactly the class of message that must not die
-    // inside an unfocused panel — reaches the human as a notification too.
-    expect(window.showInformationMessage).toHaveBeenCalledWith(
+    // inside an unfocused panel — reaches the human as a notification too. It
+    // goes through showErrorMessage specifically, not showInformationMessage —
+    // red is reserved for a rule that tried and actually failed (the same
+    // house rule .fl-receipt .err leans on), and it is what keeps this failure
+    // reading as visibly different from an ordinary `notify` firing.
+    expect(window.showErrorMessage).toHaveBeenCalledWith(
       expect.stringContaining("Couldn't create a git worktree in aws-ops"),
     );
+    expect(window.showInformationMessage).not.toHaveBeenCalled();
     // …and the failure is not retried on the next poll: twenty windows is how that ends.
     h.launchPlanned.mockClear();
     await send({ type: "deck:refresh" });
