@@ -84,6 +84,12 @@ export interface FlowEdge {
   firedAt?: number;
   /** The receipt the drawer shows, e.g. "opened bite-me-3a". */
   firedNote?: string;
+  /** Extra, once-off text for the agent this rule starts — appended to the prompt
+   * mode's template, or substituted at `{note}` if the template has one. For
+   * `launch` and `seed` only; a `notify` rule's words live on its notify node.
+   * Reusable instructions belong in `agentFlow.promptModes`, which the rule
+   * already picks from — this is for what is specific to THIS transition. */
+  note?: string;
   /** The action threw. Never retried until Reset — retrying a launch that failed
    * every poll is how you end up with twenty windows. */
   error?: string;

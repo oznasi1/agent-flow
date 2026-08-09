@@ -25,7 +25,7 @@ import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntr
 import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
 import { discoverRepos } from "./engine/repos";
-import { prReviewTemplate } from "./engine/prompt";
+import { composeAgentPrompt, prReviewTemplate } from "./engine/prompt";
 import { launchReview, resolveReviewMode, reviewRunKey } from "./engine/review/launch";
 import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
@@ -75,10 +75,21 @@ function nextPlannedNodeId(flow: Flow): string {
 /** What a performing edge (`launch` or `seed`) is about to spend money on, resolved
  * just far enough for the once-per-flow confirmation to name it. A `launch` has a
  * ticket and a set of repos; a `seed` has no ticket at all — only the place it opens
- * another agent in and the prompt mode it uses. */
+ * another agent in and the prompt mode it uses. `note` rides along from the edge on
+ * both: it is what the agent will actually be told, so it belongs in the same
+ * consent gate as the ticket/repos/mode. */
 type SpendTarget =
-  | { action: "launch"; node: PlannedNode }
-  | { action: "seed"; node: PlaceNode; mode?: string };
+  | { action: "launch"; node: PlannedNode; note?: string }
+  | { action: "seed"; node: PlaceNode; mode?: string; note?: string };
+
+/** How much of a rule's note the once-per-flow confirmation shows. The modal is
+ * naming what the agent will be told, not reproducing it in full — a pasted
+ * paragraph must not grow the dialog unboundedly. */
+const NOTE_PREVIEW_MAX = 160;
+
+function notePreview(note: string): string {
+  return note.length > NOTE_PREVIEW_MAX ? note.slice(0, NOTE_PREVIEW_MAX) + "…" : note;
+}
 
 /** One acting edge, decided. `promote` turns a launched planned node into the place
  * the rest of the chain observes; `receipt` is the toast, which exists only when there
@@ -625,10 +636,10 @@ export class DeckPanel {
     if (!isSpendAction(edge.action)) return undefined;
     if (edge.action === "launch") {
       const node = this.plannedTarget(flow, edge);
-      return node ? { action: "launch", node } : undefined;
+      return node ? { action: "launch", node, note: edge.note } : undefined;
     }
     const node = this.placeTarget(flow, edge);
-    return node ? { action: "seed", node, mode: edge.mode } : undefined;
+    return node ? { action: "seed", node, mode: edge.mode, note: edge.note } : undefined;
   }
 
   /** Ask, once per flow, before it ever spends anything — naming what will actually
@@ -641,18 +652,22 @@ export class DeckPanel {
     const cfg = getConfig();
     const ACT = target.action === "launch" ? "Launch" : "Seed";
     const DISARM = "Disarm";
+    // What the agent will actually be told is material to this consent, so a note
+    // rides along in the same sentence as the prompt mode — absent, it contributes
+    // nothing, so today's wording (and every existing assertion on it) survives.
+    const noteClause = target.note ? ` and the note "${notePreview(target.note)}"` : "";
     const message = target.action === "launch"
       ? (() => {
           const mode = cfg.promptModes.find((m) => m.id === target.node.mode);
           return `${flow.name} is ready to launch ${target.node.ticketKey} in ${target.node.repos.join(", ")} with the "${
             mode?.label ?? target.node.mode
-          }" prompt, unattended. It will keep launching on its own from now on.`;
+          }" prompt${noteClause}, unattended. It will keep launching on its own from now on.`;
         })()
       : (() => {
           const mode = cfg.promptModes.find((m) => m.id === target.mode);
           return `${flow.name} is ready to seed another agent into ${target.node.repo} with the "${
             mode?.label ?? target.mode ?? "default"
-          }" prompt, unattended. It will keep seeding on its own from now on.`;
+          }" prompt${noteClause}, unattended. It will keep seeding on its own from now on.`;
         })();
     const answer = await vscode.window.showWarningMessage(message, { modal: true }, ACT, DISARM);
     // Re-read, and this is the ONLY thing standing between two windows here: the caller
@@ -745,7 +760,7 @@ export class DeckPanel {
         node,
         detail,
         repos: discoverRepos(cfg.reposRoot, cfg.repoBlocklist),
-        promptTemplate: found.mode.prompt,
+        promptTemplate: composeAgentPrompt(found.mode.prompt, edge.note),
         workspaceDir: cfg.workspaceDir,
         seedAgent: cfg.seedAgent,
         // `cfg.workspaceMode` also has "auto" and "ask", and neither is a layout: an
@@ -837,7 +852,7 @@ export class DeckPanel {
         // that still writes a brief here (a place that has none yet).
         services: [{ name: repo.name, path: repo.path, isGit: repo.isGit }],
         mode: "per-window",
-        promptTemplate: found.mode.prompt,
+        promptTemplate: composeAgentPrompt(found.mode.prompt, edge.note),
         workspaceDir: cfg.workspaceDir,
         seedAgent: cfg.seedAgent,
         openIn: "new",

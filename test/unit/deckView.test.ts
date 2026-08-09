@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { window, ViewColumn, env, workspace, commands, setConfig, ConfigurationTarget } from "../_mocks/vscode";
 import { DEFAULT_PROMPT_MODES } from "../../src/config";
+import { composeAgentPrompt } from "../../src/engine/prompt";
 import { fakeContext } from "../_helpers/factories";
 import type { ChangedFile } from "../../src/engine/git";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef, Task } from "../../src/types";
@@ -3769,6 +3770,38 @@ describe("a met launch rule acts", () => {
     expect(window.showWarningMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("includes the edge's note in the spend confirmation when one is set", async () => {
+    const note = "Careful: this repo has a flaky test suite.";
+    const { send } = await warmed([launchFlow({
+      launchConfirmedAt: undefined,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", note }],
+    })]);
+    await send({ type: "deck:refresh" });
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[0]).toContain(note);
+  });
+
+  it("truncates a long note in the spend confirmation instead of growing the modal unbounded", async () => {
+    const longNote = "x".repeat(500);
+    const { send } = await warmed([launchFlow({
+      launchConfirmedAt: undefined,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", note: longNote }],
+    })]);
+    await send({ type: "deck:refresh" });
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[0]).toContain("x".repeat(160) + "…");
+    expect(call[0]).not.toContain("x".repeat(161));
+  });
+
+  it("reads exactly as it did before notes existed when the edge has none", async () => {
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[0]).toBe(
+      'Ship the migration is ready to launch ASM-12 in aws-ops with the "Implementation" prompt, unattended. It will keep launching on its own from now on.',
+    );
+  });
+
   it("disarms on Disarm, and never launches on any later pass", async () => {
     (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
       async (_m: string, _o: unknown, ...items: string[]) => items[1], // "Disarm"
@@ -3861,6 +3894,30 @@ describe("a met launch rule acts", () => {
     expect(req.workspaceDir).toBeTypeOf("string");
     // One repo, so one window — never "ask", which an unattended launch cannot do.
     expect(req.workspaceMode).toBe("per-window");
+  });
+
+  it("composes the edge's note into the prompt template handed to the launcher", async () => {
+    const note = "Also update the migration doc while you're in there.";
+    const implMode = DEFAULT_PROMPT_MODES.find((m) => m.id === "implementation")!;
+    const { send } = await warmed([launchFlow({
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", note }],
+    })]);
+    await send({ type: "deck:refresh" });
+    const req = h.launchPlanned.mock.calls.at(-1)![0] as any;
+    // Assert the actual composed argument, not a substring of some other message —
+    // and mutation-check by construction: dropping the note at this call site would
+    // make promptTemplate equal the bare mode.prompt, failing the second assertion.
+    expect(req.promptTemplate).toBe(composeAgentPrompt(implMode.prompt, note));
+    expect(req.promptTemplate).not.toBe(implMode.prompt);
+  });
+
+  it("passes the mode's template byte-identically to the launcher when the edge has no note", async () => {
+    const implMode = DEFAULT_PROMPT_MODES.find((m) => m.id === "implementation")!;
+    // launchFlow()'s edge carries no `note` — today's behaviour, provably preserved.
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const req = h.launchPlanned.mock.calls.at(-1)![0] as any;
+    expect(req.promptTemplate).toBe(implMode.prompt);
   });
 
   it("stamps an error and promotes nothing when the launch fails, and never retries it", async () => {
@@ -4546,6 +4603,32 @@ describe("a met seed rule acts", () => {
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success" && /bite-me/.test(m.message ?? ""))).toBe(true);
   });
 
+  it("composes the edge's note into the prompt template handed to openWorkspace", async () => {
+    const note = "This place already has context — just wire up the retry logic.";
+    const implMode = DEFAULT_PROMPT_MODES.find((m) => m.id === "implementation")!;
+    const { send } = await warmed([seedFlow({
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "seed", mode: "implementation", note }],
+    })]);
+    await send({ type: "deck:refresh" });
+    const req = h.openWorkspace.mock.calls.at(-1)![0] as any;
+    // Assert the actual composed argument, not a substring of some other message —
+    // and mutation-check by construction: dropping the note at THIS call site (as
+    // opposed to the launch one above) would make promptTemplate equal the bare
+    // mode.prompt, failing the second assertion. A single shared test for both
+    // call sites would not catch that.
+    expect(req.promptTemplate).toBe(composeAgentPrompt(implMode.prompt, note));
+    expect(req.promptTemplate).not.toBe(implMode.prompt);
+  });
+
+  it("passes the mode's template byte-identically to openWorkspace when the seed edge has no note", async () => {
+    const implMode = DEFAULT_PROMPT_MODES.find((m) => m.id === "implementation")!;
+    // seedFlow()'s edge carries no `note` — today's behaviour, provably preserved.
+    const { send } = await warmed([seedFlow()]);
+    await send({ type: "deck:refresh" });
+    const req = h.openWorkspace.mock.calls.at(-1)![0] as any;
+    expect(req.promptTemplate).toBe(implMode.prompt);
+  });
+
   it("latches when the place's run is no longer on the board, naming the run", async () => {
     const { send } = await warmed([seedFlow({
       nodes: [
@@ -4633,6 +4716,26 @@ describe("a met seed rule acts", () => {
     // Seed" below for what the confirmed answer itself does).
     expect(h.openWorkspace).not.toHaveBeenCalled();
     expect(lastWrite().edges[0].firedAt).toBeUndefined();
+  });
+
+  it("includes the seed edge's note in the spend confirmation when one is set", async () => {
+    const note = "There's already a review comment thread; read it first.";
+    const { send } = await warmed([seedFlow({
+      launchConfirmedAt: undefined,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "seed", mode: "implementation", note }],
+    })]);
+    await send({ type: "deck:refresh" });
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[0]).toContain(note);
+  });
+
+  it("reads exactly as it did before notes existed when the seed edge has none", async () => {
+    const { send } = await warmed([seedFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[0]).toBe(
+      'Ship the migration is ready to seed another agent into bite-me with the "Implementation" prompt, unattended. It will keep seeding on its own from now on.',
+    );
   });
 
   it("writes nothing and seeds nothing when the question is dismissed", async () => {
