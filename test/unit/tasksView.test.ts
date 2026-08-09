@@ -358,14 +358,21 @@ describe("ready", () => {
   it("reports authed state with the current user and auto-fetches", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
+  });
+
+  it("names Copilot in the posted state's agentLabel when configured", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot" });
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", agentLabel: "Copilot" }));
   });
 
   it("reports unauthed state and does not fetch", async () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
   });
 
@@ -373,7 +380,7 @@ describe("ready", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, baseUrl: "", project: "" });
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: false, project: "", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: false, project: "", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
   });
 
@@ -393,7 +400,7 @@ describe("ready", () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
     // A state is posted before (and regardless of) the /myself round-trip…
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     // …and the task list — the real payload — still loads.
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
@@ -401,7 +408,7 @@ describe("ready", () => {
   it("re-establishes state and fetches on retry", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "retry" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
 
@@ -467,7 +474,7 @@ describe("state — liveCount", () => {
     ]);
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane",
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane",
       prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true } });
     const stateMsg = posted().find((m) => m.type === "state") as { liveCount?: number };
     expect(stateMsg.liveCount).toBeUndefined();
@@ -479,7 +486,7 @@ describe("fetch", () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "fetch", filter: "mine", size: "any" });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
   });
 
   it("toggles loading and posts tasks with a services guess", async () => {
@@ -1635,7 +1642,7 @@ describe("error handling", () => {
     clientStub.fetchTasks.mockRejectedValue(new JiraAuthError("expired"));
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mine", size: "any" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
     expect(posted()).toContainEqual({ type: "loading", loading: false });
     // Auth errors re-gate (no persistent error banner — the sign-in screen is the cue).
@@ -1665,6 +1672,29 @@ describe("takeTask", () => {
       }),
     );
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success" }));
+  });
+
+  it("still says Claude Code pre-seeded by default", async () => {
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(posted()).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Claude Code pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
+  it("names Copilot in the pre-seeded toast", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot" });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(posted()).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Copilot pre-seeded — press Enter to start."),
+      }),
+    );
   });
 
   it("errors when no repos are checked out", async () => {
@@ -2855,6 +2885,32 @@ describe("takeBatch", () => {
     await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]); // 2 > 1 → confirm
     expect(window.showWarningMessage).toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it("still names Claude Code sessions in the batch confirmation by default", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, batchLaunchConfirmThreshold: 1 });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]); // 2 > 1 → confirm
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      "Launch 2 tasks in parallel? That's 2 Claude Code sessions.",
+      { modal: true },
+      "Launch",
+    );
+  });
+
+  it("names Copilot in the batch launch confirmation", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, batchLaunchConfirmThreshold: 1, agentProvider: "copilot" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]); // 2 > 1 → confirm
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      "Launch 2 tasks in parallel? That's 2 Copilot sessions.",
+      { modal: true },
+      "Launch",
+    );
   });
 
   it("skips a task whose worktree creation falls back to the main checkout and reports it failed", async () => {

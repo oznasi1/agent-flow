@@ -473,6 +473,30 @@ describe("maybeSeedAgent", () => {
     }
   });
 
+  it("names Claude Code in the batch fallback notification by default", async () => {
+    vi.useFakeTimers();
+    try {
+      withWorkspaceFile();
+      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readFileSync.mockImplementation((p) =>
+        String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
+      );
+      commands.getCommands.mockResolvedValue([]); // no Claude command at all
+      env.openExternal.mockResolvedValue(false); // URI handler fails too
+      const { context } = fakeContext();
+
+      const pending = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await pending;
+
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Agent Flow Deck: couldn't start Claude Code for ASM-1."),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("serializes overlapping passes so a batch is never seeded twice", async () => {
     vi.useFakeTimers();
     try {
@@ -555,6 +579,26 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
 
       expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
       expect(window.showInformationMessage).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("names Claude Code in the clipboard-fallback notification by default", async () => {
+    vi.useFakeTimers();
+    try {
+      setupMatchingPlan();
+      commands.getCommands.mockResolvedValue([]);
+      env.openExternal.mockResolvedValue(false);
+      const { context } = fakeContext();
+
+      const p = maybeSeedAgent(context, () => {});
+      await vi.runAllTimersAsync();
+      await p;
+
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        "Agent Flow Deck: opened workspace for ASM-1. Claude Code prompt copied — paste it into the panel to start.",
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -835,6 +879,18 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       expect(window.showInformationMessage).toHaveBeenCalled();
     });
 
+    it("names Copilot, not Claude Code, in the clipboard-fallback notification", async () => {
+      commands.getCommands.mockResolvedValue([]);
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        "Agent Flow Deck: opened workspace for ASM-1. Copilot prompt copied — paste it into the panel to start.",
+      );
+    });
+
     it("does not try the Claude Code URI handler", async () => {
       commands.getCommands.mockResolvedValue([]);
       setupMatchingPlan();
@@ -913,6 +969,18 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining(BRIEF_DIR));
       expect(window.showInformationMessage).toHaveBeenCalledTimes(2); // one per task
       expect(env.clipboard.writeText).not.toHaveBeenCalled();
+    });
+
+    // Task 5 routes a Copilot batch onto this exact notification, so it must name
+    // Copilot rather than the Claude Code wording that shipped before providers existed.
+    it("names Copilot, not Claude Code, in the batch fallback notification", async () => {
+      await seedTwoTasks("ASM-1", "ASM-2");
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Agent Flow Deck: couldn't start Copilot for ASM-1."),
+      );
+      expect(window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringContaining("Agent Flow Deck: couldn't start Copilot for ASM-2."),
+      );
     });
   });
 });

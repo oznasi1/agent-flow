@@ -11,7 +11,7 @@ import { writeRun, defaultRunsDir } from "./runs";
 import { gitState } from "./git";
 import { ensureGitExcluded } from "./gitExclude";
 import { windowIdentity, type CurrentWindow } from "./presence";
-import { readAgentProvider, readAgentSurface, type AgentProvider } from "../config";
+import { providerLabel, readAgentProvider, readAgentSurface, type AgentProvider } from "../config";
 
 export const BRIEF_DIR = ".pick-task";
 export const BRIEF_FILE = "TASK.md";
@@ -886,15 +886,15 @@ async function seedAgentSession(opts: {
   // the briefs instead — they hold the same context and sit in the window's roots.
   if (multi) {
     vscode.window.showInformationMessage(
-      `Agent Flow Deck: couldn't start Claude Code for ${key}. Its brief is in ${BRIEF_DIR}/${BRIEF_FILE} — open it to start the task.`,
+      `Agent Flow Deck: couldn't start ${providerLabel(provider)} for ${key}. Its brief is in ${BRIEF_DIR}/${BRIEF_FILE} — open it to start the task.`,
     );
-    log(`seed ${key}: no Claude Code available — pointed at the brief (batch, clipboard withheld)`);
+    log(`seed ${key}: no ${providerLabel(provider)} available — pointed at the brief (batch, clipboard withheld)`);
     return;
   }
   if (remoteControl) log(`seed ${key}: Remote Control dropped — the clipboard is needed for the prompt`);
   await vscode.env.clipboard.writeText(prompt);
   vscode.window.showInformationMessage(
-    `Agent Flow Deck: opened workspace for ${key}. Claude Code prompt copied — paste it into the panel to start.`,
+    `Agent Flow Deck: opened workspace for ${key}. ${providerLabel(provider)} prompt copied — paste it into the panel to start.`,
   );
   log(`seed ${key}: fell back to clipboard`);
 }

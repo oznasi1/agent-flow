@@ -30,6 +30,12 @@ const FILTER_LABELS: Record<Filter, string> = {
 // stripped-down panel for a Jira user or a flash of a nameless source ("Connecting
 // to …") before the truth arrives a moment later.
 const DEFAULT_SOURCE_LABEL = "Jira";
+// The webview renders before the extension's first state post on some paths, so this
+// must be a real name and not "" — a tooltip that reads "undefined" is worse than one
+// that briefly names the default agent. Same reasoning as DEFAULT_SOURCE_LABEL. Also
+// the fallback for a `state` message that omits `agentLabel` altogether (see its
+// optional type in types.ts).
+const DEFAULT_AGENT_LABEL = "Claude Code";
 const DEFAULT_CAPS: SerializedCaps = {
   supportedFilters: ["unassigned", "mine", "mysprint", "sprint", "backlog", "all"],
   sizes: true, labels: true, sprints: true, components: true,
@@ -126,6 +132,9 @@ export function App(): JSX.Element {
   // The source's user-facing name and what it can do — see DEFAULT_SOURCE_LABEL/
   // DEFAULT_CAPS for why the pre-`state` defaults are what they are.
   const [sourceLabel, setSourceLabel] = React.useState(DEFAULT_SOURCE_LABEL);
+  // The seeded agent's user-facing name — see DEFAULT_AGENT_LABEL for why the
+  // pre-`state` default is what it is.
+  const [agentLabel, setAgentLabel] = React.useState(DEFAULT_AGENT_LABEL);
   const [caps, setCaps] = React.useState<SerializedCaps>(DEFAULT_CAPS);
   const [filter, setFilter] = React.useState<Filter>("mysprint");
   const [size, setSize] = React.useState<Size>("any");
@@ -216,6 +225,7 @@ export function App(): JSX.Element {
           setFilters(m.filters);
           setLiveCount(m.liveCount);
           setSourceLabel(m.sourceLabel);
+          setAgentLabel(m.agentLabel ?? DEFAULT_AGENT_LABEL);
           setCaps(m.caps);
           break;
         case "error":
@@ -505,7 +515,7 @@ export function App(): JSX.Element {
           <button
             className="explore"
             onClick={() => send({ type: "explore" })}
-            title="Explore repos with a Claude Code agent — pick repos, no ticket needed"
+            title={`Explore repos with a ${agentLabel} agent — pick repos, no ticket needed`}
           >
             <CompassIcon /> Explore
           </button>
@@ -672,7 +682,7 @@ export function App(): JSX.Element {
           <button className="batch-clear" onClick={clearBatch}>Clear selection</button>
           <button
             className="batch-launch"
-            title={`Open ${selectedVisible.length} ${selectedVisible.length === 1 ? "task" : "tasks"} across ${batchRepos.join(", ")}, each in its own worktree with its own Claude Code session`}
+            title={`Open ${selectedVisible.length} ${selectedVisible.length === 1 ? "task" : "tasks"} across ${batchRepos.join(", ")}, each in its own worktree with its own ${agentLabel} session`}
             onClick={() => send({ type: "takeBatch", keys: selectedVisible.map((t) => t.key), repos: batchRepos })}
           >
             <PlayIcon /> Launch in parallel

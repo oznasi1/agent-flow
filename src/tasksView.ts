@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { getConfig, AgentFlowConfig, ExploreAction } from "./config";
+import { getConfig, providerLabel, AgentFlowConfig, AgentProvider, ExploreAction } from "./config";
 import {
   isTaskNetworkError,
   serializeCaps,
@@ -196,7 +196,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
     this.post({ type: "state", authed, configured, project: info.scopeValue, me,
       prReviewStatus: cfg.prReviewStatus, filters: cfg.filters,
-      sourceLabel: info.label, caps: serializeCaps(this.provider().caps),
+      sourceLabel: info.label, agentLabel: providerLabel(cfg.agentProvider), caps: serializeCaps(this.provider().caps),
       liveCount: cfg.trackOpenWindows ? this.liveWindows().length : undefined });
   }
 
@@ -1009,7 +1009,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     });
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.seededInPlace);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, cfg.agentProvider, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     const what = env
       ? `to verify on ${env}`
@@ -1086,7 +1086,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, lastRunKey: key } : n)));
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.seededInPlace);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, cfg.agentProvider, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
   }
@@ -1422,7 +1422,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** Toast fragment announcing the pre-seed, shared by `launch()` and `explore()`. With
    * Remote Control applied, Enter only connects the bridge — the task itself starts on
    * the later paste + Enter — so the plain "press Enter to start" copy would be wrong. */
-  private seededNote(seedAgent: boolean, remoteControl: boolean, seededInPlace = false): string {
+  private seededNote(
+    seedAgent: boolean,
+    remoteControl: boolean,
+    provider: AgentProvider,
+    seededInPlace = false,
+  ): string {
     // Seeding into this window with seeding off is the one destination that ends with
     // NOTHING to show: no window opened, no session started, only briefs on disk. Every
     // other destination at least leaves a window behind, so silence reads as success.
@@ -1431,9 +1436,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ? " This window is untouched — agentFlow.seedAgent is off, so no session was seeded."
         : "";
     }
+    const agent = providerLabel(provider);
     return remoteControl
-      ? " Claude Code pre-seeded with /remote-control — Enter to connect, then paste."
-      : " Claude Code pre-seeded — press Enter to start.";
+      ? ` ${agent} pre-seeded with /remote-control — Enter to connect, then paste.`
+      : ` ${agent} pre-seeded — press Enter to start.`;
   }
 
   /** Where a completed open put the session, for the success toast. "This window" is
@@ -1531,7 +1537,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     });
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.seededInPlace);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, cfg.agentProvider, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     if (result.mergeFailed) {
       this.toast(
@@ -1650,7 +1656,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
     if (keys.length > cfg.batchLaunchConfirmThreshold) {
       const go = await vscode.window.showWarningMessage(
-        `Launch ${keys.length} tasks in parallel? That's ${keys.length} Claude Code sessions.`,
+        `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${providerLabel(cfg.agentProvider)} sessions.`,
         { modal: true },
         "Launch",
       );

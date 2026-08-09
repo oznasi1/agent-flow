@@ -155,6 +155,11 @@ export function readAgentProvider(
   return c.get<string>("agentProvider") === "copilot" && isVSCodeHost() ? "copilot" : "claude-code";
 }
 
+/** The agent's name, for copy that tells the user what was just seeded. */
+export function providerLabel(p: AgentProvider): string {
+  return p === "copilot" ? "Copilot" : "Claude Code";
+}
+
 /** One Explore action as seen by the flow: id + picker label + resolved prompt + Slack toggle. */
 export interface ExploreAction {
   id: string;
