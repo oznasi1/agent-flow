@@ -98,14 +98,14 @@ uses them.
 
 ## Settings must apply without a reload
 
-The three buttons were the only in-session way to change those settings.
-`DeckViewProvider` reads them once in its constructor, and the extension registers no
+The three buttons were the only in-session way to change those settings. `DeckPanel`
+reads them once in its constructor, and the extension registers no
 `onDidChangeConfiguration` listener anywhere outside telemetry. Removing the buttons
 without adding one would mean a setting change does nothing until the panel is closed
 and reopened.
 
-The provider registers a configuration listener, disposed with the rest of the view's
-subscriptions. When `agentFlow.prFacts`, `agentFlow.openAgents` or
+`DeckPanel` registers a configuration listener, disposed with the rest of its
+`disposables`. When `agentFlow.prFacts`, `agentFlow.openAgents` or
 `agentFlow.reviewRequests` changes:
 
 - re-seed the corresponding field from `getConfig()`;
@@ -117,6 +117,12 @@ subscriptions. When `agentFlow.prFacts`, `agentFlow.openAgents` or
   what the removed handler did;
 - refresh.
 
+The listener also handles `agentFlow.deckGrouping`, but differently: it posts
+`deck:grouping` and does **not** refresh. That key is display-only, so a rebuild would
+buy nothing. This is what preserves the property the current `grouping` field's own
+comment claims — "a settings-page edit lands without a separate message" — once that
+field stops riding along on every `deck:runs`.
+
 Unrelated configuration changes must not trigger a rebuild.
 
 ## Fixing the flake
@@ -126,12 +132,13 @@ full board rebuild. The fix is to stop putting control state on it.
 
 `deck:runs` drops `liveSignal`, `prFacts`, `openAgents`, `reviewQueue` and `grouping`
 from its payload. The first four have no webview consumer left. `grouping` moves to a
-new outbound `deck:grouping` message posted once, in the `deck:ready` handler, before
-the first rebuild — the same place `postCachedReviews()` already posts early for the
-same reason.
+new outbound `deck:grouping` message posted in the `deck:ready` handler, before the
+first rebuild — the same place `postCachedReviews()` already posts early for the same
+reason — and again from the configuration listener when `agentFlow.deckGrouping`
+changes under the panel.
 
 After that seed the webview owns the lens. A click sets local state and sends
-`deck:setGrouping`; nothing echoes back, so nothing can overtake it.
+`deck:setGrouping`; nothing echoes back off a rebuild, so nothing can overtake it.
 
 The host handler for `deck:setGrouping` persists the preference and **stops calling
 `refreshBusy()`**. `deckGrouping` is display-only — `deckView.ts` reads it in exactly
@@ -147,9 +154,38 @@ Repo gates, all of which must pass ([CONTRIBUTING.md](../../../CONTRIBUTING.md))
 | Command | Why it matters here |
 | --- | --- |
 | `npm run typecheck` | `tsc --noEmit` clean. |
-| `npm test` | The existing suite must pass **unmodified**. |
+| `npm test` | Green at the end of every task. |
 | `npm run test:cov` | Coverage thresholds are enforced. |
 | `npm run build` | The only gate that catches a webview module reaching for `fs`/`os`/`path`; typecheck and the suite both pass regardless. |
+
+### Existing tests will change, and that is expected
+
+This is a removal, so "the existing suite passes untouched" is not available and
+claiming it would be dishonest. Nineteen tests in `test/unit/deckView.test.ts` fire
+`deck:setLive` / `deck:setPrFacts` / `deck:setOpenAgents` / `deck:setReviewQueue` or
+assert `liveSignal` on a `deck:runs` post, and roughly a dozen in
+`test/webview/DeckApp.test.tsx` click a switch, read the "To review" or "Total" tile,
+or build a `deck:runs` fixture with the removed fields.
+
+The rule for each one: **the underlying behaviour keeps its coverage, only the way the
+test drives it changes.** A test that turned PR facts off with a message now turns it
+off by changing the setting and firing `fireConfigurationChanged("agentFlow.prFacts")`
+— the assertions about what the host then does are kept verbatim. Only tests whose
+entire subject is a deleted thing are deleted, and each such deletion is named in the
+task that makes it.
+
+Two need naming up front because they are not mechanical:
+
+- `"carries the review-queue toggle on deck:runs so the webview can render its pill"`
+  tests a payload field this spec deletes. It goes.
+- `"keeps the toggle's answer across a refresh, rather than re-reading the setting"`
+  guards a real invariant that survives — a routine refresh still must not re-read
+  config — but its premise changes, because a config-change event now legitimately
+  does re-seed the field. It is rewritten to assert exactly that split: a refresh does
+  not re-read, a configuration change does.
+
+`test/_mocks/vscode.ts` already exposes `onDidChangeConfiguration` and a
+`fireConfigurationChanged(sections)` helper, so the listener needs no new mock work.
 
 New coverage:
 
