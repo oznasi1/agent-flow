@@ -744,12 +744,26 @@ async function seedViaTerminal(
  *
  * There is no URI-handler rung here — Copilot publishes no documented
  * open-with-prompt URI — so a false return means the caller should fall back to the
- * clipboard. */
+ * clipboard.
+ *
+ * `multi`: Copilot's chat panel is single-instance, so a batch of N tasks calling
+ * this command would each overwrite the previous prompt — the user would silently
+ * end up with only the last task seeded. There is no verified editor-tab command to
+ * open one Copilot chat per task instead (that dev-host spike hasn't been run), so
+ * for now a batch skips the panel entirely and returns false immediately, which
+ * sends the caller (seedAgentSession) down its existing `multi` fallback: the
+ * "briefs are in .agentflow/" notification, clipboard withheld. Revisit once a
+ * verified per-task command exists. */
 async function seedCopilotPanel(
   seedText: string,
   key: string,
   log: (m: string) => void,
+  multi = false,
 ): Promise<boolean> {
+  if (multi) {
+    log(`seed ${key}: per-task Copilot chat tabs are not wired up yet — batch falls back to the briefs`);
+    return false;
+  }
   for (let attempt = 1; attempt <= 7; attempt++) {
     try {
       const cmds = await vscode.commands.getCommands(true);
@@ -843,7 +857,7 @@ async function seedAgentSession(opts: {
     } catch (e) {
       log(`seed ${key}: URI failed: ${e}`);
     }
-  } else if (await seedCopilotPanel(seedText, key, log)) {
+  } else if (await seedCopilotPanel(seedText, key, log, multi)) {
     announceRemoteControl();
     return;
   }

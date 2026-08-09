@@ -845,6 +845,76 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       expect(env.openExternal).not.toHaveBeenCalled();
     });
   });
+
+  // No editor command that opens a Copilot chat tab with a prefilled query has been
+  // verified to exist (Task 2's dev-host spike hasn't run), so a Copilot batch must
+  // degrade to the brief notification rather than ever touching the single-instance
+  // panel command — that would silently overwrite every task's prompt but the last.
+  describe("seedAgentSession — copilot batch", () => {
+    const CHAT_OPEN_CMD = "workbench.action.chat.open";
+
+    beforeEach(() => {
+      env.uriScheme = "vscode";
+      setConfig({ agentProvider: "copilot", agentSurface: undefined });
+      commands.getCommands.mockResolvedValue([CHAT_OPEN_CMD]);
+    });
+
+    afterEach(() => {
+      env.uriScheme = "cursor";
+      setConfig({ agentProvider: undefined });
+    });
+
+    /** Seed two matching plans in one pass (the file's batch pattern — see
+     * "seeds every plan matching this window" above), with the polling delay
+     * faked away so the test doesn't burn real seconds. */
+    const seedTwoTasks = async (key1: string, key2: string) => {
+      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+      readdirSync.mockReturnValue([`${key1}-1.json`, `${key2}-1.json`] as never);
+      readFileSync.mockImplementation((p) =>
+        String(p).includes(key1)
+          ? planJson({
+              key: key1,
+              seq: 0,
+              matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: `Start ${key1}` }],
+            })
+          : planJson({
+              key: key2,
+              seq: 1,
+              matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: `Start ${key2}` }],
+            }),
+      );
+      const { context } = fakeContext();
+      vi.useFakeTimers();
+      try {
+        const pending = maybeSeedAgent(context, () => {});
+        await vi.runAllTimersAsync();
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+    };
+
+    it("never reuses the single-instance panel for a batch", async () => {
+      await seedTwoTasks("ASM-1", "ASM-2");
+      expect(commands.executeCommand).not.toHaveBeenCalledWith(CHAT_OPEN_CMD, expect.anything());
+    });
+
+    it("returns false immediately, without polling for a chat command", async () => {
+      // The multi guard short-circuits before the poll loop — proven here by asserting
+      // getCommands is never even called, not just that its result goes unused.
+      await seedTwoTasks("ASM-1", "ASM-2");
+      expect(commands.getCommands).not.toHaveBeenCalled();
+    });
+
+    it("points at the briefs for each task, with the clipboard withheld", async () => {
+      // One clipboard can't carry two prompts — this is the fallback maybeSeedAgent's
+      // multi path already uses for Claude Code, and a Copilot batch must land here too.
+      await seedTwoTasks("ASM-1", "ASM-2");
+      expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining(BRIEF_DIR));
+      expect(window.showInformationMessage).toHaveBeenCalledTimes(2); // one per task
+      expect(env.clipboard.writeText).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe("seedClaudeCode — remote control", () => {
