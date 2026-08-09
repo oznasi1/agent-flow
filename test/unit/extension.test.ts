@@ -418,6 +418,122 @@ describe("activate", () => {
     expect(commands.registerCommand).toHaveBeenCalled();
   });
 
+  it("still activates and registers every command when the host-context setContext call throws", () => {
+    // The exact failure the try/catch around `setContext("agentFlow.host.vscode", …)`
+    // exists to contain (extension.ts:59-63): an uncaught throw there disposes every
+    // registration that follows it, per the comment above that try/catch. So the point
+    // of this test is proving those registrations still land — not just that
+    // activate() itself didn't throw, which alone wouldn't catch a regression that
+    // moved the setContext call after the registrations.
+    commands.executeCommand.mockImplementationOnce(() => {
+      throw new Error("setContext boom");
+    });
+    const { context } = fakeContext();
+
+    expect(() => activate(context)).not.toThrow();
+
+    // Confirms the throw really came from the setContext call this test means to
+    // exercise, not some unrelated first executeCommand call.
+    expect(commands.executeCommand).toHaveBeenNthCalledWith(
+      1,
+      "setContext",
+      "agentFlow.host.vscode",
+      expect.any(Boolean),
+    );
+
+    // Every registration after the try/catch still happens: the view provider…
+    expect(window.registerWebviewViewProvider).toHaveBeenCalledWith("agentFlow.tasks", providerStub);
+    // …and every command, not just "some" command.
+    const ids = vi.mocked(commands.registerCommand).mock.calls.map((c) => c[0]);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "agentFlow.refresh",
+        "agentFlow.signIn",
+        "agentFlow.signOut",
+        "agentFlow.takeTask",
+        "agentFlow.setup",
+        "agentFlow.openDeck",
+        "agentFlow.openMarketplace",
+        "agentFlow.doctor",
+      ]),
+    );
+
+    // The failure is logged, not silently swallowed.
+    const output = window.createOutputChannel.mock.results[0]?.value as {
+      appendLine: ReturnType<typeof vi.fn>;
+    };
+    expect(output.appendLine).toHaveBeenCalledWith(
+      expect.stringContaining("could not set the host context key"),
+    );
+  });
+
+  it("logs a non-Error setContext throw via String(), not e.message", () => {
+    // The catch's message is `e instanceof Error ? e.message : String(e)` — a plain
+    // thrown value (not an Error instance) exercises the ternary's other arm, which
+    // the Error-throwing test above does not reach.
+    commands.executeCommand.mockImplementationOnce(() => {
+      throw "setContext boom";
+    });
+    const { context } = fakeContext();
+    expect(() => activate(context)).not.toThrow();
+    const output = window.createOutputChannel.mock.results[0]?.value as {
+      appendLine: ReturnType<typeof vi.fn>;
+    };
+    expect(output.appendLine).toHaveBeenCalledWith(
+      expect.stringContaining("could not set the host context key: setContext boom"),
+    );
+  });
+
+  it("still activates and registers every command when the host-context setContext call REJECTS (real-host shape)", async () => {
+    // The two setContext tests above throw SYNCHRONOUSLY, which a plain try/catch
+    // already handles. The real VS Code host returns a Thenable from
+    // executeCommand — a rejection there would escape the synchronous try/catch as
+    // an unhandled rejection and never reach the log, unless a rejection handler is
+    // attached to the returned promise. This test is the one that would have caught
+    // that gap: it makes executeCommand RETURN a rejected promise instead of
+    // throwing, and asserts both that the failure is logged and that every
+    // registration after it still happens.
+    commands.executeCommand.mockImplementationOnce(() => Promise.reject(new Error("setContext boom (async)")));
+    const { context } = fakeContext();
+
+    expect(() => activate(context)).not.toThrow();
+    // Let the rejection's .then(undefined, ...) handler run.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(commands.executeCommand).toHaveBeenNthCalledWith(
+      1,
+      "setContext",
+      "agentFlow.host.vscode",
+      expect.any(Boolean),
+    );
+
+    const output = window.createOutputChannel.mock.results[0]?.value as {
+      appendLine: ReturnType<typeof vi.fn>;
+    };
+    expect(output.appendLine).toHaveBeenCalledWith(
+      expect.stringContaining("could not set the host context key: setContext boom (async)"),
+    );
+
+    // Registrations after the setContext call still land — a lost rejection handler
+    // wouldn't break this (the promise rejecting doesn't throw synchronously either
+    // way), but it is the same "must not dispose later registrations" guarantee the
+    // sync-throw tests pin, restated for the async arm.
+    expect(window.registerWebviewViewProvider).toHaveBeenCalledWith("agentFlow.tasks", providerStub);
+    const ids = vi.mocked(commands.registerCommand).mock.calls.map((c) => c[0]);
+    expect(ids).toEqual(
+      expect.arrayContaining([
+        "agentFlow.refresh",
+        "agentFlow.signIn",
+        "agentFlow.signOut",
+        "agentFlow.takeTask",
+        "agentFlow.setup",
+        "agentFlow.openDeck",
+        "agentFlow.openMarketplace",
+        "agentFlow.doctor",
+      ]),
+    );
+  });
+
   it("reports command_invoked with the matching command id for every registered command", async () => {
     const { context } = fakeContext();
     activate(context);

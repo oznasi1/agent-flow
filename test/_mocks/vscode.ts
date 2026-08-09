@@ -102,6 +102,7 @@ export const window = {
   withProgress: vi.fn(async (_opts: unknown, task: (...a: any[]) => any) => task()),
   showInformationMessage: vi.fn(async (..._a: unknown[]): Promise<string | undefined> => undefined),
   showWarningMessage: vi.fn(async (..._a: unknown[]): Promise<string | undefined> => undefined),
+  showErrorMessage: vi.fn(async (..._a: unknown[]): Promise<string | undefined> => undefined),
   createOutputChannel: vi.fn((_name: string) => ({ appendLine: vi.fn(), dispose: vi.fn() })),
   registerWebviewViewProvider: vi.fn((_id: string, _provider: unknown) => ({ dispose: vi.fn() })),
   createWebviewPanel: vi.fn((_id: string, _title: string, _col: unknown, _opts?: unknown) => makeWebviewPanel()),
@@ -279,6 +280,7 @@ export function resetVscodeMocks(): void {
   window.withProgress.mockReset().mockImplementation(async (_opts: unknown, task: (...a: any[]) => any) => task());
   window.showInformationMessage.mockReset().mockResolvedValue(undefined);
   window.showWarningMessage.mockReset().mockResolvedValue(undefined);
+  window.showErrorMessage.mockReset().mockResolvedValue(undefined);
   window.createOutputChannel.mockReset().mockImplementation((_name: string) => ({ appendLine: vi.fn(), dispose: vi.fn() }));
   window.registerWebviewViewProvider.mockReset().mockImplementation(() => ({ dispose: vi.fn() }));
   window.createWebviewPanel.mockReset().mockImplementation(() => makeWebviewPanel());

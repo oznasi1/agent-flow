@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import * as os from "os";
 import * as path from "path";
 import {
@@ -16,7 +16,7 @@ import {
   DEFAULT_REVIEW_REQUEST_MODES,
   DEFAULT_ENVIRONMENTS,
 } from "../../src/config";
-import { setConfig, setDefaultConfig } from "../_mocks/vscode";
+import { env, setConfig, setDefaultConfig } from "../_mocks/vscode";
 import pkg from "../../package.json";
 
 describe("expandHome", () => {
@@ -499,6 +499,52 @@ describe("getConfig — agentSurface", () => {
     // to the default surface, the same way remoteControl degrades to "off".
     setConfig({ agentSurface: "tmux" });
     expect(getConfig().agentSurface).toBe("extension");
+  });
+});
+
+describe("getConfig — agentProvider", () => {
+  // The mock host is Cursor by default (see test/_mocks/vscode.ts). Every case
+  // here states the host it means, and the afterEach puts the default back so a
+  // stray "vscode" cannot leak into the ~hundreds of tests that follow.
+  afterEach(() => {
+    env.uriScheme = "cursor";
+    setConfig({ agentProvider: undefined });
+  });
+
+  it("defaults to claude-code when unset", () => {
+    env.uriScheme = "vscode";
+    setConfig({ agentProvider: undefined });
+    expect(getConfig().agentProvider).toBe("claude-code");
+  });
+
+  it("reads copilot in VS Code", () => {
+    env.uriScheme = "vscode";
+    setConfig({ agentProvider: "copilot" });
+    expect(getConfig().agentProvider).toBe("copilot");
+  });
+
+  it("reads copilot in VS Code Insiders", () => {
+    env.uriScheme = "vscode-insiders";
+    setConfig({ agentProvider: "copilot" });
+    expect(getConfig().agentProvider).toBe("copilot");
+  });
+
+  it("degrades copilot to claude-code in Cursor", () => {
+    env.uriScheme = "cursor";
+    setConfig({ agentProvider: "copilot" });
+    expect(getConfig().agentProvider).toBe("claude-code");
+  });
+
+  it("degrades copilot to claude-code in Windsurf", () => {
+    env.uriScheme = "windsurf";
+    setConfig({ agentProvider: "copilot" });
+    expect(getConfig().agentProvider).toBe("claude-code");
+  });
+
+  it("falls back to claude-code for an unrecognized value", () => {
+    env.uriScheme = "vscode";
+    setConfig({ agentProvider: "codex" });
+    expect(getConfig().agentProvider).toBe("claude-code");
   });
 });
 

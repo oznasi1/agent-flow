@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { getConfig } from "./config";
+import { getConfig, providerLabel, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { buildRunStatus } from "./engine/status";
@@ -40,8 +40,10 @@ const GH_NOTES: Record<GhGap["kind"], string> = {
 
 /** Appended to a review body the agent drafted, when provenance stamping is on.
  * Posting an agent's words as unmarked human review is the kind of thing worth
- * being straight about with teammates. */
-export const REVIEW_PROVENANCE = "_Drafted with Claude Code via Agent Flow Deck._";
+ * being straight about with teammates — which means naming the agent that actually
+ * drafted it. */
+export const reviewProvenance = (p: AgentProvider): string =>
+  `_Drafted with ${providerLabel(p)} via Agent Flow Deck._`;
 
 const VERB_LABEL: Record<ReviewVerb, string> = {
   approve: "Approve",
@@ -423,7 +425,7 @@ export class DeckPanel {
     }
     this.toast(
       "success",
-      `Reviewing ${req.repoName}#${req.number} in a worktree.${cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : ""}`,
+      `Reviewing ${req.repoName}#${req.number} in a worktree.${cfg.seedAgent ? ` ${providerLabel(cfg.agentProvider)} pre-seeded — press Enter to start.` : ""}`,
     );
     await this.refreshBusy(); // picks up the new run so the row shows "reviewing"
   }
@@ -511,7 +513,7 @@ export class DeckPanel {
         return;
       }
       const text = fromDraft && cfg.stampLabelOnWrite && body.trim()
-        ? `${body.trim()}\n\n${REVIEW_PROVENANCE}`
+        ? `${body.trim()}\n\n${reviewProvenance(cfg.agentProvider)}`
         : body;
       this.log(`deck: submitting ${verb} on ${req.repo}#${req.number}`);
       const res = await this.reviewProvider.submit(req.repo, req.number, verb, text);

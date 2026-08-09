@@ -35,6 +35,7 @@ export interface DoctorConfig {
   workspaceDir: string;
   repoBlocklist: string[];
   prFacts: boolean;
+  agentProvider: "claude-code" | "copilot";
 }
 
 /** Every outside-world touch Doctor makes, injected. `collectInputs` is then pure
@@ -52,6 +53,7 @@ export interface DoctorDeps {
   repos: () => { repos: number; gitRepos: number };
   claudeExtension: () => { installed: boolean; version: string | null };
   claudeProjectsReadable: () => boolean;
+  copilotChat: () => Promise<{ available: boolean }>;
   runs: () => number;
   log: (message: string) => void;
 }
@@ -92,6 +94,9 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
     claudeCode: d.claudeExtension(),
     claudeProjectsReadable: d.claudeProjectsReadable(),
     runs: d.runs(),
+    agentProvider: cfg.agentProvider,
+    // Only probed when it can matter — the Claude Code path must not pay for it.
+    copilotChat: cfg.agentProvider === "copilot" ? await d.copilotChat() : { available: false },
   };
 }
 
@@ -169,6 +174,17 @@ export function probeClaudeExtension(): { installed: boolean; version: string | 
   return { installed: true, version: ext.packageJSON?.version ?? null };
 }
 
+/** Whether this window can open a chat panel at all. Command registration rather
+ *  than an extension id: chat is built into VS Code and Copilot ships bundled in
+ *  some builds. */
+export async function probeCopilotChat(): Promise<{ available: boolean }> {
+  try {
+    return { available: (await vscode.commands.getCommands(true)).includes("workbench.action.chat.open") };
+  } catch {
+    return { available: false };
+  }
+}
+
 function statDir(p: string): { exists: boolean; writable: boolean } {
   try {
     if (!fs.statSync(p).isDirectory()) return { exists: false, writable: false };
@@ -200,6 +216,7 @@ export function defaultDeps(connector: TaskConnector, log: (message: string) => 
       workspaceDir: c.workspaceDir,
       repoBlocklist: c.repoBlocklist,
       prFacts: c.prFacts,
+      agentProvider: c.agentProvider,
     };
   };
   return {
@@ -215,6 +232,7 @@ export function defaultDeps(connector: TaskConnector, log: (message: string) => 
       return { repos: found.length, gitRepos: found.filter((r) => r.isGit).length };
     },
     claudeExtension: probeClaudeExtension,
+    copilotChat: probeCopilotChat,
     claudeProjectsReadable: () => {
       try {
         fs.accessSync(path.join(os.homedir(), ".claude", "projects"), fs.constants.R_OK);

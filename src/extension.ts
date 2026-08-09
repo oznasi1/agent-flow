@@ -6,7 +6,7 @@ import { MarketplacePanel } from "./marketplaceView";
 import { maybeSeedAgent, watchPlansAndSeed } from "./engine/workspace";
 import { BASE_SCHEME, TaskBaseContentProvider } from "./engine/diffView";
 import { windowIdentity, writePresence, removePresence, defaultWindowsDir } from "./engine/presence";
-import { getConfig } from "./config";
+import { getConfig, isVSCodeHost } from "./config";
 import { maybeRunSetup, runSetup } from "./setup";
 import { showDoctor, defaultDeps } from "./doctorView";
 import { disposeTelemetry, initTelemetry, track } from "./telemetry/telemetry";
@@ -51,6 +51,24 @@ export function activate(context: vscode.ExtensionContext): void {
   const connector = resolveConnector(context, log);
   const provider = new TasksViewProvider(context, connector, log);
   log("Agent Flow Deck activated");
+
+  // Gates the `when` clause on agentFlow.agentProvider so the Copilot choice does not
+  // render in Cursor's settings UI. Cosmetic only — readAgentProvider enforces the
+  // same rule at seed time. Guarded on both a synchronous throw AND an async
+  // rejection: executeCommand returns a Thenable in the real host, so a rejection
+  // would otherwise escape as an unhandled rejection rather than being logged. A
+  // failure here must never escape activate(), because an uncaught throw disposes
+  // every registration that follows it. One formatter shared by both arms so there
+  // is a single Error-vs-not branch to cover, not two.
+  const logSetContextFailure = (e: unknown) =>
+    log(`could not set the host context key: ${e instanceof Error ? e.message : String(e)}`);
+  try {
+    void vscode.commands
+      .executeCommand("setContext", "agentFlow.host.vscode", isVSCodeHost())
+      .then(undefined, logSetContextFailure);
+  } catch (e) {
+    logSetContextFailure(e);
+  }
 
   // Telemetry must come up before the commands below so `command_invoked` can
   // use it. A throw here must NEVER escape activate() — see the comment on the
