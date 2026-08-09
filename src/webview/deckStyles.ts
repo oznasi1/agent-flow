@@ -29,7 +29,12 @@ export const DECK_CSS = `
     --rv-row-h: 26px;
   }
 
-  .hd { flex: none; display: flex; align-items: center; gap: 14px;
+  /* Wraps, always. The row is the panel's widest object and gains controls over
+     time; without this it clips its right end off-screen instead of folding.
+     gap's shorthand form sets row-gap and column-gap in one value, so it is
+     also the safe way to give them different sizes — a separate row-gap
+     declaration ahead of a shorthand gap would be silently overwritten. */
+  .hd { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
     padding: 13px 20px; border-bottom: 1px solid var(--hair); }
   /* The gloss sits under the label, not beside it: stacked, the two lines read as one
      title block instead of a sentence that happens to change weight mid-way. Free

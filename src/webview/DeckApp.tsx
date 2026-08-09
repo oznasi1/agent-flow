@@ -391,13 +391,6 @@ export function DeckApp(): JSX.Element {
    * inline "check the PR before trying again" line; cleared on `"ok"`, left
    * alone on `"cancelled"` (nothing was attempted, so nothing to warn about). */
   const [submitFailed, setSubmitFailed] = React.useState<Record<string, boolean>>({});
-  /** Mirrors the host's own `enabled` flag on `deck:reviews`: true once a post
-   * with the feature on has landed, false again the moment it posts `enabled:
-   * false` (the setting turned off, PR facts turned off, or gh going unusable).
-   * The stat tile needs this, not just `issueCount === 0` — "0 To review" is
-   * information about an enabled, empty queue; a switched-off strip should show
-   * no tile at all, the same way the strip itself renders nothing below. */
-  const [reviewsSeen, setReviewsSeen] = React.useState(false);
 
   React.useEffect(() => {
     const handler = (ev: MessageEvent<OutboundMessage>) => {
@@ -421,7 +414,6 @@ export function DeckApp(): JSX.Element {
         // own scroller, so the board keeps its share of the window without the queue
         // ever being hidden — which also means the collapse state is purely the user's,
         // with no seeded-once ref and no setState nested inside another's updater.
-        setReviewsSeen(m.enabled);
         setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale, reviewWrites: m.reviewWrites, loading: m.loading });
       } else if (m.type === "deck:reviewDetail") {
         setDetails((d) => ({ ...d, [m.id]: m.detail }));
@@ -479,20 +471,13 @@ export function DeckApp(): JSX.Element {
     <>
       <div className="hd">
         <div className="title">In-flight<span className="sub">everything you've launched</span></div>
+        {/* The three board columns and nothing else. "To review" lived here too,
+            six pixels above the review strip that renders its own count; "Total"
+            was the sum of these three, over a board showing every card it counted. */}
         <div className="stats">
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "progress").length}</span><span className="l">In progress</span></div>
           <div className={`stat ${needs > 0 ? "attn" : ""}`}><span className="n">{needs}</span><span className="l">Action required</span></div>
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "review").length}</span><span className="l">In review</span></div>
-          {reviewsSeen && (
-            // A spinning glyph where the number goes, not "0": on a cold start the
-            // count is genuinely unknown for the few seconds the first `gh` search
-            // takes, and "0 To review" is a claim we cannot back yet.
-            <div className="stat">
-              <span className="n">{reviews.loading ? <span className="spin on" aria-label="checking">⟳</span> : reviews.issueCount}</span>
-              <span className="l">To review</span>
-            </div>
-          )}
-          <div className="stat"><span className="n">{cards.length}</span><span className="l">Total</span></div>
         </div>
         <div className="sp" />
         {/* A lens, not a trust toggle: both sides show everything, one card per

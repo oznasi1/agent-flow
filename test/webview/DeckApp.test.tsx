@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as React from "react";
-import { render, screen, fireEvent, act, within } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
@@ -94,10 +94,39 @@ describe("DeckApp", () => {
     expect(screen.getAllByText("In progress").length).toBeGreaterThan(0);
   });
 
-  it("shows a summary strip with the total count", () => {
+  it("shows a summary tile with the aggregate count across runs", () => {
+    // There is no longer a Total tile — this is really about whether the header
+    // adds two separate runs into one tile's count, not about any one label.
     render(<DeckApp />);
     host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
-    expect(screen.getByText(/Total/i)).toBeInTheDocument();
+    const tiles = Array.from(document.querySelectorAll(".stat")).map((s) => [s.querySelector(".l")!.textContent, s.querySelector(".n")!.textContent]);
+    expect(tiles).toContainEqual(["In progress", "2"]);
+  });
+
+  it("shows three tiles: the board's own columns", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "progress" }), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" }, column: "needs" })]));
+    const labels = screen.getAllByText(/./, { selector: ".stat .l" }).map((n) => n.textContent);
+    expect(labels).toEqual(["In progress", "Action required", "In review"]);
+  });
+
+  it("drops the To review and Total tiles", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+
+    // Both restated something already on screen: the review strip renders its own
+    // count directly below, and Total is the sum of the three tiles beside it.
+    expect(screen.queryByText("To review")).not.toBeInTheDocument();
+    expect(screen.queryByText("Total")).not.toBeInTheDocument();
+  });
+
+  it("accents Action required only when something is asking for you", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "progress" })]));
+    expect(document.querySelector(".stat.attn")).toBeNull();
+
+    host(runsMsg([mkStatus({ column: "needs" })]));
+    expect(document.querySelector(".stat.attn")).not.toBeNull();
   });
 
   it("sorts cards in a column by most-recent activity", () => {
@@ -605,38 +634,13 @@ const mkReview = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
 });
 
 describe("DeckApp review strip", () => {
-  it("shows no To review stat until the host posts a queue", () => {
-    render(<DeckApp />);
-    expect(screen.queryByText("To review")).not.toBeInTheDocument();
-    host(reviewsMsg([mkReview()]));
-    expect(screen.getByText("To review")).toBeInTheDocument();
-  });
-
-  // The strip going off (reviewRequests toggled, PR facts toggled off, gh going
-  // unusable) posts `enabled: false` with an emptied queue. This must drop the
-  // stat tile entirely, not merely zero it — a "0 To review" tile reads as "the
-  // feature is on and you owe nobody a review", which is a different claim than
-  // "this feature is off".
-  it("drops the To review stat entirely once the host reports the strip disabled", () => {
-    render(<DeckApp />);
-    host(reviewsMsg([mkReview()]));
-    expect(screen.getByText("To review")).toBeInTheDocument();
-    host({ ...reviewsMsg([], 0), enabled: false } as OutboundMessage);
-    expect(screen.queryByText("To review")).not.toBeInTheDocument();
-    expect(screen.queryByText(/waiting on your review/i)).not.toBeInTheDocument();
-  });
-
-  // The strip and the stat part company here, deliberately: an empty rail above the
-  // board is noise, but a "0" tile is the only thing telling you the feature is alive.
-  // Scoped to the "To review" stat itself: with no runs, every other stat tile (In
-  // progress, Action required, In review, Total) also reads "0", so a bare
-  // screen.getByText("0") matches five elements and throws rather than asserting
-  // anything.
-  it("keeps the To review stat at zero, while the strip itself disappears", () => {
+  // Not a tile assertion: the strip renders nothing of its own — no header line,
+  // no rows — for an empty, resolved queue (not loading, not stale). Kept from
+  // two tests that used to bundle this together with the now-removed "To review"
+  // tile; this is the part of each that was really about the strip.
+  it("renders nothing for an empty, resolved queue", () => {
     render(<DeckApp />);
     host(reviewsMsg([], 0));
-    const stat = screen.getByText("To review").closest<HTMLElement>(".stat")!;
-    expect(within(stat).getByText("0")).toBeInTheDocument();
     expect(screen.queryByText(/waiting on your review/i)).not.toBeInTheDocument();
   });
 
@@ -720,24 +724,6 @@ describe("DeckApp review strip", () => {
 
     expect(screen.queryByText("check-a")).not.toBeInTheDocument();
     expect(screen.getByText("check-b")).toBeInTheDocument();
-  });
-
-  // Cold start. The tile has to say *something* — it is the only part of the
-  // header that survives the strip being empty — but "0" is a claim about a
-  // search that has not come back yet.
-  it("spins the To review tile instead of counting zero while loading", () => {
-    const { container } = render(<DeckApp />);
-    host({ ...reviewsMsg([], 0), loading: true } as OutboundMessage);
-    expect(screen.getByText("To review")).toBeInTheDocument();
-    expect(container.querySelector(".stat .spin")).toBeInTheDocument();
-  });
-
-  it("swaps the spinner for the real count once the search lands", () => {
-    const { container } = render(<DeckApp />);
-    host({ ...reviewsMsg([], 0), loading: true } as OutboundMessage);
-    host(reviewsMsg([mkReview(), mkReview({ id: "o/r#2", number: 2 })]));
-    expect(container.querySelector(".stat .spin")).not.toBeInTheDocument();
-    expect(screen.getByText("2")).toBeInTheDocument();
   });
 
   it("passes the loading flag through to the strip", () => {
@@ -1181,7 +1167,6 @@ describe("Agents view", () => {
     ] })]));
     const tiles = Array.from(document.querySelectorAll(".stat")).map((s) => [s.querySelector(".l")!.textContent, s.querySelector(".n")!.textContent]);
     expect(tiles).toContainEqual(["In progress", "2"]);
-    expect(tiles).toContainEqual(["Total", "2"]);
   });
 
   it("offers Clear stale only when something is actually stale", () => {
