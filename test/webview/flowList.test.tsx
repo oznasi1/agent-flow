@@ -81,6 +81,23 @@ describe("rows", () => {
     expect(screen.getByTestId("flowlist-empty")).toBeTruthy();
   });
 
+  // `wasEmpty` is seeded from the flow's edge count AT MOUNT, precisely so
+  // the effect that focuses the empty state only fires on the TRANSITION
+  // into empty (a delete), never on a mount that already starts there —
+  // e.g. switching to List view on a flow that has no rules yet. Without
+  // that guard, mounting here would yank focus off whatever the user was on
+  // (the Canvas/List tab, a header control) for no reason connected to
+  // anything the user just did.
+  it("mounting on an already-empty flow does not steal focus from whatever the user was on", () => {
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+    expect(document.activeElement).toBe(outside);
+    render(<FlowList {...props({ flow: flow() })} />);
+    expect(document.activeElement).toBe(outside);
+    document.body.removeChild(outside);
+  });
+
   it("the sentence includes the condition, the action and the target", () => {
     render(<FlowList {...props({ flow: placeAndPlanned() })} />);
     const row = screen.getByTestId("flowlist-row-e1");
