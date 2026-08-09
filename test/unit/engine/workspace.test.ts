@@ -808,16 +808,20 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     });
 
     it("never calls Claude Code's open command", async () => {
+      // Asserted on the command id alone, independent of argument shape: Claude's
+      // real call is executeCommand(cmd, undefined, seedText), and expect.anything()
+      // never matches `undefined` — an argument-shaped matcher here would be
+      // trivially true even if this branch called Claude's command directly.
+      // Covers both Claude command ids: the multi-session path prefers
+      // "claude-vscode.editor.open" over "claude-vscode.primaryEditor.open".
       setupMatchingPlan();
       const { context } = fakeContext();
 
       await seedWithTimers(context);
 
-      expect(commands.executeCommand).not.toHaveBeenCalledWith(
-        CLAUDE_OPEN_CMD,
-        expect.anything(),
-        expect.anything(),
-      );
+      const claudeCmdIds = new Set([CLAUDE_OPEN_CMD, "claude-vscode.editor.open"]);
+      const claudeCalls = commands.executeCommand.mock.calls.filter((c) => claudeCmdIds.has(String(c[0])));
+      expect(claudeCalls).toEqual([]);
     });
 
     it("falls back to the clipboard when no chat command is registered", async () => {
