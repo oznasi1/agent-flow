@@ -3201,6 +3201,34 @@ describe("orchestrator flows", () => {
       );
     });
 
+    it("toasts and writes nothing when there are no repos to offer, after the ticket is already picked", async () => {
+      // Same dead-end as an unauthenticated connector or an empty ticket list: a
+      // picker the user can only dismiss, with nothing said about why. Named the
+      // same way tasksView.ts's explore()/resolveKickoffTarget already do for the
+      // identical cause, so this reads as familiar rather than a new phrasing.
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "n")];
+      quickPick().mockResolvedValueOnce({ label: TASK.key, task: TASK }); // ticket answered
+      // Not mockReturnValueOnce: the panel's own initial refresh calls
+      // discoverRepos before this message is even sent (e.g. for review-request
+      // decoration), and a "once" stub would be consumed by that call instead of
+      // addPlanned's. h.repos backs discoverRepos's default implementation for
+      // every call in this test.
+      h.repos = [];
+      const { p, send } = await openAuthedPanel();
+      await send({ type: "flow:addPlanned", id: "f1" });
+      // Only the ticket picker opened — the repos step never got as far as a
+      // QuickPick with nothing in it.
+      expect(quickPick()).toHaveBeenCalledTimes(1);
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      expect(posts(p)).toContainEqual(
+        expect.objectContaining({
+          type: "toast", level: "error",
+          message: "No repos found under /repos. Check agentFlow.reposRoot.",
+        }),
+      );
+    });
+
     it("refuses when the flow was deleted while the pickers were open", async () => {
       // The same re-read-before-write every other flow:* handler in this file
       // does: the four modals were up long enough for another window (or a

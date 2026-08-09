@@ -1891,6 +1891,15 @@ export class DeckPanel {
 
     const cfg = getConfig();
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+    // Same gap as an unauthenticated connector or an empty ticket list: a picker
+    // the user can only dismiss, with nothing said about why, is a dead end.
+    // Same wording tasksView.ts's `explore()` and `resolveKickoffTarget` already
+    // use for the identical cause, so a user who has seen it once there
+    // recognises it here rather than parsing a second phrasing of the same fact.
+    if (repos.length === 0) {
+      this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
+      return;
+    }
     const repoPicks = await vscode.window.showQuickPick(
       repos.map((r) => ({ label: r.name, detail: r.isGit ? r.path : `${r.path}  (not a git repo)`, repo: r })),
       {
