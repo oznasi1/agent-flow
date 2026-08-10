@@ -180,6 +180,51 @@ describe("applyFired", () => {
     expect(out.edges[0].error).toBeUndefined();
   });
 
+  it("marks the performer performed:true and leaves the demoted sibling's performed unset", () => {
+    // `evaluate.ts`'s `commandSucceeded` reads exactly this field to tell a
+    // performer apart from a stamped-only sibling — `firedAt`/`error` alone
+    // cannot, because a demoted sibling gets the identical `firedAt`-set,
+    // `error`-absent shape a successful performer gets. This is the field
+    // that fix depends on, asserted directly against `applyFired`'s real
+    // output rather than a hand-constructed fixture.
+    const flow = flowWith(
+      [place("a", "ASM-1"), place("b", "ASM-2"), notify("z", "both landed", "all")],
+      [edge("e1", "a", "z"), edge("e2", "b", "z")],
+    );
+    const out = applyFired(
+      flow,
+      [{ edge: flow.edges[0], perform: true, action: "notify" }, { edge: flow.edges[1], perform: false, action: "notify" }],
+      NOW,
+    );
+    expect(out.edges[0].performed).toBe(true);
+    expect(out.edges[1].performed).toBeUndefined();
+  });
+
+  it("marks a FAILED performer performed:true too — the one that ran and failed is still the one that ran", () => {
+    // If a failed performer did not carry `performed`, `commandSucceeded`
+    // would find no performer at all for a command that genuinely tried and
+    // failed, inverting the bug the field exists to fix: the sibling's own
+    // `performed` was already undefined either way, so silence here would
+    // read as "never ran" instead of "ran and failed" — both wrong, but the
+    // second is the one Task 7's condition must distinguish.
+    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
+    const out = applyFired(
+      flow,
+      [{ edge: flow.edges[0], perform: true, action: "seed" }],
+      NOW,
+      new Map([["e1", { ok: false, error: "Couldn't launch ASM-12: no worktree" } as const]]),
+    );
+    expect(out.edges[0].error).toBe("Couldn't launch ASM-12: no worktree");
+    expect(out.edges[0].performed).toBe(true);
+  });
+
+  it("marks a fail-closed performer (no outcome reported at all) performed:true as well", () => {
+    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "seed" })]);
+    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "seed" }], NOW);
+    expect(out.edges[0].error).toBe("seed was not performed");
+    expect(out.edges[0].performed).toBe(true);
+  });
+
   it("stamps a NON-performed non-notify edge as fired, not errored — it did nothing, and its junction closed", () => {
     // The distinction the error must not swallow: a perform:false sibling never
     // attempted its action, so there is nothing to have failed. Recording an error
@@ -196,6 +241,7 @@ describe("applyFired", () => {
     expect(out.edges[1].error).toBeUndefined();
     expect(out.edges[1].firedAt).toBe(NOW);
     expect(out.edges[1].firedNote).toBe("another edge into this target already acted");
+    expect(out.edges[1].performed).toBeUndefined();
   });
 });
 
