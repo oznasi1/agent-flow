@@ -1106,7 +1106,16 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 style={{ left: `${mid.x}px`, top: `${mid.y}px` }}
                 onClick={() => setSelEdge(e.id)}
               >
-                {COND_LABEL[e.cond.kind]}
+                {/* `condOptionLabel`, not `COND_LABEL`: the closed list row, the
+                    list's own options and this inspector's options all spend the
+                    former, and the canvas was the last surface still spending a
+                    `Record` keyed by KIND alone. A kind cannot know which branch a
+                    given rule is about, so the chip read "branch CI passed…" where
+                    the list read "CI passed on agent-flow#master" — for one rule,
+                    in one panel. The trailing ellipsis is this codebase's own mark
+                    for "carries a parameter", and a chip that wears it and then
+                    never shows one is the exact defect the list already fixed. */}
+                {condOptionLabel(e.cond)}
               </button>
             );
           })}

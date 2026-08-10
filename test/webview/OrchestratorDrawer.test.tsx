@@ -727,6 +727,26 @@ describe("wiring", () => {
     expect(label.textContent).toMatch(/merged/i);
   });
 
+  it("names the branch on a canvas chip, in the same words the list and the inspector use", () => {
+    // The canvas was the last surface still spending `COND_LABEL`, a `Record` keyed
+    // by KIND alone — which cannot know which branch a rule is about, so the chip
+    // read "branch CI passed…" while the list's closed row read "CI passed on
+    // agent-flow#main" for the same rule. The trailing ellipsis is this codebase's
+    // own mark for "carries a parameter", and wearing it while showing none is the
+    // exact defect the list already fixed.
+    const branchRule = flow({
+      nodes: wired().nodes,
+      edges: [{
+        id: "e1", from: "n1", to: "n2",
+        cond: { kind: "branch-ci-passed", repo: "agent-flow", branch: "main" },
+      }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [branchRule] })} />);
+    const label = screen.getByTestId("orch-edge-e1");
+    expect(label.textContent).toBe("CI passed on agent-flow#main");
+    expect(label.textContent).not.toContain("…");
+  });
+
   it("creates an edge by dragging from a port onto another node", () => {
     const onSave = vi.fn();
     const two = flow({
