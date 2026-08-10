@@ -139,8 +139,10 @@ describe("labelPoint", () => {
     // `.orch-edge` painted the chip ~19px above that anchor, so every DOWNWARD
     // escape deterministically re-entered the box it had just escaped — over a
     // node's only status word. `paintDy` is the vertical distance to the painted
-    // chip's own centre.
-    const paintDy = -19;
+    // chip's own centre; the literal mirrors the real `ORCH_EDGE_PAINT_DY` (a 16px
+    // chip lifted 150% of its own height) without importing a webview module into an
+    // engine test.
+    const paintDy = -16;
     // Mostly ABOVE the chord, so escaping DOWNWARD is the nearest way out — which
     // is the direction the paint offset then undoes.
     const blocker = boxAt(60, -50);
@@ -158,9 +160,9 @@ describe("labelPoint", () => {
     // The detour is still perpendicular and still bounded — `paintDy` changes
     // WHERE the collision is judged, never how far the label may wander.
     const blocker = boxAt(60, -22);
-    const p = labelPoint({ x: 0, y: 0 }, { x: 288, y: 0 }, [blocker], -19);
+    const p = labelPoint({ x: 0, y: 0 }, { x: 288, y: 0 }, [blocker], -16);
     expect(p.x).toBe(144); // unchanged along the chord
-    expect(Math.abs(p.y)).toBeLessThanOrEqual(NODE_H + 16 + 19);
+    expect(Math.abs(p.y)).toBeLessThanOrEqual(NODE_H + 16 + 16);
   });
 
   it("handles a zero-length chord gracefully", () => {

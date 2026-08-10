@@ -48,7 +48,8 @@ export function edgePath(a: Point, b: Point): string {
  * `paintDy` is what makes the avoidance describe the thing the user actually
  * sees. The point returned here is an ANCHOR, and the caller's CSS may paint the
  * label somewhere else relative to it — `.orch-edge` (orchestratorStyles.ts) is
- * `translate(-50%, -150%)`, so its chip lands roughly 19px ABOVE its anchor.
+ * `translate(-50%, -150%)` over a 16px chip, so its centre lands 16px ABOVE its
+ * anchor (the measured figure lives with that rule, as `ORCH_EDGE_PAINT_DY`).
  * Testing collisions at the anchor while painting the chip elsewhere made every
  * DOWNWARD escape deterministically re-enter the box it had just escaped, sitting
  * on top of a node's only status word. Pass the vertical distance from the anchor
