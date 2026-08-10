@@ -6416,6 +6416,35 @@ describe("arm, disarm and reset", () => {
     expect(w.nodes).toHaveLength(1);
   });
 
+  it("flow:save cannot drop either consent stamp", async () => {
+    // Both confirmations are HOST-owned flow fields written only by
+    // `askFirstSpend`'s answer. A save built from a `flow` prop captured before
+    // either landed carries `undefined` for it, and writing that verbatim un-asks a
+    // question the user already answered — so the next met rule asks again, on a
+    // flow that is running unattended precisely because it was approved.
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f1", "n"), launchConfirmedAt: 111, commandConfirmedAt: 222 }];
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: { ...mkFlow("f1", "n"), nodes: [{ id: "n1", kind: "place", x: 3, y: 4, join: "any", runKey: "ASM-1", repo: "r" }] } });
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(w.launchConfirmedAt).toBe(111);
+    expect(w.commandConfirmedAt).toBe(222);
+    expect(w.nodes).toHaveLength(1); // the graph edit itself still lands
+  });
+
+  it("flow:save cannot invent a consent the host never recorded", async () => {
+    // The other direction, and the one that matters more: the drawer must not be
+    // able to hand the host a `commandConfirmedAt` and thereby authorise shell
+    // execution that was never approved in a modal.
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f1", "n") }];
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: { ...mkFlow("f1", "n"), launchConfirmedAt: 999, commandConfirmedAt: 999 } });
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(w.launchConfirmedAt).toBeUndefined();
+    expect(w.commandConfirmedAt).toBeUndefined();
+  });
+
   it("flow:save cannot disarm an armed one either", async () => {
     // The other direction of the same branch. A save is not a consent point in
     // either direction; Arm is.
