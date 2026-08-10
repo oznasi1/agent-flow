@@ -118,10 +118,16 @@ export const OFFERED_CONDS: CondKind[] = (Object.keys(COND_LABEL) as Condition["
  * engine's guard makes safe (never wrongly true) but which still put a choice
  * that provably cannot work in front of the user.
  *
- * A PLANNED source keeps the place-shaped list even though `isMet` cannot
- * answer for it either — that gap is older than this phase and narrowing the
- * picker for it would silently remove the only conditions such a rule has ever
- * offered. Named here so it is a known omission rather than an oversight. */
+ * A PLANNED source keeps the place-shaped list, and that is CORRECT rather than
+ * a gap: `isMet` cannot answer for it *yet*, but `promoteToPlace` (promote.ts)
+ * rewrites a launched planned node into a `place` WITH THE SAME ID, so every one
+ * of those conditions becomes answerable the moment the launch succeeds. That is
+ * the whole point of promotion — "ASM-1 merged -> launch ASM-12 -> ASM-12's CI
+ * passes -> launch ASM-15" needs the second link to be expressible before the
+ * first has run. An earlier version of this comment called it "a known omission",
+ * which is worse than merely wrong on the one function that decides what both
+ * pickers offer: a reader trusting it would strip every condition from rules out
+ * of planned work and break the chain this phase exists to support. */
 export function offeredConds(flow: Flow, fromId: string): CondKind[] {
   const fromCommand = flow.nodes.find((n) => n.id === fromId)?.kind === "command";
   // One predicate, both directions: keep `command-succeeded` exactly when the
