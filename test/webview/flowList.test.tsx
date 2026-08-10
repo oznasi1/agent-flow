@@ -1192,6 +1192,41 @@ describe("adding a rule from the keyboard", () => {
     expect(n3After.dest).toBe("current-window");
   });
 
+  it("names a target's unconfigured mode in the new-rule bar instead of showing the first one", () => {
+    // `seedModeAndDest` seeds the draft's mode from the target planned node, which
+    // can carry an id `agentFlow.promptModes` no longer has. A `<select>` whose
+    // value matches no option shows its FIRST option, selected — so the bar read
+    // "Quick pass" while "+ Add rule" wrote `gone-mode`, and `modeFor` refuses that
+    // at fire time. Asserted on the OPTIONS, deliberately: `toHaveValue` cannot
+    // catch it, because jsdom resolves an unmatched value to the first option
+    // exactly as a browser does, which is the trap this repo has now hit three
+    // times.
+    const onSave = vi.fn();
+    const goneMode = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        {
+          id: "n2", kind: "planned", x: 320, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["agent-flow"], mode: "gone-mode", dest: "worktree",
+        },
+      ],
+    });
+    render(<FlowList {...props({ flow: goneMode, onSave })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    const options = Array.from(
+      within(bar).getByLabelText("New rule mode").querySelectorAll("option"),
+    ).map((o) => o.textContent);
+    // The same words `modeDisplayLabel` gives the closed row and the inspector.
+    expect(options).toContain("gone-mode (not configured)");
+    // And the value written is the one named, not the first option: the display and
+    // the write have to agree about one fact.
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect((saved.nodes.find((n) => n.id === "n2") as { mode: string }).mode).toBe("gone-mode");
+  });
+
   it("builds a seed rule, writing the chosen mode onto the edge", () => {
     const onSave = vi.fn();
     render(<FlowList {...props({ flow: twoPlacesNoEdge(), onSave })} />);

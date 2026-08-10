@@ -397,6 +397,17 @@ function NewRuleBar(p: {
   // `addRule`'s own comment for why that distinction matters.
   const [mode, setMode] = React.useState(promptModes[0]?.id ?? "");
   const [dest, setDest] = React.useState<LaunchDest>("worktree");
+  /** Does `mode` name a mode that still exists? The SAME question an open row and
+   * the canvas inspector each ask before rendering their own Mode select, and this
+   * bar was the only one of the three that did not ask it. It matters because
+   * `seedModeAndDest` below seeds `mode` from the target planned node, which can
+   * carry an id `agentFlow.promptModes` no longer has (or never had) — and a
+   * `<select>` whose value matches none of its options does not render blank, it
+   * shows its FIRST option, selected. So the bar read "USING Quick pass" while
+   * "+ Add rule" wrote the store's real `gone-mode`, which `modeFor` then refuses
+   * at fire time. The closed row one panel away said "gone-mode (not configured)"
+   * correctly the whole time. */
+  const modeExists = mode !== "" && promptModes.some((m) => m.id === mode);
 
   // A half-built rule belongs to the flow you were looking at when you
   // started it — switching flows (the "Flows · N ▾" switcher, still visible
@@ -595,6 +606,11 @@ function NewRuleBar(p: {
             value={mode}
             onChange={(ev) => setMode(ev.currentTarget.value)}
           >
+            {/* An option for whatever the draft actually carries when it names no
+                configured mode — the same extra option an open row (above) and the
+                canvas inspector both render, through the same
+                `modeDisplayLabel`, so all three name it identically. */}
+            {!modeExists && <option value={mode}>{modeDisplayLabel(promptModes, mode)}</option>}
             {promptModes.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
           </select>
           {derived === "launch" && (
