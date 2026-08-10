@@ -3538,13 +3538,37 @@ describe("an armed flow advances on refresh", () => {
   });
 
   it("never launches a rule whose target is not planned work", async () => {
-    // A hand-edited flow can point action: "launch" at a notify node. There is
-    // nothing to launch, so it must be recorded as an error — stamped, so it does
-    // not re-evaluate forever, and never as a success — and nothing may be opened.
+    // There is nothing to launch, so it must be recorded as an error — stamped,
+    // so it does not re-evaluate forever, and never as a success — and nothing
+    // may be opened.
+    //
+    // The fixture this used to use — a hand-edited `action: "launch"` aimed at a
+    // notify node — cannot reach this path any more, and not because the guard
+    // went away: an action is DERIVED from the target now, so a notify node
+    // derives `notify` and there is no launch to refuse. (That hand-edited shape
+    // is caught one layer earlier instead: `readFlows`' `latchActionMismatches`
+    // settles a stored action that disagrees with its target, covered in
+    // migration.test.ts.) Under derivation the only edit that can change an
+    // action is a change to the TARGET NODE's KIND, so a `launch` with nothing
+    // to launch is reachable exactly one way — evaluation derived `launch` from
+    // a `planned` node, and by the time this pass acts the store holds a notify
+    // terminal in its place.
     setConfig({ orchestrator: true });
-    h.flows = [armedFlow({
-      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
-    })];
+    const withTarget = (kind: "planned" | "notify"): Flow => armedFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        kind === "planned"
+          ? {
+              id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+              ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+            }
+          : { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+      ],
+      // No stored `action` at all: the mirror decides nothing, so a fixture that
+      // set one would only invite the reader to think it did.
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
+    });
+    h.flows = [withTarget("planned")];
     // Warm the resume gate first (Task 4): without this, the met condition
     // would only ever be reported and held on the first pass, and this test
     // would pass without ever reaching the perform path it means to guard —
@@ -3554,13 +3578,35 @@ describe("an armed flow advances on refresh", () => {
     const { p, send } = await openPanel();
     await settle();
     h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    // Read 1 of the pass is evaluation's own — planned work, so `launch`. Every
+    // read after it (the `fresh` copy this pass acts and gates against, the
+    // pre-write `atWrite` read, and postFlows') sees what the node has become.
+    let reads = 0;
+    h.readFlows.mockImplementation(() => (++reads === 1 ? [withTarget("planned")] : [withTarget("notify")]));
     await send({ type: "deck:refresh" });
+    // The second read has to have actually happened, or everything below would
+    // pass on a pass that simply never got that far.
+    expect(reads).toBeGreaterThan(1);
     expect(h.launchPlanned).not.toHaveBeenCalled();
     expect(h.openInEditor).not.toHaveBeenCalled();
     expect(h.writePlanFile).not.toHaveBeenCalled();
+    // Nor was consent ever asked for — asserted BEFORE the write is read, because
+    // a pass that asks writes only the answer and never reaches the stamp below.
+    // `armedFlow` carries no `launchConfirmedAt`, and a launch with no planned
+    // node left to launch spends nothing, so gating on it would ask the user
+    // about something that can never happen — the launch side of the same claim
+    // the seed suite's "does NOT gate" case makes.
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    // The pass STAMPED rather than diverging into the ask branch, which writes
+    // only the answer and never reaches an edge at all. Spelled out so a
+    // regression that makes this rule gate fails here, on a named expectation,
+    // instead of on `.at(-1)!` of an empty call list.
+    expect(h.writeFlow).toHaveBeenCalled();
     const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
     expect(written.edges[0].error).toMatch(/planned/i);
     expect(written.edges[0].firedAt).toBeUndefined();
+    expect(written.launchConfirmedAt).toBeUndefined();
     // And no toast claims it ran.
     expect(posts(p).some((m) => m.type === "toast" && /launched/i.test(m.message ?? ""))).toBe(false);
   });
