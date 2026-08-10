@@ -1920,8 +1920,30 @@ export class DeckPanel {
           ...flow,
           // Rebuilt from its non-host fields rather than deleting three keys, so a
           // future host-owned field cannot be silently forgotten here.
+          //
+          // `action` is deliberately NOT carried over, which makes this the one
+          // place a stored action is dropped. It is what makes Reset mean what
+          // `latchActionMismatches` promises it means — "Reset the rule to accept
+          // that" — for the shape that needs it most: an edge whose stored action
+          // disagrees with its target is latched with an error on every read, and
+          // carrying the disagreeing value through this write left the next read
+          // to stamp the identical error, forever. Dropping it lets `writeFlow`'s
+          // `e.action ?? edgeAction(...)` re-derive from the target, so stored and
+          // derived agree and there is nothing left to latch.
+          //
+          // This does NOT leave the field absent on disk — relied on, not
+          // defeated: `writeFlow` fills it from the target, which is what keeps an
+          // OLDER build's `validEdge` (which still requires `action`) from
+          // dropping the edge after a downgrade.
+          //
+          // Nor is it a silent reinterpretation. Deriving on EVERY write is unsafe
+          // and `writeFlow` explains why; deriving here is safe because Reset is
+          // the user's explicit consent, and the error they are clearing names both
+          // readings ("it was saved as X but where it points now means Y"). `mode`
+          // still survives: it is the user's own configuration, not a mirror of
+          // anything, and a seed has nowhere else to keep it.
           edges: flow.edges.map((e) =>
-            e.id === m.edgeId ? { id: e.id, from: e.from, to: e.to, cond: e.cond, action: e.action, mode: e.mode } : e,
+            e.id === m.edgeId ? { id: e.id, from: e.from, to: e.to, cond: e.cond, mode: e.mode } : e,
           ),
         });
         this.postFlows();

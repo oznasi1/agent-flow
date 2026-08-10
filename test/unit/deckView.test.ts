@@ -340,6 +340,7 @@ import { DeckPanel, POLL_MS, reviewProvenance } from "../../src/deckView";
 // The real constant, through the partial mock above (which spreads the actual module):
 // a test that restated the number could not catch the call site passing a literal.
 import { LOCK_TTL_MS } from "../../src/engine/orchestrator/lock";
+import { ACTION_MISMATCH_PREFIX } from "../../src/engine/orchestrator/model";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
 import { TaskAuthError } from "../../src/tasks/provider";
 
@@ -5413,6 +5414,44 @@ describe("arm, disarm and reset", () => {
     expect(w.edges[0].firedNote).toBeUndefined();
     expect(w.edges[0].error).toBeUndefined();
     expect(w.edges[1].firedAt).toBe(7);
+  });
+
+  it("flow:resetEdge drops the stored action, so the store re-derives it from the target", async () => {
+    // The host half of making Reset mean what `latchActionMismatches` promises:
+    // "Reset the rule to accept that". Carrying the disagreeing stored action
+    // through this write left the value on disk unchanged, so the very next read
+    // compared it against the derived one again and stamped the identical error —
+    // a rule that could never fire and could never be repaired. Dropping it lets
+    // `writeFlow`'s `e.action ?? edgeAction(...)` fill it from the target.
+    //
+    // `writeFlow` is mocked in this suite, so this asserts the handler's own
+    // output; migration.test.ts owns the store half — that the field still lands
+    // on disk, derived, which is what an older build's `validEdge` needs.
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      nodes: [
+        { id: "a", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        {
+          id: "z", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-2", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
+      // A `notify` pointing at planned work: the ordinary leftover shape, since
+      // `finishWire` wires everything as `notify` whatever it points at.
+      edges: [{
+        id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify",
+        mode: "implementation", error: `${ACTION_MISMATCH_PREFIX}: it was saved as "notify" …`,
+      }],
+    }];
+    const { send } = await openPanel();
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+    const e = (h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0];
+    expect(e.action).toBeUndefined();
+    expect(e.error).toBeUndefined();
+    // The user's own configuration is not dropped along with the mirror — a seed's
+    // prompt mode lives on the edge and has nowhere else to go.
+    expect(e.mode).toBe("implementation");
   });
 
   it("flow:resetEdge ignores an unknown flow id", async () => {

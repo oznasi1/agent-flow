@@ -126,3 +126,79 @@ describe("writeFlow's derived-action mirror", () => {
     expect(written.edges[0].action).toBe("notify");
   });
 });
+
+describe("Reset accepts the new reading", () => {
+  // `latchActionMismatches` tells the user "Reset the rule to accept that". This
+  // is the store half of making that true. `deckView.ts`'s `flow:resetEdge`
+  // rebuilds the edge from its non-host fields and deliberately does NOT carry
+  // `action` over; the shape below is exactly what it hands `writeFlow`.
+  //
+  // The bug this pins: while the reset carried the stored `action` through, the
+  // disagreeing value survived the write, the next read compared it against the
+  // derived one again, and stamped the identical error. Reset, re-read, latched,
+  // forever — and since `finishWire` creates EVERY new wire as `notify`, wiring a
+  // place to planned work produced a rule that could never fire and could never
+  // be repaired.
+  const resetEdge = (flow: Flow, edgeId: string): Flow => ({
+    ...flow,
+    edges: flow.edges.map((e) =>
+      e.id === edgeId ? { id: e.id, from: e.from, to: e.to, cond: e.cond, mode: e.mode } : e),
+  });
+
+  /** A `notify` edge pointing at planned work — the ordinary leftover shape,
+   * since `finishWire` wires everything as `notify` whatever it points at. */
+  const mismatched = (): string => {
+    const doc = JSON.parse(LEGACY);
+    doc.edges = [{ id: "e9", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }];
+    return JSON.stringify(doc);
+  };
+
+  it("reads back clean after a reset, instead of re-latching the same error", () => {
+    const io = fakeIo({ "/flows/fmsm1way7-7bbm.json": mismatched() });
+    // Latched on the way in — without this the test could pass on a flow that
+    // never disagreed with its target in the first place.
+    const latched = readFlows(io, "/flows")[0];
+    expect(latched.edges[0].error).toContain(ACTION_MISMATCH_PREFIX);
+
+    writeFlow(io, "/flows", resetEdge(latched, "e9"));
+
+    const after = readFlows(io, "/flows")[0].edges[0];
+    expect(after.error).toBeUndefined();
+    // And the rule is live again — not settled by a stamp of any kind.
+    expect(after.firedAt).toBeUndefined();
+    // It is now the verb its target implies, which is what accepting the new
+    // reading means: n2 is planned work, so this is a launch.
+    expect(after.action).toBe("launch");
+  });
+
+  it("still lands on disk with an action, so an older build does not drop the edge", () => {
+    // The reset hands `writeFlow` an edge with NO action at all. `writeFlow`'s
+    // `e.action ?? derived` is what has to fill it — an OLDER build's `validEdge`
+    // requires the field and drops any edge lacking it, so a reset that left it
+    // absent would lose the rule on a downgrade or a rollback.
+    const io = fakeIo({ "/flows/fmsm1way7-7bbm.json": mismatched() });
+    writeFlow(io, "/flows", resetEdge(readFlows(io, "/flows")[0], "e9"));
+    const onDisk = JSON.parse(io.files["/flows/fmsm1way7-7bbm.json"]);
+    expect(onDisk.edges[0].action).toBe("launch");
+  });
+
+  it("does not re-derive over an edge the user did NOT reset", () => {
+    // The escape hatch stays shut for everything else: only the reset edge loses
+    // its stored action, so a mismatch on a sibling is still latched and still
+    // needs its own Reset. Deriving over every edge here is the migration that
+    // spends money on a guess.
+    const doc = JSON.parse(LEGACY);
+    doc.edges = [
+      { id: "e9", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" },
+      { id: "e8", from: "n2", to: "n1", cond: { kind: "ci-passed" }, action: "notify" },
+    ];
+    const io = fakeIo({ "/flows/fmsm1way7-7bbm.json": JSON.stringify(doc) });
+    writeFlow(io, "/flows", resetEdge(readFlows(io, "/flows")[0], "e9"));
+    const after = readFlows(io, "/flows")[0].edges;
+    expect(after.find((e) => e.id === "e9")!.error).toBeUndefined();
+    // e8 is a `notify` pointing at a `place`, which means `seed` — still latched,
+    // and still NOT silently turned into a paid session.
+    expect(after.find((e) => e.id === "e8")!.error).toContain(ACTION_MISMATCH_PREFIX);
+    expect(after.find((e) => e.id === "e8")!.action).toBe("notify");
+  });
+});

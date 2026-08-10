@@ -45,9 +45,18 @@ export interface FiredEdge {
    * `performEdge` all read THIS field — it is passed to them as a parameter, so
    * they cannot re-derive a different verb than the one stamped for the pass.
    * The only edit that can change an action is a change to the TARGET NODE's
-   * kind, and a verb whose target changed kind under the pass resolves to no
-   * target and is refused with an `error` and no `firedAt`, so the carried value
-   * being evaluation's vintage costs nothing in safety. */
+   * kind, and for the two verbs that SPEND — `launch` and `seed` — one whose
+   * target changed kind under the pass resolves to no target and is refused with
+   * an `error` and no `firedAt`. That is the whole safety argument: the carried
+   * value being evaluation's vintage cannot cost money.
+   *
+   * It is scoped to those two on purpose. The non-spending verbs settle
+   * differently, and neither is a hole: a carried `notify` never reaches
+   * `performEdge` at all (the dispatch guards on `isSpendAction`) and is stamped
+   * `firedAt` plus a receipt — the generic "told you" when the target is no
+   * longer a notify node, which `deckView.test.ts`'s "stands by a notify
+   * decision" case pins — and a carried `run` has nothing performing it yet, so
+   * `applyFired`'s fail-closed arm stamps it as an unperformed action. */
   action: FlowAction | undefined;
 }
 
