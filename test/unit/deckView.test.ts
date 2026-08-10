@@ -4564,6 +4564,46 @@ describe("a met launch rule acts", () => {
     expect(posts(p).filter((m) => m.type === "toast" && /launched ASM-12/.test(m.message ?? ""))).toHaveLength(1);
   });
 
+  it("settles a fan-in sibling whose condition never held, instead of leaving it live as a seed", async () => {
+    // The end state this phase needs. Promotion turns the target `planned -> place`,
+    // so an unsettled sibling's verb changes under it: clearing its stored action
+    // stops the false latch, but left live it becomes a `seed` rule, and its own
+    // condition coming true later opens an ADDITIONAL paid agent session the user
+    // never wrote — under a consent stamped for a launch. In a `join: "any"` fan-in
+    // the sibling means "this is another reason to get ASM-12 running", and ASM-12 is
+    // running.
+    //
+    // `review-approved` is never met by this fixture (its PR carries no review), so
+    // e2 is genuinely unsettled when e1 launches.
+    const unmetSibling = (): Flow => launchFlow({
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n2", cond: { kind: "review-approved" }, action: "launch" },
+      ],
+    });
+    const { send } = await warmed([unmetSibling()]);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    const w = lastWrite();
+    const e2 = w.edges.find((e) => e.id === "e2")!;
+    // Satisfied, with a receipt that says why — visible in the drawer, and Resettable
+    // if the user genuinely wanted a seed out of this wire.
+    expect(e2.firedAt).toBeTypeOf("number");
+    expect(e2.firedNote).toBe("ASM-12 was already launched by another rule");
+    // It ran nothing, so it must not read as a performer…
+    expect(e2.performed).toBeUndefined();
+    // …and nothing failed, so it is not an error either.
+    expect(e2.error).toBeUndefined();
+    // The next pass leaves it alone: no second session, and nothing new written.
+    h.flows = [w];
+    h.writeFlow.mockClear();
+    h.launchPlanned.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
   it("holds a whole target back when its acting rule defers, siblings included", async () => {
     // e1 acts and defers; e2 points at the same node and must NOT act in its place —
     // that would spend exactly what the defer avoided. Nothing about this target is

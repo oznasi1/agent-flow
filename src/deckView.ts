@@ -844,7 +844,10 @@ export class DeckPanel {
         // would resurrect it, the same reasoning as the `!fresh` check above.
         if (!atWrite) continue;
         let next = applyFired(atWrite, stamping, nowMs, outcomes);
-        for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo);
+        // `nowMs` — this pass's own clock, the same one `applyFired` stamped with a
+        // line above: a promotion settles the rules that pointed at the node as
+        // planned work, and those stamps belong to this pass, not to a later read.
+        for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo, nowMs);
         writeFlow(this.flowIo, this.flowsDir, next);
         // `next`, not `fresh`: the message should describe what was actually just
         // written — same reasoning as building `next` from `atWrite` above — and

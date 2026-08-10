@@ -5,6 +5,10 @@ import { promoteToPlace } from "../../../../src/engine/orchestrator/promote";
 import type { Flow } from "../../../../src/engine/orchestrator/model";
 import type { FlowIo } from "../../../../src/engine/orchestrator/store";
 
+/** A fixed clock for the stamps promotion writes — the pass's own `nowMs` in
+ * production (see `promoteToPlace`). */
+const NOW = 1_800_000_000_000;
+
 /** An in-memory FlowIo. `readDir` lists what has been written, so a test can
  * seed a file exactly as a previous build left it on disk. */
 function fakeIo(files: Record<string, string> = {}): FlowIo & { files: Record<string, string> } {
@@ -300,9 +304,22 @@ describe("a launch that promotes its target", () => {
     return readFlows(io, "/flows")[0];
   };
 
+  it("settles the untriggered sibling, so no later pass spends on a verb it never had", () => {
+    // Round-tripped, because the shape has to survive `coerceFlow` too: the sibling
+    // reads back as FIRED (a receipt, no error) rather than as a live `seed` rule that
+    // would open an extra paid session the user never wrote.
+    const io = fakeIo();
+    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow", NOW));
+    const e2 = readFlows(io, "/flows")[0].edges.find((e) => e.id === "e2")!;
+    expect(e2.firedAt).toBe(NOW);
+    expect(e2.firedNote).toBe("ASM-2 was already launched by another rule");
+    expect(e2.performed).toBeUndefined();
+    expect(e2.error).toBeUndefined();
+  });
+
   it("does not latch the untriggered sibling of the rule that launched", () => {
     const io = fakeIo();
-    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow"));
+    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow", NOW));
     const e2 = readFlows(io, "/flows")[0].edges.find((e) => e.id === "e2")!;
     // The user edited nothing, so nothing may be stamped on their behalf.
     expect(e2.error).toBeUndefined();
@@ -316,7 +333,7 @@ describe("a launch that promotes its target", () => {
     // without it. Promotion clears the field in memory; `writeFlow`'s
     // `e.action ?? derived` is what has to put the new value back on disk.
     const io = fakeIo();
-    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow"));
+    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow", NOW));
     const onDisk = JSON.parse(io.files["/flows/fmsm1way7-7bbm.json"]);
     expect(onDisk.edges.map((e: { action?: string }) => e.action)).toEqual(["seed", "seed"]);
   });
@@ -325,7 +342,7 @@ describe("a launch that promotes its target", () => {
     // Clearing the mirror is not clearing the latch: the rule that actually ran
     // must still read as fired, or the next pass launches the same ticket again.
     const io = fakeIo();
-    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow"));
+    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow", NOW));
     const e1 = readFlows(io, "/flows")[0].edges.find((e) => e.id === "e1")!;
     expect(e1.firedAt).toBe(500);
     expect(e1.firedNote).toBe("launched ASM-2 in agent-flow");
