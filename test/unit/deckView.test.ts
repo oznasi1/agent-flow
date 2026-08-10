@@ -1351,12 +1351,35 @@ describe("DeckPanel local cards", () => {
   });
 
   it("does not fold a root a tracked run already owns into a local card", async () => {
+    // /r/centaur has a session too, but ASM-1 already tracks it — its diff and
+    // dirty state belong on ASM-1's own card. /r/automation_e2e's session is not
+    // owned by anything: it still gets a local card, and that card must name
+    // only the root nobody tracks, not the one ASM-1 already owns.
     h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-1-x" }] })];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" }),
+      sess({ sessionId: "s2", cwd: "/r/automation_e2e", name: "e2e-3a" })];
     show();
     await settled();
-    // The tracked run claimed the only live place: one card, and it is the tracked one.
+    // Two cards on the board: the tracked run keeps its own, and a local card
+    // for the leftover place — not one merged card carrying both roots.
+    expect(h.buildRunStatus).toHaveBeenCalledTimes(2);
+    expect(h.buildRunStatus.mock.calls[0][0].run.key).toBe("ASM-1");
+    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["automation_e2e"]);
+  });
+
+  it("makes no local card when a tracked run already owns every live root in the window", async () => {
+    h.runs = [mkRun({ key: "ASM-1", repos: [
+      { name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-1-x" },
+      { name: "automation_e2e", path: "/r/automation_e2e", isGit: true, branch: "ASM-1-x" },
+    ] })];
+    h.liveWindows = [WS];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" }),
+      sess({ sessionId: "s2", cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    show();
+    await settled();
+    // Both roots are claimed by the one tracked run: nothing is left over for a
+    // local card, not even an empty one.
     expect(h.buildRunStatus).toHaveBeenCalledTimes(1);
     expect(h.buildRunStatus.mock.calls[0][0].run.key).toBe("ASM-1");
   });

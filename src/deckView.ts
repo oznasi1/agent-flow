@@ -639,16 +639,24 @@ export class DeckPanel {
     // roots. Anything a live multi-root window does not list — including a place
     // whose window predates presence roots — stays the per-place card it was.
     for (const group of groupPlacesByWindow(unclaimed, liveWindows)) {
-      const gitByRoot = new Map(group.roots.map((root) =>
+      // groupPlacesByWindow hands back a window's FULL roots — it has no notion
+      // of which of them a tracked run already claimed. A claimed root's diff and
+      // dirty state already renders on that tracked run's own card; keeping it
+      // here too would double-count it. A root nobody claimed stays, whether or
+      // not it currently has a session (see the "no session in it" case below).
+      const roots = group.roots.filter((root) => !claimed.has(root));
+      if (roots.length === 0) continue; // every root here belongs to a tracked run
+      const liveGroup = { ...group, roots };
+      const gitByRoot = new Map(roots.map((root) =>
         [root, { isGit: repoRoot(root) !== "", branch: currentBranch(root) }] as const));
       const git = (root: string) => gitByRoot.get(root) ?? { isGit: false, branch: null };
       // First root whose branch names a ticket wins, so a workspace whose two
       // branches disagree still resolves to one card, the same one every refresh.
-      const ticket = group.roots
+      const ticket = roots
         .map((root) => inferTicket(git(root).branch, cfg.project, cfg.baseUrl))
         .find((t) => t !== null) ?? null;
       const sessions = group.places.flatMap((place) => places.get(place) ?? []);
-      const run = localRunFor(group, sessions, git, ticket, now);
+      const run = localRunFor(liveGroup, sessions, git, ticket, now);
       this.localRuns.set(run.key, run);
       agentsByKey.set(
         run.key,
