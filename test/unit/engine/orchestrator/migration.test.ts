@@ -127,6 +127,69 @@ describe("writeFlow's derived-action mirror", () => {
   });
 });
 
+// The exact scenario Task 9's review MEASURED as the list view's blocker 1, at
+// the layer that does the stamping. It is guaranteed by composition today
+// (`actionFor("command") === "run"`, plus `writeFlow`'s generic `e.action ??
+// derived` mirror), and both halves are pinned elsewhere — but neither store nor
+// migration test had a `kind: "command"` fixture at all, so a regression in
+// either half would surface two layers away, as a webview test about a select.
+describe("a rule wired to a command node, round-tripped", () => {
+  /** A place, planned work, a notify terminal AND a command node — LEGACY plus
+   * the kind this phase added. Built by mutating the parsed literal rather than
+   * from the current types, for the same reason `LEGACY` itself is a literal. */
+  const withCommand = (edge: Record<string, unknown>): string => {
+    const doc = JSON.parse(LEGACY);
+    doc.nodes.push({ id: "n4", kind: "command", x: 600, y: 0, join: "any", commandId: "deploy-staging" });
+    doc.edges = [edge];
+    return JSON.stringify(doc);
+  };
+
+  it("stamps no error, and lands on disk as a run, for the shape the new-rule bar builds", () => {
+    // No `action` key at all — what both the list's new-rule bar and the
+    // canvas's `finishWire` now create.
+    const io = fakeIo();
+    const flow = JSON.parse(withCommand(
+      { id: "e9", from: "n1", to: "n4", cond: { kind: "ci-passed" } },
+    )) as Flow;
+    writeFlow(io, "/flows", flow);
+
+    // An older build's `validEdge` requires the field, so the mirror must have
+    // filled it — with the verb the TARGET implies, which is what makes the read
+    // below find nothing to disagree about.
+    const onDisk = JSON.parse(io.files["/flows/fmsm1way7-7bbm.json"]);
+    expect(onDisk.edges[0].action).toBe("run");
+
+    const after = readFlows(io, "/flows")[0].edges[0];
+    expect(after.error).toBeUndefined();
+    // Live, not settled by a stamp of any kind: this is the rule staying usable
+    // across the save/poll round trip the user actually sees.
+    expect(after.firedAt).toBeUndefined();
+    expect(after.action).toBe("run");
+  });
+
+  it("latches the shape the bar USED to build, which is why storing no action is the fix", () => {
+    // The measured defect: the bar's action `<select>` offered three of the four
+    // verbs, so a rule from a place to a command node saved `action: "notify"`,
+    // and the round trip stamped it dead on the next poll. The counterfactual is
+    // what shows the test above passes because the action is ABSENT rather than
+    // because a command target never latches.
+    const io = fakeIo({
+      "/flows/fmsm1way7-7bbm.json": withCommand(
+        { id: "e9", from: "n1", to: "n4", cond: { kind: "ci-passed" }, action: "notify" },
+      ),
+    });
+    const e = readFlows(io, "/flows")[0].edges[0];
+    // Asserted before the string matches below, so a build that stamps NOTHING
+    // fails as "no error" rather than as an assertion-type complaint about
+    // `toContain(undefined)`.
+    expect(e.error).toBeDefined();
+    expect(e.error).toContain(ACTION_MISMATCH_PREFIX);
+    // Named both ways round, the strings the reviewer measured in the drawer.
+    expect(e.error).toContain('"notify"');
+    expect(e.error).toContain('"run"');
+  });
+});
+
 describe("Reset accepts the new reading", () => {
   // `latchActionMismatches` tells the user "Reset the rule to accept that". This
   // is the store half of making that true. `deckView.ts`'s `flow:resetEdge`

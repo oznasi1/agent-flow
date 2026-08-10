@@ -448,9 +448,11 @@ function NewRuleBar(p: {
 
   // Excludes `from` itself (no self-loop) and any node `from` already has an
   // edge to (the exact duplicate `finishWire`'s own wiring already refuses on
-  // the canvas) — not by target KIND, which is what `mismatch` below decides
-  // instead, with the one shared function, so this list and that guard can
-  // never quietly disagree about the same pairing.
+  // the canvas). Nothing is excluded by target KIND, and no companion guard
+  // decides one either — every kind is a legitimate target now that the target
+  // is what DECIDES the verb rather than something a chosen verb could disagree
+  // with. This list used to be paired with a kind guard (`actionMismatch`),
+  // which is the pairing that has gone, not moved.
   const targets = flow.nodes.filter(
     (n) => n.id !== from && !flow.edges.some((e) => e.from === from && e.to === n.id),
   );
@@ -633,9 +635,11 @@ export function FlowList(p: FlowListProps): JSX.Element {
   const [focusedIndexRaw, setFocusedIndexRaw] = React.useState(0);
   /** The one row currently open for editing, or `null`. At most one at a
    * time — this is what lets every open-row control below use a plain
-   * `aria-label` ("Condition", "Action", ...) without colliding: a list of
-   * near-identical rows is exactly where a query for "the" Condition select
-   * would otherwise match more than one element. */
+   * `aria-label` ("Condition", "Mode", "Command", ...) without colliding: a
+   * list of near-identical rows is exactly where a query for "the" Condition
+   * select would otherwise match more than one element. (Deliberately NOT
+   * "Action": there is no action control, and this file must not grow one —
+   * see the `THEN` clause's own comment in `ruleSentence`.) */
   const [openId, setOpenId] = React.useState<string | null>(null);
   const rowRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   /** Where focus goes once the last rule is deleted and the empty state

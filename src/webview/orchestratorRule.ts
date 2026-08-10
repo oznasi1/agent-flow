@@ -492,14 +492,19 @@ export function withDest(flow: Flow, edge: FlowEdge, dest: LaunchDest): Flow {
 }
 
 /** Write a rule's once-off note. Unlike `withMode`, there is exactly ONE home
- * for this fact regardless of `edge.action` — a launch's mode moves to its
- * target node because a place has no mode field to share, but nothing about
- * a note is ever read from a node: `composeAgentPrompt` (prompt.ts) takes it
- * only as its own second argument, wherever the caller reads it from. So
- * this always writes the edge, for both `launch` and `seed` alike — the one
- * thing `withAction` still has to do on its own is clear it for `notify`
- * (see that function's own doc comment), since this function has no action
- * to check and just writes whatever it is given. */
+ * for this fact regardless of what the rule DOES — a launch's mode moves to its
+ * target node because a place has no mode field to share, but nothing about a
+ * note is ever read from a node: `composeAgentPrompt` (prompt.ts) and
+ * `command.ts`'s own `withNote` each take it as an argument, wherever the caller
+ * read it from. So this always writes the edge, for `launch`, `seed` and `run`
+ * alike, and it has no verb to check: it writes whatever it is given.
+ *
+ * Nothing clears it when a rule's meaning changes any more, and nothing needs
+ * to. Clearing a note for `notify` was `withAction`'s job (deleted — see the
+ * comment where it stood), and a note is only ever READ for a verb that spends
+ * one, so a leftover note on a rule now pointing at a notify terminal is inert
+ * rather than wrong. The one way to change what a rule does is to point it at a
+ * different node, which no longer rewrites the edge at all. */
 export function withNote(flow: Flow, edge: FlowEdge, note: string): Flow {
   return { ...flow, edges: flow.edges.map((x) => (x.id === edge.id ? { ...x, note } : x)) };
 }
