@@ -691,7 +691,17 @@ export class DeckPanel {
    * different question than the dispatch below and the stamp in `applyFired`;
    * see the vintage note in `advanceUnderLock`. The TARGET is still resolved out
    * of `flow`, which is why a verb whose target has since changed kind resolves
-   * to `undefined` and gates nothing. */
+   * to `undefined` and gates nothing.
+   *
+   * `run` is deliberately unresolved here, and this is a gap, not an oversight:
+   * `isSpendAction("run") === true` (model.ts) says a command SHOULD gate the
+   * same once-per-flow ask a launch or seed does — it runs shell on the user's
+   * machine, unattended — but `SpendTarget` has no `run` member yet to return.
+   * Task 6 adds it, resolving a command node the same way `plannedTarget`/
+   * `placeTarget` resolve theirs. Until that lands, a `run` edge falls out of
+   * `wantsSpend` below with no consent asked — do NOT add command EXECUTION to
+   * `performEdge` before this arm exists, or a flow will run a command with no
+   * ask ever having been possible. */
   private spendTarget(flow: Flow, edge: FlowEdge, action: FlowAction | undefined): SpendTarget | undefined {
     // `isSpendAction` is the one predicate for "does this rule cost money" — the
     // caller hands every performing edge to this function rather than
@@ -703,6 +713,8 @@ export class DeckPanel {
       const node = this.plannedTarget(flow, edge);
       return node ? { action: "launch", node, note: edge.note } : undefined;
     }
+    // See this function's own doc comment: unresolved on purpose until Task 6.
+    if (action === "run") return undefined;
     const node = this.placeTarget(flow, edge);
     return node ? { action: "seed", node, mode: edge.mode, note: edge.note } : undefined;
   }
@@ -817,6 +829,24 @@ export class DeckPanel {
       };
     }
     if (action === "seed") return this.performSeed(flow, edge, statuses);
+    // A `run` edge falls through to here today because `isSpendAction("run")`
+    // is true and this is the acting loop's only other branch — NOT because
+    // running a command is implemented. Without this arm it would fall into
+    // the launch resolution below and settle with "a launch rule must point
+    // at planned work", which is the wrong words for a command and would say
+    // nothing about the real gap: `spendTarget` (above) has no `run` member
+    // to resolve yet, so this edge never went through the once-per-flow
+    // consent ask either. Settles rather than defers — the same "so the rule
+    // doesn't retry every poll forever" reasoning as the `undefined` case
+    // above, and correct here too: nothing about the target will change on
+    // its own. Task 6 replaces this arm with real execution once `SpendTarget`
+    // gains its `run` member and the ask can actually happen first.
+    if (action === "run") {
+      return {
+        kind: "done",
+        outcome: { ok: false, error: `this rule points at a command, and running one isn't implemented yet.` },
+      };
+    }
     const node = this.plannedTarget(flow, edge);
     if (!node) {
       return {
