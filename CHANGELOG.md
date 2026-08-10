@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-08-10
+
+### Changed
+
+- **"This window" no longer asks which repos the task touches.** Choosing it already says
+  where the work happens, so the folders open in the window are taken as the repo set —
+  the confirm-repos QuickPick is skipped, exactly as it is for an existing workspace or
+  another open window. Applies to Take, Address PR, Explore and Notepad runs. A new
+  window still gets the pick, with inferred repos pre-checked, and so does the rare case
+  where the window loses its folders between the destination pick and the launch.
+
 ## [0.11.2] — 2026-08-10
 
 ### Changed
