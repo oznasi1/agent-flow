@@ -539,14 +539,19 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * KNOW THE BOUNDARY, because it is not a property of the shape: an actionless
    * edge is unlatchable only IN MEMORY. `writeFlow` persists the derived value,
    * so the moment this flow is saved the edge does carry a stored action on
-   * disk — and a stored action is what `latchActionMismatches` compares. What
-   * keeps that stored value from ever disagreeing is that nothing in either
-   * presentation can RETARGET an existing edge: no endpoint drag on the canvas,
-   * no "To node" select on a rule that already exists, only delete-and-rewire
-   * (which mints a fresh actionless edge). The guarantee therefore rests on a
-   * load-bearing ABSENCE. Anyone adding a retarget affordance reintroduces this
-   * defect exactly as it was, and must clear `action` on the retargeted edge —
-   * the same thing `flow:resetEdge` already does for the same reason. */
+   * disk — and a stored action is what `latchActionMismatches` compares. So a
+   * stored value only stays in agreement while nothing changes what the edge
+   * points at OR what that target IS. Neither presentation can RETARGET an
+   * existing edge (no endpoint drag on the canvas, no "To node" select on a rule
+   * that already exists, only delete-and-rewire, which mints a fresh actionless
+   * edge) — but a target's KIND does change under a live flow, in exactly one
+   * place: `promoteToPlace` (promote.ts) rewrites a launched `planned` node into
+   * a `place` with the same id, which flips every edge into it from `launch` to
+   * `seed`. That is ours, not the user's, and it is why promotion clears
+   * `action` on every one of those edges itself — the same thing
+   * `flow:resetEdge` does, for the same reason. Anyone adding a retarget
+   * affordance, or a second rewrite of a node's kind, owes the retargeted edges
+   * the identical clear. */
   const finishWire = (toId: string) => {
     const from = wiring;
     setWiring(null);

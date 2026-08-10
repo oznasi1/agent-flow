@@ -55,11 +55,63 @@ describe("promoteToPlace", () => {
     expect(out.nodes[0]).toEqual(place);
   });
 
-  it("leaves the edges untouched", () => {
+  it("clears the stored action on every edge into the promoted node", () => {
+    // Promotion flips the node `planned` -> `place`, which is the other direction
+    // `edgeAction` moves: an edge into it meant `launch` and means `seed` now. A
+    // stored `launch` left behind is the disagreement `latchActionMismatches`
+    // stamps an edge dead for on the very next read — and in a fan-in the sibling
+    // that did NOT trigger is still unsettled, so the engine would latch a rule
+    // the user never touched.
     const flow: Flow = {
       ...flowWith([planned("n3")]),
-      edges: [{ id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch", mode: "tdd" }],
+      edges: [
+        { id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n2", to: "n3", cond: { kind: "ci-passed" }, action: "launch" },
+      ],
     };
-    expect(promoteToPlace(flow, "n3", "ASM-12", "bite-me").edges).toEqual(flow.edges);
+    const out = promoteToPlace(flow, "n3", "ASM-12", "bite-me");
+    expect(out.edges[0].action).toBeUndefined();
+    expect(out.edges[1].action).toBeUndefined();
+    // The FIELD is removed, not set to `undefined`: that is the shape an edge
+    // this build creates has, and the one `writeFlow`'s `e.action ?? derived`
+    // and an older build's `validEdge` both reason about.
+    expect(out.edges[0]).not.toHaveProperty("action");
+  });
+
+  it("keeps every other field on an edge whose action it clears", () => {
+    const flow: Flow = {
+      ...flowWith([planned("n3")]),
+      edges: [{
+        id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" },
+        action: "launch", mode: "tdd", note: "staging", firedAt: 5, firedNote: "launched ASM-12",
+      }],
+    };
+    const e = promoteToPlace(flow, "n3", "ASM-12", "bite-me").edges[0];
+    expect(e).toMatchObject({
+      id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" },
+      mode: "tdd", note: "staging", firedAt: 5, firedNote: "launched ASM-12",
+    });
+  });
+
+  it("leaves an edge OUT of the promoted node untouched", () => {
+    // A rule leaving the promoted node still means whatever ITS own target
+    // implies; nothing about that changed here.
+    const flow: Flow = {
+      ...flowWith([planned("n3")]),
+      edges: [{ id: "e1", from: "n3", to: "n9", cond: { kind: "ci-passed" }, action: "notify" }],
+    };
+    const out = promoteToPlace(flow, "n3", "ASM-12", "bite-me");
+    expect(out.edges[0]).toBe(flow.edges[0]);
+  });
+
+  it("clears nothing when nothing was promoted", () => {
+    // Same gate as the node rewrite: a call naming a node that is already a place
+    // changes no kind, so no edge's meaning moved and no stored action is stale.
+    const place: FlowNode = { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "api" };
+    const flow: Flow = {
+      ...flowWith([place]),
+      edges: [{ id: "e1", from: "n0", to: "n1", cond: { kind: "pr-merged" }, action: "seed" }],
+    };
+    expect(promoteToPlace(flow, "n1", "ASM-9", "web").edges[0].action).toBe("seed");
   });
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFlows, writeFlow } from "../../../../src/engine/orchestrator/store";
 import { ACTION_MISMATCH_PREFIX } from "../../../../src/engine/orchestrator/model";
+import { promoteToPlace } from "../../../../src/engine/orchestrator/promote";
 import type { Flow } from "../../../../src/engine/orchestrator/model";
 import type { FlowIo } from "../../../../src/engine/orchestrator/store";
 
@@ -193,8 +194,9 @@ describe("a rule wired to a command node, round-tripped", () => {
 describe("Reset accepts the new reading", () => {
   // `latchActionMismatches` tells the user "Reset the rule to accept that". This
   // is the store half of making that true. `deckView.ts`'s `flow:resetEdge`
-  // rebuilds the edge from its non-host fields and deliberately does NOT carry
-  // `action` over; the shape below is exactly what it hands `writeFlow`.
+  // deletes the host's own stamps from a spread of the edge and deliberately
+  // drops `action` with them; the shape below is exactly what it hands
+  // `writeFlow`.
   //
   // The bug this pins: while the reset carried the stored `action` through, the
   // disagreeing value survived the write, the next read compared it against the
@@ -204,8 +206,16 @@ describe("Reset accepts the new reading", () => {
   // be repaired.
   const resetEdge = (flow: Flow, edgeId: string): Flow => ({
     ...flow,
-    edges: flow.edges.map((e) =>
-      e.id === edgeId ? { id: e.id, from: e.from, to: e.to, cond: e.cond, mode: e.mode } : e),
+    edges: flow.edges.map((e) => {
+      if (e.id !== edgeId) return e;
+      const kept = { ...e };
+      delete kept.firedAt;
+      delete kept.firedNote;
+      delete kept.performed;
+      delete kept.error;
+      delete kept.action;
+      return kept;
+    }),
   });
 
   /** A `notify` edge pointing at planned work — the ordinary leftover shape,
@@ -263,5 +273,62 @@ describe("Reset accepts the new reading", () => {
     // and still NOT silently turned into a paid session.
     expect(after.find((e) => e.id === "e8")!.error).toContain(ACTION_MISMATCH_PREFIX);
     expect(after.find((e) => e.id === "e8")!.action).toBe("notify");
+  });
+});
+
+describe("a launch that promotes its target", () => {
+  // The engine's own edit, not the user's: `promoteToPlace` rewrites a launched
+  // `planned` node into a `place` WITH THE SAME ID, so every edge into it means
+  // `seed` from that moment on while the file still says `launch`. That is exactly
+  // the disagreement `latchActionMismatches` stamps an edge dead for, which is why
+  // promotion clears the field itself. Round-tripped through the real store,
+  // because the whole defect only appears on the NEXT read.
+  const fanIn = (): Flow => {
+    const doc = JSON.parse(LEGACY);
+    // Two rules into one planned node — the default `join: "any"`, so the first
+    // condition met launches and the sibling is left unsettled.
+    doc.nodes = [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n0", kind: "place", x: 0, y: 90, join: "any", runKey: "ASM-0", repo: "agent-flow" },
+      { id: "n2", kind: "planned", x: 200, y: 0, join: "any", ticketKey: "ASM-2", repos: ["agent-flow"], mode: "plan", dest: "worktree" },
+    ];
+    doc.edges = [
+      { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", firedAt: 500, firedNote: "launched ASM-2 in agent-flow", performed: true },
+      { id: "e2", from: "n0", to: "n2", cond: { kind: "ci-passed" }, action: "launch" },
+    ];
+    const io = fakeIo({ "/flows/fmsm1way7-7bbm.json": JSON.stringify(doc) });
+    return readFlows(io, "/flows")[0];
+  };
+
+  it("does not latch the untriggered sibling of the rule that launched", () => {
+    const io = fakeIo();
+    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow"));
+    const e2 = readFlows(io, "/flows")[0].edges.find((e) => e.id === "e2")!;
+    // The user edited nothing, so nothing may be stamped on their behalf.
+    expect(e2.error).toBeUndefined();
+    // And it now reads as the verb its target implies — a promoted node is a
+    // place, so a rule into it seeds.
+    expect(e2.action).toBe("seed");
+  });
+
+  it("still writes an action for every edge, so an older build keeps the rules", () => {
+    // `validEdge` in the shipping build REQUIRES `action` and drops any edge
+    // without it. Promotion clears the field in memory; `writeFlow`'s
+    // `e.action ?? derived` is what has to put the new value back on disk.
+    const io = fakeIo();
+    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow"));
+    const onDisk = JSON.parse(io.files["/flows/fmsm1way7-7bbm.json"]);
+    expect(onDisk.edges.map((e: { action?: string }) => e.action)).toEqual(["seed", "seed"]);
+  });
+
+  it("keeps the launched edge's own receipt", () => {
+    // Clearing the mirror is not clearing the latch: the rule that actually ran
+    // must still read as fired, or the next pass launches the same ticket again.
+    const io = fakeIo();
+    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow"));
+    const e1 = readFlows(io, "/flows")[0].edges.find((e) => e.id === "e1")!;
+    expect(e1.firedAt).toBe(500);
+    expect(e1.firedNote).toBe("launched ASM-2 in agent-flow");
+    expect(e1.performed).toBe(true);
   });
 });
