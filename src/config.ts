@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as os from "os";
 import * as path from "path";
-import { FilterVisibility, PromptMode } from "./types";
+import { FilterVisibility, FlowCommand, PromptMode } from "./types";
 
 /** The stock "how should the agent start" modes, in picker order. `detail` is the
  * line shown under the label — written for the user reading the picker, never
@@ -116,6 +116,10 @@ export const DEFAULT_EXPLORE_VERIFY_PROMPT =
  * page renders it as an editable list widget; the same constraint that made each
  * explore prompt its own setting. */
 export const DEFAULT_ENVIRONMENTS = ["dev", "staging", "production"];
+
+/** No built-ins ship for `agentFlow.commands` — an empty list is what a fresh
+ * install starts with, and stays with, until the user opts in. */
+export const DEFAULT_COMMANDS: FlowCommand[] = [];
 
 /** Where Agent Flow starts a session. */
 export type AgentSurface = "extension" | "terminal";
@@ -256,6 +260,9 @@ export interface AgentFlowConfig {
   exploreActions: ExploreAction[];
   // Environments offered by Explore actions that verify against a live env.
   environments: string[];
+  // Named commands an Orchestrator command node can run. No built-ins — an
+  // empty list means the user hasn't opted into any.
+  commands: FlowCommand[];
   prReviewStatus: string; // task status that reveals the "Address PR" card action
   prReviewAutoFix: boolean; // after assessing, proceed to implement the PR's requested changes
   prReviewPrompt: string; // seeded prompt for the PR-review kick-off
@@ -416,6 +423,33 @@ function readEnvironments(c: vscode.WorkspaceConfiguration): string[] {
   return seen.size ? [...seen] : [...DEFAULT_ENVIRONMENTS];
 }
 
+/** No built-ins to layer over, unlike `promptModes` — so an empty result is
+ * returned as-is rather than falling back to defaults. A command list is
+ * something the user opts into; inventing entries would put commands in a
+ * picker that nobody asked to be able to run.
+ *
+ * An entry with no usable `id` or no `run` is dropped: the id is how a node
+ * refers to it, and a command with nothing to execute is a picker row that
+ * fails at the moment it is trusted. A missing `label` falls back to the id
+ * rather than rendering a blank row. */
+function readCommands(c: vscode.WorkspaceConfiguration): FlowCommand[] {
+  const raw = c.get<unknown[]>("commands");
+  if (!Array.isArray(raw)) return [];
+  const out: FlowCommand[] = [];
+  const seen = new Set<string>();
+  for (const v of raw) {
+    if (!v || typeof v !== "object") continue;
+    const e = v as Partial<FlowCommand>;
+    const id = typeof e.id === "string" ? e.id.trim() : "";
+    const run = typeof e.run === "string" ? e.run.trim() : "";
+    if (!id || !run || seen.has(id)) continue;
+    seen.add(id);
+    const label = typeof e.label === "string" && e.label.trim() ? e.label.trim() : id;
+    out.push({ id, label, run, ...(typeof e.detail === "string" && e.detail.trim() ? { detail: e.detail.trim() } : {}) });
+  }
+  return out;
+}
+
 export function getConfig(): AgentFlowConfig {
   const c = vscode.workspace.getConfiguration("agentFlow");
   const slackRaw = c.get<Record<string, unknown>>("exploreSlackDm") ?? {};
@@ -459,6 +493,7 @@ export function getConfig(): AgentFlowConfig {
     exploreMode: c.get<string>("exploreMode") || "ask",
     exploreActions,
     environments: readEnvironments(c),
+    commands: readCommands(c),
     prReviewStatus: c.get<string>("prReviewStatus") || "PR initiated",
     prReviewAutoFix: c.get<boolean>("prReviewAutoFix") ?? true,
     prReviewPrompt: c.get<string>("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT,

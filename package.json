@@ -337,6 +337,21 @@
             }
           ]
         },
+        "agentFlow.commands": {
+          "type": "array",
+          "default": [],
+          "markdownDescription": "Commands an Orchestrator rule can run when its condition is met — a deploy, a webhook call, a smoke test. Each has an `id`, a `label` shown in the picker, the `run` command itself, and an optional `detail` line. `run` may contain `{note}`, replaced with the rule's own free text. **These run unattended on your machine**, so a flow asks once before it runs its first command. Unlike `#agentFlow.promptModes#` there are no built-ins: an empty list means no named commands.",
+          "items": {
+            "type": "object",
+            "required": ["id", "run"],
+            "properties": {
+              "id": { "type": "string", "description": "Stable id, referenced by a flow's command node." },
+              "label": { "type": "string", "description": "Shown in the rule picker. Defaults to the id." },
+              "detail": { "type": "string", "description": "Optional line shown under the label." },
+              "run": { "type": "string", "description": "The command to run. May contain {note}." }
+            }
+          }
+        },
         "agentFlow.explorePrompt": {
           "type": "string",
           "editPresentation": "multilineText",

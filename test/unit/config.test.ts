@@ -15,6 +15,7 @@ import {
   DEFAULT_REVIEW_REQUEST_PROMPT,
   DEFAULT_REVIEW_REQUEST_MODES,
   DEFAULT_ENVIRONMENTS,
+  DEFAULT_COMMANDS,
 } from "../../src/config";
 import { env, setConfig, setDefaultConfig } from "../_mocks/vscode";
 import pkg from "../../package.json";
@@ -444,6 +445,30 @@ describe("getConfig — environments", () => {
   });
 });
 
+describe("getConfig — commands", () => {
+  it("reads commands, dropping entries with no id or no run", () => {
+    setConfig({ commands: [
+      { id: "deploy", label: "Deploy to staging", run: "gh workflow run deploy.yml" },
+      { id: "", label: "nameless", run: "true" },
+      { id: "noRun", label: "No command" },
+    ] });
+    expect(getConfig().commands).toEqual([
+      { id: "deploy", label: "Deploy to staging", run: "gh workflow run deploy.yml" },
+    ]);
+  });
+
+  // Unlike promptModes there are no built-ins to layer over — an empty list is
+  // a legitimate answer, and must not fall back to anything.
+  it("returns an empty list when the setting is absent", () => {
+    expect(getConfig().commands).toEqual([]);
+  });
+
+  it("falls back to a label when one is missing, never to a blank picker row", () => {
+    setConfig({ commands: [{ id: "deploy", run: "true" }] });
+    expect(getConfig().commands[0].label).toBe("deploy");
+  });
+});
+
 describe("getConfig — filter visibility", () => {
   it("defaults every filter control to visible when nothing is configured", () => {
     expect(getConfig().filters).toEqual({ size: true, status: true, repo: true, search: true });
@@ -774,6 +799,14 @@ describe("package.json ⇄ config constants", () => {
 
   it("keeps the environments schema default equal to DEFAULT_ENVIRONMENTS", () => {
     expect(props["agentFlow.environments"].default).toEqual(DEFAULT_ENVIRONMENTS);
+  });
+
+  // Same rationale as the promptModes/environments parity checks above: an
+  // untouched setting resolves to the manifest default, so a manifest typo
+  // that invented a non-empty default would put commands in a picker nobody
+  // asked to be able to run, and this is the only test that would catch it.
+  it("keeps the commands schema default equal to DEFAULT_COMMANDS (empty)", () => {
+    expect(props["agentFlow.commands"].default).toEqual(DEFAULT_COMMANDS);
   });
 
   it("keeps the deprecated explorePrompt default equal to the knowledge default (migration target)", () => {

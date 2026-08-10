@@ -135,6 +135,7 @@ const CFG = {
     { id: "verify", label: "Verify on an environment", prompt: "VER {summary} on {env} for {services}{files}", slackDm: false, needsEnv: true },
   ],
   environments: ["dev", "staging", "production"],
+  commands: [] as { id: string; label: string; run: string; detail?: string }[],
   prReviewStatus: "PR initiated",
   prReviewAutoFix: true,
   prReviewPrompt: "PR {key}{files}",
