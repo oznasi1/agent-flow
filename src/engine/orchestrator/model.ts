@@ -41,7 +41,7 @@ export type NotifyNode = NodeBase & { kind: "notify"; message: string };
 
 /** A command to run when a condition is met: a deploy, a webhook call, a
  * smoke test. Either `commandId` (an entry in `agentFlow.commands`) or `run`
- * (typed into the drawer), never both — `commandOf` in command.ts resolves
+ * (typed into the drawer), never both — `resolveCommand` in command.ts resolves
  * which, and refuses a node carrying neither.
  *
  * A command node is not a place: nothing observes it, and no condition asks

@@ -12,9 +12,27 @@ import type { FlowCommand } from "../../types";
 /** 120 s. Must stay well under `LOCK_TTL_MS` (300 s, `lock.ts`): the flows lock is
  * held across the whole act, and a command outliving the TTL would have its own
  * lock reaped by another window while the command is still running — the same
- * hazard `LOCK_TTL_MS`'s own comment describes for a launch or a seed. */
+ * hazard `LOCK_TTL_MS`'s own comment describes for a launch or a seed. Pinned by
+ * a test against the real `LOCK_TTL_MS` (not a hand-copied number) so the two
+ * cannot drift silently. */
 export const COMMAND_TIMEOUT_MS = 120_000;
 
+/** Spawns `command` in `opts.cwd` and resolves with its exit code and captured
+ * stdout/stderr. `opts.timeoutMs` is a CONTRACT, not a hint: the runner MUST
+ * enforce it itself — kill the child at (or shortly after) that many
+ * milliseconds and resolve rather than hang. `runCommand` below holds no
+ * process handle of its own and has no way to enforce this from the outside;
+ * if a runner ignores `timeoutMs` (a `spawn` with no timeout wired up, or one
+ * whose own timer silently fails), the `await` in `runCommand` never settles,
+ * and the flows lock that pass is holding is held for the life of the
+ * process — not just the 120 s ceiling `COMMAND_TIMEOUT_MS` promises. This
+ * module deliberately does NOT add its own `Promise.race` backstop: a race can
+ * only unblock the CALLER, not the child, so on a misbehaving runner it would
+ * trade a hung pass for a silently orphaned process that keeps running (and
+ * possibly still writing into `opts.cwd`) after `runCommand` has already told
+ * everyone it failed. That is a worse failure to debug than a hung pass, which
+ * at least fails loudly (the flows lock stays visibly held). The fix for a
+ * runner that cannot honor its own timeout belongs in the runner. */
 export interface CommandRunner {
   (command: string, opts: { cwd: string; timeoutMs: number }):
     Promise<{ code: number; stdout: string; stderr: string }>;
@@ -31,13 +49,23 @@ export type CommandOutcome =
   | { ok: true; code: 0; label: string; output: string }
   | { ok: false; message: string; label: string; output?: string };
 
-/** Substitute `{note}` slice-by-slice. NEVER `String.replace`: its replacement
- * argument interprets `$&`, `$1` and friends, and a note is user text that must
- * reach the shell exactly as typed.
+/** Substitute EVERY `{note}` occurrence slice-by-slice. NEVER `String.replace`:
+ * its replacement argument interprets `$&`, `$1` and friends, and a note is
+ * user text that must reach the shell exactly as typed.
  *
  * A template with no `{note}` gets NOTHING appended, which is where this differs
  * from `composeAgentPrompt` (`prompt.ts`). Appending stray words to a prompt adds
- * context; appending them to a shell command changes what executes. */
+ * context; appending them to a shell command changes what executes.
+ *
+ * Splicing is unquoted and untouched otherwise: `note` lands in the command
+ * string verbatim, so a template like `deploy.sh --env={note}` with a note of
+ * `prod; rm -rf ~` produces a string carrying both commands. That is inherent
+ * to letting a user type a free-text command at all — this module does not
+ * remove it, because doing so would mean rewriting or rejecting the user's own
+ * shell syntax — but it means quoting is the TEMPLATE AUTHOR'S job, and even
+ * `--env="{note}"` does not neutralise a `"` inside the note. See the
+ * `agentFlow.commands` setting's description, which is the only place a user
+ * configuring a command actually reads this. */
 function withNote(template: string, note: string): string {
   let out = "";
   let i = 0;
@@ -49,24 +77,48 @@ function withNote(template: string, note: string): string {
   }
 }
 
+/** True for a usable string: present, and non-empty once whitespace is
+ * stripped. Guards the RUNTIME type, not just presence — a hand-edited flow
+ * file can carry `"run": 42`, `"run": ""`, or `"run": "   "`, and `store.ts`'s
+ * `validNode` rejects none of that. `resolveCommand` is exported and callable
+ * directly (a future "what would run" preview is the likely caller — see
+ * Task 9), so it must refuse such input rather than crash on it (a bare
+ * `as string` cast used to send a non-string into `withNote`'s `.indexOf`) or
+ * treat blank text as a real command to hand to the runner. Same predicate as
+ * `prompt.ts`'s `hasNote`, restated here rather than imported — one boolean
+ * check does not justify coupling this module to `prompt.ts`. */
+function isUsableText(v: unknown): v is string {
+  return typeof v === "string" && v.trim() !== "";
+}
+
 /** The label to show when a node can't even be resolved enough to have a real
- * one — the drawer or a log line still needs SOMETHING to name the rule by. */
+ * one — the drawer or a log line still needs SOMETHING to name the rule by.
+ * Deliberately permissive (no `isUsableText` guard): this is display-only text
+ * interpolated into a template string, never passed to anything string-typed
+ * that would throw on a non-string, so it is safe even for a hand-edited
+ * node's `run: 42`. */
 function fallbackLabel(node: CommandNode): string {
   return node.commandId ?? node.run ?? "command";
 }
 
-/** Resolve a command node to the text that will actually run. Refuses rather than
- * guesses on every ambiguous or incomplete shape: a `commandId` naming nothing
- * configured, a node with neither `commandId` nor `run`, and a node with BOTH
- * (picking one would make the drawer's display and what executes disagree, which
- * is the failure mode this whole feature exists to remove). */
+/** Resolve a command node to the text that will actually run. Refuses rather
+ * than guesses on every ambiguous or incomplete shape:
+ * - a `commandId` naming nothing configured,
+ * - a node with neither a usable `commandId` nor a usable `run`,
+ * - a node whose `run` is present but blank (empty or whitespace-only, or —
+ *   on a hand-edited flow file — not even a string): materially the same as
+ *   having no `run` at all, and `config.ts`'s `readCommands` already treats a
+ *   blank `run` as absent on the config side, so this side must agree,
+ * - and a node with BOTH a usable `commandId` and a usable `run` (picking one
+ *   would make the drawer's display and what executes disagree, which is the
+ *   failure mode this whole feature exists to remove). */
 export function resolveCommand(
   node: CommandNode,
   commands: FlowCommand[],
   note?: string,
 ): { ok: true; label: string; text: string } | { ok: false; message: string } {
-  const hasId = node.commandId !== undefined;
-  const hasRun = node.run !== undefined;
+  const hasId = isUsableText(node.commandId);
+  const hasRun = isUsableText(node.run);
 
   if (hasId && hasRun) {
     return {
@@ -85,8 +137,12 @@ export function resolveCommand(
     return { ok: true, label: cmd.label, text: withNote(cmd.run, note ?? "") };
   }
 
-  if (hasRun) {
-    return { ok: true, label: node.run as string, text: withNote(node.run as string, note ?? "") };
+  if (isUsableText(node.run)) {
+    return { ok: true, label: node.run, text: withNote(node.run, note ?? "") };
+  }
+
+  if (node.run !== undefined) {
+    return { ok: false, message: "command node's run is blank — nothing to execute." };
   }
 
   return { ok: false, message: "command node names neither a configured commandId nor a free-text run." };
@@ -112,8 +168,14 @@ export async function runCommand(
     }
 
     deps.log(`running: ${resolved.text}`);
+    // `timeoutMs` is passed as DATA to the injected runner; see CommandRunner's
+    // doc comment for why enforcing it is entirely the runner's job, not
+    // something this call can add a backstop for.
     const { code, stdout, stderr } = await deps.run(resolved.text, { cwd, timeoutMs: COMMAND_TIMEOUT_MS });
-    const output = stdout + stderr;
+    // Joined with a newline, not concatenated bare: stdout with no trailing
+    // newline would otherwise run into stderr's first line in both the log and
+    // the receipt the drawer shows ("deployed" + "boom" -> "deployedboom").
+    const output = [stdout, stderr].filter((s) => s.length > 0).join("\n");
     deps.log(output);
 
     if (code === 0) {
