@@ -192,6 +192,31 @@ describe("readLiveWindows", () => {
   });
 });
 
+describe("roots round-trip (F4)", () => {
+  it("carries roots through windowIdentity → writePresence → readLiveWindows", () => {
+    // The spec's own ask, and the shape every other consumer here (deckView.ts,
+    // groupPlacesByWindow) trusts: what actually lands on disk, read back
+    // exactly as PresenceRecord's optional `roots` promises.
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/team.code-workspace" };
+    workspace.workspaceFolders = [{ uri: { fsPath: "/repos/a" } }, { uri: { fsPath: "/repos/b" } }];
+    const id = windowIdentity()!;
+
+    let onDisk = "";
+    writeFileSync.mockImplementation((_p, data) => { onDisk = String(data); });
+    writePresence("/win", { ...id, pid: 321, updatedAt: 10 });
+
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true as never);
+    readdirSync.mockReturnValue(["321.json"] as never);
+    readFileSync.mockImplementation(() => onDisk);
+
+    const live = readLiveWindows("/win");
+
+    expect(live).toHaveLength(1);
+    expect(live[0].roots).toEqual(["/repos/a", "/repos/b"]);
+    killSpy.mockRestore();
+  });
+});
+
 describe("currentWindow", () => {
   it("returns the workspace identity with every root folder", () => {
     workspace.workspaceFile = { scheme: "file", fsPath: "/ws/team.code-workspace" } as never;

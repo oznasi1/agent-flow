@@ -4,20 +4,35 @@ import * as os from "os";
 import * as path from "path";
 import { canon, pidAlive } from "./paths";
 
-export interface WindowIdentity {
+/** The fields every presence-adjacent record shares, with no opinion on whether
+ * `roots` is there — `WindowIdentity` and `PresenceRecord` diverge on exactly
+ * that below, and TypeScript will not let a subinterface re-narrow a required
+ * inherited member to optional. */
+interface WindowIdentityCore {
   identity: string; // canonical path — a .code-workspace file or a single folder
   kind: "workspace" | "folder";
   label: string; // basename, for display
   folders: number; // folder count in the window
+}
+
+export interface WindowIdentity extends WindowIdentityCore {
   /** The window's folder paths, canonicalized, in workspaceFolders order. The
    * Deck maps a session's directory back to the window holding it with these;
-   * `folders` alone could only ever say how many there were. Absent on a record
-   * written by an older extension host — every reader treats that as a window
-   * that claims nothing, which is exactly the behavior before this field. */
+   * `folders` alone could only ever say how many there were. Always present
+   * here — `windowIdentity()` is the only constructor, and it always computes
+   * this list, empty or not. */
   roots: string[];
 }
 
-export interface PresenceRecord extends WindowIdentity {
+/** What actually sits on disk under ~/.agentflow/windows, read back with no
+ * validation beyond `pid`/`identity` (see `readLiveWindows`). `roots` is
+ * optional, not `WindowIdentity`'s required — a record written by an older
+ * extension host predates the field entirely, so at runtime it is `undefined`
+ * for every one of them no matter what the type promises. Every reader treats
+ * a missing list as a window that claims nothing, which is exactly the
+ * behavior before this field existed. */
+export interface PresenceRecord extends WindowIdentityCore {
+  roots?: string[];
   pid: number; // the window's extension-host process id
   updatedAt: number; // epoch ms, stamped by the caller
 }
