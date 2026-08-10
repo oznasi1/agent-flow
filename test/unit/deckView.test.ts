@@ -7,8 +7,16 @@ import type { ChangedFile } from "../../src/engine/git";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef, Task } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
-import type { Flow } from "../../src/engine/orchestrator/model";
+import type { CommandNode, Flow } from "../../src/engine/orchestrator/model";
 import type { AgentProvider } from "../../src/config";
+import type { FlowCommand } from "../../src/types";
+
+/** The shape `child_process.exec`'s callback is invoked with, narrowed to the four
+ * fields `shellCommandRunner` actually branches on. A real `ExecException` carries
+ * more, but a test that built one would be asserting against Node's own class
+ * rather than against the runner's mapping of exit code, string code, and signal. */
+type ExecError = Error & { code?: number | string; killed?: boolean; signal?: string };
+type ExecCallback = (err: ExecError | null, stdout: string, stderr: string) => void;
 
 // Isolate the panel from the engine: fixtures for runs, a pass-through status
 // builder, and a stubbed workspace opener.
@@ -146,6 +154,19 @@ const h = vi.hoisted(() => ({
   // so the re-mint-on-collision path is reachable. A constant would make the
   // retry loop indistinguishable from a refusal.
   idSeq: 0,
+  // `agentFlow.commands` (Task 4). Empty by default: no built-ins ship, and a
+  // free-text `run` node needs none — the cases about a configured command say so.
+  commands: [] as FlowCommand[],
+  // The ONE call in this feature that would reach a real shell (Task 6). Succeeds
+  // silently by default with output on both streams, so every case that is not
+  // about failure still proves the output path. Deliberately callback-style rather
+  // than a stubbed CommandRunner: `shellCommandRunner`'s whole job is the mapping
+  // between exec's callback contract (a null error, a numeric code, a string code,
+  // a kill signal) and CommandOutcome, and a stubbed runner would skip it — which
+  // is exactly where the timeout enforcement lives.
+  exec: vi.fn((_command: string, _opts: unknown, cb: ExecCallback) => {
+    cb(null, "deployed 3 services", "warning: slow");
+  }),
   // The candidate list the missing ticket picker (Task 4b) reads from
   // `provider().list(...)`. One ticket by default — enough for the picker to
   // have something to show without a test having to name a task it never uses.
@@ -292,6 +313,17 @@ vi.mock("fs", async (importActual) => {
   const actual = await importActual<typeof import("fs")>();
   return { ...actual, existsSync: (p: string) => h.existsSync(p), readFileSync: (p: string, e: string) => h.readFileSync(p, e) };
 });
+// Partial mock: `exec` is the only member replaced, and everything else in
+// `child_process` stays real for the same reason the `fs` mock above spreads the
+// actual module — deckView.ts's own graph reaches `execFileSync`/`execSync` through
+// several real modules, and blanking them would break imports that have nothing to
+// do with a flow's command. This is what makes a met `run` rule assertable at all:
+// `shellCommandRunner` is built over `exec` and is the only participant in the
+// feature holding a process handle.
+vi.mock("child_process", async (importActual) => {
+  const actual = await importActual<typeof import("child_process")>();
+  return { ...actual, exec: h.exec };
+});
 // Partial mock: reviewRunKey is real (its slugging is exactly what decorateReviews
 // relies on to match a run to a queued PR); only launchReview — the side-effecting
 // half — is replaced.
@@ -311,6 +343,11 @@ vi.mock("../../src/config", async (importActual) => {
       prReviewPrompt: h.prReviewPrompt, prReviewAutoFix: h.prReviewAutoFix, seedAgent: h.seedAgent,
       agentProvider: h.agentProvider,
       prReviewStatus: "PR initiated",
+      // The named commands a `run` rule's node can point at by `commandId`. Steered
+      // per test rather than sourced from the real getConfig(): no built-ins ship,
+      // so the real value is always the empty list, which would make "the runner got
+      // the CONFIGURED command's text, not its label" untestable.
+      commands: h.commands,
       // Sourced from the real getConfig() (itself driven by the globally-mocked
       // vscode module) rather than hardcoded here, so a test's setConfig({
       // reviewRequestModes / reviewRequestMode }) actually reaches launchReviewFor.
@@ -336,7 +373,10 @@ vi.mock("../../src/config", async (importActual) => {
     }),
   };
 });
-import { DeckPanel, POLL_MS, reviewProvenance } from "../../src/deckView";
+import { DeckPanel, POLL_MS, reviewProvenance, shellCommandRunner } from "../../src/deckView";
+// The real ceiling, not a number restated here: a call site that passed a literal
+// (or nothing at all) would still satisfy a test that hardcoded 120_000.
+import { COMMAND_TIMEOUT_MS } from "../../src/engine/orchestrator/command";
 // The real constant, through the partial mock above (which spreads the actual module):
 // a test that restated the number could not catch the call site passing a literal.
 import { LOCK_TTL_MS } from "../../src/engine/orchestrator/lock";
@@ -511,6 +551,10 @@ beforeEach(() => {
     h.flows = i >= 0 ? h.flows.map((f, idx) => (idx === i ? flow : f)) : [...h.flows, flow];
   });
   h.removeFlow.mockClear();
+  h.commands = [];
+  h.exec.mockClear().mockImplementation((_command: string, _opts: unknown, cb: ExecCallback) => {
+    cb(null, "deployed 3 services", "warning: slow");
+  });
   h.acquire.mockClear().mockReturnValue(true);
   h.lockIoLog = undefined;
   h.discoverRepos.mockClear().mockImplementation(() => h.repos);
@@ -5126,6 +5170,533 @@ describe("a met seed rule acts", () => {
     expect(h.openWorkspace).not.toHaveBeenCalled();
     // And no approval was recorded for a flow that was never asked.
     expect(lastWrite().launchConfirmedAt).toBeUndefined();
+  });
+});
+
+describe("shellCommandRunner", () => {
+  const optsOf = () => h.exec.mock.calls.at(-1)![1] as {
+    cwd: string; timeout: number; killSignal: string; maxBuffer: number; encoding: string;
+  };
+
+  it("hands exec the cwd and a REAL timeout, with a signal a trapping script cannot ignore", async () => {
+    await shellCommandRunner("deploy.sh", { cwd: "/r/aws-ops", timeoutMs: 90_000 });
+    expect(h.exec.mock.calls.at(-1)![0]).toBe("deploy.sh");
+    const opts = optsOf();
+    expect(opts.cwd).toBe("/r/aws-ops");
+    // The contract command.ts cannot enforce: exec's own `timeout` option is what
+    // actually kills the child. Passing the value straight through is the whole
+    // mechanism — a runner that dropped it would hang forever holding the flows
+    // lock, which is the failure this assertion exists to make impossible.
+    expect(opts.timeout).toBe(90_000);
+    // SIGTERM (exec's default) is trappable, and a deploy script that traps it
+    // would outlive its own deadline while the runner reported it killed.
+    expect(opts.killSignal).toBe("SIGKILL");
+    // Bounded capture: a chatty deploy must not grow the host's heap without limit.
+    expect(opts.maxBuffer).toBeGreaterThan(0);
+  });
+
+  it("resolves code 0 with both streams when the command succeeds", async () => {
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) => cb(null, "out", "err"));
+    expect(await shellCommandRunner("ok.sh", { cwd: "/r/a", timeoutMs: 1 })).toEqual({
+      code: 0, stdout: "out", stderr: "err",
+    });
+  });
+
+  it("passes a command's OWN exit code through untouched", async () => {
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) =>
+      cb(Object.assign(new Error("Command failed"), { code: 2 }), "partial", "boom"));
+    // 2, not a generic 1: `runCommand`'s message quotes this number back to the
+    // user, and "exited with code 2" is a fact about their script.
+    expect(await shellCommandRunner("nope.sh", { cwd: "/r/a", timeoutMs: 1 })).toEqual({
+      code: 2, stdout: "partial", stderr: "boom",
+    });
+  });
+
+  it("reports a killed command as a kill, naming the signal and the deadline it missed", async () => {
+    // What a timeout looks like coming back out of exec: no numeric code, `killed`
+    // set, and the signal the runner asked for. Reported as 124 (timeout(1)'s
+    // convention) with the reason written into stderr, because a bare 124 would
+    // read as the command's own choice of exit code.
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) =>
+      cb(Object.assign(new Error("Command failed"), { killed: true, signal: "SIGKILL" }), "started…", ""));
+    const res = await shellCommandRunner("hangs.sh", { cwd: "/r/a", timeoutMs: 120_000 });
+    expect(res.code).toBe(124);
+    expect(res.stdout).toBe("started…");
+    expect(res.stderr).toContain("SIGKILL");
+    expect(res.stderr).toContain("120000 ms");
+  });
+
+  it("keeps a partial line off the runner's own explanation", async () => {
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) =>
+      cb(Object.assign(new Error("Command failed"), { killed: true, signal: "SIGKILL" }), "", "deploying"));
+    const res = await shellCommandRunner("hangs.sh", { cwd: "/r/a", timeoutMs: 5 });
+    // Not "deployingkilled by…": the command's last unterminated line and the
+    // runner's reason are two different statements.
+    expect(res.stderr.split("\n")).toEqual(["deploying", expect.stringContaining("SIGKILL")]);
+  });
+
+  it("explains a failure that never produced an exit code at all", async () => {
+    // A shell that could not start, or output past maxBuffer: Node's own string
+    // code. The message is the only evidence there is, so it must reach stderr.
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) =>
+      cb(Object.assign(new Error("spawn /bin/sh ENOENT"), { code: "ENOENT" }), "", ""));
+    const res = await shellCommandRunner("deploy.sh", { cwd: "/r/a", timeoutMs: 1 });
+    expect(res.code).toBe(1);
+    expect(res.stderr).toContain("ENOENT");
+  });
+
+  it("never rejects, whatever exec reports", async () => {
+    // The caller is a poll loop inside the Deck's refresh: a rejection here would
+    // escape `runCommand`'s "never throws" contract and take the whole pass down.
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) => cb(new Error("weird"), "", ""));
+    await expect(shellCommandRunner("x.sh", { cwd: "/r/a", timeoutMs: 1 })).resolves.toMatchObject({ code: 1 });
+  });
+});
+
+describe("a met run rule acts", () => {
+  /** `log` is injectable because this suite's whole diagnosability claim is about
+   * it: a command's stdout/stderr reaches the Deck's output channel and nowhere
+   * else, and a failed unattended deploy is undiagnosable without it. */
+  const openPanel = async (log: (m: string) => void = () => {}) => {
+    DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** One run, two repos: `aws-ops` is the watched place whose PR merging is the
+   * rule's condition, `bite-me` is a second checkout of the SAME run that a command
+   * node can name with `cwdRepo`. Both paths are `/r/…` — deliberately different
+   * from `h.repos`'s `/repos/…` (what `discoverRepos` reports), which is what makes
+   * "resolved against the run's own worktrees, not the main checkouts" assertable.
+   *
+   * `ciGreen` is steerable so the warm-up pass can leave `ci-passed` unmet as well
+   * as `pr-merged` — a rule that fires during warm-up is held by the resume gate
+   * instead of clearing it, which would silently make every case below about the
+   * gate rather than about running a command. */
+  const runStatus = (prState: "OPEN" | "MERGED", ciGreen = true): RunStatus => ({
+    run: {
+      key: "ASM-1", summary: "ship the migration", url: "https://jira/ASM-1", createdAt: 1, mode: "multiroot",
+      repos: [
+        { name: "aws-ops", path: "/r/aws-ops", isGit: true },
+        { name: "bite-me", path: "/r/bite-me", isGit: true },
+      ],
+      briefPaths: [],
+    },
+    column: "progress", ticketStatus: "In Progress", ticketCategory: "indeterminate",
+    repos: [{ name: "aws-ops", path: "/r/aws-ops", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
+    agent: { state: "working", lastActivityMs: 1, slug: null },
+    windowOpen: true,
+    prs: {
+      "aws-ops": {
+        facts: {
+          number: 1, url: "u", title: "t", state: prState, isDraft: false,
+          ci: ciGreen ? { passing: 2, pending: 0, failing: [] } : { passing: 0, pending: 0, failing: [{ name: "build", url: "" }] },
+          review: "none", unresolved: null, mergeable: "clean", ciAdvisory: false,
+        },
+        fetchedAt: 1,
+      },
+    },
+    agents: [],
+  });
+
+  /** A place watching `aws-ops`, wired to a command node that deploys. Free-text
+   * `run` by default — the shape needing no configuration at all.
+   * `launchConfirmedAt` is SET by default, exactly as `launchFlow`/`seedFlow` do:
+   * most cases here are about what an already-approved flow does, and the consent
+   * gate has its own cases below. */
+  const cmdFlow = (over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run" }],
+    ...over,
+  });
+
+  /** `cmdFlow` with its command node's own fields replaced — the node is what
+   * decides both the text that runs and the directory it runs in, so most cases
+   * here vary only it. */
+  const withCommandNode = (node: Partial<CommandNode>, over: Partial<Flow> = {}): Flow => cmdFlow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n2", kind: "command", x: 0, y: 0, join: "any", ...node },
+    ],
+    ...over,
+  });
+
+  /** Open with the conditions UNMET so the resume gate clears itself, then arm the
+   * met ones — the same two-pass idiom every firing test in this file uses. */
+  const warmed = async (flows: Flow[], log?: (m: string) => void) => {
+    setConfig({ orchestrator: true });
+    h.flows = flows;
+    h.buildRunStatus.mockReturnValue(runStatus("OPEN", false));
+    const opened = await openPanel(log);
+    await settle();
+    h.buildRunStatus.mockReturnValue(runStatus("MERGED"));
+    h.writeFlow.mockClear();
+    h.exec.mockClear();
+    return opened;
+  };
+
+  const lastWrite = () => h.writeFlow.mock.calls.at(-1)![2] as Flow;
+  const ran = () => h.exec.mock.calls.at(-1)! as [string, { cwd: string; timeout: number; killSignal: string }, unknown];
+  /** Fail the next command with a real exit code, the ordinary "the deploy broke"
+   * shape: partial stdout, a message on stderr, and a non-zero code. */
+  const failsWith = (code: number, stderr = "boom") =>
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) =>
+      cb(Object.assign(new Error("Command failed"), { code }), "", stderr));
+
+  it("runs the node's command in the source place's checkout, stamps the edge, and promotes nothing", async () => {
+    const { p, send } = await warmed([cmdFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    const [command, opts] = ran();
+    // The two facts that decide what actually happened on the user's machine.
+    expect(command).toBe("deploy.sh staging");
+    expect(opts.cwd).toBe("/r/aws-ops");
+    // Threaded from command.ts's own constant, through runCommand, into exec.
+    expect(opts.timeout).toBe(COMMAND_TIMEOUT_MS);
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+
+    const w = lastWrite();
+    expect(w.edges[0].firedAt).toBeTypeOf("number");
+    expect(w.edges[0].error).toBeUndefined();
+    expect(w.edges[0].firedNote).toBe("ran deploy.sh staging in aws-ops");
+    // A command node is not a place: nothing was promoted, and the node is
+    // byte-identical to what it was before this pass.
+    expect(w.nodes.find((n) => n.id === "n2")).toEqual({
+      id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging",
+    });
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "success" && /deploy\.sh staging/.test(m.message ?? ""))).toBe(true);
+    expect(window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it("runs a CONFIGURED command's text, never its label", async () => {
+    h.commands = [{ id: "deploy", label: "Deploy staging", run: "make deploy ENV=staging" }];
+    const { send } = await warmed([withCommandNode({ commandId: "deploy" })]);
+    await send({ type: "deck:refresh" });
+    expect(ran()[0]).toBe("make deploy ENV=staging");
+    // The receipt names the label, which is the whole point of configuring one.
+    expect(lastWrite().edges[0].firedNote).toBe("ran Deploy staging in aws-ops");
+  });
+
+  it("splices the rule's note into the command at {note}", async () => {
+    const { send } = await warmed([cmdFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh --env={note}" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run", note: "staging" }],
+    })]);
+    await send({ type: "deck:refresh" });
+    // The resolved text, not the template: dropping the note at this call site
+    // would run `deploy.sh --env={note}` verbatim.
+    expect(ran()[0]).toBe("deploy.sh --env=staging");
+  });
+
+  it("runs in the repo the node names, resolved against that run's own worktree", async () => {
+    const { send } = await warmed([withCommandNode({ run: "smoke.sh", cwdRepo: "bite-me" })]);
+    await send({ type: "deck:refresh" });
+    expect(ran()[1].cwd).toBe("/r/bite-me");
+    expect(lastWrite().edges[0].firedNote).toBe("ran smoke.sh in bite-me");
+  });
+
+  it("prefers the run's worktree over the main checkout of the same name", async () => {
+    // `discoverRepos` reports `/repos/aws-ops` — the user's own checkout — while the
+    // run's copy is `/r/aws-ops`, this task's worktree. Resolving the name against
+    // the machine first would deploy from the wrong tree with the right name.
+    h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }];
+    const { send } = await warmed([withCommandNode({ run: "deploy.sh", cwdRepo: "aws-ops" })]);
+    await send({ type: "deck:refresh" });
+    expect(ran()[1].cwd).toBe("/r/aws-ops");
+  });
+
+  it("falls back to the machine's checkouts for a repo outside the run", async () => {
+    h.repos = [{ name: "infra", path: "/repos/infra", isGit: true }];
+    const { send } = await warmed([withCommandNode({ run: "terraform apply", cwdRepo: "infra" })]);
+    await send({ type: "deck:refresh" });
+    expect(ran()[1].cwd).toBe("/repos/infra");
+    expect(h.discoverRepos).toHaveBeenCalledWith("/repos", ["vendored"]);
+  });
+
+  it("refuses a named repo that is checked out nowhere, rather than running somewhere else", async () => {
+    h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }];
+    const { send } = await warmed([withCommandNode({ run: "deploy.sh", cwdRepo: "ghost" })]);
+    await send({ type: "deck:refresh" });
+    // Nothing ran at all — not in aws-ops, not in the place's own checkout.
+    expect(h.exec).not.toHaveBeenCalled();
+    const w = lastWrite();
+    expect(w.edges[0].error).toContain("ghost");
+    expect(w.edges[0].firedAt).toBeUndefined();
+    // Deterministic, so it does not retry on the next pass either.
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+  });
+
+  it("treats a blank cwdRepo as absent and inherits the place's checkout", async () => {
+    // A hand-edited flow file can carry `"cwdRepo": ""`. Refusing it would strand a
+    // rule whose author plainly meant "wherever the rule came from" — and
+    // `readCommands`/`resolveCommand` both already treat blank text as absent.
+    const { send } = await warmed([withCommandNode({ run: "deploy.sh", cwdRepo: "   " })]);
+    await send({ type: "deck:refresh" });
+    expect(ran()[1].cwd).toBe("/r/aws-ops");
+  });
+
+  it("latches a failed command and never retries it", async () => {
+    failsWith(2);
+    const { p, send } = await warmed([cmdFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    const w = lastWrite();
+    // An `error` and NO `firedAt`: the second would consume the latch as a success,
+    // and the drawer would show a broken deploy as done.
+    expect(w.edges[0].error).toContain("exited with code 2");
+    expect(w.edges[0].firedAt).toBeUndefined();
+    // A failed unattended command must escape an unfocused panel, exactly as a
+    // failed launch does.
+    expect(window.showErrorMessage).toHaveBeenCalledTimes(1);
+    expect((window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0]).toContain("exited with code 2");
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "error")).toBe(true);
+    // The second pass: a broken deploy that re-ran every six seconds would be a
+    // real side effect on real infrastructure, over and over.
+    await send({ type: "deck:refresh" });
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+  });
+
+  it("latches a command killed at the timeout, naming the deadline it missed", async () => {
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) =>
+      cb(Object.assign(new Error("Command failed"), { killed: true, signal: "SIGKILL" }), "", ""));
+    const { send } = await warmed([cmdFlow()]);
+    await send({ type: "deck:refresh" });
+    const w = lastWrite();
+    expect(w.edges[0].error).toContain("exited with code 124");
+    expect(w.edges[0].firedAt).toBeUndefined();
+  });
+
+  it("refuses a command node it cannot resolve, and runs nothing", async () => {
+    // Both a configured id and free text: picking either would make the drawer's
+    // display and what executes disagree, which is the failure this whole feature
+    // exists to remove.
+    const { send } = await warmed([withCommandNode({ commandId: "deploy", run: "rm -rf /" })]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+    const w = lastWrite();
+    expect(w.edges[0].error).toContain("refusing rather than guessing");
+    expect(w.edges[0].firedAt).toBeUndefined();
+  });
+
+  it("writes the command's output to the Deck output channel", async () => {
+    const lines: string[] = [];
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) =>
+      cb(null, "deployed 3 services", "warning: slow"));
+    const { send } = await warmed([cmdFlow()], (m) => lines.push(m));
+    await send({ type: "deck:refresh" });
+    // Both streams, and the command itself: the channel is the ONLY place a
+    // failed unattended deploy can be diagnosed from.
+    expect(lines).toContain("running: deploy.sh staging");
+    expect(lines).toContain("deployed 3 services\nwarning: slow");
+  });
+
+  it("writes a FAILED command's output to the channel too, and points the receipt at it", async () => {
+    const lines: string[] = [];
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) =>
+      cb(Object.assign(new Error("Command failed"), { code: 1 }), "step 1 ok", "step 2 failed: no such cluster"));
+    const { send } = await warmed([cmdFlow()], (m) => lines.push(m));
+    await send({ type: "deck:refresh" });
+    expect(lines).toContain("step 1 ok\nstep 2 failed: no such cluster");
+    const shown = (window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(shown).toContain("output channel");
+  });
+
+  it("does not send the user to an empty channel when nothing ran", async () => {
+    const { send } = await warmed([withCommandNode({})]); // neither commandId nor run
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+    const shown = (window.showErrorMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(shown).toContain("names neither");
+    expect(shown).not.toContain("output channel");
+  });
+
+  it("asks once before a flow runs its first command, and runs nothing that pass", async () => {
+    // BLOCKER: `isSpendAction("run")` is true, but until `spendTarget` had a `run`
+    // arm the once-per-flow ask could never see a command edge — so the first shell
+    // command ran unattended with no prompt ever shown, while package.json's own
+    // `agentFlow.commands` copy promised "a flow asks once before it runs its first
+    // command". This is that promise, asserted.
+    const { send } = await warmed([cmdFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[1]).toMatchObject({ modal: true });
+    expect(call.slice(2)).toEqual(["Run", "Disarm"]);
+    // The asking pass performs NOTHING — whatever the answer, this pass never
+    // executes and never stamps the edge.
+    expect(lastWrite().edges[0].firedAt).toBeUndefined();
+    expect(lastWrite().edges[0].error).toBeUndefined();
+  });
+
+  it("names the resolved command in the confirmation, not just the flow", async () => {
+    const { send } = await warmed([cmdFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const message = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(message).toBe(
+      'Ship the migration is ready to run "deploy.sh staging" on this machine, unattended. It will keep running commands on its own from now on.',
+    );
+  });
+
+  it("names a configured command's TEXT in the confirmation, not its label", async () => {
+    // Approving "Deploy staging" is not approving `make deploy ENV=staging`: for a
+    // shell command the text is not a description of what will happen, it IS what
+    // will happen.
+    h.commands = [{ id: "deploy", label: "Deploy staging", run: "make deploy ENV=staging" }];
+    const { send } = await warmed([withCommandNode({ commandId: "deploy" }, { launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const message = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(message).toContain("make deploy ENV=staging");
+  });
+
+  it("shows the command with the rule's note already spliced in", async () => {
+    // The consent gate resolves through the SAME resolveCommand the run does, so
+    // the modal cannot show one string while another executes.
+    const { send } = await warmed([cmdFlow({
+      launchConfirmedAt: undefined,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh --env={note}" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run", note: "prod" }],
+    })]);
+    await send({ type: "deck:refresh" });
+    const message = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(message).toContain('"deploy.sh --env=prod"');
+    expect(message).not.toContain("{note}");
+  });
+
+  it("truncates a very long command rather than growing the dialog unboundedly", async () => {
+    const long = `deploy.sh ${"--flag ".repeat(60)}`.trim();
+    const { send } = await warmed([withCommandNode({ run: long }, { launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const message = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(message).toContain(long.slice(0, 160));
+    expect(message).toContain("…");
+    expect(message).not.toContain(long);
+  });
+
+  it("stamps launchConfirmedAt on Run and lets the NEXT pass execute", async () => {
+    const { send } = await warmed([cmdFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    expect(lastWrite().launchConfirmedAt).toBeTypeOf("number");
+    expect(h.exec).not.toHaveBeenCalled();
+    h.flows = [lastWrite()];
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    expect(window.showWarningMessage).toHaveBeenCalledTimes(1); // asked once per flow
+  });
+
+  it("runs nothing at all on Disarm", async () => {
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_m: string, _o: unknown, ...items: string[]) => items[1], // "Disarm"
+    );
+    const { send } = await warmed([cmdFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    expect(lastWrite().armed).toBe(false);
+    expect(h.exec).not.toHaveBeenCalled();
+    h.flows = [lastWrite()];
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+  });
+
+  it("runs a command with no fresh prompt once the flow is confirmed for anything", async () => {
+    // The gate is once per FLOW, shared with launch and seed. A flow already
+    // approved runs a command without asking again — the existing design, pinned
+    // here so nobody "fixes" it into a second gate.
+    const { send } = await warmed([cmdFlow()]); // launchConfirmedAt: 500
+    await send({ type: "deck:refresh" });
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.exec).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT gate on a command edge it cannot resolve — nothing would be spent", async () => {
+    // The same reasoning the launch and seed gates rest on: asking about a rule
+    // that can never run would be asking about something that will never happen.
+    // The refusal itself is stamped (see the case above); this owns the gate.
+    const { send } = await warmed([withCommandNode({ run: "  " }, { launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.exec).not.toHaveBeenCalled();
+    expect(lastWrite().launchConfirmedAt).toBeUndefined();
+    expect(lastWrite().edges[0].error).toContain("blank");
+  });
+
+  it("runs a command node ONCE when two rules point at it", async () => {
+    // Two conditions into one command node is the ordinary way to wire "when it
+    // lands, deploy" — `pr-merged` and `ci-passed` are both true the moment a PR
+    // merges. Running per edge would deploy twice.
+    const { send } = await warmed([cmdFlow({
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run" },
+        { id: "e2", from: "n1", to: "n2", cond: { kind: "ci-passed" }, action: "run" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    const w = lastWrite();
+    expect(w.edges[0].firedNote).toBe("ran deploy.sh staging in aws-ops");
+    // The second edge DID fire, so it is stamped — an unstamped met edge is
+    // re-evaluated every pass forever — but it performed nothing and says so.
+    expect(w.edges[1].firedAt).toBeTypeOf("number");
+    expect(w.edges[1].firedNote).toBe("another edge into this target already acted");
+    // And no later pass picks it up as unrun work.
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a run rule whose target is no longer a command", async () => {
+    // Reachable exactly one way, the same way its launch and seed mirrors are: the
+    // target's KIND changed between the read evaluation derived the verb from and
+    // the copy this pass acts against.
+    const asCommand = () => cmdFlow();
+    const asNotify = () => cmdFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "not a command" },
+      ],
+    });
+    const { send } = await warmed([asCommand()]);
+    let reads = 0;
+    h.readFlows.mockImplementation(() => (++reads === 1 ? [asCommand()] : [asNotify()]));
+    await send({ type: "deck:refresh" });
+    expect(reads).toBeGreaterThan(1);
+    expect(h.exec).not.toHaveBeenCalled();
+    expect(lastWrite().edges[0].error).toBe("a run rule must point at a command, and n2 is not.");
+    expect(lastWrite().edges[0].firedAt).toBeUndefined();
+  });
+
+  it("defers, rather than guessing a directory, when the source is not a place", async () => {
+    // No `cwdRepo` and nothing to inherit from. Deferred, not latched: nothing was
+    // spent, and running a deploy in a guessed checkout is not recoverable.
+    const lines: string[] = [];
+    const fromPlace = () => cmdFlow();
+    const fromNotify = () => cmdFlow({
+      nodes: [
+        { id: "n1", kind: "notify", x: 0, y: 0, join: "any", message: "not a place" },
+        { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
+      ],
+    });
+    const { send } = await warmed([fromPlace()], (m) => lines.push(m));
+    let reads = 0;
+    h.readFlows.mockImplementation(() => (++reads === 1 ? [fromPlace()] : [fromNotify()]));
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+    // Left pending: no stamp of any kind, so a corrected flow retries cleanly.
+    expect(h.writeFlow).not.toHaveBeenCalled();
+    expect(lines.some((l) => /deferred — n1 is not a place/.test(l))).toBe(true);
   });
 });
 
