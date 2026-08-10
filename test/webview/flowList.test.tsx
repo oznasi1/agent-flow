@@ -121,7 +121,11 @@ describe("rows", () => {
   it("reads notify's clause as complete on its own, with no bare target after it", () => {
     render(<FlowList {...props({ flow: twoPlaces() })} />);
     const row = screen.getByTestId("flowlist-row-e1");
-    expect(row.textContent).toContain("notify me");
+    // The spec's rename: "notify me" alone reads as if it messages somebody,
+    // which is the confusion that started this phase. Both presentations spend
+    // `ACTION_LABEL` for exactly this reason, so the list gets the new wording
+    // for free — this assertion is the one place it was hand-typed.
+    expect(row.textContent).toContain("Notify me in VS Code");
   });
 
   // `endLabel` used to fall through to the literal word "notify" for any

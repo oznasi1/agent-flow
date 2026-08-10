@@ -1165,11 +1165,15 @@ describe("the inspector", () => {
   });
 });
 
-/** A place feeding a planned node — the only pairing where BOTH acting verbs
- * have somewhere valid to land: `launch` at n2 (planned), or, symmetrically,
- * a `seed` edge could target n1 (place). n2 already carries a real mode/dest,
- * matching a planned node's own invariant that it is never created without
- * one — an armed launch cannot stop to ask. */
+/** A place feeding a planned node — so the rule DERIVES `launch`, since that
+ * is the action a planned target implies (`actionFor`). n2 already carries a
+ * real mode/dest, matching a planned node's own invariant that it is never
+ * created without one — an armed launch cannot stop to ask.
+ *
+ * The edge carries NO stored `action`, which is what every edge this build
+ * creates looks like (see `finishWire`) and the only shape the store's
+ * mismatch migration can never latch. Tests about a STALE stored action set
+ * one explicitly. */
 const placeAndPlanned = () =>
   flow({
     nodes: [
@@ -1179,17 +1183,18 @@ const placeAndPlanned = () =>
         ticketKey: "ASM-12", repos: ["agent-flow"], mode: "quick", dest: "worktree",
       },
     ],
-    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
   });
 
-/** Two places — the pairing `seed` needs. */
+/** Two places — so the rule derives `seed`, the action a place target implies.
+ * Actionless for the same reason `placeAndPlanned` above is. */
 const twoPlacesWired = () =>
   flow({
     nodes: [
       { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
       { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-2", repo: "agent-flow" },
     ],
-    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
   });
 
 describe("the acting verbs", () => {
@@ -1200,49 +1205,78 @@ describe("the acting verbs", () => {
     return onSave;
   };
 
-  it("offers launch, seed and notify — not just notify", () => {
+  // The action is DERIVED from the target node now, so a `<select>` here could
+  // not decide anything: the pick was overridden by the target on the next
+  // read, and the stored value it left behind is exactly what
+  // `latchActionMismatches` stamps an edge dead for. THEN is a statement.
+  it("states what the rule does instead of offering a verb to pick", () => {
     openInspector(placeAndPlanned());
-    const values = Array.from(screen.getByLabelText("Action").querySelectorAll("option")).map(
-      (o) => (o as HTMLOptionElement).value,
-    );
-    expect(values).toEqual(["launch", "seed", "notify"]);
+    expect(screen.queryByLabelText("Action")).toBeNull();
+    // Planned work means launch — and it says so, with the target's own key.
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.textContent).toContain("launch");
+    expect(insp.textContent).toContain("ASM-12");
   });
 
-  it("selecting launch does not carry a mode onto the edge — it already lives on the target node", () => {
-    // deckView.ts's performEdge reads a launch's mode from the target PLANNED
-    // node (`node.mode`), never from `edge.mode` — that field is `seed`'s
-    // alone (see FlowEdge.mode's own doc comment). Mirroring the value onto
-    // the edge too would give a launch two sources of truth for one fact,
-    // the exact bug class a reviewer already caught once in this plan.
-    const before = placeAndPlanned();
-    const onSave = openInspector(before);
-    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "launch" } });
-    const saved = onSave.mock.calls.at(-1)![0] as Flow;
-    expect(saved.edges[0].action).toBe("launch");
-    expect(saved.edges[0].mode).toBeUndefined();
-    // The node already carried both — switching the verb doesn't need to
-    // touch them, but they must still be there for the USING clause to show.
-    const target = saved.nodes.find((n) => n.id === "n2") as { mode: string; dest: string };
-    expect(target.mode).toBe("quick");
-    expect(target.dest).toBe("worktree");
+  it("reads the verb off the TARGET, not off a stale stored action", () => {
+    // The shape the mismatch migration exists for: an edge saved as "notify"
+    // by an older build, pointing at planned work. The drawer must not repeat
+    // the stored word — it says what this rule will do once accepted.
+    const stale = placeAndPlanned();
+    stale.edges[0] = { ...stale.edges[0], action: "notify" };
+    openInspector(stale);
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.textContent).toContain("launch");
+    expect(insp.textContent).not.toContain("Notify me in VS Code");
   });
 
-  it("selecting seed writes the action and a mode onto the edge", () => {
-    const onSave = openInspector(twoPlacesWired());
-    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "seed" } });
-    const saved = onSave.mock.calls.at(-1)![0] as Flow;
-    // Neither node here carries a mode of its own (a place has none), so the
-    // fallback is the first configured mode — MODES[0].
-    expect(saved.edges[0]).toMatchObject({ action: "seed", mode: "quick" });
+  // The spec's rename. "notify" alone reads as if it messages somebody, which
+  // is the confusion that started this phase; a DM is a command node now.
+  it('labels the notify action "Notify me in VS Code"', () => {
+    openInspector(wired()); // n2 is a notify node, so the rule derives notify
+    expect(screen.getByTestId("orch-inspector").textContent).toContain("Notify me in VS Code");
   });
 
-  it("selecting notify clears the mode", () => {
-    const withSeedMode = twoPlacesWired();
-    withSeedMode.edges[0] = { ...withSeedMode.edges[0], action: "seed", mode: "careful" };
-    const onSave = openInspector(withSeedMode);
-    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "notify" } });
+  it("says so when it cannot tell what the rule does", () => {
+    // `store.ts`'s `validNode` admits an unknown `kind` on purpose, so a flow
+    // written by a NEWER build still renders here. Such a target derives no
+    // action at all, and the drawer must say that rather than fall through to
+    // some verb it made up.
+    const future = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "webhook", x: 320, y: 24, join: "any" } as unknown as Flow["nodes"][number],
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [future] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.textContent).toMatch(/can\u2019t be determined/);
+    // And none of the editing controls a known verb would bring.
+    expect(screen.queryByLabelText("Mode")).toBeNull();
+    expect(screen.queryByLabelText("Notify message")).toBeNull();
+  });
+
+  // Task 1 deferred this here: both helpers keyed off the raw `e.action`, so an
+  // edge with no stored action — every edge this build creates — showed
+  // "(no mode set)" and defaulted its destination to `worktree`, contradicting
+  // the very node `performEdge` reads those two facts from.
+  it("reads an actionless launch rule's mode and destination off its target node", () => {
+    const launching = placeAndPlanned();
+    launching.nodes[1] = { ...(launching.nodes[1] as any), mode: "careful", dest: "new-window" };
+    openInspector(launching);
+    expect((screen.getByLabelText("Mode") as HTMLSelectElement).value).toBe("careful");
+    expect((screen.getByLabelText("Destination") as HTMLSelectElement).value).toBe("new-window");
+  });
+
+  it("writes an actionless launch rule's mode onto the target node, where performEdge reads it", () => {
+    const onSave = openInspector(placeAndPlanned());
+    fireEvent.change(screen.getByLabelText("Mode"), { target: { value: "careful" } });
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
-    expect(saved.edges[0].action).toBe("notify");
+    expect((saved.nodes.find((n) => n.id === "n2") as { mode: string }).mode).toBe("careful");
+    // Not onto the edge, which `performEdge` never looks at for a launch — a
+    // mode written there is a choice the launch would silently ignore.
     expect(saved.edges[0].mode).toBeUndefined();
   });
 
@@ -1271,66 +1305,55 @@ describe("the acting verbs", () => {
   });
 
   it("the destination selector appears for launch and not for seed or notify", () => {
-    const launching = placeAndPlanned();
-    launching.edges[0] = { ...launching.edges[0], action: "launch" }; // a launch edge carries no mode of its own
-    const r1 = render(<OrchestratorDrawer {...props({ flows: [launching] })} />);
+    const r1 = render(<OrchestratorDrawer {...props({ flows: [placeAndPlanned()] })} />); // derives launch
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     expect(screen.getByLabelText("Destination")).toBeTruthy();
     r1.unmount();
 
-    const seeding = twoPlacesWired();
-    seeding.edges[0] = { ...seeding.edges[0], action: "seed", mode: "quick" };
-    const r2 = render(<OrchestratorDrawer {...props({ flows: [seeding] })} />);
+    const r2 = render(<OrchestratorDrawer {...props({ flows: [twoPlacesWired()] })} />); // derives seed
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     expect(screen.queryByLabelText("Destination")).toBeNull();
     r2.unmount();
 
-    render(<OrchestratorDrawer {...props({ flows: [twoPlacesWired()] })} />); // action: notify
+    render(<OrchestratorDrawer {...props({ flows: [wired()] })} />); // derives notify
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     expect(screen.queryByLabelText("Destination")).toBeNull();
   });
 
   it("changing the destination writes it onto the target node, not the edge", () => {
-    const launching = placeAndPlanned();
-    launching.edges[0] = { ...launching.edges[0], action: "launch" };
-    const onSave = openInspector(launching);
+    const onSave = openInspector(placeAndPlanned());
     fireEvent.change(screen.getByLabelText("Destination"), { target: { value: "new-window" } });
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
     expect((saved.nodes.find((n) => n.id === "n2") as { dest: string }).dest).toBe("new-window");
     expect(saved.edges[0]).not.toHaveProperty("dest");
   });
 
-  it("a launch edge whose target is a place is refused with a visible reason", () => {
-    const misWired = twoPlacesWired();
-    misWired.edges[0] = { ...misWired.edges[0], action: "launch" };
-    render(<OrchestratorDrawer {...props({ flows: [misWired] })} />);
+  // What used to be `actionMismatch`'s two "refused with a visible reason"
+  // tests. Under derivation a user cannot MAKE a launch-at-a-place pairing —
+  // the target is the verb — so the question is no longer "is the disagreement
+  // explained" but "does the drawer describe the rule by its target". A stale
+  // stored action is a migration matter, and `store.ts` is what surfaces it
+  // (see the migration-notice tests further down).
+  it("describes a rule pointing at a place as a seed, whatever a stale action says", () => {
+    const stale = twoPlacesWired();
+    stale.edges[0] = { ...stale.edges[0], action: "launch" };
+    render(<OrchestratorDrawer {...props({ flows: [stale] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     const insp = screen.getByTestId("orch-inspector");
-    expect(insp.textContent).toMatch(/launch needs planned work/i);
-    // And it does not render the USING controls a valid pairing would.
-    expect(screen.queryByLabelText("Mode")).toBeNull();
+    expect(insp.textContent).toContain("seed");
+    // A seed has no destination to pick — the place already exists.
     expect(screen.queryByLabelText("Destination")).toBeNull();
+    // But it does have a mode, which is the thing `performSeed` reads.
+    expect(screen.getByLabelText("Mode")).toBeTruthy();
   });
 
-  it("the mirror: a seed edge whose target is planned work is refused with a visible reason", () => {
-    const misWired = placeAndPlanned();
-    misWired.edges[0] = { ...misWired.edges[0], action: "seed" };
-    render(<OrchestratorDrawer {...props({ flows: [misWired] })} />);
+  it("the mirror: a rule pointing at planned work is a launch, whatever a stale action says", () => {
+    const stale = placeAndPlanned();
+    stale.edges[0] = { ...stale.edges[0], action: "seed" };
+    render(<OrchestratorDrawer {...props({ flows: [stale] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
-    const insp = screen.getByTestId("orch-inspector");
-    expect(insp.textContent).toMatch(/seed needs a place/i);
-    expect(screen.queryByLabelText("Mode")).toBeNull();
-  });
-
-  it("does not spend red on a mis-wired verb — nothing has tried and failed yet", () => {
-    const misWired = twoPlacesWired();
-    misWired.edges[0] = { ...misWired.edges[0], action: "launch" };
-    const { container } = render(<OrchestratorDrawer {...props({ flows: [misWired] })} />);
-    fireEvent.click(screen.getByTestId("orch-edge-e1"));
-    expect(container.querySelector(".orch-obs .err")).toBeNull();
-    const reason = screen.getByText(/launch needs planned work/i);
-    expect(reason.getAttribute("style")).toContain("--dim");
-    expect(reason.getAttribute("style")).not.toContain("--c-danger");
+    expect(screen.getByTestId("orch-inspector").textContent).toContain("launch");
+    expect(screen.getByLabelText("Destination")).toBeTruthy();
   });
 
   it("renders the mode list the host sent, not a hardcoded one", () => {
@@ -1358,7 +1381,6 @@ describe("the acting verbs", () => {
     // for a target node whose mode is really "deleted-mode" — a launch `modeFor`
     // will in fact refuse, described here as if it will run.
     const launching = placeAndPlanned();
-    launching.edges[0] = { ...launching.edges[0], action: "launch" };
     launching.nodes[1] = { ...(launching.nodes[1] as any), mode: "deleted-mode" };
     render(<OrchestratorDrawer {...props({ flows: [launching] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
@@ -1373,9 +1395,7 @@ describe("the acting verbs", () => {
   });
 
   it("shows the target's identifier in mono, house style for an identifier", () => {
-    const launching = placeAndPlanned();
-    launching.edges[0] = { ...launching.edges[0], action: "launch" };
-    render(<OrchestratorDrawer {...props({ flows: [launching] })} />);
+    render(<OrchestratorDrawer {...props({ flows: [placeAndPlanned()] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     // "ASM-12" renders three times — the canvas node's own label (mono via a
     // CSS class, not inline style), the "Connection · A → B" header (already
@@ -1388,59 +1408,28 @@ describe("the acting verbs", () => {
   });
 
   it("offers a note for launch and for seed, but not for notify", () => {
-    const launching = placeAndPlanned();
-    launching.edges[0] = { ...launching.edges[0], action: "launch" };
-    const r1 = render(<OrchestratorDrawer {...props({ flows: [launching] })} />);
+    const r1 = render(<OrchestratorDrawer {...props({ flows: [placeAndPlanned()] })} />); // launch
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     expect(screen.getByLabelText("Note")).toBeTruthy();
     r1.unmount();
 
-    const seeding = twoPlacesWired();
-    seeding.edges[0] = { ...seeding.edges[0], action: "seed", mode: "quick" };
-    const r2 = render(<OrchestratorDrawer {...props({ flows: [seeding] })} />);
+    const r2 = render(<OrchestratorDrawer {...props({ flows: [twoPlacesWired()] })} />); // seed
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     expect(screen.getByLabelText("Note")).toBeTruthy();
     r2.unmount();
 
-    render(<OrchestratorDrawer {...props({ flows: [twoPlacesWired()] })} />); // action: notify
+    render(<OrchestratorDrawer {...props({ flows: [wired()] })} />); // notify
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     expect(screen.queryByLabelText("Note")).toBeNull();
   });
 
   it("typing a note saves it on the edge, on blur", () => {
-    const launching = placeAndPlanned();
-    launching.edges[0] = { ...launching.edges[0], action: "launch" };
-    const onSave = openInspector(launching);
+    const onSave = openInspector(placeAndPlanned());
     const box = screen.getByLabelText("Note");
     fireEvent.change(box, { target: { value: "watch for the flaky upload test" } });
     fireEvent.blur(box);
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
     expect(saved.edges[0].note).toBe("watch for the flaky upload test");
-  });
-
-  it("selecting notify clears the note, the same way it already clears the mode", () => {
-    const withNote = twoPlacesWired();
-    withNote.edges[0] = { ...withNote.edges[0], action: "seed", mode: "careful", note: "keep an eye on this one" };
-    const onSave = openInspector(withNote);
-    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "notify" } });
-    const saved = onSave.mock.calls.at(-1)![0] as Flow;
-    expect(saved.edges[0].action).toBe("notify");
-    expect(saved.edges[0].mode).toBeUndefined();
-    expect(saved.edges[0].note).toBeUndefined();
-  });
-
-  it("switching from seed to launch leaves an existing note alone", () => {
-    // twoPlacesWired's target is a place, so switching to `launch` here is
-    // itself a mismatch (see `actionMismatch`) — irrelevant to this test,
-    // which is only about whether `withAction`'s own edge write drops the
-    // note, not about what the inspector renders for a mismatched pairing.
-    const seeding = twoPlacesWired();
-    seeding.edges[0] = { ...seeding.edges[0], action: "seed", mode: "careful", note: "keep an eye on this one" };
-    const onSave = openInspector(seeding);
-    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "launch" } });
-    const afterLaunch = onSave.mock.calls.at(-1)![0] as Flow;
-    expect(afterLaunch.edges[0].action).toBe("launch");
-    expect(afterLaunch.edges[0].note).toBe("keep an eye on this one");
   });
 });
 

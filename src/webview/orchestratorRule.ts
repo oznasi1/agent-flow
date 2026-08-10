@@ -15,8 +15,10 @@
 // know how the other renders a control.
 import { describeCond } from "../engine/orchestrator/conditions";
 import {
+  CommandNode,
   CondKind,
   Condition,
+  edgeAction,
   Flow,
   FlowAction,
   FlowEdge,
@@ -118,16 +120,19 @@ export function defaultCondFor(flow: Flow, fromId: string): Condition {
 }
 
 /** The verb (and, for `notify`, the whole rest of the clause) a rule's action
- * reads as. Both the inspector's `<option>` text and the list's closed-row
- * text spend the exact same three strings — a second hand-typed "notify me"
- * is exactly the kind of copy that quietly stops matching its twin. */
+ * reads as. Both presentations' rule sentence spends the exact same four
+ * strings — a second hand-typed "notify me" is exactly the kind of copy that
+ * quietly stops matching its twin.
+ *
+ * `notify` says WHERE it notifies, per the spec's rename: "notify me" alone
+ * reads as if it messages somebody, which is the exact confusion that started
+ * this phase ("I don't understand the notify node"). Messaging somebody is a
+ * command node against a webhook now, so the one that only raises a VS Code
+ * toast has to say so. */
 export const ACTION_LABEL: Record<FlowAction, string> = {
   launch: "launch",
   seed: "seed",
-  notify: "notify me",
-  // Inert until Task 4 gives a command node somewhere to point at — nothing
-  // offers this action yet, but `FlowAction` is a `Record` key here and must
-  // stay exhaustive.
+  notify: "Notify me in VS Code",
   run: "run",
 };
 
@@ -199,6 +204,37 @@ export function truncatedNote(note: string | undefined): string {
   return trimmed.length > NOTE_TRUNCATE_AT ? `${trimmed.slice(0, NOTE_TRUNCATE_AT)}…` : trimmed;
 }
 
+/** How long a free-text command may be before a rule's sentence elides it. A
+ * `.orch-node` chip is 168px wide and a rule's sentence shares one flex row,
+ * so a 200-character `gh workflow run …` pasted into a node would push either
+ * out of shape — the same reason `truncatedNote` exists for a closed row's
+ * note. The whole text is still readable where it is EDITED (the inspector's
+ * own command field), which is the same division of labour a note already
+ * follows. */
+const COMMAND_LABEL_MAX = 24;
+
+/** Present, a string, and not just whitespace. The runtime check `resolveCommand`
+ * (command.ts) makes for the same fields, restated here because this module
+ * renders a hand-edited flow file's nodes too: `"run": 42` and `"run": "  "`
+ * both reach the drawer, and `commandId ?? run ?? "command"` rendered the
+ * second as an EMPTY chip label — the shape a node created for a free-text
+ * command starts in, before the user has typed anything. */
+function usableText(v: unknown): string | null {
+  return typeof v === "string" && v.trim() !== "" ? v.trim() : null;
+}
+
+/** How a command node names itself: its configured id, else the free text it
+ * carries (elided), else the bare word. Never blank, and never the other
+ * field's value — a node carrying BOTH is `resolveCommand`'s refusal to make,
+ * not this function's; it only has to name the node, not validate it. */
+export function commandLabel(n: CommandNode): string {
+  const id = usableText(n.commandId);
+  if (id) return id;
+  const run = usableText(n.run);
+  if (!run) return "command";
+  return run.length > COMMAND_LABEL_MAX ? `${run.slice(0, COMMAND_LABEL_MAX)}…` : run;
+}
+
 /** How a node's end reads in a rule's sentence. Named per kind rather than by
  * a fallthrough default: a command node used to fall into the same "notify"
  * string a genuine notify node gets, which — paired with `ACTION_LABEL.run`
@@ -211,8 +247,14 @@ export function endLabel(flow: Flow, id: string): string {
   if (!n) return "?";
   if (n.kind === "place") return n.runKey;
   if (n.kind === "planned") return n.ticketKey;
-  if (n.kind === "command") return n.commandId ?? n.run ?? "command";
-  return "notify";
+  if (n.kind === "command") return commandLabel(n);
+  if (n.kind === "notify") return "notify";
+  // A kind this build does not know — `store.ts`'s `validNode` admits one on
+  // purpose so a flow written by a NEWER build still renders. It has no
+  // identifier to show, and it is certainly not a notify terminal: naming
+  // `notify` as the fallthrough here is exactly how a command node once read
+  // as one, and the same trap is still open for whatever kind comes next.
+  return "?";
 }
 
 /** The message the rule's notify target carries, or empty when the target is
@@ -251,15 +293,26 @@ export function actionMismatch(flow: Flow, e: FlowEdge): string | null {
 
 /** The USING clause's value. A launch's mode lives on its target planned node
  * (never on the edge — see `withMode`'s own doc comment below); a seed's
- * lives on the edge, because a place has no mode field of its own. */
+ * lives on the edge, because a place has no mode field of its own.
+ *
+ * Which of the two it is comes from `edgeAction` — the action the TARGET
+ * implies — not from `e.action`. Keying off the stored field made an edge with
+ * no stored action (every edge this build creates: see `finishWire`) read as
+ * neither a launch nor a seed, so a launch rule pointing at real planned work
+ * showed "(no mode set)" while the node beside it carried the mode the engine
+ * will actually spend. */
 export function modeValueOf(flow: Flow, e: FlowEdge): string {
-  return (e.action === "launch" ? plannedTargetOf(flow, e)?.mode : e.mode) ?? "";
+  return (edgeAction(flow, e) === "launch" ? plannedTargetOf(flow, e)?.mode : e.mode) ?? "";
 }
 
 /** The launch destination clause's value — `undefined` for anything that
- * isn't a launch, since only a launch opens a destination at all. */
+ * isn't a launch, since only a launch opens a destination at all. Derived from
+ * the target, for the same reason `modeValueOf` above is: read off `e.action`,
+ * an actionless launch edge answered `undefined` and every caller then fell
+ * back to `"worktree"`, silently contradicting a target node whose `dest` says
+ * `new-window` — and that node is what `performEdge` actually reads. */
 export function launchDestOf(flow: Flow, e: FlowEdge): LaunchDest | undefined {
-  return e.action === "launch" ? plannedTargetOf(flow, e)?.dest : undefined;
+  return edgeAction(flow, e) === "launch" ? plannedTargetOf(flow, e)?.dest : undefined;
 }
 
 /** How `modeValueOf` reads as words, for a closed row or as the fallback
@@ -356,9 +409,15 @@ export function withAction(
  * `node.mode` on the target PLANNED node, never from the edge — so a
  * launch's selection is written to the node alone. Mirroring it onto
  * `edge.mode` too was tried and reverted once already: two homes for one
- * fact is a bug class this codebase has already paid for. */
+ * fact is a bug class this codebase has already paid for.
+ *
+ * WHICH home is decided by `edgeAction`, not by `edge.action` — the same
+ * reasoning `modeValueOf` above spells out, and here it is worse than a
+ * display bug: an edge with no stored action pointing at planned work wrote
+ * the chosen mode onto the EDGE, where `performEdge` never looks, so the USING
+ * select accepted a choice the launch would then silently ignore. */
 export function withMode(flow: Flow, edge: FlowEdge, mode: string): Flow {
-  if (edge.action === "launch") {
+  if (edgeAction(flow, edge) === "launch") {
     return {
       ...flow,
       nodes: flow.nodes.map((n) => (n.id === edge.to && n.kind === "planned" ? { ...n, mode } : n)),

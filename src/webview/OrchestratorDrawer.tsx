@@ -1,13 +1,12 @@
 import * as React from "react";
 import { placeActivity } from "../engine/orchestrator/conditions";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
-import { Condition, Flow, FlowAction, FlowEdge, FlowNode, isSettled, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { Condition, edgeAction, Flow, FlowEdge, FlowNode, isSettled, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { AgentState, FlowPromptMode, PendingResume, RunStatus } from "../types";
 import { FlowList } from "./flowList";
 import { ORCH_ANIM_MS } from "./orchestratorStyles";
 import {
   ACTION_LABEL,
-  actionMismatch,
   COND_LABEL,
   defaultCondFor,
   DEST_LABEL,
@@ -22,7 +21,6 @@ import {
   observationOf,
   OFFERED_CONDS,
   OFFERED_DESTS,
-  withAction,
   withCond,
   withDest,
   withMode,
@@ -528,15 +526,21 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const onTidy = () => p.onSave({ ...flow, nodes: tidy(flow) });
 
   const edge = flow.edges.find((e) => e.id === selEdge) ?? null;
-  // Computed once here, not inline in the JSX below: it needs `edge` narrowed
-  // to non-null, which the ternary in the render already does, but a `const`
-  // cannot be declared in the middle of a JSX expression.
-  const mismatch = edge ? actionMismatch(flow, edge) : null;
+  /** What the selected rule DOES — derived from the node it points at, never
+   * read off `edge.action`. Computed once here, not inline in the JSX below,
+   * because it needs `edge` narrowed to non-null (which the ternary in the
+   * render already does) and a `const` cannot be declared mid-JSX-expression.
+   *
+   * `undefined` means a missing target, or a node kind this build does not
+   * know — `store.ts`'s `validNode` admits an unknown kind on purpose so a
+   * flow written by a newer build still renders. Every read below treats that
+   * as "cannot say" rather than falling through to a wrong verb. */
+  const derived = edge ? edgeAction(flow, edge) : undefined;
   /** The destination select's value, resolved without a non-null assertion:
-   * this is only ever rendered once `mismatch` is null and `edge.action` is
-   * `launch`, which together guarantee a planned target exists — but nothing
-   * in the type system knows that at the render site, so the fallback is
-   * purely to satisfy `LaunchDest`'s type, never a value the user can see. */
+   * this is only ever rendered once `derived` is `launch`, which guarantees a
+   * planned target exists — but nothing in the type system knows that at the
+   * render site, so the fallback is purely to satisfy `LaunchDest`'s type,
+   * never a value the user can see. */
   const launchDest = edge ? launchDestOf(flow, edge) : undefined;
   /** The Mode select's value. A launch's mode lives on its target planned
    * node (never on the edge — see `withMode`'s own doc comment in
@@ -560,8 +564,6 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     // is what keeps that one rule living in exactly one place.
     if (next !== flow) p.onSave(next);
   };
-
-  const setAction = (e: FlowEdge, action: FlowAction) => p.onSave(withAction(flow, e.id, action, p.promptModes));
 
   const setMode = (e: FlowEdge, mode: string) => p.onSave(withMode(flow, e, mode));
 
@@ -1029,26 +1031,35 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 ))}
               </select>
             </div>
+            {/* THEN is a STATEMENT, not a choice. The action is whatever the
+                node this rule points at implies (`edgeAction`), so a `<select>`
+                here could not decide anything: the pick was silently overridden
+                by the target on the next read, and — worse — it was STORED,
+                which is precisely the disagreement `latchActionMismatches`
+                stamps an edge dead for. A control whose choice is overridden is
+                worse than no control. The way to change what a rule does is to
+                point it at a different node. */}
             <div className="orch-clause">
               <span className="orch-kw">THEN</span>
-              <select
-                className="orch-sel"
-                aria-label="Action"
-                value={edge.action}
-                onChange={(ev) => setAction(edge, ev.currentTarget.value as FlowAction)}
-              >
-                <option value="launch">{ACTION_LABEL.launch}</option>
-                <option value="seed">{ACTION_LABEL.seed}</option>
-                <option value="notify">{ACTION_LABEL.notify}</option>
-              </select>
-              {/* The target's name — an identifier, so mono — is part of the
-                  sentence for the two acting verbs ("THEN launch ASM-12"), but
-                  notify already reads complete on its own ("THEN notify me"). */}
-              {edge.action !== "notify" && (
-                <span className="k" style={{ fontFamily: "var(--mono)" }}>{endLabel(flow, edge.to)}</span>
+              {derived === undefined ? (
+                // flowList.tsx's wording for this exact state, verbatim: two
+                // presentations of one model must not describe it two ways.
+                <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>
+                  this rule&rsquo;s action can&rsquo;t be determined
+                </span>
+              ) : (
+                <>
+                  <span style={{ fontSize: "var(--t-body)" }}>{ACTION_LABEL[derived]}</span>
+                  {/* The target's name — an identifier, so mono — is part of the
+                      sentence for every acting verb ("THEN launch ASM-12"), but
+                      notify already reads complete on its own. */}
+                  {derived !== "notify" && (
+                    <span className="k" style={{ fontFamily: "var(--mono)" }}>{endLabel(flow, edge.to)}</span>
+                  )}
+                </>
               )}
             </div>
-            {edge.action === "notify" ? (
+            {derived === "notify" ? (
               <div className="orch-clause">
                 <input
                   className="orch-msg"
@@ -1058,16 +1069,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   onBlur={(ev) => setNotifyMessage(edge, ev.currentTarget.value)}
                 />
               </div>
-            ) : mismatch ? (
-              // Say so now, rather than let the user build a rule the engine
-              // will always refuse later — see `actionMismatch`'s own doc
-              // comment. Not red: nothing has tried and failed yet, so
-              // `--c-danger` (reserved for exactly that, in `.orch-obs .err`
-              // below) would be a claim this state does not make.
-              <div className="orch-clause">
-                <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>{mismatch}</span>
-              </div>
-            ) : (
+            ) : derived === "launch" || derived === "seed" ? (
               <>
                 <div className="orch-clause">
                   <span className="orch-kw">USING</span>
@@ -1093,7 +1095,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   </select>
                   {/* A place already exists, so `seed` has nothing to pick a
                       destination for — only `launch` opens one. */}
-                  {edge.action === "launch" && (
+                  {derived === "launch" && (
                     <>
                       <span style={{ fontSize: "var(--t-body)" }}>in a</span>
                       <select
@@ -1131,7 +1133,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   />
                 </div>
               </>
-            )}
+            ) : null}
             {/* Reset is offered for an ERRORED edge, not only a fired one. An edge
                 carrying `error` with no `firedAt` is settled in `evaluate.ts`, so it
                 never fires again — offering Reset only for `firedAt` made it an
