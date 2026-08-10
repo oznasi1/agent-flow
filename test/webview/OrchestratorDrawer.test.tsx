@@ -2543,8 +2543,66 @@ describe("building a whole flow from the keyboard", () => {
     );
     expect(saved.edges).toHaveLength(1);
     expect(saved.edges[0]).toMatchObject({
-      from: place.id, to: notify.id, cond: { kind: "ci-passed" }, action: "notify",
+      from: place.id, to: notify.id, cond: { kind: "ci-passed" },
     });
+    // No stored action, the same shape `finishWire` creates on the canvas: the
+    // target IS the verb now, and an edge with no stored action is the one shape
+    // `latchActionMismatches` can never latch.
+    expect(saved.edges[0].action).toBeUndefined();
+  });
+
+  // The other half of the same promise, for the node kind Task 9 added. Phase 3
+  // shipped a launch path nothing in the UI could create a `planned` node for,
+  // which made it unreachable; a command rule buildable only with a mouse would
+  // repeat that for everyone who cannot use one. Every step here is a keyboard
+  // control: a select, a select, a button, a select, a text field.
+  it("adds a command node, wires a rule to it, and types what it runs — no pointer gesture", () => {
+    const onSave = vi.fn();
+    const initial = props({ onSave, flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
+    const { rerender } = render(<OrchestratorDrawer {...initial} />);
+    const rerenderWith = (next: Flow) => rerender(<OrchestratorDrawer {...initial} flows={[next]} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+
+    // A place to watch.
+    fireEvent.change(screen.getByLabelText("Add a place"), { target: { value: `ASM-1${DRAG_SEP}agent-flow` } });
+    let saved = onSave.mock.calls.at(-1)![0] as Flow;
+    rerenderWith(saved);
+
+    // A command node, in the free-text shape — the option that exists because
+    // `agentFlow.commands` ships no built-ins, so for most users it is the only
+    // entry in this picker.
+    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: COMMAND_FREE_TEXT } });
+    saved = onSave.mock.calls.at(-1)![0] as Flow;
+    rerenderWith(saved);
+    const place = saved.nodes.find((n) => n.kind === "place")!;
+    const command = saved.nodes.find((n) => n.kind === "command")!;
+    expect(command).toMatchObject({ run: "" }); // "free text, nothing typed yet"
+
+    // The rule, from the list's own new-rule bar.
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: place.id } });
+    fireEvent.change(within(bar).getByLabelText("New rule condition"), { target: { value: "ci-passed" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: command.id } });
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    saved = onSave.mock.calls.at(-1)![0] as Flow;
+    rerenderWith(saved);
+    expect(saved.edges).toHaveLength(1);
+    expect(saved.edges[0]).toMatchObject({ from: place.id, to: command.id, cond: { kind: "ci-passed" } });
+    expect(saved.edges[0].action).toBeUndefined();
+
+    // And what it runs, typed into the rule's own open row — the step that used
+    // to exist only in the canvas inspector, which is unreachable by keyboard.
+    const row = screen.getByTestId(`flowlist-row-${saved.edges[0].id}`);
+    fireEvent.keyDown(row, { key: "Enter" });
+    const box = within(row).getByLabelText("Command to run");
+    fireEvent.change(box, { target: { value: "deploy.sh --env=staging" } });
+    fireEvent.blur(box);
+    saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes.find((n) => n.id === command.id)).toMatchObject({ run: "deploy.sh --env=staging" });
+    // A flow that would actually fire: `resolveCommand` refuses a blank `run`,
+    // and this one is no longer blank.
+    expect(saved.edges[0].error).toBeUndefined();
   });
 });
 

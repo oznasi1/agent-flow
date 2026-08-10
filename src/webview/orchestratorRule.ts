@@ -345,22 +345,17 @@ function plannedTargetOf(flow: Flow, e: FlowEdge): PlannedNode | undefined {
   return n && n.kind === "planned" ? n : undefined;
 }
 
-/** Why `launch` or `seed` on this rule would never run, given the kind of
- * node it actually points at — or `null` when the pairing is fine. This is
- * exactly what `deckView.ts`'s `performEdge`/`performSeed` refuse at
- * evaluation time ("a launch rule must point at planned work" / "a seed rule
- * must point at a place"); saying it here means a mis-wired rule is visible
- * the moment it is made, in whichever presentation made it, not only once
- * armed and it comes back as a stalled edge. */
-export function actionMismatch(flow: Flow, e: FlowEdge): string | null {
-  if (e.action === "launch" && !plannedTargetOf(flow, e)) {
-    return "a launch needs planned work — this points at something already there.";
-  }
-  if (e.action === "seed" && flow.nodes.find((x) => x.id === e.to)?.kind !== "place") {
-    return "a seed needs a place that already exists — this points at planned work.";
-  }
-  return null;
-}
+// `actionMismatch` lived here — "why `launch` or `seed` on this rule would
+// never run, given the kind of node it points at". It answered a question that
+// can no longer be ASKED: an action was chosen, separately from the target, and
+// the two could disagree. The action is now derived from the target in every
+// presentation (`edgeAction`), so the pairing it refused is unconstructible: the
+// canvas's `finishWire`, the list's new-rule bar and both inspectors read the
+// verb off the node. What remains of the same guarantee lives in two other
+// places — `performEdge`/`performSeed` still refuse a wrong-kind target at
+// evaluation time (a hand-edited flow file can still hold one), and
+// `latchActionMismatches` (store.ts) reports a STORED action that disagrees, in
+// the one direction still possible: a file written by an older build.
 
 /** The USING clause's value. A launch's mode lives on its target planned node
  * (never on the edge — see `withMode`'s own doc comment below); a seed's
@@ -451,43 +446,15 @@ export function withCond(flow: Flow, edgeId: string, kind: Condition["kind"]): F
   return { ...flow, edges: flow.edges.map((x) => (x.id === edgeId ? { ...x, cond } : x)) };
 }
 
-/** Change what a rule does. `notify` and `launch` both clear `edge.mode` —
- * `FlowEdge.mode` belongs to `seed` alone (see its own doc comment in
- * model.ts): a launch's mode already lives on the target `PlannedNode`,
- * which is never created without one, so there is nothing to write there
- * just for switching the verb. Clearing it here matters for the same reason
- * `notify`'s clear does: a launch edge left carrying a `mode` would be a
- * second, unread source of truth for a fact the node alone owns.
- *
- * `note`, unlike `mode`, is cleared for `notify` ALONE — `launch` and `seed`
- * both spend a note (see `FlowEdge.note`'s own doc comment: "for `launch`
- * and `seed` only"), so switching between the two acting verbs must not
- * throw away text the user just typed for the other one. Only `notify` has
- * nowhere to spend it — its own words live on its notify node — which is
- * exactly the persisted-but-unread state this clears, the same reasoning
- * `mode`'s own clear already follows. */
-export function withAction(
-  flow: Flow,
-  edgeId: string,
-  action: FlowAction,
-  promptModes: FlowPromptMode[],
-): Flow {
-  if (action === "seed") {
-    const edge = flow.edges.find((x) => x.id === edgeId);
-    const mode = edge?.mode ?? promptModes[0]?.id;
-    return { ...flow, edges: flow.edges.map((x) => (x.id === edgeId ? { ...x, action, mode } : x)) };
-  }
-  if (action === "notify") {
-    return {
-      ...flow,
-      edges: flow.edges.map((x) => (x.id === edgeId ? { ...x, action, mode: undefined, note: undefined } : x)),
-    };
-  }
-  return {
-    ...flow,
-    edges: flow.edges.map((x) => (x.id === edgeId ? { ...x, action, mode: undefined } : x)),
-  };
-}
+// `withAction` lived here — the writer behind both presentations' action
+// `<select>`. Neither control exists any more (Task 9 removed the inspector's,
+// this task the list's), and it is the ONE mutation in this module that must not
+// come back: writing a stored action is precisely what
+// `latchActionMismatches` (store.ts) stamps an edge dead for, since the value it
+// wrote could disagree with the target on the very next read. Changing what a
+// rule does means pointing it at a different node. Its housekeeping is not lost
+// — `withMode` still keeps a launch's mode on the node and a seed's on the edge,
+// which is the fact `withAction`'s clearing existed to protect.
 
 /** Write a chosen prompt mode where the engine actually spends it — and ONLY
  * there, never in both places. `performSeed` in deckView.ts reads
