@@ -375,6 +375,58 @@ describe("settingsSnapshot — orchestrator", () => {
   });
 });
 
+describe("settingsSnapshot — field-count guard", () => {
+  // docs/TELEMETRY.md hand-states two counts about this exact interface: the
+  // total field count ("a 38-field reduction") and how many of those fields
+  // can report the "invalid" sentinel ("Nine of the fields above"). Both have
+  // drifted from the code silently before — caught only by a human re-reading
+  // carefully, four separate times across this phase and its predecessors,
+  // because nothing ever asserted either number. If EITHER assertion below
+  // fails after you add, remove, or reclassify a SettingsSnapshot field, the
+  // fix is TWO files: this test's expected number, AND docs/TELEMETRY.md's
+  // "N-field reduction" sentence and its field-inventory table (and, if the
+  // field is enum-ish, the "invalid" sentinel paragraph and its own field
+  // list) — update the doc, don't just bump the number here.
+
+  it("emits exactly 38 fields — a count also stated in docs/TELEMETRY.md's " +
+    "'Settings snapshot' section; a mismatch means that doc is now wrong too", () => {
+    const s = settingsSnapshot(getConfig());
+    expect(Object.keys(s)).toHaveLength(38);
+  });
+
+  it("reports the \"invalid\" sentinel on exactly 9 fields when every enum-ish " +
+    "setting holds an unrecognized value — docs/TELEMETRY.md's sentinel " +
+    "paragraph states this same count and must move with it", () => {
+    // Every config property whose SettingsSnapshot field is built with
+    // enumOrInvalid (settingsSnapshot.ts), driven to a value none of their
+    // allowed lists contains. task_mode/review_mode are deliberately absent:
+    // they're built with modeProp, not enumOrInvalid, and can never produce
+    // the literal "invalid" (see their own field's test coverage above).
+    const secret = "acme-internal-not-a-real-value";
+    const cfg: AgentFlowConfig = {
+      ...getConfig(),
+      workspaceMode: secret as unknown as AgentFlowConfig["workspaceMode"],
+      openIn: secret as unknown as AgentFlowConfig["openIn"],
+      agentProvider: secret as unknown as AgentFlowConfig["agentProvider"],
+      agentSurface: secret as unknown as AgentFlowConfig["agentSurface"],
+      exploreMode: secret as unknown as AgentFlowConfig["exploreMode"],
+      worktree: secret as unknown as AgentFlowConfig["worktree"],
+      remoteControl: secret as unknown as AgentFlowConfig["remoteControl"],
+      defaultFilter: secret as unknown as AgentFlowConfig["defaultFilter"],
+      taskSource: secret as unknown as AgentFlowConfig["taskSource"],
+    };
+    const s = settingsSnapshot(cfg);
+    // Booleans and numbers can never equal the string "invalid", and
+    // task_mode/review_mode's own sentinel is "custom" — so every hit here is
+    // a genuine enumOrInvalid field, not a coincidence.
+    const invalidFields = Object.entries(s).filter(([, v]) => v === "invalid").map(([k]) => k);
+    expect(invalidFields.sort()).toEqual([
+      "agent_provider", "agent_surface", "default_filter", "explore_mode",
+      "open_in", "remote_control", "task_source", "workspace_mode", "worktree",
+    ]);
+  });
+});
+
 describe("settingsSnapshot — commands", () => {
   // The sentinel lives in the id and the label too, not only in `run`: a
   // mutation that added `command_ids: cfg.commands.map(c => c.id)` or the
