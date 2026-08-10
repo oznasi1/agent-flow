@@ -6,7 +6,8 @@
 // `npm run build` catches such an import (`tsc` and the tests pass regardless).
 // The actual process spawn is an injected `CommandRunner`, the same posture
 // `launch.ts` takes with `openWorkspace`.
-import type { CommandNode } from "./model";
+import { findNode, incomingEdges, isPlace } from "./model";
+import type { CommandNode, Flow, PlaceNode } from "./model";
 import type { FlowCommand } from "../../types";
 
 /** 120 s. Must stay well under `LOCK_TTL_MS` (300 s, `lock.ts`): the flows lock is
@@ -87,6 +88,53 @@ function withNote(template: string, note: string): string {
     out += template.slice(i, at) + note;
     i = at + "{note}".length;
   }
+}
+
+/** The place a rule leaving `fromId` inherits its working directory from —
+ * walking BACK through a chain of command nodes to reach it.
+ *
+ * A rule out of a place answers itself: that place is the source. A rule out of a
+ * COMMAND node is the shape this function exists for, and it is the feature's own
+ * headline example: `place -> deploy.sh -> smoke.sh`, "deploy, then smoke test".
+ * `command-succeeded` is the default and only condition a picker offers off a
+ * command node, so it is the shape the UI steers users into — and a command node
+ * is not a place, so without this walk the second command had no directory at all
+ * and its rule stalled invisibly on every pass.
+ *
+ * Depth-first over `incomingEdges` (flow order), so the answer is deterministic
+ * for a command node fed by several rules — the same reason `incomingEdges`
+ * documents its own ordering. It deliberately does NOT prefer the edge that
+ * actually performed: the directory is a property of the CHAIN's root, and every
+ * incoming edge of a command node comes from the same side of the graph in every
+ * shape a picker can build.
+ *
+ * `visited` is not defensive tidiness: `tidy()` bounds its own relaxation because
+ * the drawer can hold a cycle, and a cycle of command nodes would otherwise
+ * recurse until the stack gave out — inside the Deck's poll loop, holding the
+ * flows lock.
+ *
+ * `undefined` when no place is reachable: a chain rooted at planned work, at a
+ * node of a kind this build does not know, or at nothing at all. The caller must
+ * REFUSE such a rule rather than retry it — see `commandCwd` in deckView.ts. */
+export function chainSourcePlace(flow: Flow, fromId: string): PlaceNode | undefined {
+  const visited = new Set<string>();
+  const walk = (id: string): PlaceNode | undefined => {
+    if (visited.has(id)) return undefined;
+    visited.add(id);
+    const node = findNode(flow, id);
+    if (!node) return undefined;
+    if (isPlace(node)) return node;
+    // Only a command node is walked THROUGH. A planned node has no run yet and a
+    // notify terminal has no out-port, so neither can stand between a command and
+    // the checkout it should run in.
+    if (node.kind !== "command") return undefined;
+    for (const e of incomingEdges(flow, id)) {
+      const found = walk(e.from);
+      if (found) return found;
+    }
+    return undefined;
+  };
+  return walk(fromId);
 }
 
 /** True for a usable string: present, and non-empty once whitespace is

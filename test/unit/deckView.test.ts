@@ -7,7 +7,7 @@ import type { ChangedFile } from "../../src/engine/git";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef, Task } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
-import type { CommandNode, Flow, FlowEdge } from "../../src/engine/orchestrator/model";
+import type { CommandNode, Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
 import { BRANCH_CI_ARGS, branchCiKey } from "../../src/engine/orchestrator/branchCi";
 import { GH_TIMEOUT_MS } from "../../src/engine/pr/provider";
 import type { AgentProvider } from "../../src/config";
@@ -6090,10 +6090,14 @@ describe("a met run rule acts", () => {
     expect(lastWrite().edges[0].firedAt).toBeTypeOf("number");
   });
 
-  it("defers, rather than guessing a directory, when the source is not a place", async () => {
-    // No `cwdRepo` and nothing to inherit from. Deferred, not latched: nothing was
-    // spent, and running a deploy in a guessed checkout is not recoverable.
-    const lines: string[] = [];
+  it("refuses, rather than guessing a directory, when nothing upstream is a place", async () => {
+    // No `cwdRepo` and nothing to inherit from — not even through a chain. Refused,
+    // never a guessed checkout: running a deploy in the wrong one is not
+    // recoverable. LATCHED rather than deferred, which is the correction: a defer
+    // stamps nothing and leaves no `error`, and there is no `BlockedNote` for this
+    // kind, so the rule would have retried every six seconds forever, invisibly.
+    // A notify source can never become a place on its own, so the next pass would
+    // answer identically.
     const fromPlace = () => cmdFlow();
     const fromNotify = () => cmdFlow({
       nodes: [
@@ -6101,14 +6105,168 @@ describe("a met run rule acts", () => {
         { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
       ],
     });
-    const { send } = await warmed([fromPlace()], (m) => lines.push(m));
+    const { send } = await warmed([fromPlace()]);
     let reads = 0;
     h.readFlows.mockImplementation(() => (++reads === 1 ? [fromPlace()] : [fromNotify()]));
     await send({ type: "deck:refresh" });
     expect(h.exec).not.toHaveBeenCalled();
-    // Left pending: no stamp of any kind, so a corrected flow retries cleanly.
+    const e = lastWrite().edges[0];
+    // Settled with an `error` and NO `firedAt`: visible in the drawer, with a Reset
+    // beside it, and never re-run under the latch.
+    expect(e.firedAt).toBeUndefined();
+    expect(e.error).toContain("nothing upstream of n1 is a place");
+    // Names what to set, since nothing else here can tell the user how to fix it.
+    expect(e.error).toContain("cwdRepo");
+  });
+
+  /** The feature's headline example: `place -> deploy.sh -> smoke.sh`, "deploy,
+   * then smoke test". `command-succeeded` is the default AND only condition a
+   * picker offers off a command node, so this is the shape the UI steers users
+   * into — and the second command's source is a command node, not a place. */
+  const chainedFlow = (): Flow => cmdFlow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
+      { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "smoke.sh staging" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run" },
+      { id: "e2", from: "n2", to: "n3", cond: { kind: "command-succeeded" }, action: "run" },
+    ],
+  });
+
+  it("runs a chained command in the checkout of the place at the head of the chain", async () => {
+    // The defect: `commandCwd` asked only whether the rule's OWN source was a
+    // place, so this rule hit the "not a place" arm and deferred — stamping
+    // nothing, every six seconds, forever, while `spendTarget` still resolved and
+    // asked the user to approve a command that could never run.
+    const { send } = await warmed([chainedFlow()]);
+    // Pass one: the deploy runs and stamps `performed`, which is what
+    // `command-succeeded` reads.
+    await send({ type: "deck:refresh" });
+    expect(ran()[0]).toBe("deploy.sh staging");
+    h.flows = [lastWrite()];
+    // Pass two: the smoke test's condition is now met.
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(2);
+    expect(ran()[0]).toBe("smoke.sh staging");
+    // Inherited from n1, two hops back — the place at the head of the chain.
+    expect(ran()[1].cwd).toBe("/r/aws-ops");
+    const w = lastWrite();
+    expect(w.edges[1].firedAt).toBeTypeOf("number");
+    expect(w.edges[1].firedNote).toBe("ran smoke.sh staging in aws-ops");
+  });
+
+  it("resolves a chained command's own cwdRepo against the chain's run, not just the machine", async () => {
+    // `cwdRepo` already won over the inherited directory; what a chained source
+    // used to lose was the RUN to resolve it against, so a name belonging to the
+    // chain's own run fell through to `discoverRepos`'s main checkout. `bite-me` is
+    // a second checkout of the same run (`/r/bite-me`), and the machine's copy is
+    // deliberately elsewhere.
+    h.repos = [{ name: "bite-me", path: "/repos/bite-me", isGit: true }];
+    const flow = chainedFlow();
+    flow.nodes[2] = { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "smoke.sh", cwdRepo: "bite-me" };
+    const { send } = await warmed([flow]);
+    await send({ type: "deck:refresh" });
+    h.flows = [lastWrite()];
+    await send({ type: "deck:refresh" });
+    expect(ran()[1].cwd).toBe("/r/bite-me");
+  });
+
+  it("refuses a chained command whose chain reaches no place at all", async () => {
+    // A hand-edited file, or one written by a newer build: `validNode` admits an
+    // unknown kind on purpose so such a flow still renders. Its incoming edge is
+    // already stamped `performed`, so `command-succeeded` is met — and nothing
+    // upstream is, or will become, a place. Refused and latched, not deferred: no
+    // later pass would answer differently.
+    const chainRootUnknown = (): Flow => cmdFlow({
+      nodes: [
+        { id: "n1", kind: "webhook", x: 0, y: 0, join: "any" } as unknown as FlowNode,
+        { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
+        { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "smoke.sh staging" },
+      ],
+      edges: [
+        {
+          id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run",
+          firedAt: 400, firedNote: "ran deploy.sh staging in aws-ops", performed: true,
+        },
+        { id: "e2", from: "n2", to: "n3", cond: { kind: "command-succeeded" }, action: "run" },
+      ],
+    });
+    // Not `warmed`: this rule's condition is met from the very first evaluation
+    // (its performer is already stamped in the fixture), so the resume gate holds
+    // it and approval — not a second poll — is what lets the pass act.
+    setConfig({ orchestrator: true });
+    h.flows = [chainRootUnknown()];
+    h.buildRunStatus.mockReturnValue(runStatus("MERGED"));
+    const { send } = await openPanel();
+    await settle();
+    h.writeFlow.mockClear();
+    h.exec.mockClear();
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    await settle();
+    expect(h.exec).not.toHaveBeenCalled();
+    const e = lastWrite().edges[1];
+    expect(e.firedAt).toBeUndefined();
+    expect(e.error).toContain("nothing upstream of n2 is a place");
+    expect(e.error).toContain("cwdRepo");
+  });
+
+  it("refuses a chained command whose chain reaches a place whose run is not on the board", async () => {
+    // A chained rule is NOT the mid-pass race a defer is for: `commandSucceeded`
+    // reads a receipt off the flow itself, so nothing in this pass ever proved the
+    // upstream run was live. A retired run is an ordinary durable fact here, and
+    // deferring on it is the invisible forever-loop this fix removes.
+    const chainRootGone = (): Flow => cmdFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-GONE", repo: "aws-ops" },
+        { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
+        { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "smoke.sh staging" },
+      ],
+      edges: [
+        {
+          id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run",
+          firedAt: 400, firedNote: "ran deploy.sh staging in aws-ops", performed: true,
+        },
+        { id: "e2", from: "n2", to: "n3", cond: { kind: "command-succeeded" }, action: "run" },
+      ],
+    });
+    setConfig({ orchestrator: true });
+    h.flows = [chainRootGone()];
+    h.buildRunStatus.mockReturnValue(runStatus("MERGED"));
+    const { send } = await openPanel();
+    await settle();
+    h.writeFlow.mockClear();
+    h.exec.mockClear();
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    await settle();
+    expect(h.exec).not.toHaveBeenCalled();
+    const e = lastWrite().edges[1];
+    expect(e.firedAt).toBeUndefined();
+    expect(e.error).toContain("ASM-GONE");
+    expect(e.error).toContain("cwdRepo");
+  });
+
+  it("still DEFERS when the rule's own source is a place whose repo left this pass's board", async () => {
+    // The one shape a defer is honest for, kept: `evaluateFlow` only fires an edge
+    // out of a place with a live status, so a missing repo means the graph changed
+    // under the pass. Nothing was spent and nothing is decided — the next pass gets
+    // a clean read rather than a permanent latch.
+    const lines: string[] = [];
+    const moved = () => cmdFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "gone-repo" },
+        { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
+      ],
+    });
+    const { send } = await warmed([cmdFlow()], (m) => lines.push(m));
+    let reads = 0;
+    h.readFlows.mockImplementation(() => (++reads === 1 ? [cmdFlow()] : [moved()]));
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+    // No stamp of any kind, so a corrected flow retries cleanly.
     expect(h.writeFlow).not.toHaveBeenCalled();
-    expect(lines.some((l) => /deferred — n1 is not a place/.test(l))).toBe(true);
+    expect(lines.some((l) => /deferred — gone-repo is not among run ASM-1's repos/.test(l))).toBe(true);
   });
 });
 

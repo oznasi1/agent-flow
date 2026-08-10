@@ -15,7 +15,7 @@ import { unfirableRules } from "./engine/orchestrator/armability";
 import { ActOutcome, applyFired, notifyLines } from "./engine/orchestrator/runner";
 import { promoteToPlace } from "./engine/orchestrator/promote";
 import { LaunchTicketDetail, launchPlanned } from "./engine/orchestrator/launch";
-import { COMMAND_KILLED_EXIT_CODE, CommandRunner, resolveCommand, runCommand } from "./engine/orchestrator/command";
+import { COMMAND_KILLED_EXIT_CODE, CommandRunner, chainSourcePlace, resolveCommand, runCommand } from "./engine/orchestrator/command";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
@@ -1387,12 +1387,30 @@ export class DeckPanel {
    * `launchPlanned` takes for a planned node naming repos that aren't checked out.
    *
    * With no `cwdRepo`, the directory is inherited from the place the rule came from
-   * (what `CommandNode.cwdRepo`'s own doc calls the common case). If that cannot be
-   * resolved this pass, the answer is a DEFER: unlike a typed name, "the run isn't on
-   * this pass's board" is a fact about a snapshot rebuilt from disk every six seconds,
-   * nothing was spent, and `evaluateFlow` only fires an edge whose source IS a place
-   * with a live status — so reaching this at all means the graph changed under the
-   * pass, and the next pass gets a clean read rather than a permanent latch. */
+   * (what `CommandNode.cwdRepo`'s own doc calls the common case) — and "came from"
+   * means through a CHAIN of command nodes, not only directly: `chainSourcePlace`
+   * (command.ts) walks back to the nearest place. `place -> deploy.sh -> smoke.sh`
+   * ("deploy, then smoke test") is the feature's headline example, and
+   * `command-succeeded` is the default and only condition a picker offers off a
+   * command node, so it is the shape users are steered into. Before the walk, that
+   * second command hit the "not a place" arm below and DEFERRED — every six
+   * seconds, forever, stamping nothing, with no `error` and no `BlockedNote` for
+   * this kind, while `spendTarget` still resolved and asked the user to approve a
+   * command that could never run.
+   *
+   * WHICH of the two unresolved answers a failure gets is decided by where the
+   * rule's source is, and the earlier version of this comment had the reasoning
+   * backwards from Task 7 onwards:
+   *  - A DIRECT place source keeps the DEFER. There the claim holds: `evaluateFlow`
+   *    only fires such an edge when that place has a live status this pass, so a
+   *    missing run means the graph changed under the pass, nothing was spent, and
+   *    the next pass gets a clean read.
+   *  - Everything else REFUSES. For a chained source nothing in this pass verified
+   *    any run: `commandSucceeded` reads a receipt off the flow itself, so a
+   *    retired run or a chain rooted in planned work is an ordinary durable fact,
+   *    not a mid-pass race — and a defer for a durable fact is the invisible
+   *    forever-loop above. The refusal names `cwdRepo`, which is what makes such a
+   *    chain runnable, and latches so the drawer shows it with a Reset beside it. */
   private commandCwd(
     flow: Flow,
     edge: FlowEdge,
@@ -1400,7 +1418,12 @@ export class DeckPanel {
     statuses: RunStatus[],
   ): { cwd: string; repo: string } | { refusal: EdgeDone } | { defer: string } {
     const source = findNode(flow, edge.from);
-    const fromPlace = source && isPlace(source) ? source : undefined;
+    /** The rule's own source, when it IS a place — the only shape whose run this
+     * pass has already proven live, and so the only one a defer is honest for. */
+    const directPlace = source && isPlace(source) ? source : undefined;
+    /** The place the working directory comes from: the source itself, or the
+     * nearest one back through a chain of command nodes. */
+    const fromPlace = directPlace ?? chainSourcePlace(flow, edge.from);
     // The source run's own repos, which for a worktree run are the worktree paths.
     const runRepos = fromPlace ? statuses.find((s) => s.run.key === fromPlace.runKey)?.run.repos ?? [] : [];
     // Blank or non-string counts as ABSENT, not as a name that resolves to nothing:
@@ -1426,14 +1449,38 @@ export class DeckPanel {
       };
     }
     if (!fromPlace) {
+      // Nothing upstream is a place, and nothing will become one on its own: a
+      // chain rooted in planned work, in a node kind this build does not know, or
+      // in nothing at all. Deterministic, so it latches — and it names the one
+      // thing that makes such a chain runnable rather than leaving the user to
+      // guess (there is no control for it yet, so the flow file is named too).
       return {
-        defer: `${edge.from} is not a place, so there is no repo for the command at ${edge.to} to run in — give it a working directory`,
+        refusal: {
+          kind: "done",
+          outcome: {
+            ok: false,
+            error: `nothing upstream of ${edge.from} is a place, so the command at ${edge.to} has no checkout to run in — give the command node a working directory ("cwdRepo" in the flow file).`,
+          },
+        },
       };
     }
     const repo = runRepos.find((r) => r.name === fromPlace.repo);
     if (!repo) {
+      // A DIRECT place source is the mid-pass race a defer is for; a chained one is
+      // not — see this function's own doc comment on which answer belongs where.
+      if (directPlace) {
+        return {
+          defer: `${fromPlace.repo} is not among run ${fromPlace.runKey}'s repos on this pass, so the command at ${edge.to} has no directory to run in`,
+        };
+      }
       return {
-        defer: `${fromPlace.repo} is not among run ${fromPlace.runKey}'s repos on this pass, so the command at ${edge.to} has no directory to run in`,
+        refusal: {
+          kind: "done",
+          outcome: {
+            ok: false,
+            error: `the command at ${edge.to} runs where ${fromPlace.runKey} put "${fromPlace.repo}", and that run is not on the board — give the command node a working directory ("cwdRepo" in the flow file).`,
+          },
+        },
       };
     }
     return { cwd: repo.path, repo: repo.name };
