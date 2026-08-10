@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { inferTicket, localKey, localRunFor } from "../../../src/engine/localRuns";
+import { groupPlacesByWindow } from "../../../src/engine/localRuns";
 import type { OpenSession } from "../../../src/engine/sessions";
 
 const BASE = "https://at-bay.atlassian.net";
@@ -108,5 +109,64 @@ describe("localRunFor", () => {
   it("falls back to now when no session records a start", () => {
     const r = localRunFor("/r/centaur", [sess({ startedAt: 0 })], git, ticket, NOW);
     expect(r.createdAt).toBe(NOW);
+  });
+});
+
+const ws = (identity: string, roots: string[]) =>
+  ({ identity, kind: "workspace" as const, roots });
+
+describe("groupPlacesByWindow", () => {
+  it("folds two places of one multi-root window into a single group", () => {
+    expect(groupPlacesByWindow(
+      ["/r/automation_e2e", "/r/centaur"],
+      [ws("/ws/centaur+e2e.code-workspace", ["/r/centaur", "/r/automation_e2e"])],
+    )).toEqual([{
+      workspaceFile: "/ws/centaur+e2e.code-workspace",
+      roots: ["/r/centaur", "/r/automation_e2e"],
+      places: ["/r/automation_e2e", "/r/centaur"],
+    }]);
+  });
+
+  it("covers a root with no session of its own", () => {
+    // The whole point: the card names both repos even though Claude only runs
+    // in one of them.
+    expect(groupPlacesByWindow(
+      ["/r/automation_e2e"],
+      [ws("/ws/centaur+e2e.code-workspace", ["/r/centaur", "/r/automation_e2e"])],
+    )).toEqual([{
+      workspaceFile: "/ws/centaur+e2e.code-workspace",
+      roots: ["/r/centaur", "/r/automation_e2e"],
+      places: ["/r/automation_e2e"],
+    }]);
+  });
+
+  it("leaves a place no window lists standing alone", () => {
+    expect(groupPlacesByWindow(["/r/lonely"], [ws("/ws/x.code-workspace", ["/r/a", "/r/b"])]))
+      .toEqual([{ workspaceFile: null, roots: ["/r/lonely"], places: ["/r/lonely"] }]);
+  });
+
+  it("leaves a place alone when the window's record predates roots", () => {
+    // An older extension host wrote no roots. Claiming nothing is exactly the
+    // behavior before this feature.
+    expect(groupPlacesByWindow(
+      ["/r/centaur"],
+      [{ identity: "/ws/x.code-workspace", kind: "workspace" as const }],
+    )).toEqual([{ workspaceFile: null, roots: ["/r/centaur"], places: ["/r/centaur"] }]);
+  });
+
+  it("leaves a place alone when its window has a single root", () => {
+    // A one-folder window is the place. Grouping it would rename the card after
+    // a workspace file that adds nothing.
+    expect(groupPlacesByWindow(
+      ["/r/centaur"],
+      [{ identity: "/r/centaur", kind: "folder" as const, roots: ["/r/centaur"] }],
+    )).toEqual([{ workspaceFile: null, roots: ["/r/centaur"], places: ["/r/centaur"] }]);
+  });
+
+  it("keeps two windows' places apart, in first-place order", () => {
+    expect(groupPlacesByWindow(
+      ["/r/b", "/r/solo", "/r/a"],
+      [ws("/ws/one.code-workspace", ["/r/a", "/r/b"])],
+    ).map((g) => g.places)).toEqual([["/r/b", "/r/a"], ["/r/solo"]]);
   });
 });

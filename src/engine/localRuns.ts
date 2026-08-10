@@ -70,3 +70,59 @@ export function localRunFor(
     briefPaths: [],
   };
 }
+
+/** A card's worth of places: one multi-root window's session directories, or a
+ * single directory that no live window claims. */
+export interface LocalGroup {
+  /** The .code-workspace this card stands for, or null for a lone place. */
+  workspaceFile: string | null;
+  /** Every folder the card covers, in window order. `[place]` when standalone. */
+  roots: string[];
+  /** The session places inside this group, in input order — never empty. */
+  places: string[];
+}
+
+/**
+ * Fold session places into the multi-root window that holds them.
+ *
+ * Only a window with a .code-workspace and more than one root groups anything: a
+ * single-folder window *is* the place, so grouping it would rename the card after
+ * a file that adds no information. A window whose record carries no `roots` was
+ * written by an older extension host and claims nothing — that record cannot say
+ * which folders it holds, and guessing from the workspace file would mean reading
+ * and parsing it on every refresh.
+ *
+ * Every input place comes back in exactly one group, in first-appearance order,
+ * so the board's card order does not shuffle between refreshes.
+ */
+export function groupPlacesByWindow(
+  places: string[],
+  windows: { identity: string; kind: "workspace" | "folder"; roots?: string[] }[],
+): LocalGroup[] {
+  const owner = new Map<string, { identity: string; roots: string[] }>();
+  for (const w of windows) {
+    const roots = w.roots ?? [];
+    if (w.kind !== "workspace" || roots.length < 2) continue;
+    for (const root of roots) {
+      if (!owner.has(root)) owner.set(root, { identity: w.identity, roots });
+    }
+  }
+  const groups: LocalGroup[] = [];
+  const byWorkspace = new Map<string, LocalGroup>();
+  for (const place of places) {
+    const win = owner.get(place);
+    if (!win) {
+      groups.push({ workspaceFile: null, roots: [place], places: [place] });
+      continue;
+    }
+    const existing = byWorkspace.get(win.identity);
+    if (existing) {
+      existing.places.push(place);
+      continue;
+    }
+    const group: LocalGroup = { workspaceFile: win.identity, roots: win.roots, places: [place] };
+    byWorkspace.set(win.identity, group);
+    groups.push(group);
+  }
+  return groups;
+}
