@@ -129,6 +129,13 @@ const h = vi.hoisted(() => ({
   // that is not about contention behaves as it did before the lock existed; a
   // test about a busy directory says so with mockReturnValue(false).
   acquire: vi.fn((..._args: unknown[]) => true),
+  // The mid-pass ownership check (Task 6). Still ours by default, so a pass runs
+  // to completion exactly as it did before renewal existed; a test about a lock
+  // reaped mid-pass says so with mockReturnValue(false). Mocked rather than run
+  // for real against the `nodeLockIo` stub below for the same reason `acquire` and
+  // `release` are — that stub's `read` answers null, which is indistinguishable
+  // from "another window reaped us".
+  renew: vi.fn((..._args: unknown[]) => true),
   // Whatever logger the panel handed nodeLockIo, so a test can prove it passed one
   // and that it reaches the output channel.
   lockIoLog: undefined as ((m: string) => void) | undefined,
@@ -285,6 +292,7 @@ vi.mock("../../src/engine/orchestrator/lock", async (importActual) => {
     ...actual,
     acquire: (...args: Parameters<typeof actual.acquire>) => h.acquire(...args),
     release: (...args: Parameters<typeof actual.release>) => h.release(...args),
+    renew: (...args: Parameters<typeof actual.renew>) => h.renew(...args),
   };
 });
 vi.mock("../../src/engine/orchestrator/launch", () => ({
@@ -556,6 +564,7 @@ beforeEach(() => {
     cb(null, "deployed 3 services", "warning: slow");
   });
   h.acquire.mockClear().mockReturnValue(true);
+  h.renew.mockClear().mockReturnValue(true);
   h.lockIoLog = undefined;
   h.discoverRepos.mockClear().mockImplementation(() => h.repos);
   h.release.mockClear();
@@ -5676,6 +5685,165 @@ describe("a met run rule acts", () => {
     expect(h.exec).not.toHaveBeenCalled();
     expect(lastWrite().edges[0].error).toBe("a run rule must point at a command, and n2 is not.");
     expect(lastWrite().edges[0].firedAt).toBeUndefined();
+  });
+
+  /** Two command nodes off one place, each with its own rule, so ONE pass has two
+   * spending steps — the shape the lock hold is actually about: 120 s each, and the
+   * pass stamps nothing until both are done. */
+  const twoCommandFlow = (): Flow => cmdFlow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
+      { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "smoke.sh staging" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run" },
+      { id: "e2", from: "n1", to: "n3", cond: { kind: "ci-passed" }, action: "run" },
+    ],
+  });
+
+  it("renews the flows lock after each command, with the token it acquired under", async () => {
+    const { send } = await warmed([twoCommandFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(2);
+    // One renewal per performed step: the hold is bounded by the longest single
+    // command, not by the whole pass.
+    expect(h.renew).toHaveBeenCalledTimes(2);
+    // The SAME token — `acquire(io, dir, nowMs, ttl, token)` and
+    // `renew(io, dir, token, nowMs)` do not agree on argument order, and renewing
+    // under a token nobody holds would silently answer false forever.
+    const token = h.acquire.mock.calls.at(-1)![4] as string;
+    expect(token).toBeTypeOf("string");
+    expect(h.renew.mock.calls[0][2]).toBe(token);
+    expect(h.renew.mock.calls[0][1]).toBe(h.acquire.mock.calls.at(-1)![1]); // same dir
+  });
+
+  it("stops the pass when the lock was reaped mid-pass, and does not run the next command", async () => {
+    // The hazard this closes: past the TTL, window B reaps and starts its own pass.
+    // Because THIS pass stamps only at the end, B sees the same edges unfired and
+    // would run the same commands again. A pass that has lost the lock must stop.
+    h.renew.mockReturnValue(false);
+    const { send } = await warmed([twoCommandFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    expect(ran()[0]).toBe("deploy.sh staging");
+    const w = lastWrite();
+    // What already ran IS stamped: it happened, and an unstamped success is exactly
+    // what makes the next pass repeat it.
+    expect(w.edges[0].firedAt).toBeTypeOf("number");
+    expect(w.edges[0].firedNote).toBe("ran deploy.sh staging in aws-ops");
+    // What never ran is left untouched — NOT stamped with "run was not performed",
+    // which would latch a rule that never executed.
+    expect(w.edges[1].firedAt).toBeUndefined();
+    expect(w.edges[1].error).toBeUndefined();
+  });
+
+  it("leaves the un-run command for the next pass, once the lock is held again", async () => {
+    h.renew.mockReturnValue(false);
+    const { send } = await warmed([twoCommandFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    // Next poll: this window acquires cleanly again.
+    h.renew.mockReturnValue(true);
+    h.flows = [lastWrite()];
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(2);
+    expect(ran()[0]).toBe("smoke.sh staging");
+    expect(lastWrite().edges[1].firedAt).toBeTypeOf("number");
+  });
+
+  it("stops before the NEXT flow when the lock was reaped, not just the next rule", async () => {
+    // The hold is over the whole pass, so the abort has to be too: a second armed
+    // flow must not be advanced under a lock this window no longer owns. The second
+    // flow's rule is a NOTIFY on purpose — a command in it proves nothing here,
+    // since the per-edge guard already stops that; a notify is the cheapest action
+    // there is, and stamping and announcing one is still a write to its file.
+    const second: Flow = {
+      ...cmdFlow(),
+      id: "f2",
+      name: "Second flow",
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    };
+    h.renew.mockReturnValue(false);
+    const { send } = await warmed([cmdFlow(), second]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    expect(ran()[0]).toBe("deploy.sh staging");
+    // The second flow was never advanced: nothing stamped, and nothing announced.
+    expect(h.writeFlow.mock.calls.some((c) => (c[2] as Flow).id === "f2")).toBe(false);
+    expect((window.showInformationMessage as ReturnType<typeof vi.fn>).mock.calls
+      .some((c) => /the migration has landed/.test(c[0] as string))).toBe(false);
+    // And the next pass, holding the lock again, does announce it.
+    h.renew.mockReturnValue(true);
+    await send({ type: "deck:refresh" });
+    expect((window.showInformationMessage as ReturnType<typeof vi.fn>).mock.calls
+      .some((c) => /the migration has landed/.test(c[0] as string))).toBe(true);
+  });
+
+  it("does not stamp or announce a notify that follows a lost lock in the SAME flow", async () => {
+    // The guard sits above the spend filter for this: a notify is free, but its
+    // stamp is a write, and writing this file without the lock is the read-then-write
+    // race the lock exists to close.
+    h.renew.mockReturnValue(false);
+    const { send } = await warmed([cmdFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
+        { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "deployed" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "ci-passed" }, action: "notify" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    const w = lastWrite();
+    expect(w.edges[0].firedAt).toBeTypeOf("number"); // the command that ran
+    expect(w.edges[1].firedAt).toBeUndefined(); // the notify that did not
+    expect((window.showInformationMessage as ReturnType<typeof vi.fn>).mock.calls
+      .some((c) => /deployed/.test(c[0] as string))).toBe(false);
+  });
+
+  it("says in the log that the pass stopped because the lock was lost", async () => {
+    const lines: string[] = [];
+    h.renew.mockReturnValue(false);
+    const { send } = await warmed([twoCommandFlow()], (m) => lines.push(m));
+    await send({ type: "deck:refresh" });
+    // A pass that silently does half its work is invisible without this.
+    expect(lines.some((l) => /lock was lost/.test(l) && /f1/.test(l))).toBe(true);
+  });
+
+  it("does not run a command when the flow is disarmed mid-pass", async () => {
+    // The per-edge `stillArmed` re-read, for the verb that executes shell: a
+    // command that goes ahead after Disarm is a real side effect the user just
+    // said stop to. Left pending rather than stamped, so a re-arm retries cleanly.
+    const lines: string[] = [];
+    const { send } = await warmed([twoCommandFlow()], (m) => lines.push(m));
+    let reads = 0;
+    // Reads 1 and 2 are evaluation's and the `fresh` copy's; from the per-edge
+    // check onward the flow is disarmed.
+    h.readFlows.mockImplementation(() => (++reads <= 2
+      ? [twoCommandFlow()]
+      : [{ ...twoCommandFlow(), armed: false }]));
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+    expect(lines.some((l) => /disarmed mid-pass/.test(l))).toBe(true);
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("treats a non-string cwdRepo as absent rather than crashing on it", async () => {
+    // A hand-edited flow file can carry `"cwdRepo": 42`; `validNode` rejects none
+    // of that, and neither `.find()` nor a template string would throw on it — but
+    // refusing it outright would strand a rule whose author meant the default.
+    const { send } = await warmed([withCommandNode({ run: "deploy.sh", cwdRepo: 42 as unknown as string })]);
+    await send({ type: "deck:refresh" });
+    expect(ran()[1].cwd).toBe("/r/aws-ops");
+    expect(lastWrite().edges[0].firedAt).toBeTypeOf("number");
   });
 
   it("defers, rather than guessing a directory, when the source is not a place", async () => {

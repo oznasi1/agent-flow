@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { acquire, release, lockPath, LockIo, LOCK_TTL_MS } from "../../../../src/engine/orchestrator/lock";
+import { acquire, release, renew, lockPath, LockIo, LOCK_TTL_MS } from "../../../../src/engine/orchestrator/lock";
 
 const NOW = 1_800_000_000_000;
 const DIR = "/store/flows";
@@ -117,6 +117,56 @@ describe("acquire", () => {
     expect(removed).toBe(true); // it really did meet a dead lock and reap it
     expect(stolen).toBe(false); // and it did NOT claim it in the same pass
     expect(files[lockPath(DIR)]).toBeUndefined();
+  });
+});
+
+describe("renew", () => {
+  it("pushes our own lock's deadline out, so the same holder survives its own TTL", () => {
+    const { io, files } = fakeIo();
+    acquire(io, DIR, NOW, LOCK_TTL_MS, "win-a");
+    // Most of the TTL has gone by inside one slow step.
+    expect(renew(io, DIR, "win-a", NOW + LOCK_TTL_MS - 1)).toBe(true);
+    // The stamp really moved: another window at a time that WOULD have reaped the
+    // original lock now finds a live one and leaves it alone.
+    expect(acquire(io, DIR, NOW + LOCK_TTL_MS + 1, LOCK_TTL_MS, "win-b")).toBe(false);
+    expect(files[lockPath(DIR)]).toBe(`${NOW + LOCK_TTL_MS - 1}:win-a`);
+  });
+
+  it("reports false when our lock was reaped, and does not re-take it", () => {
+    // The whole point: a pass that lost its lock must learn that and STOP, and it
+    // must not create a lock from a path that never arbitrated for one.
+    const { io, files } = fakeIo();
+    acquire(io, DIR, NOW, LOCK_TTL_MS, "win-a");
+    io.remove(lockPath(DIR)); // window B reaped it past the TTL
+    expect(renew(io, DIR, "win-a", NOW + LOCK_TTL_MS + 2)).toBe(false);
+    expect(files[lockPath(DIR)]).toBeUndefined();
+  });
+
+  it("reports false when another window now holds the lock, and leaves that lock alone", () => {
+    const { io, files } = fakeIo({ [lockPath(DIR)]: `${NOW + 1}:win-b` });
+    expect(renew(io, DIR, "win-a", NOW + 2)).toBe(false);
+    // Untouched: removing it here would be the steal `acquire` refuses.
+    expect(files[lockPath(DIR)]).toBe(`${NOW + 1}:win-b`);
+  });
+
+  it("reports false, rather than holding on, when the create loses the gap to another window", () => {
+    // Our token is in the lock, so we remove it — and another window's plain
+    // create wins the gap before ours. Two windows must not both believe they
+    // hold it, so the answer is false and the caller stops.
+    const files: Record<string, string> = { [lockPath(DIR)]: `${NOW}:win-a` };
+    const io: LockIo = {
+      tryCreate: () => false, // win-b got there first
+      read: (p) => files[p] ?? null,
+      remove: (p) => { delete files[p]; },
+    };
+    expect(renew(io, DIR, "win-a", NOW + 1)).toBe(false);
+  });
+
+  it("does not renew a corrupted lock into a live one under our name", () => {
+    // Unparseable contents mean no token of ours: `acquire`'s reaping path owns
+    // that case, and renewing would resurrect it as a lock we claim to hold.
+    const { io } = fakeIo({ [lockPath(DIR)]: "not:a:timestamp" });
+    expect(renew(io, DIR, "win-a", NOW)).toBe(false);
   });
 });
 

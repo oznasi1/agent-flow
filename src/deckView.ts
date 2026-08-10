@@ -9,7 +9,7 @@ import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId } from "./engine/orchestrator/flowIo";
-import { LOCK_TTL_MS, acquire, release } from "./engine/orchestrator/lock";
+import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
 import { evaluateFlow } from "./engine/orchestrator/evaluate";
 import { unfirableRules } from "./engine/orchestrator/armability";
 import { ActOutcome, applyFired, notifyLines } from "./engine/orchestrator/runner";
@@ -447,7 +447,7 @@ export class DeckPanel {
       // panel hands it `this.log`.
       if (!acquire(this.lockIo, this.flowsDir, nowMs, LOCK_TTL_MS, token)) return;
       try {
-        asks = await this.advanceUnderLock(runs, nowMs);
+        asks = await this.advanceUnderLock(runs, nowMs, token);
       } finally {
         release(this.lockIo, this.flowsDir, token);
       }
@@ -471,13 +471,39 @@ export class DeckPanel {
   /** The body of a pass, with the lock held. Returns the flows that need the user's
    * consent before they can ever spend anything — the caller asks once the lock is
    * released. Split out so the lock's `try`/`finally` above stays readable, and so
-   * "what happens under the lock" is one function with no modal in it. */
+   * "what happens under the lock" is one function with no modal in it.
+   *
+   * `token` is the caller's lock token, threaded in so this function can RENEW the
+   * lock after every spending step and stop when it no longer holds it. That is not
+   * housekeeping: one pass loops over every armed flow, and one `run` edge can
+   * legitimately take `COMMAND_TIMEOUT_MS` (120 s), so a pass with met command rules
+   * in three flows outlives `LOCK_TTL_MS` (300 s). Another window then reaps the
+   * lock, starts its own pass, sees the same edge still unstamped — this pass writes
+   * its stamps only at the END — and runs the same command again. Renewing bounds
+   * the hold to the longest SINGLE step instead of the whole pass, and aborting on a
+   * failed renewal is what stops a pass that has already lost the lock from carrying
+   * on spending under it. */
   private async advanceUnderLock(
     runs: RunStatus[],
     nowMs: number,
+    token: string,
   ): Promise<{ flow: Flow; target: SpendTarget }[]> {
     const asks: { flow: Flow; target: SpendTarget }[] = [];
+    /** Set the moment a renewal fails. Nothing further in this pass may act — but
+     * whatever already ran still gets written below, because the act happened and
+     * an unstamped success is what makes the NEXT pass repeat it. */
+    let lostLock = false;
     for (const flow of readFlows(this.flowIo, this.flowsDir)) {
+      // Stop the whole pass, not just the flow that lost the lock. Deliberately
+      // belt-and-braces: `lostLock` is scoped to this whole function, so the guard
+      // at the top of the edge loop below already defers every remaining edge of
+      // every remaining flow, and REMOVING this line changes nothing observable
+      // today (proved — no test can tell). It stays because it is the structural
+      // guarantee: without it, "we no longer hold the lock" would be enforced only
+      // by one check deep inside a nested loop, and any future statement added to
+      // this flow loop — a write, a promotion, a toast — would silently run under
+      // a lock this window does not hold until someone remembered to guard it too.
+      if (lostLock) break;
       if (!flow.armed) {
         // A disarmed flow holds no gate — re-arming starts the cycle over.
         this.pendingResume.delete(flow.id);
@@ -635,6 +661,19 @@ export class DeckPanel {
         // The junction targets of rules that could not even be DECIDED this pass.
         const deferredTargets = new Set<string>();
         for (const f of firing) {
+          // An earlier step in this pass lost the lock. EVERY remaining edge is left
+          // exactly as it was — deferred, not stamped — and this check sits above the
+          // spend filter deliberately, so it covers a `notify` too: stamping and
+          // announcing one is still a WRITE to this flow's file, and doing that
+          // without the lock is the read-then-write race the lock exists to close
+          // (measured once as two identical toasts for one rule). Deferring rather
+          // than stamping also matters for the spend edges: `applyFired` would write
+          // `error: "run was not performed"` on a rule that never ran, latching it
+          // out of existence.
+          if (lostLock) {
+            deferredTargets.add(f.edge.to);
+            continue;
+          }
           // A stamped-only sibling performs nothing, and a notify's whole action is
           // the toast `notifyLines` produces below.
           if (!f.perform || !isSpendAction(f.action)) continue;
@@ -653,6 +692,19 @@ export class DeckPanel {
             continue;
           }
           const done = await this.performEdge(fresh, f.edge, runs, f.action);
+          // Renewed AFTER the act, against the real clock rather than this pass's
+          // `nowMs` — a stamp dated when the poll started would be no renewal at
+          // all. `false` means another window reaped this lock while the step above
+          // was running and may already be acting on the same flows, so this pass
+          // stops spending immediately. It still records what it just did (below):
+          // the command really ran, and leaving it unstamped is precisely what would
+          // make the next pass run it again.
+          if (!renew(this.lockIo, this.flowsDir, token, Date.now())) {
+            this.log(
+              `deck: flow ${flow.id} rule ${f.edge.id} was the last step of this pass — the flows lock was lost (reaped past its ${LOCK_TTL_MS} ms TTL); another window may be advancing now, so nothing further is performed`,
+            );
+            lostLock = true;
+          }
           if (done.kind === "defer") {
             // The log, and nothing else: a transient read failure on an unattended
             // flow is not worth a notification, but a rule quietly not advancing is

@@ -73,6 +73,43 @@ export function acquire(
   return false;
 }
 
+/** Push our own lock's deadline out to `nowMs`, and report whether we still hold
+ * it. `false` means we do not: the lock is gone, or another window's token is in
+ * it — and the caller must STOP whatever it is doing under the lock, not carry on.
+ *
+ * This exists because the TTL alone cannot bound a pass, only a single step of one.
+ * `advanceUnderLock` holds one lock across EVERY armed flow, and a `run` edge can
+ * legitimately take `COMMAND_TIMEOUT_MS` (120 s) all by itself, so a pass over
+ * three flows with met command rules can hold the lock for far longer than
+ * `LOCK_TTL_MS`. Window B then reaps it and starts its own pass while A is still
+ * executing; because A stamps its edges only at the END of its pass, B sees the
+ * same edge unfired, evaluates it as met, and runs the same command a second
+ * time — a double deploy. Renewing after each step, and ABORTING when the renewal
+ * fails, reduces the exposure from "the whole pass" to "the longest single step",
+ * which is the invariant `LOCK_TTL_MS`'s own comment claims and is what makes 120 s
+ * "comfortably" under 300 s again. Renewal is not an alternative to that ceiling:
+ * it is what makes one ceiling enough.
+ *
+ * Same "reap, not steal" discipline as `acquire`, and for the same reason. This
+ * returns true from exactly one place — a successful exclusive create — and it
+ * never removes a lock whose token is not ours. The remove/create pair is safe
+ * here precisely because of that token check: the only window that can win the
+ * gap between them is one whose plain `tryCreate` succeeded, and if that happens
+ * OUR create fails, we report false, and the caller stops. There is no
+ * interleaving in which two windows both come away believing they hold it. */
+export function renew(io: LockIo, dir: string, token: string, nowMs: number): boolean {
+  const p = lockPath(dir);
+  const raw = io.read(p);
+  // Gone: reaped by another window (and possibly already replaced and released
+  // again). Not ours to re-take here — `acquire` on the next poll is the only way
+  // back in, so that a lock is never created by a path that has not arbitrated.
+  if (raw === null) return false;
+  // Someone else's. Do NOT remove it: that is the steal this module refuses.
+  if (tokenOf(raw) !== token) return false;
+  io.remove(p);
+  return io.tryCreate(p, stamp(nowMs, token));
+}
+
 /** Release our own lock, and only ours. A window suspended past the TTL has its
  * lock reaped and possibly replaced; without the token check its `release` would
  * delete a live holder's lock. */
