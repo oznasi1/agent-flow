@@ -13,7 +13,7 @@ const rmSync = vi.mocked(fs.rmSync);
 const realpathSync = vi.mocked(fs.realpathSync);
 
 const rec = (over: Partial<PresenceRecord> = {}): PresenceRecord => ({
-  pid: 111, identity: "/repos/foo", kind: "folder", label: "foo", folders: 1, updatedAt: 10, ...over,
+  pid: 111, identity: "/repos/foo", kind: "folder", label: "foo", folders: 1, roots: ["/repos/foo"], updatedAt: 10, ...over,
 });
 
 beforeEach(() => {
@@ -31,12 +31,25 @@ describe("windowIdentity", () => {
   it("is a workspace identity when a .code-workspace file is open", () => {
     workspace.workspaceFile = { scheme: "file", fsPath: "/ws/team.code-workspace" };
     workspace.workspaceFolders = [{ uri: { fsPath: "/repos/a" } }, { uri: { fsPath: "/repos/b" } }];
-    expect(windowIdentity()).toEqual({ identity: "/ws/team.code-workspace", kind: "workspace", label: "team.code-workspace", folders: 2 });
+    expect(windowIdentity()).toEqual({
+      identity: "/ws/team.code-workspace", kind: "workspace", label: "team.code-workspace",
+      folders: 2, roots: ["/repos/a", "/repos/b"],
+    });
   });
 
   it("is a folder identity for a single-folder window", () => {
     workspace.workspaceFolders = [{ uri: { fsPath: "/repos/foo" } }];
-    expect(windowIdentity()).toEqual({ identity: "/repos/foo", kind: "folder", label: "foo", folders: 1 });
+    expect(windowIdentity()).toEqual({
+      identity: "/repos/foo", kind: "folder", label: "foo", folders: 1, roots: ["/repos/foo"],
+    });
+  });
+
+  it("carries the roots of a workspace whose folders were never opened", () => {
+    // A .code-workspace can be open with zero resolved folders; the record must
+    // still be writable, and claim nothing.
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/empty.code-workspace" };
+    workspace.workspaceFolders = undefined;
+    expect(windowIdentity()?.roots).toEqual([]);
   });
 
   it("is undefined for an empty window", () => {

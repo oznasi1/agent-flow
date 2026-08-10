@@ -9,6 +9,12 @@ export interface WindowIdentity {
   kind: "workspace" | "folder";
   label: string; // basename, for display
   folders: number; // folder count in the window
+  /** The window's folder paths, canonicalized, in workspaceFolders order. The
+   * Deck maps a session's directory back to the window holding it with these;
+   * `folders` alone could only ever say how many there were. Absent on a record
+   * written by an older extension host — every reader treats that as a window
+   * that claims nothing, which is exactly the behavior before this field. */
+  roots: string[];
 }
 
 export interface PresenceRecord extends WindowIdentity {
@@ -26,15 +32,14 @@ export function defaultWindowsDir(): string {
  * .code-workspace file wins; else a lone folder; else undefined (empty windows and
  * untitled multi-root windows are neither trackable nor seedable). */
 export function windowIdentity(): WindowIdentity | undefined {
+  const roots = (vscode.workspace.workspaceFolders ?? []).map((f) => canon(f.uri.fsPath));
   const wf = vscode.workspace.workspaceFile;
   if (wf && wf.scheme === "file") {
     const identity = canon(wf.fsPath);
-    return { identity, kind: "workspace", label: path.basename(identity), folders: vscode.workspace.workspaceFolders?.length ?? 0 };
+    return { identity, kind: "workspace", label: path.basename(identity), folders: roots.length, roots };
   }
-  const folders = vscode.workspace.workspaceFolders;
-  if (folders?.length === 1) {
-    const identity = canon(folders[0].uri.fsPath);
-    return { identity, kind: "folder", label: path.basename(identity), folders: 1 };
+  if (roots.length === 1) {
+    return { identity: roots[0], kind: "folder", label: path.basename(roots[0]), folders: 1, roots };
   }
   return undefined;
 }
