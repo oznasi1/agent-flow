@@ -1247,7 +1247,9 @@ export class DeckPanel {
     }
     const cfg = getConfig();
     // A place has no `mode` of its own the way a planned node does, so a seed's prompt
-    // id lives on the EDGE (Task 6 is what lets the inspector set it).
+    // id lives on the EDGE — which both presentations' USING select writes through
+    // `withMode` (orchestratorRule.ts), the canvas inspector's and the list row's
+    // alike.
     const found = this.modeFor(edge.mode, `not seeding ${node.repo}`);
     if ("refusal" in found) return found.refusal;
     try {

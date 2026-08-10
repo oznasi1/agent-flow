@@ -18,8 +18,13 @@ export interface LockIo {
   remove(p: string): void;
 }
 
-/** Must comfortably exceed the slowest thing done while holding the lock — a launch
- * that opens a window or a seed that opens a workspace. NOT a confirmation modal: a
+/** Must comfortably exceed the slowest thing done while holding the lock. That is
+ * no longer a launch opening a window or a seed opening a workspace: it is a `run`
+ * edge's shell command, bounded by `COMMAND_TIMEOUT_MS` (120 s, command.ts) — which
+ * is why that constant is pinned against THIS one by a test rather than eyeballed,
+ * and why `advanceUnderLock` renews the lock after every spending step instead of
+ * once per pass (three met command rules outlive this TTL together). NOT a
+ * confirmation modal: a
  * pass that needs to ask performs nothing and records the ask instead, and the
  * modal itself runs after `release` — see `advanceArmedFlows` in `deckView.ts`. The
  * TTL is only crash recovery: if a holder dies, this is how long other windows wait

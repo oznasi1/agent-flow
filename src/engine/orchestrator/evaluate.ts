@@ -10,9 +10,17 @@ import {
   Condition, Flow, FlowAction, FlowEdge, edgeAction, findNode, incomingEdges, isPlace, isSettled, isSpendAction,
 } from "./model";
 
-/** How many acting edges (`launch` or `seed`) may fire in one pass. A badly wired
- * graph should not be able to storm your window manager; the remainder is reported
- * as `deferred` and fires on later passes. */
+/** How many SPENDING edges (`launch`, `seed` or `run` — whatever `isSpendAction`
+ * admits) may fire in one call. A badly wired graph should not be able to storm
+ * your window manager; the remainder is reported as `deferred` and fires on later
+ * passes.
+ *
+ * "PER_PASS" is the Deck's word, not this function's, and the two are not the same
+ * unit: `evaluateFlow` is called once PER FLOW, so a poll over N armed flows can
+ * spend up to 3N — three windows each, or three shell commands each. That is
+ * deliberate (one flow cannot starve another), but it is the number to reason about
+ * when asking what one poll can cost. `deckView.ts`'s per-target dedupe and its two
+ * consent gates are what bound it in practice. */
 export const MAX_LAUNCHES_PER_PASS = 3;
 
 /** Conditions that can only ever be true when the Live signal is readable, because

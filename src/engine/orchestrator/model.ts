@@ -133,10 +133,14 @@ export interface FlowEdge {
    * `evaluate.ts` derives the verb from the target (`costsSlot`/`edgeAction`) and
    * carries it on `FiredEdge.action`, and `deckView.ts`'s spend-slot check, its
    * dispatch, `spendTarget` and `performEdge` all take that carried value as a
-   * parameter. The one behavioural reader left is the WEBVIEW's rule
-   * labels/mode/dest resolution in `orchestratorRule.ts`, deferred to Task 9;
-   * `store.ts` reads it too, but only to compare against the derived value and
-   * latch a disagreement, which is the field's whole remaining purpose. */
+   * parameter. Nor does the WEBVIEW: Task 9 finished that half, so
+   * `orchestratorRule.ts`'s labels, mode and destination all resolve through
+   * `edgeAction` (the TARGET) — see `modeValueOf`'s own comment on what keying off
+   * the stored field broke. `store.ts` reads it, but only to compare against the
+   * derived value and latch a disagreement, and `promoteToPlace` CLEARS it on every
+   * edge into a node it rewrites, because that rewrite is what would otherwise
+   * manufacture such a disagreement. Comparison, compatibility and that one clear
+   * are the field's whole remaining purpose. */
   action?: FlowAction;
   /** A PromptMode id, for `seed` only. A launch's prompt and destination live on the
    * `planned` node it targets, which carries its whole launch configuration — see

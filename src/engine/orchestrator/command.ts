@@ -1,6 +1,6 @@
-// Resolve a command node's shell command and run it. This is the file Task 6's
-// wiring will call from the Deck's poll loop; it does not touch the panel or the
-// webview itself.
+// Resolve a command node's shell command and run it, and answer where a chain of
+// command nodes should run it. `deckView.ts`'s poll loop calls all three from
+// `performRun`/`commandCwd`; nothing here touches the panel or the webview itself.
 //
 // No `vscode`, no `child_process` — this directory is webview-reachable, and only
 // `npm run build` catches such an import (`tsc` and the tests pass regardless).
@@ -140,10 +140,14 @@ export function chainSourcePlace(flow: Flow, fromId: string): PlaceNode | undefi
 /** True for a usable string: present, and non-empty once whitespace is
  * stripped. Guards the RUNTIME type, not just presence — a hand-edited flow
  * file can carry `"run": 42`, `"run": ""`, or `"run": "   "`, and `store.ts`'s
- * `validNode` rejects none of that. `resolveCommand` is exported and callable
- * directly (a future "what would run" preview is the likely caller — see
- * Task 9), so it must refuse such input rather than crash on it (a bare
- * `as string` cast used to send a non-string into `withNote`'s `.indexOf`) or
+ * `validNode` rejects none of that. `resolveCommand` is exported and called
+ * directly by `spendTarget` (deckView.ts) — i.e. by THE CONSENT GATE, which is the
+ * strongest reason for this guard there is: that call decides both whether to ask
+ * the user at all and what command text the modal names, so a node this predicate
+ * let through would put someone else's string in front of a Run button. (An earlier
+ * version of this comment guessed at "a future 'what would run' preview"; the real
+ * caller arrived in Task 8.) It must refuse such input rather than crash on it (a
+ * bare `as string` cast used to send a non-string into `withNote`'s `.indexOf`) or
  * treat blank text as a real command to hand to the runner. Same predicate as
  * `prompt.ts`'s `hasNote`, restated here rather than imported — one boolean
  * check does not justify coupling this module to `prompt.ts`. */
