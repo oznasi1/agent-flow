@@ -419,6 +419,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * rule points AT and a notify terminal is a toast, so neither is ever observed —
    * `evaluate.ts` reads a condition off a place's `RunStatus` and nothing else. */
   const watched = flow.nodes.filter(isAgentNode).length;
+  /** The nodes a rule ACTS on rather than watches — a notify terminal or a command
+   * node. Named by the two kinds it admits rather than as "not an agent node", the
+   * same lesson `isAgentNode`'s own doc comment records: a `!==` filter is what let
+   * a command node into a list that then read `.runKey` off it. */
+  const actionNodes = flow.nodes.filter((n) => n.kind === "notify" || n.kind === "command");
   /** How many rules cannot advance. Driven by the edges' own `error` — the half of
    * `isSettled` that means "tried and failed" rather than "ran". An armed flow with
    * one of these is not simply watching, and the footer must not say it is. */
@@ -1003,6 +1008,45 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             )}
           </div>
         </div>
+        {/* The other half of the tray, and the ONLY way to delete either kind of
+            node a rule ACTS on. `removeNode` was reachable from the Agents tray
+            alone, and that tray is `isAgentNode` — place|planned — so a notify
+            terminal could not be removed at all, and this phase's command node
+            joined it in the same hole. A command node is created by a `<select>`
+            that fires on change, so one accidental pick was permanent short of
+            hand-editing the flow file.
+            Its own section rather than more chips in the tray above: that tray is a
+            DROP TARGET with its own empty-state hint, and the two lists answer
+            different questions — "Agents" is what conditions are about, "Actions"
+            is what rules do (`ACTION_LABEL`'s `notify` and `run`). Rendered only
+            when there is something in it, so a flow with no terminals gains no
+            empty box. */}
+        {actionNodes.length > 0 && (
+          <div className="orch-sect">
+            <div className="orch-sect-hd">
+              <span className="t">Actions</span>
+              <span className="rule" />
+            </div>
+            <div className="orch-tray" data-testid="orch-actions">
+              {actionNodes.map((n) => (
+                <span className="orch-tchip" key={n.id}>
+                  {/* `endLabel`, the same function the canvas chip and both rule
+                      sentences spend, so one node is never named two ways. */}
+                  <span className="k">{endLabel(flow, n.id)}</span>
+                  <span className="sub">{n.kind === "notify" ? n.message : "runs a command"}</span>
+                  <button
+                    type="button"
+                    className="rm"
+                    aria-label={`Remove ${endLabel(flow, n.id)}`}
+                    onClick={() => removeNode(n.id)}
+                  >
+                    ✕
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="orch-bar">
           <span className="t" style={{ fontSize: "var(--t-micro)", letterSpacing: ".06em", textTransform: "uppercase", color: "var(--dim)" }}>
             Graph

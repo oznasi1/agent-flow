@@ -325,7 +325,73 @@ describe("the tray", () => {
     });
     render(<OrchestratorDrawer {...props({ flows: [existing] })} />);
     expect(screen.getByText(/Drag a card from the board to attach an agent/i)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Remove/ })).toBeNull();
+    // Not in THIS tray — the Agents tray is what a condition can be about. It has
+    // its own Remove in the Actions section below (see that describe block); the
+    // scope here is what makes this about the tray's membership rather than about
+    // whether the node can be deleted at all.
+    expect(within(screen.getByTestId("orch-tray")).queryByRole("button", { name: /^Remove/ })).toBeNull();
+  });
+
+  it("removes a command node, which nothing could delete before", () => {
+    // `removeNode` was reachable from the Agents tray alone, and that tray is
+    // `isAgentNode` — so a command node could not be deleted from either surface,
+    // and it is created by a `<select>` that fires on change: one accidental pick
+    // was permanent short of hand-editing the flow file.
+    const onSave = vi.fn();
+    const existing = flow({
+      nodes: [{ id: "n1", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh --env=staging" }],
+    });
+    render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
+    const actions = screen.getByTestId("orch-actions");
+    // Named by `endLabel`, the same words the canvas chip and both rule sentences
+    // give this node.
+    expect(within(actions).getByText("deploy.sh --env=staging")).toBeTruthy();
+    fireEvent.click(within(actions).getByRole("button", { name: "Remove deploy.sh --env=staging" }));
+    expect((onSave.mock.calls[0][0] as Flow).nodes).toEqual([]);
+  });
+
+  it("removes a notify node too — the same hole, one kind older", () => {
+    const onSave = vi.fn();
+    const existing = flow({
+      nodes: [{ id: "n1", kind: "notify", x: 0, y: 0, join: "any", message: "landed" }],
+      edges: [],
+    });
+    render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
+    fireEvent.click(within(screen.getByTestId("orch-actions")).getByRole("button", { name: "Remove notify" }));
+    expect((onSave.mock.calls[0][0] as Flow).nodes).toEqual([]);
+  });
+
+  it("drops every edge touching a command node it removes", () => {
+    // Same rule the Agents tray's own delete follows: an edge whose end is gone can
+    // never be evaluated. It matters more here — a chained command's rules point at
+    // AND out of the node being deleted.
+    const onSave = vi.fn();
+    const chained = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh" },
+        { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "smoke.sh" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } },
+        { id: "e2", from: "n2", to: "n3", cond: { kind: "command-succeeded" } },
+      ],
+    });
+    render(<OrchestratorDrawer {...props({ onSave, flows: [chained] })} />);
+    fireEvent.click(within(screen.getByTestId("orch-actions")).getByRole("button", { name: "Remove deploy.sh" }));
+    const saved = onSave.mock.calls[0][0] as Flow;
+    expect(saved.nodes.map((n) => n.id)).toEqual(["n1", "n3"]);
+    expect(saved.edges).toEqual([]);
+  });
+
+  it("shows no Actions section at all when a flow has no notify or command node", () => {
+    // No empty box for a flow that has none — the Agents tray earns its empty
+    // state because it is a drop target; this list is not.
+    const placeOnly = flow({
+      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [placeOnly] })} />);
+    expect(screen.queryByTestId("orch-actions")).toBeNull();
   });
 
   it("lists an attached node as a chip, and removes it", () => {
