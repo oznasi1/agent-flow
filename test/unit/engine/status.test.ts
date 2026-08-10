@@ -5,6 +5,8 @@ import * as path from "path";
 import { execFileSync } from "child_process";
 import { mostActive, buildRunStatus } from "../../../src/engine/status";
 import { encodeProjectDir } from "../../../src/engine/transcript";
+import { currentBranch } from "../../../src/engine/git";
+import { canon } from "../../../src/engine/paths";
 import { AgentActivity, AgentState, CardAgent, Run, PrEntryMap, PrFacts } from "../../../src/types";
 
 const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
@@ -200,6 +202,77 @@ describe("buildRunStatus", () => {
       // and never read the per-repo signal at all, reporting idle instead.
       expect(s.agent.state).toBe("needs-you");
       fs.rmSync(localRoot, { recursive: true, force: true });
+    });
+  });
+
+  describe("buildRunStatus's branch reuse (F3)", () => {
+    it("reuses a local card's already-known branch instead of re-reading it", () => {
+      // A local card's `run.repos[].branch` was read moments earlier, in this
+      // same refresh tick, by whatever inferred its ticket. gitState must reuse
+      // it rather than pay for a second, redundant `rev-parse` — proven by
+      // declaring a branch that is NOT the repo's real one and getting it back
+      // unchanged.
+      const localRun: Run = { ...run, kind: "local", repos: [{ ...run.repos[0], branch: "stale-declared-branch" }] };
+      const s = buildRunStatus({ run: localRun, ticket: null, projectsRoot: projRoot, nowMs: NOW });
+      expect(s.repos[0].branch).toBe("stale-declared-branch");
+    });
+
+    it("still reads a tracked run's branch live, never trusting the stored one", () => {
+      // The byte-identical guarantee: a stored branch can go stale the moment
+      // somebody checks out something else, so only a LOCAL run's own reuse
+      // (above) may shortcut it. `run` here carries no `kind`, same as every
+      // record written before local cards existed.
+      const trackedRun: Run = { ...run, repos: [{ ...run.repos[0], branch: "stale-declared-branch" }] };
+      const s = buildRunStatus({ run: trackedRun, ticket: null, projectsRoot: projRoot, nowMs: NOW });
+      expect(s.repos[0].branch).toBe(currentBranch(repoPath));
+      expect(s.repos[0].branch).not.toBe("stale-declared-branch");
+    });
+  });
+
+  describe("buildRunStatus's activityRoots (F2)", () => {
+    it("withholds a sibling root's transcript vote when activityRoots omits it, and votes with it when absent", () => {
+      // F2, human ruling: a local grouped run's repos now include idle sibling
+      // roots. A warm "ended turn" transcript sitting in one must not out-rank
+      // the signal from the root the session is actually in. `activityRoots`
+      // absent — a tracked run's default — must still read every repo, exactly
+      // as before this field existed.
+      const own = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-status-own-"));
+      const sibling = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-status-sibling-"));
+      const activityProjRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-status-activity-"));
+      const writeTranscript = (repoDir: string, stopReason: string): void => {
+        const tdir = path.join(activityProjRoot, encodeProjectDir(repoDir));
+        fs.mkdirSync(tdir, { recursive: true });
+        const tfile = path.join(tdir, "s.jsonl");
+        fs.writeFileSync(tfile, JSON.stringify({ type: "assistant", slug: "wip", message: { stop_reason: stopReason } }) + "\n");
+        fs.utimesSync(tfile, NOW / 1000, NOW / 1000);
+      };
+      writeTranscript(sibling, "end_turn"); // reads needs-you (rank 3) if it gets to vote
+      writeTranscript(own, "tool_use"); // reads working (rank 2)
+
+      const localRun: Run = {
+        key: "local-x", summary: "x", url: "", createdAt: 1, mode: "multiroot", kind: "local",
+        repos: [
+          { name: "own", path: own, isGit: false },
+          { name: "sibling", path: sibling, isGit: false },
+        ],
+        briefPaths: [],
+      };
+      // canon(own), not `own` itself: buildRunStatus compares against
+      // `canon(r.path)` (a real repo path can resolve through a symlinked temp
+      // dir — /tmp -> /private/tmp on macOS), and deckView.ts's own caller
+      // builds this same set from already-canonicalized places.
+      const restricted = buildRunStatus({
+        run: localRun, ticket: null, projectsRoot: activityProjRoot, nowMs: NOW,
+        activityRoots: new Set([canon(own)]),
+      });
+      expect(restricted.agent.state).toBe("working"); // sibling's needs-you never got a vote
+
+      const unrestricted = buildRunStatus({ run: localRun, ticket: null, projectsRoot: activityProjRoot, nowMs: NOW });
+      expect(unrestricted.agent.state).toBe("needs-you"); // no restriction: the sibling votes and wins
+
+      fs.rmSync(own, { recursive: true, force: true });
+      fs.rmSync(sibling, { recursive: true, force: true });
+      fs.rmSync(activityProjRoot, { recursive: true, force: true });
     });
   });
 });

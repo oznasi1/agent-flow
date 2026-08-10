@@ -193,6 +193,20 @@ export const DECK_CSS = `
   .repo .add { color: var(--c-done); } .repo .del { color: var(--c-danger); }
   .repo .dirty { color: var(--c-idle); }
 
+  /* The workspace chip and its fold. The name is an identifier, so it is mono;
+     "2 repos" is prose, so it is not. The fold is in the DOM at rest and hidden
+     with display:none — a card that has to grow anyway on hover should not also
+     pay for a mount. */
+  .c-ws { margin-top: 7px; }
+  .ws { display: inline-flex; align-items: baseline; gap: 5px; font-size: var(--t-data);
+    color: var(--dim); background: none; border: 1px solid var(--hair); border-radius: var(--r-chip);
+    padding: 1px 6px; cursor: pointer; }
+  .ws:hover { border-color: color-mix(in srgb, var(--vscode-foreground) 25%, transparent); }
+  .ws .wsi { font-size: 9px; color: color-mix(in srgb, var(--vscode-foreground) 40%, transparent); }
+  .ws .n { font-family: var(--mono); color: color-mix(in srgb, var(--vscode-foreground) 82%, transparent); }
+  .ws-fold { display: none; margin-top: 6px; flex-wrap: wrap; gap: 5px 7px; }
+  .c-ws:hover .ws-fold, .c-ws:focus-within .ws-fold, .c-ws.open .ws-fold { display: flex; }
+
   /* Agents open in this card's directories. Names are identifiers, so mono; the
      row is a control, so it takes the same focus treatment as .act. */
   .c-agents { margin-top: 7px; }

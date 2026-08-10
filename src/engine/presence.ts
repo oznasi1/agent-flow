@@ -4,14 +4,35 @@ import * as os from "os";
 import * as path from "path";
 import { canon, pidAlive } from "./paths";
 
-export interface WindowIdentity {
+/** The fields every presence-adjacent record shares, with no opinion on whether
+ * `roots` is there — `WindowIdentity` and `PresenceRecord` diverge on exactly
+ * that below, and TypeScript will not let a subinterface re-narrow a required
+ * inherited member to optional. */
+interface WindowIdentityCore {
   identity: string; // canonical path — a .code-workspace file or a single folder
   kind: "workspace" | "folder";
   label: string; // basename, for display
   folders: number; // folder count in the window
 }
 
-export interface PresenceRecord extends WindowIdentity {
+export interface WindowIdentity extends WindowIdentityCore {
+  /** The window's folder paths, canonicalized, in workspaceFolders order. The
+   * Deck maps a session's directory back to the window holding it with these;
+   * `folders` alone could only ever say how many there were. Always present
+   * here — `windowIdentity()` is the only constructor, and it always computes
+   * this list, empty or not. */
+  roots: string[];
+}
+
+/** What actually sits on disk under ~/.agentflow/windows, read back with no
+ * validation beyond `pid`/`identity` (see `readLiveWindows`). `roots` is
+ * optional, not `WindowIdentity`'s required — a record written by an older
+ * extension host predates the field entirely, so at runtime it is `undefined`
+ * for every one of them no matter what the type promises. Every reader treats
+ * a missing list as a window that claims nothing, which is exactly the
+ * behavior before this field existed. */
+export interface PresenceRecord extends WindowIdentityCore {
+  roots?: string[];
   pid: number; // the window's extension-host process id
   updatedAt: number; // epoch ms, stamped by the caller
 }
@@ -26,15 +47,14 @@ export function defaultWindowsDir(): string {
  * .code-workspace file wins; else a lone folder; else undefined (empty windows and
  * untitled multi-root windows are neither trackable nor seedable). */
 export function windowIdentity(): WindowIdentity | undefined {
+  const roots = (vscode.workspace.workspaceFolders ?? []).map((f) => canon(f.uri.fsPath));
   const wf = vscode.workspace.workspaceFile;
   if (wf && wf.scheme === "file") {
     const identity = canon(wf.fsPath);
-    return { identity, kind: "workspace", label: path.basename(identity), folders: vscode.workspace.workspaceFolders?.length ?? 0 };
+    return { identity, kind: "workspace", label: path.basename(identity), folders: roots.length, roots };
   }
-  const folders = vscode.workspace.workspaceFolders;
-  if (folders?.length === 1) {
-    const identity = canon(folders[0].uri.fsPath);
-    return { identity, kind: "folder", label: path.basename(identity), folders: 1 };
+  if (roots.length === 1) {
+    return { identity: roots[0], kind: "folder", label: path.basename(roots[0]), folders: 1, roots };
   }
   return undefined;
 }
