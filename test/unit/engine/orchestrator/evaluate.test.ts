@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { evaluateFlow, MAX_LAUNCHES_PER_PASS } from "../../../../src/engine/orchestrator/evaluate";
 import {
-  Flow, FlowEdge, FlowNode, JoinMode, NotifyNode, PlaceNode, PlannedNode, emptyFlow,
+  CommandNode, Flow, FlowEdge, FlowNode, JoinMode, NotifyNode, PlaceNode, PlannedNode, emptyFlow,
 } from "../../../../src/engine/orchestrator/model";
 import { CardAgent, PrEntryMap, PrFacts, RepoGit, Run, RunStatus } from "../../../../src/types";
 
@@ -34,6 +34,8 @@ const planned = (id: string, join: JoinMode = "any"): PlannedNode =>
   ({ id, kind: "planned", x: 0, y: 0, join, ticketKey: "ASM-99", repos: ["r"], mode: "tdd", dest: "worktree" });
 const notify = (id: string, join: JoinMode = "any"): NotifyNode =>
   ({ id, kind: "notify", x: 0, y: 0, join, message: "done" });
+const command = (id: string, join: JoinMode = "any"): CommandNode =>
+  ({ id, kind: "command", x: 0, y: 0, join, run: "deploy.sh" });
 
 const edge = (id: string, from: string, to: string, over: Partial<FlowEdge> = {}): FlowEdge =>
   ({ id, from, to, cond: { kind: "pr-merged" }, action: "notify", ...over });
@@ -357,5 +359,57 @@ describe("evaluateFlow — the carried action", () => {
     );
     const out = run(flow, [status("ASM-1", { merged: true }), status("ASM-2", { merged: true })]);
     expect(out.fired.map((f) => f.action)).toEqual(["notify", "notify"]);
+  });
+});
+
+// `command-succeeded` is a rule wired FROM a command node onward ("deploy, then
+// verify, then message me"). It is answered in `evaluate.ts`, not `evalCond` —
+// see `commandSucceeded`'s own doc comment there — by reading the command
+// node's INCOMING edge(s), which is why every fixture here needs a command node
+// with edges pointing INTO it, stamped exactly the way `applyFired` (runner.ts)
+// stamps them, rather than a `RunStatus`.
+describe("evaluateFlow — command-succeeded", () => {
+  it("is met when the edge into the command node succeeded", () => {
+    const flow = flowWith(
+      [place("a", "ASM-1"), command("cmd"), notify("z")],
+      [edge("in", "a", "cmd", { firedAt: NOW - 1_000, firedNote: "ran deploy.sh in repo-ASM-1" }),
+       edge("e1", "cmd", "z", { cond: { kind: "command-succeeded" } })],
+    );
+    expect(run(flow, []).fired.map((f) => f.edge.id)).toEqual(["e1"]);
+  });
+
+  it("is not met when that edge errored", () => {
+    const flow = flowWith(
+      [place("a", "ASM-1"), command("cmd"), notify("z")],
+      [edge("in", "a", "cmd", { error: "\"deploy.sh\" exited with code 1." }),
+       edge("e1", "cmd", "z", { cond: { kind: "command-succeeded" } })],
+    );
+    expect(run(flow, []).fired).toEqual([]);
+  });
+
+  it("is not met before the command has run at all", () => {
+    const flow = flowWith(
+      [place("a", "ASM-1"), command("cmd"), notify("z")],
+      // The incoming edge is wired but neither fired nor errored yet.
+      [edge("in", "a", "cmd"), edge("e1", "cmd", "z", { cond: { kind: "command-succeeded" } })],
+    );
+    expect(run(flow, [status("ASM-1")]).fired).toEqual([]);
+  });
+
+  it("reads the edge that actually performed, not a stamped-only sibling", () => {
+    // Two rules trigger the same command node. Only one performs — here it
+    // errored — and its sibling is demoted to a stamped-only latch, exactly
+    // the shape `applyFired`'s per-target dedupe gives it: `firedAt` set, no
+    // `error`, and a note that says nothing ran. Indistinguishable from a
+    // genuine success by `firedAt` and `error` alone, in isolation — which is
+    // exactly why "succeeded" must be answered from ALL incoming edges, not
+    // by picking one and asking only it.
+    const flow = flowWith(
+      [place("a", "ASM-1"), place("b", "ASM-2"), command("cmd"), notify("z")],
+      [edge("perf", "a", "cmd", { error: "\"deploy.sh\" exited with code 1." }),
+       edge("sib", "b", "cmd", { firedAt: NOW - 1_000, firedNote: "another edge into this target already acted" }),
+       edge("e1", "cmd", "z", { cond: { kind: "command-succeeded" } })],
+    );
+    expect(run(flow, []).fired).toEqual([]);
   });
 });

@@ -44,6 +44,7 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
   "nothing-to-push": "nothing to push",
   "ticket-done": "ticket reached done",
   "ticket-status-is": "ticket status is…",
+  "command-succeeded": "the command succeeded",
 };
 
 /** What either presentation offers in a condition picker. `agent-idle-over`
@@ -51,7 +52,11 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
  * name) and this phase has no input for either — offering them would create
  * a rule waiting on a fixed 10 minutes or on the empty string, which never
  * matches. They stay in `COND_LABEL` because a flow hand-edited on disk can
- * still hold one and its rule must still render, in both presentations. */
+ * still hold one and its rule must still render, in both presentations.
+ * `command-succeeded` carries no parameter, so unlike those two it is NOT
+ * filtered out below — the drawer can offer it on any rule, though only one
+ * pointing out of a command node ever does anything once armed (see
+ * `evaluate.ts`'s `commandSucceeded`). */
 export const OFFERED_CONDS: Condition["kind"][] = (
   Object.keys(COND_LABEL) as Condition["kind"][]
 ).filter((k) => k !== "agent-idle-over" && k !== "ticket-status-is");

@@ -54,6 +54,13 @@ const LABEL: Record<Condition["kind"], string> = {
   "nothing-to-push": "nothing to push",
   "ticket-done": "ticket reached done",
   "ticket-status-is": "ticket status is…",
+  // Present here only because this `Record` must cover every `Condition["kind"]`
+  // to typecheck — NOT because this condition needs a toggle. It needs neither
+  // PR facts nor the Live signal: its verdict comes from the command node's own
+  // incoming edge, stamped straight onto the flow regardless of what the board
+  // can currently observe (see `evaluate.ts`'s `commandSucceeded`). Deliberately
+  // absent from both `NEEDS_LIVE` and `NEEDS_PR` below for that reason.
+  "command-succeeded": "the command succeeded",
 };
 
 export function unfirableRules(flow: Flow, sources: SourceState): UnfirableRule[] {

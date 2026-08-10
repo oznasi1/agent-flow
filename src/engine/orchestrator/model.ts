@@ -73,7 +73,15 @@ export type CondKind =
   | "tree-clean"
   | "has-uncommitted"
   | "nothing-to-push"
-  | "ticket-done";
+  | "ticket-done"
+  /** Whether the command a LATER rule points past a `CommandNode` actually ran
+   * and succeeded — see that node's own doc comment. Bare, like every other
+   * entry here, but answered nowhere near them: `evaluate.ts`'s `isMet`
+   * intercepts this kind before `conditions.ts`'s `evalCond` ever sees it,
+   * because the verdict lives on the command node's INCOMING edge, not on any
+   * `RunStatus` `evalCond` could be handed. `conditions.ts` still carries a
+   * documented arm for it, so it stays a total function over every kind. */
+  | "command-succeeded";
 
 /** Parameterised where it has to be, a bare kind everywhere else. */
 export type Condition =

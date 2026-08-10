@@ -21,6 +21,36 @@ export const MAX_LAUNCHES_PER_PASS = 3;
  * so blocking it on an unknown state would invert it. */
 const AGENT_CONDS: Set<Condition["kind"]> = new Set(["agent-ended-turn", "agent-idle-over"]);
 
+/** Whether the command a `command-succeeded` rule depends on actually ran and
+ * succeeded. Lives here, not in `conditions.ts`, because a command node is not
+ * a place: `evalCond`'s `CondContext` is built around a live `RunStatus` — an
+ * agent, its repos, its PR — and a command node has none of those for it to
+ * read (see that kind's own documented, unreachable arm in `conditions.ts`).
+ * The verdict instead lives on the command node's INCOMING edge, which
+ * `applyFired` (runner.ts) stamps with `firedAt` plus either an `error` or a
+ * success note — and reading that needs the whole `Flow` in scope, which only
+ * this module has.
+ *
+ * Deliberately does NOT try to identify which incoming edge "is the
+ * performer". A settled edge's own stamp does not say that: `applyFired`
+ * gives a demoted per-target-dedupe SIBLING the exact same shape a successful
+ * performer gets — `firedAt` set, no `error` — and the only thing that tells
+ * the two apart is the literal text of `firedNote` ("another edge into this
+ * target already acted" vs. whatever the command's own outcome said), a
+ * magic string this function would have to import from `runner.ts` to match
+ * against. It does not need to: `applyFired`'s demoted-sibling branch NEVER
+ * sets `error` — only a PERFORMED edge's outcome can — so an `error` on any
+ * incoming edge can only be the actual performer's, whichever one that was.
+ * That is enough to answer correctly with two aggregate questions instead of
+ * one identity question: "did anything error" (if so, the run failed, no
+ * matter how many stamped-only siblings say nothing happened) and, only if
+ * not, "has anything fired at all" (if not, the command has not run yet). */
+function commandSucceeded(flow: Flow, commandNodeId: string): boolean {
+  const incoming = incomingEdges(flow, commandNodeId);
+  if (incoming.some((e) => e.error !== undefined)) return false;
+  return incoming.some((e) => e.firedAt !== undefined);
+}
+
 export interface EvalInput {
   flow: Flow;
   /** Every status the Deck built this pass, in any order. */
@@ -92,6 +122,11 @@ export function evaluateFlow(i: EvalInput): EvalResult {
 
   /** Is this edge's condition true right now? `undefined` means "cannot say". */
   const isMet = (e: FlowEdge): boolean | undefined => {
+    // Answered from the whole flow, not from a place's `RunStatus` — see
+    // `commandSucceeded`'s own doc comment. Intercepted before the place/status
+    // lookup below, which a command node's incoming edges have no use for and
+    // would otherwise report as an unhelpful "gone" or a silent never-fires.
+    if (e.cond.kind === "command-succeeded") return commandSucceeded(i.flow, e.from);
     const from = findNode(i.flow, e.from);
     // A planned source has no run to observe yet. Not a problem — just not ready.
     if (!from || !isPlace(from)) return undefined;

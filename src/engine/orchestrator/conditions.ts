@@ -102,6 +102,21 @@ export function evalCond(cond: Condition, c: CondContext): boolean {
       return c.status.ticketCategory === "done";
     case "ticket-status-is":
       return c.status.ticketStatus === cond.status;
+    case "command-succeeded":
+      // Not answerable here. Every OTHER arm above is a pure function of the
+      // one `RunStatus` a `CondContext` carries — a live agent, its repos, its
+      // PR — because a place always resolves to exactly one of each. A command
+      // node is not a place: nothing in `c` says what a shell command's exit
+      // code was, because nothing about a command node ever produces a
+      // `RunStatus` for one to live in. The verdict instead lives on the
+      // command node's INCOMING edge — `firedAt` plus either an `error` or a
+      // success note, stamped by `applyFired` in runner.ts — and reading that
+      // needs the whole `Flow`, which only `evaluate.ts` has in scope. That is
+      // where this kind is actually decided (see `commandSucceeded` there);
+      // `evaluate.ts`'s `isMet` intercepts it before it ever reaches this
+      // switch. This arm exists only so `evalCond` stays total over every
+      // `Condition` kind for any OTHER caller — it is never the real answer.
+      return false;
   }
 }
 
@@ -202,5 +217,11 @@ export function describeCond(cond: Condition, c: CondContext): string {
     }
     case "ticket-status-is":
       return c.status.ticketStatus ?? "no ticket status";
+    case "command-succeeded":
+      // Unreachable through the drawer today, and for the same reason `evalCond`
+      // gives above: `observationOf` (orchestratorRule.ts) only calls
+      // `describeCond` for an edge whose SOURCE is a place, and this kind's
+      // source is always a command node. Kept only for exhaustiveness.
+      return "";
   }
 }
