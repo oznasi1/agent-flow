@@ -65,6 +65,18 @@ const twoPlaces = (edgeOver: Partial<Flow["edges"][number]> = {}) =>
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", ...edgeOver }],
   });
 
+/** A place feeding a command node — the pairing `run` implies (`actionFor`).
+ * No UI yet builds this edge; it exercises `endLabel`'s command branch the
+ * same way `placeAndPlanned` exercises its planned one. */
+const placeAndCommand = (edgeOver: Partial<Flow["edges"][number]> = {}) =>
+  flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n2", kind: "command", x: 320, y: 0, join: "any", commandId: "deploy" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run", ...edgeOver }],
+  });
+
 describe("rows", () => {
   it("renders one row per edge, in a stable order", () => {
     render(<FlowList {...props({ flow: threeRules() })} />);
@@ -110,6 +122,18 @@ describe("rows", () => {
     render(<FlowList {...props({ flow: twoPlaces() })} />);
     const row = screen.getByTestId("flowlist-row-e1");
     expect(row.textContent).toContain("notify me");
+  });
+
+  // `endLabel` used to fall through to the literal word "notify" for any
+  // target that was neither a place nor planned work — honest for a real
+  // notify node, but paired with `ACTION_LABEL.run` it read as "THEN run
+  // notify": a rule that executes shell, described as if it sends a toast.
+  it("labels a command target by its own identifier, not the notify fallthrough", () => {
+    render(<FlowList {...props({ flow: placeAndCommand() })} />);
+    const row = screen.getByTestId("flowlist-row-e1");
+    expect(row.textContent).toContain("run"); // the action
+    expect(row.textContent).toContain("deploy"); // the target's own identifier
+    expect(row.textContent).not.toContain("notify");
   });
 
   // `coerceFlow` never fills `action` in, and a bare read never calls

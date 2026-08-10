@@ -138,11 +138,20 @@ export function truncatedNote(note: string | undefined): string {
   return trimmed.length > NOTE_TRUNCATE_AT ? `${trimmed.slice(0, NOTE_TRUNCATE_AT)}…` : trimmed;
 }
 
-/** How a node's end reads in a rule's sentence. */
+/** How a node's end reads in a rule's sentence. Named per kind rather than by
+ * a fallthrough default: a command node used to fall into the same "notify"
+ * string a genuine notify node gets, which — paired with `ACTION_LABEL.run`
+ * — would have a rule that executes shell read as "THEN run notify". Its own
+ * identifier is whichever of `commandId`/`run` the node actually carries;
+ * Task 5 owns refusing a node with both or neither, so this only has to
+ * degrade, not validate. */
 export function endLabel(flow: Flow, id: string): string {
   const n = flow.nodes.find((x) => x.id === id);
   if (!n) return "?";
-  return n.kind === "place" ? n.runKey : n.kind === "planned" ? n.ticketKey : "notify";
+  if (n.kind === "place") return n.runKey;
+  if (n.kind === "planned") return n.ticketKey;
+  if (n.kind === "command") return n.commandId ?? n.run ?? "command";
+  return "notify";
 }
 
 /** The message the rule's notify target carries, or empty when the target is

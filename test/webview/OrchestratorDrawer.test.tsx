@@ -299,6 +299,20 @@ describe("the tray", () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
+  // `isAgentNode` used to assert `n is PlaceNode | PlannedNode` from a body
+  // that only checked `!== "notify"` — TypeScript never checks a predicate's
+  // body against its claim, so a command node passed the guard and was
+  // narrowed (wrongly) to PlannedNode, rendering a chip with a blank key,
+  // "not taken" as its sub, and `aria-label="Remove undefined"`.
+  it("excludes a command node from the agent tray, not just notify", () => {
+    const existing = flow({
+      nodes: [{ id: "n1", kind: "command", x: 0, y: 0, join: "any", commandId: "deploy" }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [existing] })} />);
+    expect(screen.getByText(/Drag a card from the board to attach an agent/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Remove/ })).toBeNull();
+  });
+
   it("lists an attached node as a chip, and removes it", () => {
     const onSave = vi.fn();
     const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" }] });
@@ -399,6 +413,21 @@ describe("the canvas", () => {
     const n1 = screen.getByTestId("orch-node-n1");
     expect(n1.textContent).toContain("ASM-1");
     expect(n1.textContent).toContain("agent-flow");
+  });
+
+  // The top label used to fall through a `place ? … : planned ? … : "notify"`
+  // ternary that gave every other kind the literal word "notify" — honest for
+  // a real notify node, but a lie for a command, which `actionFor` derives as
+  // `run`. Pins both the identifier (via `endLabel`) and the status line.
+  it("labels a command node by its identifier, and says what it does rather than reading as notify", () => {
+    const existing = flow({
+      nodes: [{ id: "n1", kind: "command", x: 0, y: 0, join: "any", commandId: "deploy" }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [existing] })} />);
+    const n1 = screen.getByTestId("orch-node-n1");
+    expect(n1.textContent).toContain("deploy");
+    expect(n1.textContent).not.toContain("notify");
+    expect(n1.textContent).toContain("runs a command");
   });
 
   // Phase 1's Critical bug, reintroduced in the node badge: `runs.find(...)?.agent

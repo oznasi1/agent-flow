@@ -145,10 +145,14 @@ function placeCandidates(flow: Flow, runs: RunStatus[]): { key: string; label: s
 }
 
 /** The tray shows what a condition can attach to: a place already on disk, or
- * work not yet launched. A pure `notify` terminal is neither, so it never
- * appears here. */
+ * work not yet launched. Named by the two kinds it admits, not by the ones it
+ * excludes — `!== "notify"` once let a `CommandNode` through too (TypeScript
+ * does not check a predicate's body against its claimed type), which the
+ * `.ticketKey`/`.runKey` accesses below then read off a node that has
+ * neither: a chip with a blank `.k`, "not taken" as its sub, and
+ * `aria-label="Remove undefined"`. */
 function isAgentNode(n: FlowNode): n is PlaceNode | PlannedNode {
-  return n.kind !== "notify";
+  return n.kind === "place" || n.kind === "planned";
 }
 
 /** A node's live state, from the card it points at. `undefined` when the node is
@@ -919,12 +923,15 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               >
                 <div className="l1">
                   <span className="d" style={{ background: st ? STATE_HUE[st] : "var(--dim)" }} />
-                  <span className="k">
-                    {n.kind === "place" ? n.runKey : n.kind === "planned" ? n.ticketKey : "notify"}
-                  </span>
+                  {/* `endLabel` (orchestratorRule.ts), not a second hand-typed
+                      ternary: this exact fallthrough used to give a command
+                      node the literal word "notify" — a canvas chip lying
+                      about what it does — because it fell to the same default
+                      a genuine notify node reads correctly. */}
+                  <span className="k">{endLabel(flow, n.id)}</span>
                 </div>
                 <div className="st">
-                  {n.kind === "place" ? n.repo : n.kind === "planned" ? "not taken" : n.kind === "notify" ? n.message : ""}
+                  {n.kind === "place" ? n.repo : n.kind === "planned" ? "not taken" : n.kind === "notify" ? n.message : n.kind === "command" ? "runs a command" : ""}
                 </div>
                 <span
                   className="orch-port in"
