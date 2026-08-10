@@ -3783,6 +3783,29 @@ describe("a met launch rule acts", () => {
   const toastCount = (p: ReturnType<typeof lastPanel>) => posts(p).filter((m) => m.type === "toast").length;
   const lastWrite = () => h.writeFlow.mock.calls.at(-1)![2] as Flow;
 
+  it("acts on the node's action, not the record's stale mirror of it", async () => {
+    // The edge's stored `action` is a backward-compatibility mirror (see
+    // `FlowEdge.action`'s own doc comment), never an instruction: an edge saved
+    // as `notify` that points at PLANNED WORK is a launch, because the TARGET
+    // NODE is what decides. If the dispatch ever read the mirror again, this
+    // rule would silently do nothing but toast, for a wire the user drew to
+    // start a paid session.
+    const { send } = await warmed([launchFlow({
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    })]);
+    await send({ type: "deck:refresh" });
+    // The observable effect of a launch, not a mock shape: the launcher was
+    // called, and for the ticket the planned node names.
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    expect((h.launchPlanned.mock.calls.at(-1)![0] as { node: { ticketKey: string } }).node.ticketKey).toBe("ASM-12");
+    // And it is recorded as the launch it was, so `applyFired`'s stamp agrees
+    // with what this pass actually performed.
+    const w = lastWrite();
+    expect(w.edges[0].firedAt).toBeTypeOf("number");
+    expect(w.edges[0].error).toBeUndefined();
+    expect(w.edges[0].firedNote).toContain("ASM-12");
+  });
+
   it("does nothing at all when another window holds the flows lock", async () => {
     const { p, send } = await warmed([launchFlow()]);
     h.acquire.mockReturnValue(false);
