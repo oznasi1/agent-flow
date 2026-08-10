@@ -2,10 +2,11 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { exec } from "child_process";
 import { getConfig, providerLabel, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
+import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId } from "./engine/orchestrator/flowIo";
 import { LOCK_TTL_MS, acquire, release } from "./engine/orchestrator/lock";
@@ -14,6 +15,7 @@ import { unfirableRules } from "./engine/orchestrator/armability";
 import { ActOutcome, applyFired, notifyLines } from "./engine/orchestrator/runner";
 import { promoteToPlace } from "./engine/orchestrator/promote";
 import { LaunchTicketDetail, launchPlanned } from "./engine/orchestrator/launch";
+import { CommandRunner, resolveCommand, runCommand } from "./engine/orchestrator/command";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
@@ -74,19 +76,111 @@ function nextPlannedNodeId(flow: Flow): string {
   return `n${i}`;
 }
 
-/** What a performing edge (`launch` or `seed`) is about to spend money on, resolved
+/** How much of a command's captured output `exec` buffers before it kills the child.
+ * `exec`'s own default is 1 MiB; stated here rather than left implicit because it is
+ * a real limit on what the output channel can show for a chatty deploy, and because
+ * exceeding it is one of the non-numeric failures `shellCommandRunner` has to map to
+ * an exit code below. */
+const COMMAND_MAX_OUTPUT_BYTES = 1024 * 1024;
+
+/** The exit code reported for a command the runner had to KILL rather than one that
+ * chose its own code — `timeout(1)`'s convention, so it reads as what it is to
+ * anyone who has met a CI timeout. A command is free to exit 124 by itself, which
+ * is why the runner also writes the reason into `stderr`: the code is the summary,
+ * the stderr line is the evidence. */
+const COMMAND_KILLED_EXIT_CODE = 124;
+
+/** The one place a flow's command actually reaches a shell, and the only place in
+ * this feature that holds a process handle.
+ *
+ * `child_process.exec`, deliberately, not `spawn`: `exec` takes a `timeout` option
+ * and Node arms that timer itself, sending `killSignal` to the child when it
+ * expires. That is what makes `CommandRunner`'s timeout a real contract instead of
+ * a number passed around — `command.ts` awaits this promise unconditionally and adds
+ * no `Promise.race` (see its own doc comment on why a caller-side race would trade a
+ * hung pass for a silently orphaned process), so a runner that never settled would
+ * hold the flows-directory lock for the life of the extension host and stall every
+ * other window's Deck refresh. A `spawn` with a hand-rolled timer would have to
+ * reimplement exactly this and could get it wrong; `exec` cannot forget.
+ *
+ * `SIGKILL`, not the default `SIGTERM`: a deploy script that traps or ignores TERM
+ * would otherwise keep running past its own deadline while the runner reported it
+ * killed.
+ *
+ * Never rejects. Every failure — a non-zero exit, a timeout kill, a shell that could
+ * not even start, more output than `maxBuffer` holds — resolves as a `code`/`stdout`/
+ * `stderr` triple, because the caller is a poll loop inside the Deck's refresh and
+ * `runCommand`'s "never throws" guarantee is worth more than a distinction between
+ * kinds of failure that all end the same way: the rule latches with an error. */
+export const shellCommandRunner: CommandRunner = (command, opts) =>
+  new Promise((resolve) => {
+    exec(
+      command,
+      {
+        cwd: opts.cwd,
+        // The contract. Node kills the child here; nothing else in this feature can.
+        timeout: opts.timeoutMs,
+        killSignal: "SIGKILL",
+        maxBuffer: COMMAND_MAX_OUTPUT_BYTES,
+        // Pins the string-typed `exec` overload as well as the decoding: a Buffer
+        // pair would satisfy `CommandRunner`'s types only after a cast, and the
+        // output is going straight into a log channel and a receipt.
+        encoding: "utf8",
+        windowsHide: true,
+      },
+      (err, stdout, stderr) => {
+        if (!err) return resolve({ code: 0, stdout, stderr });
+        // A number means the command chose it: an ordinary failing exit, and the
+        // most common case by far. Nothing to explain — the code IS the reason.
+        if (typeof err.code === "number") return resolve({ code: err.code, stdout, stderr });
+        // A STRING code is one of Node's own (`ERR_CHILD_PROCESS_STDIO_MAXBUFFER`,
+        // `ENOENT` for a shell that isn't there). The command never got to report
+        // anything, so the message is the only evidence there is.
+        if (typeof err.code === "string") return resolve({ code: 1, stdout, stderr: withReason(stderr, err.message) });
+        // No code at all and a signal: this is the timeout kill above (or a kill
+        // from outside). Say which, and say it happened rather than letting a
+        // 124 stand alone and read like the command's own choice.
+        if (err.killed || err.signal) {
+          return resolve({
+            code: COMMAND_KILLED_EXIT_CODE,
+            stdout,
+            stderr: withReason(stderr, `killed by ${err.signal ?? "signal"} — it did not finish within ${opts.timeoutMs} ms.`),
+          });
+        }
+        return resolve({ code: 1, stdout, stderr: withReason(stderr, err.message) });
+      },
+    );
+  });
+
+/** Append the runner's own explanation to whatever the command managed to write,
+ * on its own line. Joined rather than concatenated for the same reason
+ * `runCommand` joins stdout and stderr: a partial last line with no newline would
+ * otherwise run straight into the reason ("Deploying…killed by SIGKILL"). */
+function withReason(stderr: string, reason: string): string {
+  return stderr.length > 0 ? `${stderr}\n${reason}` : reason;
+}
+
+/** What a performing edge (`launch`, `seed` or `run`) is about to spend on, resolved
  * just far enough for the once-per-flow confirmation to name it. A `launch` has a
  * ticket and a set of repos; a `seed` has no ticket at all — only the place it opens
- * another agent in and the prompt mode it uses. `note` rides along from the edge on
- * both: it is what the agent will actually be told, so it belongs in the same
- * consent gate as the ticket/repos/mode. */
+ * another agent in and the prompt mode it uses; a `run` has neither, and carries the
+ * resolved command TEXT, because for a shell command the text is not a description
+ * of what will happen, it IS what will happen — a label like "Deploy" tells the user
+ * nothing about `deploy.sh --env=prod`. `note` rides along from the edge on all
+ * three: it is what the agent will actually be told, so it belongs in the same
+ * consent gate as the ticket/repos/mode. For a `run` it is deliberately not rendered
+ * as its own clause — `resolveCommand` has already spliced it into `text` at
+ * `{note}`, or dropped it because the template has no `{note}` at all — but it is
+ * kept on the member so every spend target says what it carries. */
 type SpendTarget =
   | { action: "launch"; node: PlannedNode; note?: string }
-  | { action: "seed"; node: PlaceNode; mode?: string; note?: string };
+  | { action: "seed"; node: PlaceNode; mode?: string; note?: string }
+  | { action: "run"; node: CommandNode; text: string; label: string; note?: string };
 
-/** How much of a rule's note the once-per-flow confirmation shows. The modal is
- * naming what the agent will be told, not reproducing it in full — a pasted
- * paragraph must not grow the dialog unboundedly. */
+/** How much of a rule's note — or of a command's resolved text, which has exactly
+ * the same "the user pasted a paragraph" problem — the once-per-flow confirmation
+ * shows. The modal is naming what the agent will be told (or what will be
+ * executed), not reproducing it in full: neither may grow the dialog unboundedly. */
 const NOTE_PREVIEW_MAX = 160;
 
 function notePreview(note: string): string {
@@ -680,10 +774,21 @@ export class DeckPanel {
     return target && isPlace(target) ? target : undefined;
   }
 
-  /** What a `launch` or `seed` edge would actually spend money on, resolved just
+  /** The command node a `run` edge points at, or `undefined` when it points at
+   * anything else — the third of `plannedTarget`/`placeTarget`, resolved the same
+   * way and reachable for the same one reason: the target's kind changed under this
+   * pass, between the read `evaluateFlow` derived "run" from and the copy being
+   * acted against. */
+  private commandTarget(flow: Flow, edge: FlowEdge): CommandNode | undefined {
+    const target = findNode(flow, edge.to);
+    return target && isCommand(target) ? target : undefined;
+  }
+
+  /** What a `launch`, `seed` or `run` edge would actually spend on, resolved just
    * far enough to ask about it — never as far as reading a ticket or touching
    * disk. `undefined` means the edge cannot spend anything (wrong kind of
-   * target), so it must not count toward the once-per-flow gate below.
+   * target, or a command that cannot be resolved to any text), so it must not
+   * count toward the once-per-flow gate below.
    *
    * `action` is passed IN — the value `evaluateFlow` derived for this pass and
    * carried on the `FiredEdge` — rather than read off `edge.action` or re-derived
@@ -693,15 +798,23 @@ export class DeckPanel {
    * of `flow`, which is why a verb whose target has since changed kind resolves
    * to `undefined` and gates nothing.
    *
-   * `run` is deliberately unresolved here, and this is a gap, not an oversight:
-   * `isSpendAction("run") === true` (model.ts) says a command SHOULD gate the
-   * same once-per-flow ask a launch or seed does — it runs shell on the user's
-   * machine, unattended — but `SpendTarget` has no `run` member yet to return.
-   * Task 6 adds it, resolving a command node the same way `plannedTarget`/
-   * `placeTarget` resolve theirs. Until that lands, a `run` edge falls out of
-   * `wantsSpend` below with no consent asked — do NOT add command EXECUTION to
-   * `performEdge` before this arm exists, or a flow will run a command with no
-   * ask ever having been possible. */
+   * A `run` resolves through `resolveCommand` — the SAME function `performEdge`
+   * runs the command with, so the text this gate shows cannot differ from the text
+   * that executes. This is what makes `isSpendAction("run") === true` real:
+   * without this arm a `run` edge falls out of `wantsSpend` below, the
+   * once-per-flow ask never fires for a flow whose only acting rule is a command,
+   * and the first shell command runs on the user's machine unattended with no
+   * prompt ever having been shown — which `package.json`'s own `agentFlow.commands`
+   * copy ("a flow asks once before it runs its first command") already promises it
+   * does not. Do not collapse this arm back into a `return undefined`.
+   *
+   * A command that will not resolve returns `undefined` for exactly the reason a
+   * wrong-kinded target does: `performEdge` stamps such a rule as an error below
+   * and runs nothing, so gating on it would ask the user to approve a rule that
+   * can never do anything. `resolveCommand` is called with the edge's note so the
+   * resolution decision here is the same one made there — a node whose `run` is
+   * blank, or which names an unconfigured `commandId`, or which carries both,
+   * refuses identically in both places. */
   private spendTarget(flow: Flow, edge: FlowEdge, action: FlowAction | undefined): SpendTarget | undefined {
     // `isSpendAction` is the one predicate for "does this rule cost money" — the
     // caller hands every performing edge to this function rather than
@@ -713,21 +826,34 @@ export class DeckPanel {
       const node = this.plannedTarget(flow, edge);
       return node ? { action: "launch", node, note: edge.note } : undefined;
     }
-    // See this function's own doc comment: unresolved on purpose until Task 6.
-    if (action === "run") return undefined;
+    if (action === "run") {
+      const node = this.commandTarget(flow, edge);
+      if (!node) return undefined;
+      const resolved = resolveCommand(node, getConfig().commands, edge.note);
+      if (!resolved.ok) return undefined;
+      return { action: "run", node, text: resolved.text, label: resolved.label, note: edge.note };
+    }
     const node = this.placeTarget(flow, edge);
     return node ? { action: "seed", node, mode: edge.mode, note: edge.note } : undefined;
   }
 
   /** Ask, once per flow, before it ever spends anything — naming what will actually
    * happen, because that is what the money is spent on: a launch names the ticket
-   * and the repos it would open, a seed names the place (it has no ticket to name).
-   * Both name the prompt mode. Writes the answer (an approval, or a disarm) and
-   * nothing else; the pass that asked never acts. Dismissing it writes nothing at
-   * all, so the flow stays armed and is asked again later. */
+   * and the repos it would open, a seed names the place (it has no ticket to name),
+   * a run names the COMMAND TEXT. The first two name the prompt mode; a command has
+   * none. Writes the answer (an approval, or a disarm) and nothing else; the pass
+   * that asked never acts. Dismissing it writes nothing at all, so the flow stays
+   * armed and is asked again later.
+   *
+   * The gate is once per FLOW and shared by all three verbs, so a flow already
+   * approved for a launch runs a command later with no fresh prompt. That is the
+   * design — a mis-wired flow should cost one prompt, not a string of paid
+   * sessions — but it is also why the wording below has to be right for whichever
+   * spend happens to come FIRST: for a flow whose first spend is a command, this
+   * modal is the only place the user ever sees what will be executed. */
   private async askFirstSpend(flow: Flow, target: SpendTarget): Promise<void> {
     const cfg = getConfig();
-    const ACT = target.action === "launch" ? "Launch" : "Seed";
+    const ACT = target.action === "launch" ? "Launch" : target.action === "run" ? "Run" : "Seed";
     const DISARM = "Disarm";
     // What the agent will actually be told is material to this consent, so a note
     // rides along in the same sentence as the prompt mode — absent, it contributes
@@ -745,6 +871,17 @@ export class DeckPanel {
             mode?.label ?? target.node.mode
           }" prompt${noteClause}, unattended. It will keep launching on its own from now on.`;
         })()
+      : target.action === "run"
+      ? // The resolved TEXT, not `target.label`: a configured command's label can
+        // be anything ("Deploy"), and approving "Deploy" is not approving
+        // `deploy.sh --env=prod`. Truncated through the same `notePreview` the
+        // note clause uses — a pasted one-liner must not grow the dialog
+        // unboundedly either. No `noteClause`: the note is already inside `text`
+        // wherever the template asked for it (see `SpendTarget`), so repeating it
+        // as its own clause would suggest a second thing was about to be sent
+        // somewhere. No prompt mode either — nothing here reads a prompt.
+        `${flow.name} is ready to run "${notePreview(target.text)}" on this machine, unattended. ` +
+          `It will keep running commands on its own from now on.`
       : (() => {
           const mode = cfg.promptModes.find((m) => m.id === target.mode);
           return `${flow.name} is ready to seed another agent into ${target.node.repo} with the "${
@@ -829,24 +966,7 @@ export class DeckPanel {
       };
     }
     if (action === "seed") return this.performSeed(flow, edge, statuses);
-    // A `run` edge falls through to here today because `isSpendAction("run")`
-    // is true and this is the acting loop's only other branch — NOT because
-    // running a command is implemented. Without this arm it would fall into
-    // the launch resolution below and settle with "a launch rule must point
-    // at planned work", which is the wrong words for a command and would say
-    // nothing about the real gap: `spendTarget` (above) has no `run` member
-    // to resolve yet, so this edge never went through the once-per-flow
-    // consent ask either. Settles rather than defers — the same "so the rule
-    // doesn't retry every poll forever" reasoning as the `undefined` case
-    // above, and correct here too: nothing about the target will change on
-    // its own. Task 6 replaces this arm with real execution once `SpendTarget`
-    // gains its `run` member and the ask can actually happen first.
-    if (action === "run") {
-      return {
-        kind: "done",
-        outcome: { ok: false, error: `this rule points at a command, and running one isn't implemented yet.` },
-      };
-    }
+    if (action === "run") return this.performRun(flow, edge, statuses);
     const node = this.plannedTarget(flow, edge);
     if (!node) {
       return {
@@ -1013,6 +1133,137 @@ export class DeckPanel {
         }`,
       },
     };
+  }
+
+  /** Perform a `run` edge: execute a command node's command in a repo checkout.
+   * This is the only place in the product that runs a shell command the user is
+   * not watching, which is why nothing here guesses:
+   *
+   * - The command text comes from `resolveCommand` (via `runCommand`), which
+   *   refuses a node that names both a configured command and free text, or
+   *   neither, rather than picking one.
+   * - The directory comes from `commandCwd` below, which refuses or defers rather
+   *   than falling back to another checkout. `cd`-ing a deploy into the wrong
+   *   worktree is not something a later pass can undo.
+   * - The runner is `shellCommandRunner`, the only participant holding a process
+   *   handle and therefore the only one that can honour `COMMAND_TIMEOUT_MS`.
+   *
+   * Both outcomes latch. A failed command is `error` with no `firedAt`, so it is
+   * never retried until the user Resets it: a deploy that fails every poll is the
+   * command-node version of "one bad rule becomes twenty windows", except each
+   * retry is a real side effect on real infrastructure. `runCommand` never throws
+   * by contract, so the only way out of here is a decided one. */
+  private async performRun(flow: Flow, edge: FlowEdge, statuses: RunStatus[]): Promise<EdgeResult> {
+    const node = this.commandTarget(flow, edge);
+    if (!node) {
+      return {
+        kind: "done",
+        outcome: { ok: false, error: `a run rule must point at a command, and ${edge.to} is not.` },
+      };
+    }
+    const where = this.commandCwd(flow, edge, node, statuses);
+    if ("defer" in where) return { kind: "defer", reason: where.defer };
+    if ("refusal" in where) return where.refusal;
+    // `this.log` is the Deck's output channel, and it is the ONLY place a
+    // command's stdout/stderr ever lands: an unattended deploy that fails is not
+    // diagnosable from a toast that says it exited 1.
+    const outcome = await runCommand(
+      { node, commands: getConfig().commands, note: edge.note, cwd: where.cwd },
+      { run: shellCommandRunner, log: this.log },
+    );
+    if (!outcome.ok) {
+      // Points at the channel only when there is actually something in it — a
+      // refusal to resolve the command produced no output at all, and sending the
+      // user to an empty log to diagnose it would be a small lie.
+      const message = `${flow.name}: ${outcome.message}${
+        outcome.output && outcome.output.length > 0 ? " The Agent Flow Deck output channel has the output." : ""
+      }`;
+      return {
+        kind: "done",
+        outcome: { ok: false, error: outcome.message },
+        receipt: { level: "error", message },
+      };
+    }
+    return {
+      kind: "done",
+      // Names the repo as well as the command: "ran deploy" in a flow touching
+      // three checkouts does not say what happened. A command node is not a
+      // place, so there is nothing to promote — the same as a seed.
+      outcome: { ok: true, note: `ran ${outcome.label} in ${where.repo}` },
+      receipt: { level: "success", message: `${flow.name}: ran ${outcome.label} in ${where.repo}.` },
+    };
+  }
+
+  /** Which directory a command node's command runs in, and the repo name to call it
+   * by. Three answers, and the difference between them is the whole safety story of
+   * this task: a resolved `cwd`, a `refusal` that latches, or a `defer` that leaves
+   * the rule pending for the next pass. There is deliberately no fourth answer that
+   * picks some other checkout — running a deploy in the wrong one is not recoverable,
+   * so anything unresolved must not run at all.
+   *
+   * `node.cwdRepo` wins when set, and is resolved against the SOURCE PLACE's run
+   * first, falling back to the checkouts on this machine. Order matters: a place's
+   * repo path is that run's WORKTREE (`/repos/aws-ops-ASM-12`), while `discoverRepos`
+   * only knows the main checkout (`/repos/aws-ops`) — so for a repo that belongs to
+   * the chain's own run, the run's copy is the one the user means.
+   *
+   * A named repo that resolves NOWHERE is a refusal, not a defer, and that is the
+   * deliberate choice between the two: the name was typed by the user, it is
+   * configuration rather than a snapshot, and it will not start existing on its own.
+   * Latching surfaces it in the drawer with a Reset next to it — the same posture
+   * `launchPlanned` takes for a planned node naming repos that aren't checked out.
+   *
+   * With no `cwdRepo`, the directory is inherited from the place the rule came from
+   * (what `CommandNode.cwdRepo`'s own doc calls the common case). If that cannot be
+   * resolved this pass, the answer is a DEFER: unlike a typed name, "the run isn't on
+   * this pass's board" is a fact about a snapshot rebuilt from disk every six seconds,
+   * nothing was spent, and `evaluateFlow` only fires an edge whose source IS a place
+   * with a live status — so reaching this at all means the graph changed under the
+   * pass, and the next pass gets a clean read rather than a permanent latch. */
+  private commandCwd(
+    flow: Flow,
+    edge: FlowEdge,
+    node: CommandNode,
+    statuses: RunStatus[],
+  ): { cwd: string; repo: string } | { refusal: EdgeDone } | { defer: string } {
+    const source = findNode(flow, edge.from);
+    const fromPlace = source && isPlace(source) ? source : undefined;
+    // The source run's own repos, which for a worktree run are the worktree paths.
+    const runRepos = fromPlace ? statuses.find((s) => s.run.key === fromPlace.runKey)?.run.repos ?? [] : [];
+    // Blank or non-string counts as ABSENT, not as a name that resolves to nothing:
+    // `config.ts`'s `readCommands` and `command.ts`'s `resolveCommand` both treat a
+    // blank string as absent, and a hand-edited flow file can carry `"cwdRepo": ""`
+    // or `42`. Refusing such a node outright would strand a rule whose author plainly
+    // meant "wherever the rule came from".
+    const named = typeof node.cwdRepo === "string" && node.cwdRepo.trim() !== "" ? node.cwdRepo : undefined;
+    if (named !== undefined) {
+      const inRun = runRepos.find((r) => r.name === named);
+      if (inRun) return { cwd: inRun.path, repo: inRun.name };
+      const cfg = getConfig();
+      const onDisk = discoverRepos(cfg.reposRoot, cfg.repoBlocklist).find((r) => r.name === named);
+      if (onDisk) return { cwd: onDisk.path, repo: onDisk.name };
+      return {
+        refusal: {
+          kind: "done",
+          outcome: {
+            ok: false,
+            error: `this command runs in "${named}", which isn't checked out on this machine — not running it somewhere else.`,
+          },
+        },
+      };
+    }
+    if (!fromPlace) {
+      return {
+        defer: `${edge.from} is not a place, so there is no repo for the command at ${edge.to} to run in — give it a working directory`,
+      };
+    }
+    const repo = runRepos.find((r) => r.name === fromPlace.repo);
+    if (!repo) {
+      return {
+        defer: `${fromPlace.repo} is not among run ${fromPlace.runKey}'s repos on this pass, so the command at ${edge.to} has no directory to run in`,
+      };
+    }
+    return { cwd: repo.path, repo: repo.name };
   }
 
   private startPolling(): void {
