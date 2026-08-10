@@ -7,7 +7,9 @@ import type { ChangedFile } from "../../src/engine/git";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef, Task } from "../../src/types";
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
-import type { CommandNode, Flow } from "../../src/engine/orchestrator/model";
+import type { CommandNode, Flow, FlowEdge } from "../../src/engine/orchestrator/model";
+import { BRANCH_CI_ARGS } from "../../src/engine/orchestrator/branchCi";
+import { GH_TIMEOUT_MS } from "../../src/engine/pr/provider";
 import type { AgentProvider } from "../../src/config";
 import type { FlowCommand } from "../../src/types";
 
@@ -6686,5 +6688,163 @@ describe("the poll and the close confirmation", () => {
     p._fireDispose();
     await settle();
     expect(commands.executeCommand).toHaveBeenCalledWith("agentFlow.openDeck");
+  });
+});
+
+// The branch-CI condition (Task 8) is the only one whose fact does not come out of
+// a `RunStatus`: it names a repo and a branch, and the verdict is fetched with `gh`
+// here, host-side, because `conditions.ts` is bundled into the webview and cannot
+// spawn anything. What these cases pin is the FETCH — its argv and cwd, how often it
+// runs, and that nothing it cannot read ever reads as green.
+describe("branch-CI verdicts for an armed flow", () => {
+  const REPO = "aws-ops";
+  const branchRule = (id: string, branch: string, repo = REPO): FlowEdge => ({
+    id, from: "n1", to: `z-${id}`,
+    cond: { kind: "branch-ci-passed", repo, branch },
+    action: "notify",
+  });
+
+  /** An armed flow whose rules all wait on a branch. One notify terminal per rule,
+   * so a met rule settles without spending anything. */
+  const branchFlow = (...edges: FlowEdge[]): Flow => ({
+    ...mkFlow("f1", "Deploy to staging"),
+    armed: true,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: REPO },
+      ...edges.map((e) => ({ id: e.to, kind: "notify" as const, x: 0, y: 0, join: "any" as const, message: `${e.id} fired` })),
+    ],
+    edges,
+  });
+
+  /** Three passes, because the fetch is deliberately out of band: pass 1 cannot even
+   * enqueue (the one-time `gh auth status` probe cannot settle inside the tick that
+   * starts it — see `showAndWarm`), pass 2 enqueues, pass 3 reads the verdict. The
+   * cost of not awaiting `gh` under the flows lock is exactly this one-poll delay,
+   * and it is safe only because an unfetched verdict is not green. */
+  const passes = async (n: number) => {
+    setConfig({ orchestrator: true });
+    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", REPO));
+    const log = vi.fn();
+    DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
+    await settled();
+    await settle();
+    for (let i = 1; i < n; i++) {
+      await lastPanel()._fire({ type: "deck:refresh" });
+      await settled();
+      await settle();
+    }
+    return { p: lastPanel(), log };
+  };
+
+  /** The flow as it was last written to the store, or undefined if it never was. */
+  const lastWritten = (): Flow | undefined => h.writeFlow.mock.calls.at(-1)?.[2] as Flow | undefined;
+  const firedIds = (): string[] =>
+    (lastWritten()?.edges ?? []).filter((e) => e.firedAt !== undefined).map((e) => e.id);
+
+  it("fetches once per distinct repo and branch, not once per rule", async () => {
+    // Ten rules on master. One `gh` call — the whole point of caching by
+    // `repo#branch` rather than fetching per node.
+    h.flows = [branchFlow(...Array.from({ length: 10 }, (_, i) => branchRule(`e${i}`, "master")))];
+    await passes(3);
+    const branchCalls = h.ghRun.mock.calls.filter((c) => c[1].includes("graphql"));
+    expect(branchCalls).toHaveLength(1);
+    const [file, args, opts] = branchCalls[0];
+    // Located, not the bare name — the extension host can inherit launchd's bare
+    // PATH, under which a Homebrew `gh` is invisible.
+    expect(file).toMatch(/gh$/);
+    expect(args).toEqual(BRANCH_CI_ARGS("master"));
+    // Asked from a checkout of that repo, because gh reads owner/name off its remote.
+    expect(opts).toEqual({ cwd: `/r/${REPO}`, timeoutMs: GH_TIMEOUT_MS });
+  });
+
+  it("fetches each branch of the same repo separately", async () => {
+    h.flows = [branchFlow(branchRule("e1", "master"), branchRule("e2", "release"))];
+    await passes(3);
+    const branches = h.ghRun.mock.calls
+      .filter((c) => c[1].includes("graphql"))
+      .map((c) => c[1].find((a: string) => a.startsWith("branch=")));
+    expect(branches.sort()).toEqual(["branch=master", "branch=release"]);
+  });
+
+  it("fires the rule once the branch reads as passed", async () => {
+    h.flows = [branchFlow(branchRule("e1", "master"))];
+    await passes(3);
+    expect(firedIds()).toEqual(["e1"]);
+  });
+
+  it("never fires when the gh call fails — an unreadable branch is not a green one", async () => {
+    // The worst outcome this feature can produce is a deploy triggered by a failed
+    // API call. A rejected fetch must leave the rule exactly where it was.
+    h.ghRun.mockRejectedValue(new Error("gh: API rate limit exceeded"));
+    h.flows = [branchFlow(branchRule("e1", "master"))];
+    const { log } = await passes(4);
+    expect(firedIds()).toEqual([]);
+    // Said out loud in the log, because an unfired rule looks like patience and
+    // nothing in the UI distinguishes "not green yet" from "could not be read".
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(`branch CI ${REPO}#master unreadable`));
+  });
+
+  it("never fires on a failing or still-running branch", async () => {
+    for (const state of ["FAILURE", "PENDING", "EXPECTED", "NONSENSE"]) {
+      h.writeFlow.mockClear();
+      h.ghRun.mockClear().mockResolvedValue(
+        JSON.stringify({ data: { repository: { ref: { target: { statusCheckRollup: { state } } } } } }),
+      );
+      h.flows = [branchFlow(branchRule("e1", "master"))];
+      await passes(4);
+      expect(firedIds()).toEqual([]);
+    }
+  });
+
+  it("does not re-fetch inside the TTL, and does again once past it", async () => {
+    // A branch whose CI is still running, so the rule keeps WAITING for every poll
+    // in this test: a rule that fired would settle and stop being fetched for, which
+    // would make "one call" true for a reason that has nothing to do with the cache.
+    const pending = JSON.stringify({ data: { repository: { ref: { target: { statusCheckRollup: { state: "PENDING" } } } } } });
+    h.ghRun.mockResolvedValue(pending);
+
+    // Four polls, one fetch: the entry is minutes fresh, and a rule that keeps
+    // waiting must not keep paying for the answer.
+    h.ttlSeconds = 120;
+    h.flows = [branchFlow(branchRule("e1", "master"))];
+    await passes(4);
+    expect(h.ghRun.mock.calls.filter((c) => c[1].includes("graphql"))).toHaveLength(1);
+
+    // With no TTL at all, every poll re-fetches — proof the cache is consulted
+    // through the staleness rule rather than filled once and trusted forever.
+    h.ghRun.mockClear();
+    h.ttlSeconds = 0;
+    h.flows = [branchFlow(branchRule("e1", "master"))];
+    await passes(4);
+    expect(h.ghRun.mock.calls.filter((c) => c[1].includes("graphql")).length).toBeGreaterThan(1);
+  });
+
+  it("makes no call at all with PR facts off, and the rule stays unfired", async () => {
+    // Same `gh` path, same toggle — which is why `armability.ts` reports a rule of
+    // this kind as needing PR facts.
+    h.prFacts = false;
+    h.flows = [branchFlow(branchRule("e1", "master"))];
+    await passes(4);
+    expect(h.ghRun.mock.calls.filter((c) => c[1].includes("graphql"))).toHaveLength(0);
+    expect(firedIds()).toEqual([]);
+  });
+
+  it("makes no call for a repo no run on the board has", async () => {
+    // Nothing to run `gh` in, so the verdict stays absent — which reads as unknown,
+    // which is not met.
+    h.flows = [branchFlow(branchRule("e1", "master", "not-on-the-board"))];
+    await passes(4);
+    expect(h.ghRun.mock.calls.filter((c) => c[1].includes("graphql"))).toHaveLength(0);
+    expect(firedIds()).toEqual([]);
+  });
+
+  it("makes no call for a settled rule or a disarmed flow", async () => {
+    // Neither is waiting on anything; paying a round trip for them is pure cost.
+    h.flows = [
+      branchFlow({ ...branchRule("e1", "master"), firedAt: 1 }),
+      { ...branchFlow(branchRule("e2", "release")), id: "f2", armed: false },
+    ];
+    await passes(3);
+    expect(h.ghRun.mock.calls.filter((c) => c[1].includes("graphql"))).toHaveLength(0);
   });
 });
