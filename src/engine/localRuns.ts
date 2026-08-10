@@ -44,33 +44,6 @@ export function localKey(place: string): string {
   return `local-${slug || "place"}-${createHash("sha1").update(place).digest("hex").slice(0, 8)}`;
 }
 
-/**
- * The card for a place Agent Flow Deck never launched, shaped as a Run so the whole
- * existing pipeline — gitState, deriveBucket, prSignals, presence, Open, Diff —
- * renders it with no special case. Never written to the runs store unless the
- * user picks Track it.
- */
-export function localRunFor(
-  place: string,
-  sessions: OpenSession[],
-  git: { isGit: boolean; branch: string | null },
-  ticket: InferredTicket | null,
-  nowMs: number,
-): Run {
-  const name = path.basename(place) || place;
-  const started = sessions.map((s) => s.startedAt).filter((n) => n > 0);
-  return {
-    key: localKey(place),
-    summary: ticket?.summary ?? name,
-    url: ticket?.url ?? "",
-    createdAt: started.length > 0 ? Math.min(...started) : nowMs,
-    kind: "local",
-    mode: "per-window",
-    repos: [{ name, path: place, isGit: git.isGit, ...(git.branch ? { branch: git.branch } : {}) }],
-    briefPaths: [],
-  };
-}
-
 /** A card's worth of places: one multi-root window's session directories, or a
  * single directory that no live window claims. */
 export interface LocalGroup {
@@ -80,6 +53,54 @@ export interface LocalGroup {
   roots: string[];
   /** The session places inside this group, in input order — never empty. */
   places: string[];
+}
+
+/** A workspace file's display name — "centaur+e2e.code-workspace" → "centaur+e2e". */
+function workspaceName(file: string): string {
+  return path.basename(file).replace(/\.code-workspace$/, "");
+}
+
+/**
+ * The card for a group of places Agent Flow Deck never launched, shaped as a Run so
+ * the whole existing pipeline — gitState, deriveBucket, prSignals, presence, Open,
+ * Diff — renders it with no special case. Never written to the runs store unless the
+ * user picks Track it.
+ *
+ * A group covering a real .code-workspace keys off that file rather than any one of
+ * its folders: two sessions in the same workspace must land on the same card, and
+ * the key outlives whichever of them started first. `runTarget` then opens the
+ * workspace, which is what the user was actually working in.
+ */
+export function localRunFor(
+  group: LocalGroup,
+  sessions: OpenSession[],
+  git: (root: string) => { isGit: boolean; branch: string | null },
+  ticket: InferredTicket | null,
+  nowMs: number,
+): Run {
+  const started = sessions.map((s) => s.startedAt).filter((n) => n > 0);
+  const fallbackName = group.workspaceFile
+    ? workspaceName(group.workspaceFile)
+    : path.basename(group.roots[0]) || group.roots[0];
+  return {
+    key: localKey(group.workspaceFile ?? group.roots[0]),
+    summary: ticket?.summary ?? fallbackName,
+    url: ticket?.url ?? "",
+    createdAt: started.length > 0 ? Math.min(...started) : nowMs,
+    kind: "local",
+    mode: group.workspaceFile ? "multiroot" : "per-window",
+    ...(group.workspaceFile ? { workspaceFile: group.workspaceFile } : {}),
+    repos: group.roots.map((root) => {
+      const g = git(root);
+      return {
+        name: path.basename(root) || root,
+        path: root,
+        isGit: g.isGit,
+        ...(g.branch ? { branch: g.branch } : {}),
+      };
+    }),
+    briefPaths: [],
+  };
 }
 
 /**
