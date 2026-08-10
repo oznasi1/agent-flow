@@ -1335,3 +1335,26 @@ describe("workspace chip", () => {
     expect(container.querySelectorAll(".c-repos .repo")).toHaveLength(2);
   });
 });
+
+describe("branch line", () => {
+  it("shows the branch of the repo this agent runs in", () => {
+    // repos[0] is centaur on ASM-9-x; the agent runs in automation_e2e on main.
+    const s = wsStatus();
+    const agent: CardAgent = {
+      session: { pid: 2, sessionId: "s9", cwd: "/r/automation_e2e", startedAt: 1, name: "e2e-3a" },
+      activity: { state: "working", lastActivityMs: 2_000, slug: null },
+      repo: "automation_e2e",
+    };
+    // The board mounts on the Agents lens (DeckApp.tsx:364), so this run renders
+    // as one card per agent with no toggling.
+    const { container } = render(<DeckApp />);
+    host(runsMsg([{ ...s, agents: [agent] }]));
+    expect(container.querySelector(".c-branch .bn")!.textContent).toContain("main");
+  });
+
+  it("falls back to the run's first repo on a card with no agent", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    expect(container.querySelector(".c-branch .bn")!.textContent).toContain("ASM-9-x");
+  });
+});

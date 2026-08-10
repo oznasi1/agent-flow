@@ -307,9 +307,13 @@ function Card({ r, prReviewStatus, onForget, agent, column, sourceLabel }: {
           half-empty branch row followed by "launched …" trailing the repo chips, where
           it read as one more chip that had lost its border. */}
       <div className="c-branch">
-        {r.run.repos[0]?.branch && (
-          <span className="bn" title={r.run.repos[0].branch}>⎇ {r.run.repos[0].branch}</span>
-        )}
+        {/* The agent's own repo, not repos[0]: on a multi-root card the first repo
+            may be one this session never touched. */}
+        {(() => {
+          const own = agent?.repo ? r.run.repos.find((x) => x.name === agent.repo) : undefined;
+          const branch = (own ?? r.run.repos[0])?.branch;
+          return branch && <span className="bn" title={branch}>⎇ {branch}</span>;
+        })()}
         <span className="elapsed">launched {timeAgo(r.run.createdAt)}</span>
       </div>
 
