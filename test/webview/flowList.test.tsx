@@ -3,6 +3,12 @@ import { describe, it, expect, vi } from "vitest";
 import * as React from "react";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { FlowList } from "../../src/webview/flowList";
+import {
+  COMMAND_FREE_TEXT,
+  NOTE_COMMAND_HINT,
+  NOTE_COMMAND_PLACEHOLDER,
+  NOTE_PLACEHOLDER,
+} from "../../src/webview/orchestratorRule";
 import { ACTION_MISMATCH_PREFIX } from "../../src/engine/orchestrator/model";
 import type { Flow } from "../../src/engine/orchestrator/model";
 
@@ -15,10 +21,21 @@ const MODES = [
   { id: "careful", label: "Careful review" },
 ];
 
+/** `agentFlow.commands`, as the host posts it. The ids are made up for this
+ * file on purpose — nothing ships built-in — so a picker showing one of these
+ * can only have read the prop, never a hardcoded list. Same fixture and same
+ * reasoning as OrchestratorDrawer.test.tsx's own, since one list feeds both
+ * presentations. */
+const COMMANDS = [
+  { id: "deploy-staging", label: "Deploy to staging", run: "deploy.sh --env=staging" },
+  { id: "smoke", label: "Smoke test", run: "npm run smoke -- {note}" },
+];
+
 const props = (over: Partial<React.ComponentProps<typeof FlowList>> = {}) => ({
   flow: flow(),
   runs: [],
   promptModes: MODES,
+  commands: COMMANDS,
   onSave: vi.fn(),
   onResetEdge: vi.fn(),
   ...over,
@@ -55,8 +72,21 @@ const placeAndPlanned = (edgeOver: Partial<Flow["edges"][number]> = {}) =>
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", ...edgeOver }],
   });
 
-/** Two places — the pairing `seed` needs, and the one `launch` can never
- * satisfy (there is no planned work to launch). */
+/** A place feeding a notify terminal — the ONLY pairing that derives `notify`
+ * now that the verb comes from the target. A stored `action: "notify"` on any
+ * other pairing is a stale value the sentence deliberately ignores (see the
+ * "described by its target" tests below), so a test about notify's own wording
+ * has to be built on a real notify node. */
+const placeAndNotify = (edgeOver: Partial<Flow["edges"][number]> = {}) =>
+  flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "landed" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, ...edgeOver }],
+  });
+
+/** Two places — the pairing `seed` derives from. */
 const twoPlaces = (edgeOver: Partial<Flow["edges"][number]> = {}) =>
   flow({
     nodes: [
@@ -66,16 +96,20 @@ const twoPlaces = (edgeOver: Partial<Flow["edges"][number]> = {}) =>
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", ...edgeOver }],
   });
 
-/** A place feeding a command node — the pairing `run` implies (`actionFor`).
- * No UI yet builds this edge; it exercises `endLabel`'s command branch the
- * same way `placeAndPlanned` exercises its planned one. */
-const placeAndCommand = (edgeOver: Partial<Flow["edges"][number]> = {}) =>
+/** A place feeding a command node — the pairing `run` implies (`actionFor`), and
+ * the one the new-rule bar can now build end to end (see "adding a rule from the
+ * keyboard" below). `commandId` is one of `COMMANDS`, so the open row's Command
+ * picker has a real option to match it. */
+const placeAndCommand = (
+  edgeOver: Partial<Flow["edges"][number]> = {},
+  nodeOver: Partial<{ commandId: string; run: string }> = { commandId: "deploy-staging" },
+) =>
   flow({
     nodes: [
       { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-      { id: "n2", kind: "command", x: 320, y: 0, join: "any", commandId: "deploy" },
+      { id: "n2", kind: "command", x: 320, y: 0, join: "any", ...nodeOver },
     ],
-    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run", ...edgeOver }],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, ...edgeOver }],
   });
 
 describe("rows", () => {
@@ -120,7 +154,7 @@ describe("rows", () => {
   });
 
   it("reads notify's clause as complete on its own, with no bare target after it", () => {
-    render(<FlowList {...props({ flow: twoPlaces() })} />);
+    render(<FlowList {...props({ flow: placeAndNotify() })} />);
     const row = screen.getByTestId("flowlist-row-e1");
     // The spec's rename: "notify me" alone reads as if it messages somebody,
     // which is the confusion that started this phase. Both presentations spend
@@ -136,9 +170,29 @@ describe("rows", () => {
   it("labels a command target by its own identifier, not the notify fallthrough", () => {
     render(<FlowList {...props({ flow: placeAndCommand() })} />);
     const row = screen.getByTestId("flowlist-row-e1");
-    expect(row.textContent).toContain("run"); // the action
-    expect(row.textContent).toContain("deploy"); // the target's own identifier
+    // The verb read off its own handle and matched EXACTLY, not searched for in
+    // the row's text: "run" is a substring of several strings this row can
+    // carry (the note hint's "…a note can extend what runs" among them), so a
+    // `toContain("run")` passes with no verb rendered at all — measured twice on
+    // the canvas side.
+    expect(screen.getByTestId("flowlist-then-e1").textContent).toBe("run");
+    expect(row.textContent).toContain("deploy-staging"); // the target's own identifier
     expect(row.textContent).not.toContain("notify");
+  });
+
+  // Blocker 3. A closed `run` row used to fall through to the launch/seed
+  // branch and read "THEN run deploy-staging USING (no mode set)" — a clause
+  // about `edge.mode`, which `performEdge` never reads for a command. The whole
+  // USING/mode/destination vocabulary belongs to an agent session.
+  it("gives a command rule no mode clause and no destination — a command is not an agent session", () => {
+    render(<FlowList {...props({ flow: placeAndCommand() })} />);
+    const row = screen.getByTestId("flowlist-row-e1");
+    expect(row.textContent).not.toContain("(no mode set)");
+    expect(row.textContent).not.toContain("USING");
+    expect(row.textContent).not.toContain("worktree");
+    fireEvent.click(row); // and no such control once opened, either
+    expect(within(row).queryByLabelText("Mode")).toBeNull();
+    expect(within(row).queryByLabelText("Destination")).toBeNull();
   });
 
   // `coerceFlow` never fills `action` in, and a bare read never calls
@@ -303,16 +357,35 @@ describe("opening and closing a row for editing", () => {
     spy.mockRestore();
   });
 
-  it("the condition, action, mode and destination controls are ordinary form controls, reachable in order", () => {
+  it("the condition, mode and destination controls are ordinary form controls, reachable in order", () => {
     const launching = placeAndPlanned();
     render(<FlowList {...props({ flow: launching })} />);
     const row1 = screen.getByTestId("flowlist-row-e1");
     fireEvent.click(row1);
     const within1 = within(row1);
     expect(within1.getByLabelText("Condition").tagName).toBe("SELECT");
-    expect(within1.getByLabelText("Action").tagName).toBe("SELECT");
     expect(within1.getByLabelText("Mode").tagName).toBe("SELECT");
     expect(within1.getByLabelText("Destination").tagName).toBe("SELECT");
+  });
+
+  // Blocker 2, and the reason there is no Action control above. The verb comes
+  // from the target (`edgeAction`), so a `<select>` could not decide anything:
+  // its pick was overridden on the next read AND stored, which is exactly the
+  // disagreement `latchActionMismatches` stamps an edge dead for. It offered
+  // three of the four verbs, so a `run` rule's value matched no option at all —
+  // blank in a browser, "launch" under jsdom, and touching it killed the rule.
+  it("an open row states the derived verb instead of offering an Action control", () => {
+    const onSave = vi.fn();
+    render(<FlowList {...props({ flow: placeAndCommand(), onSave })} />);
+    const row = screen.getByTestId("flowlist-row-e1");
+    fireEvent.click(row);
+    expect(within(row).queryByLabelText("Action")).toBeNull();
+    // Exact, on the verb's own handle: an open `run` row renders "USING" and the
+    // note hint, both of which contain "run" as a substring.
+    expect(screen.getByTestId("flowlist-then-e1").textContent).toBe("run");
+    // And nothing about opening the row writes a stored action, which is what
+    // made the old control fatal rather than merely useless.
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   it("edits the condition through the open row's own select", () => {
@@ -322,15 +395,6 @@ describe("opening and closing a row for editing", () => {
     fireEvent.change(screen.getByLabelText("Condition"), { target: { value: "ci-failed" } });
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
     expect(saved.edges.find((e) => e.id === "e1")!.cond).toEqual({ kind: "ci-failed" });
-  });
-
-  it("edits the action through the open row's own select", () => {
-    const onSave = vi.fn();
-    render(<FlowList {...props({ flow: twoPlaces(), onSave })} />);
-    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
-    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "seed" } });
-    const saved = onSave.mock.calls.at(-1)![0] as Flow;
-    expect(saved.edges[0]).toMatchObject({ action: "seed" });
   });
 
   it("edits the mode through the open row's own select, for a seed rule", () => {
@@ -371,13 +435,8 @@ describe("opening and closing a row for editing", () => {
 
   it("edits the notify message on blur through the open row's own input", () => {
     const onSave = vi.fn();
-    const placeToNotify = flow({
-      nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-        { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "say something" },
-      ],
-      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
-    });
+    const placeToNotify = placeAndNotify();
+    (placeToNotify.nodes[1] as { message: string }).message = "say something";
     render(<FlowList {...props({ flow: placeToNotify, onSave })} />);
     fireEvent.click(screen.getByTestId("flowlist-row-e1"));
     const box = screen.getByLabelText("Notify message");
@@ -400,9 +459,32 @@ describe("opening and closing a row for editing", () => {
     expect(screen.getByLabelText("Note")).toBeTruthy();
     r2.unmount();
 
-    render(<FlowList {...props({ flow: twoPlaces() })} />); // action: notify
+    render(<FlowList {...props({ flow: placeAndNotify() })} />); // derives notify
     fireEvent.click(screen.getByTestId("flowlist-row-e1"));
     expect(screen.queryByLabelText("Note")).toBeNull();
+  });
+
+  // Debt 5's second surface. A command's note is spliced into the command string
+  // unquoted (`command.ts`'s `withNote`), so `deploy.sh --env={note}` with a note
+  // of `prod; rm -rf ~` runs both — and until now that was said at the canvas
+  // inspector's note field and nowhere else, i.e. at one of the two places a
+  // person actually types one.
+  it("a command rule's note field discloses that a note is spliced in unquoted", () => {
+    render(<FlowList {...props({ flow: placeAndCommand() })} />);
+    const row = screen.getByTestId("flowlist-row-e1");
+    fireEvent.click(row);
+    expect(row.textContent).toContain(NOTE_COMMAND_HINT);
+    // And the placeholder is the command one, not the launch/seed copy that
+    // spends its whole width contrasting "note" with a mode this row has not got.
+    expect(within(row).getByLabelText("Note")).toHaveAttribute("placeholder", NOTE_COMMAND_PLACEHOLDER);
+  });
+
+  it("says nothing about splicing on a launch rule, which composes its note rather than substituting it", () => {
+    render(<FlowList {...props({ flow: placeAndPlanned() })} />);
+    const row = screen.getByTestId("flowlist-row-e1");
+    fireEvent.click(row);
+    expect(row.textContent).not.toContain(NOTE_COMMAND_HINT);
+    expect(within(row).getByLabelText("Note")).toHaveAttribute("placeholder", NOTE_PLACEHOLDER);
   });
 
   it("edits the note on blur through the open row's own input", () => {
@@ -417,16 +499,80 @@ describe("opening and closing a row for editing", () => {
     expect(saved.edges[0].note).toBe("watch for the flaky upload test");
   });
 
-  it("switching the open row's action to notify clears the note, the same way it clears the mode", () => {
-    const onSave = vi.fn();
-    const seeding = twoPlaces({ action: "seed", mode: "careful", note: "keep an eye on this one" });
-    render(<FlowList {...props({ flow: seeding, onSave })} />);
+});
+
+// The keyboard half of Task 9's command work: the command a rule runs lives on
+// the target node, and the ONLY place it could be chosen or its free text typed
+// was the canvas inspector. A command node reachable from the keyboard whose
+// command was not is the same one-step-short gap phase 3 shipped for `planned`
+// work.
+describe("choosing what a command rule runs, from an open row", () => {
+  it("offers every configured command and a free-text option, in the host's own order", () => {
+    render(<FlowList {...props({ flow: placeAndCommand() })} />);
     fireEvent.click(screen.getByTestId("flowlist-row-e1"));
-    fireEvent.change(screen.getByLabelText("Action"), { target: { value: "notify" } });
+    const values = Array.from(
+      screen.getByLabelText("Command").querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(["deploy-staging", "smoke", COMMAND_FREE_TEXT]);
+    expect(screen.getByText("Deploy to staging")).toBeTruthy();
+  });
+
+  it("picks a configured command, writing it onto the target node and clearing any free text", () => {
+    const onSave = vi.fn();
+    render(<FlowList {...props({ flow: placeAndCommand({}, { run: "deploy.sh" }), onSave })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    fireEvent.change(screen.getByLabelText("Command"), { target: { value: "smoke" } });
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
-    expect(saved.edges[0].action).toBe("notify");
-    expect(saved.edges[0].mode).toBeUndefined();
-    expect(saved.edges[0].note).toBeUndefined();
+    expect(saved.nodes.find((n) => n.id === "n2")).toMatchObject({ commandId: "smoke" });
+    // Never both fields — `resolveCommand` refuses a node carrying a usable
+    // `commandId` AND a usable `run` rather than guess which one executes.
+    expect((saved.nodes.find((n) => n.id === "n2") as { run?: string }).run).toBeUndefined();
+    // And the write lands on the NODE, not the edge: `performEdge` resolves the
+    // command from the node it points at.
+    expect(saved.edges[0]).not.toHaveProperty("commandId");
+  });
+
+  it("picks free text, and typing it lands on the node", () => {
+    const onSave = vi.fn();
+    const { rerender } = render(<FlowList {...props({ flow: placeAndCommand(), onSave })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    // A configured command has nothing to type, so the field is not there yet.
+    expect(screen.queryByLabelText("Command to run")).toBeNull();
+    fireEvent.change(screen.getByLabelText("Command"), { target: { value: COMMAND_FREE_TEXT } });
+    let saved = onSave.mock.calls.at(-1)![0] as Flow;
+    // The "free text, nothing typed yet" shape — blank `run`, no `commandId`.
+    expect(saved.nodes.find((n) => n.id === "n2")).toMatchObject({ run: "" });
+    expect((saved.nodes.find((n) => n.id === "n2") as { commandId?: string }).commandId).toBeUndefined();
+
+    // Re-rendered on the flow that write actually produced, the same way the
+    // real webview re-renders on the host's echo — this is what makes the field
+    // appear, and typing into it complete the keyboard path.
+    rerender(<FlowList {...props({ flow: saved, onSave })} />);
+    const box = screen.getByLabelText("Command to run");
+    fireEvent.change(box, { target: { value: "deploy.sh --env=staging" } });
+    fireEvent.blur(box);
+    saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes.find((n) => n.id === "n2")).toMatchObject({ run: "deploy.sh --env=staging" });
+  });
+
+  it("says so, rather than showing the first configured command, for a command that is not configured", () => {
+    render(<FlowList {...props({ flow: placeAndCommand({}, { commandId: "gone" }) })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const select = screen.getByLabelText("Command") as HTMLSelectElement;
+    // The value AND the label, not `selectedIndex`: jsdom resolves an unmatched
+    // value to the first option, so a browser's blank control shows up here as
+    // "Deploy to staging" — a command that would run while `resolveCommand`
+    // refuses the one actually on the node.
+    expect(select.value).toBe("gone");
+    expect(select.selectedOptions[0].textContent).toBe("gone (not configured)");
+  });
+
+  it("says '(no command set)' for a hand-edited node carrying neither field", () => {
+    render(<FlowList {...props({ flow: placeAndCommand({}, {}) })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const select = screen.getByLabelText("Command") as HTMLSelectElement;
+    expect(select.value).toBe("");
+    expect(select.selectedOptions[0].textContent).toBe("(no command set)");
   });
 });
 
@@ -470,7 +616,7 @@ describe("Delete", () => {
 
   it("Delete inside an open row's notify-message input deletes a character, not the rule", () => {
     const onSave = vi.fn();
-    render(<FlowList {...props({ flow: twoPlaces(), onSave })} />);
+    render(<FlowList {...props({ flow: placeAndNotify(), onSave })} />);
     fireEvent.click(screen.getByTestId("flowlist-row-e1"));
     const box = screen.getByLabelText("Notify message");
     fireEvent.keyDown(box, { key: "Delete" });
@@ -630,24 +776,58 @@ describe("a fired rule", () => {
   });
 });
 
-describe("an impossible action", () => {
-  it("a launch edge whose target is a place shows the same reason the inspector gives", () => {
+// What used to be the two "an impossible action, refused with a visible reason"
+// tests. Under derivation a user cannot MAKE a launch-at-a-place pairing — the
+// target IS the verb — so the question is no longer "is the disagreement
+// explained" but "does the row describe the rule by its target". A stale stored
+// action is a migration matter, and `store.ts` is what surfaces it (see the
+// migration-notice tests below). Same rewrite, same wording, as the canvas
+// inspector's own pair of these.
+describe("a rule described by its target, not by a stale stored action", () => {
+  it("describes a rule pointing at a place as a seed, whatever a stale action says", () => {
     render(<FlowList {...props({ flow: twoPlaces({ action: "launch" }) })} />);
     const row = screen.getByTestId("flowlist-row-e1");
-    expect(row.textContent).toMatch(/launch needs planned work/i);
-    expect(within(row).queryByLabelText("Mode")).toBeNull();
+    expect(screen.getByTestId("flowlist-then-e1").textContent).toBe("seed");
+    fireEvent.click(row);
+    // A seed has no destination to pick — the place already exists.
+    expect(within(row).queryByLabelText("Destination")).toBeNull();
+    // But it does have a mode, which is the thing `performSeed` reads.
+    expect(within(row).getByLabelText("Mode")).toBeTruthy();
   });
 
-  it("the mirror: a seed edge whose target is planned work shows its own reason", () => {
+  it("the mirror: a rule pointing at planned work is a launch, whatever a stale action says", () => {
     render(<FlowList {...props({ flow: placeAndPlanned({ action: "seed" }) })} />);
     const row = screen.getByTestId("flowlist-row-e1");
-    expect(row.textContent).toMatch(/seed needs a place/i);
+    expect(screen.getByTestId("flowlist-then-e1").textContent).toBe("launch");
+    fireEvent.click(row);
+    expect(within(row).getByLabelText("Destination")).toBeTruthy();
   });
 
-  it("does not spend red on a mismatch — nothing has tried and failed yet", () => {
+  it("does not spend red on a stale action — nothing has tried and failed", () => {
     render(<FlowList {...props({ flow: twoPlaces({ action: "launch" }) })} />);
     const row = screen.getByTestId("flowlist-row-e1");
     expect(row.querySelector(".err")).toBeNull();
+  });
+
+  // `store.ts`'s `validNode` admits a node kind this build does not know, on
+  // purpose, so a flow written by a NEWER build still renders. There is no verb
+  // to state for such a target and no clause to finish, so the row says exactly
+  // that — dim, in the inspector's own words, because nothing has failed.
+  it("says the action cannot be determined for a target of an unknown kind", () => {
+    const fromTheFuture = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "portal", x: 320, y: 0, join: "any" } as unknown as Flow["nodes"][number],
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
+    });
+    render(<FlowList {...props({ flow: fromTheFuture })} />);
+    expect(screen.getByTestId("flowlist-then-e1").textContent).toContain("can’t be determined");
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    // No clause of any kind belongs to a verb nobody can name.
+    expect(screen.queryByLabelText("Mode")).toBeNull();
+    expect(screen.queryByLabelText("Command")).toBeNull();
+    expect(screen.queryByLabelText("Notify message")).toBeNull();
   });
 });
 
@@ -768,13 +948,27 @@ describe("adding a rule from the keyboard", () => {
     expect(screen.queryByTestId("flowlist-newrule")).toBeNull();
   });
 
-  it("offers From, Condition, Action and To as ordinary form controls", () => {
+  it("offers From, Condition and To as ordinary form controls, and no action control", () => {
     render(<FlowList {...props({ flow: twoPlacesNoEdge() })} />);
     const bar = screen.getByTestId("flowlist-newrule");
     expect(within(bar).getByLabelText("From node").tagName).toBe("SELECT");
     expect(within(bar).getByLabelText("New rule condition").tagName).toBe("SELECT");
-    expect(within(bar).getByLabelText("New rule action").tagName).toBe("SELECT");
     expect(within(bar).getByLabelText("To node").tagName).toBe("SELECT");
+    // Blocker 1. The verb comes from the target, so this control could only ever
+    // disagree with it — and it STORED its pick, which is the disagreement
+    // `latchActionMismatches` stamps an edge dead for.
+    expect(within(bar).queryByLabelText("New rule action")).toBeNull();
+  });
+
+  it("states what the drafted rule will do, once a To is chosen and not before", () => {
+    render(<FlowList {...props({ flow: twoPlacesNoEdge() })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    // Nothing to derive a verb from yet — and "can't be determined" would be a
+    // complaint about a rule the user has not finished describing.
+    expect(within(bar).queryByTestId("flowlist-newrule-then")).toBeNull();
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    expect(within(bar).getByTestId("flowlist-newrule-then").textContent).toBe("seed");
   });
 
   it("reseeds the draft's condition when the source changes to a command node", () => {
@@ -817,7 +1011,7 @@ describe("adding a rule from the keyboard", () => {
     expect(addBtn).not.toBeDisabled();
   });
 
-  it("builds a rule with the chosen from, to, condition and action", () => {
+  it("builds a rule with the chosen from, to and condition, and stores no action at all", () => {
     const onSave = vi.fn();
     render(<FlowList {...props({ flow: twoPlacesNoEdge(), onSave })} />);
     const bar = screen.getByTestId("flowlist-newrule");
@@ -828,7 +1022,13 @@ describe("adding a rule from the keyboard", () => {
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
     expect(saved.nodes).toEqual(twoPlacesNoEdge().nodes); // nodes untouched
     expect(saved.edges).toHaveLength(1);
-    expect(saved.edges[0]).toMatchObject({ from: "n1", to: "n2", cond: { kind: "ci-failed" }, action: "notify" });
+    expect(saved.edges[0]).toMatchObject({ from: "n1", to: "n2", cond: { kind: "ci-failed" } });
+    // An edge with no stored action is the one shape `latchActionMismatches` can
+    // never latch (it skips `action === undefined`), and `writeFlow` still puts
+    // the derived value on disk for an older build's `validEdge`. This bar used
+    // to store its own select's default — `notify` against a place target, which
+    // means `seed` — so an ordinary wiring arrived latched on the next poll.
+    expect(saved.edges[0].action).toBeUndefined();
   });
 
   it("the To list excludes the chosen From node and any node it already has a rule to", () => {
@@ -871,32 +1071,24 @@ describe("adding a rule from the keyboard", () => {
     expect(within(bar).getByLabelText("To node")).toHaveValue("");
   });
 
-  it("a launch rule cannot be created pointing at a place — the same reason the inspector gives", () => {
+  // The two "an impossible pairing, refused with a visible reason" tests are
+  // gone with the control that made the pairing possible: a mismatch was a
+  // CHOSEN action disagreeing with a target, and there is no chosen action any
+  // more. What replaces them is the pair below — the bar builds whatever verb
+  // the target implies, and cannot build any other.
+  it("wiring a place to a place builds the seed its target implies, not the old default notify", () => {
     const onSave = vi.fn();
     render(<FlowList {...props({ flow: twoPlacesNoEdge(), onSave })} />);
     const bar = screen.getByTestId("flowlist-newrule");
     fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
     fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
-    fireEvent.change(within(bar).getByLabelText("New rule action"), { target: { value: "launch" } });
-    expect(bar.textContent).toMatch(/launch needs planned work/i);
-    // Not disabled — see the button's own comment: the refusal is `addRule`'s
-    // guard, exercised by clicking, not a control withheld from the user.
-    const addBtn = within(bar).getByRole("button", { name: "+ Add rule" });
-    expect(addBtn).not.toBeDisabled();
-    fireEvent.click(addBtn);
-    expect(onSave).not.toHaveBeenCalled();
-  });
-
-  it("the mirror: a seed rule cannot be created pointing at planned work", () => {
-    const onSave = vi.fn();
-    render(<FlowList {...props({ flow: placeAndPlannedNoEdge(), onSave })} />);
-    const bar = screen.getByTestId("flowlist-newrule");
-    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
-    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
-    fireEvent.change(within(bar).getByLabelText("New rule action"), { target: { value: "seed" } });
-    expect(bar.textContent).toMatch(/seed needs a place/i);
+    expect(within(bar).getByTestId("flowlist-newrule-then").textContent).toBe("seed");
     fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
-    expect(onSave).not.toHaveBeenCalled();
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    // The seed's mode lands on the EDGE, which is what `performSeed` reads — a
+    // place has no mode field of its own.
+    expect(saved.edges[0]).toMatchObject({ from: "n1", to: "n2", mode: "quick" });
+    expect(saved.edges[0].action).toBeUndefined();
   });
 
   it("builds a launch rule, writing the mode and destination onto the target planned node, not the edge", () => {
@@ -905,12 +1097,13 @@ describe("adding a rule from the keyboard", () => {
     const bar = screen.getByTestId("flowlist-newrule");
     fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
     fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
-    fireEvent.change(within(bar).getByLabelText("New rule action"), { target: { value: "launch" } });
+    expect(within(bar).getByTestId("flowlist-newrule-then").textContent).toBe("launch");
     fireEvent.change(within(bar).getByLabelText("New rule mode"), { target: { value: "careful" } });
     fireEvent.change(within(bar).getByLabelText("New rule destination"), { target: { value: "new-window" } });
     fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
-    expect(saved.edges[0]).toMatchObject({ from: "n1", to: "n2", action: "launch" });
+    expect(saved.edges[0]).toMatchObject({ from: "n1", to: "n2" });
+    expect(saved.edges[0].action).toBeUndefined();
     expect(saved.edges[0].mode).toBeUndefined();
     const target = saved.nodes.find((n) => n.id === "n2") as { mode: string; dest: string };
     expect(target.mode).toBe("careful");
@@ -941,7 +1134,6 @@ describe("adding a rule from the keyboard", () => {
     const bar = screen.getByTestId("flowlist-newrule");
     fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
     fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
-    fireEvent.change(within(bar).getByLabelText("New rule action"), { target: { value: "launch" } });
     // The USING clause's own selects already read back the target's real
     // values, not a generic default — pinning the display half of the fix,
     // not only the write half `addRule` performs below.
@@ -976,7 +1168,6 @@ describe("adding a rule from the keyboard", () => {
     // First rule: n1 -> n2 (mode "careful", dest "new-window").
     fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
     fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
-    fireEvent.change(within(bar).getByLabelText("New rule action"), { target: { value: "launch" } });
     fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
     let saved = onSave.mock.calls.at(-1)![0] as Flow;
 
@@ -985,7 +1176,6 @@ describe("adding a rule from the keyboard", () => {
     const bar2 = screen.getByTestId("flowlist-newrule");
     fireEvent.change(within(bar2).getByLabelText("From node"), { target: { value: "n1" } });
     fireEvent.change(within(bar2).getByLabelText("To node"), { target: { value: "n3" } });
-    fireEvent.change(within(bar2).getByLabelText("New rule action"), { target: { value: "launch" } });
     expect(within(bar2).getByLabelText("New rule mode")).toHaveValue("quick");
     expect(within(bar2).getByLabelText("New rule destination")).toHaveValue("current-window");
     fireEvent.click(within(bar2).getByRole("button", { name: "+ Add rule" }));
@@ -1004,18 +1194,80 @@ describe("adding a rule from the keyboard", () => {
     const bar = screen.getByTestId("flowlist-newrule");
     fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
     fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
-    fireEvent.change(within(bar).getByLabelText("New rule action"), { target: { value: "seed" } });
     fireEvent.change(within(bar).getByLabelText("New rule mode"), { target: { value: "careful" } });
     fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
-    expect(saved.edges[0]).toMatchObject({ from: "n1", to: "n2", action: "seed", mode: "careful" });
+    expect(saved.edges[0]).toMatchObject({ from: "n1", to: "n2", mode: "careful" });
+    expect(saved.edges[0].action).toBeUndefined();
   });
 
-  it("offers no mode or destination clause for a notify rule", () => {
+  it("offers no mode or destination clause before a To is chosen", () => {
     render(<FlowList {...props({ flow: twoPlacesNoEdge() })} />);
     const bar = screen.getByTestId("flowlist-newrule");
+    // No target, so no verb, so no clause belonging to one — even though the very
+    // next pick (a place) does bring a mode with it.
+    expect(within(bar).queryByLabelText("New rule mode")).toBeNull();
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
     expect(within(bar).queryByLabelText("New rule mode")).toBeNull();
     expect(within(bar).queryByLabelText("New rule destination")).toBeNull();
+  });
+
+  it("a rule wired to a notify terminal gets no mode or destination clause", () => {
+    const placeAndFreeNotify = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "landed" },
+      ],
+    });
+    const onSave = vi.fn();
+    render(<FlowList {...props({ flow: placeAndFreeNotify, onSave })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    expect(within(bar).getByTestId("flowlist-newrule-then").textContent).toBe("Notify me in VS Code");
+    expect(within(bar).queryByLabelText("New rule mode")).toBeNull();
+    expect(within(bar).queryByLabelText("New rule destination")).toBeNull();
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0].mode).toBeUndefined();
+    expect(saved.edges[0].action).toBeUndefined();
+  });
+
+  // The task's own deliverable: a whole rule ending in a command node, built
+  // from the keyboard. The NODE is added one bar above this one ("+ Add
+  // command…", which the drawer renders in the List view too — see
+  // OrchestratorDrawer.test.tsx's end-to-end); this is the WIRING half, and the
+  // shape it must not produce is a stored `notify` against a command target,
+  // which arrived latched and permanently dead on the next poll.
+  it("builds a condition -> command rule from the new-rule bar", () => {
+    const onSave = vi.fn();
+    const placeAndCommandNoEdge = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "command", x: 320, y: 0, join: "any", commandId: "deploy-staging" },
+      ],
+    });
+    render(<FlowList {...props({ flow: placeAndCommandNoEdge, onSave })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("New rule condition"), { target: { value: "ci-passed" } });
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    // Exact match on the verb's own handle: "run" is a substring of enough
+    // strings that a `toContain` here would pass with no verb rendered at all.
+    expect(within(bar).getByTestId("flowlist-newrule-then").textContent).toBe("run");
+    // A command is not an agent session: no mode, no destination.
+    expect(within(bar).queryByLabelText("New rule mode")).toBeNull();
+    expect(within(bar).queryByLabelText("New rule destination")).toBeNull();
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges).toHaveLength(1);
+    expect(saved.edges[0]).toMatchObject({ from: "n1", to: "n2", cond: { kind: "ci-passed" } });
+    // THE blocker: this used to save `action: "notify"` against a `run` target,
+    // and the round trip stamped the edge with the migration notice — dead on
+    // the next poll, and (before Task 3's Reset fix) unrepairable.
+    expect(saved.edges[0].action).toBeUndefined();
+    expect(saved.edges[0].mode).toBeUndefined();
+    expect(saved.nodes).toEqual(placeAndCommandNoEdge.nodes); // the node is untouched
   });
 
   // A stale draft: `from`/`to` are plain component state, so nothing stops

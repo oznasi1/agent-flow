@@ -940,6 +940,10 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               flow={flow}
               runs={p.runs}
               promptModes={p.promptModes}
+              // The same `agentFlow.commands` this file's own inspector reads —
+              // one list, both presentations, so a command rule's picker cannot
+              // offer one set of commands on the canvas and another in the list.
+              commands={p.commands}
               onSave={onListSave}
               onResetEdge={(edgeId) => p.onResetEdge(flow.id, edgeId)}
             />
