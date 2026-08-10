@@ -143,12 +143,14 @@ function RepoChip({ g }: { g: RepoGit }): JSX.Element {
  * Hover and focus reveal the fold in CSS, with no state to keep in sync. The
  * click toggle exists for touch and for a keyboard user who tabs past: `.open`
  * survives the pointer leaving, which a :hover rule cannot. */
-function WorkspaceChip({ label, repos }: { label: string; repos: RepoGit[] }): JSX.Element {
+function WorkspaceChip({ label, repos, filePath }: { label: string; repos: RepoGit[]; filePath: string }): JSX.Element {
   const [open, setOpen] = React.useState(false);
   return (
     <div className={`c-ws ${open ? "open" : ""}`}>
-      <button type="button" className="ws" onClick={() => setOpen((o) => !o)}
-        title="The workspace this task runs in — its repos are underneath">
+      {/* The workspace file's own path, not a generic sentence — it is the only
+        * thing that tells apart two open .code-workspace files that happen to
+        * share a label. */}
+      <button type="button" className="ws" onClick={() => setOpen((o) => !o)} title={filePath}>
         <span className="wsi">{open ? "▾" : "▸"}</span>
         <span className="n">{label}</span>
         <span className="ct">{repos.length} repos</span>
@@ -319,7 +321,7 @@ function Card({ r, prReviewStatus, onForget, agent, column, sourceLabel }: {
 
       {(() => {
         const ws = workspaceLabel(r.run);
-        if (ws && r.repos.length > 1) return <WorkspaceChip label={ws} repos={r.repos} />;
+        if (ws && r.repos.length > 1) return <WorkspaceChip label={ws} repos={r.repos} filePath={r.run.workspaceFile ?? ws} />;
         return r.repos.length > 0 && (
           <div className="c-repos">
             {r.repos.map((g) => <RepoChip key={g.name} g={g} />)}

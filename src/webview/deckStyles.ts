@@ -199,7 +199,7 @@ export const DECK_CSS = `
      pay for a mount. */
   .c-ws { margin-top: 7px; }
   .ws { display: inline-flex; align-items: baseline; gap: 5px; font-size: var(--t-data);
-    color: var(--dim); background: none; border: 1px solid var(--hair); border-radius: 3px;
+    color: var(--dim); background: none; border: 1px solid var(--hair); border-radius: var(--r-chip);
     padding: 1px 6px; cursor: pointer; }
   .ws:hover { border-color: color-mix(in srgb, var(--vscode-foreground) 25%, transparent); }
   .ws .wsi { font-size: 9px; color: color-mix(in srgb, var(--vscode-foreground) 40%, transparent); }

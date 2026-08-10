@@ -1296,6 +1296,15 @@ describe("workspace chip", () => {
     expect(chip.textContent).not.toContain(".code-workspace");
   });
 
+  it("tooltips the chip with the workspace file's own path, not a generic sentence", () => {
+    // The path is the only thing that tells apart two open .code-workspace files
+    // sharing a label — a generic sentence can't disambiguate them.
+    const { container } = render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    const chip = container.querySelector(".c-ws .ws")!;
+    expect(chip.getAttribute("title")).toBe("/ws/centaur+e2e.code-workspace");
+  });
+
   it("keeps both repo chips in the fold, with their git signal", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
