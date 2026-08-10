@@ -161,27 +161,60 @@ the setting, and cards fall back to the git + Jira backbone.
 An **Orchestrator** drawer (off by default, `agentFlow.orchestrator`) lets you wire the
 agents already on the board into a *flow*: drag a card in, connect two nodes, and put a
 condition on the connection — a merged PR, failing CI, an agent that ended its turn, a
-clean tree, a Jira status. The drawer resizes by dragging its edge or pressing **Expand**,
-and switching to **List** gives the same flow a keyboard path — build, wire, edit and arm
-it without a pointer. Each connection can **launch** the next agent in a fresh
-worktree, **seed** a second agent into a place that already exists, or **notify** you,
-and the drawer says what each condition is waiting on right now. A **launch** or **seed**
-rule can also carry a note of its own, folded into whichever prompt mode it uses: put
-anything reusable in the prompt mode, and save the note for what is specific to just this
-one rule. **Arm** a flow and it
-is checked on every Deck refresh; a rule that is met fires exactly once and tells you,
-rather than firing again on every later pass. It keeps advancing while the Deck is
-hidden — an armed flow that only ran while you were looking at the board would not be
-armed — and closing the Deck genuinely does stop it, since the panel owns the poll;
-closing with something armed says so. Reopening the Deck, including after a restart,
-shows you what is already ready and waits for a **Go** before acting on it, so an armed
-flow can never spend anything the moment you come back. Before it ever launches or seeds
-for the first time, a flow also asks once — naming the ticket, the repos, and the prompt
-mode it would use — and only then runs unattended; at most three launches happen in a
-single pass, with the rest picked up on the next one. A launch that fails stamps its rule
-as errored and stops it there until you **Reset** it; a pre-flight read that fails
-instead — Jira unreachable, say — is retried on the next pass rather than latched as a
-failure. Two VS Code windows with the Deck open cannot fire the same rule twice.
+clean tree, a Jira status, **the command succeeded**, or CI passing on a named branch of a
+named repo. That last one has no picker yet: you get it only by hand-editing the flow file,
+not through the drawer or the list. The drawer resizes by dragging its edge or pressing
+**Expand**, and switching to **List** gives the same flow a keyboard path — build, wire,
+edit and arm it without a pointer.
+
+What a connection *does* comes from the node it points at, not from a choice you make on the
+rule — there is no action picker anywhere in the drawer or the list. Point a rule at
+unstarted work and it **launches** that agent in a fresh worktree; point it at a place that
+already exists and it **seeds** a second agent there; point it at a **notify** node and it
+does exactly what that node says: **"Notify me in VS Code"** — a notification popped in your
+own window, nothing more. It messages nobody; if you were hoping for a Slack DM or an email,
+that's not what this does. Point it at
+a **command** node and it runs a shell command, configured under `agentFlow.commands` (an
+`id`, a `label` for the picker, the `run` string, and an optional `detail` line) or typed as
+free text straight onto the node. A `run` template can contain `{note}`, replaced with the
+rule's own note. A **launch** or **seed** rule can also carry a note of its own, folded into
+whichever prompt mode it uses: put anything reusable in the prompt mode, and save the note
+for what is specific to just this one rule.
+
+**A command's `{note}` substitution is spliced in unquoted, exactly as typed.** A template
+`deploy.sh --env={note}` fed a note of `prod; rm -rf ~` runs both commands — quoting the
+template yourself (`--env="{note}"`) does not close that off either, since a `"` inside the
+note still breaks out. That's inherent to letting a rule's free text reach a shell command at
+all, not a bug waiting on a fix: quoting is the template author's job. A command is killed
+120 seconds after it starts, but only the shell process it started — anything that process
+goes on to spawn can outlive the kill. Its captured output is capped at 1 MiB; a chattier
+command is killed the same way and its rule latched as a failure. A failed command (like a
+failed launch or seed) latches and is never retried automatically until you click **Reset** —
+deliberately, so a broken deploy doesn't run again every six seconds. The CI-passing-on-a-branch
+condition reads GitHub's aggregate status rollup, which folds skipped and neutral checks
+toward success — so a branch whose required build was merely *skipped* can read as passed
+here. A commit with no checks at all correctly reads as unknown rather than passed, and
+anything the check can't read (a failed call, a repo not checked out anywhere, an unparseable
+response) reads as not-met, never as green.
+
+The drawer says what each condition is waiting on right now. **Arm** a flow and it is checked
+on every Deck refresh; a rule that is met fires exactly once and tells you, rather than firing
+again on every later pass. It keeps advancing while the Deck is hidden — an armed flow that
+only ran while you were looking at the board would not be armed — and closing the Deck
+genuinely does stop it, since the panel owns the poll; closing with something armed says so.
+Reopening the Deck, including after a restart, shows you what is already ready and waits for a
+**Go** before acting on it, so an armed flow can never spend anything the moment you come
+back. Before it ever launches or seeds for the first time, a flow asks once — naming the
+ticket, the repos, and the prompt mode it would use — and only then runs unattended. Running
+its first command asks again, separately: approving a flow's launches only approves opening
+agent sessions, never running a shell command on your machine, so a flow you already
+confirmed for a launch still asks the first time one of its rules would run a command — and
+then, like a launch, runs unattended after that. At most three of these — launches, seeds and
+commands together — happen in a single pass, with the rest picked up on the next one. A
+launch, seed or command that fails stamps its rule as errored and stops it there until you
+**Reset** it; a pre-flight read that fails instead — Jira unreachable, say — is retried on the
+next pass rather than latched as a failure. Two VS Code windows with the Deck open cannot fire
+the same rule twice.
 
 Above the columns sits your **review queue** — every open PR that asks for your
 review, found with one `gh` search. PRs in archived repositories are left out:

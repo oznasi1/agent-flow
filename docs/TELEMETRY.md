@@ -50,12 +50,15 @@ Regardless of any setting, Agent Flow Deck never sends:
   sent (see [Errors](#errors--operation_failed-and-unhandled_error) below)
 - The value of any user-authored setting — `baseUrl`, `project`, `githubOrg`,
   `reposRoot`, `workspaceDir`, `provenanceLabel`, `prReviewStatus`,
-  `reviewRequestModes`, or any of the `*Prompt` / `promptModes` /
+  `reviewRequestModes`, `commands`, or any of the `*Prompt` / `promptModes` /
   `explorePrompts.*` content. Where a setting like this matters for the product
   decisions this data informs, only a derived, non-identifying fact is sent — e.g.
   `prompt_modes_overridden: 1`, not the customized text; `repo_blocklist_count:
-  3`, not which repos. See [`settingsSnapshot.ts`](../src/telemetry/settingsSnapshot.ts)
-  for the exact reduction.
+  3`, not which repos; `commands_count: 2`, never a command's `id`, `label`, or
+  `run` string, since a command's `run` is arbitrary shell that can carry
+  hostnames, tokens or internal URLs. See
+  [`settingsSnapshot.ts`](../src/telemetry/settingsSnapshot.ts) for the exact
+  reduction.
 
 On the "no paths" point specifically: nothing is ever sent that names a path to
 your files, folders, repos, or workspace. The one string that is path-*shaped* is
@@ -167,27 +170,29 @@ entry point:
 
 ### Settings snapshot
 
-`extension_activated` includes a 37-field reduction of your configuration,
+`extension_activated` includes a 38-field reduction of your configuration,
 built by `settingsSnapshot()`. Every field is either a boolean, a count, or a
 value drawn from a fixed, shipped set of choices — never a user-authored string:
 
 | Field | Values |
 |---|---|
-| `workspace_mode`, `open_in`, `agent_surface`, `explore_mode`, `worktree`, `remote_control`, `default_filter` | One of that setting's shipped choices, or the literal string `"invalid"` |
+| `workspace_mode`, `open_in`, `agent_provider`, `agent_surface`, `explore_mode`, `worktree`, `remote_control`, `default_filter`, `task_source` | One of that setting's shipped choices, or the literal string `"invalid"` |
 | `task_mode`, `review_mode` | `"ask"`, `"stock"` (pinned to a shipped mode), or `"custom"` |
 | `seed_agent`, `filters_size`, `filters_status`, `filters_repo`, `filters_search`, `pr_review_auto_fix`, `pr_facts`, `review_requests`, `open_agents`, `review_writes`, `orchestrator`, `stamp_label_on_write`, `track_open_windows` | `true` / `false` |
-| `batch_confirm_threshold`, `repo_blocklist_count`, `prompt_modes_count`, `review_modes_count`, `prompt_modes_overridden`, `prompt_modes_custom`, `prompt_modes_hidden`, `review_modes_overridden`, `review_modes_custom`, `review_modes_hidden` | Numbers |
+| `batch_confirm_threshold`, `repo_blocklist_count`, `commands_count`, `prompt_modes_count`, `review_modes_count`, `prompt_modes_overridden`, `prompt_modes_custom`, `prompt_modes_hidden`, `review_modes_overridden`, `review_modes_custom`, `review_modes_hidden` | Numbers |
 | `explore_prompts_customized`, `environments_customized`, `pr_review_prompt_customized` | `true` / `false` — *whether* the corresponding user-authored text was changed from the shipped default, never the text itself |
 
-**The `"invalid"` sentinel.** Seven of the fields above (`workspace_mode`,
-`open_in`, `agent_surface`, `explore_mode`, `worktree`, `remote_control`, `default_filter`) can
-report the literal string `"invalid"` instead of a real value. VS Code's
-settings UI only ever offers the shipped choices for these, but a hand-edited
-`settings.json` can hold anything. When it does, the raw value is **never**
-transmitted and never silently mapped to a real default (e.g. `"auto"`) either
-— `"invalid"` marks it as "this install has an unrecognised value here" without
-saying what that value is, so that case stays distinguishable from a user who
-genuinely left the setting at its default.
+**The `"invalid"` sentinel.** Nine of the fields above (`workspace_mode`,
+`open_in`, `agent_provider`, `agent_surface`, `explore_mode`, `worktree`,
+`remote_control`, `default_filter`, `task_source`) can report the literal
+string `"invalid"` instead of a real value. VS Code's settings UI only ever
+offers a valid choice for these — the shipped enum for most of them, or, for
+`task_source`, whichever task connectors are actually registered — but a
+hand-edited `settings.json` can hold anything. When it does, the raw value is
+**never** transmitted and never silently mapped to a real default (e.g.
+`"auto"`) either — `"invalid"` marks it as "this install has an unrecognised
+value here" without saying what that value is, so that case stays
+distinguishable from a user who genuinely left the setting at its default.
 
 ## Keeping this page true
 
