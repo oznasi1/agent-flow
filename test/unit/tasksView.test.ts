@@ -2370,7 +2370,7 @@ describe("takeTask", () => {
     });
   });
 
-  describe("existing/live-folder destinations skip the repo picker", () => {
+  describe("destinations that already have folders skip the repo picker", () => {
     it("uses the existing workspace's repos and never shows the service pick", async () => {
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
       vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur"]);
@@ -2427,6 +2427,65 @@ describe("takeTask", () => {
           services: [expect.objectContaining({ name: "account-service" })],
         }),
       );
+    });
+
+    // "This window" is a promise about where the work happens — the folders already open
+    // here ARE the repo set, so a confirm pick would ask a question already answered.
+    it("uses this window's folders and never shows the repo confirm pick", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+      vi.mocked(currentWindow).mockReturnValue({
+        identity: "/repos/centaur",
+        kind: "folder",
+        roots: [{ name: "centaur", path: "/repos/centaur" }],
+      });
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", "command"); // no preselected repos
+
+      expect(window.showQuickPick).not.toHaveBeenCalled();
+      expect(openWorkspace).toHaveBeenCalledWith(
+        expect.objectContaining({
+          openIn: "current",
+          services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
+        }),
+      );
+    });
+
+    it("takes every folder of a multi-root window, not just the inferred repo", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+      vi.mocked(currentWindow).mockReturnValue({
+        identity: "/ws/team.code-workspace",
+        kind: "workspace",
+        roots: [
+          { name: "centaur", path: "/repos/centaur" },
+          { name: "account-service", path: "/repos/account-service" },
+        ],
+      });
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", "command");
+
+      const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
+      expect(services.map((s) => s.path)).toEqual(["/repos/centaur", "/repos/account-service"]);
+    });
+
+    // The two currentWindow() reads aren't atomic (see the race test above). Losing the
+    // identity mid-flight leaves no folders to infer from, so the confirm pick has to
+    // come back rather than the take dead-ending on "no valid repos".
+    it("falls back to the confirm pick when this window loses its folders after the pick", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
+      vi.mocked(currentWindow)
+        .mockReturnValueOnce({ identity: "/repos/centaur", kind: "folder", roots: [{ name: "centaur", path: "/repos/centaur" }] })
+        .mockReturnValue(undefined);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never); // cancel the confirm pick
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", "command");
+
+      expect(vi.mocked(window.showQuickPick).mock.calls[0][1]).toEqual(
+        expect.objectContaining({ title: "ASM-1 — confirm the repos this task touches" }),
+      );
+      expect(openWorkspace).not.toHaveBeenCalled();
     });
 
     it("aborts when the existing workspace resolves to no repos", async () => {
@@ -3753,6 +3812,26 @@ describe("explore — open target", () => {
 
     const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
     expect(services.map((s) => s.path)).toEqual(["/repos/centaur"]);
+  });
+
+  it("skips the repo pick for this window and uses the folders already open here", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window", exploreMode: "knowledge" });
+    vi.mocked(currentWindow).mockReturnValue({
+      identity: "/repos/centaur",
+      kind: "folder",
+      roots: [{ name: "centaur", path: "/repos/centaur" }],
+    });
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
+
+    await runExplore();
+
+    expect(window.showQuickPick).not.toHaveBeenCalled(); // no destination pick, no repo pick
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        openIn: "current",
+        services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
+      }),
+    );
   });
 
   it("aborts an Explore into an existing workspace that resolves to no repos", async () => {

@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-08-10
+
+### Fixed
+
+- **A notepad card no longer shows a pull request that is not its own.** A notepad run is
+  launched into the window and branch you already had open, so any PR on that branch
+  belongs to that branch's work, not to the note. Notepad runs are now treated as
+  PR-less: no PR is fetched or read back for them, their cards drop the `pr`, `ci` and
+  `review` rows, and they no longer land in Done reading "merged" off somebody else's
+  merge.
+
+## [0.12.0] — 2026-08-10
+
+### Changed
+
+- **"This window" no longer asks which repos the task touches.** Choosing it already says
+  where the work happens, so the folders open in the window are taken as the repo set —
+  the confirm-repos QuickPick is skipped, exactly as it is for an existing workspace or
+  another open window. Applies to Take, Address PR, Explore and Notepad runs. A new
+  window still gets the pick, with inferred repos pre-checked, and so does the rare case
+  where the window loses its folders between the destination pick and the launch.
+
+## [0.11.2] — 2026-08-10
+
+### Changed
+
+- **The sidebar screenshots show a real view title bar.** Both README shots frame the
+  panel under a mock of VS Code's own title row, and that mock had drifted: the signed-in
+  name sat 5px above the project key's baseline and a size larger, the row was 46px
+  instead of 35px, the title started 6px inside the panel's text edge, and the three
+  view actions were Unicode stand-ins (`⧉ ⊞ ⟳ ⋯`). They are now the real codicons the
+  `view/title` menu contributes — `library` for the Marketplace, `dashboard` for the
+  Deck, then `refresh` — followed by the container's More Actions button, and the title,
+  name and icons share one centered 35px row aligned to the panel's own text edges.
+
+  The name's drift was a CSS collision, not a layout bug: the harness reused the class
+  `.desc`, which the webview bundle — injected into the same document — defines for task
+  descriptions with a `margin-bottom` that the centered row counted as part of the item.
+  The mock host chrome is now namespaced so the extension's own styles can't reach it.
+
+No code changed in this release; only `media/screenshot.png` and `media/notepad.png`.
+
 ## [0.11.1] — 2026-08-09
 
 ### Changed

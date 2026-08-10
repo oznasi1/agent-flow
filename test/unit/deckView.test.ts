@@ -1730,6 +1730,39 @@ describe("DeckPanel PR facts", () => {
     expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "ASM-1");
   });
 
+  it("does not fetch a PR for a notepad run, whatever branch it sits on", async () => {
+    // A notepad run is launched into whatever window and branch you already had
+    // open, so its branch is PR-eligible (not the default branch) while any PR on
+    // it belongs to that branch's own work. Nothing to fetch, and nothing that
+    // could be honestly rendered if we did.
+    h.runs = [mkRun({
+      key: "notepad-dm-dean-n1", url: "", kind: "notepad",
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "docs/login-flow" }],
+    })];
+    await showAndWarm();
+    expect(h.prFetch).not.toHaveBeenCalled();
+  });
+
+  it("keeps a notepad run PR-less even with entries already cached on disk", async () => {
+    // The gate has to cover the read as well as the fetch: entries written before
+    // this rule existed (or by another run in the same repo) would otherwise still
+    // render as this note's pr / ci / review rows and vote in prSignals — which is
+    // how a notepad card reached Done reading "merged" off a stranger's merge.
+    const facts: PrFacts = {
+      number: 860, url: "https://github.com/o/r/pull/860", title: "login flow docs",
+      state: "MERGED", isDraft: false,
+      ci: { passing: 10, pending: 0, failing: [] }, review: "approved", unresolved: 1,
+      mergeable: "clean", ciAdvisory: false,
+    };
+    h.prEntries = { svc: { facts, fetchedAt: Date.now() } };
+    h.runs = [mkRun({
+      key: "notepad-dm-dean-n1", url: "", kind: "notepad",
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "docs/login-flow" }],
+    })];
+    await showAndWarm();
+    expect(builtFor("notepad-dm-dean-n1").prs).toEqual({});
+  });
+
   it("does not let an in-flight fetch resurrect a forgotten run's cache file", async () => {
     let release!: () => void;
     h.prFetch.mockImplementation(() => new Promise((res) => { release = () => res({ ok: true, facts: null }); }));
