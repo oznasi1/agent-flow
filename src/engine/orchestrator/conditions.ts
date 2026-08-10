@@ -10,6 +10,7 @@
 // that imports types only. test/webview/webviewGraph.test.ts pins this.
 import { AgentActivity, PrFacts, RepoGit, RunStatus } from "../../types";
 import { mostActive, UNKNOWN_ACTIVITY } from "../activity";
+import { BranchCiStatus, branchCiKey } from "./branchCi";
 import { Condition } from "./model";
 
 export interface CondContext {
@@ -18,6 +19,28 @@ export interface CondContext {
    * condition is ever ambiguous about which repo's git or PR it means. */
   repo: string;
   nowMs: number;
+  /** Branch-CI verdicts this pass fetched, keyed `repo#branch` by `branchCiKey` —
+   * both halves, so a flow waiting on `main` and a flow waiting on `release` in the
+   * same repo can never read each other's answer.
+   *
+   * The only fact in this context that does NOT come out of `status`, because it is
+   * the only one that is not about this place: `branch-ci-passed` names a branch
+   * nothing on the board need have checked out (see its own doc comment in
+   * `model.ts`). It arrives already fetched — `deckView.ts` makes the `gh` call,
+   * once per distinct key per poll, and hands the map to `evaluateFlow` — because
+   * this module is bundled into the webview and cannot spawn anything (see the
+   * header comment above).
+   *
+   * Optional, and an absent map or an absent key is NOT green: see the arm in
+   * `evalCond`. */
+  branchCi?: Record<string, BranchCiStatus>;
+}
+
+/** This place's verdict for a named repo and branch. `"unknown"` for an absent map
+ * and for an absent key alike — a fact nobody fetched and a fact nobody could read
+ * are the same amount of evidence. */
+function branchCi(c: CondContext, repo: string, branch: string): BranchCiStatus {
+  return c.branchCi?.[branchCiKey(repo, branch)] ?? "unknown";
 }
 
 function facts(c: CondContext): PrFacts | null {
@@ -102,6 +125,22 @@ export function evalCond(cond: Condition, c: CondContext): boolean {
       return c.status.ticketCategory === "done";
     case "ticket-status-is":
       return c.status.ticketStatus === cond.status;
+    case "branch-ci-passed":
+      // Unknown is NOT green, and this is the arm where that matters most: this
+      // condition exists to gate a deploy. An armed flow that ships to staging
+      // because a `gh` call failed, timed out, hit a rate limit or answered in a
+      // shape this build does not parse is the worst outcome the whole feature can
+      // produce — strictly worse than a deploy that waits one poll too long. So
+      // only an explicit `"passed"` is met; `"failed"`, `"pending"`, `"unknown"`
+      // and a key nobody fetched at all are all "not yet".
+      //
+      // The same posture every other arm above takes toward an unreadable fact:
+      // `threads-resolved` demands a strict `0` because `null` is a call that was
+      // skipped, `tree-clean` writes `!!g && !g.dirty` because a repo missing from
+      // the status is not a clean repo, and `ci-passed` demands `passing > 0`
+      // because "no checks at all" is not a pass. `branchCi()` collapses absent
+      // and unreadable into the same `"unknown"` for exactly that reason.
+      return branchCi(c, cond.repo, cond.branch) === "passed";
     case "command-succeeded":
       // Not answerable here, and not answered with a silent wrong guess
       // either. Every OTHER arm above is a pure function of the one
@@ -225,6 +264,26 @@ export function describeCond(cond: Condition, c: CondContext): string {
       const looksDone = /done/i.test(status);
       const isDone = c.status.ticketCategory === "done";
       return looksDone === isDone ? status : `${status} (${c.status.ticketCategory ?? "no category"})`;
+    }
+    case "branch-ci-passed": {
+      // Names the branch, because `COND_LABEL` cannot: the drawer's label for this
+      // kind is one static string for every rule of it, so "`main` passed" beside a
+      // rule about `release` would be the only place the two are told apart.
+      //
+      // "not checked yet" and "unreadable" are deliberately different words for the
+      // two `"unknown"`s. Both are equally not-met (see `evalCond`), but they send a
+      // user to different places: an absent key means nothing fetched it — which is
+      // what the WEBVIEW always sees, since `observationOf` builds a context out of
+      // a `RunStatus` and the verdicts never cross the wire — while an explicit
+      // `"unknown"` means a call was made and could not be read, and that one is
+      // worth looking in the log for.
+      const v = branchCi(c, cond.repo, cond.branch);
+      if (v === "passed") return `${cond.branch} passed`;
+      if (v === "failed") return `${cond.branch} failed`;
+      if (v === "pending") return `${cond.branch} CI running`;
+      return c.branchCi === undefined || !(branchCiKey(cond.repo, cond.branch) in c.branchCi)
+        ? `${cond.branch} not checked yet`
+        : `${cond.branch} status unreadable`;
     }
     case "ticket-status-is":
       return c.status.ticketStatus ?? "no ticket status";

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { evaluateFlow, MAX_LAUNCHES_PER_PASS } from "../../../../src/engine/orchestrator/evaluate";
+import { BranchCiStatus } from "../../../../src/engine/orchestrator/branchCi";
 import {
   CommandNode, Flow, FlowEdge, FlowNode, JoinMode, NotifyNode, PlaceNode, PlannedNode, emptyFlow,
 } from "../../../../src/engine/orchestrator/model";
@@ -463,5 +464,62 @@ describe("evaluateFlow — command-succeeded", () => {
        edge("e1", "cmd2", "z", { cond: { kind: "command-succeeded" } })],
     );
     expect(run(flow, [status("ASM-1")]).fired).toEqual([]);
+  });
+});
+
+// `branch-ci-passed` is the one condition whose fact is not in any `RunStatus`: it
+// names a repo and branch nothing on the board need have checked out, so the
+// verdicts are fetched host-side (deckView.ts, once per distinct `repo#branch` per
+// poll) and handed to `evaluateFlow` as one map for the whole pass. What is pinned
+// here is the THREADING — that the map reaches every `CondContext` this function
+// builds, and that a pass without one cannot fire a deploy.
+describe("evaluateFlow — branch-CI verdicts arrive from outside the status", () => {
+  // The condition's repo is deliberately NOT the source place's repo
+  // (`repo-ASM-1`): it is a branch of another repo entirely, which is the whole
+  // point of the kind.
+  const onMaster = (): Flow =>
+    flowWith(
+      [place("a", "ASM-1"), notify("z")],
+      [edge("e1", "a", "z", { cond: { kind: "branch-ci-passed", repo: "bite-me", branch: "master" } })],
+    );
+
+  it("fires only when this pass fetched a pass for that repo and branch", () => {
+    const out = evaluateFlow({
+      flow: onMaster(), statuses: [status("ASM-1")], nowMs: NOW,
+      branchCi: { "bite-me#master": "passed" },
+    });
+    expect(out.fired.map((f) => f.edge.id)).toEqual(["e1"]);
+  });
+
+  it("does not fire on a failure, on pending, on unknown, or with no map at all", () => {
+    // The last case is the one that matters most: a pass whose `gh` call failed,
+    // timed out or never ran must not deploy. `undefined` is not green.
+    const maps: (Record<string, BranchCiStatus> | undefined)[] = [
+      { "bite-me#master": "failed" },
+      { "bite-me#master": "pending" },
+      { "bite-me#master": "unknown" },
+      { "api#master": "passed" }, // a different repo's master
+      {},
+      undefined,
+    ];
+    for (const branchCi of maps) {
+      const out = evaluateFlow({ flow: onMaster(), statuses: [status("ASM-1")], nowMs: NOW, branchCi });
+      expect(out.fired).toEqual([]);
+    }
+  });
+
+  it("serves every rule that names the same branch from the one map", () => {
+    // Two rules, two source places, one fetch — the shape that makes "ten rules on
+    // main is not ten API calls" possible at all.
+    const flow = flowWith(
+      [place("a", "ASM-1"), place("b", "ASM-2"), notify("z1"), notify("z2")],
+      [edge("e1", "a", "z1", { cond: { kind: "branch-ci-passed", repo: "bite-me", branch: "master" } }),
+       edge("e2", "b", "z2", { cond: { kind: "branch-ci-passed", repo: "bite-me", branch: "master" } })],
+    );
+    const out = evaluateFlow({
+      flow, statuses: [status("ASM-1"), status("ASM-2")], nowMs: NOW,
+      branchCi: { "bite-me#master": "passed" },
+    });
+    expect(out.fired.map((f) => f.edge.id)).toEqual(["e1", "e2"]);
   });
 });

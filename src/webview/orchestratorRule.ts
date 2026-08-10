@@ -15,6 +15,7 @@
 // know how the other renders a control.
 import { describeCond } from "../engine/orchestrator/conditions";
 import {
+  CondKind,
   Condition,
   Flow,
   FlowAction,
@@ -44,26 +45,63 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
   "nothing-to-push": "nothing to push",
   "ticket-done": "ticket reached done",
   "ticket-status-is": "ticket status is…",
+  // The trailing ellipsis is this list's own mark for "carries a parameter", the
+  // same one `agent-idle-over` and `ticket-status-is` wear — and for the same
+  // reason: neither presentation has an input for the repo and branch it names,
+  // so it is filtered out of the picker below. `describeCond` is what says WHICH
+  // branch a given rule is about; a `Record` keyed by kind cannot.
+  "branch-ci-passed": "branch CI passed…",
   "command-succeeded": "the command succeeded",
 };
 
-/** What either presentation offers in a condition picker. `agent-idle-over`
- * and `ticket-status-is` each carry a parameter (a minute count, a status
- * name) and this phase has no input for either — offering them would create
- * a rule waiting on a fixed 10 minutes or on the empty string, which never
- * matches. They stay in `COND_LABEL` because a flow hand-edited on disk can
- * still hold one and its rule must still render, in both presentations.
- * `command-succeeded` carries no parameter, so unlike those two it is NOT
+/** Every condition kind that carries a parameter, and so cannot be built from a
+ * picker that knows only a kind. One list, in one place, because FOUR things have
+ * to agree about it and each used to say it for itself: `OFFERED_CONDS` and
+ * `withCond` here, and both of flowList.tsx's pieces of picker state.
+ *
+ * A `Record` over `Exclude<Condition["kind"], CondKind>` rather than a hand-typed
+ * `Set`, so the list cannot fall behind the model: `CondKind` (model.ts) is by its
+ * own definition every kind that needs NO parameter, which makes that `Exclude`
+ * exactly the parameterised ones, and a `Record` over it must be exhaustive to
+ * typecheck. Add a fifth parameterised kind to `Condition` and this object stops
+ * compiling until it is named here — instead of silently becoming an
+ * unconstructible picker entry. */
+const PARAMETERISED_CONDS: Record<Exclude<Condition["kind"], CondKind>, true> = {
+  "agent-idle-over": true,
+  "ticket-status-is": true,
+  "branch-ci-passed": true,
+};
+
+/** Can `{ kind }` alone be a complete `Condition`? A type guard, not a bare
+ * boolean, so `withCond` and the `OFFERED_CONDS` filter both get the narrowing
+ * out of it rather than reaching for a cast. */
+export function isBareCond(kind: Condition["kind"]): kind is CondKind {
+  return !(kind in PARAMETERISED_CONDS);
+}
+
+/** What either presentation offers in a condition picker. `agent-idle-over`,
+ * `ticket-status-is` and `branch-ci-passed` each carry a parameter (a minute
+ * count, a status name, a repo AND a branch) and this phase has no input for
+ * any of them — offering them would create a rule waiting on a fixed 10
+ * minutes, on the empty string, or on `undefined#undefined`, none of which
+ * ever matches. They stay in `COND_LABEL` because a flow hand-edited on disk
+ * can still hold one and its rule must still render, in both presentations.
+ * `command-succeeded` carries no parameter, so unlike those three it is NOT
  * filtered out below — the drawer can offer it on any rule regardless of
  * what that rule's source node is. Offering it that broadly is safe, not
  * merely tolerated: `evaluate.ts`'s `commandSucceeded` refuses to answer
  * `true` unless the rule's source really is a command node, so a rule wired
  * off anything else is inert forever (never fires) rather than wrongly true.
  * Restricting the PICKER to command-node sources so such a rule is never
- * offered in the first place is Tasks 9/10's, not this one's. */
-export const OFFERED_CONDS: Condition["kind"][] = (
-  Object.keys(COND_LABEL) as Condition["kind"][]
-).filter((k) => k !== "agent-idle-over" && k !== "ticket-status-is");
+ * offered in the first place is Tasks 9/10's, not this one's.
+ *
+ * `branch-ci-passed` is the one filtered kind whose absence a user can FEEL —
+ * it is the condition that makes "wait for the build to pass on master, then
+ * deploy to staging" expressible, and until a picker can ask for a repo and a
+ * branch, the only way to write one is by hand in the flow file. An unusable
+ * picker entry would be worse than none: it would silently produce a rule
+ * that can never fire, on the one condition built to gate a deploy. */
+export const OFFERED_CONDS: CondKind[] = (Object.keys(COND_LABEL) as Condition["kind"][]).filter(isBareCond);
 
 /** The verb (and, for `notify`, the whole rest of the clause) a rule's action
  * reads as. Both the inspector's `<option>` text and the list's closed-row
@@ -251,7 +289,10 @@ export function observationOf(flow: Flow, e: FlowEdge, runs: RunStatus[]): strin
  * case, which is what lets a caller skip `onSave` entirely by checking
  * `next !== flow` rather than re-deriving the same guard itself. */
 export function withCond(flow: Flow, edgeId: string, kind: Condition["kind"]): Flow {
-  if (kind === "agent-idle-over" || kind === "ticket-status-is") return flow;
+  // `isBareCond`, not a hand-listed pair of kinds: this guard and `OFFERED_CONDS`
+  // must refuse exactly the same set, or a kind the picker somehow offers gets
+  // silently dropped here instead (or, worse, one it refuses gets built).
+  if (!isBareCond(kind)) return flow;
   const cond: Condition = { kind };
   return { ...flow, edges: flow.edges.map((x) => (x.id === edgeId ? { ...x, cond } : x)) };
 }

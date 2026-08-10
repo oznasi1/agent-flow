@@ -87,7 +87,24 @@ export type CondKind =
 export type Condition =
   | { kind: CondKind }
   | { kind: "agent-idle-over"; minutes: number }
-  | { kind: "ticket-status-is"; status: string };
+  | { kind: "ticket-status-is"; status: string }
+  /** Did CI pass on a NAMED BRANCH of a NAMED REPO — "wait for the build to pass
+   * on master, then deploy to staging". Parameterised for a reason no other
+   * condition here shares: every one of them asks about the place the rule's
+   * source node already is (its PR, its git, its agent), so the repo is implied
+   * and the branch is whatever that place has checked out. This one asks about a
+   * branch nothing on the board need be sitting on, so both halves have to be
+   * said out loud.
+   *
+   * `repo` is Agent Flow's name for a CHECKOUT (a `run.repos[].name`), not a
+   * GitHub `owner/name` — it says which directory the fetch runs in, and gh
+   * resolves the repository from that directory's remote. See
+   * `branchCi.ts`'s `BRANCH_CI_QUERY` for why that distinction is load-bearing.
+   *
+   * Verdicts arrive on `CondContext.branchCi`, keyed `repo#branch`, and only an
+   * explicit `"passed"` satisfies it: this condition is built to gate a deploy,
+   * so an unreadable branch reads as not met (see `conditions.ts`'s arm). */
+  | { kind: "branch-ci-passed"; repo: string; branch: string };
 
 /** What a rule does when its condition is met, derived from the node it points
  * at — see `actionFor`. `run` executes a command node's command.

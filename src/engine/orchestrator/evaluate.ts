@@ -4,6 +4,7 @@
 // Keeping the decision separate from the action is what makes the latch, the join
 // and the cap testable without launching a window.
 import { RunStatus } from "../../types";
+import { BranchCiStatus } from "./branchCi";
 import { CondContext, evalCond, placeActivity } from "./conditions";
 import {
   Condition, Flow, FlowAction, FlowEdge, edgeAction, findNode, incomingEdges, isPlace, isSettled, isSpendAction,
@@ -65,6 +66,15 @@ export interface EvalInput {
   nowMs: number;
   /** Defaults to `MAX_LAUNCHES_PER_PASS`. */
   maxLaunches?: number;
+  /** Branch-CI verdicts for this pass, keyed `repo#branch` — passed straight through
+   * to every `CondContext` this evaluation builds (see that field's own doc comment
+   * in `conditions.ts`). One map for the whole pass, not one per node: several rules
+   * can name the same branch and they must all read the same fetch.
+   *
+   * Omitted by every caller that has no branch-CI rule to answer, and by every
+   * existing test — which is safe rather than merely convenient: an absent map reads
+   * as `"unknown"`, and `"unknown"` is not met. */
+  branchCi?: Record<string, BranchCiStatus>;
 }
 
 export interface FiredEdge {
@@ -142,7 +152,7 @@ export function evaluateFlow(i: EvalInput): EvalResult {
       note(from.id, "gone");
       return undefined;
     }
-    const c: CondContext = { status, repo: from.repo, nowMs: i.nowMs };
+    const c: CondContext = { status, repo: from.repo, nowMs: i.nowMs, branchCi: i.branchCi };
     // Read the same per-place activity `evalCond` itself will use — not the
     // unfiltered run aggregate. `placeActivity` only borrows the run aggregate
     // for a single-repo run, where it genuinely IS this place's state; for any

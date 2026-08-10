@@ -24,7 +24,14 @@ export interface UnfirableRule {
 const NEEDS_LIVE = new Set<Condition["kind"]>(["agent-ended-turn", "agent-idle-over"]);
 
 /** Conditions that read a pull request. With PR facts off, `prs` is `{}` for every
- * run, so all of these read a missing entry and stay false forever. */
+ * run, so all of these read a missing entry and stay false forever.
+ *
+ * `branch-ci-passed` reads no pull request at all, and belongs here anyway: the
+ * toggle governs the `gh` PATH, not the PR shape. `deckView.ts` gates its branch-CI
+ * fetch on the same `ghReady()` every PR fetch goes through — which folds in the
+ * `agentFlow.prFacts` setting AND the `gh auth status` probe — so with PR facts off
+ * `CondContext.branchCi` is empty for every pass, every verdict reads `"unknown"`,
+ * and a rule of this kind waits forever. Named here so arming SAYS so. */
 const NEEDS_PR = new Set<Condition["kind"]>([
   "pr-merged",
   "ci-passed",
@@ -33,6 +40,7 @@ const NEEDS_PR = new Set<Condition["kind"]>([
   "changes-requested",
   "threads-resolved",
   "pr-conflicting",
+  "branch-ci-passed",
 ]);
 
 /** The drawer's own wording, kept here so the warning reads like the rule does.
@@ -54,6 +62,7 @@ const LABEL: Record<Condition["kind"], string> = {
   "nothing-to-push": "nothing to push",
   "ticket-done": "ticket reached done",
   "ticket-status-is": "ticket status is…",
+  "branch-ci-passed": "branch CI passed…",
   // Present here only because this `Record` must cover every `Condition["kind"]`
   // to typecheck — NOT because this condition needs a toggle. It needs neither
   // PR facts nor the Live signal: its verdict comes from the command node's own

@@ -15,7 +15,7 @@
 // living in this file. A second copy, even a faithful one today, is exactly
 // the drift "one model, two presentations" is warning against.
 import * as React from "react";
-import { Condition, edgeAction, Flow, FlowAction, FlowEdge, isSettled, LaunchDest } from "../engine/orchestrator/model";
+import { CondKind, Condition, edgeAction, Flow, FlowAction, FlowEdge, isSettled, LaunchDest } from "../engine/orchestrator/model";
 import { FlowPromptMode, RunStatus } from "../types";
 import {
   ACTION_LABEL,
@@ -256,15 +256,15 @@ function NewRuleBar(p: {
   const { flow, promptModes, onSave } = p;
   const [from, setFrom] = React.useState("");
   const [to, setTo] = React.useState("");
-  // Narrowed to what `OFFERED_CONDS` actually offers — the two parameterised
-  // kinds (`agent-idle-over`, `ticket-status-is`) need a value this bar has no
-  // input for, same reason `OFFERED_CONDS` itself excludes them (see its own
-  // doc comment in orchestratorRule.ts) — so the type this state can ever
-  // hold never includes them, and building `{ kind: cond }` below is always a
-  // complete `Condition` with no cast needed.
-  const [cond, setCond] = React.useState<Exclude<Condition["kind"], "agent-idle-over" | "ticket-status-is">>(
-    "pr-merged",
-  );
+  // `CondKind` is by its own definition every kind that needs no parameter, which
+  // is exactly what `OFFERED_CONDS` offers — the parameterised kinds
+  // (`agent-idle-over`, `ticket-status-is`, `branch-ci-passed`) each need a value
+  // this bar has no input for, same reason `OFFERED_CONDS` itself excludes them
+  // (see `isBareCond` and its own doc comment in orchestratorRule.ts). Naming the
+  // model type rather than re-`Exclude`ing the kinds by hand is what keeps this
+  // state from falling behind `Condition`: building `{ kind: cond }` below stays a
+  // complete `Condition` with no cast needed, and stops compiling if it ever is not.
+  const [cond, setCond] = React.useState<CondKind>("pr-merged");
   const [action, setAction] = React.useState<FlowAction>("notify");
   // Seeded from nothing in particular — there is no `to` chosen yet for
   // either to describe anything about. The moment a `to` (or the action) IS
@@ -398,7 +398,7 @@ function NewRuleBar(p: {
         aria-label="New rule condition"
         value={cond}
         onChange={(ev) =>
-          setCond(ev.currentTarget.value as Exclude<Condition["kind"], "agent-idle-over" | "ticket-status-is">)
+          setCond(ev.currentTarget.value as CondKind)
         }
       >
         {OFFERED_CONDS.map((k) => <option key={k} value={k}>{COND_LABEL[k]}</option>)}

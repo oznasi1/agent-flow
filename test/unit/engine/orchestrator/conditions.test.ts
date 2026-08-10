@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { evalCond, CondContext, describeCond, placeActivity } from "../../../../src/engine/orchestrator/conditions";
+import { BranchCiStatus, branchCiKey } from "../../../../src/engine/orchestrator/branchCi";
 import { Condition } from "../../../../src/engine/orchestrator/model";
 import { AgentState, CardAgent, PrEntryMap, PrFacts, RepoGit, Run, RunStatus } from "../../../../src/types";
 
@@ -217,6 +218,52 @@ describe("evalCond — ticket source", () => {
   });
 });
 
+describe("evalCond — branch CI", () => {
+  // The one condition whose fact does not come out of the `RunStatus`: it names a
+  // repo and branch nothing on the board need be sitting on, and the verdicts arrive
+  // pre-fetched on `branchCi`. Deliberately a repo that is NOT this context's own
+  // (`REPO`), to pin that the condition reads its own `repo`, not the place's.
+  const withCi = (branchCi: Record<string, BranchCiStatus>): CondContext => ({ ...ctx(), branchCi });
+  const onMaster: Condition = { kind: "branch-ci-passed", repo: "bite-me", branch: "master" };
+
+  it("is met only when that repo and branch passed", () => {
+    expect(met(onMaster, withCi({ "bite-me#master": "passed" }))).toBe(true);
+    expect(met(onMaster, withCi({ "bite-me#master": "failed" }))).toBe(false);
+    expect(met(onMaster, withCi({ "bite-me#master": "pending" }))).toBe(false);
+    // Another repo's master being green says nothing about this one.
+    expect(met(onMaster, withCi({ "api#master": "passed" }))).toBe(false);
+  });
+
+  // The worst outcome available: deploying because an API call failed.
+  it("is NOT met when the branch status is unknown or absent", () => {
+    expect(met(onMaster, withCi({ "bite-me#master": "unknown" }))).toBe(false);
+    expect(met(onMaster, withCi({}))).toBe(false);
+    // No map at all — a pass that fetched nothing, e.g. with PR facts off.
+    expect(met(onMaster, ctx())).toBe(false);
+  });
+
+  it("does not confuse two branches of the same repo", () => {
+    // Keyed through `branchCiKey` — the same function `deckView.ts` writes with —
+    // rather than with two hand-written strings, so a key that dropped its branch
+    // half would make these two entries COLLIDE here exactly as they would in the
+    // real cache (the second write winning), instead of merely missing.
+    const both = withCi({
+      [branchCiKey("bite-me", "main")]: "passed",
+      [branchCiKey("bite-me", "release")]: "failed",
+    });
+    expect(met({ kind: "branch-ci-passed", repo: "bite-me", branch: "main" }, both)).toBe(true);
+    expect(met({ kind: "branch-ci-passed", repo: "bite-me", branch: "release" }, both)).toBe(false);
+  });
+
+  it("is not fooled by a key that only looks right", () => {
+    // `main` must not read `main-2`'s verdict, in either direction.
+    expect(met({ kind: "branch-ci-passed", repo: "bite-me", branch: "main" }, withCi({ "bite-me#main-2": "passed" })))
+      .toBe(false);
+    expect(met({ kind: "branch-ci-passed", repo: "bite", branch: "me#main" }, withCi({ "bite-me#main": "passed" })))
+      .toBe(false);
+  });
+});
+
 describe("describeCond", () => {
   it("describes CI progress rather than the condition's name", () => {
     expect(describeCond({ kind: "ci-passed" }, ctx({}, pr({ ci: { passing: 4, pending: 3, failing: [] } }))))
@@ -353,6 +400,24 @@ describe("describeCond", () => {
   it("ticket-status-is falls back to 'no ticket status' too, same as ticket-done", () => {
     expect(describeCond({ kind: "ticket-status-is", status: "PR initiated" }, ctx({ ticketStatus: null })))
       .toBe("no ticket status");
+  });
+
+  it("branch-ci-passed names the branch, because the rule's own label cannot", () => {
+    const cond: Condition = { kind: "branch-ci-passed", repo: "bite-me", branch: "master" };
+    const withCi = (branchCi: Record<string, BranchCiStatus>): CondContext => ({ ...ctx(), branchCi });
+    expect(describeCond(cond, withCi({ "bite-me#master": "passed" }))).toBe("master passed");
+    expect(describeCond(cond, withCi({ "bite-me#master": "failed" }))).toBe("master failed");
+    expect(describeCond(cond, withCi({ "bite-me#master": "pending" }))).toBe("master CI running");
+  });
+
+  it("branch-ci-passed tells 'nobody fetched it' apart from 'nobody could read it'", () => {
+    const cond: Condition = { kind: "branch-ci-passed", repo: "bite-me", branch: "master" };
+    // Equally not-met, different next step for the reader: an absent key is what the
+    // webview always sees (the verdicts never cross the wire), while an explicit
+    // `unknown` means a call was made and came back unreadable.
+    expect(describeCond(cond, ctx())).toBe("master not checked yet");
+    expect(describeCond(cond, { ...ctx(), branchCi: {} })).toBe("master not checked yet");
+    expect(describeCond(cond, { ...ctx(), branchCi: { "bite-me#master": "unknown" } })).toBe("master status unreadable");
   });
 });
 

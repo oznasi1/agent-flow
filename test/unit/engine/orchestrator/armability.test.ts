@@ -41,6 +41,18 @@ describe("unfirableRules", () => {
     expect(out.every((r) => r.needs === "pr-facts")).toBe(true);
   });
 
+  it("names a branch-CI rule when PR facts are off — same gh path, same toggle", () => {
+    // It reads no pull request at all, but `deckView.ts` gates its branch-CI fetch
+    // on the same `ghReady()` the PR fetches go through, so with that off the
+    // verdict map is empty every pass and the rule waits forever.
+    const flow = flowOf(edge("e1", { kind: "branch-ci-passed", repo: "bite-me", branch: "master" }));
+    expect(unfirableRules(flow, { liveSignal: true, prFacts: false })).toEqual([
+      { edgeId: "e1", needs: "pr-facts", label: expect.any(String) },
+    ]);
+    // And never blamed on the Live signal, which has nothing to do with it.
+    expect(unfirableRules(flow, { liveSignal: false, prFacts: true })).toEqual([]);
+  });
+
   it("never names a git or ticket condition — their data is always there", () => {
     const flow = flowOf(
       edge("e1", { kind: "tree-clean" }),
