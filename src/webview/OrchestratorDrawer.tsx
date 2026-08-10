@@ -9,6 +9,7 @@ import {
   ACTION_LABEL,
   addCommandNode,
   COMMAND_FREE_TEXT,
+  COMMAND_NOT_SET,
   commandTargetOf,
   condOffered,
   condOptionLabel,
@@ -1312,7 +1313,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                         like the first configured command. */}
                     {!commandIdExists && (
                       <option value={commandValue}>
-                        {commandValue === "" ? "(no command set)" : `${commandValue} (not configured)`}
+                        {commandValue === "" ? COMMAND_NOT_SET : `${commandValue} (not configured)`}
                       </option>
                     )}
                     {p.commands.map((c) => (

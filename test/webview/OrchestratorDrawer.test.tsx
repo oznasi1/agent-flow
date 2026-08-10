@@ -11,7 +11,7 @@ import type { Flow } from "../../src/engine/orchestrator/model";
 import { readFlows, writeFlow } from "../../src/engine/orchestrator/store";
 import { edgeAction } from "../../src/engine/orchestrator/model";
 import { branchCiKey } from "../../src/engine/orchestrator/branchCi";
-import { ACTION_LABEL, COMMAND_FREE_TEXT } from "../../src/webview/orchestratorRule";
+import { ACTION_LABEL, COMMAND_FREE_TEXT, COMMAND_NOT_SET } from "../../src/webview/orchestratorRule";
 import { anchor, edgePath, GRID, labelPoint, NODE_H, NODE_W } from "../../src/engine/orchestrator/layout";
 import type { PrEntryMap, RunStatus } from "../../src/types";
 
@@ -1695,6 +1695,20 @@ describe("a command node", () => {
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "ci-passed" } }],
     });
+
+  it("says a free-text node with nothing typed has no command set, on the canvas and in the sentence", () => {
+    // The shape the picker actually CREATES ("Free-text command…" writes `run: ""`)
+    // and the one `resolveCommand` refuses, so an armed flow latches it errored. It
+    // used to read as configured on every surface: the canvas chip and the
+    // inspector's title both said the bare word "command", and the rule sentence
+    // read "THEN run command". Every value beside it already had a not-set voice.
+    const blank = placeAndCommand({ run: "" });
+    render(<OrchestratorDrawer {...props({ flows: [blank] })} />);
+    expect(within(screen.getByTestId("orch-node-n2")).getByText(COMMAND_NOT_SET)).toBeTruthy();
+    // And in the inspector's own title, which names both ends of the rule.
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByTestId("orch-inspector").textContent).toContain(COMMAND_NOT_SET);
+  });
 
   it("offers every configured command, and a free-text option", () => {
     render(<OrchestratorDrawer {...props()} />);

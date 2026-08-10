@@ -20,6 +20,7 @@ import { FlowCommand, FlowPromptMode, RunStatus } from "../types";
 import {
   ACTION_LABEL,
   COMMAND_FREE_TEXT,
+  COMMAND_NOT_SET,
   commandTargetOf,
   condOffered,
   condOptionLabel,
@@ -265,7 +266,7 @@ function ruleSentence(
                     say so rather than look like a command that exists. */}
                 {!commandIdExists && (
                   <option value={commandValue}>
-                    {commandValue === "" ? "(no command set)" : `${commandValue} (not configured)`}
+                    {commandValue === "" ? COMMAND_NOT_SET : `${commandValue} (not configured)`}
                   </option>
                 )}
                 {commands.map((c) => (

@@ -300,15 +300,33 @@ function usableText(v: unknown): string | null {
   return typeof v === "string" && v.trim() !== "" ? v.trim() : null;
 }
 
+/** A command node that names nothing runnable yet, in words — the not-set voice
+ * every value beside it already has ("(no mode set)", "(not configured)"). ONE
+ * string, because three surfaces say it: the Command select's own fallback option
+ * in both presentations, and `commandLabel` below.
+ *
+ * It is the shape the picker actually CREATES — "Free-text command…" writes
+ * `run: ""` for the inspector to fill in — and `resolveCommand` refuses to execute
+ * it, so an armed flow latches such a rule errored. Until now it was the one shape
+ * with no not-set voice at all: the node read "command" in every sentence and
+ * "runs a command" on the canvas, i.e. as though it were configured. */
+export const COMMAND_NOT_SET = "(no command set)";
+
 /** How a command node names itself: its configured id, else the free text it
- * carries (elided), else the bare word. Never blank, and never the other
+ * carries (elided), else `COMMAND_NOT_SET`. Never blank, and never the other
  * field's value — a node carrying BOTH is `resolveCommand`'s refusal to make,
- * not this function's; it only has to name the node, not validate it. */
+ * not this function's; it only has to name the node, not validate it.
+ *
+ * The empty case says so out loud rather than answering the bare word "command":
+ * this is the single place every surface reads a command node's name from (the
+ * canvas chip, both rule sentences, the inspector's title, the Actions tray), so
+ * one edit here is what stops a node with nothing typed from reading as
+ * configured everywhere at once. */
 export function commandLabel(n: CommandNode): string {
   const id = usableText(n.commandId);
   if (id) return id;
   const run = usableText(n.run);
-  if (!run) return "command";
+  if (!run) return COMMAND_NOT_SET;
   return run.length > COMMAND_LABEL_MAX ? `${run.slice(0, COMMAND_LABEL_MAX)}…` : run;
 }
 

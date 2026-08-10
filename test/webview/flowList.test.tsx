@@ -5,6 +5,7 @@ import { render, screen, fireEvent, within } from "@testing-library/react";
 import { FlowList } from "../../src/webview/flowList";
 import {
   COMMAND_FREE_TEXT,
+  COMMAND_NOT_SET,
   NOTE_COMMAND_HINT,
   NOTE_COMMAND_PLACEHOLDER,
   NOTE_PLACEHOLDER,
@@ -569,6 +570,17 @@ describe("choosing what a command rule runs, from an open row", () => {
     // refuses the one actually on the node.
     expect(select.value).toBe("gone");
     expect(select.selectedOptions[0].textContent).toBe("gone (not configured)");
+  });
+
+  it("says a free-text node with nothing typed has no command set, in the closed row's own sentence", () => {
+    // `run: ""` is exactly what the Add-command picker's free-text option creates,
+    // and `resolveCommand` refuses it — so an armed flow latches this rule errored.
+    // The CLOSED row is the reading a scanning user gets, and it used to say
+    // "THEN run command", i.e. as though the node were configured. Asserted on the
+    // row, not on the open Command select (which already said so).
+    render(<FlowList {...props({ flow: placeAndCommand({}, { run: "" }) })} />);
+    const row = screen.getByTestId("flowlist-row-e1");
+    expect(row.textContent).toContain(COMMAND_NOT_SET);
   });
 
   it("says '(no command set)' for a hand-edited node carrying neither field", () => {
