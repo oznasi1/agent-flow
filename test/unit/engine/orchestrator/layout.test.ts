@@ -134,6 +134,35 @@ describe("labelPoint", () => {
     expect(Math.abs(p.y)).toBeGreaterThan(0);
   });
 
+  it("clears the box for where the label is PAINTED, not for its anchor", () => {
+    // The defect: `labelPoint` stepped the ANCHOR 8px clear of a box while
+    // `.orch-edge` painted the chip ~19px above that anchor, so every DOWNWARD
+    // escape deterministically re-entered the box it had just escaped — over a
+    // node's only status word. `paintDy` is the vertical distance to the painted
+    // chip's own centre.
+    const paintDy = -19;
+    // Mostly ABOVE the chord, so escaping DOWNWARD is the nearest way out — which
+    // is the direction the paint offset then undoes.
+    const blocker = boxAt(60, -50);
+    const p = labelPoint({ x: 0, y: 0 }, { x: 288, y: 0 }, [blocker], paintDy);
+    // What the user sees is clear of the node.
+    expect(inside({ x: p.x, y: p.y + paintDy }, blocker)).toBe(false);
+    // And the fixture is not vacuous: the SAME escape, judged at the anchor, is
+    // one this box would have admitted — which is exactly what used to be painted
+    // back inside it.
+    const anchorOnly = labelPoint({ x: 0, y: 0 }, { x: 288, y: 0 }, [blocker]);
+    expect(inside({ x: anchorOnly.x, y: anchorOnly.y + paintDy }, blocker)).toBe(true);
+  });
+
+  it("keeps the label on its own line while clearing the painted box", () => {
+    // The detour is still perpendicular and still bounded — `paintDy` changes
+    // WHERE the collision is judged, never how far the label may wander.
+    const blocker = boxAt(60, -22);
+    const p = labelPoint({ x: 0, y: 0 }, { x: 288, y: 0 }, [blocker], -19);
+    expect(p.x).toBe(144); // unchanged along the chord
+    expect(Math.abs(p.y)).toBeLessThanOrEqual(NODE_H + 16 + 19);
+  });
+
   it("handles a zero-length chord gracefully", () => {
     // Degenerate case: both points are the same, so the chord has no direction.
     // The function should return the midpoint (which is the same point).

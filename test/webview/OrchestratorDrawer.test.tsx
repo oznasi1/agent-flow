@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import * as React from "react";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { OrchestratorDrawer, DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
-import { ORCH_ANIM_MS, ORCH_CSS } from "../../src/webview/orchestratorStyles";
+import { ORCH_ANIM_MS, ORCH_CSS, ORCH_EDGE_PAINT_DY } from "../../src/webview/orchestratorStyles";
 import type { Flow } from "../../src/engine/orchestrator/model";
 // The real store, so the "a new wire is never latched" test below is answered by
 // the migration itself rather than by this file restating its rule. Its io is
@@ -895,7 +895,10 @@ describe("wiring", () => {
     const from = anchor(fromBox, "out");
     const to = anchor(toBox, "in");
     const rawMid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
-    const expectedMid = labelPoint(from, to, [obstacleBox]);
+    // `ORCH_EDGE_PAINT_DY`, as the drawer passes it: the chip is painted well
+    // above the point it is positioned at, so that is where the obstacle search
+    // has to judge the collision.
+    const expectedMid = labelPoint(from, to, [obstacleBox], ORCH_EDGE_PAINT_DY);
     // Sanity: this fixture actually exercises the obstacle path — the raw
     // midpoint really does sit on n3, so the expected point must differ from
     // it. If it didn't, the fixture (not the rule) would be at fault.
@@ -906,11 +909,40 @@ describe("wiring", () => {
     expect(label.style.left).toBe(`${expectedMid.x}px`);
     expect(label.style.top).toBe(`${expectedMid.y}px`);
 
-    // And directly: the rendered point must not fall inside n3's box.
+    // And directly: what the user SEES must not fall inside n3's box. Judged at
+    // the painted position, not at the anchor — checking the anchor is what let
+    // every downward escape step clear and then paint itself straight back into
+    // the box, over that node's only status word.
     const lx = parseFloat(label.style.left);
-    const ly = parseFloat(label.style.top);
+    const ly = parseFloat(label.style.top) + ORCH_EDGE_PAINT_DY;
     expect(lx >= obstacleBox.x && lx <= obstacleBox.x + obstacleBox.w &&
       ly >= obstacleBox.y && ly <= obstacleBox.y + obstacleBox.h).toBe(false);
+  });
+
+  it("does not paint an escaped label back inside the node it escaped", () => {
+    // The mechanism, end to end: `labelPoint` stepped the ANCHOR 8px clear while
+    // `.orch-edge`'s `translate(-50%, -150%)` painted the chip ~19px above it, so a
+    // DOWNWARD escape deterministically re-entered the box. n3 sits just above the
+    // chord, which makes down the nearest way out.
+    const above = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 64, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n3", kind: "place", x: 344, y: 24, join: "any", runKey: "ASM-12", repo: "r" },
+        { id: "n2", kind: "notify", x: 624, y: 64, join: "any", message: "landed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    });
+    const obstacleBox = { x: 344, y: 24, w: NODE_W, h: NODE_H };
+    render(<OrchestratorDrawer {...props({ flows: [above] })} />);
+    const label = screen.getByTestId("orch-edge-e1");
+    const lx = parseFloat(label.style.left);
+    const painted = parseFloat(label.style.top) + ORCH_EDGE_PAINT_DY;
+    const insideX = lx >= obstacleBox.x && lx <= obstacleBox.x + obstacleBox.w;
+    expect(insideX && painted >= obstacleBox.y && painted <= obstacleBox.y + obstacleBox.h).toBe(false);
+    // Not vacuous: the fixture really does put the raw midpoint on n3, so
+    // something had to move.
+    const rawMidY = 64 + NODE_H / 2;
+    expect(parseFloat(label.style.top)).not.toBe(rawMidY);
   });
 
   // Same three-node shape, but the third node sits well clear of the chord

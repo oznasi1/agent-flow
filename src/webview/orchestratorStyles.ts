@@ -24,6 +24,23 @@
  * imports nothing, so the dependency only ever points one way. */
 export const ORCH_ANIM_MS = 180;
 
+/** How far an edge chip's own centre is painted from the point it is positioned
+ * at, in px — negative because it sits ABOVE that point. Declared HERE for the
+ * same reason `ORCH_ANIM_MS` is: `.orch-edge` below carries
+ * `transform: translate(-50%, -150%)`, and this number is the vertical half of
+ * that transform resolved against the chip's own height (a `--t-micro` line plus
+ * 1px padding and a 1px border each way, ~19px, so -150% lifts the box to sit
+ * between ~9 and ~28px above the point and centres it ~19px above).
+ *
+ * `OrchestratorDrawer.tsx` hands it to `labelPoint` (layout.ts) as that
+ * function's `paintDy`, which is what makes the obstacle search avoid boxes for
+ * the CHIP rather than for its anchor. Without it, every downward escape stepped
+ * the anchor clear and then painted the chip straight back into the box it had
+ * escaped — over a node's only status word. Change the transform below and this
+ * number changes with it; they are one fact in two languages, the same way
+ * `NOTIFY_W` and `.orch-node.notify`'s width are. */
+export const ORCH_EDGE_PAINT_DY = -19;
+
 export const ORCH_CSS = `
   /* Brand-toned, and the only control in the Deck header that carries a hue.
      It earned one: every other header control is a lens over what is already

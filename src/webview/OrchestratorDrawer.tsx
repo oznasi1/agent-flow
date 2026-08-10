@@ -4,7 +4,7 @@ import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../eng
 import { Condition, edgeAction, Flow, FlowEdge, FlowNode, isSettled, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
 import { FlowList } from "./flowList";
-import { ORCH_ANIM_MS } from "./orchestratorStyles";
+import { ORCH_ANIM_MS, ORCH_EDGE_PAINT_DY } from "./orchestratorStyles";
 import {
   ACTION_LABEL,
   addCommandNode,
@@ -1096,7 +1096,13 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             const obstacles = flow.nodes
               .filter((n) => n.id !== e.from && n.id !== e.to)
               .map((n) => boxOf(n));
-            const mid = labelPoint(anchor(boxOf(a), "out"), anchor(boxOf(b), "in"), obstacles);
+            // `ORCH_EDGE_PAINT_DY`: this chip is painted well ABOVE the point
+            // positioned below (`.orch-edge`'s own transform), so the avoidance has
+            // to be told where it actually lands — see that constant, and
+            // `labelPoint`'s `paintDy`.
+            const mid = labelPoint(
+              anchor(boxOf(a), "out"), anchor(boxOf(b), "in"), obstacles, ORCH_EDGE_PAINT_DY,
+            );
             return (
               <button
                 type="button"

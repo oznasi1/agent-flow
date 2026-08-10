@@ -44,8 +44,23 @@ export function edgePath(a: Point, b: Point): string {
  * graph can have obstacles stacked taller than expected. The loop checks
  * both directions equally at each distance, keeping the label as close to
  * the line as possible before giving up.
+ *
+ * `paintDy` is what makes the avoidance describe the thing the user actually
+ * sees. The point returned here is an ANCHOR, and the caller's CSS may paint the
+ * label somewhere else relative to it — `.orch-edge` (orchestratorStyles.ts) is
+ * `translate(-50%, -150%)`, so its chip lands roughly 19px ABOVE its anchor.
+ * Testing collisions at the anchor while painting the chip elsewhere made every
+ * DOWNWARD escape deterministically re-enter the box it had just escaped, sitting
+ * on top of a node's only status word. Pass the vertical distance from the anchor
+ * to the painted chip's own centre (negative for "above") and the search clears
+ * the box for the CHIP, not for the anchor; the default of 0 is for a caller that
+ * paints exactly on the point it is given.
+ *
+ * Still a POINT, not the chip's full rect: its width depends on the text inside
+ * it, which lives in the DOM this module deliberately knows nothing about. The
+ * existing `margin` below is what stands in for that width, unchanged.
  */
-export function labelPoint(a: Point, b: Point, obstacles?: Box[]): Point {
+export function labelPoint(a: Point, b: Point, obstacles?: Box[], paintDy = 0): Point {
   const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 
   if (!obstacles || obstacles.length === 0) {
@@ -55,8 +70,13 @@ export function labelPoint(a: Point, b: Point, obstacles?: Box[]): Point {
   // Margin around boxes when checking for collision
   const margin = 8;
 
-  // Check if a point is inside any obstacle (with margin inflated)
-  const pointInObstacle = (p: Point): boolean => {
+  // Where an anchor's label is actually PAINTED — the only position worth
+  // testing, see `paintDy`.
+  const painted = (p: Point): Point => ({ x: p.x, y: p.y + paintDy });
+
+  // Check if an anchor's painted label is inside any obstacle (with margin inflated)
+  const pointInObstacle = (anchorPoint: Point): boolean => {
+    const p = painted(anchorPoint);
     for (const box of obstacles) {
       if (p.x >= box.x - margin && p.x <= box.x + box.w + margin &&
           p.y >= box.y - margin && p.y <= box.y + box.h + margin) {
