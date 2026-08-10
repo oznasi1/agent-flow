@@ -36,9 +36,15 @@ function gitRaw(repoPath: string, args: string[]): string {
  * The reliable backbone of a run's status: branch, working-tree diff vs HEAD
  * (uncommitted work the agent produced), commits ahead of upstream, and dirtiness.
  * Degrades to zeros/null for a non-git or missing path rather than throwing.
+ *
+ * `knownBranch` lets a caller that *just* read this repo's branch in the same
+ * tick (a local card's roots, resolved moments earlier for ticket inference)
+ * hand it back in rather than paying for a second `rev-parse` that can only
+ * repeat the same answer. Omitted, this reads it fresh — every tracked run's
+ * call, unchanged.
  */
-export function gitState(name: string, repoPath: string): RepoGit {
-  const branch = currentBranch(repoPath);
+export function gitState(name: string, repoPath: string, knownBranch?: string | null): RepoGit {
+  const branch = knownBranch !== undefined ? knownBranch : currentBranch(repoPath);
   const dirty = git(repoPath, ["status", "--porcelain"]).length > 0;
 
   const aheadRaw = git(repoPath, ["rev-list", "--count", "@{u}..HEAD"]);

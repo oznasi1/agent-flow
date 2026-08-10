@@ -101,6 +101,16 @@ const h = vi.hoisted(() => ({
   // against a real conflict, not just one root that has a ticket and one that
   // never can. Defaults to "main", same as every other path already did.
   branch2: "main" as string | null,
+  // A third steerable path (F1's own-root-vs-sibling coverage needs three roots
+  // to pin "first hit wins" independently of "the session's own root wins").
+  branch3: "main" as string | null,
+  // repoRoot (F5): a path in here answers "" — a plain, non-git directory — and
+  // every other path defaults to identity (its own git root), matching the
+  // suite's original hardcoded stub. A path in `repoRootRemap` answers with the
+  // mapped value instead, for the "nested folder normalizes to its containing
+  // repo" case — identity can't express that on its own.
+  nonGitRoots: new Set<string>(),
+  repoRootRemap: new Map<string, string>(),
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -126,7 +136,11 @@ vi.mock("../../src/engine/workspace", () => ({
 vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn() }));
 // repoRoot stubbed alongside the real taskDiff: groupByPlace (engine/sessions)
 // calls the real repoRoot, which would shell out to git for a fixture path like
-// "/r/svc" and get "" back rather than the fixtures' own place key.
+// "/r/svc" and get "" back rather than the fixtures' own place key. Identity by
+// default (a path's own git root is itself) — the same answer the suite's old
+// hardcoded `(p) => p` gave for every path — but steerable per test via
+// `h.nonGitRoots` (F5's "drop a non-repo folder" case) and `h.repoRootRemap`
+// (F5's "a nested folder normalizes to its containing repo" case).
 // prEligible: a faithful-enough stand-in for the real branch-vs-origin/HEAD
 // check (Task 2) — "master" plays the role of "this repo's default branch" so
 // a test can choose the answer just by naming a branch, without a real repo.
@@ -138,8 +152,9 @@ vi.mock("../../src/engine/git", () => ({
   taskDiff: h.taskDiff,
   taskDiffBase: h.taskDiffBase,
   taskChangedFiles: h.taskChangedFiles,
-  repoRoot: (p: string) => p,
-  currentBranch: (p: string) => (p === "/r/centaur" ? h.branch : p === "/r/automation_e2e" ? h.branch2 : "main"),
+  repoRoot: (p: string) => (h.nonGitRoots.has(p) ? "" : h.repoRootRemap.get(p) ?? p),
+  currentBranch: (p: string) =>
+    p === "/r/centaur" ? h.branch : p === "/r/automation_e2e" ? h.branch2 : p === "/r/third" ? h.branch3 : "main",
   prEligible: (r: { isGit: boolean; branch?: string }) => r.isGit && !!r.branch && r.branch !== "master",
   gitState: (name: string, path: string) => h.gitState(name, path),
 }));
@@ -327,7 +342,8 @@ const builtFor = (key: string) =>
 /** Every local card's key is a hash (engine/localRuns.ts's localKey) — read it off
  * the built input rather than hard-coding one. */
 const builtLocal = () =>
-  h.buildRunStatus.mock.calls.map((c) => c[0] as { run: Run; agents: CardAgent[] }).filter((i) => i.run.kind === "local").at(-1)!;
+  h.buildRunStatus.mock.calls.map((c) => c[0] as { run: Run; agents: CardAgent[]; prs: PrEntryMap })
+    .filter((i) => i.run.kind === "local").at(-1)!;
 
 /** The last `deck:runs` message actually posted to the webview — the real,
  * host-computed output, as opposed to `builtLocal`/`builtFor` above, which only
@@ -387,6 +403,9 @@ beforeEach(() => {
   h.reviewSubmit.mockClear().mockResolvedValue({ ok: true });
   h.branch = "ASM-5641-team-table";
   h.branch2 = "main";
+  h.branch3 = "main";
+  h.nonGitRoots = new Set();
+  h.repoRootRemap = new Map();
   // Confirm by default: resolve the label passed as the modal's sole action item,
   // rather than vscode's own mock default of `undefined` (which reads as "declined"
   // for every other suite in this file). Individual tests override this per case.
@@ -1315,8 +1334,10 @@ describe("DeckPanel local cards", () => {
     expect(builtLocal().agents.map((a) => a.repo)).toEqual(["automation_e2e"]);
   });
 
-  it("infers the ticket from the first root whose branch names one", async () => {
-    // h.branch is the branch of /r/centaur; every other path reads "main".
+  it("falls through to a sibling root when the session's own root names no ticket", async () => {
+    // The session sits in /r/automation_e2e ("main" — no ticket); /r/centaur
+    // names one. The session's own root gets first say (F1, human ruling), but
+    // when it has nothing to say the remaining roots are still checked.
     h.runs = [];
     h.liveWindows = [WS];
     h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
@@ -1325,16 +1346,35 @@ describe("DeckPanel local cards", () => {
     expect(builtLocal().run.url).toContain("/browse/ASM-5641");
   });
 
-  it("prefers the first root's ticket over a later root's, when both name one", async () => {
-    // Both roots now name a ticket (unlike the case above, where only /r/centaur
-    // could) — this is what actually distinguishes "first root wins" from "last
-    // root wins": with only one root ever able to carry a ticket, .find and a
-    // `.filter(Boolean).at(-1)` mutation would agree.
+  it("prefers the session's own root's ticket over a sibling's, even one earlier in window order (F1, test 6)", async () => {
+    // /r/centaur is FIRST in WS.roots and names a ticket of its own — the old,
+    // window-order rule would pick it. The session sits in /r/automation_e2e,
+    // which also names a ticket: the human ruling says the session's own root
+    // wins regardless of where it falls in the workspace's folder list.
     h.runs = [];
-    h.branch = "ASM-1111-first";
-    h.branch2 = "ASM-2222-second";
+    h.branch = "ASM-9999-sibling"; // /r/centaur — earlier in window order, but not the session's root
+    h.branch2 = "ASM-5641-team-table"; // /r/automation_e2e — the session's own root
     h.liveWindows = [WS];
     h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    show(true);
+    await settled();
+    expect(builtLocal().run.url).toContain("/browse/ASM-5641");
+    expect(builtLocal().run.url).not.toContain("/browse/ASM-9999");
+  });
+
+  it("prefers an earlier sibling root's ticket over a later one, when the session's own root names nothing", async () => {
+    // Three roots: the session's own (/r/third, "main" — no ticket) gets first
+    // say and has none, so the remaining two are checked in their OWN window
+    // order. Both name a ticket — the point that actually distinguishes "first
+    // hit wins" from "last hit wins": with only one of them able to carry a
+    // ticket, .find and a `.filter(Boolean).at(-1)` mutation would agree.
+    const WS3 = { identity: "/ws/three.code-workspace", kind: "workspace" as const,
+      roots: ["/r/centaur", "/r/automation_e2e", "/r/third"] };
+    h.runs = [];
+    h.branch = "ASM-1111-first"; // /r/centaur
+    h.branch2 = "ASM-2222-second"; // /r/automation_e2e
+    h.liveWindows = [WS3];
+    h.openSessions = [sess({ cwd: "/r/third", name: "third-1a" })];
     show(true);
     await settled();
     expect(builtLocal().run.url).toContain("/browse/ASM-1111");
@@ -1379,9 +1419,113 @@ describe("DeckPanel local cards", () => {
     show();
     await settled();
     // Both roots are claimed by the one tracked run: nothing is left over for a
-    // local card, not even an empty one.
+    // local card, not even an empty one. This does NOT exercise deckView.ts's
+    // own "if (roots.length === 0) continue" guard — with both places claimed,
+    // `unclaimed` is already empty and groupPlacesByWindow([], liveWindows)
+    // returns [] before the loop body (and that guard) ever runs. It stands on
+    // its own merits regardless: no card for a place nothing is left to render.
     expect(h.buildRunStatus).toHaveBeenCalledTimes(1);
     expect(h.buildRunStatus.mock.calls[0][0].run.key).toBe("ASM-1");
+  });
+
+  it("drops a non-git workspace root that has no session in it (F5)", async () => {
+    // /r/automation_e2e is a plain docs/ folder here (repoRoot answers ""), and
+    // nobody is working in it — Spec §2 says `repos` is the roots that ARE git
+    // repos, and a folder that is neither must not inflate the chip's "N repos"
+    // count or spend four extra git calls on nothing. Steers the real repoRoot
+    // seam (h.nonGitRoots), not localRunFor's injected `git` function.
+    h.runs = [];
+    h.nonGitRoots.add("/r/automation_e2e");
+    h.liveWindows = [WS];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show();
+    await settled();
+    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["centaur"]);
+  });
+
+  it("keeps a non-git workspace root that DOES have a live session in it (F5)", async () => {
+    // Same non-git folder as above, but this time a session is open in it — a
+    // session running in a plain directory is a legitimate card today, and F5
+    // dropping every non-git folder unconditionally would delete it. That would
+    // be a regression, not a cleanup.
+    h.runs = [];
+    h.nonGitRoots.add("/r/automation_e2e");
+    h.liveWindows = [WS];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" }),
+      sess({ sessionId: "s2", cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    show();
+    await settled();
+    const repos = builtLocal().run.repos;
+    expect(repos.map((r) => r.name)).toEqual(["centaur", "automation_e2e"]);
+    expect(repos.find((r) => r.name === "automation_e2e")?.isGit).toBe(false);
+  });
+
+  it("normalizes a workspace root nested inside a repo to that repo's root, so a tracked run claims it (F5)", async () => {
+    // The exact double-count the human ruling was meant to prevent. ASM-1 owns
+    // /r/monorepo, with its own live session cd'd exactly into it (that live
+    // session is what puts /r/monorepo in `claimed` at all). A SEPARATE window
+    // declares monorepo/packages/api — a folder nested INSIDE that same repo —
+    // as one of its own roots, alongside an unrelated /r/other where a second,
+    // untracked session actually is. Comparing raw paths, ASM-1's claim would
+    // never match the nested path, and monorepo would render (and vote its
+    // diff/dirty) a second time on the local card built for /r/other.
+    // Normalizing first (repoRoot(nested) -> /r/monorepo) is what makes the
+    // claimed-root filter actually catch it.
+    const nested = "/r/monorepo/packages/api";
+    h.repoRootRemap.set(nested, "/r/monorepo");
+    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "monorepo", path: "/r/monorepo", isGit: true, branch: "main" }] })];
+    h.liveWindows = [{ identity: "/ws/mono+other.code-workspace", kind: "workspace", roots: [nested, "/r/other"] }];
+    h.openSessions = [
+      sess({ cwd: "/r/monorepo", name: "monorepo-7e" }),
+      sess({ sessionId: "s2", cwd: "/r/other", name: "other-1a" }),
+    ];
+    show();
+    await settled();
+    expect(h.buildRunStatus).toHaveBeenCalledTimes(2); // ASM-1's own card, and one local card
+    expect(builtLocal().run.repos.map((r) => r.path)).toEqual(["/r/other"]);
+  });
+});
+
+describe("DeckPanel PR facts for a local grouped run (F2)", () => {
+  const WS = { identity: "/ws/centaur+e2e.code-workspace", kind: "workspace" as const,
+    roots: ["/r/centaur", "/r/automation_e2e"] };
+
+  it("does not enqueue a PR fetch for a sibling root with no live session", async () => {
+    h.runs = [];
+    h.liveWindows = [WS];
+    // Session only in /r/centaur — /r/automation_e2e is a sibling nobody is
+    // working in, carried on the card only because F5 keeps every git root.
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    await showAndWarm();
+    expect(h.prFetch).not.toHaveBeenCalledWith("/r/automation_e2e", expect.anything(), expect.anything());
+  });
+
+  it("does not read a sibling root's cached PR facts back onto the card, even a merged one", async () => {
+    // The regression this pass reopens (commit 536b3bd, through a different
+    // door): a merged PR cached for the idle sibling must not render as this
+    // card's PrBlock or vote it into Done through prSignals. Excluding it from
+    // the `prs` map handed to buildRunStatus is what keeps prSignals from ever
+    // seeing it — status.test.ts already pins that a merged entry in that map
+    // moves the column to Done, so together the two prove the sibling can't.
+    const merged: PrFacts = {
+      number: 42, url: "https://github.com/o/r/pull/42", title: "unrelated work", state: "MERGED",
+      isDraft: false, ci: { passing: 1, pending: 0, failing: [] }, review: "approved", unresolved: 0,
+      mergeable: "clean", ciAdvisory: false,
+    };
+    h.prEntries = { automation_e2e: { facts: merged, fetchedAt: Date.now() } };
+    h.runs = [];
+    h.liveWindows = [WS];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    await showAndWarm(true);
+    expect(builtLocal().prs).toEqual({});
+  });
+
+  it("still reads and fetches PR facts for the session's own root", async () => {
+    h.runs = [];
+    h.liveWindows = [WS];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    await showAndWarm(true);
+    expect(h.prFetch).toHaveBeenCalledWith("/r/centaur", "ASM-5641-team-table", "ASM-5641");
   });
 });
 

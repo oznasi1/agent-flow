@@ -628,36 +628,72 @@ export class DeckPanel {
     }
 
     // Whatever no tracked run claimed is a place you are working in that the Deck
-    // has never heard of. One git call each for the branch — buildRunStatus does
-    // the rest of the git work from run.repos, so this does not double it.
+    // has never heard of. Each surviving root gets exactly one currentBranch call,
+    // right here — buildRunStatus's gitState reuses it (see status.ts) rather
+    // than reading it a second time. gitState still spends three more git calls
+    // per root (status, rev-list, diff --numstat) to render that root's chip —
+    // every surviving root, tracked or local, live session or not, since the
+    // chips show every root regardless of who is voting on the card.
     const cfg = getConfig();
     this.localRuns.clear();
     const locals: Run[] = [];
+    // Local grouped run key -> the roots that actually have a live session right
+    // now (F2). Read by the PR gates below and threaded into buildRunStatus's
+    // `activityRoots`, so an idle sibling root's PR or transcript never votes on
+    // a card it doesn't belong to. `.get` returning undefined for a tracked run
+    // is exactly "no restriction" — every one of its repos still counts, unchanged.
+    const localActiveRootsByKey = new Map<string, ReadonlySet<string>>();
     const unclaimed = [...places.keys()].filter((place) => !claimed.has(place));
     // A window holding two repos is one place to work, not two: fold its session
     // directories into a single card that names the workspace and carries both
     // roots. Anything a live multi-root window does not list — including a place
     // whose window predates presence roots — stays the per-place card it was.
     for (const group of groupPlacesByWindow(unclaimed, liveWindows)) {
-      // groupPlacesByWindow hands back a window's FULL roots — it has no notion
-      // of which of them a tracked run already claimed. A claimed root's diff and
-      // dirty state already renders on that tracked run's own card; keeping it
-      // here too would double-count it. A root nobody claimed stays, whether or
-      // not it currently has a session (see the "no session in it" case below).
-      const roots = group.roots.filter((root) => !claimed.has(root));
-      if (roots.length === 0) continue; // every root here belongs to a tracked run
+      // groupPlacesByWindow hands back a window's FULL roots, raw folder paths —
+      // it has no notion of git, and no notion of which of them a tracked run
+      // already claimed. Normalize each root to the repo root that contains it
+      // (so a nested folder like monorepo/packages/api compares equal to a
+      // tracked run's own "monorepo" root, or to a sibling workspace's folder
+      // naming the same repo) and dedupe the result; only THEN filter against
+      // `claimed` — a claimed root's diff and dirty state already renders on
+      // that tracked run's own card, and keeping it here too would double-count
+      // it. What survives: a root nobody claimed, kept if it is a git repo (a
+      // docs/ folder that names no repo of its own is dropped, along with the
+      // four extra git calls and the chip that would have inflated "N repos")
+      // OR it has a live session in it right now — a session running in a plain
+      // directory is a legitimate card today, and dropping it would be a
+      // regression, not a cleanup.
+      const isGitByRoot = new Map<string, boolean>();
+      for (const root of group.roots) {
+        const rr = repoRoot(root);
+        const norm = canon(rr || root);
+        if (!isGitByRoot.has(norm)) isGitByRoot.set(norm, rr !== "");
+      }
+      const roots = [...isGitByRoot.keys()].filter((root) =>
+        !claimed.has(root) && (isGitByRoot.get(root) || livePlaces.has(root)));
+      // Every root here either belongs to a tracked run already, or named no
+      // repo and had nobody working in it — a window whose only unclaimed
+      // folder was a plain docs/ directory, for instance.
+      if (roots.length === 0) continue;
       const liveGroup = { ...group, roots };
       const gitByRoot = new Map(roots.map((root) =>
-        [root, { isGit: repoRoot(root) !== "", branch: currentBranch(root) }] as const));
+        [root, { isGit: isGitByRoot.get(root) ?? false, branch: currentBranch(root) }] as const));
       const git = (root: string) => gitByRoot.get(root) ?? { isGit: false, branch: null };
-      // First root whose branch names a ticket wins, so a workspace whose two
-      // branches disagree still resolves to one card, the same one every refresh.
-      const ticket = roots
+      // The session's own root(s) get first say on the ticket (human ruling,
+      // F1): a stale sibling repo — the other folder in last month's
+      // .code-workspace, still on an old branch — must not out-vote the place
+      // the person actually launched Claude Code in. `group.places` is already
+      // in first-appearance order; whatever root is not one of them follows, in
+      // `roots`' own order, so the whole candidate list stays deterministic.
+      const placeSet = new Set(group.places);
+      const candidates = [...group.places, ...roots.filter((r) => !placeSet.has(r))];
+      const ticket = candidates
         .map((root) => inferTicket(git(root).branch, cfg.project, cfg.baseUrl))
         .find((t) => t !== null) ?? null;
       const sessions = group.places.flatMap((place) => places.get(place) ?? []);
       const run = localRunFor(liveGroup, sessions, git, ticket, now);
       this.localRuns.set(run.key, run);
+      localActiveRootsByKey.set(run.key, placeSet);
       agentsByKey.set(
         run.key,
         group.places.flatMap((place) => (places.get(place) ?? []).map((s) => ({
@@ -700,20 +736,31 @@ export class DeckPanel {
       // merge that was never its own.
       const prLess = runKind(run) === "notepad";
       const stored = this.prFacts && !prLess ? readPrEntries(defaultPrFactsDir(), run.key) : {};
+      // A local grouped run's repos now include sibling roots the session never
+      // touched (F2, human ruling): PR facts for a local card come only from
+      // roots that have a live session, so a stranger's open or merged PR in an
+      // idle sibling repo can neither render on this card nor vote it into Action
+      // required or Done through prSignals. `activeRoots` is undefined for every
+      // tracked run — `prRepos` then falls back to `run.repos`, every one of
+      // which is genuinely this run's own, exactly as before this field existed.
+      // Degrades correctly for a single-place local run: its one root IS its live
+      // place, so the filter is a no-op there.
+      const activeRoots = localActiveRootsByKey.get(run.key);
+      const prRepos = activeRoots ? run.repos.filter((r) => activeRoots.has(canon(r.path))) : run.repos;
       // A repo on its default branch is filtered out here as well as below, so a
       // stale entry written before this rule existed stays inert on disk rather
       // than rendering as this run's pull request. This also drops entries for
       // repos that have left the run — re-taking a task with a different repo
       // selection can leave one behind. It is never re-staled (only repos in
-      // run.repos are checked below), yet an orphan would still render as a
+      // prRepos are checked below), yet an orphan would still render as a
       // PrBlock and vote in prSignals, pinning a card in Needs you or out of
       // Done with Forget as the only escape.
       const prs: PrEntryMap = Object.fromEntries(
-        run.repos.filter((r) => stored[r.name] && prEligible(r)).map((r) => [r.name, stored[r.name]]),
+        prRepos.filter((r) => stored[r.name] && prEligible(r)).map((r) => [r.name, stored[r.name]]),
       );
       if (ghReady && !prLess) {
         const ttlMs = getConfig().prFactsTtlSeconds * 1000;
-        for (const repo of run.repos) {
+        for (const repo of prRepos) {
           if (prEligible(repo) && isStale(prs[repo.name], ttlMs, now)) {
             this.enqueuePr(run.key, ticketKeyFor(run, this.connector), repo, repo.branch ?? null, prs[repo.name]);
           }
@@ -723,6 +770,7 @@ export class DeckPanel {
         run, ticket, projectsRoot, nowMs: now,
         openIdentities, prs,
         agents: agentsByKey.get(run.key) ?? [],
+        activityRoots: activeRoots,
       });
       // A local card has no record on disk — `removeRun` would be a no-op but
       // `writeRun` would *create* one, promoting a card the user never tracked.
