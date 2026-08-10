@@ -383,6 +383,10 @@ describe("opening and closing a row for editing", () => {
     // Exact, on the verb's own handle: an open `run` row renders "USING" and the
     // note hint, both of which contain "run" as a substring.
     expect(screen.getByTestId("flowlist-then-e1").textContent).toBe("run");
+    // And the command is named ONCE in an open row — by the picker below, which
+    // is the control that changes it. The mono identifier a closed row prints
+    // after the verb would be the same rule's own name twice in one row.
+    expect(row.textContent).not.toContain("deploy-staging");
     // And nothing about opening the row writes a stored action, which is what
     // made the old control fatal rather than merely useless.
     expect(onSave).not.toHaveBeenCalled();

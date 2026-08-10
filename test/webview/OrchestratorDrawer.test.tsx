@@ -1619,6 +1619,21 @@ describe("a command node", () => {
     ]);
   });
 
+  // The list view's own rule rows pick a command too, and they read the list
+  // from this file's `commands` prop — the SAME one the inspector reads. Passed
+  // down explicitly, so this pins the wiring: without it the keyboard row would
+  // offer free text alone while the canvas offered the configured commands, for
+  // one flow.
+  it("hands the configured commands to the list view's rows as well as the inspector's", () => {
+    render(<OrchestratorDrawer {...props({ flows: [placeAndCommand()] })} />);
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const values = Array.from(
+      screen.getByLabelText("Command").querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(["deploy-staging", "smoke", COMMAND_FREE_TEXT]);
+  });
+
   it("reads as a run rule, named by its picker rather than twice over", () => {
     openInspector(placeAndCommand());
     // The verb, from the THEN clause alone and matched exactly — see the e2e's
