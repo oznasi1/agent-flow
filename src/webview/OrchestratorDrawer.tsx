@@ -924,7 +924,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   </span>
                 </div>
                 <div className="st">
-                  {n.kind === "place" ? n.repo : n.kind === "planned" ? "not taken" : n.message}
+                  {n.kind === "place" ? n.repo : n.kind === "planned" ? "not taken" : n.kind === "notify" ? n.message : ""}
                 </div>
                 <span
                   className="orch-port in"

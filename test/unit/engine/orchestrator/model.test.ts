@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  emptyFlow, isPlace, isPlanned, isNotify, isSettled, isSpendAction, findNode, incomingEdges,
+  emptyFlow, isPlace, isPlanned, isNotify, isCommand, isSettled, isSpendAction, findNode, incomingEdges,
   actionFor, edgeAction,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode,
 } from "../../../../src/engine/orchestrator/model";
@@ -39,6 +39,12 @@ describe("node guards", () => {
     expect([isPlace(pl), isPlanned(pl), isNotify(pl)]).toEqual([false, true, false]);
     expect([isPlace(nt), isPlanned(nt), isNotify(nt)]).toEqual([false, false, true]);
   });
+
+  it("recognises a command node", () => {
+    const n: FlowNode = { id: "c", kind: "command", x: 0, y: 0, join: "any", commandId: "deploy" };
+    expect(isCommand(n)).toBe(true);
+    expect(isCommand({ id: "p", kind: "place", x: 0, y: 0, join: "any", runKey: "K", repo: "r" })).toBe(false);
+  });
 });
 
 describe("isSettled", () => {
@@ -75,6 +81,13 @@ describe("isSpendAction", () => {
 
   it("is false for notify", () => {
     expect(isSpendAction("notify")).toBe(false);
+  });
+
+  // `run` spends: it executes shell on the user's machine unattended.
+  // `isSpendAction`'s own comment warns a new action defaults to "free" until
+  // added deliberately, and free would mean skipping the consent gate.
+  it("treats run as a spending action", () => {
+    expect(isSpendAction("run")).toBe(true);
   });
 
   // `FlowEdge.action` is optional now — an edge with no derivable action

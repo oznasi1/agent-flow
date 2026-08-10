@@ -61,6 +61,15 @@ export interface FlowPromptMode {
   label: string;
 }
 
+/** One entry in `agentFlow.commands`: a named command a flow rule can run.
+ * `run` may contain `{note}`, substituted with the rule's own free text. */
+export interface FlowCommand {
+  id: string;
+  label: string;
+  run: string;
+  detail?: string;
+}
+
 // ── The Deck: in-flight orchestration board ─────────────────────────────────────
 
 /** Live agent activity, inferred best-effort from the Claude Code session transcript. */

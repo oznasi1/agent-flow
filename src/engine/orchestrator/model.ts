@@ -39,7 +39,25 @@ export type PlannedNode = NodeBase & {
 /** A terminal that tells you something. Not a place, so nothing observes it. */
 export type NotifyNode = NodeBase & { kind: "notify"; message: string };
 
-export type FlowNode = PlaceNode | PlannedNode | NotifyNode;
+/** A command to run when a condition is met: a deploy, a webhook call, a
+ * smoke test. Either `commandId` (an entry in `agentFlow.commands`) or `run`
+ * (typed into the drawer), never both — `commandOf` in command.ts resolves
+ * which, and refuses a node carrying neither.
+ *
+ * A command node is not a place: nothing observes it, and no condition asks
+ * what it is "doing". What a LATER rule can ask is whether it succeeded, which
+ * is what the `command-succeeded` condition reads off the receipt. */
+export type CommandNode = NodeBase & {
+  kind: "command";
+  commandId?: string;
+  run?: string;
+  /** Which repo's checkout to run in. Absent means the repo of the place the
+   * incoming edge came from — the common case, and the one that needs no
+   * configuration. */
+  cwdRepo?: string;
+};
+
+export type FlowNode = PlaceNode | PlannedNode | NotifyNode | CommandNode;
 
 /** Every condition kind that needs no parameter. */
 export type CondKind =
@@ -156,7 +174,11 @@ export function isSettled(e: FlowEdge): boolean {
  * hand would otherwise be silently treated as free by whichever site got
  * missed. `notify` is the only non-spending action today, but this is written
  * as an allowlist, not a `!== "notify"` negation, so a NEW action defaults to
- * "does not spend" until someone deliberately adds it here.
+ * "does not spend" until someone deliberately adds it here. `run` was added
+ * deliberately: it executes a shell command on the user's machine, unattended,
+ * which is exactly the kind of consequence the once-per-flow consent gate
+ * exists to catch before the first one fires — an action that reads as "free"
+ * here skips that gate entirely.
  *
  * Takes `FlowAction | undefined` — `FlowEdge.action` is optional now (see its
  * own doc comment) — and answers `false` for `undefined`: an edge with no
@@ -165,7 +187,7 @@ export function isSettled(e: FlowEdge): boolean {
  * every caller check `e.action !== undefined` first, is what keeps this the
  * ONE place the question is answered. */
 export function isSpendAction(action: FlowAction | undefined): boolean {
-  return action === "launch" || action === "seed";
+  return action === "launch" || action === "seed" || action === "run";
 }
 
 export function isPlace(n: FlowNode): n is PlaceNode {
@@ -178,6 +200,10 @@ export function isPlanned(n: FlowNode): n is PlannedNode {
 
 export function isNotify(n: FlowNode): n is NotifyNode {
   return n.kind === "notify";
+}
+
+export function isCommand(n: FlowNode): n is CommandNode {
+  return n.kind === "command";
 }
 
 export function findNode(flow: Flow, id: string): FlowNode | undefined {
