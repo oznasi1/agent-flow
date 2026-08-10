@@ -49,6 +49,14 @@ const h = vi.hoisted(() => ({
   // Typed as the real union so a test can resolve a gap as well as the null that
   // means "gh is usable".
   probeGh: vi.fn(async (): Promise<GhGap | null> => null),
+  // The branch-CI fetch's spawn (Task 8), standing in for `execRunner`: resolves
+  // the raw stdout of one `gh api graphql` call. Green by default, so a test about
+  // the fetch's SHAPE (argv, cwd, how many calls) needs no payload of its own; a
+  // test about an unreadable branch rejects or resolves garbage instead.
+  ghRun: vi.fn(
+    async (_file: string, _args: string[], _opts: { cwd: string; timeoutMs: number }): Promise<string> =>
+      JSON.stringify({ data: { repository: { ref: { target: { statusCheckRollup: { state: "SUCCESS" } } } } } }),
+  ),
   prFacts: true as boolean,
   ttlSeconds: 120,
   openAgents: true as boolean,
@@ -253,10 +261,20 @@ vi.mock("../../src/engine/pr/store", () => ({
   // Exercise the real staleness rule rather than restating it here.
   isStale: (e: { fetchedAt: number } | undefined, ttl: number, now: number) => !e || now - e.fetchedAt >= ttl,
 }));
-vi.mock("../../src/engine/pr/provider", () => ({
-  probeGh: h.probeGh,
-  GhProvider: class { fetch = h.prFetch; },
-}));
+// Partial mock: `GH_TIMEOUT_MS` stays real (the panel passes it to the branch-CI
+// fetch, and a test asserting on it should not assert against a number this file
+// made up), and so does everything else in the module. Only the two spawning
+// members are replaced — `GhProvider` for PR facts, `execRunner` for the branch-CI
+// call, which deckView.ts takes as its `ghRun` seam.
+vi.mock("../../src/engine/pr/provider", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/engine/pr/provider")>();
+  return {
+    ...actual,
+    probeGh: h.probeGh,
+    GhProvider: class { fetch = h.prFetch; },
+    execRunner: (file: string, args: string[], opts: { cwd: string; timeoutMs: number }) => h.ghRun(file, args, opts),
+  };
+});
 vi.mock("../../src/engine/review/provider", () => ({
   GhReviewProvider: class {
     search = h.reviewSearch;
@@ -525,6 +543,9 @@ beforeEach(() => {
   h.removePrEntries.mockClear();
   h.prFetch.mockClear().mockResolvedValue({ ok: true, facts: null });
   h.probeGh.mockClear().mockResolvedValue(null);
+  h.ghRun.mockClear().mockResolvedValue(
+    JSON.stringify({ data: { repository: { ref: { target: { statusCheckRollup: { state: "SUCCESS" } } } } } }),
+  );
   h.reviewSearch.mockClear().mockResolvedValue({ issueCount: 1, requests: [reviewFixture()] });
   h.reviewCache = null;
   h.writeReviewCache.mockClear();

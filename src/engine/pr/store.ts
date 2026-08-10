@@ -74,8 +74,15 @@ export function removePrEntries(dir: string, key: string): void {
 }
 
 /** Is this entry due for a refetch? A missing entry is stale; an entry exactly at
- * the TTL is stale. Pure — `nowMs` is injected so callers control the clock. */
-export function isStale(entry: PrEntry | undefined, ttlMs: number, nowMs: number): boolean {
+ * the TTL is stale. Pure — `nowMs` is injected so callers control the clock.
+ *
+ * Takes anything carrying a `fetchedAt` rather than a `PrEntry` specifically: the
+ * rule is about a timestamp, and `deckView.ts`'s branch-CI cache ages out on the
+ * same one (same `gh`, same TTL setting) without being a PR entry. Widening the
+ * parameter is what stops that second caller from restating the rule — including
+ * the "exactly at the TTL is stale" edge, which is the half a re-implementation
+ * gets wrong. */
+export function isStale(entry: PrEntry | { fetchedAt: number } | undefined, ttlMs: number, nowMs: number): boolean {
   if (!entry) return true;
   return nowMs - entry.fetchedAt >= ttlMs;
 }

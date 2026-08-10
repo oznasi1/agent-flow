@@ -23,8 +23,10 @@ import { createWorktrees } from "./engine/worktree";
 import { currentBranch, gitState, prEligible, repoRoot, taskDiff } from "./engine/git";
 import { openTaskDiff } from "./engine/diffView";
 import { RetireVerdict, retireVerdict } from "./engine/retire";
+import { BRANCH_CI_ARGS, BranchCiStatus, branchCiKey, mapBranchStatus } from "./engine/orchestrator/branchCi";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
-import { FetchResult, GhGap, GhProvider, PrProvider, probeGh } from "./engine/pr/provider";
+import { FetchResult, GhGap, GhProvider, PrProvider, Runner, execRunner, GH_TIMEOUT_MS, probeGh } from "./engine/pr/provider";
+import { resolveBin } from "./engine/pr/which";
 import { RefreshQueue } from "./engine/pr/queue";
 import { discoverRepos } from "./engine/repos";
 import { composeAgentPrompt, hasNote, prReviewTemplate } from "./engine/prompt";
@@ -231,6 +233,29 @@ export class DeckPanel {
   private reviewQueue: boolean; // seeded from config in the constructor; re-seeded only by onConfigChanged
   private readonly prQueue = new RefreshQueue();
   private readonly pr: PrProvider = new GhProvider();
+  /** Spawning for the branch-CI fetch. The same injected `Runner` seam every PR
+   * fetch goes through (`execRunner`, `pr/provider.ts`) rather than a second way to
+   * call `gh`, so no test forks a process and the timeout is the one number this
+   * codebase already agreed on. It is not on `PrProvider` because it is not a PR
+   * fetch: `GhProvider.fetch` answers "which PR is this branch's", and this asks
+   * "is this branch green", with no PR in the question at all. */
+  private readonly ghRun: Runner = execRunner;
+  /** Branch-CI verdicts, keyed `repo#branch` by `branchCiKey`, with the moment each
+   * was fetched.
+   *
+   * In memory and per panel, deliberately NOT the on-disk `PrEntry` cache: a
+   * `PrEntry` is keyed by RUN, and a branch is not a property of any run — a flow
+   * can wait on `master` with no card for it on the board at all. Nothing here is
+   * worth surviving a window reload either. A verdict is only ever a few seconds
+   * old (`POLL_MS`) and the honest cold-start answer is `"unknown"`, which is not
+   * green, so a fresh panel simply waits one poll instead of trusting a stamp it
+   * inherited.
+   *
+   * The TTL is `prFactsTtlSeconds`, the same setting the PR fetches age out on: it
+   * is the same `gh`, the same rate limit, and the same "how fresh does a CI fact
+   * need to be" question. The whole point of the cache is cost: ten rules naming
+   * `main` share ONE entry and therefore one `gh` call per TTL, not ten per poll. */
+  private readonly branchCi = new Map<string, { status: BranchCiStatus; fetchedAt: number }>();
   private readonly reviewProvider: ReviewProvider = new GhReviewProvider();
   private reviewSort: ReviewSort = "oldest";
   /** Last successful search. Held in memory as well as on disk so a failed fetch
@@ -505,7 +530,12 @@ export class DeckPanel {
      * whatever already ran still gets written below, because the act happened and
      * an unstamped success is what makes the NEXT pass repeat it. */
     let lostLock = false;
-    for (const flow of readFlows(this.flowIo, this.flowsDir)) {
+    const flows = readFlows(this.flowIo, this.flowsDir);
+    // Read ONCE for the whole pass, before any flow is evaluated: two flows waiting
+    // on the same branch must be answered by the same verdict, and a fetch per node
+    // would be a `gh` call per rule.
+    const branchCi = this.branchCiFor(flows, runs, nowMs);
+    for (const flow of flows) {
       // Stop the whole pass, not just the flow that lost the lock — and this line is
       // LOAD-BEARING, not belt-and-braces. The guard at the top of the edge loop
       // below cannot cover a later flow, because that flow's SPEND GATE is checked
@@ -526,7 +556,7 @@ export class DeckPanel {
         continue;
       }
       try {
-        const result = evaluateFlow({ flow, statuses: runs, nowMs });
+        const result = evaluateFlow({ flow, statuses: runs, nowMs, branchCi });
         if (result.fired.length === 0) {
           // Nothing ready means nothing to approve: clear the gate so a rule
           // that becomes met later in this session fires without ceremony.
@@ -1453,6 +1483,113 @@ export class DeckPanel {
     });
   }
 
+  /** Every distinct branch these flows are waiting on, and the checkout to ask from.
+   *
+   * Keyed by `repo#branch`, so several rules — in one flow or across flows — naming
+   * the same branch collapse to ONE entry and therefore one `gh` call. A disarmed
+   * flow and a settled edge are skipped: neither is waiting on anything, and paying
+   * a round trip for them would be pure cost.
+   *
+   * `cwd` is any board checkout of that repo, because gh resolves owner/name from
+   * its remote (see `BRANCH_CI_QUERY`) and every checkout of a repo — worktrees
+   * included — shares that remote. A repo NO run on the board has is skipped
+   * entirely: there is no directory to ask from, so its verdict stays absent, which
+   * reads as `"unknown"`, which is not met. */
+  private branchCiWanted(
+    flows: Flow[],
+    runs: RunStatus[],
+  ): Map<string, { repo: string; branch: string; cwd: string }> {
+    const out = new Map<string, { repo: string; branch: string; cwd: string }>();
+    for (const flow of flows) {
+      if (!flow.armed) continue;
+      // Defensive about the SHAPE, not just the contents, because this scan runs
+      // BEFORE the per-flow `try` in `advanceUnderLock`: a hand-edited or
+      // half-migrated flow on disk can be armed with `edges: null` or an edge with
+      // no `cond`, and one of those must cost that flow its own pass, not every
+      // other flow's. `deckView.test.ts`'s "keeps advancing the other flows when
+      // one throws while evaluating" pins exactly that, and caught this.
+      for (const e of Array.isArray(flow.edges) ? flow.edges : []) {
+        if (!e || e.cond?.kind !== "branch-ci-passed" || isSettled(e)) continue;
+        const { repo, branch } = e.cond;
+        // A hand-edited flow file can carry either half empty. `gh` would answer
+        // for the wrong thing (or error), so refuse before spending the call.
+        if (!repo || !branch) continue;
+        const key = branchCiKey(repo, branch);
+        if (out.has(key)) continue;
+        const cwd = runs.flatMap((s) => s.repos).find((r) => r.name === repo)?.path;
+        if (!cwd) continue;
+        out.set(key, { repo, branch, cwd });
+      }
+    }
+    return out;
+  }
+
+  /** The branch-CI verdicts for this pass, and the refreshes the NEXT pass will
+   * read.
+   *
+   * Synchronous on purpose — it returns what the cache already holds and only
+   * ENQUEUES what has aged out, exactly as `enqueuePr` does. Awaiting a `gh` call
+   * here would hold the flows-directory lock across the network for every window on
+   * the machine, and a hung `gh` would stall the pass; the cost of not awaiting is
+   * that a brand-new rule reads `"unknown"` for one poll (six seconds) before its
+   * first verdict lands. That trade only works because `"unknown"` is not green: the
+   * cold-start answer delays a deploy, it never triggers one.
+   *
+   * `ghReady()` gates BOTH the fetch and the read. Serving a cached verdict after PR
+   * facts were switched off would leave a stamp from before the switch gating a
+   * deploy with nothing left to ever refresh it — and it would make `armability.ts`'s
+   * warning ("these rules need PR facts") a lie. Off means no verdicts at all. */
+  private branchCiFor(flows: Flow[], runs: RunStatus[], nowMs: number): Record<string, BranchCiStatus> {
+    const wanted = this.branchCiWanted(flows, runs);
+    // Nothing waiting on a branch: no config read, no queue traffic, and — for
+    // every flow that has no such rule, which today is all of them — no cost.
+    if (wanted.size === 0) return {};
+    if (!this.ghReady()) return {};
+    const ttlMs = getConfig().prFactsTtlSeconds * 1000;
+    const out: Record<string, BranchCiStatus> = {};
+    for (const [key, want] of wanted) {
+      const entry = this.branchCi.get(key);
+      if (entry) out[key] = entry.status;
+      // The PR path's own staleness rule, not a second copy of it — including
+      // "a missing entry is stale", which is what makes the first pass fetch.
+      if (isStale(entry, ttlMs, nowMs)) this.enqueueBranchCi(key, want);
+    }
+    return out;
+  }
+
+  /** Fetch one branch's rollup, out of band. Through `prQueue` like every other `gh`
+   * call on this panel, so one in flight is never re-issued by the next tick and a
+   * dozen branches cannot fork a dozen processes at once.
+   *
+   * Always stamps, even on failure, and stamps `"unknown"` when it cannot read an
+   * answer. Both halves matter: an unstamped entry reads as stale forever and
+   * re-enqueues the same `gh` call every tick (the same trap `enqueuePr`'s own catch
+   * exists for), and `"unknown"` — rather than keeping the previous verdict, which is
+   * what the PR cache does with `previous?.facts` — is what stops a branch that was
+   * green an hour ago from opening a deploy gate on the strength of a call that
+   * failed since. */
+  private enqueueBranchCi(key: string, want: { repo: string; branch: string; cwd: string }): void {
+    this.prQueue.push(`branch-ci:${key}`, async () => {
+      let status: BranchCiStatus = "unknown";
+      try {
+        const out = await this.ghRun(resolveBin("gh") ?? "gh", BRANCH_CI_ARGS(want.branch), {
+          cwd: want.cwd,
+          timeoutMs: GH_TIMEOUT_MS,
+        });
+        status = mapBranchStatus(JSON.parse(out) as unknown);
+      } catch {
+        // A non-zero exit, a timeout, a rate limit, unparseable output: all the
+        // same answer, and it is not green.
+        status = "unknown";
+      }
+      // Logged, because "unknown" is invisible in the UI by design (a rule that
+      // has not fired looks like patience) and this is the only place that can say
+      // which branch could not be read.
+      if (status === "unknown") this.log(`deck: branch CI ${key} unreadable`);
+      this.branchCi.set(key, { status, fetchedAt: Date.now() });
+    });
+  }
+
   /** Is the review strip live? Two gates, not three: the session's own Review
    * queue flag (seeded from the persistent `reviewRequests` setting, then held
    * until `onConfigChanged` re-seeds it — re-reading config here would stomp
@@ -2099,6 +2236,11 @@ export class DeckPanel {
     let touched = false;
     if (e.affectsConfiguration("agentFlow.prFacts")) {
       this.prFacts = cfg.prFacts;
+      // Dropped either way. Off: the verdicts must not outlive the source they came
+      // from — `branchCiFor` already refuses to serve them, and forgetting them means
+      // switching back on cannot re-serve a stamp from before the switch either. On:
+      // a fresh start is the point, same as re-probing gh below.
+      this.branchCi.clear();
       // The user may have run `gh auth login` since the last probe; a stale gap
       // would otherwise keep PR facts dark for the rest of the session.
       if (cfg.prFacts) {
