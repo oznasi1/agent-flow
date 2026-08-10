@@ -96,7 +96,24 @@ export function acquire(
  * here precisely because of that token check: the only window that can win the
  * gap between them is one whose plain `tryCreate` succeeded, and if that happens
  * OUR create fails, we report false, and the caller stops. There is no
- * interleaving in which two windows both come away believing they hold it. */
+ * interleaving in which two windows both come away believing they hold it.
+ *
+ * The gap is real and is stated rather than hidden: for the sub-millisecond
+ * between `remove` and `tryCreate` the path is empty, so another window's ordinary
+ * `acquire` can legitimately take it — and that window is then the rightful holder.
+ * The outcome is fail-safe (we lose the race, answer false, and the caller aborts
+ * mid-pass exactly as it would for a reaping) and it is strictly smaller than the
+ * hazard it replaces: a 300 s window in which a pass keeps spending under a lock
+ * another window already reaped.
+ *
+ * The obvious alternative — an in-place overwrite via a `write` on `LockIo`, no
+ * remove — is WORSE, which is why it is not here. The token check would then be
+ * TOCTOU: read says ours, we write, and in between another window reaped the stale
+ * stamp and created its own, which our write silently overwrites with our token.
+ * Both windows then believe they hold it, and the one that thinks it renewed keeps
+ * spending — the exact double-acquire `acquire`'s reap-not-steal discipline exists
+ * to prevent. An atomic create that FAILS is the only primitive that can tell us
+ * we lost. */
 export function renew(io: LockIo, dir: string, token: string, nowMs: number): boolean {
   const p = lockPath(dir);
   const raw = io.read(p);

@@ -506,15 +506,18 @@ export class DeckPanel {
      * an unstamped success is what makes the NEXT pass repeat it. */
     let lostLock = false;
     for (const flow of readFlows(this.flowIo, this.flowsDir)) {
-      // Stop the whole pass, not just the flow that lost the lock. Deliberately
-      // belt-and-braces: `lostLock` is scoped to this whole function, so the guard
-      // at the top of the edge loop below already defers every remaining edge of
-      // every remaining flow, and REMOVING this line changes nothing observable
-      // today (proved — no test can tell). It stays because it is the structural
-      // guarantee: without it, "we no longer hold the lock" would be enforced only
-      // by one check deep inside a nested loop, and any future statement added to
-      // this flow loop — a write, a promotion, a toast — would silently run under
-      // a lock this window does not hold until someone remembered to guard it too.
+      // Stop the whole pass, not just the flow that lost the lock — and this line is
+      // LOAD-BEARING, not belt-and-braces. The guard at the top of the edge loop
+      // below cannot cover a later flow, because that flow's SPEND GATE is checked
+      // before the edge loop is ever reached: without this `break`, a later armed
+      // flow with an unconfirmed spend still resolves its target, pushes an ask, and
+      // — once the caller releases the lock — puts a consent MODAL in front of the
+      // user and writes that flow's consent stamp, from a pass that had already
+      // abandoned itself. Pinned by "does not ask the user for consent from a pass
+      // that already lost the lock"; removing this line fails it with one call to
+      // `showWarningMessage`. It is also the structural guarantee for everything
+      // added to this loop later — a write, a promotion, a toast — none of which
+      // should run under a lock this window no longer holds.
       if (lostLock) break;
       if (!flow.armed) {
         // A disarmed flow holds no gate — re-arming starts the cycle over.
@@ -2238,6 +2241,8 @@ export class DeckPanel {
           // `launchConfirmedAt` and `commandConfirmedAt` are written by
           // `askFirstSpend`'s answer, once per flow per KIND of spend — a stale save
           // dropping either would silently un-ask a question the user already
+          // answered, and a save CARRYING one the host never recorded would
+          // authorise a spend that was never approved in a modal.
           name: existing.name,
           armed: existing.armed,
           createdAt: existing.createdAt,

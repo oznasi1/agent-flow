@@ -5908,6 +5908,37 @@ describe("a met run rule acts", () => {
       .some((c) => /the migration has landed/.test(c[0] as string))).toBe(true);
   });
 
+  it("does not ask the user for consent from a pass that already lost the lock", async () => {
+    // What makes the flow-loop `break` load-bearing, and it is not a stamp — it is a
+    // MODAL. A later flow's gate check runs BEFORE the edge loop, so the per-edge
+    // guard never sees it: without the break, `unconfirmedSpend` pushes an ask, and
+    // once the lock is released the user gets a consent question — and that flow's
+    // consent stamp gets written — from a pass that had already abandoned itself.
+    const second: Flow = {
+      ...cmdFlow(),
+      id: "f2",
+      name: "Second flow",
+      commandConfirmedAt: undefined,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "publish.sh" },
+      ],
+    };
+    h.renew.mockReturnValue(false);
+    const { send } = await warmed([cmdFlow(), second]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    // And no consent was recorded for the flow that was never asked about.
+    expect(h.writeFlow.mock.calls.some((c) => (c[2] as Flow).id === "f2")).toBe(false);
+    // The question is not lost, only deferred: the next pass holds the lock and asks.
+    h.renew.mockReturnValue(true);
+    await send({ type: "deck:refresh" });
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[0]).toContain("publish.sh");
+    expect(call.slice(2)).toEqual(["Run", "Disarm"]);
+  });
+
   it("does not stamp or announce a notify that follows a lost lock in the SAME flow", async () => {
     // The guard sits above the spend filter for this: a notify is free, but its
     // stamp is a write, and writing this file without the lock is the read-then-write
