@@ -86,13 +86,14 @@ export interface FlowEdge {
    * rollback — an edge THIS build created has no stored value yet, so it always
    * falls through to the derived one.
    *
-   * As of this task it is still read directly for behaviour at several call
-   * sites — `deckView.ts`'s spend-slot check, its dispatch, `spendTarget`/
-   * `performAction`, and the webview's rule labels/mode/dest resolution in
-   * `orchestratorRule.ts` — because moving each of those onto `edgeAction` is
-   * Task 3's work, not this one. (`evaluate.ts`'s own spend-slot check moved
-   * onto `edgeAction` in Task 2 — see `evaluate.ts`'s `costsSlot`.) Do not
-   * read this comment as "nothing does" until Task 3 lands. */
+   * NOTHING on the host's acting path reads this field for behaviour any more:
+   * `evaluate.ts` derives the verb from the target (`costsSlot`/`edgeAction`) and
+   * carries it on `FiredEdge.action`, and `deckView.ts`'s spend-slot check, its
+   * dispatch, `spendTarget` and `performEdge` all take that carried value as a
+   * parameter. The one behavioural reader left is the WEBVIEW's rule
+   * labels/mode/dest resolution in `orchestratorRule.ts`, deferred to Task 9;
+   * `store.ts` reads it too, but only to compare against the derived value and
+   * latch a disagreement, which is the field's whole remaining purpose. */
   action?: FlowAction;
   /** A PromptMode id, for `seed` only. A launch's prompt and destination live on the
    * `planned` node it targets, which carries its whole launch configuration — see

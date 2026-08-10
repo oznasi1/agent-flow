@@ -64,12 +64,10 @@ export function applyFired(
       // below still comes from `e`/`flow` — only which branch to take, and
       // which verb the fallback error below names, come from `hit`.
       //
-      // NOTE: `hit.action` is not yet what the caller actually PERFORMED
-      // against — `deckView.ts`'s `performEdge` still acts on `edge.action`
-      // (the edge's stored mirror, rebound to a fresh read before it acts —
-      // see `advanceUnderLock`), not on this carried value. The two can
-      // disagree for an edge whose stored action no longer matches its
-      // target; reconciling that is Task 3's job, not this function's.
+      // `hit.action` is also what the caller PERFORMED against: `deckView.ts`'s
+      // spend gate, its dispatch check and `performEdge` all take this same
+      // carried value as a parameter rather than reading `e.action`, so the verb
+      // this function stamps is the verb that ran.
       if (hit.perform && hit.action !== "notify") {
         const outcome = outcomes?.get(e.id);
         if (!outcome) return { ...e, error: `${hit.action} was not performed` };

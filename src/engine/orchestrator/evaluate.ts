@@ -41,13 +41,13 @@ export interface FiredEdge {
    * discipline `notifyLines` already spells out. `undefined` when the target
    * is missing or of an unknown kind.
    *
-   * `deckView.ts`'s own dispatch, `spendTarget` and `performEdge` do NOT yet
-   * read this field — they still decide off `edge.action`, the edge's stored
-   * mirror (see its doc comment in `model.ts`). Moving them onto this carried
-   * value is Task 3's work, not this one; until it lands, an edge whose stored
-   * `action` disagrees with its target's derived one is decided one way here
-   * and another way there. Do not read this comment as "deckView agrees"
-   * until that work lands. */
+   * `deckView.ts`'s spend gate, its dispatch check, `spendTarget` and
+   * `performEdge` all read THIS field — it is passed to them as a parameter, so
+   * they cannot re-derive a different verb than the one stamped for the pass.
+   * The only edit that can change an action is a change to the TARGET NODE's
+   * kind, and a verb whose target changed kind under the pass resolves to no
+   * target and is refused with an `error` and no `firedAt`, so the carried value
+   * being evaluation's vintage costs nothing in safety. */
   action: FlowAction | undefined;
 }
 
