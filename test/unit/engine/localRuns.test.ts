@@ -163,6 +163,17 @@ describe("groupPlacesByWindow", () => {
     )).toEqual([{ workspaceFile: null, roots: ["/r/centaur"], places: ["/r/centaur"] }]);
   });
 
+  it("leaves a place alone when a workspace-kind window has a single root", () => {
+    // A .code-workspace with only one folder in it is still just that one
+    // folder. Grouping it would rename the card after a workspace file that
+    // adds nothing — same guard as the folder-kind case above, but exercised
+    // through the "workspace" branch instead of the "kind !== workspace" one.
+    expect(groupPlacesByWindow(
+      ["/r/centaur"],
+      [ws("/ws/x.code-workspace", ["/r/centaur"])],
+    )).toEqual([{ workspaceFile: null, roots: ["/r/centaur"], places: ["/r/centaur"] }]);
+  });
+
   it("keeps two windows' places apart, in first-place order", () => {
     expect(groupPlacesByWindow(
       ["/r/b", "/r/solo", "/r/a"],
