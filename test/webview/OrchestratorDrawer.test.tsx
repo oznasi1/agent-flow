@@ -5,6 +5,10 @@ import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { OrchestratorDrawer, DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { ORCH_ANIM_MS } from "../../src/webview/orchestratorStyles";
 import type { Flow } from "../../src/engine/orchestrator/model";
+// The real store, so the "a new wire is never latched" test below is answered by
+// the migration itself rather than by this file restating its rule. Its io is
+// injected (see `FlowIo`), so importing it here costs no temp directory.
+import { readFlows, writeFlow } from "../../src/engine/orchestrator/store";
 import { anchor, edgePath, GRID, labelPoint, NODE_H, NODE_W } from "../../src/engine/orchestrator/layout";
 import type { PrEntryMap, RunStatus } from "../../src/types";
 
@@ -665,6 +669,41 @@ const wired = () =>
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
   });
 
+/** A place and planned work, with NOTHING wired between them yet — the fixture
+ * the wiring tests need, as opposed to `placeAndPlanned()` further down, which
+ * already carries the edge. */
+const placeAndPlanned0 = () =>
+  flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      {
+        id: "n2", kind: "planned", x: 320, y: 24, join: "any",
+        ticketKey: "ASM-12", repos: ["agent-flow"], mode: "quick", dest: "worktree",
+      },
+    ],
+  });
+
+/** Which of this flow's rules the STORE latches — the ids of every edge that
+ * comes back carrying an `error` after a real round trip through `writeFlow`
+ * (which mirrors the derived action onto disk for an older build's sake) and
+ * `readFlows` (whose `latchActionMismatches` stamps any stored action that
+ * disagrees with its target). The real store, injected with an in-memory io,
+ * rather than this file restating the migration's rule and then agreeing with
+ * itself. */
+const latchesFor = (f: Flow): string[] => {
+  const files = new Map<string, string>();
+  const io = {
+    readDir: () => [...files.keys()].map((p) => p.slice(p.lastIndexOf("/") + 1)),
+    readFile: (p: string) => files.get(p) ?? null,
+    writeFile: (p: string, text: string) => { files.set(p, text); },
+    remove: (p: string) => { files.delete(p); },
+  };
+  writeFlow(io, "/flows", f);
+  return readFlows(io, "/flows").flatMap((x) =>
+    x.edges.filter((e) => e.error !== undefined).map((e) => e.id),
+  );
+};
+
 describe("wiring", () => {
   it("draws one connector per edge", () => {
     const { container } = render(<OrchestratorDrawer {...props({ flows: [wired()] })} />);
@@ -677,7 +716,7 @@ describe("wiring", () => {
     expect(label.textContent).toMatch(/merged/i);
   });
 
-  it("creates a notify edge by dragging from a port onto another node", () => {
+  it("creates an edge by dragging from a port onto another node", () => {
     const onSave = vi.fn();
     const two = flow({
       nodes: [
@@ -690,8 +729,48 @@ describe("wiring", () => {
     fireEvent.pointerUp(screen.getByTestId("orch-node-n2"));
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.edges).toEqual([
-      expect.objectContaining({ from: "n1", to: "n2", action: "notify", cond: { kind: "pr-merged" } }),
+      expect.objectContaining({ from: "n1", to: "n2", cond: { kind: "pr-merged" } }),
     ]);
+  });
+
+  // The phase defect this closes: `finishWire` hardcoded `action: "notify"` for
+  // every new wire regardless of its target, so wiring a place to planned work
+  // produced an edge whose STORED action ("notify") disagreed with the action
+  // its target implies ("launch") — which is exactly what
+  // `latchActionMismatches` stamps with an error on the next read. The rule was
+  // dead the moment it was drawn. An edge with NO stored action is the one shape
+  // that migration can never latch (it skips `action === undefined`), and
+  // `writeFlow` still puts the derived value on disk for an older build.
+  it("records no action on a new wire, so the migration cannot latch it", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [placeAndPlanned0()] })} />);
+    fireEvent.pointerDown(screen.getByTestId("orch-port-out-n1"));
+    fireEvent.pointerUp(screen.getByTestId("orch-node-n2"));
+    const saved = onSave.mock.calls[0][0] as Flow;
+    expect(saved.edges[0].action).toBeUndefined();
+    expect(saved.edges[0]).not.toHaveProperty("action");
+    // And the same edge, read back through the store's own migration, is not
+    // latched — the guarantee the assertion above exists for.
+    expect(latchesFor(saved)).toEqual([]);
+  });
+
+  // A rule out of a command node can only ever ask one thing: did that command
+  // succeed. `evaluate.ts`'s `isMet` answers every OTHER kind from the source
+  // place's `RunStatus`, and a command node has none — so a new wire seeded
+  // with `pr-merged` here would be inert from the moment it was drawn.
+  it("seeds a wire out of a command node with the one condition it can ask", () => {
+    const onSave = vi.fn();
+    const fromCommand = flow({
+      nodes: [
+        { id: "n1", kind: "command", x: 24, y: 24, join: "any", commandId: "deploy" },
+        { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
+      ],
+    });
+    render(<OrchestratorDrawer {...props({ onSave, flows: [fromCommand] })} />);
+    fireEvent.pointerDown(screen.getByTestId("orch-port-out-n1"));
+    fireEvent.pointerUp(screen.getByTestId("orch-node-n2"));
+    const saved = onSave.mock.calls[0][0] as Flow;
+    expect(saved.edges[0].cond).toEqual({ kind: "command-succeeded" });
   });
 
   it("refuses an edge from a node to itself", () => {

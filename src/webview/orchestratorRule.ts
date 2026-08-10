@@ -103,6 +103,20 @@ export function isBareCond(kind: Condition["kind"]): kind is CondKind {
  * that can never fire, on the one condition built to gate a deploy. */
 export const OFFERED_CONDS: CondKind[] = (Object.keys(COND_LABEL) as Condition["kind"][]).filter(isBareCond);
 
+/** The condition a BRAND NEW rule out of `fromId` starts on. Keyed off the
+ * source node's kind for the same reason `offeredConds` is: `evaluate.ts`'s
+ * `isMet` answers `command-succeeded` from the flow itself and every other
+ * kind from the source's `RunStatus`, so a place-shaped condition on a rule
+ * out of a COMMAND node can never be met — a new wire out of a command node
+ * seeded with `pr-merged` would be inert from the moment it was drawn. Every
+ * other source keeps `pr-merged`, which is what the drawer has always seeded
+ * and what `OFFERED_CONDS` lists first. */
+export function defaultCondFor(flow: Flow, fromId: string): Condition {
+  return flow.nodes.find((n) => n.id === fromId)?.kind === "command"
+    ? { kind: "command-succeeded" }
+    : { kind: "pr-merged" };
+}
+
 /** The verb (and, for `notify`, the whole rest of the clause) a rule's action
  * reads as. Both the inspector's `<option>` text and the list's closed-row
  * text spend the exact same three strings — a second hand-typed "notify me"

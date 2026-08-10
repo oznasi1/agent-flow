@@ -9,6 +9,7 @@ import {
   ACTION_LABEL,
   actionMismatch,
   COND_LABEL,
+  defaultCondFor,
   DEST_LABEL,
   endLabel,
   launchDestOf,
@@ -484,13 +485,27 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     return { x: pos.x, y: pos.y, w: n.kind === "notify" ? NOTIFY_W : NODE_W, h: NODE_H };
   };
 
+  /** A new rule carries NO stored action at all — not even the one its target
+   * implies. The action is derived from the target now (`edgeAction`), and
+   * `store.ts`'s `latchActionMismatches` latches any edge whose STORED action
+   * disagrees with that derivation; an edge with no stored value is the one
+   * shape it can never latch. This used to hardcode `action: "notify"`
+   * regardless of the target's kind, which made an ordinary place→planned
+   * wiring a mismatch on the very next read: stamped with an error, settled,
+   * and — before Task 3's Reset fix — unrepairable. Recording the DERIVED
+   * value instead would be correct today and still stores a second copy of a
+   * fact the node owns, which is the thing this phase removed.
+   *
+   * Nothing is lost on disk: `writeFlow` writes `e.action ?? derived`, so the
+   * file an older build reads still carries the field its `validEdge`
+   * requires (see that function's own doc comment). */
   const finishWire = (toId: string) => {
     const from = wiring;
     setWiring(null);
     if (!from || from === toId) return;
     if (flow.edges.some((e) => e.from === from && e.to === toId)) return;
     const id = nextEdgeId(flow);
-    const edge: FlowEdge = { id, from, to: toId, cond: { kind: "pr-merged" }, action: "notify" };
+    const edge: FlowEdge = { id, from, to: toId, cond: defaultCondFor(flow, from) };
     setSelEdge(id);
     p.onSave({ ...flow, edges: [...flow.edges, edge] });
   };
