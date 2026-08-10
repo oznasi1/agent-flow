@@ -135,6 +135,31 @@ function RepoChip({ g }: { g: RepoGit }): JSX.Element {
   );
 }
 
+/** The repos of a multi-root run, behind the workspace that holds them. A card
+ * for a two-repo task used to spend a line on chips whose names the workspace
+ * already implies; at rest this says the one thing that identifies the task, and
+ * hovering it gives back every chip with its own git signal.
+ *
+ * Hover and focus reveal the fold in CSS, with no state to keep in sync. The
+ * click toggle exists for touch and for a keyboard user who tabs past: `.open`
+ * survives the pointer leaving, which a :hover rule cannot. */
+function WorkspaceChip({ label, repos }: { label: string; repos: RepoGit[] }): JSX.Element {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className={`c-ws ${open ? "open" : ""}`}>
+      <button type="button" className="ws" onClick={() => setOpen((o) => !o)}
+        title="The workspace this task runs in — its repos are underneath">
+        <span className="wsi">{open ? "▾" : "▸"}</span>
+        <span className="n">{label}</span>
+        <span className="ct">{repos.length} repos</span>
+      </button>
+      <div className="ws-fold">
+        {repos.map((g) => <RepoChip key={g.name} g={g} />)}
+      </div>
+    </div>
+  );
+}
+
 const AGENT_STATE: Record<AgentActivity["state"], { text: string; tone: Tone }> = {
   working: { text: "working", tone: "working" },
   "needs-you": { text: "ended turn", tone: "attn" },
@@ -288,11 +313,15 @@ function Card({ r, prReviewStatus, onForget, agent, column, sourceLabel }: {
         <span className="elapsed">launched {timeAgo(r.run.createdAt)}</span>
       </div>
 
-      {r.repos.length > 0 && (
-        <div className="c-repos">
-          {r.repos.map((g) => <RepoChip key={g.name} g={g} />)}
-        </div>
-      )}
+      {(() => {
+        const ws = workspaceLabel(r.run);
+        if (ws && r.repos.length > 1) return <WorkspaceChip label={ws} repos={r.repos} />;
+        return r.repos.length > 0 && (
+          <div className="c-repos">
+            {r.repos.map((g) => <RepoChip key={g.name} g={g} />)}
+          </div>
+        );
+      })()}
 
       {(() => {
         const withPr = Object.entries(r.prs).filter(([, e]) => e.facts !== null) as [string, { facts: PrFacts }][];

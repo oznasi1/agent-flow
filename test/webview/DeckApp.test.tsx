@@ -1269,3 +1269,69 @@ describe("DeckApp — source label", () => {
     expect(screen.queryByTitle(/in Jira/)).not.toBeInTheDocument();
   });
 });
+
+const wsStatus = () => mkStatus({
+  run: {
+    key: "ASM-9", summary: "e2e flake", url: "https://jira/ASM-9", createdAt: 1,
+    mode: "multiroot", workspaceFile: "/ws/centaur+e2e.code-workspace",
+    repos: [
+      { name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-9-x" },
+      { name: "automation_e2e", path: "/r/automation_e2e", isGit: true, branch: "main" },
+    ],
+    briefPaths: [],
+  },
+  repos: [
+    { name: "centaur", path: "/r/centaur", branch: "ASM-9-x", dirty: true, ahead: 0, added: 0, removed: 0, files: 0 },
+    { name: "automation_e2e", path: "/r/automation_e2e", branch: "main", dirty: false, ahead: 1, added: 12, removed: 2, files: 3 },
+  ],
+});
+
+describe("workspace chip", () => {
+  it("names the workspace and counts its repos", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    const chip = container.querySelector(".c-ws .ws")!;
+    expect(chip.textContent).toContain("centaur+e2e");
+    expect(chip.textContent).toContain("2 repos");
+    expect(chip.textContent).not.toContain(".code-workspace");
+  });
+
+  it("keeps both repo chips in the fold, with their git signal", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    const fold = container.querySelector(".c-ws .ws-fold")!;
+    expect(Array.from(fold.querySelectorAll(".repo")).map((r) => r.textContent))
+      .toEqual(["centaur●", "automation_e2e+12−2↑1"]);
+  });
+
+  it("replaces the flat chip row, so the card says the workspace once", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    expect(container.querySelector(".c-repos")).toBeNull();
+  });
+
+  it("toggles the fold open for keyboard and touch", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    const wrap = container.querySelector(".c-ws")!;
+    expect(wrap.className).not.toContain("open");
+    fireEvent.click(container.querySelector(".ws")!);
+    expect(container.querySelector(".c-ws")!.className).toContain("open");
+  });
+
+  it("leaves a single-repo run on the plain chip row", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(container.querySelector(".c-ws")).toBeNull();
+    expect(container.querySelector(".c-repos .repo")!.textContent).toContain("svc");
+  });
+
+  it("leaves a multi-repo run with no workspace file on the plain chip row", () => {
+    // Nothing to name: two folders opened side by side are not a workspace.
+    const s = wsStatus();
+    const { container } = render(<DeckApp />);
+    host(runsMsg([{ ...s, run: { ...s.run, workspaceFile: undefined, mode: "per-window" } }]));
+    expect(container.querySelector(".c-ws")).toBeNull();
+    expect(container.querySelectorAll(".c-repos .repo")).toHaveLength(2);
+  });
+});
