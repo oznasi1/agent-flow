@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] — 2026-08-10
+
+### Changed
+
+- **The sidebar screenshots show a real view title bar.** Both README shots frame the
+  panel under a mock of VS Code's own title row, and that mock had drifted: the signed-in
+  name sat 5px above the project key's baseline and a size larger, the row was 46px
+  instead of 35px, the title started 6px inside the panel's text edge, and the three
+  view actions were Unicode stand-ins (`⧉ ⊞ ⟳ ⋯`). They are now the real codicons the
+  `view/title` menu contributes — `library` for the Marketplace, `dashboard` for the
+  Deck, then `refresh` — followed by the container's More Actions button, and the title,
+  name and icons share one centered 35px row aligned to the panel's own text edges.
+
+  The name's drift was a CSS collision, not a layout bug: the harness reused the class
+  `.desc`, which the webview bundle — injected into the same document — defines for task
+  descriptions with a `margin-bottom` that the centered row counted as part of the item.
+  The mock host chrome is now namespaced so the extension's own styles can't reach it.
+
+No code changed in this release; only `media/screenshot.png` and `media/notepad.png`.
+
 ## [0.11.1] — 2026-08-09
 
 ### Changed
