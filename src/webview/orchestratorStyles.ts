@@ -306,6 +306,14 @@ export const ORCH_CSS = `
   .orch-insp.none { text-align: center; color: var(--dim); font-size: var(--t-body); padding: 16px 11px; }
   .orch-insp .t { display: flex; align-items: center; gap: 7px; margin-bottom: 8px;
     font-size: var(--t-micro); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+  /* The eyebrow's uppercase is for its own word ("CONNECTION"), not for the two
+     IDENTIFIERS beside it. A run key or a ticket key survives being shouted, but a
+     free-text command is case-sensitive shell text and this row prints it —
+     "deploy.sh --env=staging" rendered as "DEPLOY.SH --ENV=STAGING", which is not
+     the command that runs. Scoped to this row's \`.k\` spans, which is where the
+     identifiers are (and where \`--mono\` is already applied inline for the same
+     reason: this is an identifier, not prose). */
+  .orch-insp .t .k { text-transform: none; letter-spacing: 0; }
   .orch-insp .t .sp { flex: 1; }
   .orch-clause { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .orch-clause + .orch-clause { margin-top: 6px; }

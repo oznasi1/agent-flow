@@ -1710,6 +1710,23 @@ describe("a command node", () => {
     expect(screen.getByTestId("orch-inspector").textContent).toContain(COMMAND_NOT_SET);
   });
 
+  it("does not uppercase the command it names in the inspector's eyebrow", () => {
+    // `.orch-insp .t` is uppercased for its own word ("CONNECTION"); the two
+    // identifiers beside it are not its to shout. A run key survives it, but a
+    // free-text command is case-sensitive shell text and this phase routed it
+    // through that row: "deploy.sh --env={note}" rendered as
+    // "DEPLOY.SH --ENV={NOTE}", which is not the command that runs.
+    //
+    // The visual half cannot be computed under jsdom (the sheet is never
+    // injected), so both halves are pinned together: the identifier really is in a
+    // `.k` inside that row, and the sheet really does exempt it.
+    render(<OrchestratorDrawer {...props({ flows: [placeAndCommand({ run: "deploy.sh --env={note}" })] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const eyebrow = screen.getByTestId("orch-inspector").querySelector(".t") as HTMLElement;
+    expect(within(eyebrow).getByText("deploy.sh --env={note}").className).toContain("k");
+    expect(ORCH_CSS).toContain(".orch-insp .t .k { text-transform: none;");
+  });
+
   it("offers every configured command, and a free-text option", () => {
     render(<OrchestratorDrawer {...props()} />);
     const values = Array.from(
