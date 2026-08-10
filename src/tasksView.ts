@@ -869,8 +869,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Shared kickoff tail for `explore()` and `runNotepadItem`: pick a destination,
-   * resolve the repo set for it (skipping the picker for an existing/live-folder
-   * destination that already fixes its own repos), turn the destination into
+   * resolve the repo set for it (skipping the picker for a destination that already
+   * fixes its own repos — an existing/live-folder window, or this one), turn it into
    * `openWorkspace` args, and resolve the Remote Control toggle. `pickerLabel` and
    * `argsLabel` are the only two points where the two callers' copy differs.
    * Returns undefined on any cancellation, at which point the caller must open
@@ -893,12 +893,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (!target) return undefined;
 
     let services: ServiceRef[];
+    // "This window" already names its repos — the folders open here (see resolveKickoff).
+    const openHere = target.kind === "current" ? this.servicesFromExistingDestination(target, repos) : [];
     if (target.kind === "existing" || target.kind === "live-folder") {
       services = this.servicesFromExistingDestination(target, repos);
       if (services.length === 0) {
         this.toast("error", "That workspace has no repos to open.");
         return undefined;
       }
+    } else if (openHere.length) {
+      services = openHere;
     } else {
       const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
         repos.map((r) => ({
@@ -1117,10 +1121,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Read the ticket and resolve the destination + repo set for a kick-off (Take or
-   * Address PR): auth gate, repo discovery, the destination pick, then the confirm-repos
-   * QuickPick (pre-checking inferred repos AND repos the destination already contains).
-   * `preselected` (the in-card selection) skips the confirm QuickPick. Returns undefined
-   * on any abort. */
+   * Address PR): auth gate, repo discovery, the destination pick, then — only for a NEW
+   * window — the confirm-repos QuickPick (pre-checking inferred repos). A destination
+   * that already has folders (an existing/live-folder window, or this one) supplies its
+   * own repo set, and `preselected` (the in-card selection) skips the QuickPick too.
+   * Returns undefined on any abort. */
   private async resolveKickoff(
     key: string,
     preselected?: string[],
@@ -1162,6 +1167,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       });
     }
 
+    // "This window" means "work where I already am", so the folders already open here
+    // ARE the repo set — asking again would make the choice mean less than it says.
+    // Empty only in the race where the window lost its identity after the pick; that
+    // falls through to the confirm QuickPick rather than dead-ending the take.
+    const openHere = target.kind === "current" ? this.servicesFromExistingDestination(target, repos) : [];
+
     let services: ServiceRef[];
     let repoSource: RepoSource;
     let inferredCount = 0;
@@ -1178,8 +1189,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       // The destination already fixes its repo set — use it as-is, no service pick.
       repoSource = "destination";
       services = this.servicesFromExistingDestination(target, repos);
+    } else if (openHere.length) {
+      repoSource = "destination";
+      services = openHere;
     } else {
-      // New / this window — confirm the repos the task touches (inferred pre-selected).
+      // New window — confirm the repos the task touches (inferred pre-selected).
       repoSource = "quickpick";
       const inferred = inferServices(
         { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
@@ -1244,11 +1258,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return { detail, services, target };
   }
 
-  /** Canonical paths the chosen destination already contains. New / current windows
-   * contribute nothing (nothing to merge into). */
+  /** Canonical paths the chosen destination already contains — for "current", the folders
+   * open in this window right now. A new window contributes nothing. */
   private prefillPathsForTarget(target: OpenTarget): Set<string> {
     if (target.kind === "existing") return new Set(workspaceFolderPaths(target.file));
     if (target.kind === "live-folder") return new Set([canon(target.folder)]);
+    // Already canonical (currentWindow canonicalizes its roots), and empty when the
+    // window has lost its identity since the destination pick.
+    if (target.kind === "current") return new Set(currentWindow()?.roots.map((r) => r.path) ?? []);
     return new Set();
   }
 
