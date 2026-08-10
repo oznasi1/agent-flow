@@ -1852,6 +1852,34 @@ describe("arming", () => {
     expect(onArm).toHaveBeenCalledWith("f1", false);
   });
 
+  it("counts every node it draws, and watches only the ones a condition can be about", () => {
+    // `places = nodes.filter(kind !== "notify")` was a fossil from when non-notify
+    // meant place: six nodes drawn, header and footer both saying five, and a
+    // command node counted as something the flow "watches" — when a command node is
+    // a thing a rule points AT and is never observed at all.
+    const six = flow({
+      armed: true,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n2", kind: "place", x: 0, y: 88, join: "any", runKey: "ASM-2", repo: "r" },
+        {
+          id: "n3", kind: "planned", x: 320, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["r"], mode: "quick", dest: "worktree",
+        },
+        { id: "n4", kind: "notify", x: 320, y: 88, join: "any", message: "landed" },
+        { id: "n5", kind: "command", x: 620, y: 0, join: "any", run: "deploy.sh" },
+        { id: "n6", kind: "command", x: 620, y: 88, join: "any", commandId: "deploy-staging" },
+      ],
+      edges: [],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [six] })} />);
+    // Header and footer both say the same thing, and it is the number drawn.
+    expect(screen.getAllByText(/6 nodes · 0 rules/)).toHaveLength(2);
+    // Three agent nodes: the two places and the planned work. Not the notify
+    // terminal, and not either command node.
+    expect(screen.getByText(/armed · watching 3 nodes/i)).toBeTruthy();
+  });
+
   it("no longer claims arming is coming in a later phase", () => {
     render(<OrchestratorDrawer {...props()} />);
     expect(screen.queryByText(/next phase/i)).toBeNull();

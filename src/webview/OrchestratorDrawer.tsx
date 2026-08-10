@@ -406,7 +406,18 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
 
   if (!flow) return null;
 
-  const places = flow.nodes.filter((n) => n.kind !== "notify").length;
+  /** How many nodes this flow HAS — every one the canvas draws, which is what the
+   * header's and the footer's "N nodes" claim to count. It used to be
+   * `kind !== "notify"`, a fossil from when non-notify meant place: six nodes drawn
+   * and both counters saying five, from the day the command node shipped. */
+  const nodeCount = flow.nodes.length;
+  /** How many nodes an armed flow is WATCHING — a different question from how many
+   * it has, and the only one "Armed · watching N nodes" is about. `isAgentNode` is
+   * the same pair the tray admits, and for the same reason: a condition can only be
+   * about a place on disk or work not yet launched. A command node is something a
+   * rule points AT and a notify terminal is a toast, so neither is ever observed —
+   * `evaluate.ts` reads a condition off a place's `RunStatus` and nothing else. */
+  const watched = flow.nodes.filter(isAgentNode).length;
   /** How many rules cannot advance. Driven by the edges' own `error` — the half of
    * `isSettled` that means "tried and failed" rather than "ran". An armed flow with
    * one of these is not simply watching, and the footer must not say it is. */
@@ -856,7 +867,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
         />
         <div className="row" style={{ marginTop: 8 }}>
           <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>
-            {places} {places === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
+            {nodeCount} {nodeCount === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
             {flow.edges.length === 1 ? "rule" : "rules"}
           </span>
           <div className="sp" />
@@ -1431,11 +1442,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             ? "Not armed"
             : stalled > 0
               ? `Armed · ${stalled} ${stalled === 1 ? "rule" : "rules"} stalled`
-              : `Armed · watching ${places} ${places === 1 ? "node" : "nodes"}`}
+              : `Armed · watching ${watched} ${watched === 1 ? "node" : "nodes"}`}
         </span>
         <div className="sp" />
         <span>
-          {places} {places === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
+          {nodeCount} {nodeCount === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
           {flow.edges.length === 1 ? "rule" : "rules"}
         </span>
       </div>
