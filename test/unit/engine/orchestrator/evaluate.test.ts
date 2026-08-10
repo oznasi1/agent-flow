@@ -367,12 +367,13 @@ describe("evaluateFlow — the carried action", () => {
 // see `commandSucceeded`'s own doc comment there — by reading the command
 // node's INCOMING edge(s), which is why every fixture here needs a command node
 // with edges pointing INTO it, stamped exactly the way `applyFired` (runner.ts)
-// stamps them, rather than a `RunStatus`.
+// stamps them — including `performed`, the field that names which incoming
+// edge actually ran — rather than a `RunStatus`.
 describe("evaluateFlow — command-succeeded", () => {
   it("is met when the edge into the command node succeeded", () => {
     const flow = flowWith(
       [place("a", "ASM-1"), command("cmd"), notify("z")],
-      [edge("in", "a", "cmd", { firedAt: NOW - 1_000, firedNote: "ran deploy.sh in repo-ASM-1" }),
+      [edge("in", "a", "cmd", { firedAt: NOW - 1_000, firedNote: "ran deploy.sh in repo-ASM-1", performed: true }),
        edge("e1", "cmd", "z", { cond: { kind: "command-succeeded" } })],
     );
     expect(run(flow, []).fired.map((f) => f.edge.id)).toEqual(["e1"]);
@@ -381,7 +382,7 @@ describe("evaluateFlow — command-succeeded", () => {
   it("is not met when that edge errored", () => {
     const flow = flowWith(
       [place("a", "ASM-1"), command("cmd"), notify("z")],
-      [edge("in", "a", "cmd", { error: "\"deploy.sh\" exited with code 1." }),
+      [edge("in", "a", "cmd", { error: "\"deploy.sh\" exited with code 1.", performed: true }),
        edge("e1", "cmd", "z", { cond: { kind: "command-succeeded" } })],
     );
     expect(run(flow, []).fired).toEqual([]);
@@ -400,16 +401,67 @@ describe("evaluateFlow — command-succeeded", () => {
     // Two rules trigger the same command node. Only one performs — here it
     // errored — and its sibling is demoted to a stamped-only latch, exactly
     // the shape `applyFired`'s per-target dedupe gives it: `firedAt` set, no
-    // `error`, and a note that says nothing ran. Indistinguishable from a
-    // genuine success by `firedAt` and `error` alone, in isolation — which is
-    // exactly why "succeeded" must be answered from ALL incoming edges, not
-    // by picking one and asking only it.
+    // `error`, no `performed`, and a note that says nothing ran.
+    // Indistinguishable from a genuine success by `firedAt`/`error` alone in
+    // isolation — which is exactly why the performer must be named by
+    // `performed`, not inferred from the absence of an error anywhere.
     const flow = flowWith(
       [place("a", "ASM-1"), place("b", "ASM-2"), command("cmd"), notify("z")],
-      [edge("perf", "a", "cmd", { error: "\"deploy.sh\" exited with code 1." }),
+      [edge("perf", "a", "cmd", { error: "\"deploy.sh\" exited with code 1.", performed: true }),
        edge("sib", "b", "cmd", { firedAt: NOW - 1_000, firedNote: "another edge into this target already acted" }),
        edge("e1", "cmd", "z", { cond: { kind: "command-succeeded" } })],
     );
     expect(run(flow, []).fired).toEqual([]);
+  });
+
+  it("stays NOT met after a partial Reset clears only the errored performer, leaving the sibling's bare firedAt behind", () => {
+    // The scenario review flagged: two rules into one command node, the
+    // performer errored, its sibling carries a bare `firedAt`. The drawer
+    // offers Reset for the red, errored edge — nothing invites a click on the
+    // sibling, which looks fine. `flow:resetEdge` (deckView.ts) rebuilds the
+    // RESET edge from `{ id, from, to, cond, mode }` alone, dropping
+    // `firedAt`/`error`/`firedNote`/`performed` — exactly what this fixture's
+    // "perf" edge models below, already reset. If `commandSucceeded` still
+    // inferred success from "no error anywhere" (the pre-review reasoning),
+    // this would now read as succeeded: no incoming edge carries `error`, and
+    // the sibling's `firedAt` is still set. `performed` is what keeps it
+    // correct — a Reset performer means there is no performer, not "no
+    // evidence of failure".
+    const flow = flowWith(
+      [place("a", "ASM-1"), place("b", "ASM-2"), command("cmd"), notify("z")],
+      [edge("perf", "a", "cmd"), // reset: unsettled again, carries no `performed`
+       edge("sib", "b", "cmd", { firedAt: NOW - 1_000, firedNote: "another edge into this target already acted" }),
+       edge("e1", "cmd", "z", { cond: { kind: "command-succeeded" } })],
+    );
+    expect(run(flow, [status("ASM-1"), status("ASM-2")]).fired).toEqual([]);
+  });
+
+  it("is not met for a rule wired off a PLACE, even when that place's own incoming edge has fired", () => {
+    // The picker does not filter by source kind (Tasks 9/10's job, per the
+    // review), so nothing stops `e1` below from pointing out of a place
+    // rather than a command node. `commandSucceeded` must refuse such a
+    // source rather than read ITS incoming edges — "p" here is a promoted
+    // place whose own incoming edge ("in") is a perfectly ordinary fired
+    // seed/launch edge, wholly unrelated to any command, and it must not be
+    // read as a command's success just because it carries `firedAt`.
+    const flow = flowWith(
+      [place("a", "ASM-1"), place("p", "ASM-2"), notify("z")],
+      [edge("in", "a", "p", { firedAt: NOW - 1_000, firedNote: "opened bite-me-2", performed: true }),
+       edge("e1", "p", "z", { cond: { kind: "command-succeeded" } })],
+    );
+    expect(run(flow, [status("ASM-1"), status("ASM-2")]).fired).toEqual([]);
+  });
+
+  it("scopes to its OWN command node — a sibling command node's success does not leak in", () => {
+    // Kills a mutant that reads `flow.edges` wholesale instead of this node's
+    // own incoming edges: cmd1 has genuinely succeeded, cmd2 has never run,
+    // and a rule wired off cmd2 must answer for cmd2 alone.
+    const flow = flowWith(
+      [place("a", "ASM-1"), command("cmd1"), command("cmd2"), notify("z")],
+      [edge("in1", "a", "cmd1", { firedAt: NOW - 1_000, firedNote: "ran deploy.sh in repo-ASM-1", performed: true }),
+       edge("in2", "a", "cmd2"), // cmd2's own incoming edge has not fired
+       edge("e1", "cmd2", "z", { cond: { kind: "command-succeeded" } })],
+    );
+    expect(run(flow, [status("ASM-1")]).fired).toEqual([]);
   });
 });

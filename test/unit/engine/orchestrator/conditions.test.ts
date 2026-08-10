@@ -355,3 +355,18 @@ describe("describeCond", () => {
       .toBe("no ticket status");
   });
 });
+
+describe("evalCond and describeCond — command-succeeded is unreachable here, loudly", () => {
+  // Neither function can answer this kind from one place's `CondContext` — the
+  // verdict lives on a command node's incoming edge, which needs the whole
+  // `Flow` (see `evaluate.ts`'s `commandSucceeded`, and this kind's own arm
+  // comments in conditions.ts). Both arms throw rather than guess, so a future
+  // second caller gets a loud failure instead of a confidently wrong answer.
+  it("evalCond throws for command-succeeded", () => {
+    expect(() => evalCond({ kind: "command-succeeded" }, ctx())).toThrow();
+  });
+
+  it("describeCond throws for command-succeeded", () => {
+    expect(() => describeCond({ kind: "command-succeeded" }, ctx())).toThrow();
+  });
+});

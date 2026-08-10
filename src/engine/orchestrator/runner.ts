@@ -68,11 +68,18 @@ export function applyFired(
       // spend gate, its dispatch check and `performEdge` all take this same
       // carried value as a parameter rather than reading `e.action`, so the verb
       // this function stamps is the verb that ran.
+      // `performed: true` on every branch below where `hit.perform` is true, and
+      // on NONE where it is false — see `FlowEdge.performed`'s own doc comment
+      // for why `firedAt`/`error` alone cannot carry this. It is set
+      // regardless of whether the performed action then succeeded or failed,
+      // because "was this the one that ran" and "did it succeed" are two
+      // different questions; `commandSucceeded` (evaluate.ts) asks them in
+      // that order.
       if (hit.perform && hit.action !== "notify") {
         const outcome = outcomes?.get(e.id);
-        if (!outcome) return { ...e, error: `${hit.action} was not performed` };
-        if (!outcome.ok) return { ...e, error: outcome.error };
-        return { ...e, firedAt: nowMs, firedNote: outcome.note };
+        if (!outcome) return { ...e, error: `${hit.action} was not performed`, performed: true };
+        if (!outcome.ok) return { ...e, error: outcome.error, performed: true };
+        return { ...e, firedAt: nowMs, firedNote: outcome.note, performed: true };
       }
       return {
         ...e,
@@ -82,6 +89,7 @@ export function applyFired(
         // junction at all — the drawer would show that word for a node that
         // never waited on anything. True for both shapes instead.
         firedNote: hit.perform ? performedNote(flow, hit) : "another edge into this target already acted",
+        ...(hit.perform ? { performed: true as const } : {}),
       };
     }),
   };

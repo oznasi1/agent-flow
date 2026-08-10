@@ -103,20 +103,31 @@ export function evalCond(cond: Condition, c: CondContext): boolean {
     case "ticket-status-is":
       return c.status.ticketStatus === cond.status;
     case "command-succeeded":
-      // Not answerable here. Every OTHER arm above is a pure function of the
-      // one `RunStatus` a `CondContext` carries — a live agent, its repos, its
-      // PR — because a place always resolves to exactly one of each. A command
+      // Not answerable here, and not answered with a silent wrong guess
+      // either. Every OTHER arm above is a pure function of the one
+      // `RunStatus` a `CondContext` carries — a live agent, its repos, its PR
+      // — because a place always resolves to exactly one of each. A command
       // node is not a place: nothing in `c` says what a shell command's exit
       // code was, because nothing about a command node ever produces a
       // `RunStatus` for one to live in. The verdict instead lives on the
-      // command node's INCOMING edge — `firedAt` plus either an `error` or a
-      // success note, stamped by `applyFired` in runner.ts — and reading that
-      // needs the whole `Flow`, which only `evaluate.ts` has in scope. That is
-      // where this kind is actually decided (see `commandSucceeded` there);
-      // `evaluate.ts`'s `isMet` intercepts it before it ever reaches this
-      // switch. This arm exists only so `evalCond` stays total over every
-      // `Condition` kind for any OTHER caller — it is never the real answer.
-      return false;
+      // command node's INCOMING edge — `firedAt`/`error`/`performed`, stamped
+      // by `applyFired` in runner.ts — and reading that needs the whole
+      // `Flow`, which only `evaluate.ts` has in scope: see `commandSucceeded`
+      // there, which is where this kind is actually decided. `evaluate.ts`'s
+      // `isMet` intercepts it before it ever reaches this switch, and
+      // `orchestratorRule.ts`'s `observationOf` refuses this kind before ever
+      // calling `describeCond`'s matching arm below — so this arm has no live
+      // caller left to hand a value to. A `false` here once WAS that wrong
+      // guess: harmless while nothing called it, but a silent, confidently
+      // wrong answer the moment a second caller ever does. Throwing is the
+      // same choice `evaluate.ts`'s `isMet` makes for "cannot say" elsewhere
+      // (it returns `undefined`, never a guessed `boolean`) — `evalCond`'s own
+      // return type has no room for `undefined`, so failing loudly is the
+      // closest equivalent available here.
+      throw new Error(
+        "evalCond cannot answer command-succeeded: it is decided in evaluate.ts's " +
+          "commandSucceeded from the whole Flow, never from one place's CondContext.",
+      );
   }
 }
 
@@ -218,10 +229,21 @@ export function describeCond(cond: Condition, c: CondContext): string {
     case "ticket-status-is":
       return c.status.ticketStatus ?? "no ticket status";
     case "command-succeeded":
-      // Unreachable through the drawer today, and for the same reason `evalCond`
-      // gives above: `observationOf` (orchestratorRule.ts) only calls
-      // `describeCond` for an edge whose SOURCE is a place, and this kind's
-      // source is always a command node. Kept only for exhaustiveness.
-      return "";
+      // Unreachable, deliberately: `observationOf` (orchestratorRule.ts)
+      // refuses this kind before ever calling `describeCond` at all, rather
+      // than only guarding on the source being a place — a `command-succeeded`
+      // rule is not guaranteed to have a command-node source (nothing enforces
+      // that in the picker yet; see `evaluate.ts`'s `commandSucceeded`, which
+      // guards it on the read side), so a place-sourced one would otherwise
+      // reach here too. An empty string used to be the answer, and it was
+      // exactly the wrong shape of "unreachable": `observationOf` returned it
+      // to the drawer, which has no `?? fallback` that catches an empty
+      // string, rendering as a blank line instead of surfacing the mistake.
+      // Throwing — same reasoning as `evalCond`'s arm above — turns a silent
+      // blank into a loud one if this ever becomes reachable again.
+      throw new Error(
+        "describeCond cannot describe command-succeeded: there is no place-shaped " +
+          "observation for it. observationOf (orchestratorRule.ts) must keep refusing this kind.",
+      );
   }
 }

@@ -54,9 +54,13 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
  * matches. They stay in `COND_LABEL` because a flow hand-edited on disk can
  * still hold one and its rule must still render, in both presentations.
  * `command-succeeded` carries no parameter, so unlike those two it is NOT
- * filtered out below — the drawer can offer it on any rule, though only one
- * pointing out of a command node ever does anything once armed (see
- * `evaluate.ts`'s `commandSucceeded`). */
+ * filtered out below — the drawer can offer it on any rule regardless of
+ * what that rule's source node is. Offering it that broadly is safe, not
+ * merely tolerated: `evaluate.ts`'s `commandSucceeded` refuses to answer
+ * `true` unless the rule's source really is a command node, so a rule wired
+ * off anything else is inert forever (never fires) rather than wrongly true.
+ * Restricting the PICKER to command-node sources so such a rule is never
+ * offered in the first place is Tasks 9/10's, not this one's. */
 export const OFFERED_CONDS: Condition["kind"][] = (
   Object.keys(COND_LABEL) as Condition["kind"][]
 ).filter((k) => k !== "agent-idle-over" && k !== "ticket-status-is");
@@ -223,6 +227,16 @@ export function modeDisplayLabel(promptModes: FlowPromptMode[], modeValue: strin
  * words. `null` when the node's run is not on the board — a claim neither
  * presentation can make. */
 export function observationOf(flow: Flow, e: FlowEdge, runs: RunStatus[]): string | null {
+  // Refused before the source-kind check below, not caught by it: this kind
+  // has no place-shaped observation to make regardless of what `e.from`
+  // turns out to be, and nothing today stops a `command-succeeded` rule from
+  // being wired off a PLACE (the picker does not filter by source kind yet —
+  // see `evaluate.ts`'s own `commandSucceeded`, which guards the read side
+  // instead). A place source would otherwise pass the check below and reach
+  // `describeCond`'s matching arm, which throws — see that arm's own doc
+  // comment for why throwing there is the right failure mode as long as this
+  // guard keeps it unreachable.
+  if (e.cond.kind === "command-succeeded") return null;
   const from = flow.nodes.find((n) => n.id === e.from);
   if (!from || from.kind !== "place") return null;
   const status = runs.find((r) => r.run.key === from.runKey);

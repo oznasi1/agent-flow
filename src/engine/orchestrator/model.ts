@@ -131,6 +131,30 @@ export interface FlowEdge {
   firedAt?: number;
   /** The receipt the drawer shows, e.g. "opened bite-me-3a". */
   firedNote?: string;
+  /** Set, and only ever set to `true`, on the edge whose action actually ran —
+   * as opposed to a per-target-dedupe or "all"-junction SIBLING that
+   * `applyFired` (runner.ts) stamps with the identical `firedAt`-set,
+   * `error`-absent shape without ever running anything. `firedAt`/`error`
+   * alone cannot tell the two apart (a demoted sibling never gets `error`, so
+   * it reads exactly like a successful performer); this field is the
+   * explicit answer to "was THIS the one that ran", independent of whether it
+   * then succeeded or failed.
+   *
+   * Read by `evaluate.ts`'s `commandSucceeded`, which needs to name the
+   * performer among a command node's several incoming edges rather than
+   * infer it from the absence of an error anywhere — the inference this
+   * field replaces breaks the moment the performer alone is Reset (Reset is
+   * per edge): the sibling's bare `firedAt` would otherwise outlive the
+   * failure it was standing next to and read back as a success.
+   *
+   * Optional, absent on every edge from a build before this field existed and
+   * on every non-performing edge going forward — both read the same as "not
+   * this edge", which is what keeps an old flow file parsing unchanged.
+   * Dropped by Reset (`flow:resetEdge`, deckView.ts) along with `firedAt` and
+   * `error`, because that handler rebuilds the edge from an explicit allow-
+   * list of its non-host fields rather than deleting keys — a field added
+   * here needs no matching edit there to be cleared. */
+  performed?: true;
   /** Extra, once-off text for the agent this rule starts — appended to the prompt
    * mode's template, or substituted at `{note}` if the template has one. For
    * `launch` and `seed` only; a `notify` rule's words live on its notify node.

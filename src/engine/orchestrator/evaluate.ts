@@ -31,24 +31,31 @@ const AGENT_CONDS: Set<Condition["kind"]> = new Set(["agent-ended-turn", "agent-
  * success note — and reading that needs the whole `Flow` in scope, which only
  * this module has.
  *
- * Deliberately does NOT try to identify which incoming edge "is the
- * performer". A settled edge's own stamp does not say that: `applyFired`
- * gives a demoted per-target-dedupe SIBLING the exact same shape a successful
- * performer gets — `firedAt` set, no `error` — and the only thing that tells
- * the two apart is the literal text of `firedNote` ("another edge into this
- * target already acted" vs. whatever the command's own outcome said), a
- * magic string this function would have to import from `runner.ts` to match
- * against. It does not need to: `applyFired`'s demoted-sibling branch NEVER
- * sets `error` — only a PERFORMED edge's outcome can — so an `error` on any
- * incoming edge can only be the actual performer's, whichever one that was.
- * That is enough to answer correctly with two aggregate questions instead of
- * one identity question: "did anything error" (if so, the run failed, no
- * matter how many stamped-only siblings say nothing happened) and, only if
- * not, "has anything fired at all" (if not, the command has not run yet). */
+ * Two guards, both load-bearing:
+ *
+ * `commandNodeId`'s own kind must actually be `"command"`. Nothing stops a
+ * rule wired FROM a place (or any other node) with this cond — the picker
+ * does not filter by source kind yet, and a hand-edited flow file never did —
+ * and without this check `incomingEdges` would read THAT node's incoming
+ * edges instead, which for a promoted `place` are typically already fired,
+ * reporting "succeeded" for a rule with no command anywhere near it.
+ *
+ * The performer must be found by `e.performed`, not inferred from the
+ * absence of an error anywhere. An EARLIER version of this function reasoned
+ * "a demoted per-target-dedupe sibling never gets `error`, so an `error`
+ * anywhere can only be the real performer's" — true within one pass, but
+ * Reset is PER EDGE: resetting only the errored performer (the one the
+ * drawer highlights and offers Reset for) leaves the sibling's bare,
+ * unrelated `firedAt` behind with nothing to contradict it, and "no error
+ * anywhere" then reads as success for a command that has only ever failed.
+ * `e.performed` is the fact that inference was reconstructing without ever
+ * being told: it is set on the performer alone (see its own doc comment in
+ * model.ts) and is cleared by that same Reset, so a Reset performer
+ * correctly becomes "no performer", not "no evidence of failure". */
 function commandSucceeded(flow: Flow, commandNodeId: string): boolean {
-  const incoming = incomingEdges(flow, commandNodeId);
-  if (incoming.some((e) => e.error !== undefined)) return false;
-  return incoming.some((e) => e.firedAt !== undefined);
+  if (findNode(flow, commandNodeId)?.kind !== "command") return false;
+  const performer = incomingEdges(flow, commandNodeId).find((e) => e.performed === true);
+  return performer !== undefined && performer.firedAt !== undefined;
 }
 
 export interface EvalInput {

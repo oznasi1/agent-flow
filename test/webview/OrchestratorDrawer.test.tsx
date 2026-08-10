@@ -1035,6 +1035,29 @@ describe("the inspector", () => {
     expect(screen.getByTestId("orch-inspector").textContent).toMatch(/not on the board/i);
   });
 
+  it("survives a command-succeeded rule wired off a PLACE instead of a command node", () => {
+    // The picker does not filter a rule's condition by its source node kind
+    // (Tasks 9/10's job) — so nothing stops "command-succeeded" from landing
+    // on an edge out of a place, same as `n1` below, which has a perfectly
+    // real, fetched run status. `describeCond`'s own arm for this kind
+    // throws rather than silently answering wrong (see conditions.ts) —
+    // deliberately, since it should never be reachable — so `observationOf`
+    // must refuse the CONDITION KIND itself before ever calling it, not only
+    // guard on the source failing to be a place (which this fixture's source
+    // is). This pins that the drawer renders the same "not on the board"
+    // fallback instead of crashing.
+    const placeSourced = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "command-succeeded" }, action: "notify" }],
+    });
+    render(<OrchestratorDrawer {...props({ runs: [runStatus("ASM-1", "agent-flow")], flows: [placeSourced] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByTestId("orch-inspector").textContent).toMatch(/not on the board/i);
+  });
+
   it("deletes the edge", () => {
     const { onSave } = open();
     fireEvent.click(screen.getByRole("button", { name: "Delete connection" }));
