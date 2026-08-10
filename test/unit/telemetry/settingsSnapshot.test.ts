@@ -124,9 +124,13 @@ describe("settingsSnapshot", () => {
       baseUrl: "https://acme.atlassian.net", project: "BILL", githubOrg: "acme-inc",
       reposRoot: "/Users/someone/dev", workspaceDir: "/Users/someone/ws",
       provenanceLabel: "acme-label", repoBlocklist: ["secret-repo"],
+      // A sentinel in every field, not only `run`: id and label are just as
+      // user-authored as the command text itself, and only its length may
+      // ever cross into telemetry (see commands_count).
+      commands: [{ id: "cmd-id-leak", label: "cmd-label-leak", run: "cmd-run-leak" }],
     };
     const serialized = JSON.stringify(settingsSnapshot(cfg));
-    for (const leak of ["acme", "BILL", "someone", "secret-repo", "atlassian"]) {
+    for (const leak of ["acme", "BILL", "someone", "secret-repo", "atlassian", "cmd-id-leak", "cmd-label-leak", "cmd-run-leak"]) {
       expect(serialized).not.toContain(leak);
     }
   });
@@ -372,10 +376,14 @@ describe("settingsSnapshot — orchestrator", () => {
 });
 
 describe("settingsSnapshot — commands", () => {
-  it("counts configured commands without revealing their run text", () => {
+  // The sentinel lives in the id and the label too, not only in `run`: a
+  // mutation that added `command_ids: cfg.commands.map(c => c.id)` or the
+  // labels to the snapshot would still pass a test that only ever put
+  // "acme-internal" inside the run text.
+  it("counts configured commands without revealing their id, label or run text", () => {
     setConfig({
       commands: [
-        { id: "deploy", label: "Deploy", run: "gh workflow run deploy.yml --repo acme-internal/billing" },
+        { id: "acme-internal-deploy", label: "acme-internal Deploy", run: "gh workflow run deploy.yml --repo acme-internal/billing" },
         { id: "smoke", label: "Smoke test", run: "curl https://acme-internal.example/health" },
       ],
     });
