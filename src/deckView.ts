@@ -5,7 +5,7 @@ import * as path from "path";
 import { getConfig, providerLabel, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { Flow, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
+import { Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId } from "./engine/orchestrator/flowIo";
 import { LOCK_TTL_MS, acquire, release } from "./engine/orchestrator/lock";
@@ -443,20 +443,38 @@ export class DeckPanel {
             return now !== undefined && !isSettled(now);
           })
           // Rebind `.edge` to the fresh copy, once, for everything unclaimed. From
-          // here on, EVERY decision about an edge — is it a spend, which verb, what
-          // it points at, which prompt mode — must be about the edge as the store
-          // holds it now, not as evaluation saw it a store-read ago: a user can edit
-          // an armed flow (change an edge's action, target or mode) in the moments
-          // between this pass's evaluation and its acting step, and the stale
-          // `action` is the direction that actually spends money — a rule the user
-          // just switched to `notify` must not still launch because evaluation
-          // captured it as a `launch` a moment earlier. `perform` is untouched: that
+          // here on, every RECORD-level detail of an edge — where it points, which
+          // prompt mode, which note — must be about the edge as the store holds it
+          // now, not as evaluation saw it a store-read ago: a user can edit an armed
+          // flow (retarget an edge, change its mode) in the moments between this
+          // pass's evaluation and its acting step. `perform` is untouched: that
           // verdict is evaluation's own, and redeciding it here would mean
           // re-evaluating. INVARIANT: after this line, nothing below ever reads
           // `f.edge` from a `FiredEdge` that predates this map — `firing`, `stamping`,
           // the dedup, the spend gate, the dispatch check and `performEdge` itself
           // all inherit the fresh edge from here. Do not reintroduce a raw
           // `result.fired` reference below this point.
+          //
+          // `f.action` is DELIBERATELY NOT rebound, and is the one thing here that
+          // stays evaluation's vintage. An action is no longer a field a user can
+          // edit: it is derived from the TARGET NODE's kind (`edgeAction`), and
+          // `evaluateFlow` derived it once, for this pass, onto `FiredEdge.action`.
+          // Everything downstream — this dedupe, the spend gate, the dispatch check,
+          // `performEdge`, and `applyFired`/`notifyLines` in `runner.ts` — reads that
+          // one carried value, so a single vintage decides WHICH VERB this pass is
+          // performing and which verb it then stamps and announces. Re-deriving here
+          // against `fresh` would create a second vintage and put this pass's own
+          // dispatch back in disagreement with the stamp `applyFired` writes for it,
+          // which is how a refused launch used to be stamped as a notify success.
+          //
+          // That is not a hole in the money guarantee, because the verb alone spends
+          // nothing: `spendTarget` and `performEdge` resolve the TARGET out of
+          // `fresh`, so a target whose kind changed under this pass — the only edit
+          // that can change an action at all — resolves to nothing, and the rule is
+          // refused with an `error` and no `firedAt`. Concretely: a `launch` decided
+          // against a `planned` node the user has since turned into a notify
+          // terminal cannot launch it, because there is no planned node left to
+          // launch. The decision stands; what it would have spent on is gone.
           .map((f) => ({ ...f, edge: freshById.get(f.edge.id)! }));
         // Nothing left to stamp: the other window did all of it. No write, and no
         // toast — it already announced every one of these.
@@ -481,7 +499,7 @@ export class DeckPanel {
         // target a deferred target can never also have a successful stamp to drop.
         const actedTargets = new Set<string>();
         const firing = unclaimed.map((f) => {
-          if (!f.perform || !isSpendAction(f.edge.action)) return f;
+          if (!f.perform || !isSpendAction(f.action)) return f;
           if (actedTargets.has(f.edge.to)) return { ...f, perform: false };
           actedTargets.add(f.edge.to);
           return f;
@@ -497,7 +515,7 @@ export class DeckPanel {
         // error below, so gating on it would ask about a rule that can never run.
         const wantsSpend = firing
           .filter((f) => f.perform)
-          .map((f) => this.spendTarget(fresh, f.edge))
+          .map((f) => this.spendTarget(fresh, f.edge, f.action))
           .find((t) => t !== undefined);
         if (wantsSpend !== undefined && fresh.launchConfirmedAt === undefined) {
           // Recorded, not asked — the caller asks once the lock is released. Whatever
@@ -525,7 +543,7 @@ export class DeckPanel {
         for (const f of firing) {
           // A stamped-only sibling performs nothing, and a notify's whole action is
           // the toast `notifyLines` produces below.
-          if (!f.perform || !isSpendAction(f.edge.action)) continue;
+          if (!f.perform || !isSpendAction(f.action)) continue;
           // Re-read and check `armed` immediately before THIS edge, not once for the
           // whole flow: a launch or seed is its own `await`, and up to three of them
           // can run in one pass (the per-pass cap), each one long enough for
@@ -540,7 +558,7 @@ export class DeckPanel {
             deferredTargets.add(f.edge.to);
             continue;
           }
-          const done = await this.performEdge(fresh, f.edge, runs);
+          const done = await this.performEdge(fresh, f.edge, runs, f.action);
           if (done.kind === "defer") {
             // The log, and nothing else: a transient read failure on an unattended
             // flow is not worth a notification, but a rule quietly not advancing is
@@ -644,7 +662,10 @@ export class DeckPanel {
   }
 
   /** The planned node a `launch` edge points at, or `undefined` when it points at
-   * anything else — a hand-edited flow can aim `launch` at a notify terminal. */
+   * anything else. Now that the verb is DERIVED from the target, the two can only
+   * disagree when the target's kind changed under this pass — the node was planned
+   * work when `evaluateFlow` decided "launch" and is something else in the copy
+   * being acted against. That is not a spend: it is the refusal below. */
   private plannedTarget(flow: Flow, edge: FlowEdge): PlannedNode | undefined {
     const target = findNode(flow, edge.to);
     return target && isPlanned(target) ? target : undefined;
@@ -662,15 +683,23 @@ export class DeckPanel {
   /** What a `launch` or `seed` edge would actually spend money on, resolved just
    * far enough to ask about it — never as far as reading a ticket or touching
    * disk. `undefined` means the edge cannot spend anything (wrong kind of
-   * target), so it must not count toward the once-per-flow gate below. */
-  private spendTarget(flow: Flow, edge: FlowEdge): SpendTarget | undefined {
+   * target), so it must not count toward the once-per-flow gate below.
+   *
+   * `action` is passed IN — the value `evaluateFlow` derived for this pass and
+   * carried on the `FiredEdge` — rather than read off `edge.action` or re-derived
+   * from `flow` here. Re-deriving is what would let this function answer a
+   * different question than the dispatch below and the stamp in `applyFired`;
+   * see the vintage note in `advanceUnderLock`. The TARGET is still resolved out
+   * of `flow`, which is why a verb whose target has since changed kind resolves
+   * to `undefined` and gates nothing. */
+  private spendTarget(flow: Flow, edge: FlowEdge, action: FlowAction | undefined): SpendTarget | undefined {
     // `isSpendAction` is the one predicate for "does this rule cost money" — the
     // caller hands every performing edge to this function rather than
     // pre-filtering by action, so this guard is the only place that question is
     // asked on this path. What follows resolves WHAT it spends on, which
     // `isSpendAction` deliberately knows nothing about.
-    if (!isSpendAction(edge.action)) return undefined;
-    if (edge.action === "launch") {
+    if (!isSpendAction(action)) return undefined;
+    if (action === "launch") {
       const node = this.plannedTarget(flow, edge);
       return node ? { action: "launch", node, note: edge.note } : undefined;
     }
@@ -764,13 +793,30 @@ export class DeckPanel {
    *
    * `statuses` is the same `RunStatus[]` this poll already built for the board —
    * threaded in rather than re-read, so a `seed` resolves its place against exactly
-   * what the rest of this pass saw. */
+   * what the rest of this pass saw.
+   *
+   * `action` is threaded in too, for the same reason `spendTarget`'s is: it is the
+   * verb `evaluateFlow` derived for this pass and `applyFired` will stamp against,
+   * and re-deriving it here from `flow` — or reading `edge.action`, the record's
+   * backward-compatibility mirror — is exactly how this function could come to
+   * perform one verb while the stamp claimed another. */
   private async performEdge(
     flow: Flow,
     edge: FlowEdge,
     statuses: RunStatus[],
+    action: FlowAction | undefined,
   ): Promise<EdgeResult> {
-    if (edge.action === "seed") return this.performSeed(flow, edge, statuses);
+    // An action the target does not imply cannot be performed. Reached when the
+    // target is missing or of a kind this build does not know — the same
+    // situation `evaluate.ts` reports as "gone", stamped here so the rule
+    // settles instead of being re-evaluated every poll forever.
+    if (action === undefined) {
+      return {
+        kind: "done",
+        outcome: { ok: false, error: `this rule points at ${edge.to}, which is not a place, planned work, a notification, or a command.` },
+      };
+    }
+    if (action === "seed") return this.performSeed(flow, edge, statuses);
     const node = this.plannedTarget(flow, edge);
     if (!node) {
       return {
