@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { inferTicket, localKey, localRunFor } from "../../../src/engine/localRuns";
-import { groupPlacesByWindow } from "../../../src/engine/localRuns";
+import { groupPlacesByWindow, inferTicket, localKey, localRunFor } from "../../../src/engine/localRuns";
 import type { OpenSession } from "../../../src/engine/sessions";
 
 const BASE = "https://at-bay.atlassian.net";

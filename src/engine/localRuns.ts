@@ -113,8 +113,14 @@ export function localRunFor(
  * which folders it holds, and guessing from the workspace file would mean reading
  * and parsing it on every refresh.
  *
- * Every input place comes back in exactly one group, in first-appearance order,
- * so the board's card order does not shuffle between refreshes.
+ * Every input place comes back in exactly one group, in first-appearance order —
+ * that much is stable refresh to refresh. Which WINDOW a folder shared by two
+ * open workspaces gets grouped under is not: ownership goes to whichever window
+ * lists it first in `windows`, and that order is `readLiveWindows`' updatedAt-DESC
+ * sort, which every window re-stamps on focus. Focusing the other window can
+ * therefore hand the folder to a different owner on the very next refresh — a
+ * different `run.key`, a remounted card, and any PR facts cached under the old
+ * key orphaned. Pre-existing, and not what this pass redesigns.
  */
 export function groupPlacesByWindow(
   places: string[],
