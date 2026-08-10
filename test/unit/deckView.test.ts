@@ -58,6 +58,11 @@ const h = vi.hoisted(() => ({
   // Every Claude Code session open on this machine (Task 8) — the registry
   // readOpenSessions reads, stubbed here rather than touching real ~/.claude/sessions.
   openSessions: [] as OpenSession[],
+  // Every window presence knows about (Task 1/4) — steerable per test so a
+  // multi-root workspace window can be asserted to fold its sessions into one
+  // card. Empty by default, which groups nothing: every pre-existing
+  // local-card test keeps producing its old one-place-one-card shape.
+  liveWindows: [] as { identity: string; kind: "workspace" | "folder"; roots?: string[] }[],
   // Per-session live activity (Task 8) — stubbed so a test can assert a real,
   // known AgentActivity is threaded through to the right CardAgent, without
   // this suite re-testing readSessionActivity's own parsing of a real
@@ -91,6 +96,11 @@ const h = vi.hoisted(() => ({
   // steerable per test, unlike repoRoot below, because the branch is exactly the
   // thing a local card's ticket inference and "no card twice" tests need to vary.
   branch: "ASM-5641-team-table" as string | null,
+  // The branch for /r/automation_e2e (Task 4) — a second steerable path so a
+  // multi-root workspace card's "first root's ticket wins" rule can be tested
+  // against a real conflict, not just one root that has a ticket and one that
+  // never can. Defaults to "main", same as every other path already did.
+  branch2: "main" as string | null,
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -129,7 +139,7 @@ vi.mock("../../src/engine/git", () => ({
   taskDiffBase: h.taskDiffBase,
   taskChangedFiles: h.taskChangedFiles,
   repoRoot: (p: string) => p,
-  currentBranch: (p: string) => (p === "/r/centaur" ? h.branch : "main"),
+  currentBranch: (p: string) => (p === "/r/centaur" ? h.branch : p === "/r/automation_e2e" ? h.branch2 : "main"),
   prEligible: (r: { isGit: boolean; branch?: string }) => r.isGit && !!r.branch && r.branch !== "master",
   gitState: (name: string, path: string) => h.gitState(name, path),
 }));
@@ -150,7 +160,7 @@ vi.mock("../../src/engine/transcript", async (importActual) => ({
     h.sessionActivity(projectsRoot, cwd, sessionId, nowMs),
 }));
 vi.mock("../../src/engine/presence", () => ({
-  readLiveWindows: () => [],
+  readLiveWindows: () => h.liveWindows,
   defaultWindowsDir: () => "/windows",
 }));
 vi.mock("../../src/engine/pr/store", () => ({
@@ -363,6 +373,7 @@ beforeEach(() => {
   h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }];
   h.reviewRequests = true;
   h.openSessions = [];
+  h.liveWindows = [];
   h.sessionActivity.mockClear().mockReturnValue({ state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" });
   h.launchReview.mockClear().mockResolvedValue({ ok: true, runKey: "review-aws-ops-8491" });
   h.existsSync.mockClear().mockReturnValue(true);
@@ -375,6 +386,7 @@ beforeEach(() => {
   h.agentProvider = "claude-code";
   h.reviewSubmit.mockClear().mockResolvedValue({ ok: true });
   h.branch = "ASM-5641-team-table";
+  h.branch2 = "main";
   // Confirm by default: resolve the label passed as the modal's sole action item,
   // rather than vscode's own mock default of `undefined` (which reads as "declined"
   // for every other suite in this file). Individual tests override this per case.
@@ -1268,6 +1280,85 @@ describe("DeckPanel local cards", () => {
     const p = lastPanel();
     await p._fire({ type: "deck:inspect", key: builtLocal().run.key, action: "open" });
     expect(h.openInEditor).toHaveBeenCalledWith("/r/centaur");
+  });
+
+  const WS = { identity: "/ws/centaur+e2e.code-workspace", kind: "workspace" as const,
+    roots: ["/r/centaur", "/r/automation_e2e"] };
+
+  it("makes one card for two sessions in the same workspace", async () => {
+    h.runs = [];
+    h.liveWindows = [WS];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" }),
+      sess({ sessionId: "s2", cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    show();
+    await settled();
+    expect(h.buildRunStatus).toHaveBeenCalledTimes(1);
+    expect(builtLocal().agents.map((a) => a.session.name).sort()).toEqual(["centaur-7e", "e2e-3a"]);
+  });
+
+  it("carries every workspace root, including one with no session in it", async () => {
+    h.runs = [];
+    h.liveWindows = [WS];
+    h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    show();
+    await settled();
+    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["centaur", "automation_e2e"]);
+    expect(builtLocal().run.workspaceFile).toBe("/ws/centaur+e2e.code-workspace");
+  });
+
+  it("tags each agent with the root it runs in, not the run's first repo", async () => {
+    h.runs = [];
+    h.liveWindows = [WS];
+    h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    show();
+    await settled();
+    expect(builtLocal().agents.map((a) => a.repo)).toEqual(["automation_e2e"]);
+  });
+
+  it("infers the ticket from the first root whose branch names one", async () => {
+    // h.branch is the branch of /r/centaur; every other path reads "main".
+    h.runs = [];
+    h.liveWindows = [WS];
+    h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    show(true);
+    await settled();
+    expect(builtLocal().run.url).toContain("/browse/ASM-5641");
+  });
+
+  it("prefers the first root's ticket over a later root's, when both name one", async () => {
+    // Both roots now name a ticket (unlike the case above, where only /r/centaur
+    // could) — this is what actually distinguishes "first root wins" from "last
+    // root wins": with only one root ever able to carry a ticket, .find and a
+    // `.filter(Boolean).at(-1)` mutation would agree.
+    h.runs = [];
+    h.branch = "ASM-1111-first";
+    h.branch2 = "ASM-2222-second";
+    h.liveWindows = [WS];
+    h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    show(true);
+    await settled();
+    expect(builtLocal().run.url).toContain("/browse/ASM-1111");
+  });
+
+  it("still makes a per-place card when the window record has no roots", async () => {
+    h.runs = [];
+    h.liveWindows = [{ identity: "/ws/centaur+e2e.code-workspace", kind: "workspace" }];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show();
+    await settled();
+    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["centaur"]);
+    expect(builtLocal().run.workspaceFile).toBeUndefined();
+  });
+
+  it("does not fold a root a tracked run already owns into a local card", async () => {
+    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-1-x" }] })];
+    h.liveWindows = [WS];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show();
+    await settled();
+    // The tracked run claimed the only live place: one card, and it is the tracked one.
+    expect(h.buildRunStatus).toHaveBeenCalledTimes(1);
+    expect(h.buildRunStatus.mock.calls[0][0].run.key).toBe("ASM-1");
   });
 });
 

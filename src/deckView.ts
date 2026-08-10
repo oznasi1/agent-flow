@@ -21,7 +21,7 @@ import { launchReview, resolveReviewMode, reviewRunKey } from "./engine/review/l
 import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
-import { inferTicket, localRunFor } from "./engine/localRuns";
+import { groupPlacesByWindow, inferTicket, localRunFor } from "./engine/localRuns";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity } from "./engine/transcript";
 import { canon } from "./engine/paths";
@@ -593,7 +593,8 @@ export class DeckPanel {
     const now = Date.now();
     const authed = await this.connector.isAuthenticated();
     const ghReady = this.ghReady();
-    const openIdentities = new Set(readLiveWindows(defaultWindowsDir()).map((w) => w.identity));
+    const liveWindows = readLiveWindows(defaultWindowsDir());
+    const openIdentities = new Set(liveWindows.map((w) => w.identity));
 
     // Every Claude Code session open on this machine, grouped by the directory it
     // runs in. A place is claimed by at most one tracked run; Task 11 turns what
@@ -632,19 +633,32 @@ export class DeckPanel {
     const cfg = getConfig();
     this.localRuns.clear();
     const locals: Run[] = [];
-    for (const [place, sessions] of places) {
-      if (claimed.has(place)) continue;
-      const branch = currentBranch(place);
-      const ticket = inferTicket(branch, cfg.project, cfg.baseUrl);
-      const run = localRunFor(place, sessions, { isGit: repoRoot(place) !== "", branch }, ticket, now);
+    const unclaimed = [...places.keys()].filter((place) => !claimed.has(place));
+    // A window holding two repos is one place to work, not two: fold its session
+    // directories into a single card that names the workspace and carries both
+    // roots. Anything a live multi-root window does not list — including a place
+    // whose window predates presence roots — stays the per-place card it was.
+    for (const group of groupPlacesByWindow(unclaimed, liveWindows)) {
+      const gitByRoot = new Map(group.roots.map((root) =>
+        [root, { isGit: repoRoot(root) !== "", branch: currentBranch(root) }] as const));
+      const git = (root: string) => gitByRoot.get(root) ?? { isGit: false, branch: null };
+      // First root whose branch names a ticket wins, so a workspace whose two
+      // branches disagree still resolves to one card, the same one every refresh.
+      const ticket = group.roots
+        .map((root) => inferTicket(git(root).branch, cfg.project, cfg.baseUrl))
+        .find((t) => t !== null) ?? null;
+      const sessions = group.places.flatMap((place) => places.get(place) ?? []);
+      const run = localRunFor(group, sessions, git, ticket, now);
       this.localRuns.set(run.key, run);
       agentsByKey.set(
         run.key,
-        sessions.map((s) => ({
+        group.places.flatMap((place) => (places.get(place) ?? []).map((s) => ({
           session: s,
           activity: readSessionActivity(projectsRoot, s.cwd, s.sessionId, now),
-          repo: run.repos[0]?.name,
-        })),
+          // The root this session runs in — not repos[0], which on a workspace
+          // card is a repo the session may never have touched.
+          repo: run.repos.find((r) => r.path === place)?.name,
+        }))),
       );
       locals.push(run);
     }
