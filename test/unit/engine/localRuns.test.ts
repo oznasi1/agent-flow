@@ -137,6 +137,23 @@ describe("localRunFor", () => {
     expect(localRunFor(solo("/r/centaur"), [sess({ startedAt: 900 }), sess({ startedAt: 500 })], GIT, null, NOW).createdAt).toBe(500);
     expect(localRunFor(solo("/r/centaur"), [sess({ startedAt: 0 })], GIT, null, NOW).createdAt).toBe(NOW);
   });
+
+  it("names a ticketless, workspaceless card after the full path when its only root has no basename", () => {
+    // A filesystem root like "/" has an empty basename. An empty summary would
+    // render as a blank card title, so the fallback names it after the path.
+    const run = localRunFor(solo("/"), [sess()], () => ({ isGit: false, branch: null }), null, NOW);
+    expect(run.summary).toBe("/");
+  });
+
+  it("names a repo after its full path when its basename is empty", () => {
+    // Same shape, inside the repos map: a workspace root of "/" would otherwise
+    // render as a blank repo chip on the board.
+    const run = localRunFor(
+      { workspaceFile: "/ws/x.code-workspace", roots: ["/r/centaur", "/"], places: ["/r/centaur"] },
+      [sess()], GIT, null, NOW,
+    );
+    expect(run.repos[1]).toEqual({ name: "/", path: "/", isGit: true, branch: "main" });
+  });
 });
 
 const ws = (identity: string, roots: string[]) =>
