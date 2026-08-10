@@ -6193,6 +6193,46 @@ describe("a met run rule acts", () => {
     expect(ran()[1].cwd).toBe("/r/bite-me");
   });
 
+  it("runs a chained command where the rule that DID fire came from, not where flow order points", async () => {
+    // Two places into one command node is an ordinary two-wire build ("when either
+    // merges, deploy"), and the two roots are different checkouts of the run. The
+    // chained `smoke.sh` used to walk back to whichever root sorted FIRST — here the
+    // branch whose condition never held — and execute unattended shell in a checkout
+    // the user did not intend. e1 is first in flow order and never met; e2 is the one
+    // that runs, so the two answers genuinely disagree.
+    const fanIn = (): Flow => cmdFlow({
+      nodes: [
+        // FIRST in flow order, and the branch that never fires: this fixture's run
+        // carries `bite-me` as a second checkout with no pull request of its own, so
+        // no place-shaped condition on it is ever met.
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "bite-me" },
+        { id: "n2", kind: "place", x: 0, y: 88, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
+        { id: "n4", kind: "command", x: 0, y: 88, join: "any", run: "smoke.sh staging" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "run" },
+        { id: "e2", from: "n2", to: "n3", cond: { kind: "pr-merged" }, action: "run" },
+        { id: "e3", from: "n3", to: "n4", cond: { kind: "command-succeeded" }, action: "run" },
+      ],
+    });
+    const { send } = await warmed([fanIn()]);
+    await send({ type: "deck:refresh" });
+    // Pass one: only e2 fires, and it runs in its OWN place's checkout.
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    expect(ran()[1].cwd).toBe("/r/aws-ops");
+    expect(lastWrite().edges[1].performed).toBe(true);
+    // The waiting wire is untouched, so the disagreement is still live for pass two.
+    expect(lastWrite().edges[0].firedAt).toBeUndefined();
+    h.flows = [lastWrite()];
+    await send({ type: "deck:refresh" });
+    // Pass two: the chained command inherits the PERFORMER's checkout, not the
+    // first-in-flow-order one (`/r/bite-me`).
+    expect(ran()[0]).toBe("smoke.sh staging");
+    expect(ran()[1].cwd).toBe("/r/aws-ops");
+    expect(lastWrite().edges[2].firedNote).toBe("ran smoke.sh staging in aws-ops");
+  });
+
   it("refuses a chained command whose chain reaches no place at all", async () => {
     // A hand-edited file, or one written by a newer build: `validNode` admits an
     // unknown kind on purpose so such a flow still renders. Its incoming edge is

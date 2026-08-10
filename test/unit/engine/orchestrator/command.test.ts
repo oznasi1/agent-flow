@@ -261,12 +261,43 @@ describe("chainSourcePlace", () => {
     expect(chainSourcePlace(f, "n4")?.id).toBe("n1");
   });
 
-  it("takes the first place in flow order when a command node has several sources", () => {
+  it("takes the first place in flow order when no incoming edge names a performer", () => {
     // Deterministic for the same reason `incomingEdges` documents its own order: an
-    // unattended deploy must not change directory between passes.
+    // unattended deploy must not change directory between passes. This is the
+    // FALLBACK — see the performer case below.
     const f = flow(
       [place("n1", "ASM-1", "aws-ops"), place("n9", "ASM-9", "web"), cmd("n2")],
       [edge("e1", "n1", "n2"), edge("e2", "n9", "n2")],
+    );
+    expect(chainSourcePlace(f, "n2")?.id).toBe("n1");
+  });
+
+  it("prefers the source of the edge that actually PERFORMED the command", () => {
+    // Two places into one command node is an ordinary two-wire build — `finishWire`
+    // refuses only a duplicate (from, to) pair, and "when either merges, deploy" is
+    // a natural thing to draw — so the two roots are DIFFERENT checkouts. Taking
+    // whichever sorted first meant a chained `smoke.sh` could run in the branch that
+    // never fired: unattended shell in a checkout the user did not intend.
+    const f = flow(
+      [place("n1", "ASM-1", "aws-ops"), place("n9", "ASM-9", "web"), cmd("n2")],
+      // e2 is second in flow order AND is the one that ran, so flow order and the
+      // performer disagree — which is what makes this fixture discriminating.
+      [edge("e1", "n1", "n2"), { ...edge("e2", "n9", "n2"), firedAt: 5, performed: true }],
+    );
+    expect(chainSourcePlace(f, "n2")?.id).toBe("n9");
+    expect(chainSourcePlace(f, "n2")?.repo).toBe("web");
+  });
+
+  it("falls back to flow order when the performer's own branch reaches no place", () => {
+    // The preference is an ordering, not a veto: a performer whose source cannot
+    // resolve must not shadow a sibling that can, or a resolvable chain would refuse.
+    const planned: FlowNode = {
+      id: "n0", kind: "planned", x: 0, y: 0, join: "any",
+      ticketKey: "ASM-2", repos: ["aws-ops"], mode: "tdd", dest: "worktree",
+    };
+    const f = flow(
+      [planned, place("n1", "ASM-1", "aws-ops"), cmd("n2")],
+      [edge("e1", "n1", "n2"), { ...edge("e2", "n0", "n2"), firedAt: 5, performed: true }],
     );
     expect(chainSourcePlace(f, "n2")?.id).toBe("n1");
   });

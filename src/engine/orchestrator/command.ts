@@ -101,12 +101,24 @@ function withNote(template: string, note: string): string {
  * is not a place, so without this walk the second command had no directory at all
  * and its rule stalled invisibly on every pass.
  *
- * Depth-first over `incomingEdges` (flow order), so the answer is deterministic
- * for a command node fed by several rules — the same reason `incomingEdges`
- * documents its own ordering. It deliberately does NOT prefer the edge that
- * actually performed: the directory is a property of the CHAIN's root, and every
- * incoming edge of a command node comes from the same side of the graph in every
- * shape a picker can build.
+ * Depth-first, and the ORDER it tries a command node's incoming edges in is the
+ * safety story, not housekeeping. Two places into one command node is an ordinary
+ * two-wire build — `finishWire` refuses only a duplicate `(from, to)` pair, and
+ * "when either of these merges, deploy" is a natural thing to draw — so the roots
+ * of a fan-in are genuinely different checkouts, not "the same side of the graph"
+ * (an earlier version of this comment claimed the latter, and it was wrong).
+ * Whichever root sorted first would then decide where a CHAINED command runs,
+ * which for `P1 → deploy.sh → smoke.sh` and `P2 → deploy.sh` means executing
+ * unattended shell in the branch that did not fire.
+ *
+ * So the edge that actually PERFORMED this node's command comes first — the same
+ * `performed === true` fact `commandSucceeded` (evaluate.ts) uses to name the
+ * performer among several incoming edges, and for the same reason: it is the only
+ * one that says which rule's source this command actually ran for. Flow order is
+ * the fallback for when no performer is identifiable (a chain being resolved before
+ * anything has run, or a flow written before that field existed), where
+ * `incomingEdges`' documented ordering at least makes the answer deterministic
+ * across passes.
  *
  * `visited` is not defensive tidiness: `tidy()` bounds its own relaxation because
  * the drawer can hold a cycle, and a cycle of command nodes would otherwise
@@ -128,7 +140,16 @@ export function chainSourcePlace(flow: Flow, fromId: string): PlaceNode | undefi
     // notify terminal has no out-port, so neither can stand between a command and
     // the checkout it should run in.
     if (node.kind !== "command") return undefined;
-    for (const e of incomingEdges(flow, id)) {
+    // The performer first, then the rest in flow order — see this function's own
+    // doc comment on why the order is the whole point. Two passes over the same
+    // list rather than a sort, so flow order survives inside each group and a
+    // (hand-edited) node with two performed edges is still deterministic.
+    const incoming = incomingEdges(flow, id);
+    const ordered = [
+      ...incoming.filter((e) => e.performed === true),
+      ...incoming.filter((e) => e.performed !== true),
+    ];
+    for (const e of ordered) {
       const found = walk(e.from);
       if (found) return found;
     }
