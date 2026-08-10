@@ -167,10 +167,12 @@ export interface FlowEdge {
    * Optional, absent on every edge from a build before this field existed and
    * on every non-performing edge going forward — both read the same as "not
    * this edge", which is what keeps an old flow file parsing unchanged.
-   * Dropped by Reset (`flow:resetEdge`, deckView.ts) along with `firedAt` and
-   * `error`, because that handler rebuilds the edge from an explicit allow-
-   * list of its non-host fields rather than deleting keys — a field added
-   * here needs no matching edit there to be cleared. */
+   * Dropped by Reset (`flow:resetEdge`, deckView.ts), which names it in an
+   * explicit list of the stamps it deletes. It used to be cleared for free —
+   * that handler rebuilt the edge from an allow-list of its non-host fields —
+   * but the allow-list also silently dropped `note`, the user's own
+   * configuration, so it is a deny-list now: a HOST-OWNED field added here
+   * needs a matching edit there, or Reset will leave it behind. */
   performed?: true;
   /** Extra, once-off text for the agent this rule starts — appended to the prompt
    * mode's template, or substituted at `{note}` if the template has one. For

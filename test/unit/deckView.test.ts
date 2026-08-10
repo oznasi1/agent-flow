@@ -6399,6 +6399,76 @@ describe("arm, disarm and reset", () => {
     expect(w.edges[1].firedAt).toBe(7);
   });
 
+  it("flow:resetEdge clears `performed` along with the other stamps", async () => {
+    // `performed` names the edge that actually ran among a command node's several
+    // incoming edges (see its own doc comment) and `commandSucceeded` reads it, so
+    // a Reset that left it behind would leave a reset performer still claiming to
+    // be one. It used to be cleared for free by the allow-list rebuild; now that
+    // Reset deletes named stamps instead, this is the pin that it is still named.
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{
+        id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "run",
+        firedAt: 5, firedNote: "ran deploy in aws-ops", performed: true,
+      }],
+    }];
+    const { send } = await openPanel();
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+    const e = (h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0];
+    expect(e.performed).toBeUndefined();
+    expect(e.firedAt).toBeUndefined();
+    expect(e.firedNote).toBeUndefined();
+  });
+
+  it("flow:resetEdge keeps the rule's note, so the command it re-runs is the one that was approved", async () => {
+    // The defect this pins: the handler rebuilt the edge from an allow-list of
+    // `{id, from, to, cond, mode}` and dropped `note`. For a `run` rule the note is
+    // spliced into the command at `{note}` (`command.ts`'s `withNote`), so Reset on
+    // a failed `deploy.sh --env={note}` carrying `note: "staging"` made the next
+    // poll execute `deploy.sh --env=` — a DIFFERENT command from the one that
+    // failed and from the one the modal named — with `commandConfirmedAt` already
+    // stamped, so with no second ask.
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      commandConfirmedAt: 1,
+      nodes: [
+        { id: "a", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "z", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh --env={note}" },
+      ],
+      edges: [{
+        id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "run",
+        note: "staging", error: "\"deploy.sh --env=staging\" exited with code 1.",
+      }],
+    }];
+    const { send } = await openPanel();
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+    const e = (h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0];
+    expect(e.note).toBe("staging");
+    expect(e.error).toBeUndefined();
+  });
+
+  it("flow:resetEdge carries an unknown field through, so a newer build's edge survives a Reset here", async () => {
+    // `coerceFlow`'s own rule: unknown fields ride along untouched so a newer
+    // build's flow survives an older build rewriting it. An allow-list rebuild
+    // broke exactly that for the one edge being Reset.
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{
+        id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, firedAt: 5,
+        // A field a LATER build added, which this one knows nothing about.
+        ...({ retryAfter: 42 } as Record<string, unknown>),
+      }],
+    }];
+    const { send } = await openPanel();
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+    const e = (h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0] as unknown as { retryAfter?: number };
+    expect(e.retryAfter).toBe(42);
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0].firedAt).toBeUndefined();
+  });
+
   it("flow:resetEdge drops the stored action, so the store re-derives it from the target", async () => {
     // The host half of making Reset mean what `latchActionMismatches` promises:
     // "Reset the rule to accept that". Carrying the disagreeing stored action

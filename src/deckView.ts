@@ -2551,10 +2551,28 @@ export class DeckPanel {
         if (!flow) return;
         writeFlow(this.flowIo, this.flowsDir, {
           ...flow,
-          // Rebuilt from its non-host fields rather than deleting three keys, so a
-          // future host-owned field cannot be silently forgotten here.
+          // The stamps are DELETED from a spread of the edge, not rebuilt from an
+          // allow-list of the fields this build happens to know. The allow-list
+          // shape read `{ id, from, to, cond, mode }`, and it silently dropped
+          // `note` — the user's own configuration, exactly like `mode`, and for a
+          // `run` rule the text spliced into the command at `{note}`. Reset on a
+          // failed deploy carrying `note: "staging"` therefore rewrote the rule:
+          // the next poll ran `deploy.sh --env=` — neither the command that
+          // failed nor the one the modal named — under a `commandConfirmedAt`
+          // that was already stamped, so with no second ask.
           //
-          // `action` is deliberately NOT carried over, which makes this the one
+          // `note` alone could have been added to the list, but the shape itself
+          // is the defect: `coerceFlow` (store.ts) documents that unknown fields
+          // must ride along untouched so a newer build's flow survives an older
+          // build rewriting it, and an allow-list here is precisely a rewrite
+          // that discards them for one edge. A deny-list keeps that tolerance.
+          // The cost is the honest inverse of the old comment's claim: a future
+          // HOST-owned stamp must be named below to be cleared. That is the
+          // safer direction to forget in — a stamp left behind keeps a rule
+          // settled and visibly resettable, where a dropped field silently
+          // changes what an armed flow does.
+          //
+          // `action` is deliberately dropped too, which makes this the one
           // place a stored action is dropped. It is what makes Reset mean what
           // `latchActionMismatches` promises it means — "Reset the rule to accept
           // that" — for the shape that needs it most: an edge whose stored action
@@ -2573,11 +2591,18 @@ export class DeckPanel {
           // and `writeFlow` explains why; deriving here is safe because Reset is
           // the user's explicit consent, and the error they are clearing names both
           // readings ("it was saved as X but where it points now means Y"). `mode`
-          // still survives: it is the user's own configuration, not a mirror of
-          // anything, and a seed has nowhere else to keep it.
-          edges: flow.edges.map((e) =>
-            e.id === m.edgeId ? { id: e.id, from: e.from, to: e.to, cond: e.cond, mode: e.mode } : e,
-          ),
+          // and `note` both survive: they are the user's own configuration, not a
+          // mirror of anything, and a seed's mode has nowhere else to live.
+          edges: flow.edges.map((e) => {
+            if (e.id !== m.edgeId) return e;
+            const kept: FlowEdge = { ...e };
+            delete kept.firedAt;
+            delete kept.firedNote;
+            delete kept.performed;
+            delete kept.error;
+            delete kept.action;
+            return kept;
+          }),
         });
         this.postFlows();
         return;
