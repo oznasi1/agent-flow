@@ -1344,7 +1344,7 @@ const firedFlow = (): Flow => ({
 // with no rendering yet (Task 6 wires the banner) — every existing fixture here
 // predates the field and has nothing to hold.
 const flowsMsg = (flows: Flow[], enabled = true): OutboundMessage =>
-  ({ type: "deck:flows", flows, enabled, pendingResume: [], promptModes: [] });
+  ({ type: "deck:flows", commands: [], branchCi: {}, flows, enabled, pendingResume: [], promptModes: [] });
 
 /** The drawer itself, not the header chip that shares its name. */
 const drawer = () => screen.queryByRole("complementary", { name: "Orchestrator" });
@@ -1586,6 +1586,8 @@ describe("the drawer's callbacks", () => {
     render(<DeckApp />);
     host({
       type: "deck:flows",
+      commands: [],
+      branchCi: {},
       flows: [{ ...mkFlow("f1", "Ship the migration"), armed: true }],
       enabled: true,
       pendingResume: [{ flowId: "f1", flowName: "Ship the migration", lines: ["ready"] }],
@@ -1603,6 +1605,8 @@ describe("the drawer's callbacks", () => {
     render(<DeckApp />);
     host({
       type: "deck:flows",
+      commands: [],
+      branchCi: {},
       flows: [{
         ...mkFlow("f1", "Ship the migration"),
         nodes: [

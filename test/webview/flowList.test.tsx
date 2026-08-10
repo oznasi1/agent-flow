@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import * as React from "react";
 import { render, screen, fireEvent, within } from "@testing-library/react";
 import { FlowList } from "../../src/webview/flowList";
+import { ACTION_MISMATCH_PREFIX } from "../../src/engine/orchestrator/model";
 import type { Flow } from "../../src/engine/orchestrator/model";
 
 const flow = (over: Partial<Flow> = {}): Flow => ({
@@ -673,6 +674,94 @@ const placeAndPlannedNoEdge = () =>
     ],
   });
 
+// Debt 7's other half: the same blank-select defect the inspector had, in the
+// open row — and the closed row, which named the KIND but never the branch.
+// The store's migration notice, in the list's own receipt row. Same helper the
+// inspector uses, so the two presentations cannot disagree about what counts as
+// a failure worth painting red.
+describe("a migrated rule's mismatch notice", () => {
+  /** Built from `ACTION_MISMATCH_PREFIX` itself — the constant the migration,
+   * the drawer's copy and these tests are all meant to name once — so this
+   * fixture cannot drift into a string `isMigrationNotice` no longer
+   * recognises and quietly pass for the wrong reason. */
+  const noticed = () =>
+    twoPlaces({
+      action: "notify",
+      error: `${ACTION_MISMATCH_PREFIX}: it was saved as "notify" but where it points now means "seed".`,
+    });
+
+  it("says so without claiming the flow failed", () => {
+    const { container } = render(<FlowList {...props({ flow: noticed() })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    expect(container.querySelector(".fl-receipt .err")).toBeNull();
+    expect(container.querySelector(".fl-receipt")!.textContent).toContain("no longer matches");
+  });
+
+  it("still paints a rule that actually failed red", () => {
+    const { container } = render(
+      <FlowList {...props({ flow: twoPlaces({ error: "Couldn't seed ASM-2: no worktree" }) })} />,
+    );
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    expect(container.querySelector(".fl-receipt .err")!.textContent).toContain("Couldn't seed");
+  });
+});
+
+describe("a condition the picker does not offer", () => {
+  const branchRule = () =>
+    flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "deploy" },
+      ],
+      edges: [{
+        id: "e1", from: "n1", to: "n2",
+        cond: { kind: "branch-ci-passed", repo: "agent-flow", branch: "main" },
+      }],
+    });
+
+  it("names the branch in a closed row, rather than promising a parameter it never shows", () => {
+    render(<FlowList {...props({ flow: branchRule() })} />);
+    expect(screen.getByTestId("flowlist-row-e1").textContent).toContain("CI passed on agent-flow#main");
+  });
+
+  it("renders it in an open row's select instead of leaving the control blank", () => {
+    render(<FlowList {...props({ flow: branchRule() })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const select = screen.getByLabelText("Condition") as HTMLSelectElement;
+    // "shows this rule's condition", not `selectedIndex !== -1`: jsdom resolves
+    // an unmatched `value` to the first option rather than to -1, so a real
+    // browser's blank control shows up here as the WRONG condition — the same
+    // defect, and this is the assertion that catches both.
+    expect(select.value).toBe("branch-ci-passed");
+    expect(select.selectedOptions[0].textContent).toBe("CI passed on agent-flow#main");
+  });
+
+  it("does not offer the command condition on a row out of a place", () => {
+    render(<FlowList {...props({ flow: twoPlaces() })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const values = Array.from(
+      screen.getByLabelText("Condition").querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).not.toContain("command-succeeded");
+  });
+
+  it("offers only the command condition on a row out of a command node", () => {
+    const fromCommand = flow({
+      nodes: [
+        { id: "n1", kind: "command", x: 0, y: 0, join: "any", commandId: "deploy" },
+        { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "deployed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "command-succeeded" } }],
+    });
+    render(<FlowList {...props({ flow: fromCommand })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const values = Array.from(
+      screen.getByLabelText("Condition").querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(["command-succeeded"]);
+  });
+});
+
 describe("adding a rule from the keyboard", () => {
   it("renders nothing when there is no node that could ever be a rule's source", () => {
     render(<FlowList {...props({ flow: flow() })} />);
@@ -686,6 +775,35 @@ describe("adding a rule from the keyboard", () => {
     expect(within(bar).getByLabelText("New rule condition").tagName).toBe("SELECT");
     expect(within(bar).getByLabelText("New rule action").tagName).toBe("SELECT");
     expect(within(bar).getByLabelText("To node").tagName).toBe("SELECT");
+  });
+
+  it("reseeds the draft's condition when the source changes to a command node", () => {
+    // The offered set depends on the SOURCE (see `offeredConds`), so choosing a
+    // command node while `pr-merged` is selected would leave the draft holding a
+    // kind its own picker no longer offers — one click from a rule that can
+    // never be met.
+    const onSave = vi.fn();
+    const withCommand = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "command", x: 320, y: 0, join: "any", commandId: "deploy" },
+        { id: "n3", kind: "notify", x: 320, y: 88, join: "any", message: "deployed" },
+      ],
+    });
+    render(<FlowList {...props({ flow: withCommand, onSave })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    const cond = within(bar).getByLabelText("New rule condition") as HTMLSelectElement;
+    expect(cond.value).toBe("pr-merged");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n2" } });
+    expect(Array.from(cond.querySelectorAll("option")).map((o) => (o as HTMLOptionElement).value))
+      .toEqual(["command-succeeded"]);
+    // Asserted on the rule the bar actually BUILDS, not on the select's rendered
+    // value: jsdom resolves a value matching no option to the FIRST option, so a
+    // draft still holding `pr-merged` would read as "command-succeeded" here
+    // while writing the stale kind to disk.
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n3" } });
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].cond).toEqual({ kind: "command-succeeded" });
   });
 
   it("Add rule is disabled until both a from and a to are chosen", () => {

@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { AgentActivity, CardAgent, DeckColumn, FlowPromptMode, OutboundMessage, PendingResume, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
+import { AgentActivity, BranchCiStatus, CardAgent, DeckColumn, FlowCommand, FlowPromptMode, OutboundMessage, PendingResume, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
 import type { Flow } from "../engine/orchestrator/model";
 import { DeckCard, projectCards } from "./deckCards";
 import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
@@ -434,6 +434,14 @@ export function DeckApp(): JSX.Element {
   const [flows, setFlows] = React.useState<Flow[]>([]);
   const [pendingResume, setPendingResume] = React.useState<PendingResume[]>([]);
   const [promptModes, setPromptModes] = React.useState<FlowPromptMode[]>([]);
+  /** `agentFlow.commands`, carried on the same post as `promptModes` and held
+   * the same way: configuration the drawer builds a command node out of, which
+   * a webview cannot read for itself. */
+  const [commands, setCommands] = React.useState<FlowCommand[]>([]);
+  /** Branch-CI verdicts, keyed `repo#branch`, as the host last fetched them. The
+   * drawer needs them to say what a `branch-ci-passed` rule is waiting on;
+   * nothing else on the board reads a branch. */
+  const [branchCi, setBranchCi] = React.useState<Record<string, BranchCiStatus>>({});
   const [orchEnabled, setOrchEnabled] = React.useState(false);
   const [openFlowId, setOpenFlowId] = React.useState<string | null>(null);
   /** The flow list the last `deck:flows` post carried. The message handler below is
@@ -527,6 +535,8 @@ export function DeckApp(): JSX.Element {
         setOrchEnabled(m.enabled);
         setPendingResume(m.pendingResume);
         setPromptModes(m.promptModes);
+        setCommands(m.commands);
+        setBranchCi(m.branchCi);
       }
     };
     window.addEventListener("message", handler);
@@ -728,6 +738,8 @@ export function DeckApp(): JSX.Element {
           runs={runs}
           pendingResume={pendingResume}
           promptModes={promptModes}
+          commands={commands}
+          branchCi={branchCi}
           onClose={() => setOpenFlowId(null)}
           onCreate={() => send({ type: "flow:create" })}
           onOpen={(id) => setOpenFlowId(id)}

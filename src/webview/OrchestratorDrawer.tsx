@@ -2,25 +2,35 @@ import * as React from "react";
 import { placeActivity } from "../engine/orchestrator/conditions";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, edgeAction, Flow, FlowEdge, FlowNode, isSettled, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
-import { AgentState, FlowPromptMode, PendingResume, RunStatus } from "../types";
+import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
 import { FlowList } from "./flowList";
 import { ORCH_ANIM_MS } from "./orchestratorStyles";
 import {
   ACTION_LABEL,
+  addCommandNode,
+  COMMAND_FREE_TEXT,
+  commandTargetOf,
+  condOffered,
+  condOptionLabel,
   COND_LABEL,
   defaultCondFor,
   DEST_LABEL,
   endLabel,
+  isMigrationNotice,
   launchDestOf,
   modeValueOf,
   nextEdgeId,
   nextNodeId,
   NOTE_ARIA_LABEL,
+  NOTE_COMMAND_HINT,
+  NOTE_COMMAND_PLACEHOLDER,
   NOTE_PLACEHOLDER,
   notifyMessageOf,
   observationOf,
-  OFFERED_CONDS,
+  offeredConds,
   OFFERED_DESTS,
+  withCommandId,
+  withCommandRun,
   withCond,
   withDest,
   withMode,
@@ -211,6 +221,19 @@ export interface OrchestratorDrawerProps {
    * `deck:flows` post (`postFlows` in deckView.ts) rather than being
    * hardcoded here, because the webview has no fs access to read it itself. */
   promptModes: FlowPromptMode[];
+  /** `agentFlow.commands`, from the same `deck:flows` post and for the same
+   * reason as `promptModes`: a command node names one of these, and the webview
+   * cannot read the setting itself. An empty list is the ordinary case — no
+   * built-ins ship — and the free-text option below is what keeps the command
+   * node reachable for a user who has configured none. */
+  commands: FlowCommand[];
+  /** Branch-CI verdicts the host has fetched, keyed `repo#branch` — the same map
+   * `evaluateFlow` is handed. Without it a `branch-ci-passed` rule's own
+   * observation line reads "not checked yet" forever, even while the host knows
+   * the branch is PENDING or FAILED: a rule whose state is invisible. Empty
+   * before the first post, and whenever PR facts are off (the host refuses to
+   * serve a verdict it would not act on itself). */
+  branchCi: Record<string, BranchCiStatus>;
   onClose: () => void;
   onCreate: () => void;
   onOpen: (id: string) => void;
@@ -523,6 +546,40 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   // `addPlanned`.
   const addPlanned = () => send({ type: "flow:addPlanned", id: flow.id });
 
+  /** Add a command node from the picker below. Two shapes, one control: a
+   * configured command (its own id) or free text, which lands as an empty `run`
+   * for the inspector to fill in. Unlike a `planned` node this needs no host
+   * round trip — `agentFlow.commands` is already here as a prop, and free text
+   * is typed, not discovered — so it goes through `onSave` like every other
+   * node this drawer builds. */
+  const addCommand = (value: string) => {
+    if (!value) return;
+    p.onSave(addCommandNode(flow, value === COMMAND_FREE_TEXT ? { run: "" } : { commandId: value }));
+  };
+
+  /** The picker itself, rendered on both the canvas's Graph bar and the list
+   * view's Add bar — one element, two call sites, because a node kind reachable
+   * from only one of the two views is the gap Task 6 closed for a place and
+   * this task must not reopen for a command. Value pinned to `""` so it always
+   * reads "+ Add command…" and choosing the same entry twice fires again. */
+  const addCommandPicker = (
+    <select
+      className="orch-sel"
+      aria-label="Add a command"
+      value=""
+      onChange={(ev) => addCommand(ev.currentTarget.value)}
+    >
+      <option value="">+ Add command…</option>
+      {p.commands.map((c) => (
+        <option key={c.id} value={c.id}>{c.label}</option>
+      ))}
+      {/* Last, and always present: `agentFlow.commands` ships no built-ins, so
+          for most users this is the only entry — and the user explicitly chose
+          free-text commands over a config-only list. */}
+      <option value={COMMAND_FREE_TEXT}>Free-text command…</option>
+    </select>
+  );
+
   const onTidy = () => p.onSave({ ...flow, nodes: tidy(flow) });
 
   const edge = flow.edges.find((e) => e.id === selEdge) ?? null;
@@ -555,6 +612,23 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * mode that will run while the flow is actually about to error. See the extra
    * `<option>` this gates, below. */
   const modeExists = modeValue !== "" && p.promptModes.some((m) => m.id === modeValue);
+  /** The selected rule's target command node, when it has one. */
+  const commandNode = edge ? commandTargetOf(flow, edge) : undefined;
+  /** The Command select's value: a configured id, the free-text sentinel when
+   * the node is in the free-text shape, or `""` for a node carrying neither
+   * (only a hand-edited file — the picker always sets one). `commandId` wins
+   * when a file somehow carries both, matching `commandLabel`; `resolveCommand`
+   * is what refuses that shape at fire time rather than picking a side. */
+  const commandValue =
+    commandNode?.commandId ?? (commandNode?.run !== undefined ? COMMAND_FREE_TEXT : "");
+  /** Is `commandValue` something the select already has an option for? Free text
+   * always is (its option is unconditional), and so is a configured id that is
+   * still in the setting. */
+  const commandIdExists =
+    commandValue === COMMAND_FREE_TEXT || p.commands.some((c) => c.id === commandValue);
+  /** The free-text field's value, and — by being `undefined` for a configured
+   * command — whether that field renders at all. */
+  const commandRun = commandNode?.commandId === undefined ? commandNode?.run : undefined;
 
   const setCond = (e: FlowEdge, kind: Condition["kind"]) => {
     const next = withCond(flow, e.id, kind);
@@ -572,6 +646,14 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const setNotifyMessage = (e: FlowEdge, message: string) => p.onSave(withNotifyMessage(flow, e, message));
 
   const setNote = (e: FlowEdge, note: string) => p.onSave(withNote(flow, e, note));
+
+  /** One handler for the Command select's two kinds of choice: the free-text
+   * sentinel puts the node into the free-text shape with nothing typed yet
+   * (`run: ""`, which `resolveCommand` refuses to execute), anything else names
+   * a configured command. Each writer clears the other's field, so the node can
+   * never reach the "carries both" shape `resolveCommand` refuses. */
+  const setCommand = (e: FlowEdge, value: string) =>
+    p.onSave(value === COMMAND_FREE_TEXT ? withCommandRun(flow, e, "") : withCommandId(flow, e, value));
 
   const deleteEdge = (e: FlowEdge) => {
     setSelEdge(null);
@@ -803,6 +885,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               <div className="sp" />
               <button type="button" className="orch-mini" onClick={addNotify}>+ Notify</button>
               <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
+              {addCommandPicker}
               <select
                 className="orch-sel"
                 aria-label="Add a place"
@@ -880,6 +963,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           <button type="button" className="orch-mini" onClick={onTidy}>Tidy</button>
           <button type="button" className="orch-mini" onClick={addNotify}>+ Notify</button>
           <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
+          {addCommandPicker}
         </div>
         <div
           ref={graphRef}
@@ -1026,7 +1110,27 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 value={edge.cond.kind}
                 onChange={(ev) => setCond(edge, ev.currentTarget.value as Condition["kind"])}
               >
-                {OFFERED_CONDS.map((k) => (
+                {/* An option for whatever this rule's condition actually IS,
+                    when the picker does not offer that kind — a parameterised
+                    one, or `command-succeeded` on a rule out of a place. The
+                    same defect the Mode select's own extra option exists for,
+                    but one step worse: a `<select>` whose `value` matches no
+                    option has `selectedIndex` -1 and renders BLANK, which is
+                    how a hand-authored `branch-ci-passed` rule showed an empty
+                    Condition control — the one condition built to gate a
+                    deploy, displayed as nothing at all. `condOptionLabel` is
+                    what names the repo and branch a `Record` keyed by kind
+                    cannot. Selectable, not disabled: switching away to a bare
+                    kind (and losing the parameters with it) is a real edit a
+                    user is allowed to make. */}
+                {!condOffered(flow, edge) && (
+                  <option value={edge.cond.kind}>{condOptionLabel(edge.cond)}</option>
+                )}
+                {/* Offered per SOURCE, not the whole list: `evaluate.ts` answers
+                    `command-succeeded` from the flow and every other kind from
+                    the source place's `RunStatus`, so each set is inert on the
+                    other's source — see `offeredConds`. */}
+                {offeredConds(flow, edge.from).map((k) => (
                   <option key={k} value={k}>{COND_LABEL[k]}</option>
                 ))}
               </select>
@@ -1051,9 +1155,12 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 <>
                   <span style={{ fontSize: "var(--t-body)" }}>{ACTION_LABEL[derived]}</span>
                   {/* The target's name — an identifier, so mono — is part of the
-                      sentence for every acting verb ("THEN launch ASM-12"), but
-                      notify already reads complete on its own. */}
-                  {derived !== "notify" && (
+                      sentence for launch and seed ("THEN launch ASM-12"). Notify
+                      already reads complete on its own, and a `run`'s target is
+                      named by the USING picker right below, which is a control
+                      rather than a label: printing it here too would give one
+                      rule's own name twice in three lines. */}
+                  {derived !== "notify" && derived !== "run" && (
                     <span className="k" style={{ fontFamily: "var(--mono)" }}>{endLabel(flow, edge.to)}</span>
                   )}
                 </>
@@ -1069,6 +1176,81 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   onBlur={(ev) => setNotifyMessage(edge, ev.currentTarget.value)}
                 />
               </div>
+            ) : derived === "run" ? (
+              <>
+                <div className="orch-clause">
+                  <span className="orch-kw">USING</span>
+                  <select
+                    className="orch-sel"
+                    aria-label="Command"
+                    value={commandValue}
+                    onChange={(ev) => setCommand(edge, ev.currentTarget.value)}
+                  >
+                    {/* Same reasoning as the Mode select's own extra option
+                        below: a `<select>` whose value matches none of its
+                        options silently shows the FIRST one instead, so a node
+                        naming a command that is not (or no longer) in
+                        `agentFlow.commands` would read as "Deploy to staging"
+                        while `resolveCommand` refuses it outright. And a node
+                        with neither field — a hand-edited file, since the
+                        picker never builds one — must say so rather than look
+                        like the first configured command. */}
+                    {!commandIdExists && (
+                      <option value={commandValue}>
+                        {commandValue === "" ? "(no command set)" : `${commandValue} (not configured)`}
+                      </option>
+                    )}
+                    {p.commands.map((c) => (
+                      <option key={c.id} value={c.id}>{c.label}</option>
+                    ))}
+                    <option value={COMMAND_FREE_TEXT}>Free-text command…</option>
+                  </select>
+                </div>
+                {/* Free text gets its own row and its own field. Shown whenever
+                    the node is IN the free-text shape (`run` present, even
+                    blank) — which is exactly what the picker's own option
+                    creates — so a user who chooses it has somewhere to type,
+                    and a node already carrying free text shows it in full
+                    rather than eliding it the way the sentence does. */}
+                {commandRun !== undefined && (
+                  <div className="orch-clause">
+                    <span className="orch-kw" />
+                    <input
+                      className="orch-msg"
+                      aria-label="Command to run"
+                      key={edge.id}
+                      defaultValue={commandRun}
+                      placeholder="deploy.sh --env=staging"
+                      onBlur={(ev) => p.onSave(withCommandRun(flow, edge, ev.currentTarget.value))}
+                    />
+                  </div>
+                )}
+                {/* A command's note is read by `resolveCommand`, exactly like a
+                    launch's is read by `composeAgentPrompt` — so the field
+                    belongs here too, with its own placeholder (a command rule
+                    has no mode for `NOTE_PLACEHOLDER` to contrast itself
+                    with). */}
+                <div className="orch-clause">
+                  <span className="orch-kw" />
+                  <input
+                    className="orch-msg"
+                    aria-label={NOTE_ARIA_LABEL}
+                    key={edge.id}
+                    defaultValue={edge.note ?? ""}
+                    placeholder={NOTE_COMMAND_PLACEHOLDER}
+                    onBlur={(ev) => setNote(edge, ev.currentTarget.value)}
+                  />
+                </div>
+                {/* The one place a person typing a note actually reads what
+                    happens to it: `command.ts` splices it in unquoted, so a note
+                    can extend the command. Dim, not red and not a warning icon —
+                    nothing has failed, this is how a feature the user chose
+                    works. */}
+                <div className="orch-clause">
+                  <span className="orch-kw" />
+                  <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>{NOTE_COMMAND_HINT}</span>
+                </div>
+              </>
             ) : derived === "launch" || derived === "seed" ? (
               <>
                 <div className="orch-clause">
@@ -1147,7 +1329,12 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               {isSettled(edge) ? (
                 <>
                   {edge.error !== undefined ? (
-                    <span className="err">{edge.error}</span>
+                    // Red for a rule that TRIED AND FAILED — and only that.
+                    // The store's migration notice is settled the same way and
+                    // gets the same Reset, but nothing ran and nothing broke, so
+                    // it reads in the row's own dim voice instead of claiming a
+                    // failure. See `isMigrationNotice`.
+                    <span className={isMigrationNotice(edge.error) ? undefined : "err"}>{edge.error}</span>
                   ) : (
                     <span className="fired">{edge.firedNote ?? "fired"}</span>
                   )}
@@ -1155,7 +1342,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   <button type="button" className="orch-mini" onClick={() => p.onResetEdge(flow.id, edge.id)}>Reset</button>
                 </>
               ) : (
-                <span>{observationOf(flow, edge, p.runs) ?? "this card is not on the board right now"}</span>
+                <span>{observationOf(flow, edge, p.runs, p.branchCi) ?? "this card is not on the board right now"}</span>
               )}
             </div>
           </div>

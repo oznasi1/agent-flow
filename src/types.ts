@@ -3,6 +3,13 @@
 // value import would be a runtime cycle. `import type` is erased at build time.
 import type { SerializedCaps, TaskConnector } from "./tasks/provider";
 import type { Flow } from "./engine/orchestrator/model";
+// A verdict enum, not a value module — `deck:flows` carries a map of these so the
+// drawer can say what a branch-CI rule is waiting on. Re-exported because the
+// webview reads it from here: `src/webview/*` may import `branchCi.ts` safely
+// today, but every other Deck type it needs already comes from this module and
+// one door is easier to keep webview-safe than two.
+import type { BranchCiStatus } from "./engine/orchestrator/branchCi";
+export type { BranchCiStatus };
 
 export type Filter = "unassigned" | "mine" | "mysprint" | "sprint" | "backlog" | "all";
 export type Size = "any" | "s" | "m" | "l"; // by original time estimate
@@ -572,7 +579,24 @@ export type OutboundMessage =
   // `promptModes` is the six configured prompt modes, narrowed to what the
   // inspector's USING selector needs — sent unconditionally, even with the
   // setting off, since it is configuration rather than flow data.
-  | { type: "deck:flows"; flows: Flow[]; enabled: boolean; pendingResume: PendingResume[]; promptModes: FlowPromptMode[] }
+  // `commands` is `agentFlow.commands` verbatim, and rides along for the same
+  // reason: the drawer builds a command node by naming one of these, and the
+  // webview has no fs access to read the setting itself. NOT narrowed the way
+  // `promptModes` is — a prompt's template is long and the inspector never
+  // shows it, whereas a command's `run` is short and IS what the rule executes,
+  // so a future "what would run" line has it without a second round trip.
+  // `branchCi` is the branch-CI verdict map this panel has fetched, keyed
+  // `repo#branch` by `branchCiKey` — the SAME map `evaluateFlow` is handed, so
+  // the drawer's "what is this rule waiting on" line and the engine's own
+  // answer cannot disagree. It rides `deck:flows` rather than `deck:runs`
+  // because it is flow data (its keys come from the rules themselves) and
+  // because `postFlows` runs AFTER the pass that reads the verdicts, whereas
+  // the `deck:runs` post happens before it.
+  | {
+      type: "deck:flows"; flows: Flow[]; enabled: boolean; pendingResume: PendingResume[];
+      promptModes: FlowPromptMode[]; commands: FlowCommand[];
+      branchCi: Record<string, BranchCiStatus>;
+    }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
   | { type: "mkt:loading"; loading: boolean }

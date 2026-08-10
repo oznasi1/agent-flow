@@ -272,11 +272,14 @@ export function describeCond(cond: Condition, c: CondContext): string {
       //
       // "not checked yet" and "unreadable" are deliberately different words for the
       // two `"unknown"`s. Both are equally not-met (see `evalCond`), but they send a
-      // user to different places: an absent key means nothing fetched it — which is
-      // what the WEBVIEW always sees, since `observationOf` builds a context out of
-      // a `RunStatus` and the verdicts never cross the wire — while an explicit
+      // user to different places: an absent key means nothing fetched it — a rule on
+      // a disarmed flow, or one whose repo is not on the board, since
+      // `branchCiWanted` only asks for armed flows' branches — while an explicit
       // `"unknown"` means a call was made and could not be read, and that one is
-      // worth looking in the log for.
+      // worth looking in the log for. The webview can now tell them apart too: the
+      // verdict map crosses the wire on `deck:flows` and `observationOf` puts it in
+      // this context, where it used to build one without it and read every branch
+      // rule as "not checked yet" forever.
       const v = branchCi(c, cond.repo, cond.branch);
       if (v === "passed") return `${cond.branch} passed`;
       if (v === "failed") return `${cond.branch} failed`;

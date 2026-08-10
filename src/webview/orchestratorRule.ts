@@ -15,6 +15,7 @@
 // know how the other renders a control.
 import { describeCond } from "../engine/orchestrator/conditions";
 import {
+  ACTION_MISMATCH_PREFIX,
   CommandNode,
   CondKind,
   Condition,
@@ -26,7 +27,7 @@ import {
   PlannedNode,
 } from "../engine/orchestrator/model";
 import { hasNote } from "../engine/prompt";
-import { FlowPromptMode, RunStatus } from "../types";
+import { BranchCiStatus, FlowPromptMode, RunStatus } from "../types";
 
 /** The drawer's own wording for a condition. `describeCond` says what a place
  * currently looks like; this says what the rule is. Both are needed and they
@@ -88,22 +89,70 @@ export function isBareCond(kind: Condition["kind"]): kind is CondKind {
  * minutes, on the empty string, or on `undefined#undefined`, none of which
  * ever matches. They stay in `COND_LABEL` because a flow hand-edited on disk
  * can still hold one and its rule must still render, in both presentations.
- * `command-succeeded` carries no parameter, so unlike those three it is NOT
- * filtered out below — the drawer can offer it on any rule regardless of
- * what that rule's source node is. Offering it that broadly is safe, not
- * merely tolerated: `evaluate.ts`'s `commandSucceeded` refuses to answer
- * `true` unless the rule's source really is a command node, so a rule wired
- * off anything else is inert forever (never fires) rather than wrongly true.
- * Restricting the PICKER to command-node sources so such a rule is never
- * offered in the first place is Tasks 9/10's, not this one's.
- *
  * `branch-ci-passed` is the one filtered kind whose absence a user can FEEL —
  * it is the condition that makes "wait for the build to pass on master, then
  * deploy to staging" expressible, and until a picker can ask for a repo and a
  * branch, the only way to write one is by hand in the flow file. An unusable
  * picker entry would be worse than none: it would silently produce a rule
- * that can never fire, on the one condition built to gate a deploy. */
+ * that can never fire, on the one condition built to gate a deploy. A rule
+ * hand-authored with one still RENDERS in either presentation's open picker —
+ * see `condOffered`/`condOptionLabel` below, which exist so a `<select>` whose
+ * value is not in this list does not come up blank.
+ *
+ * Not offered per SOURCE — that is `offeredConds` below, which every picker
+ * should call instead. This list stays exported because it is the whole set,
+ * and one of the two filters needs it. */
 export const OFFERED_CONDS: CondKind[] = (Object.keys(COND_LABEL) as Condition["kind"][]).filter(isBareCond);
+
+/** What a condition picker offers for a rule leaving `fromId` — the same list
+ * as `OFFERED_CONDS`, split by the one thing that makes a condition answerable
+ * at all: what kind of node is watching.
+ *
+ * `evaluate.ts`'s `isMet` has exactly two answers. `command-succeeded` it reads
+ * off the FLOW (the receipt on the command node's own incoming edge), and every
+ * other kind it reads off the source's `RunStatus` — returning `undefined`
+ * forever for a source that is not a place. So the two sets are disjoint, not
+ * nested: on a rule out of a command node every place-shaped condition is inert,
+ * and on a rule out of anything else `command-succeeded` is. Task 7 shipped
+ * `command-succeeded` offered on every rule regardless of source, which the
+ * engine's guard makes safe (never wrongly true) but which still put a choice
+ * that provably cannot work in front of the user.
+ *
+ * A PLANNED source keeps the place-shaped list even though `isMet` cannot
+ * answer for it either — that gap is older than this phase and narrowing the
+ * picker for it would silently remove the only conditions such a rule has ever
+ * offered. Named here so it is a known omission rather than an oversight. */
+export function offeredConds(flow: Flow, fromId: string): CondKind[] {
+  const fromCommand = flow.nodes.find((n) => n.id === fromId)?.kind === "command";
+  // One predicate, both directions: keep `command-succeeded` exactly when the
+  // source IS a command node, and every other kind exactly when it is not.
+  return OFFERED_CONDS.filter((k) => (k === "command-succeeded") === fromCommand);
+}
+
+/** Is this rule's own condition one the picker for it offers? When it is not —
+ * a parameterised kind, or `command-succeeded` on a rule out of a place — an
+ * open `<select>` whose `value` matches none of its `<option>`s renders BLANK
+ * (`selectedIndex` is -1), which is how a hand-authored `branch-ci-passed`
+ * rule showed an empty Condition control in the inspector and the open row: the
+ * one condition built to gate a deploy, displayed as nothing at all. Callers
+ * pair this with `condOptionLabel` to add the missing option. */
+export function condOffered(flow: Flow, e: FlowEdge): boolean {
+  return isBareCond(e.cond.kind) && offeredConds(flow, e.from).includes(e.cond.kind);
+}
+
+/** A condition as one `<option>`'s text — including the parameters `COND_LABEL`
+ * cannot show, because it is keyed by kind alone and a kind does not know which
+ * branch or which status a given rule is about. Its trailing "…" is this
+ * codebase's own mark for "carries a parameter"; this function is what fills
+ * that ellipsis in for a rule that actually has one. */
+export function condOptionLabel(cond: Condition): string {
+  switch (cond.kind) {
+    case "agent-idle-over": return `agent idle over ${cond.minutes}m`;
+    case "ticket-status-is": return `ticket status is ${cond.status}`;
+    case "branch-ci-passed": return `CI passed on ${cond.repo}#${cond.branch}`;
+    default: return COND_LABEL[cond.kind];
+  }
+}
 
 /** The condition a BRAND NEW rule out of `fromId` starts on. Keyed off the
  * source node's kind for the same reason `offeredConds` is: `evaluate.ts`'s
@@ -184,6 +233,28 @@ export const NOTE_ARIA_LABEL = "Note";
  * 560px width, in the LIST's own row (the binding constraint — the
  * inspector's row has room to spare), to confirm it renders in full. */
 export const NOTE_PLACEHOLDER = "Specific to this rule — the mode is reusable";
+
+/** The note placeholder for a rule that runs a COMMAND. `NOTE_PLACEHOLDER`
+ * above spends its whole width contrasting "note" with "mode", and a command
+ * rule has no mode at all — the sentence would be explaining a control that
+ * isn't on screen. What a user needs to know here instead is that the note is
+ * not appended: `withNote` (command.ts) substitutes it at `{note}` and a
+ * template without one drops it entirely, which is the opposite of how
+ * `composeAgentPrompt` treats a launch's note. */
+export const NOTE_COMMAND_PLACEHOLDER = "Substituted at {note} in the command";
+
+/** Said where the note is TYPED, because this is the field that makes it true.
+ * `command.ts`'s `withNote` splices a note into the command string unquoted and
+ * untouched, so `deploy.sh --env={note}` with a note of `prod; rm -rf ~`
+ * produces a shell line carrying both commands. That is inherent to letting a
+ * user type a free-text command at all — the user chose that over a config-only
+ * list, and neutralising it would mean rewriting or rejecting their own shell
+ * syntax — but until now it was said only in `command.ts`'s source and in the
+ * `agentFlow.commands` setting description, i.e. everywhere except the one
+ * place a person actually types the thing. Deliberately not red and not a
+ * warning icon: nothing has failed, and this is how the feature works. */
+export const NOTE_COMMAND_HINT =
+  "Spliced into the command unquoted, exactly as typed — a note can extend what runs.";
 
 /** How many characters of a note a CLOSED row shows before an ellipsis takes
  * over. A closed row is for scanning a flow's rules at a glance — see this
@@ -331,7 +402,19 @@ export function modeDisplayLabel(promptModes: FlowPromptMode[], modeValue: strin
 /** What the rule's source place looks like right now, in `describeCond`'s
  * words. `null` when the node's run is not on the board — a claim neither
  * presentation can make. */
-export function observationOf(flow: Flow, e: FlowEdge, runs: RunStatus[]): string | null {
+export function observationOf(
+  flow: Flow,
+  e: FlowEdge,
+  runs: RunStatus[],
+  /** The host's branch-CI verdicts, keyed `repo#branch`. Optional so a caller
+   * with no access to them (a presentation that shows no observation line)
+   * needs no second prop — but an absent map is exactly what made every
+   * `branch-ci-passed` rule read "not checked yet" forever, so the drawer
+   * passes the real one. `describeCond` tells the two apart deliberately: an
+   * ABSENT key means nothing fetched it, an explicit `"unknown"` means a call
+   * was made and could not be read. */
+  branchCi?: Record<string, BranchCiStatus>,
+): string | null {
   // Refused before the source-kind check below, not caught by it: this kind
   // has no place-shaped observation to make regardless of what `e.from`
   // turns out to be, and nothing today stops a `command-succeeded` rule from
@@ -346,7 +429,7 @@ export function observationOf(flow: Flow, e: FlowEdge, runs: RunStatus[]): strin
   if (!from || from.kind !== "place") return null;
   const status = runs.find((r) => r.run.key === from.runKey);
   if (!status) return null;
-  return describeCond(e.cond, { status, repo: from.repo, nowMs: Date.now() });
+  return describeCond(e.cond, { status, repo: from.repo, nowMs: Date.now(), branchCi });
 }
 
 /** Set a rule's condition. Only bare kinds are ever reachable from either
@@ -450,11 +533,94 @@ export function withNote(flow: Flow, edge: FlowEdge, note: string): Flow {
   return { ...flow, edges: flow.edges.map((x) => (x.id === edge.id ? { ...x, note } : x)) };
 }
 
+/** The picker value that means "I will type the command myself", as opposed to
+ * naming one of `agentFlow.commands`. A NUL inside it is what makes it
+ * unmistakable: a configured id comes from a settings file and cannot contain
+ * one, so this sentinel can never collide with a real command's id — the same
+ * trick `DRAG_SEP` uses for the Deck's drag payload. */
+export const COMMAND_FREE_TEXT = "\u0000free-text";
+
+/** Add a command node. `seed` is exactly what the picker chose: a configured
+ * command's id, or the free-text shape — an EMPTY `run`, which is the node
+ * saying "free text, not yet typed". Never both fields: `resolveCommand`
+ * (command.ts) refuses a node carrying a usable `commandId` AND a usable `run`
+ * rather than guess which one executes, so the two writers below each clear
+ * the other's field and this builder only ever sets one.
+ *
+ * Placed in the right-hand column like a notify terminal — a command is
+ * something a rule points AT, never a source of observations — and stepped
+ * down by the node count so two added in a row don't land exactly on top of
+ * each other. `tidy()` is still the thing that lays a graph out properly. */
+export function addCommandNode(flow: Flow, seed: { commandId: string } | { run: string }): Flow {
+  return {
+    ...flow,
+    nodes: [
+      ...flow.nodes,
+      { id: nextNodeId(flow), kind: "command", x: 320, y: 24 + flow.nodes.length * 88, join: "any", ...seed },
+    ],
+  };
+}
+
+/** Name a configured command on this rule's target node, clearing any free text
+ * that was there — see `addCommandNode` on why both can never be set at once.
+ * Written on the NODE, not the edge, for the same reason a launch's mode and
+ * destination are: the command is the node's own configuration, and
+ * `performEdge` resolves it from there. */
+export function withCommandId(flow: Flow, edge: FlowEdge, commandId: string): Flow {
+  return {
+    ...flow,
+    nodes: flow.nodes.map((n) =>
+      n.id === edge.to && n.kind === "command" ? { ...n, commandId, run: undefined } : n,
+    ),
+  };
+}
+
+/** Put free text on this rule's target command node, clearing any configured id.
+ * A BLANK string is a legitimate value here — it is what "free text, nothing
+ * typed yet" looks like, and `resolveCommand` refuses to run it (see its
+ * "run is blank" arm) rather than execute an empty shell line. */
+export function withCommandRun(flow: Flow, edge: FlowEdge, run: string): Flow {
+  return {
+    ...flow,
+    nodes: flow.nodes.map((n) =>
+      n.id === edge.to && n.kind === "command" ? { ...n, run, commandId: undefined } : n,
+    ),
+  };
+}
+
+/** The target command node of this rule, or `undefined` when it points at
+ * anything else — the `run` counterpart of `plannedTargetOf`. */
+export function commandTargetOf(flow: Flow, e: FlowEdge): CommandNode | undefined {
+  const n = flow.nodes.find((x) => x.id === e.to);
+  return n && n.kind === "command" ? n : undefined;
+}
+
 export function withNotifyMessage(flow: Flow, edge: FlowEdge, message: string): Flow {
   return {
     ...flow,
     nodes: flow.nodes.map((n) => (n.id === edge.to && n.kind === "notify" ? { ...n, message } : n)),
   };
+}
+
+/** Is this edge's `error` the store's own MIGRATION notice, rather than a report
+ * of something that tried and failed? `latchActionMismatches` (store.ts) stamps
+ * an edge whose stored action disagrees with the action its target now implies,
+ * to stop an armed flow silently reinterpreting a `notify` rule as a paid
+ * `seed`. Nothing ran, nothing broke, and no money was spent — the rule is
+ * waiting for the user to accept a new reading, which is what Reset does.
+ *
+ * It matters because of a house rule this codebase keeps deliberately narrow:
+ * `--c-danger` is spent on a real failure and nothing else (see
+ * `orchestratorStyles.ts`'s own comments on `.orch-obs .err` and
+ * `.orch-edge.bad`). A migration notice painted red claims the flow broke, when
+ * what happened is that this build reads an old file more carefully than the one
+ * that wrote it. Both presentations still SETTLE such an edge and still offer
+ * Reset — the only thing that changes is the colour of the sentence.
+ *
+ * Matched on `ACTION_MISMATCH_PREFIX` (model.ts), which exists so the migration,
+ * the drawer's copy and the tests all name it once rather than three times. */
+export function isMigrationNotice(error: string | undefined): boolean {
+  return error !== undefined && error.startsWith(ACTION_MISMATCH_PREFIX);
 }
 
 /** Remove a rule. Callers own clearing whatever selection/open state pointed

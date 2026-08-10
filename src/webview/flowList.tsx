@@ -20,9 +20,13 @@ import { FlowPromptMode, RunStatus } from "../types";
 import {
   ACTION_LABEL,
   actionMismatch,
+  condOffered,
+  condOptionLabel,
   COND_LABEL,
+  defaultCondFor,
   DEST_LABEL,
   endLabel,
+  isMigrationNotice,
   launchDestOf,
   modeDisplayLabel,
   modeValueOf,
@@ -30,7 +34,7 @@ import {
   NOTE_ARIA_LABEL,
   NOTE_PLACEHOLDER,
   notifyMessageOf,
-  OFFERED_CONDS,
+  offeredConds,
   OFFERED_DESTS,
   truncatedNote,
   withAction,
@@ -106,12 +110,28 @@ function ruleSentence(
           value={e.cond.kind}
           onChange={(ev) => setCond(ev.currentTarget.value as Condition["kind"])}
         >
-          {OFFERED_CONDS.map((k) => (
+          {/* An option for this rule's own condition when the picker does not
+              offer that kind. Without it `selectedIndex` is -1 and the control
+              renders BLANK — which is how a hand-authored `branch-ci-passed`
+              rule showed an empty Condition select in an open row while the
+              CLOSED row read it correctly. `condOptionLabel` names the repo and
+              branch that `COND_LABEL`, keyed by kind alone, cannot. */}
+          {!condOffered(flow, e) && (
+            <option value={e.cond.kind}>{condOptionLabel(e.cond)}</option>
+          )}
+          {/* Per SOURCE: `command-succeeded` can only ever be answered for a
+              rule out of a command node, and every place-shaped condition only
+              for one out of a place — see `offeredConds`. */}
+          {offeredConds(flow, e.from).map((k) => (
             <option key={k} value={k}>{COND_LABEL[k]}</option>
           ))}
         </select>
       ) : (
-        <span>{COND_LABEL[e.cond.kind]}</span>
+        // `condOptionLabel`, not `COND_LABEL`: a closed row was already honest
+        // about the KIND, but said "branch CI passed…" without ever saying
+        // which branch — and the ellipsis promised a parameter it then never
+        // showed. Same string the open row's own option spends.
+        <span>{condOptionLabel(e.cond)}</span>
       )}
 
       <span className="orch-kw">THEN</span>
@@ -388,7 +408,17 @@ function NewRuleBar(p: {
         className="orch-sel"
         aria-label="From node"
         value={from}
-        onChange={(ev) => { setFrom(ev.currentTarget.value); setTo(""); }}
+        onChange={(ev) => {
+          const val = ev.currentTarget.value;
+          setFrom(val);
+          setTo("");
+          // The offered conditions depend on the SOURCE (see `offeredConds`), so
+          // the draft's own condition has to be reseeded with it: leaving
+          // `pr-merged` selected after choosing a command node would leave this
+          // select's value out of its own option list — blank, and one click
+          // from building a rule that can never be met.
+          setCond(defaultCondFor(flow, val).kind as CondKind);
+        }}
       >
         <option value="">choose a node…</option>
         {sources.map((n) => <option key={n.id} value={n.id}>{endLabel(flow, n.id)}</option>)}
@@ -401,7 +431,7 @@ function NewRuleBar(p: {
           setCond(ev.currentTarget.value as CondKind)
         }
       >
-        {OFFERED_CONDS.map((k) => <option key={k} value={k}>{COND_LABEL[k]}</option>)}
+        {offeredConds(flow, from).map((k) => <option key={k} value={k}>{COND_LABEL[k]}</option>)}
       </select>
       <span className="orch-kw">THEN</span>
       <select
@@ -648,7 +678,11 @@ export function FlowList(p: FlowListProps): JSX.Element {
                     carries both — same tie-break as the inspector's, for the
                     same reason: a failure is the more important claim. */}
                 {e.error !== undefined ? (
-                  <span className="err">{e.error}</span>
+                  // Same two licences the inspector's `.orch-obs` spends, and the
+                  // same exception: red is for a rule that tried and failed, and
+                  // the store's migration notice is not one — see
+                  // `isMigrationNotice`.
+                  <span className={isMigrationNotice(e.error) ? undefined : "err"}>{e.error}</span>
                 ) : (
                   <span className="fired">{e.firedNote ?? "fired"}</span>
                 )}

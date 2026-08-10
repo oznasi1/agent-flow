@@ -9,6 +9,9 @@ import type { Flow } from "../../src/engine/orchestrator/model";
 // the migration itself rather than by this file restating its rule. Its io is
 // injected (see `FlowIo`), so importing it here costs no temp directory.
 import { readFlows, writeFlow } from "../../src/engine/orchestrator/store";
+import { edgeAction } from "../../src/engine/orchestrator/model";
+import { branchCiKey } from "../../src/engine/orchestrator/branchCi";
+import { COMMAND_FREE_TEXT } from "../../src/webview/orchestratorRule";
 import { anchor, edgePath, GRID, labelPoint, NODE_H, NODE_W } from "../../src/engine/orchestrator/layout";
 import type { PrEntryMap, RunStatus } from "../../src/types";
 
@@ -76,8 +79,16 @@ const MODES = [
   { id: "careful", label: "Careful review" },
 ];
 
+/** Two configured commands, distinct ids and labels, so a test asserting "the
+ * picker offers what the host sent" cannot pass against a coincidence with some
+ * hardcoded default — the same reasoning `MODES` above is built on. */
+const COMMANDS = [
+  { id: "deploy-staging", label: "Deploy to staging", run: "deploy.sh --env=staging" },
+  { id: "smoke", label: "Smoke test", run: "npm run smoke -- {note}" },
+];
+
 const props = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => ({
-  flows: [flow()], openId: "f1", runs: [], pendingResume: [], promptModes: MODES,
+  flows: [flow()], openId: "f1", runs: [], pendingResume: [], promptModes: MODES, commands: COMMANDS, branchCi: {},
   onClose: vi.fn(), onCreate: vi.fn(), onOpen: vi.fn(),
   onRename: vi.fn(), onSave: vi.fn(), onDelete: vi.fn(),
   onArm: vi.fn(), onResumeApprove: vi.fn(), onResumeDisarm: vi.fn(), onResetEdge: vi.fn(),
@@ -1080,6 +1091,83 @@ describe("the inspector", () => {
     expect(values).toContain("pr-merged");
   });
 
+  // Task 7 shipped `command-succeeded` offered on every rule regardless of its
+  // source. `evaluate.ts`'s guard makes that safe — such a rule is inert, never
+  // wrongly true — so this is a UX defect rather than a money one: the picker
+  // offered a choice that provably cannot work.
+  it("does not offer the command condition on a rule out of a place", () => {
+    open();
+    const values = Array.from(
+      screen.getByLabelText("Condition").querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).not.toContain("command-succeeded");
+    expect(values).toContain("pr-merged");
+  });
+
+  it("offers only the command condition on a rule out of a command node", () => {
+    // The mirror, and the reason the filter is a split rather than a subtraction:
+    // `isMet` reads every place-shaped condition off the source's `RunStatus`,
+    // which a command node has none of, so all of them are inert here.
+    const fromCommand = flow({
+      nodes: [
+        { id: "n1", kind: "command", x: 24, y: 24, join: "any", commandId: "deploy-staging" },
+        { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "deployed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "command-succeeded" } }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [fromCommand] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const values = Array.from(
+      screen.getByLabelText("Condition").querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(["command-succeeded"]);
+  });
+
+  // A `<select>` whose `value` matches none of its options has `selectedIndex`
+  // -1 and renders BLANK — not "the first option", which is what the same
+  // mistake does to the Mode select. `branch-ci-passed` is not offered (no
+  // input for a repo and a branch yet), so a hand-authored rule using it showed
+  // an EMPTY Condition control: the one condition built to gate a deploy,
+  // displayed as nothing at all.
+  it("renders a hand-authored branch-CI condition instead of a blank select", () => {
+    const branchRule = flow({
+      nodes: wired().nodes,
+      edges: [{
+        id: "e1", from: "n1", to: "n2",
+        cond: { kind: "branch-ci-passed", repo: "agent-flow", branch: "main" },
+      }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [branchRule] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const select = screen.getByLabelText("Condition") as HTMLSelectElement;
+    // Asserted as "the control shows THIS rule's condition", not as
+    // `selectedIndex !== -1`: jsdom resolves an unmatched `value` to the first
+    // option instead of -1, so the -1 a real browser reports is not observable
+    // here — but the wrong condition being displayed is, and it is the same
+    // defect either way (a blank select in Chrome, "PR is merged" under jsdom,
+    // and in neither case the branch rule the user wrote).
+    expect(select.value).toBe("branch-ci-passed");
+    // And it names the branch, which `COND_LABEL` — keyed by kind alone — cannot.
+    expect(select.selectedOptions[0].textContent).toBe("CI passed on agent-flow#main");
+  });
+
+  it("lets a parameterised condition be swapped for one the picker can build", () => {
+    // Selectable, not disabled: dropping the parameters is a real edit, and
+    // without this the rule would be uneditable from either presentation.
+    const onSave = vi.fn();
+    const branchRule = flow({
+      nodes: wired().nodes,
+      edges: [{
+        id: "e1", from: "n1", to: "n2",
+        cond: { kind: "branch-ci-passed", repo: "agent-flow", branch: "main" },
+      }],
+    });
+    render(<OrchestratorDrawer {...props({ onSave, flows: [branchRule] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    fireEvent.change(screen.getByLabelText("Condition"), { target: { value: "ci-passed" } });
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].cond).toEqual({ kind: "ci-passed" });
+  });
+
   it("edits the notify message on blur", () => {
     const { onSave } = open();
     const box = screen.getByLabelText("Notify message");
@@ -1433,6 +1521,220 @@ describe("the acting verbs", () => {
   });
 });
 
+// Task 9's whole point. Phase 3 shipped a launch path nothing in the UI could
+// create a `planned` node for, which made it unreachable; a command node with no
+// way to be built would repeat that exactly.
+describe("a command node", () => {
+  const openInspector = (f: Flow, over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [f], ...over })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    return onSave;
+  };
+
+  /** A place wired to a command node that names a configured command — the
+   * shape "wait for CI, then deploy" actually takes. */
+  const placeAndCommand = (over: Partial<{ commandId: string; run: string }> = { commandId: "deploy-staging" }) =>
+    flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "command", x: 320, y: 24, join: "any", ...over },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "ci-passed" } }],
+    });
+
+  it("offers every configured command, and a free-text option", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    const values = Array.from(
+      screen.getByLabelText("Add a command").querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    // The host's own list, in order, plus the placeholder and free text — never
+    // a hardcoded set, which is why COMMANDS' ids are made up for this file.
+    expect(values).toEqual(["", "deploy-staging", "smoke", COMMAND_FREE_TEXT]);
+    expect(screen.getByText("Deploy to staging")).toBeTruthy();
+  });
+
+  it("adds a node for a configured command", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave })} />);
+    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: "deploy-staging" } });
+    const saved = onSave.mock.calls[0][0] as Flow;
+    expect(saved.nodes).toEqual([
+      expect.objectContaining({ kind: "command", commandId: "deploy-staging" }),
+    ]);
+    // Never both fields — `resolveCommand` refuses a node carrying a usable
+    // `commandId` AND a usable `run` rather than guess which one executes.
+    expect(saved.nodes[0]).not.toHaveProperty("run");
+  });
+
+  it("adds a node for a free-text command, in the shape that says 'not typed yet'", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave })} />);
+    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: COMMAND_FREE_TEXT } });
+    const saved = onSave.mock.calls[0][0] as Flow;
+    expect(saved.nodes[0]).toMatchObject({ kind: "command", run: "" });
+    expect(saved.nodes[0]).not.toHaveProperty("commandId");
+  });
+
+  it("stays reachable with no commands configured at all — no built-ins ship", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, commands: [] })} />);
+    const values = Array.from(
+      screen.getByLabelText("Add a command").querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(["", COMMAND_FREE_TEXT]);
+  });
+
+  it("is reachable from the list view too, not only from the canvas", () => {
+    // A node kind reachable from one of the two views only is the gap Task 6
+    // closed for a place; reopening it for a command would undo that.
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: "smoke" } });
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes.filter((n) => n.kind === "command")).toEqual([
+      expect.objectContaining({ commandId: "smoke" }),
+    ]);
+  });
+
+  it("reads as a run rule, named by its picker rather than twice over", () => {
+    openInspector(placeAndCommand());
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.textContent).toContain("run");
+    expect((screen.getByLabelText("Command") as HTMLSelectElement).value).toBe("deploy-staging");
+    // No Mode, no Destination: a command is not an agent session.
+    expect(screen.queryByLabelText("Mode")).toBeNull();
+    expect(screen.queryByLabelText("Destination")).toBeNull();
+  });
+
+  it("switches which configured command a rule runs", () => {
+    const onSave = openInspector(placeAndCommand());
+    fireEvent.change(screen.getByLabelText("Command"), { target: { value: "smoke" } });
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes.find((n) => n.id === "n2")).toMatchObject({ commandId: "smoke" });
+  });
+
+  it("saves a free-text command onto the node, on blur", () => {
+    const onSave = openInspector(placeAndCommand({ run: "" }));
+    const box = screen.getByLabelText("Command to run");
+    fireEvent.change(box, { target: { value: "deploy.sh --env=staging" } });
+    fireEvent.blur(box);
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    // On the NODE, where `performEdge` resolves it — never on the edge.
+    expect(saved.nodes.find((n) => n.id === "n2")).toMatchObject({ run: "deploy.sh --env=staging" });
+    expect(saved.edges[0]).not.toHaveProperty("run");
+  });
+
+  it("switching to free text clears the configured id, and offers the field to type in", () => {
+    const onSave = openInspector(placeAndCommand());
+    expect(screen.queryByLabelText("Command to run")).toBeNull(); // a configured command has no free text
+    fireEvent.change(screen.getByLabelText("Command"), { target: { value: COMMAND_FREE_TEXT } });
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    const node = saved.nodes.find((n) => n.id === "n2")!;
+    expect(node).toMatchObject({ run: "" });
+    expect(node).not.toHaveProperty("commandId", expect.anything());
+  });
+
+  it("shows a commandId that is not configured, rather than the first one that is", () => {
+    // Same defect class as a deleted prompt mode: a `<select>` whose value
+    // matches no option falls back to showing its FIRST option selected, so
+    // this node would read as "Deploy to staging" while `resolveCommand`
+    // refuses it for naming nothing configured.
+    openInspector(placeAndCommand({ commandId: "since-deleted" }));
+    const select = screen.getByLabelText("Command") as HTMLSelectElement;
+    expect(select.value).toBe("since-deleted");
+    expect(select.selectedOptions[0].textContent).toContain("not configured");
+  });
+
+  it("says a hand-edited node carries no command at all", () => {
+    openInspector(placeAndCommand({}));
+    const select = screen.getByLabelText("Command") as HTMLSelectElement;
+    expect(select.selectedOptions[0].textContent).toBe("(no command set)");
+  });
+
+  it("labels a free-text node that has nothing typed yet, rather than rendering a blank chip", () => {
+    render(<OrchestratorDrawer {...props({ flows: [placeAndCommand({ run: "" })] })} />);
+    expect(screen.getByTestId("orch-node-n2").textContent).toContain("command");
+  });
+
+  // Task 5's deferral: the injection surface is stated in command.ts and in the
+  // `agentFlow.commands` setting description — i.e. everywhere except the field
+  // a user actually types the thing into.
+  it("says where the note goes, beside the note itself", () => {
+    openInspector(placeAndCommand());
+    const hint = screen.getByText(/unquoted/i);
+    expect(hint.textContent).toContain("can extend what runs");
+    // Not red: nothing has failed, and this is how a feature the user chose
+    // works. Red in this drawer is for a rule that tried and failed.
+    expect(hint.getAttribute("style")).toContain("--dim");
+    expect(hint.getAttribute("style")).not.toContain("--c-danger");
+  });
+
+  it("does not put that hint on a launch rule, whose note is appended to a prompt", () => {
+    openInspector(placeAndPlanned());
+    expect(screen.queryByText(/unquoted/i)).toBeNull();
+  });
+
+  it("saves a command rule's note on the edge, where resolveCommand reads it", () => {
+    const onSave = openInspector(placeAndCommand());
+    const box = screen.getByLabelText("Note");
+    fireEvent.change(box, { target: { value: "staging" } });
+    fireEvent.blur(box);
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0].note).toBe("staging");
+  });
+
+  // THE one that matters: a condition → command rule, built end to end from
+  // this drawer with nothing hand-authored. Every step re-renders with the flow
+  // the previous step actually saved, since each control reads the live prop.
+  it("builds a whole condition → command rule from the drawer", () => {
+    const onSave = vi.fn();
+    const initial = props({ onSave, flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
+    const { rerender } = render(<OrchestratorDrawer {...initial} />);
+    const rerenderWith = (next: Flow) => rerender(<OrchestratorDrawer {...initial} flows={[next]} />);
+    const lastSaved = () => onSave.mock.calls.at(-1)![0] as Flow;
+
+    // A place, dragged off the board onto the tray.
+    drop(screen.getByTestId("orch-tray"), `ASM-1${DRAG_SEP}agent-flow`);
+    rerenderWith(lastSaved());
+
+    // A command node, from the picker — free text, so nothing about this test
+    // depends on the user having configured anything.
+    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: COMMAND_FREE_TEXT } });
+    rerenderWith(lastSaved());
+
+    // A rule between them, by wiring the ports.
+    fireEvent.pointerDown(screen.getByTestId("orch-port-out-n1"));
+    fireEvent.pointerUp(screen.getByTestId("orch-node-n2"));
+    rerenderWith(lastSaved());
+
+    // Its condition, and the command it runs.
+    fireEvent.change(screen.getByLabelText("Condition"), { target: { value: "ci-passed" } });
+    rerenderWith(lastSaved());
+    const box = screen.getByLabelText("Command to run");
+    fireEvent.change(box, { target: { value: "deploy.sh --env=staging" } });
+    fireEvent.blur(box);
+
+    const built = lastSaved();
+    expect(built.nodes).toEqual([
+      expect.objectContaining({ kind: "place", runKey: "ASM-1", repo: "agent-flow" }),
+      expect.objectContaining({ kind: "command", run: "deploy.sh --env=staging" }),
+    ]);
+    expect(built.edges).toEqual([
+      expect.objectContaining({ from: "n1", to: "n2", cond: { kind: "ci-passed" } }),
+    ]);
+    // No stored action, so nothing for the store's mismatch migration to latch —
+    // and the action it derives is the one that executes the command.
+    expect(built.edges[0].action).toBeUndefined();
+    expect(latchesFor(built)).toEqual([]);
+    expect(edgeAction(built, built.edges[0])).toBe("run");
+    // And the drawer says so, having kept the new rule selected throughout.
+    rerenderWith(built);
+    expect(screen.getByTestId("orch-inspector").textContent).toContain("run");
+  });
+});
+
 describe("arming", () => {
   it("offers Arm for a disarmed flow", () => {
     const onArm = vi.fn();
@@ -1650,6 +1952,133 @@ describe("an errored rule", () => {
 // The grip that resizes the drawer. `.orch`'s width lives in `--orch-w`, set as
 // an inline style on the `<aside>` — reading `orch.style.getPropertyValue` is
 // the width itself, not a proxy for it.
+// The store's own migration: `latchActionMismatches` stamps an edge whose STORED
+// action disagrees with the action its target now implies, so an armed flow
+// cannot silently reinterpret a `notify` rule as a paid `seed`. The drawer shows
+// it through the same stalled-rule affordance an error uses — which is what
+// makes its COLOUR a question, since red in this codebase is for a real failure.
+// Task 8's deferral: `observationOf` built its `CondContext` with no `branchCi`,
+// so a rule waiting on a branch read "not checked yet" forever — even while the
+// host knew the branch was PENDING or FAILED. A rule whose state is invisible.
+describe("a branch-CI rule's observation", () => {
+  const branchRule = () =>
+    flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "deploy" },
+      ],
+      edges: [{
+        id: "e1", from: "n1", to: "n2",
+        cond: { kind: "branch-ci-passed", repo: "agent-flow", branch: "main" },
+      }],
+    });
+
+  /** Renders, reads the observation line, and UNMOUNTS — so a test that needs
+   * two verdicts does not leave two drawers mounted and every query ambiguous. */
+  const observationWith = (branchCi: Record<string, "passed" | "failed" | "pending" | "unknown">) => {
+    const r = render(<OrchestratorDrawer {...props({
+      flows: [branchRule()], runs: [runStatus("ASM-1", "agent-flow")], branchCi,
+    })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const text = screen.getByTestId("orch-inspector").textContent ?? "";
+    r.unmount();
+    return text;
+  };
+
+  it("says the build is running while the host says pending", () => {
+    // Keyed `repo#branch` by `branchCiKey` — the host's own key function, so this
+    // test cannot pass against a key format the engine does not use.
+    expect(observationWith({ [branchCiKey("agent-flow", "main")]: "pending" })).toContain("main CI running");
+  });
+
+  it("says the build failed while the host says failed", () => {
+    expect(observationWith({ [branchCiKey("agent-flow", "main")]: "failed" })).toContain("main failed");
+  });
+
+  it("says it passed while the host says passed", () => {
+    expect(observationWith({ [branchCiKey("agent-flow", "main")]: "passed" })).toContain("main passed");
+  });
+
+  it("tells an unreadable branch apart from one nothing has fetched", () => {
+    // Two different `unknown`s, deliberately different words: an explicit
+    // "unknown" means a call was made and could not be read (worth a look in the
+    // log), an absent key means nothing asked yet.
+    expect(observationWith({ [branchCiKey("agent-flow", "main")]: "unknown" })).toContain("unreadable");
+    expect(observationWith({})).toContain("not checked yet");
+  });
+
+  it("does not answer for a different branch's verdict", () => {
+    expect(observationWith({ [branchCiKey("agent-flow", "release")]: "passed" })).toContain("not checked yet");
+  });
+});
+
+describe("a migrated rule's mismatch notice", () => {
+  /** An edge saved as `notify` by an older build, pointing at a place — the
+   * ordinary leftover shape, since `finishWire` used to create every wire that
+   * way — as the store hands it back after latching. `latchesFor` (above) proves
+   * the fixture is what the real migration produces rather than a hand-written
+   * guess at it. */
+  const migrated = (): Flow => {
+    const stale = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-2", repo: "agent-flow" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    });
+    const files = new Map<string, string>();
+    const io = {
+      readDir: () => [...files.keys()].map((x) => x.slice(x.lastIndexOf("/") + 1)),
+      readFile: (x: string) => files.get(x) ?? null,
+      writeFile: (x: string, text: string) => { files.set(x, text); },
+      remove: (x: string) => { files.delete(x); },
+    };
+    writeFlow(io, "/flows", stale);
+    return readFlows(io, "/flows")[0];
+  };
+
+  it("is really a latched edge, not a hand-written fixture", () => {
+    // Guards the two tests below from passing vacuously against a shape the
+    // migration does not actually produce.
+    expect(migrated().edges[0].error).toContain("no longer matches where it points");
+  });
+
+  it("shows the notice and offers Reset — without it the rule is a dead end", () => {
+    const onResetEdge = vi.fn();
+    render(<OrchestratorDrawer {...props({ flows: [migrated()], onResetEdge })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByTestId("orch-inspector").textContent).toContain("Reset the rule to accept that");
+    fireEvent.click(screen.getByRole("button", { name: /reset/i }));
+    expect(onResetEdge).toHaveBeenCalledWith("f1", "e1");
+  });
+
+  it("does not paint it red — nothing ran, and nothing broke", () => {
+    // `--c-danger` is this codebase's one claim of "a real failure" (see
+    // orchestratorStyles.ts's own comments). A migration notice means this build
+    // reads an old file more carefully than the build that wrote it, and the
+    // rule is waiting for the user to accept the new reading.
+    const { container } = render(<OrchestratorDrawer {...props({ flows: [migrated()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(container.querySelector(".orch-obs .err")).toBeNull();
+    // Still SAID, though — quietly, in the observation row's own dim voice.
+    expect(container.querySelector(".orch-obs")!.textContent).toContain("no longer matches");
+  });
+
+  it("still paints a rule that actually failed red", () => {
+    // The other side of the same branch, so "never red" cannot be the fix.
+    const failed = flow({
+      nodes: migrated().nodes,
+      edges: [{
+        id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" },
+        error: "Couldn't seed ASM-2: no worktree",
+      }],
+    });
+    const { container } = render(<OrchestratorDrawer {...props({ flows: [failed] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(container.querySelector(".orch-obs .err")!.textContent).toContain("Couldn't seed");
+  });
+});
+
 describe("resizing", () => {
   const grip = () => screen.getByRole("separator", { name: /resize/i });
   const widthOf = (container: HTMLElement) =>

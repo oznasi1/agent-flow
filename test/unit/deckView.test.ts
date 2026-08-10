@@ -8,7 +8,7 @@ import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, Review
 import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
 import type { CommandNode, Flow, FlowEdge } from "../../src/engine/orchestrator/model";
-import { BRANCH_CI_ARGS } from "../../src/engine/orchestrator/branchCi";
+import { BRANCH_CI_ARGS, branchCiKey } from "../../src/engine/orchestrator/branchCi";
 import { GH_TIMEOUT_MS } from "../../src/engine/pr/provider";
 import type { AgentProvider } from "../../src/config";
 import type { FlowCommand } from "../../src/types";
@@ -3185,6 +3185,32 @@ describe("orchestrator flows", () => {
     expect(msg.promptModes).toEqual(DEFAULT_PROMPT_MODES.map((m) => ({ id: m.id, label: m.label })));
     // Narrowed, not the whole PromptMode — `prompt` never reaches the webview.
     expect(msg.promptModes[0]).not.toHaveProperty("prompt");
+  });
+
+  // The drawer builds a command node by naming one of these, and a webview has
+  // no fs access to read the setting for itself. Sent whole rather than narrowed
+  // the way `promptModes` is: a command's `run` is short and IS what the rule
+  // executes. Setting off on purpose, same as the modes above — configuration,
+  // not flow data.
+  it("posts the configured commands, even with the setting off", async () => {
+    setConfig({ orchestrator: false });
+    // Through `h.commands`, which is what this file's config mock serves for
+    // this setting (see its own comment there) — a `setConfig` would not reach
+    // it.
+    h.commands = [{ id: "deploy-staging", label: "Deploy to staging", run: "deploy.sh --env={note}" }];
+    const { p } = await openPanel();
+    const msg = posts(p).find((m) => m.type === "deck:flows") as { commands: unknown[] };
+    expect(msg.commands).toEqual([
+      { id: "deploy-staging", label: "Deploy to staging", run: "deploy.sh --env={note}" },
+    ]);
+  });
+
+  it("posts an empty command list when none is configured — no built-ins ship", async () => {
+    setConfig({ orchestrator: true });
+    h.commands = [];
+    const { p } = await openPanel();
+    const msg = posts(p).find((m) => m.type === "deck:flows") as { commands: unknown[] };
+    expect(msg.commands).toEqual([]);
   });
 
   it("flow:create writes a new disarmed flow with a store-safe id", async () => {
@@ -6792,6 +6818,54 @@ describe("branch-CI verdicts for an armed flow", () => {
     h.flows = [branchFlow(branchRule("e1", "master"))];
     await passes(3);
     expect(firedIds()).toEqual(["e1"]);
+  });
+
+  // Task 8 left the verdicts host-only, so the drawer's own "what is this rule
+  // waiting on" line read "not checked yet" forever — even for a branch this panel
+  // had just measured as PENDING. They ride `deck:flows` because `postFlows` runs
+  // AFTER the pass that reads them, unlike the `deck:runs` post.
+  it("posts the branch-CI verdicts it has fetched, so the drawer can say what a rule is waiting on", async () => {
+    h.ghRun.mockResolvedValue(
+      JSON.stringify({ data: { repository: { ref: { target: { statusCheckRollup: { state: "PENDING" } } } } } }),
+    );
+    h.flows = [branchFlow(branchRule("e1", "master"))];
+    const { p } = await passes(3);
+    const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as {
+      branchCi: Record<string, string>;
+    };
+    // Keyed by the engine's own key function, not a hand-spelled string.
+    expect(msg.branchCi).toEqual({ [branchCiKey(REPO, "master")]: "pending" });
+  });
+
+  it("stops posting a verdict once PR facts are switched off", async () => {
+    // The webview must not show a verdict the engine would refuse to act on, or
+    // the drawer claims a branch is green while `branchCiFor` reads it as unknown.
+    // What actually enforces it here is `onConfigChanged` clearing the cache —
+    // `postFlows`'s own `ghReady()` gate mirrors the serve-side rule but has no
+    // independently reachable case (see its comment there). This pins the
+    // OUTCOME, which is the part a user can see. Measured, so the redundancy is
+    // stated rather than assumed: removing EITHER mechanism alone still leaves
+    // this green, and removing BOTH makes it fail with the stale
+    // `{ "<repo>#master": "passed" }` a user would otherwise have been shown.
+    h.ghRun.mockResolvedValue(
+      JSON.stringify({ data: { repository: { ref: { target: { statusCheckRollup: { state: "SUCCESS" } } } } } }),
+    );
+    h.flows = [branchFlow(branchRule("e1", "master"))];
+    const { p } = await passes(3);
+    expect(Object.keys((posts(p).filter((m) => m.type === "deck:flows").at(-1) as {
+      branchCi: Record<string, string>;
+    }).branchCi)).toEqual([branchCiKey(REPO, "master")]);
+    // Switched off the way the panel actually learns about it: it seeds `prFacts`
+    // from config once and holds it, so a bare `h.prFacts = false` would not reach
+    // the panel at all (see `onConfigChanged`'s own comment in deckView.ts).
+    h.prFacts = false;
+    setConfig({ prFacts: false });
+    fireConfigurationChanged("agentFlow.prFacts");
+    await settled();
+    await poll(1);
+    expect((posts(p).filter((m) => m.type === "deck:flows").at(-1) as {
+      branchCi: Record<string, string>;
+    }).branchCi).toEqual({});
   });
 
   it("never fires when the gh call fails — an unreadable branch is not a green one", async () => {

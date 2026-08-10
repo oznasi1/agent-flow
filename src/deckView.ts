@@ -440,7 +440,31 @@ export class DeckPanel {
     // prop instead of an import). Never the whole `PromptMode` — `prompt` can
     // be long and the inspector never displays it.
     const promptModes: FlowPromptMode[] = cfg.promptModes.map((m) => ({ id: m.id, label: m.label }));
-    this.post({ type: "deck:flows", flows, enabled, pendingResume, promptModes });
+    // The branch-CI verdicts this panel has fetched, so the drawer can say what a
+    // `branch-ci-passed` rule is actually waiting on. Without them,
+    // `observationOf` builds its context with no `branchCi` at all and every such
+    // rule reads "not checked yet" forever — even while this panel knows the
+    // branch is PENDING or FAILED, which is a rule whose state is invisible.
+    //
+    // Gated on `ghReady()` exactly as `branchCiFor` is, and for its reason: a
+    // verdict this panel would not ACT on must not be shown either, or the drawer
+    // claims a branch is green while the engine reads it as unknown. Honest about
+    // what the gate is worth: `onConfigChanged` already CLEARS the cache when PR
+    // facts change, and `branchCiFor` never enqueues while gh is unready, so no
+    // test can distinguish this condition today — it is a mirror of the serve-side
+    // rule kept beside it rather than a guard with its own reachable case. Emptied
+    // with `flows` when the orchestrator is off, for the reason `pendingResume` is.
+    const branchCi: Record<string, BranchCiStatus> = {};
+    if (enabled && this.ghReady()) {
+      for (const [key, entry] of this.branchCi) branchCi[key] = entry.status;
+    }
+    // Same reasoning as `promptModes`: configuration the drawer needs to build a
+    // node with, which the webview cannot read for itself. Sent whole rather
+    // than narrowed — see the `deck:flows` member's own comment in types.ts.
+    this.post({
+      type: "deck:flows", flows, enabled, pendingResume, promptModes,
+      commands: cfg.commands, branchCi,
+    });
   }
 
   /** Advance every armed flow against the statuses this pass already built.
