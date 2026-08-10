@@ -437,6 +437,34 @@ export function observationOf(
   return describeCond(e.cond, { status, repo: from.repo, nowMs: Date.now(), branchCi });
 }
 
+/** What a rule's observation line reads when `observationOf` has nothing to say.
+ * It returns `null` for TWO different reasons and a caller that cannot tell them
+ * apart says the wrong thing about one of them:
+ *  - the source's run is not on this board (or the source is not a place at all),
+ *    which is what "this card is not on the board right now" is about;
+ *  - the condition is `command-succeeded`, which HAS no place-shaped observation
+ *    to make — see `observationOf`'s own first guard. Nothing is missing here: the
+ *    rule is waiting, exactly as intended.
+ *
+ * The second was deferred as an edge case while `command-succeeded` was one
+ * condition among many. Tasks 9 and 10 made it the default AND only condition
+ * offered off a command node, so "this card is not on the board right now" became
+ * the guaranteed steady state of this phase's headline shape
+ * (`place -> deploy.sh -> smoke.sh`) — a sentence claiming something is missing,
+ * on the one rule where nothing is.
+ *
+ * A source that is not a command node cannot answer this condition at all
+ * (`evaluate.ts`'s `commandSucceeded` checks the kind first, and answers `false`
+ * forever otherwise), and only a hand-edited file or another build can produce
+ * one — so it gets its own sentence rather than a wait that will never end. */
+export function observationFallback(flow: Flow, e: FlowEdge): string {
+  if (e.cond.kind !== "command-succeeded") return "this card is not on the board right now";
+  const from = flow.nodes.find((n) => n.id === e.from);
+  return from && from.kind === "command"
+    ? `waiting for ${commandLabel(from)} to succeed`
+    : "this rule waits on a command, but it does not come from one";
+}
+
 /** Set a rule's condition. Only bare kinds are ever reachable from either
  * presentation's picker (see `OFFERED_CONDS`), so the parameterised arms
  * cannot be constructed here without a value to put in them — this returns

@@ -1263,8 +1263,10 @@ describe("the inspector", () => {
     // deliberately, since it should never be reachable — so `observationOf`
     // must refuse the CONDITION KIND itself before ever calling it, not only
     // guard on the source failing to be a place (which this fixture's source
-    // is). This pins that the drawer renders the same "not on the board"
-    // fallback instead of crashing.
+    // is). This pins that the drawer renders a sentence instead of crashing —
+    // and that the sentence names the real problem: this condition can NEVER be
+    // met from a place (`commandSucceeded` checks the source's kind first), so it
+    // is not a wait, and it is certainly not a missing card.
     const placeSourced = flow({
       nodes: [
         { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
@@ -1274,7 +1276,36 @@ describe("the inspector", () => {
     });
     render(<OrchestratorDrawer {...props({ runs: [runStatus("ASM-1", "agent-flow")], flows: [placeSourced] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
-    expect(screen.getByTestId("orch-inspector").textContent).toMatch(/not on the board/i);
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.textContent).toMatch(/waits on a command, but it does not come from one/i);
+    expect(insp.textContent).not.toMatch(/not on the board/i);
+  });
+
+  it("says what a waiting command rule is waiting for, not that its card is missing", () => {
+    // `observationOf` answers `null` for two different reasons and the drawer used
+    // to print one sentence for both. Tasks 9 and 10 made `command-succeeded` the
+    // default and ONLY condition offered off a command node, so "this card is not
+    // on the board right now" became the guaranteed steady state of this phase's
+    // headline shape — a claim that something is missing, on the one rule where
+    // nothing is.
+    const chained = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "command", x: 320, y: 24, join: "any", run: "deploy.sh --env=staging" },
+        { id: "n3", kind: "command", x: 620, y: 24, join: "any", run: "smoke.sh" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } },
+        { id: "e2", from: "n2", to: "n3", cond: { kind: "command-succeeded" } },
+      ],
+    });
+    render(<OrchestratorDrawer {...props({ runs: [runStatus("ASM-1", "agent-flow")], flows: [chained] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e2"));
+    const insp = screen.getByTestId("orch-inspector");
+    // Names the command it waits on, in `commandLabel`'s own words — the same
+    // string the chip and the sentence use for that node.
+    expect(insp.textContent).toContain("waiting for deploy.sh --env=staging to succeed");
+    expect(insp.textContent).not.toMatch(/not on the board/i);
   });
 
   it("deletes the edge", () => {

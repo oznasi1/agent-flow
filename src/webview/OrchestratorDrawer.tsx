@@ -26,6 +26,7 @@ import {
   NOTE_COMMAND_PLACEHOLDER,
   NOTE_PLACEHOLDER,
   notifyMessageOf,
+  observationFallback,
   observationOf,
   offeredConds,
   OFFERED_DESTS,
@@ -1412,7 +1413,13 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   <button type="button" className="orch-mini" onClick={() => p.onResetEdge(flow.id, edge.id)}>Reset</button>
                 </>
               ) : (
-                <span>{observationOf(flow, edge, p.runs, p.branchCi) ?? "this card is not on the board right now"}</span>
+                // `observationFallback`, not a literal: `observationOf` answers
+                // `null` for two different reasons, and "this card is not on the
+                // board right now" is true of only one of them. A waiting
+                // `command-succeeded` rule — the default and only condition off a
+                // command node, so the steady state of this phase's headline shape
+                // — has no place-shaped observation to make and nothing missing.
+                <span>{observationOf(flow, edge, p.runs, p.branchCi) ?? observationFallback(flow, edge)}</span>
               )}
             </div>
           </div>
