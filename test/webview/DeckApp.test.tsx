@@ -1350,6 +1350,85 @@ const flowsMsg = (flows: Flow[], enabled = true): OutboundMessage =>
 const drawer = () => screen.queryByRole("complementary", { name: "Orchestrator" });
 const chip = () => screen.getByRole("button", { name: /Orchestrator/ });
 
+// The host and this webview ship in one .vsix, so a real post always carries
+// every list on this message. What makes a missing one worth defending anyway is
+// the blast radius: each lands in a prop the drawer dereferences on its next
+// render, there is no error boundary anywhere in `src/`, and a throw out of
+// render leaves the ROOT EMPTY — board and drawer both gone, with nothing on
+// screen to say why. Measured against a harness whose `postFlows` predated the
+// `commands` field.
+describe("a deck:flows payload missing a field a newer webview reads", () => {
+  /** A payload from a build that predates one of these fields, which is exactly
+   * what a `delete` models — cast because `OutboundMessage` (correctly) says the
+   * field is required, and the point of the test is a message that does not obey
+   * the current type. */
+  /** A flow with a real RULE in it, not a bare one: `promptModes` is dereferenced
+   * only by an open rule's USING select, so a payload carrying an empty flow
+   * never touches it and could not tell a missing list from a defended one. Two
+   * places, so the rule derives `seed` and that select renders. */
+  const withARule = (): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-2", repo: "agent-flow" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
+  });
+
+  const without = (field: "flows" | "commands" | "pendingResume" | "promptModes" | "branchCi"): OutboundMessage => {
+    const msg = { ...flowsMsg([withARule()]) } as Record<string, unknown>;
+    delete msg[field];
+    return msg as unknown as OutboundMessage;
+  };
+
+  it("still renders the board and the drawer with no commands", () => {
+    render(<DeckApp />);
+    host(without("commands"));
+    // The chip is the board's own control, so its presence IS "the panel
+    // rendered" — under the unfixed version this query finds nothing at all,
+    // because the whole tree threw.
+    expect(chip()).toBeInTheDocument();
+    fireEvent.click(chip());
+    expect(drawer()).not.toBeNull();
+    // And the picker the missing field feeds still works, offering the one
+    // option a build with no configured commands should offer.
+    const values = Array.from(
+      screen.getByLabelText("Add a command").querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toHaveLength(2); // the placeholder, and free text
+  });
+
+  it("survives every other missing list on that message too", () => {
+    // One `it` per field would pin the same guard four times; what matters is
+    // that no member of the set is the odd one out.
+    //
+    // The drawer is OPENED for each, deliberately: `promptModes` and
+    // `pendingResume` are dereferenced by the drawer alone, so a version of this
+    // test that only looked for the chip passed with their defaults removed —
+    // measured, and it was this test's first draft.
+    //
+    // `branchCi` is in the list for completeness, not because this can catch it:
+    // it is the one field nothing dereferences unguarded (`describeCond` reads
+    // `c.branchCi?.[key]`), so removing ITS default leaves this green. Said out
+    // loud rather than left to look like coverage it is not.
+    for (const field of ["flows", "pendingResume", "promptModes", "branchCi"] as const) {
+      const r = render(<DeckApp />);
+      host(without(field));
+      expect(screen.queryByRole("button", { name: /Orchestrator/ })).not.toBeNull();
+      fireEvent.click(chip());
+      // With `flows` missing there is no flow to open, so the drawer stays shut;
+      // every other case must actually render it — and then render a RULE, since
+      // `promptModes` is reached only by an open rule's USING select.
+      if (field !== "flows") {
+        expect(drawer()).not.toBeNull();
+        fireEvent.click(screen.getByTestId("orch-edge-e1"));
+        expect(screen.getByLabelText("Mode")).toBeTruthy();
+      }
+      r.unmount();
+    }
+  });
+});
+
 describe("the Orchestrator chip", () => {
   it("appears once the host says the feature is on", () => {
     render(<DeckApp />);

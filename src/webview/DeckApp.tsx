@@ -524,19 +524,45 @@ export function DeckApp(): JSX.Element {
         // first post's previous list is `[]`, which would otherwise make every
         // saved flow look newly created.
         const seenBefore = seenFlowsRef.current;
-        flowsRef.current = m.flows;
+        // Every list on this message is defaulted, and the reason is the blast
+        // radius rather than a live symptom: the host and this webview ship in
+        // one .vsix, so a real post always carries all of them — but there is no
+        // error boundary anywhere in `src/`, and each of these lands in a prop
+        // the drawer dereferences (`.map`, `.some`, `.find`) on its next render.
+        // One absent field therefore throws out of render and leaves `#root`
+        // with NO CHILDREN AT ALL: no board, no drawer, nothing to click, and no
+        // hint of why. Measured, not inferred — a `deck:flows` payload with no
+        // `commands` (a harness whose `postFlows` predates that field) blanks the
+        // whole panel, and adding `commands: []` brings it straight back.
+        //
+        // `store.ts`'s `coerceFlow` already spells out this exact posture for the
+        // same panel ("one malformed edge thrown out of render blanks the whole
+        // Deck panel"), so tolerating a missing list here is the house rule, not
+        // a new indulgence. An empty list is also the honest reading of an absent
+        // one: a build that did not send `commands` had none to send.
+        // `posted`, not `flows`: the `flows` STATE variable is in scope here and is
+        // permanently `[]` (this listener is registered once with `[]` deps — see
+        // `flowsRef`'s own doc comment), so a local shadow of that name would be an
+        // invitation to the exact confusion that ref exists to prevent.
+        const posted = m.flows ?? [];
+        flowsRef.current = posted;
         seenFlowsRef.current = true;
-        setFlows(m.flows);
+        setFlows(posted);
         setOpenFlowId((cur) => {
-          if (cur && m.flows.some((f) => f.id === cur)) return cur;
-          const fresh = seenBefore ? m.flows.find((f) => !old.some((o) => o.id === f.id)) : undefined;
+          if (cur && posted.some((f) => f.id === cur)) return cur;
+          const fresh = seenBefore ? posted.find((f) => !old.some((o) => o.id === f.id)) : undefined;
           return fresh ? fresh.id : null;
         });
         setOrchEnabled(m.enabled);
-        setPendingResume(m.pendingResume);
-        setPromptModes(m.promptModes);
-        setCommands(m.commands);
-        setBranchCi(m.branchCi);
+        setPendingResume(m.pendingResume ?? []);
+        setPromptModes(m.promptModes ?? []);
+        setCommands(m.commands ?? []);
+        // The one field here that is NOT dereferenced unguarded downstream —
+        // `describeCond` reads it as `c.branchCi?.[key]` — but defaulted with its
+        // siblings anyway: the prop is typed non-optional, and leaving one member
+        // of a defended set undefended is how the next reader learns the wrong
+        // rule from the surrounding code.
+        setBranchCi(m.branchCi ?? {});
       }
     };
     window.addEventListener("message", handler);

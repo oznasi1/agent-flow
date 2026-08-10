@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import * as React from "react";
 import { act, render, screen, fireEvent, within } from "@testing-library/react";
 import { OrchestratorDrawer, DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
-import { ORCH_ANIM_MS } from "../../src/webview/orchestratorStyles";
+import { ORCH_ANIM_MS, ORCH_CSS } from "../../src/webview/orchestratorStyles";
 import type { Flow } from "../../src/engine/orchestrator/model";
 // The real store, so the "a new wire is never latched" test below is answered by
 // the migration itself rather than by this file restating its rule. Its io is
@@ -1556,6 +1556,23 @@ describe("a command node", () => {
     // a hardcoded set, which is why COMMANDS' ids are made up for this file.
     expect(values).toEqual(["", "deploy-staging", "smoke", COMMAND_FREE_TEXT]);
     expect(screen.getByText("Deploy to staging")).toBeTruthy();
+  });
+
+  // The visual half, which no computed style can assert under jsdom (the sheet is
+  // never injected): what CAN be pinned is the contract the styling depends on —
+  // the picker lives inside an `.orch-bar`, which is the selector that gives it
+  // its neighbours' weight. Both halves asserted together, so moving the control
+  // out of the bar or dropping the rule each break this.
+  it("reads at the same weight as the buttons beside it", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    const picker = screen.getByLabelText("Add a command");
+    const bar = picker.closest(".orch-bar");
+    expect(bar).not.toBeNull();
+    // Its neighbours are the quiet `.orch-mini` buttons, and this must not be
+    // heavier than them — Arm is this surface's only accented control.
+    expect(within(bar as HTMLElement).getByRole("button", { name: "+ Notify" }).className).toBe("orch-mini");
+    expect(picker.className).toBe("orch-sel");
+    expect(ORCH_CSS).toContain(".orch-bar .orch-sel");
   });
 
   it("adds a node for a configured command", () => {

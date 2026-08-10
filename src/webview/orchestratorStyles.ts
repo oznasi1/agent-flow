@@ -219,6 +219,28 @@ export const ORCH_CSS = `
     pointer-events: none; background: linear-gradient(to right, transparent, var(--vscode-editor-background)); }
   .orch-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
   .orch-bar .sp { flex: 1; }
+  /* An "add a node" picker sitting in a bar of buttons. \`.orch-sel\`'s own
+     metrics (22px, --t-body, an input-coloured fill) belong to the inspector's
+     sentence rows, where a select IS the sentence; on this bar the same element
+     sat beside three \`.orch-mini\` buttons and became the heaviest thing in the
+     row — taller, filled where they are transparent, and stretched to its widest
+     option — which on a surface whose one accented control is Arm is a claim it
+     has no business making. So it borrows \`.orch-mini\`'s height, type, border
+     and dim foreground: the row reads as four controls of one weight, and the
+     chevron still says (honestly, unlike a button) that this one opens a list.
+
+     Not a new class, and not applied per element: scoping by the BAR is what
+     makes it cover the place picker in the list view's own \`.orch-bar\` too —
+     that select had exactly the same mismatch and the same fix, and a modifier
+     class would have fixed whichever one someone remembered.
+
+     \`max-width\` because a select's intrinsic width is its widest OPTION
+     ("Deploy to staging", or a run key plus a repo), which is what stretched the
+     row; the closed control only ever shows its own short placeholder, and the
+     popup the browser opens is sized to its contents regardless of this cap. */
+  .orch-bar .orch-sel { height: 20px; padding: 0 4px 0 7px; font-size: var(--t-micro);
+    max-width: 150px; color: var(--dim); background: transparent; }
+  .orch-bar .orch-sel:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
 
   /* 168px is enough for a state dot, the key, and the one fact the rules read.
      Narrower and a node degenerates into a bare key. */
