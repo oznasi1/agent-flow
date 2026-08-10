@@ -29,6 +29,7 @@ describe("settingsSnapshot", () => {
     expect(s.review_writes).toBe(false);
     expect(s.orchestrator).toBe(false);
     expect(s.repo_blocklist_count).toBe(0);
+    expect(s.commands_count).toBe(0);
     expect(s.review_mode).toBe("ask");
     expect(s.review_modes_count).toBe(1);
     expect(s.review_modes_overridden).toBe(0);
@@ -367,5 +368,19 @@ describe("settingsSnapshot — orchestrator", () => {
     expect(settingsSnapshot(getConfig()).orchestrator).toBe(false);
     setConfig({ orchestrator: true });
     expect(settingsSnapshot(getConfig()).orchestrator).toBe(true);
+  });
+});
+
+describe("settingsSnapshot — commands", () => {
+  it("counts configured commands without revealing their run text", () => {
+    setConfig({
+      commands: [
+        { id: "deploy", label: "Deploy", run: "gh workflow run deploy.yml --repo acme-internal/billing" },
+        { id: "smoke", label: "Smoke test", run: "curl https://acme-internal.example/health" },
+      ],
+    });
+    const s = settingsSnapshot(getConfig());
+    expect(s.commands_count).toBe(2);
+    expect(JSON.stringify(s)).not.toContain("acme-internal");
   });
 });

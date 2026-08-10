@@ -74,15 +74,17 @@ function modeCounts(
 /** Reduce config to shape only. Every setting whose value is user-authored —
  * baseUrl, project, githubOrg, reposRoot, workspaceDir, provenanceLabel,
  * prReviewStatus and every *Prompt — contributes at most a "was it changed
- * from the default" boolean. repoBlocklist contributes its length. promptModes
- * and reviewRequestModes each contribute several counts instead (via
- * modeCounts above) — never a label, detail or prompt, which stay
- * user-authored and untransmitted. Every enum-ish setting is validated against
- * its known values and collapsed to the `"invalid"` sentinel when
- * unrecognised, never cast and never a real shipped default — a hand-edited
- * settings.json can hold any string there, and reporting it as e.g. "auto"
- * would be indistinguishable from a genuine default. Tests assert none of the
- * above leak. */
+ * from the default" boolean. repoBlocklist and commands each contribute only
+ * their length — a command's `run` is arbitrary shell and can carry
+ * hostnames, tokens or internal URLs, so nothing beyond a count is ever
+ * justified. promptModes and reviewRequestModes each contribute several
+ * counts instead (via modeCounts above) — never a label, detail or prompt,
+ * which stay user-authored and untransmitted. Every enum-ish setting is
+ * validated against its known values and collapsed to the `"invalid"`
+ * sentinel when unrecognised, never cast and never a real shipped default —
+ * a hand-edited settings.json can hold any string there, and reporting it as
+ * e.g. "auto" would be indistinguishable from a genuine default. Tests
+ * assert none of the above leak. */
 export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
   const promptCounts = modeCounts(cfg.promptModes, DEFAULT_PROMPT_MODES);
   const reviewCounts = modeCounts(cfg.reviewRequestModes, DEFAULT_REVIEW_REQUEST_MODES);
@@ -112,6 +114,9 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     track_open_windows: cfg.trackOpenWindows,
     batch_confirm_threshold: cfg.batchLaunchConfirmThreshold,
     repo_blocklist_count: cfg.repoBlocklist.length,
+    // Count only — see the field's own doc comment in events.ts for why the
+    // command strings themselves never cross this boundary.
+    commands_count: cfg.commands.length,
     prompt_modes_count: cfg.promptModes.length,
     prompt_modes_overridden: promptCounts.overridden,
     prompt_modes_custom: promptCounts.custom,

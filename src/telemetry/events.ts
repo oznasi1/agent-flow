@@ -151,6 +151,10 @@ export interface SettingsSnapshot {
   track_open_windows: boolean;
   batch_confirm_threshold: number;
   repo_blocklist_count: number;
+  // How many named commands are configured under `agentFlow.commands`. Count
+  // only — the command strings themselves are user-authored shell and can
+  // carry hostnames, tokens or internal URLs, and never leave this machine.
+  commands_count: number;
   prompt_modes_count: number;
   // How the resolved prompt-mode list differs from the built-ins it layered
   // over. Counts only — labels, details and prompts are user-authored text.
