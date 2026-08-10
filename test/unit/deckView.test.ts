@@ -4863,6 +4863,21 @@ describe("a met seed rule acts", () => {
 
   const lastWrite = () => h.writeFlow.mock.calls.at(-1)![2] as Flow;
 
+  /** `seedFlow` with its TARGET node's kind switched. An action is DERIVED from
+   * that node, so re-kinding it is the only edit that can change what a rule
+   * does — the two cases below steer `h.readFlows` between these variants to put
+   * evaluation and the acting step in disagreement, which is the one way a
+   * `seed` can find no place to seed. */
+  const seedFlowTargeting = (kind: "place" | "notify", over: Partial<Flow> = {}): Flow => seedFlow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      kind === "place"
+        ? { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "bite-me" }
+        : { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "not a place" },
+    ],
+    ...over,
+  });
+
   it("opens another agent in the place's resolved directory, stamps the edge, and promotes nothing", async () => {
     const { p, send } = await warmed([seedFlow()]);
     await send({ type: "deck:refresh" });
@@ -4956,17 +4971,27 @@ describe("a met seed rule acts", () => {
     expect(w.edges[0].firedAt).toBeUndefined();
   });
 
-  it("refuses a seed rule whose target is not a place, the mirror of launch's not-planned guard", async () => {
-    const { send } = await warmed([seedFlow({
-      nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
-        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "not a place" },
-      ],
-    })]);
+  it("refuses a seed rule whose target is no longer a place, the mirror of launch's not-planned guard", async () => {
+    // The static fixture this used to use — a `seed` edge pointing at a notify
+    // node — cannot reach `performSeed` any more: the verb is derived from the
+    // target, so that node derives `notify` and there is no seed to refuse. A
+    // seed with no place to seed is reachable exactly one way, the same way its
+    // launch mirror is: the target's KIND changed between the read evaluation
+    // derived the verb from and the copy this pass acts against.
+    const { send } = await warmed([seedFlowTargeting("place")]);
+    // Read 1 is evaluation's own — a place, so `seed`. Every read after it (the
+    // `fresh` copy this pass acts and gates against, the pre-write `atWrite`
+    // read, and postFlows') sees the notify terminal the node has become.
+    let reads = 0;
+    h.readFlows.mockImplementation(() => (++reads === 1 ? [seedFlowTargeting("place")] : [seedFlowTargeting("notify")]));
     await send({ type: "deck:refresh" });
+    expect(reads).toBeGreaterThan(1);
     expect(h.openWorkspace).not.toHaveBeenCalled();
+    expect(h.writeFlow).toHaveBeenCalled();
     const w = lastWrite();
-    expect(w.edges[0].error).toMatch(/place/i);
+    // Settled as a refusal: an `error` so it cannot re-fire in a loop, and NO
+    // `firedAt`, which would consume the latch as a success.
+    expect(w.edges[0].error).toBe("a seed rule must point at a place, and n2 is not.");
     expect(w.edges[0].firedAt).toBeUndefined();
   });
 
@@ -5080,20 +5105,25 @@ describe("a met seed rule acts", () => {
   });
 
   it("does NOT gate on a seed edge whose target is not a place — nothing would be spent", async () => {
-    // The same reasoning `launchFlow`'s "never launches a rule whose target is not
-    // planned work" case rests on: gating on a rule that can never spend anything
-    // would ask about something that will never happen.
-    const { send } = await warmed([seedFlow({
-      launchConfirmedAt: undefined,
-      nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
-        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "not a place" },
-      ],
-    })]);
+    // The same reasoning the "never launches a rule whose target is not planned
+    // work" case rests on: gating on a rule that can never spend anything would
+    // ask about something that will never happen.
+    //
+    // Split from the refusal case above, which owns the `error` stamp — this one
+    // owns the gate, on the same fixture but with NO approval on file. Kept on a
+    // `seed` verb rather than the notify the old static fixture now derives,
+    // because "a rule that cannot resolve what it would spend on must not ask" is
+    // only a claim about a SPENDING verb.
+    const { send } = await warmed([seedFlowTargeting("place", { launchConfirmedAt: undefined })]);
+    let reads = 0;
+    h.readFlows.mockImplementation(() => (++reads === 1
+      ? [seedFlowTargeting("place", { launchConfirmedAt: undefined })]
+      : [seedFlowTargeting("notify", { launchConfirmedAt: undefined })]));
     await send({ type: "deck:refresh" });
+    expect(reads).toBeGreaterThan(1);
     expect(window.showWarningMessage).not.toHaveBeenCalled();
-    // Still refused, exactly as it would be with an approval already on file.
-    expect(lastWrite().edges[0].error).toMatch(/place/i);
+    expect(h.openWorkspace).not.toHaveBeenCalled();
+    // And no approval was recorded for a flow that was never asked.
     expect(lastWrite().launchConfirmedAt).toBeUndefined();
   });
 });
