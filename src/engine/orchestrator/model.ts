@@ -146,6 +146,21 @@ export interface Flow {
    * resume gate: a mis-wired flow should cost one prompt, not a string of paid
    * sessions. Absent means it has never launched anything. */
   launchConfirmedAt?: number;
+  /** When the user approved this flow's first COMMAND. A second gate, deliberately
+   * separate from `launchConfirmedAt`, because the two consents are not the same
+   * one: approving a launch approves opening an agent session, and the modal that
+   * asked closed with "It will keep launching on its own from now on", which
+   * discloses nothing about executing shell. Every flow confirmed by an existing
+   * user before commands shipped carries `launchConfirmedAt` and nothing else — one
+   * shared gate would let all of those run their first `deploy.sh` with no ask at
+   * all, on a machine whose owner approved a Claude Code window.
+   *
+   * Optional, and absent on every flow written before this build, which is what
+   * makes an old file read unchanged: absent means "has never run a command", so
+   * the first one asks. Nothing migrates it — a migration that copied
+   * `launchConfirmedAt` into it would be inventing the consent this field exists to
+   * require. */
+  commandConfirmedAt?: number;
 }
 
 export function emptyFlow(id: string, name: string, nowMs: number): Flow {

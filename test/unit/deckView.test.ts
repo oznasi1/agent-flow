@@ -4087,7 +4087,7 @@ describe("a met launch rule acts", () => {
     await send({ type: "deck:refresh" });
     const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
     expect(call[0]).toBe(
-      'Ship the migration is ready to launch ASM-12 in aws-ops with the "Implementation" prompt, unattended. It will keep launching on its own from now on.',
+      'Ship the migration is ready to launch ASM-12 in aws-ops with the "Implementation" prompt, unattended. It will keep launching and seeding on its own from now on. It will still ask before it runs a shell command.',
     );
   });
 
@@ -4103,7 +4103,7 @@ describe("a met launch rule acts", () => {
     await send({ type: "deck:refresh" });
     const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
     expect(call[0]).toBe(
-      'Ship the migration is ready to launch ASM-12 in aws-ops with the "Implementation" prompt, unattended. It will keep launching on its own from now on.',
+      'Ship the migration is ready to launch ASM-12 in aws-ops with the "Implementation" prompt, unattended. It will keep launching and seeding on its own from now on. It will still ask before it runs a shell command.',
     );
   });
 
@@ -5108,7 +5108,7 @@ describe("a met seed rule acts", () => {
     await send({ type: "deck:refresh" });
     const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
     expect(call[0]).toBe(
-      'Ship the migration is ready to seed another agent into bite-me with the "Implementation" prompt, unattended. It will keep seeding on its own from now on.',
+      'Ship the migration is ready to seed another agent into bite-me with the "Implementation" prompt, unattended. It will keep seeding and launching on its own from now on. It will still ask before it runs a shell command.',
     );
   });
 
@@ -5120,7 +5120,7 @@ describe("a met seed rule acts", () => {
     await send({ type: "deck:refresh" });
     const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
     expect(call[0]).toBe(
-      'Ship the migration is ready to seed another agent into bite-me with the "Implementation" prompt, unattended. It will keep seeding on its own from now on.',
+      'Ship the migration is ready to seed another agent into bite-me with the "Implementation" prompt, unattended. It will keep seeding and launching on its own from now on. It will still ask before it runs a shell command.',
     );
   });
 
@@ -5317,7 +5317,12 @@ describe("a met run rule acts", () => {
   const cmdFlow = (over: Partial<Flow> = {}): Flow => ({
     ...mkFlow("f1", "Ship the migration"),
     armed: true,
+    // BOTH gates confirmed by default. `commandConfirmedAt` is the one that
+    // authorises a command (see `Flow.commandConfirmedAt`) — `launchConfirmedAt` is
+    // set too so that no case here passes merely because the flow had never been
+    // asked anything, and so a fixture reads like a flow in ordinary use.
     launchConfirmedAt: 500,
+    commandConfirmedAt: 500,
     nodes: [
       { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
       { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
@@ -5406,6 +5411,10 @@ describe("a met run rule acts", () => {
     // The resolved text, not the template: dropping the note at this call site
     // would run `deploy.sh --env={note}` verbatim.
     expect(ran()[0]).toBe("deploy.sh --env=staging");
+    // And the RECEIPT says what ran, not what was configured. With the template
+    // here instead, a staging deploy and a prod deploy leave byte-identical
+    // receipts and only the output channel knows which happened.
+    expect(lastWrite().edges[0].firedNote).toBe("ran deploy.sh --env=staging in aws-ops");
   });
 
   it("runs in the repo the node names, resolved against that run's own worktree", async () => {
@@ -5485,6 +5494,11 @@ describe("a met run rule acts", () => {
     await send({ type: "deck:refresh" });
     const w = lastWrite();
     expect(w.edges[0].error).toContain("exited with code 124");
+    // The deadline reaches the EDGE, not only stderr and the channel: a user
+    // looking at a stalled rule in the drawer sees this sentence and nothing else,
+    // and a bare "code 124" tells them nothing about a limit they never chose.
+    expect(w.edges[0].error).toContain(String(COMMAND_TIMEOUT_MS));
+    expect(w.edges[0].error).toContain("killed");
     expect(w.edges[0].firedAt).toBeUndefined();
   });
 
@@ -5538,7 +5552,7 @@ describe("a met run rule acts", () => {
     // command ran unattended with no prompt ever shown, while package.json's own
     // `agentFlow.commands` copy promised "a flow asks once before it runs its first
     // command". This is that promise, asserted.
-    const { send } = await warmed([cmdFlow({ launchConfirmedAt: undefined })]);
+    const { send } = await warmed([cmdFlow({ commandConfirmedAt: undefined })]);
     await send({ type: "deck:refresh" });
     expect(h.exec).not.toHaveBeenCalled();
     const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
@@ -5551,7 +5565,7 @@ describe("a met run rule acts", () => {
   });
 
   it("names the resolved command in the confirmation, not just the flow", async () => {
-    const { send } = await warmed([cmdFlow({ launchConfirmedAt: undefined })]);
+    const { send } = await warmed([cmdFlow({ commandConfirmedAt: undefined })]);
     await send({ type: "deck:refresh" });
     const message = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
     expect(message).toBe(
@@ -5564,7 +5578,7 @@ describe("a met run rule acts", () => {
     // shell command the text is not a description of what will happen, it IS what
     // will happen.
     h.commands = [{ id: "deploy", label: "Deploy staging", run: "make deploy ENV=staging" }];
-    const { send } = await warmed([withCommandNode({ commandId: "deploy" }, { launchConfirmedAt: undefined })]);
+    const { send } = await warmed([withCommandNode({ commandId: "deploy" }, { commandConfirmedAt: undefined })]);
     await send({ type: "deck:refresh" });
     const message = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
     expect(message).toContain("make deploy ENV=staging");
@@ -5574,7 +5588,7 @@ describe("a met run rule acts", () => {
     // The consent gate resolves through the SAME resolveCommand the run does, so
     // the modal cannot show one string while another executes.
     const { send } = await warmed([cmdFlow({
-      launchConfirmedAt: undefined,
+      commandConfirmedAt: undefined,
       nodes: [
         { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
         { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh --env={note}" },
@@ -5587,20 +5601,41 @@ describe("a met run rule acts", () => {
     expect(message).not.toContain("{note}");
   });
 
-  it("truncates a very long command rather than growing the dialog unboundedly", async () => {
-    const long = `deploy.sh ${"--flag ".repeat(60)}`.trim();
-    const { send } = await warmed([withCommandNode({ run: long }, { launchConfirmedAt: undefined })]);
+  it("keeps a very long command's TAIL visible, where the dangerous part lives", async () => {
+    // A shell command is not prose. The operative clause is often at the END, and a
+    // note is spliced in unquoted — so head-only truncation is exactly how
+    // `; rm -rf ~` ends up hidden behind an "…" in the one dialog that was supposed
+    // to show the user what will run.
+    const long = `deploy.sh ${"--flag ".repeat(120)}; rm -rf ~`;
+    const { send } = await warmed([withCommandNode({ run: long }, { commandConfirmedAt: undefined })]);
     await send({ type: "deck:refresh" });
     const message = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
-    expect(message).toContain(long.slice(0, 160));
+    expect(long.length).toBeGreaterThan(600); // long enough that it really is elided
     expect(message).toContain("…");
     expect(message).not.toContain(long);
+    // Both ends survive: what it starts with, and what it ends with.
+    expect(message).toContain("deploy.sh --flag");
+    expect(message).toContain("; rm -rf ~");
+    // And a command far longer than a note's cap is NOT cut at 160 characters.
+    expect(message).toContain(long.slice(0, 300));
   });
 
-  it("stamps launchConfirmedAt on Run and lets the NEXT pass execute", async () => {
-    const { send } = await warmed([cmdFlow({ launchConfirmedAt: undefined })]);
+  it("shows a moderately long command in full, where a note would already be cut", async () => {
+    // 300 characters is a perfectly ordinary one-liner and is nearly twice
+    // `NOTE_PREVIEW_MAX`. Eliding it would hide real arguments for no reason.
+    const cmd = `deploy.sh ${"--flag ".repeat(40)}--last`;
+    const { send } = await warmed([withCommandNode({ run: cmd }, { commandConfirmedAt: undefined })]);
     await send({ type: "deck:refresh" });
-    expect(lastWrite().launchConfirmedAt).toBeTypeOf("number");
+    const message = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(cmd.length).toBeGreaterThan(160);
+    expect(message).toContain(cmd);
+    expect(message).not.toContain("…");
+  });
+
+  it("stamps commandConfirmedAt on Run and lets the NEXT pass execute", async () => {
+    const { send } = await warmed([cmdFlow({ commandConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    expect(lastWrite().commandConfirmedAt).toBeTypeOf("number");
     expect(h.exec).not.toHaveBeenCalled();
     h.flows = [lastWrite()];
     await send({ type: "deck:refresh" });
@@ -5612,7 +5647,7 @@ describe("a met run rule acts", () => {
     (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
       async (_m: string, _o: unknown, ...items: string[]) => items[1], // "Disarm"
     );
-    const { send } = await warmed([cmdFlow({ launchConfirmedAt: undefined })]);
+    const { send } = await warmed([cmdFlow({ commandConfirmedAt: undefined })]);
     await send({ type: "deck:refresh" });
     expect(lastWrite().armed).toBe(false);
     expect(h.exec).not.toHaveBeenCalled();
@@ -5621,25 +5656,114 @@ describe("a met run rule acts", () => {
     expect(h.exec).not.toHaveBeenCalled();
   });
 
-  it("runs a command with no fresh prompt once the flow is confirmed for anything", async () => {
-    // The gate is once per FLOW, shared with launch and seed. A flow already
-    // approved runs a command without asking again — the existing design, pinned
-    // here so nobody "fixes" it into a second gate.
-    const { send } = await warmed([cmdFlow()]); // launchConfirmedAt: 500
+  it("asks before the first command even when the flow was already confirmed for a launch", async () => {
+    // The case a single shared gate gets wrong, and it is not hypothetical: EVERY
+    // flow an existing user armed and confirmed before commands shipped carries
+    // `launchConfirmedAt` and nothing else. Consent to open an agent session is not
+    // consent to execute shell, and the modal those users saw closed with "It will
+    // keep launching on its own" — which says nothing about a shell at all.
+    const { send } = await warmed([cmdFlow({ launchConfirmedAt: 500, commandConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call[0]).toContain("deploy.sh staging");
+    expect(call.slice(2)).toEqual(["Run", "Disarm"]);
+  });
+
+  it("runs a command with no fresh prompt once THAT gate is confirmed", async () => {
+    // The other half: the command gate is still once per flow, not once per rule.
+    const { send } = await warmed([cmdFlow()]); // both gates confirmed
     await send({ type: "deck:refresh" });
     expect(window.showWarningMessage).not.toHaveBeenCalled();
     expect(h.exec).toHaveBeenCalledTimes(1);
+  });
+
+  it("records the command approval on its OWN field, never on the launch gate", async () => {
+    const { send } = await warmed([cmdFlow({ launchConfirmedAt: undefined, commandConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const w = lastWrite();
+    expect(w.commandConfirmedAt).toBeTypeOf("number");
+    // Approving a command must not silently authorise agent sessions the user was
+    // never asked about.
+    expect(w.launchConfirmedAt).toBeUndefined();
+  });
+
+  it("still asks before a LAUNCH in a flow that has only ever confirmed commands", async () => {
+    // The mirror, so the separation cannot be half-implemented: a flow confirmed
+    // for shell must not thereby be allowed to open a paid session.
+    const { send } = await warmed([cmdFlow({
+      launchConfirmedAt: undefined,
+      commandConfirmedAt: 500,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+    expect(call.slice(2)).toEqual(["Launch", "Disarm"]);
+  });
+
+  it("tells the user, in the launch modal, that a shell command will be asked about separately", async () => {
+    const { send } = await warmed([cmdFlow({
+      launchConfirmedAt: undefined,
+      commandConfirmedAt: undefined,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
+    })]);
+    await send({ type: "deck:refresh" });
+    const message = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(message).toContain("still ask before it runs a shell command");
+  });
+
+  it("does not promise a further question once the command gate is already confirmed", async () => {
+    // The clause has to be true when it is shown: a flow that has already approved
+    // commands will NOT be asked again, and saying otherwise is a false statement in
+    // a consent dialog.
+    const { send } = await warmed([cmdFlow({
+      launchConfirmedAt: undefined,
+      commandConfirmedAt: 500,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
+    })]);
+    await send({ type: "deck:refresh" });
+    const message = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(message).not.toContain("still ask");
+  });
+
+  it("tells the user, in the command modal, that an agent session will be asked about separately", async () => {
+    const { send } = await warmed([cmdFlow({ launchConfirmedAt: undefined, commandConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const message = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(message).toContain("still ask before it starts an agent session");
   });
 
   it("does NOT gate on a command edge it cannot resolve — nothing would be spent", async () => {
     // The same reasoning the launch and seed gates rest on: asking about a rule
     // that can never run would be asking about something that will never happen.
     // The refusal itself is stamped (see the case above); this owns the gate.
-    const { send } = await warmed([withCommandNode({ run: "  " }, { launchConfirmedAt: undefined })]);
+    const { send } = await warmed([withCommandNode({ run: "  " }, { commandConfirmedAt: undefined })]);
     await send({ type: "deck:refresh" });
     expect(window.showWarningMessage).not.toHaveBeenCalled();
     expect(h.exec).not.toHaveBeenCalled();
-    expect(lastWrite().launchConfirmedAt).toBeUndefined();
+    expect(lastWrite().commandConfirmedAt).toBeUndefined();
     expect(lastWrite().edges[0].error).toContain("blank");
   });
 

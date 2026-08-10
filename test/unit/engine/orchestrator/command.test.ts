@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { COMMAND_TIMEOUT_MS, resolveCommand, runCommand } from "../../../../src/engine/orchestrator/command";
+import { COMMAND_KILLED_EXIT_CODE, COMMAND_TIMEOUT_MS, resolveCommand, runCommand } from "../../../../src/engine/orchestrator/command";
 import type { CommandNode } from "../../../../src/engine/orchestrator/model";
 import { LOCK_TTL_MS } from "../../../../src/engine/orchestrator/lock";
 
@@ -49,6 +49,26 @@ describe("resolveCommand", () => {
   it("uses a free-text command as written", () => {
     expect(resolveCommand(node({ run: "npm run deploy:staging" }), COMMANDS, "x"))
       .toEqual({ ok: true, label: "npm run deploy:staging", text: "npm run deploy:staging" });
+  });
+
+  // A free-text node has no human name of its own, so its label exists only to say
+  // WHAT RAN — and the template is not what ran. With the raw `run` as the label,
+  // a `staging` deploy and a `prod` deploy leave byte-identical receipts on the
+  // edge ("ran deploy.sh --env={note}"), and only the output channel knows which
+  // actually happened. The drawer's receipt is this feature's one downstream
+  // reader, so label and text must agree here.
+  it("labels a free-text command with the SUBSTITUTED text, not the template", () => {
+    expect(resolveCommand(node({ run: "deploy.sh --env={note}" }), COMMANDS, "prod"))
+      .toEqual({ ok: true, label: "deploy.sh --env=prod", text: "deploy.sh --env=prod" });
+  });
+
+  // The mirror: a CONFIGURED command keeps its configured label, which is a human
+  // name somebody chose in settings — "Deploy to staging" is the point of
+  // configuring one, and substituting the text there would throw it away.
+  it("keeps a configured command's own label rather than its substituted text", () => {
+    const r = resolveCommand(node({ commandId: "deploy" }), COMMANDS, "prod");
+    expect(r).toMatchObject({ label: "Deploy to staging" });
+    expect((r as { label: string; text: string }).label).not.toBe((r as { text: string }).text);
   });
 
   it("refuses a node naming a command that is not configured", () => {
@@ -120,6 +140,34 @@ describe("runCommand", () => {
     );
     expect(out.ok).toBe(false);
     expect((out as { message: string }).message).toContain("3");
+  });
+
+  // The exit code a runner reports for a command it had to kill. The stamped
+  // `error` is all a user looking at a stalled rule sees — the runner's own reason
+  // line goes to the output channel, which the drawer does not show — so the
+  // deadline has to be in the MESSAGE, not only in the code.
+  it("names the timeout in the message for the killed exit code", async () => {
+    const run = vi.fn().mockResolvedValue({ code: COMMAND_KILLED_EXIT_CODE, stdout: "started…", stderr: "" });
+    const out = await runCommand(
+      { node: node({ commandId: "plain" }), commands: COMMANDS, cwd: "/repo" },
+      { run, log: () => {} },
+    );
+    expect(out.ok).toBe(false);
+    const message = (out as { message: string }).message;
+    expect(message).toContain(String(COMMAND_KILLED_EXIT_CODE));
+    expect(message).toContain(String(COMMAND_TIMEOUT_MS));
+    expect(message).toContain("killed");
+  });
+
+  it("says nothing about a timeout for an ordinary non-zero exit", async () => {
+    // The kill sentence must not leak onto every failure: a script that exits 1 was
+    // not killed, and telling the user it missed a deadline would be a fabrication.
+    const run = vi.fn().mockResolvedValue({ code: 1, stdout: "", stderr: "boom" });
+    const out = await runCommand(
+      { node: node({ commandId: "plain" }), commands: COMMANDS, cwd: "/repo" },
+      { run, log: () => {} },
+    );
+    expect((out as { message: string }).message).not.toContain("killed");
   });
 
   // The caller is a poll loop inside the Deck's own refresh. An exception here

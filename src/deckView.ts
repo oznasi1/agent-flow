@@ -15,7 +15,7 @@ import { unfirableRules } from "./engine/orchestrator/armability";
 import { ActOutcome, applyFired, notifyLines } from "./engine/orchestrator/runner";
 import { promoteToPlace } from "./engine/orchestrator/promote";
 import { LaunchTicketDetail, launchPlanned } from "./engine/orchestrator/launch";
-import { CommandRunner, resolveCommand, runCommand } from "./engine/orchestrator/command";
+import { COMMAND_KILLED_EXIT_CODE, CommandRunner, resolveCommand, runCommand } from "./engine/orchestrator/command";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
@@ -83,12 +83,6 @@ function nextPlannedNodeId(flow: Flow): string {
  * an exit code below. */
 const COMMAND_MAX_OUTPUT_BYTES = 1024 * 1024;
 
-/** The exit code reported for a command the runner had to KILL rather than one that
- * chose its own code — `timeout(1)`'s convention, so it reads as what it is to
- * anyone who has met a CI timeout. A command is free to exit 124 by itself, which
- * is why the runner also writes the reason into `stderr`: the code is the summary,
- * the stderr line is the evidence. */
-const COMMAND_KILLED_EXIT_CODE = 124;
 
 /** The one place a flow's command actually reaches a shell, and the only place in
  * this feature that holds a process handle.
@@ -138,8 +132,10 @@ export const shellCommandRunner: CommandRunner = (command, opts) =>
         // anything, so the message is the only evidence there is.
         if (typeof err.code === "string") return resolve({ code: 1, stdout, stderr: withReason(stderr, err.message) });
         // No code at all and a signal: this is the timeout kill above (or a kill
-        // from outside). Say which, and say it happened rather than letting a
-        // 124 stand alone and read like the command's own choice.
+        // from outside). Reported as `COMMAND_KILLED_EXIT_CODE`, which `command.ts`
+        // owns precisely so it can turn it into a receipt that names the deadline —
+        // the reason line below reaches the output channel, but the edge's `error`
+        // is built from the code.
         if (err.killed || err.signal) {
           return resolve({
             code: COMMAND_KILLED_EXIT_CODE,
@@ -177,14 +173,30 @@ type SpendTarget =
   | { action: "seed"; node: PlaceNode; mode?: string; note?: string }
   | { action: "run"; node: CommandNode; text: string; label: string; note?: string };
 
-/** How much of a rule's note — or of a command's resolved text, which has exactly
- * the same "the user pasted a paragraph" problem — the once-per-flow confirmation
- * shows. The modal is naming what the agent will be told (or what will be
- * executed), not reproducing it in full: neither may grow the dialog unboundedly. */
+/** How much of a rule's note the once-per-flow confirmation shows. The modal is
+ * naming what the agent will be told, not reproducing it in full — a pasted
+ * paragraph must not grow the dialog unboundedly. Prose survives elision: the first
+ * 160 characters of a note tell you what it is about. */
 const NOTE_PREVIEW_MAX = 160;
 
 function notePreview(note: string): string {
   return note.length > NOTE_PREVIEW_MAX ? note.slice(0, NOTE_PREVIEW_MAX) + "…" : note;
+}
+
+/** How much of a COMMAND the confirmation shows, and it is deliberately not
+ * `NOTE_PREVIEW_MAX`. A shell command is not prose: the operative part is very
+ * often at the END (`&& deploy.sh`, `| sh`, `; rm -rf ~`), and a rule's note is
+ * spliced in unquoted, so head-only truncation can hide the exact fragment the user
+ * most needs to see behind an "…". This modal is the only place that fragment is
+ * ever shown, so the cap is far larger AND the tail is always kept. */
+const COMMAND_PREVIEW_MAX = 600;
+/** How much of the tail survives elision. Enough for the trailing clause of a
+ * pipeline, not so much that head and tail meet in the middle. */
+const COMMAND_PREVIEW_TAIL = 200;
+
+function commandPreview(text: string): string {
+  if (text.length <= COMMAND_PREVIEW_MAX) return text;
+  return `${text.slice(0, COMMAND_PREVIEW_MAX - COMMAND_PREVIEW_TAIL)}…${text.slice(-COMMAND_PREVIEW_TAIL)}`;
 }
 
 /** One acting edge, decided. `promote` turns a launched planned node into the place
@@ -633,15 +645,25 @@ export class DeckPanel {
         // at all. Only a launch or seed we would actually attempt counts — an edge
         // pointing at the wrong kind of node spends nothing and is stamped as an
         // error below, so gating on it would ask about a rule that can never run.
-        const wantsSpend = firing
-          .filter((f) => f.perform)
-          .map((f) => this.spendTarget(fresh, f.edge, f.action))
-          .find((t) => t !== undefined);
-        if (wantsSpend !== undefined && fresh.launchConfirmedAt === undefined) {
+        //
+        // TWO gates, not one — see `Flow.commandConfirmedAt`. A launch and a seed
+        // share `launchConfirmedAt` (both open an agent session); a `run` has its
+        // own, because consent to open a session is not consent to execute shell,
+        // and every flow an existing user confirmed before commands existed carries
+        // only the first. So the question is not "has this flow ever been confirmed"
+        // but "is THIS spend confirmed", which is what `unconfirmedSpend` answers.
+        const wantsSpend = this.unconfirmedSpend(fresh, firing);
+        if (wantsSpend !== undefined) {
           // Recorded, not asked — the caller asks once the lock is released. Whatever
           // the answer, THIS pass performs nothing: an approval only lets the next pass
           // act, which keeps the acting path identical whether or not a question was
           // ever asked.
+          //
+          // One question per pass, even when a flow has an unconfirmed launch AND an
+          // unconfirmed command: the second is asked on a later pass, once the first
+          // is answered. A pass that asked performs nothing anyway, so nothing is
+          // delayed by more than a poll — and two modals stacked from one pass would
+          // be a worse way to meet a flow.
           asks.push({ flow: fresh, target: wantsSpend });
           continue;
         }
@@ -857,8 +879,8 @@ export class DeckPanel {
    * once-per-flow ask never fires for a flow whose only acting rule is a command,
    * and the first shell command runs on the user's machine unattended with no
    * prompt ever having been shown — which `package.json`'s own `agentFlow.commands`
-   * copy ("a flow asks once before it runs its first command") already promises it
-   * does not. Do not collapse this arm back into a `return undefined`.
+   * copy ("a flow asks before its FIRST command") already promises it does not. Do
+   * not collapse this arm back into a `return undefined`.
    *
    * A command that will not resolve returns `undefined` for exactly the reason a
    * wrong-kinded target does: `performEdge` stamps such a rule as an error below
@@ -889,6 +911,29 @@ export class DeckPanel {
     return node ? { action: "seed", node, mode: edge.mode, note: edge.note } : undefined;
   }
 
+  /** Which stored approval authorises this target, or `undefined` when the user has
+   * never given it. `run` reads `commandConfirmedAt`; `launch` and `seed` share
+   * `launchConfirmedAt` — they spend the same way (an agent session opens) and the
+   * modal for either says so. The ONE place this mapping lives: the gate check, the
+   * write in `askFirstSpend`, and the "will still ask" clause in its wording all go
+   * through it, so a fourth action cannot be added as "already confirmed" by
+   * whichever of the three someone forgot. */
+  private confirmedAt(flow: Flow, target: SpendTarget): number | undefined {
+    return target.action === "run" ? flow.commandConfirmedAt : flow.launchConfirmedAt;
+  }
+
+  /** The first spend in this pass that the user has not yet approved FOR ITS OWN
+   * GATE, or `undefined` when every spend the pass would attempt is already
+   * covered. An edge that can spend nothing (`spendTarget` → `undefined`) is not a
+   * spend at all and cannot gate: it is stamped as an error instead, so asking
+   * about it would ask about a rule that can never run. */
+  private unconfirmedSpend(flow: Flow, firing: { perform: boolean; edge: FlowEdge; action: FlowAction | undefined }[]): SpendTarget | undefined {
+    return firing
+      .filter((f) => f.perform)
+      .map((f) => this.spendTarget(flow, f.edge, f.action))
+      .find((t): t is SpendTarget => t !== undefined && this.confirmedAt(flow, t) === undefined);
+  }
+
   /** Ask, once per flow, before it ever spends anything — naming what will actually
    * happen, because that is what the money is spent on: a launch names the ticket
    * and the repos it would open, a seed names the place (it has no ticket to name),
@@ -897,12 +942,14 @@ export class DeckPanel {
    * that asked never acts. Dismissing it writes nothing at all, so the flow stays
    * armed and is asked again later.
    *
-   * The gate is once per FLOW and shared by all three verbs, so a flow already
-   * approved for a launch runs a command later with no fresh prompt. That is the
-   * design — a mis-wired flow should cost one prompt, not a string of paid
-   * sessions — but it is also why the wording below has to be right for whichever
-   * spend happens to come FIRST: for a flow whose first spend is a command, this
-   * modal is the only place the user ever sees what will be executed. */
+   * Each answer approves ONE KIND of spend for this flow, not the flow as a whole:
+   * `Launch`/`Seed` writes `launchConfirmedAt`, `Run` writes `commandConfirmedAt`
+   * (see `confirmedAt`). So each branch's closing sentence has to say what it is
+   * actually authorising, and — while it is still true — that the other kind will
+   * be asked about separately. A flow with an approved launch and no command
+   * approval is exactly the state every flow an existing user armed before commands
+   * shipped is in, and telling that user "it will keep launching on its own" was
+   * never consent to run `deploy.sh`. */
   private async askFirstSpend(flow: Flow, target: SpendTarget): Promise<void> {
     const cfg = getConfig();
     const ACT = target.action === "launch" ? "Launch" : target.action === "run" ? "Run" : "Seed";
@@ -916,29 +963,36 @@ export class DeckPanel {
     // silently drop it — that would be this consent gate misrepresenting what it
     // is asking the user to approve.
     const noteClause = hasNote(target.note) ? ` and the note "${notePreview(target.note)}"` : "";
+    // What this answer does NOT authorise, stated only while it is still true: a
+    // flow that has already confirmed the OTHER kind must not be promised a
+    // question it will never be asked. Both halves read off `confirmedAt`, so the
+    // sentence and the gate cannot drift apart.
+    const alsoAsks = target.action === "run"
+      ? (flow.launchConfirmedAt === undefined ? " It will still ask before it starts an agent session." : "")
+      : (flow.commandConfirmedAt === undefined ? " It will still ask before it runs a shell command." : "");
     const message = target.action === "launch"
       ? (() => {
           const mode = cfg.promptModes.find((m) => m.id === target.node.mode);
           return `${flow.name} is ready to launch ${target.node.ticketKey} in ${target.node.repos.join(", ")} with the "${
             mode?.label ?? target.node.mode
-          }" prompt${noteClause}, unattended. It will keep launching on its own from now on.`;
+          }" prompt${noteClause}, unattended. It will keep launching and seeding on its own from now on.${alsoAsks}`;
         })()
       : target.action === "run"
       ? // The resolved TEXT, not `target.label`: a configured command's label can
         // be anything ("Deploy"), and approving "Deploy" is not approving
-        // `deploy.sh --env=prod`. Truncated through the same `notePreview` the
-        // note clause uses — a pasted one-liner must not grow the dialog
-        // unboundedly either. No `noteClause`: the note is already inside `text`
-        // wherever the template asked for it (see `SpendTarget`), so repeating it
-        // as its own clause would suggest a second thing was about to be sent
-        // somewhere. No prompt mode either — nothing here reads a prompt.
-        `${flow.name} is ready to run "${notePreview(target.text)}" on this machine, unattended. ` +
-          `It will keep running commands on its own from now on.`
+        // `deploy.sh --env=prod`. Truncated through `commandPreview`, NOT
+        // `notePreview` — see that function for why a command needs its tail kept.
+        // No `noteClause`: the note is already inside `text` wherever the template
+        // asked for it (see `SpendTarget`), so repeating it as its own clause would
+        // suggest a second thing was about to be sent somewhere. No prompt mode
+        // either — nothing here reads a prompt.
+        `${flow.name} is ready to run "${commandPreview(target.text)}" on this machine, unattended. ` +
+          `It will keep running commands on its own from now on.${alsoAsks}`
       : (() => {
           const mode = cfg.promptModes.find((m) => m.id === target.mode);
           return `${flow.name} is ready to seed another agent into ${target.node.repo} with the "${
             mode?.label ?? target.mode ?? "default"
-          }" prompt${noteClause}, unattended. It will keep seeding on its own from now on.`;
+          }" prompt${noteClause}, unattended. It will keep seeding and launching on its own from now on.${alsoAsks}`;
         })();
     const answer = await vscode.window.showWarningMessage(message, { modal: true }, ACT, DISARM);
     // Re-read, and this is the ONLY thing standing between two windows here: the caller
@@ -949,8 +1003,15 @@ export class DeckPanel {
     // touched, never an edge stamp.
     const latest = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
     if (!latest) return;
-    if (answer === ACT) writeFlow(this.flowIo, this.flowsDir, { ...latest, launchConfirmedAt: Date.now() });
-    else if (answer === DISARM) writeFlow(this.flowIo, this.flowsDir, { ...latest, armed: false });
+    // The approval lands on the gate this question was ASKED about, never on both:
+    // writing `launchConfirmedAt` here for a command would silently authorise agent
+    // sessions the user was never asked about, and vice versa.
+    if (answer === ACT) {
+      const stamp = target.action === "run"
+        ? { commandConfirmedAt: Date.now() }
+        : { launchConfirmedAt: Date.now() };
+      writeFlow(this.flowIo, this.flowsDir, { ...latest, ...stamp });
+    } else if (answer === DISARM) writeFlow(this.flowIo, this.flowsDir, { ...latest, armed: false });
   }
 
   /** The configured PromptMode for an id, or a `done` refusal naming what will not
@@ -2166,7 +2227,7 @@ export class DeckPanel {
         const mine = new Map(existing.edges.map((e) => [e.id, e]));
         writeFlow(this.flowIo, this.flowsDir, {
           ...m.flow,
-          // The host owns four FLOW-level fields too, and a graph save has no
+          // The host owns five FLOW-level fields too, and a graph save has no
           // business carrying any of them. `armed` is written only by `flow:arm`
           // and `flow:resumeDisarm`: a save built from a `flow` prop captured
           // before a `deck:flows` post lands holds a stale value, so pressing
@@ -2174,13 +2235,14 @@ export class DeckPanel {
           // RE-ARM the flow with the resume gate already cleared — armed, and free
           // to fire immediately. `name` belongs to `flow:rename`, and `createdAt`
           // is the sort key: neither is the drawer's to overwrite on a node drag.
-          // `launchConfirmedAt` is written by `askFirstSpend`'s answer, once per
-          // flow — a stale save dropping it would silently un-ask a question the
-          // user already answered.
+          // `launchConfirmedAt` and `commandConfirmedAt` are written by
+          // `askFirstSpend`'s answer, once per flow per KIND of spend — a stale save
+          // dropping either would silently un-ask a question the user already
           name: existing.name,
           armed: existing.armed,
           createdAt: existing.createdAt,
           launchConfirmedAt: existing.launchConfirmedAt,
+          commandConfirmedAt: existing.commandConfirmedAt,
           edges: m.flow.edges.map((e) => {
             const host = mine.get(e.id);
             if (!host) return e;

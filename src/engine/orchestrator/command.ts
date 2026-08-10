@@ -17,6 +17,18 @@ import type { FlowCommand } from "../../types";
  * cannot drift silently. */
 export const COMMAND_TIMEOUT_MS = 120_000;
 
+/** The exit code a `CommandRunner` MUST report for a command it had to KILL rather
+ * than one that chose its own code — `timeout(1)`'s convention, so it reads as what
+ * it is to anyone who has met a CI timeout.
+ *
+ * Part of the runner contract, not one runner's private detail, and that is why it
+ * lives here: `runCommand` below turns this code into the sentence the drawer's
+ * receipt shows, so the two cannot be defined in separate files and drift. A command
+ * that genuinely exits 124 by itself is described the same way, which is why the
+ * message names what the code MEANS here rather than asserting which of the two
+ * happened — the output channel has the runner's own reason line. */
+export const COMMAND_KILLED_EXIT_CODE = 124;
+
 /** Spawns `command` in `opts.cwd` and resolves with its exit code and captured
  * stdout/stderr. `opts.timeoutMs` is a CONTRACT, not a hint: the runner MUST
  * enforce it itself — kill the child at (or shortly after) that many
@@ -138,7 +150,17 @@ export function resolveCommand(
   }
 
   if (isUsableText(node.run)) {
-    return { ok: true, label: node.run, text: withNote(node.run, note ?? "") };
+    // The label is the SUBSTITUTED text, not the template. A free-text node has no
+    // human name of its own, so its label is only ever used to say what ran — and
+    // `deploy.sh --env={note}` is not what ran. The drawer's receipt is the one
+    // downstream reader of this ("ran <label> in <repo>"), and with the template
+    // there, a `staging` deploy and a `prod` deploy leave byte-identical receipts:
+    // only the output channel would know which happened. A configured command keeps
+    // its configured `label` instead — that one IS a human name, chosen by whoever
+    // wrote the setting, and the drawer showing "Deploy staging" is the point of
+    // configuring it.
+    const text = withNote(node.run, note ?? "");
+    return { ok: true, label: text, text };
   }
 
   if (node.run !== undefined) {
@@ -180,6 +202,21 @@ export async function runCommand(
 
     if (code === 0) {
       return { ok: true, code: 0, label: resolved.label, output };
+    }
+    // A killed command says so IN THE MESSAGE, because the message is what gets
+    // stamped on the edge as `error` and shown in the drawer. The runner writes its
+    // reason to stderr, which reaches the output channel — but a user looking at a
+    // stalled rule sees only this sentence, and "exited with code 124" alone tells
+    // them nothing about a deadline they never chose.
+    if (code === COMMAND_KILLED_EXIT_CODE) {
+      return {
+        ok: false,
+        message:
+          `"${resolved.label}" exited with code ${code} — the code reported for a command killed after ` +
+          `${COMMAND_TIMEOUT_MS} ms without finishing.`,
+        label: resolved.label,
+        output,
+      };
     }
     return { ok: false, message: `"${resolved.label}" exited with code ${code}.`, label: resolved.label, output };
   } catch (e) {
