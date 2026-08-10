@@ -434,7 +434,11 @@ function readEnvironments(c: vscode.WorkspaceConfiguration): string[] {
  * rather than rendering a blank row. */
 function readCommands(c: vscode.WorkspaceConfiguration): FlowCommand[] {
   const raw = c.get<unknown[]>("commands");
-  if (!Array.isArray(raw)) return [];
+  // Spread from DEFAULT_COMMANDS, not a bare `[]` literal — same wiring
+  // readEnvironments gives DEFAULT_ENVIRONMENTS, so the exported constant is
+  // what a missing setting actually resolves to, not a decorative export a
+  // mutation to could change with nothing here noticing.
+  if (!Array.isArray(raw)) return [...DEFAULT_COMMANDS];
   const out: FlowCommand[] = [];
   const seen = new Set<string>();
   for (const v of raw) {

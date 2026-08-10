@@ -467,6 +467,61 @@ describe("getConfig — commands", () => {
     setConfig({ commands: [{ id: "deploy", run: "true" }] });
     expect(getConfig().commands[0].label).toBe("deploy");
   });
+
+  it("falls back to the id when the label is whitespace-only, not just when it's absent", () => {
+    setConfig({ commands: [{ id: "deploy", label: "   ", run: "true" }] });
+    expect(getConfig().commands[0].label).toBe("deploy");
+  });
+
+  // A plain object, not a string: readCommands' inner filter drops anything
+  // that isn't itself an object (`typeof v !== "object"`), so a STRING here
+  // would silently pass — each character skipped by that filter, landing on
+  // `[]` by accident regardless of whether the array guard ran at all. An
+  // object is not iterable, so weakening `!Array.isArray(raw)` to `raw ==
+  // null` reaches a `for...of` that throws, which is what actually pins the
+  // guard.
+  it("returns an empty list when the setting is not an array", () => {
+    setConfig({ commands: { id: "deploy", run: "true" } });
+    expect(getConfig().commands).toEqual([]);
+  });
+
+  it("drops a duplicate id, keeping the first entry", () => {
+    setConfig({ commands: [
+      { id: "deploy", label: "First", run: "one" },
+      { id: "deploy", label: "Second", run: "two" },
+    ] });
+    expect(getConfig().commands).toEqual([{ id: "deploy", label: "First", run: "one" }]);
+  });
+
+  it("drops a non-object entry, keeping the usable ones around it", () => {
+    setConfig({ commands: [null, 42, "nope", { id: "deploy", run: "true" }] });
+    expect(getConfig().commands).toEqual([{ id: "deploy", label: "deploy", run: "true" }]);
+  });
+
+  // A plain null/number/string entry is ALSO caught by the id/run check below
+  // it (none of those has an `.id`), so the test above alone does not pin
+  // `typeof v !== "object"` — removing just that clause still passes it. A
+  // function is the one non-object JS value that can carry real properties,
+  // so it is what actually exercises this guard on its own: id/run cannot
+  // reach this code from real JSON (`agentFlow.commands` is parsed from
+  // settings.json), but the reader's own parameter type is `unknown[]`, and
+  // this is the shape that makes the type check load-bearing rather than
+  // dead code shadowed by the id/run guard.
+  it("drops a non-object entry even when it carries id/run-shaped properties of its own", () => {
+    const sneaky = Object.assign(() => {}, { id: "sneaky", run: "true" });
+    setConfig({ commands: [sneaky, { id: "deploy", run: "true" }] });
+    expect(getConfig().commands).toEqual([{ id: "deploy", label: "deploy", run: "true" }]);
+  });
+
+  it("drops an entry whose run is whitespace-only", () => {
+    setConfig({ commands: [{ id: "deploy", run: "   " }] });
+    expect(getConfig().commands).toEqual([]);
+  });
+
+  it("drops an entry whose id is whitespace-only", () => {
+    setConfig({ commands: [{ id: "   ", run: "true" }] });
+    expect(getConfig().commands).toEqual([]);
+  });
 });
 
 describe("getConfig — filter visibility", () => {
