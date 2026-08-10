@@ -665,7 +665,19 @@ export class DeckPanel {
     let stale = 0;
     for (const [i, run] of all.entries()) {
       const ticket = tickets[i];
-      const stored = this.prFacts ? readPrEntries(defaultPrFactsDir(), run.key) : {};
+      // A notepad run owns no pull request. Its repos are wherever the note was
+      // launched from — routinely the window that was already open, on whatever
+      // branch was already checked out — so a PR found on that branch belongs to
+      // that branch's own work, not to a line you jotted into the notepad. This is
+      // the defect `prEligible` fixed one level up, in the one shape a branch test
+      // cannot catch: there the run sat on `master`, here it sits on a stranger's
+      // feature branch, indistinguishable from ours. So a notepad run is treated as
+      // structurally PR-less, exactly like a review run (see `sweepReviewRuns`) —
+      // nothing is fetched for it, nothing already on disk is read back for it, and
+      // its card renders no pr / ci / review row and never lands in Done off a
+      // merge that was never its own.
+      const prLess = runKind(run) === "notepad";
+      const stored = this.prFacts && !prLess ? readPrEntries(defaultPrFactsDir(), run.key) : {};
       // A repo on its default branch is filtered out here as well as below, so a
       // stale entry written before this rule existed stays inert on disk rather
       // than rendering as this run's pull request. This also drops entries for
@@ -677,7 +689,7 @@ export class DeckPanel {
       const prs: PrEntryMap = Object.fromEntries(
         run.repos.filter((r) => stored[r.name] && prEligible(r)).map((r) => [r.name, stored[r.name]]),
       );
-      if (ghReady) {
+      if (ghReady && !prLess) {
         const ttlMs = getConfig().prFactsTtlSeconds * 1000;
         for (const repo of run.repos) {
           if (prEligible(repo) && isStale(prs[repo.name], ttlMs, now)) {
