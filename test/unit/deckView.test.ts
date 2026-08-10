@@ -5479,6 +5479,26 @@ describe("a met run rule acts", () => {
     expect(window.showErrorMessage).not.toHaveBeenCalled();
   });
 
+  it("stamps a rule pointing at an unknown node kind with what is wrong, not with 'undefined'", async () => {
+    // End to end for the arm `applyFired` now owns: `validNode` admits an unknown
+    // kind on purpose (a newer build's flow must still render), nothing derives a
+    // verb for it, the dispatch performs nothing — and the stamp used to read
+    // "undefined was not performed", while the sentence written for this case sat
+    // unreachable in `performEdge`.
+    const { send } = await warmed([cmdFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n2", kind: "webhook", x: 0, y: 0, join: "any" } as unknown as FlowNode,
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+    const e = lastWrite().edges[0];
+    expect(e.error).toBe("this rule points at n2, which is not a place, planned work, a notification, or a command.");
+    expect(e.error).not.toContain("undefined");
+    expect(e.firedAt).toBeUndefined();
+  });
+
   it("runs a CONFIGURED command's text, never its label", async () => {
     h.commands = [{ id: "deploy", label: "Deploy staging", run: "make deploy ENV=staging" }];
     const { send } = await warmed([withCommandNode({ commandId: "deploy" })]);

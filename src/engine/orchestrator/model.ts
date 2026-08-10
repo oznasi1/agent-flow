@@ -251,8 +251,14 @@ export function isSettled(e: FlowEdge): boolean {
  * derivable action cannot spend anything, the same as an edge with a known
  * non-spending one. Accepting the optional type here, rather than making
  * every caller check `e.action !== undefined` first, is what keeps this the
- * ONE place the question is answered. */
-export function isSpendAction(action: FlowAction | undefined): boolean {
+ * ONE place the question is answered.
+ *
+ * A type PREDICATE rather than a bare boolean, so the guard that decides whether
+ * to spend also narrows the verb for the code that then spends it:
+ * `deckView.ts`'s dispatch hands `performEdge` an action this has already
+ * admitted, and `performEdge` therefore has no `undefined` case to write a
+ * refusal for that nothing could reach (it had one, and it was dead). */
+export function isSpendAction(action: FlowAction | undefined): action is Exclude<FlowAction, "notify"> {
   return action === "launch" || action === "seed" || action === "run";
 }
 

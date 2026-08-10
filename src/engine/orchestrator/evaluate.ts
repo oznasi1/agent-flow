@@ -94,18 +94,21 @@ export interface FiredEdge {
    * `performEdge` all read THIS field — it is passed to them as a parameter, so
    * they cannot re-derive a different verb than the one stamped for the pass.
    * The only edit that can change an action is a change to the TARGET NODE's
-   * kind, and for the two verbs that SPEND — `launch` and `seed` — one whose
+   * kind, and for every verb that SPENDS — `launch`, `seed` and `run` — one whose
    * target changed kind under the pass resolves to no target and is refused with
-   * an `error` and no `firedAt`. That is the whole safety argument: the carried
-   * value being evaluation's vintage cannot cost money.
+   * an `error` and no `firedAt`. `performRun` refuses in exactly the same shape
+   * `performEdge`/`performSeed` do (`commandTarget` answering nothing), which is
+   * what made this paragraph true for `run` as well from Task 6 onwards; an
+   * earlier version of this comment still said `run` had "nothing performing it
+   * yet" and settled through `applyFired`'s fail-closed arm. That is the whole
+   * safety argument: the carried value being evaluation's vintage cannot cost
+   * money.
    *
-   * It is scoped to those two on purpose. The non-spending verbs settle
-   * differently, and neither is a hole: a carried `notify` never reaches
-   * `performEdge` at all (the dispatch guards on `isSpendAction`) and is stamped
-   * `firedAt` plus a receipt — the generic "told you" when the target is no
-   * longer a notify node, which `deckView.test.ts`'s "stands by a notify
-   * decision" case pins — and a carried `run` has nothing performing it yet, so
-   * `applyFired`'s fail-closed arm stamps it as an unperformed action. */
+   * The one non-spending verb settles differently and is not a hole either: a
+   * carried `notify` never reaches `performEdge` at all (the dispatch guards on
+   * `isSpendAction`) and is stamped `firedAt` plus a receipt — the generic
+   * "told you" when the target is no longer a notify node, which
+   * `deckView.test.ts`'s "stands by a notify decision" case pins. */
   action: FlowAction | undefined;
 }
 

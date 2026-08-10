@@ -225,6 +225,36 @@ describe("applyFired", () => {
     expect(out.edges[0].performed).toBe(true);
   });
 
+  it("says what is wrong with the GRAPH for an edge whose action could not be derived", () => {
+    // Reachable: `store.ts`'s `validNode` admits an unknown node kind on purpose so
+    // a flow written by a newer build still renders, `actionFor` derives nothing for
+    // it, and `evaluateFlow` still fires the edge. This arm used to fall in with the
+    // acting ones and stamp the literal string "undefined was not performed", while
+    // the sentence written for exactly this case sat unreachable in `performEdge`
+    // (the dispatch there only ever calls it for a spending verb).
+    const unknown = { id: "z", kind: "webhook", x: 0, y: 0, join: "any" } as unknown as FlowNode;
+    const flow = flowWith([place("a", "ASM-1"), unknown], [edge("e1", "a", "z")]);
+    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: undefined }], NOW);
+    expect(out.edges[0].error).toBe(
+      "this rule points at z, which is not a place, planned work, a notification, or a command.",
+    );
+    expect(out.edges[0].error).not.toContain("undefined");
+    // Settled, but never as a success: the drawer surfaces it and offers Reset.
+    expect(out.edges[0].firedAt).toBeUndefined();
+    expect(out.edges[0].performed).toBe(true);
+  });
+
+  it("does not claim a derivable-action rule was told to anybody", () => {
+    // The same edge, `perform: false` — a sibling that did nothing. It closes with
+    // the junction's own note rather than the refusal above, which is about an
+    // action that was attempted.
+    const unknown = { id: "z", kind: "webhook", x: 0, y: 0, join: "any" } as unknown as FlowNode;
+    const flow = flowWith([place("a", "ASM-1"), unknown], [edge("e1", "a", "z")]);
+    const out = applyFired(flow, [{ edge: flow.edges[0], perform: false, action: undefined }], NOW);
+    expect(out.edges[0].error).toBeUndefined();
+    expect(out.edges[0].firedNote).toBe("another edge into this target already acted");
+  });
+
   it("stamps a NON-performed non-notify edge as fired, not errored — it did nothing, and its junction closed", () => {
     // The distinction the error must not swallow: a perform:false sibling never
     // attempted its action, so there is nothing to have failed. Recording an error

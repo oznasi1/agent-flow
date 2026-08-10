@@ -2,7 +2,7 @@
 // to show. Pure and total, so both decisions are testable from fixtures without a
 // panel, a filesystem or a clock — the panel does the I/O.
 import { FiredEdge } from "./evaluate";
-import { Flow, findNode } from "./model";
+import { Flow, findNode, isSpendAction } from "./model";
 
 /** What actually happened when the caller performed one acting edge. Only the
  * caller can know — a `launch` either opened a window or explained why it did not —
@@ -24,9 +24,9 @@ export type ActOutcome =
  *
  * A PERFORMED edge whose CARRIED action — `hit.action`, decided once at
  * evaluation, not necessarily `flow`'s own current copy of it (see the branch
- * below) — is not `notify` — a `launch` or a `seed` — is stamped from
- * `outcomes`, keyed by edge id. A success takes `firedAt` and the caller's
- * note; a failure takes `error`
+ * below) — is one the caller was asked to perform (`isSpendAction`: a `launch`, a
+ * `seed` or a `run`) is stamped from `outcomes`, keyed by edge id. A success takes
+ * `firedAt` and the caller's note; a failure takes `error`
  * and NO `firedAt`, and the difference matters in three ways:
  *  - `isSettled` counts `error`, so it still cannot re-fire in a loop;
  *  - the drawer surfaces an errored edge and offers Reset for it, so it is not a
@@ -38,7 +38,11 @@ export type ActOutcome =
  * success stamp for an action that may never have happened.
  *
  * A `perform: false` non-notify edge is NOT an error: it genuinely did nothing,
- * and its junction genuinely closed. */
+ * and its junction genuinely closed.
+ *
+ * A performed edge whose carried action is `undefined` — no verb could be derived,
+ * because its target is missing or of a kind this build does not know — is
+ * stamped with an `error` naming THAT, not with a verb it does not have. */
 export function applyFired(
   flow: Flow, fired: FiredEdge[], nowMs: number, outcomes?: ReadonlyMap<string, ActOutcome>,
 ): Flow {
@@ -75,7 +79,35 @@ export function applyFired(
       // because "was this the one that ran" and "did it succeed" are two
       // different questions; `commandSucceeded` (evaluate.ts) asks them in
       // that order.
-      if (hit.perform && hit.action !== "notify") {
+      //
+      // An UNDEFINED carried action is answered first, and with a sentence about
+      // the graph rather than about the verb: evaluation could not derive one at
+      // all, because the target is missing or of a kind this build does not know
+      // (`validNode` admits an unknown kind on purpose so a newer build's flow
+      // still renders). This arm used to fall in with the acting ones and stamp
+      // the literal `"undefined was not performed"`, while the carefully worded
+      // refusal for the same case in `performEdge` (deckView.ts) was DEAD — the
+      // dispatch there only calls it for a spending verb, which `undefined` is
+      // not. The sentence lives here now, where the case is actually reachable.
+      if (hit.perform && hit.action === undefined) {
+        return {
+          ...e,
+          error: `this rule points at ${e.to}, which is not a place, planned work, a notification, or a command.`,
+          performed: true,
+        };
+      }
+      // `isSpendAction`, not a local `!== "notify"`: `model.ts` promises ONE
+      // allowlist for "does this spend", written that way so a NEW action defaults
+      // to non-spending until someone deliberately adds it — and re-answering the
+      // same question here as a negation is exactly how the two drift.
+      //
+      // It is also the RIGHT predicate for this arm, not merely the shared one:
+      // `deckView.ts`'s dispatch calls `performEdge` for `isSpendAction(f.action)`
+      // and nothing else, so "the caller was asked to perform this and owes an
+      // outcome" IS that allowlist, by construction. A fifth, non-spending verb is
+      // never dispatched, so demanding an outcome from it would latch a rule
+      // nothing was ever asked to perform.
+      if (hit.perform && isSpendAction(hit.action)) {
         const outcome = outcomes?.get(e.id);
         if (!outcome) return { ...e, error: `${hit.action} was not performed`, performed: true };
         if (!outcome.ok) return { ...e, error: outcome.error, performed: true };
@@ -95,9 +127,18 @@ export function applyFired(
   };
 }
 
-/** Only ever asked of a performed `notify` edge — the caller above routes every
- * other action through its outcome instead, so there is no acting arm here. */
+/** The receipt for a performed edge the caller reported no outcome for — which,
+ * today, is only ever a `notify`: every SPENDING verb goes through `outcomes`
+ * above, and an undefined action is refused before this is reached.
+ *
+ * "told you" is keyed on the carried ACTION, not on the target's current kind: a
+ * pass that decided `notify` and then found the node changed under it still
+ * stands by that decision (pinned by `deckView.test.ts`'s "stands by a notify
+ * decision"). A future NON-SPENDING verb would reach here too, and it must not
+ * inherit that sentence — nothing here notified anybody — so it gets the drawer's
+ * own neutral default instead of a claim about what happened. */
 function performedNote(flow: Flow, hit: FiredEdge): string {
+  if (hit.action !== "notify") return "fired";
   const target = findNode(flow, hit.edge.to);
   return target && target.kind === "notify" ? `told you: ${target.message}` : "told you";
 }

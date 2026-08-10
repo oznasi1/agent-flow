@@ -1121,23 +1121,20 @@ export class DeckPanel {
    * verb `evaluateFlow` derived for this pass and `applyFired` will stamp against,
    * and re-deriving it here from `flow` — or reading `edge.action`, the record's
    * backward-compatibility mirror — is exactly how this function could come to
-   * perform one verb while the stamp claimed another. */
+   * perform one verb while the stamp claimed another.
+   *
+   * It is typed as a SPENDING verb, not `FlowAction | undefined`, because that is
+   * all the dispatch above ever hands it (`isSpendAction`, now a type predicate,
+   * is what narrows it there). This used to accept `undefined` and open with a
+   * carefully worded refusal for it — an arm nothing could reach, whose comment
+   * claimed to cover the unknown-target case. `applyFired` (runner.ts) is where
+   * that case is actually decided, and it says that sentence now. */
   private async performEdge(
     flow: Flow,
     edge: FlowEdge,
     statuses: RunStatus[],
-    action: FlowAction | undefined,
+    action: Exclude<FlowAction, "notify">,
   ): Promise<EdgeResult> {
-    // An action the target does not imply cannot be performed. Reached when the
-    // target is missing or of a kind this build does not know — the same
-    // situation `evaluate.ts` reports as "gone", stamped here so the rule
-    // settles instead of being re-evaluated every poll forever.
-    if (action === undefined) {
-      return {
-        kind: "done",
-        outcome: { ok: false, error: `this rule points at ${edge.to}, which is not a place, planned work, a notification, or a command.` },
-      };
-    }
     if (action === "seed") return this.performSeed(flow, edge, statuses);
     if (action === "run") return this.performRun(flow, edge, statuses);
     const node = this.plannedTarget(flow, edge);
