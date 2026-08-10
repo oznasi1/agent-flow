@@ -11,7 +11,7 @@ import type { Flow } from "../../src/engine/orchestrator/model";
 import { readFlows, writeFlow } from "../../src/engine/orchestrator/store";
 import { edgeAction } from "../../src/engine/orchestrator/model";
 import { branchCiKey } from "../../src/engine/orchestrator/branchCi";
-import { COMMAND_FREE_TEXT } from "../../src/webview/orchestratorRule";
+import { ACTION_LABEL, COMMAND_FREE_TEXT } from "../../src/webview/orchestratorRule";
 import { anchor, edgePath, GRID, labelPoint, NODE_H, NODE_W } from "../../src/engine/orchestrator/layout";
 import type { PrEntryMap, RunStatus } from "../../src/types";
 
@@ -1301,9 +1301,11 @@ describe("the acting verbs", () => {
     openInspector(placeAndPlanned());
     expect(screen.queryByLabelText("Action")).toBeNull();
     // Planned work means launch — and it says so, with the target's own key.
-    const insp = screen.getByTestId("orch-inspector");
-    expect(insp.textContent).toContain("launch");
-    expect(insp.textContent).toContain("ASM-12");
+    // Scoped to the THEN clause, so neither half can be satisfied by some other
+    // string elsewhere in the panel.
+    const then = within(screen.getByTestId("orch-then"));
+    expect(then.getByText("launch")).toBeTruthy();
+    expect(then.getByText("ASM-12")).toBeTruthy();
   });
 
   it("reads the verb off the TARGET, not off a stale stored action", () => {
@@ -1313,16 +1315,19 @@ describe("the acting verbs", () => {
     const stale = placeAndPlanned();
     stale.edges[0] = { ...stale.edges[0], action: "notify" };
     openInspector(stale);
-    const insp = screen.getByTestId("orch-inspector");
-    expect(insp.textContent).toContain("launch");
-    expect(insp.textContent).not.toContain("Notify me in VS Code");
+    const then = within(screen.getByTestId("orch-then"));
+    expect(then.getByText("launch")).toBeTruthy();
+    expect(then.queryByText(ACTION_LABEL.notify)).toBeNull();
   });
 
   // The spec's rename. "notify" alone reads as if it messages somebody, which
   // is the confusion that started this phase; a DM is a command node now.
   it('labels the notify action "Notify me in VS Code"', () => {
     openInspector(wired()); // n2 is a notify node, so the rule derives notify
-    expect(screen.getByTestId("orch-inspector").textContent).toContain("Notify me in VS Code");
+    // The literal string, not `ACTION_LABEL.notify`: this assertion is the one
+    // place the spec's own wording is spelled out, so a rename has to come
+    // through here rather than agreeing with itself via the Record.
+    expect(within(screen.getByTestId("orch-then")).getByText("Notify me in VS Code")).toBeTruthy();
   });
 
   it("says so when it cannot tell what the rule does", () => {
@@ -1427,8 +1432,7 @@ describe("the acting verbs", () => {
     stale.edges[0] = { ...stale.edges[0], action: "launch" };
     render(<OrchestratorDrawer {...props({ flows: [stale] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
-    const insp = screen.getByTestId("orch-inspector");
-    expect(insp.textContent).toContain("seed");
+    expect(within(screen.getByTestId("orch-then")).getByText("seed")).toBeTruthy();
     // A seed has no destination to pick — the place already exists.
     expect(screen.queryByLabelText("Destination")).toBeNull();
     // But it does have a mode, which is the thing `performSeed` reads.
@@ -1440,7 +1444,7 @@ describe("the acting verbs", () => {
     stale.edges[0] = { ...stale.edges[0], action: "seed" };
     render(<OrchestratorDrawer {...props({ flows: [stale] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
-    expect(screen.getByTestId("orch-inspector").textContent).toContain("launch");
+    expect(within(screen.getByTestId("orch-then")).getByText("launch")).toBeTruthy();
     expect(screen.getByLabelText("Destination")).toBeTruthy();
   });
 
@@ -1600,8 +1604,11 @@ describe("a command node", () => {
 
   it("reads as a run rule, named by its picker rather than twice over", () => {
     openInspector(placeAndCommand());
-    const insp = screen.getByTestId("orch-inspector");
-    expect(insp.textContent).toContain("run");
+    // The verb, from the THEN clause alone and matched exactly — see the e2e's
+    // own note below on why an inspector-wide `toContain("run")` is vacuous.
+    expect(within(screen.getByTestId("orch-then")).getByText("run")).toBeTruthy();
+    // And the target is named ONCE, by the picker rather than also as a label.
+    expect(within(screen.getByTestId("orch-then")).queryByText("deploy-staging")).toBeNull();
     expect((screen.getByLabelText("Command") as HTMLSelectElement).value).toBe("deploy-staging");
     // No Mode, no Destination: a command is not an agent session.
     expect(screen.queryByLabelText("Mode")).toBeNull();
@@ -1730,8 +1737,12 @@ describe("a command node", () => {
     expect(latchesFor(built)).toEqual([]);
     expect(edgeAction(built, built.edges[0])).toBe("run");
     // And the drawer says so, having kept the new rule selected throughout.
+    // Scoped to the THEN clause and matched EXACTLY: "run" is a substring of the
+    // note hint's own "…a note can extend what runs", so
+    // `inspector.textContent).toContain("run")` passed even with no verb
+    // rendered at all — measured, and it was this test's closing claim.
     rerenderWith(built);
-    expect(screen.getByTestId("orch-inspector").textContent).toContain("run");
+    expect(within(screen.getByTestId("orch-then")).getByText("run")).toBeTruthy();
   });
 });
 
@@ -2062,6 +2073,34 @@ describe("a migrated rule's mismatch notice", () => {
     expect(container.querySelector(".orch-obs .err")).toBeNull();
     // Still SAID, though — quietly, in the observation row's own dim voice.
     expect(container.querySelector(".orch-obs")!.textContent).toContain("no longer matches");
+  });
+
+  it("does not turn the footer's dot red either — the panel makes ONE severity claim", () => {
+    // The defect this closes was the two halves disagreeing: the inspector
+    // deliberately refused to paint the notice red, and eleven lines below it
+    // the footer's dot (`--c-danger`) painted the same edge red anyway. A user
+    // reads the footer first, goes hunting for a failure, and the inspector
+    // denies there was one.
+    const { container } = render(
+      <OrchestratorDrawer {...props({ flows: [{ ...migrated(), armed: true }] })} />,
+    );
+    expect(container.querySelector(".orch-ft .live.stalled")).toBeNull();
+    // The SENTENCE still counts it, which is honest: the rule will not fire
+    // until Reset, and the footer is the only place that says so at a glance.
+    expect(screen.getByText(/armed · 1 rule stalled/i)).toBeTruthy();
+  });
+
+  it("still reddens the dot when a real failure stalls the same flow", () => {
+    // The other side of the split, so "never red" cannot be the fix: one
+    // migration notice AND one genuine failure on one armed flow.
+    const both = { ...migrated(), armed: true };
+    both.edges = [
+      both.edges[0],
+      { id: "e2", from: "n1", to: "n2", cond: { kind: "ci-passed" }, error: "Couldn't seed ASM-2: no worktree" },
+    ];
+    const { container } = render(<OrchestratorDrawer {...props({ flows: [both] })} />);
+    expect(container.querySelector(".orch-ft .live.stalled")).not.toBeNull();
+    expect(screen.getByText(/armed · 2 rules stalled/i)).toBeTruthy();
   });
 
   it("still paints a rule that actually failed red", () => {

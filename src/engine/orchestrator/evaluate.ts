@@ -35,9 +35,11 @@ const AGENT_CONDS: Set<Condition["kind"]> = new Set(["agent-ended-turn", "agent-
  * Two guards, both load-bearing:
  *
  * `commandNodeId`'s own kind must actually be `"command"`. Nothing stops a
- * rule wired FROM a place (or any other node) with this cond — the picker
- * does not filter by source kind yet, and a hand-edited flow file never did —
- * and without this check `incomingEdges` would read THAT node's incoming
+ * rule wired FROM a place (or any other node) with this cond — both pickers now
+ * refuse to OFFER it off a non-command source (`offeredConds`,
+ * orchestratorRule.ts), but a hand-edited flow file, or one written by another
+ * build, never went through a picker at all — and without this check
+ * `incomingEdges` would read THAT node's incoming
  * edges instead, which for a promoted `place` are typically already fired,
  * reporting "succeeded" for a rule with no command anywhere near it.
  *

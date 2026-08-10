@@ -416,11 +416,15 @@ export function observationOf(
   branchCi?: Record<string, BranchCiStatus>,
 ): string | null {
   // Refused before the source-kind check below, not caught by it: this kind
-  // has no place-shaped observation to make regardless of what `e.from`
-  // turns out to be, and nothing today stops a `command-succeeded` rule from
-  // being wired off a PLACE (the picker does not filter by source kind yet —
-  // see `evaluate.ts`'s own `commandSucceeded`, which guards the read side
-  // instead). A place source would otherwise pass the check below and reach
+  // has no place-shaped observation to make regardless of what `e.from` turns
+  // out to be. Still reachable with a place source even though `offeredConds`
+  // now refuses to OFFER this kind on a rule out of anything but a command node
+  // — a hand-edited flow file, or one written by another build, arrives here
+  // having never been through a picker, which is the same tolerance
+  // `store.ts`'s `validEdge` extends to an unrecognised `cond.kind`. (An
+  // earlier version of this comment blamed an unfiltered picker; that stopped
+  // being the reason in the same commit that added the filter, while the guard
+  // itself stayed just as necessary.) A place source would otherwise reach
   // `describeCond`'s matching arm, which throws — see that arm's own doc
   // comment for why throwing there is the right failure mode as long as this
   // guard keeps it unreachable.

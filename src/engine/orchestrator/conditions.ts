@@ -294,8 +294,9 @@ export function describeCond(cond: Condition, c: CondContext): string {
       // Unreachable, deliberately: `observationOf` (orchestratorRule.ts)
       // refuses this kind before ever calling `describeCond` at all, rather
       // than only guarding on the source being a place — a `command-succeeded`
-      // rule is not guaranteed to have a command-node source (nothing enforces
-      // that in the picker yet; see `evaluate.ts`'s `commandSucceeded`, which
+      // rule is not guaranteed to have a command-node source (the pickers refuse
+      // to offer it off one, but a hand-edited file bypasses them entirely —
+      // see `evaluate.ts`'s `commandSucceeded`, which
       // guards it on the read side), so a place-sourced one would otherwise
       // reach here too. An empty string used to be the answer, and it was
       // exactly the wrong shape of "unreachable": `observationOf` returned it

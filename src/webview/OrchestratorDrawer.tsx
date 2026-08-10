@@ -411,6 +411,21 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * `isSettled` that means "tried and failed" rather than "ran". An armed flow with
    * one of these is not simply watching, and the footer must not say it is. */
   const stalled = flow.edges.filter((e) => e.error !== undefined).length;
+  /** How many of those stalls are a real FAILURE, as opposed to the store's
+   * migration notice. Only this count may spend `--c-danger` (see the `.stalled`
+   * class below), and the split exists because the alternative was one panel
+   * making two severity claims about one edge: the inspector had just
+   * deliberately refused to paint a migration notice red (see
+   * `isMigrationNotice`), and eleven lines further down the footer's dot painted
+   * it red anyway — so a user reads the footer, goes hunting for a failure, and
+   * the inspector denies there was one.
+   *
+   * The SENTENCE still counts every stall, which is honest either way: a
+   * migration-latched rule genuinely will not fire until Reset, and the footer
+   * is the only place that says so at a glance. This is the same distinction
+   * `.orch-resume`'s own comment already draws — "not a courtesy banner, not
+   * red — nothing failed, a flow is waiting". */
+  const failed = flow.edges.filter((e) => e.error !== undefined && !isMigrationNotice(e.error)).length;
   // Reported by the host on `deck:flows`, keyed by flow id — never a second
   // source of truth for whether rules are met, only for whether the user has
   // yet said "go" on what already is.
@@ -519,7 +534,19 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    *
    * Nothing is lost on disk: `writeFlow` writes `e.action ?? derived`, so the
    * file an older build reads still carries the field its `validEdge`
-   * requires (see that function's own doc comment). */
+   * requires (see that function's own doc comment).
+   *
+   * KNOW THE BOUNDARY, because it is not a property of the shape: an actionless
+   * edge is unlatchable only IN MEMORY. `writeFlow` persists the derived value,
+   * so the moment this flow is saved the edge does carry a stored action on
+   * disk — and a stored action is what `latchActionMismatches` compares. What
+   * keeps that stored value from ever disagreeing is that nothing in either
+   * presentation can RETARGET an existing edge: no endpoint drag on the canvas,
+   * no "To node" select on a rule that already exists, only delete-and-rewire
+   * (which mints a fresh actionless edge). The guarantee therefore rests on a
+   * load-bearing ABSENCE. Anyone adding a retarget affordance reintroduces this
+   * defect exactly as it was, and must clear `action` on the retargeted edge —
+   * the same thing `flow:resetEdge` already does for the same reason. */
   const finishWire = (toId: string) => {
     const from = wiring;
     setWiring(null);
@@ -1143,7 +1170,15 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 stamps an edge dead for. A control whose choice is overridden is
                 worse than no control. The way to change what a rule does is to
                 point it at a different node. */}
-            <div className="orch-clause">
+            {/* `data-testid`, unlike every other clause in this inspector, because
+                the verb is the one thing here that is pure derived TEXT rather
+                than a labelled control — and a test scoped to the whole
+                inspector cannot pin it: "run" is a substring of the note hint's
+                own "…a note can extend what runs", so an assertion on the
+                panel's text passed even with the verb rendered as nothing at
+                all (measured). This is the handle that makes the verb
+                assertable on its own. */}
+            <div className="orch-clause" data-testid="orch-then">
               <span className="orch-kw">THEN</span>
               {derived === undefined ? (
                 // flowList.tsx's wording for this exact state, verbatim: two
@@ -1358,8 +1393,15 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             is stalled", because the flow's OTHER rules genuinely are still live.
             The node and rule counts stay on the footer's right-hand side either
             way, so nothing is lost by spending the left side on the failure.
-            Disarmed is left alone: "Not armed" makes no claim to correct. */}
-        <span className={`live${flow.armed ? " on" : ""}${flow.armed && stalled > 0 ? " stalled" : ""}`}>
+            Disarmed is left alone: "Not armed" makes no claim to correct.
+
+            The DOT is gated on `failed`, not on `stalled`: `.orch-ft
+            .live.stalled .d` is `--c-danger`, and this codebase spends red on a
+            real failure and nothing else. A flow stalled only by the store's
+            migration notice has not failed — see `failed`'s own doc comment
+            above for why one panel must not make two severity claims about one
+            edge. The sentence keeps counting every stall. */}
+        <span className={`live${flow.armed ? " on" : ""}${flow.armed && failed > 0 ? " stalled" : ""}`}>
           <span className="d" />
           {!flow.armed
             ? "Not armed"
