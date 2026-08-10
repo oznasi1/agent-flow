@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-08-10
+
+### Fixed
+
+- **A notepad card no longer shows a pull request that is not its own.** A notepad run is
+  launched into the window and branch you already had open, so any PR on that branch
+  belongs to that branch's work, not to the note. Notepad runs are now treated as
+  PR-less: no PR is fetched or read back for them, their cards drop the `pr`, `ci` and
+  `review` rows, and they no longer land in Done reading "merged" off somebody else's
+  merge.
+
 ## [0.12.0] — 2026-08-10
 
 ### Changed
