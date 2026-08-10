@@ -19,7 +19,7 @@ import { COMMAND_KILLED_EXIT_CODE, CommandRunner, resolveCommand, runCommand } f
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
-import { createWorktrees } from "./engine/worktree";
+import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { currentBranch, gitState, prEligible, repoRoot, taskDiff } from "./engine/git";
 import { openTaskDiff } from "./engine/diffView";
 import { RetireVerdict, retireVerdict } from "./engine/retire";
@@ -256,6 +256,9 @@ export class DeckPanel {
    * need to be" question. The whole point of the cache is cost: ten rules naming
    * `main` share ONE entry and therefore one `gh` call per TTL, not ten per poll. */
   private readonly branchCi = new Map<string, { status: BranchCiStatus; fetchedAt: number }>();
+  /** Repo names already reported as ambiguous, so `checkoutFor` says it once per
+   * session rather than once per six-second poll. */
+  private readonly branchCiAmbiguous = new Set<string>();
   private readonly reviewProvider: ReviewProvider = new GhReviewProvider();
   private reviewSort: ReviewSort = "oldest";
   /** Last successful search. Held in memory as well as on disk so a failed fetch
@@ -1516,12 +1519,63 @@ export class DeckPanel {
         if (!repo || !branch) continue;
         const key = branchCiKey(repo, branch);
         if (out.has(key)) continue;
-        const cwd = runs.flatMap((s) => s.repos).find((r) => r.name === repo)?.path;
+        const cwd = this.checkoutFor(repo, runs);
         if (!cwd) continue;
         out.set(key, { repo, branch, cwd });
       }
     }
     return out;
+  }
+
+  /** The one checkout to ask `gh` about `repo`, or null when the board cannot say
+   * which repository that name even means.
+   *
+   * SEVERAL paths for one name is the norm here, not an ambiguity: every task
+   * worktree Agent Flow creates is a separate checkout of the same repo
+   * (`<repo>/.claude/worktrees/<KEY>`, see `createWorktrees`), carrying the repo's
+   * name with the worktree's path, so a board with three tasks on `aws-ops` has
+   * three `aws-ops` entries. All three share one remote, and gh reads owner/name off
+   * that remote (see `BRANCH_CI_QUERY`), so any of them answers the same question
+   * correctly. Refusing on "more than one path" would have made this condition
+   * unusable in exactly the setup this product creates constantly.
+   *
+   * What IS ambiguous is two DIFFERENT repositories presenting the same name. A
+   * local card's repo name is `path.basename` of whatever folder a session was found
+   * in (`localRunFor`), so `~/work/api` and `~/repos/api` both come through as
+   * `"api"` — and answering a deploy gate from the wrong remote (a fork's green
+   * `main` opening the gate for upstream) is precisely the class of mistake this
+   * condition's whole fail-closed posture exists to prevent.
+   *
+   * `repoRootOfWorktree` separates the two cases exactly, and for free: it unwinds a
+   * worktree path to the checkout it was created from by looking at the layout alone
+   * — pure string work, no `git` call — so two entries collapse to one root when they
+   * are the same repository and stay two when they are not. Two roots means we do not
+   * know which repository the user meant, so the verdict stays absent, which reads as
+   * `"unknown"`, which is not met. Refusing to guess is the same choice every other
+   * arm of this feature makes about a fact it cannot read.
+   *
+   * Deliberately strict in one direction: two independent clones of the SAME remote,
+   * in folders that share a basename, also read as ambiguous, because telling them
+   * apart needs the remote itself (`git remote get-url`, a spawn per candidate per
+   * poll). Refusing is the safe half of that trade, and renaming one folder resolves
+   * it. */
+  private checkoutFor(repo: string, runs: RunStatus[]): string | null {
+    const paths = runs.flatMap((s) => s.repos).filter((r) => r.name === repo).map((r) => r.path);
+    if (paths.length === 0) return null;
+    const roots = new Set(paths.map((p) => repoRootOfWorktree(p) ?? p));
+    if (roots.size === 1) return paths[0];
+    // Once per repo per session, not once per poll: this is a standing condition, and
+    // a line every six seconds would bury the log it is trying to be found in. Said
+    // at all because a rule that never fires looks like patience — this is the only
+    // place that can name the real reason.
+    if (!this.branchCiAmbiguous.has(repo)) {
+      this.branchCiAmbiguous.add(repo);
+      this.log(
+        `deck: branch CI "${repo}" is ambiguous — ${roots.size} different repositories on the board carry that name ` +
+          `(${[...roots].join(", ")}); rules naming it cannot be answered`,
+      );
+    }
+    return null;
   }
 
   /** The branch-CI verdicts for this pass, and the refreshes the NEXT pass will
@@ -2241,6 +2295,7 @@ export class DeckPanel {
       // switching back on cannot re-serve a stamp from before the switch either. On:
       // a fresh start is the point, same as re-probing gh below.
       this.branchCi.clear();
+      this.branchCiAmbiguous.clear();
       // The user may have run `gh auth login` since the last probe; a stale gap
       // would otherwise keep PR facts dark for the rest of the session.
       if (cfg.prFacts) {

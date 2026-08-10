@@ -13,6 +13,21 @@
 // `mapRollup` in `../pr/facts.ts` is the precedent, including its posture toward
 // states nobody asked about: a shape we did not expect is never quietly rounded
 // into a pass.
+//
+// Where this DIFFERS from `mapRollup`, on purpose, and the difference is worth
+// knowing before trusting either: `mapRollup` tallies the individual checks itself
+// and counts `CANCELLED`/`NEUTRAL`/`SKIPPED`/`STALE` as neither pass nor fail, so a
+// PR whose only check was skipped comes out `passing: 0` — not a pass. GitHub's
+// AGGREGATE `statusCheckRollup.state`, which is what this module reads, folds those
+// same outcomes toward `SUCCESS`, so a branch whose required build was SKIPPED reads
+// as `"passed"` here. That is GitHub's own answer to "is this commit green" (it is
+// the state the commit shows in the UI and the one a branch protection rule grades),
+// and closing the gap would mean fetching the `contexts` list and tallying it here —
+// a second, heavier query, and a second definition of "green" to keep in step with
+// the first. Not done: a skipped required build is a repo configuration a user can
+// see, whereas the case that would actually be dangerous is already correct — a
+// commit with genuinely NO checks has `statusCheckRollup: null`, which is `"unknown"`,
+// which is not green.
 
 /** What we can say about a branch's CI. `unknown` is the honest answer for every
  * unreadable fact — a failed call, a timed-out call, a rate limit, a response shape

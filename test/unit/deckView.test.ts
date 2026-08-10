@@ -215,7 +215,14 @@ vi.mock("../../src/engine/workspace", () => ({
   agentPrompt: (t: { key: string }, _mentions: string[], template: string, briefPath?: string) =>
     `${template} [key=${t.key} brief=${briefPath ?? "(relative)"}]`,
 }));
-vi.mock("../../src/engine/worktree", () => ({ createWorktrees: vi.fn() }));
+// Partial mock: `repoRootOfWorktree` stays REAL. It is pure string work over the
+// `.claude/worktrees/` layout (no git, no fs), and `checkoutFor` uses it to tell a
+// second worktree of one repo apart from a second repo that merely shares a name —
+// a stub would make that distinction this file's opinion instead of the layout's.
+vi.mock("../../src/engine/worktree", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/engine/worktree")>();
+  return { ...actual, createWorktrees: vi.fn() };
+});
 // repoRoot stubbed alongside the real taskDiff: groupByPlace (engine/sessions)
 // calls the real repoRoot, which would shell out to git for a fixture path like
 // "/r/svc" and get "" back rather than the fixtures' own place key.
@@ -6721,9 +6728,10 @@ describe("branch-CI verdicts for an armed flow", () => {
    * starts it — see `showAndWarm`), pass 2 enqueues, pass 3 reads the verdict. The
    * cost of not awaiting `gh` under the flows lock is exactly this one-poll delay,
    * and it is safe only because an unfetched verdict is not green. */
-  const passes = async (n: number) => {
+  const passes = async (n: number, statuses?: () => void) => {
     setConfig({ orchestrator: true });
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", REPO));
+    if (statuses) statuses();
+    else h.buildRunStatus.mockReturnValue(openStatus("ASM-1", REPO));
     const log = vi.fn();
     DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
     await settled();
@@ -6735,6 +6743,20 @@ describe("branch-CI verdicts for an armed flow", () => {
     }
     return { p: lastPanel(), log };
   };
+
+  /** More polls on the panel `passes` already opened. */
+  const poll = async (n: number) => {
+    for (let i = 0; i < n; i++) {
+      await lastPanel()._fire({ type: "deck:refresh" });
+      await settled();
+      await settle();
+    }
+  };
+
+  /** The same status, for a checkout at a different path — a worktree of the repo, or
+   * a second, unrelated repo that happens to share its basename. Derived from
+   * `prStatus` rather than hand-built, so only the path differs. */
+  const atPath = (s: RunStatus, p: string): RunStatus => ({ ...s, repos: s.repos.map((r) => ({ ...r, path: p })) });
 
   /** The flow as it was last written to the store, or undefined if it never was. */
   const lastWritten = (): Flow | undefined => h.writeFlow.mock.calls.at(-1)?.[2] as Flow | undefined;
@@ -6836,6 +6858,98 @@ describe("branch-CI verdicts for an armed flow", () => {
     await passes(4);
     expect(h.ghRun.mock.calls.filter((c) => c[1].includes("graphql"))).toHaveLength(0);
     expect(firedIds()).toEqual([]);
+  });
+
+  it("drops a green verdict once a refetch fails, instead of gating on a stale pass", async () => {
+    // The comment on that catch claims stamping `unknown` "stops a branch that was
+    // green an hour ago from opening a deploy gate on the strength of a call that
+    // failed since". Nothing pinned it: the rejection test above fails from the very
+    // first call, so there is never a previous verdict to preserve, and a catch that
+    // kept `prev.status` passed the whole suite.
+    //
+    // To watch a verdict be REPLACED, the rule has to keep waiting while the branch
+    // is already green — so it hangs off an "all" junction whose sibling (`pr-merged`)
+    // is still unmet. Nothing fires, nothing settles, and `ttlSeconds: 0` re-fetches
+    // every poll.
+    h.ttlSeconds = 0;
+    const junction = (): Flow => ({
+      ...mkFlow("f1", "Deploy to staging"),
+      armed: true,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: REPO },
+        { id: "z", kind: "notify", x: 0, y: 0, join: "all", message: "shipped" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "z", cond: { kind: "branch-ci-passed", repo: REPO, branch: "master" }, action: "notify" },
+        { id: "e2", from: "n1", to: "z", cond: { kind: "pr-merged" }, action: "notify" },
+      ],
+    });
+    h.flows = [junction()];
+    // Green lands and is held by the junction, not fired.
+    await passes(3);
+    expect(firedIds()).toEqual([]);
+
+    // The branch becomes unreadable while the sibling is STILL unmet, so the failed
+    // refetch lands before anything can act on the old answer. (Order matters, and
+    // the first draft of this test got it wrong: a pass serves the cached verdict and
+    // only enqueues the refresh, so failing gh and merging the PR in the same tick
+    // fires on the stale green quite correctly.)
+    h.ghRun.mockRejectedValue(new Error("gh: API rate limit exceeded"));
+    await poll(2);
+    expect(firedIds()).toEqual([]);
+
+    // Now the sibling arrives. A retained green verdict would close the junction
+    // here; a dropped one cannot.
+    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", REPO));
+    await poll(3);
+    expect(firedIds()).toEqual([]);
+
+    // The control, and the whole proof this test is not passing for some unrelated
+    // reason: the junction DOES close the moment the branch reads green again, from
+    // the same panel, the same flow and the same sibling state.
+    h.ghRun.mockResolvedValue(
+      JSON.stringify({ data: { repository: { ref: { target: { statusCheckRollup: { state: "SUCCESS" } } } } } }),
+    );
+    await poll(3);
+    expect(firedIds().sort()).toEqual(["e1", "e2"]);
+  });
+
+  it("asks a worktree of the repo like any other checkout — several paths for one name is normal", async () => {
+    // Every task worktree Agent Flow creates carries the repo's NAME with the
+    // worktree's PATH, so a board with two tasks on one repo has two `aws-ops`
+    // entries. They share a remote, so either answers; refusing here would make this
+    // condition unusable in the setup this product creates constantly.
+    h.runs = [mkRun(), mkRun({ key: "ASM-2" })];
+    h.flows = [branchFlow(branchRule("e1", "master"))];
+    await passes(3, () => {
+      h.buildRunStatus.mockImplementation((i: { run: Run }) =>
+        i.run.key === "ASM-2"
+          ? atPath(openStatus("ASM-2", REPO), `/r/${REPO}/.claude/worktrees/ASM-2`)
+          : openStatus("ASM-1", REPO));
+    });
+    expect(h.ghRun.mock.calls.filter((c) => c[1].includes("graphql"))).toHaveLength(1);
+    expect(firedIds()).toEqual(["e1"]);
+  });
+
+  it("refuses to answer when two different repositories on the board share the name", async () => {
+    // A local card's repo name is `path.basename` of the folder its session was found
+    // in, so ~/work/api and ~/repos/api both present as "api". Answering a deploy gate
+    // from the wrong remote — a fork's green master opening the gate for upstream — is
+    // the mistake this condition's whole posture exists to prevent, so it refuses.
+    h.runs = [mkRun(), mkRun({ key: "ASM-2" })];
+    h.flows = [branchFlow(branchRule("e1", "master"))];
+    const { log } = await passes(4, () => {
+      h.buildRunStatus.mockImplementation((i: { run: Run }) =>
+        i.run.key === "ASM-2"
+          ? atPath(openStatus("ASM-2", REPO), `/elsewhere/${REPO}`)
+          : openStatus("ASM-1", REPO));
+    });
+    expect(h.ghRun.mock.calls.filter((c) => c[1].includes("graphql"))).toHaveLength(0);
+    expect(firedIds()).toEqual([]);
+    // Named in the log, once — silence is how a rule that can never fire looks like
+    // patience.
+    expect(log).toHaveBeenCalledWith(expect.stringContaining(`branch CI "${REPO}" is ambiguous`));
+    expect(log.mock.calls.filter((c) => /is ambiguous/.test(String(c[0])))).toHaveLength(1);
   });
 
   it("makes no call for a settled rule or a disarmed flow", async () => {
