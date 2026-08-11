@@ -1968,6 +1968,246 @@ describe("a command node", () => {
   });
 });
 
+// The defect a manual test in a real editor found, after 3328 tests and two
+// reviewers: `CommandNode.commandId`/`run` are NODE data, but the only controls
+// that wrote them were keyed on `edge.id` and rendered only inside the edge
+// inspector. So "+ Add command… → Free-text command…" created a node with `run:
+// ""` — deliberately empty, for the user to fill in — and there was nowhere to
+// fill it in until a rule pointed at the node. Every fixture and every render in
+// this file wired the edge FIRST, which is exactly why nothing here caught it.
+//
+// The shape each test below is built on is therefore the one shape none of them
+// used: a flow with NO EDGES AT ALL.
+describe("a selected node's own configuration", () => {
+  /** One command node, no rules, nothing else — the flow as it stands the moment
+   * the Add-command picker has been used once. */
+  const loneCommand = (over: Partial<{ commandId: string; run: string }> = { run: "" }) =>
+    flow({ nodes: [{ id: "n1", kind: "command", x: 320, y: 24, join: "any", ...over }] });
+
+  const loneNotify = () =>
+    flow({ nodes: [{ id: "n1", kind: "notify", x: 320, y: 24, join: "any", message: "say something" }] });
+
+  /** The shape every existing test in this file starts from, by contrast: the
+   * edge already wired. Needed here for the two tests that compare the two edit
+   * paths against each other. */
+  const wiredCommand = (over: Partial<{ commandId: string; run: string }> = { commandId: "deploy-staging" }) =>
+    flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "command", x: 320, y: 24, join: "any", ...over },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "ci-passed" } }],
+    });
+
+  /** Select a node the way a keyboard user reaches it: the Actions chip's own
+   * button. `endLabel` names it, so a free-text node with nothing typed is
+   * "Configure (no command set)". */
+  const selectChip = (name: string) =>
+    fireEvent.click(screen.getByRole("button", { name: `Configure ${name}` }));
+
+  it("types a free-text command onto a node in a flow with no edges at all", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [loneCommand()] })} />);
+    // There is no rule, and no rule can be selected, so the edge inspector — the
+    // only place these controls used to live — can never open here.
+    expect(screen.queryByTestId("orch-edge-e1")).toBeNull();
+    expect(screen.queryByTestId("orch-inspector")).not.toBeNull();
+
+    selectChip(COMMAND_NOT_SET);
+    const box = screen.getByLabelText(`Command to run for ${COMMAND_NOT_SET}`);
+    fireEvent.change(box, { target: { value: "deploy.sh --env=staging" } });
+    fireEvent.blur(box);
+
+    // Asserted on what gets SAVED, never on a rendered `value`: jsdom resolves an
+    // unmatched <select> value to its first option, so a rendered-value assertion
+    // in this family of tests can pass vacuously.
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes[0]).toMatchObject({ id: "n1", kind: "command", run: "deploy.sh --env=staging" });
+    expect(saved.edges).toEqual([]);
+  });
+
+  it("names a configured command on a node in a flow with no edges at all", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [loneCommand()] })} />);
+    selectChip(COMMAND_NOT_SET);
+    fireEvent.change(screen.getByLabelText(`Command for ${COMMAND_NOT_SET}`), {
+      target: { value: "smoke" },
+    });
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    // And never both fields at once — `resolveCommand` refuses that shape rather
+    // than guess which one executes.
+    expect(saved.nodes[0]).toMatchObject({ commandId: "smoke" });
+    expect(saved.nodes[0].kind === "command" && saved.nodes[0].run).toBeUndefined();
+  });
+
+  it("offers no free-text field for a node that names a configured command", () => {
+    render(<OrchestratorDrawer {...props({ flows: [loneCommand({ commandId: "deploy-staging" })] })} />);
+    selectChip("deploy-staging");
+    expect(screen.getByLabelText("Command for deploy-staging")).toBeTruthy();
+    expect(screen.queryByLabelText("Command to run for deploy-staging")).toBeNull();
+  });
+
+  it("selects the node the Add-command picker just created, so the field is there without a further click", () => {
+    // The order the user works in — add, configure, wire — with nothing in
+    // between. Nothing is clicked between the picker and the field.
+    const onSave = vi.fn();
+    const initial = props({ onSave, flows: [flow()] });
+    const { rerender } = render(<OrchestratorDrawer {...initial} />);
+    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: COMMAND_FREE_TEXT } });
+    rerender(<OrchestratorDrawer {...initial} flows={[onSave.mock.calls.at(-1)![0] as Flow]} />);
+
+    const box = screen.getByLabelText(`Command to run for ${COMMAND_NOT_SET}`);
+    fireEvent.change(box, { target: { value: "npm run smoke" } });
+    fireEvent.blur(box);
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes[0]).toMatchObject({ kind: "command", run: "npm run smoke" });
+  });
+
+  it("reaches the same field from the list view, whose rows are one per rule", () => {
+    // The list is the keyboard path, and a fix that worked only on the canvas
+    // would reopen for keyboard users the gap this phase closed twice. Its rows
+    // are one per RULE, so a node no rule points at appears in none of them —
+    // which is why the Actions section and this panel render in both views.
+    const onSave = vi.fn();
+    const initial = props({ onSave, flows: [flow()] });
+    const { rerender } = render(<OrchestratorDrawer {...initial} />);
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: COMMAND_FREE_TEXT } });
+    rerender(<OrchestratorDrawer {...initial} flows={[onSave.mock.calls.at(-1)![0] as Flow]} />);
+
+    // Still the list view, and it has no rule rows to edit anything through.
+    expect(screen.getByTestId("flowlist-empty")).toBeTruthy();
+    const box = screen.getByLabelText(`Command to run for ${COMMAND_NOT_SET}`);
+    fireEvent.change(box, { target: { value: "deploy.sh --env=prod" } });
+    fireEvent.blur(box);
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes[0]).toMatchObject({ kind: "command", run: "deploy.sh --env=prod" });
+  });
+
+  it("writes the identical node fields from a selected rule and from the selected node", () => {
+    // Both paths stay, because a command node reachable from a selected rule is a
+    // reasonable place to see what it runs — and they must not be able to
+    // disagree. They cannot: `withCommandId` is one line of `withNodeCommandId`.
+    const start = wiredCommand({ run: "" });
+
+    const viaRule = vi.fn();
+    const first = render(<OrchestratorDrawer {...props({ onSave: viaRule, flows: [start] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    fireEvent.change(screen.getByLabelText("Command"), { target: { value: "deploy-staging" } });
+    first.unmount();
+
+    const viaNode = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave: viaNode, flows: [start] })} />);
+    selectChip(COMMAND_NOT_SET);
+    fireEvent.change(screen.getByLabelText(`Command for ${COMMAND_NOT_SET}`), {
+      target: { value: "deploy-staging" },
+    });
+
+    const a = (viaRule.mock.calls.at(-1)![0] as Flow).nodes;
+    const b = (viaNode.mock.calls.at(-1)![0] as Flow).nodes;
+    expect(b).toEqual(a);
+    expect(b[1]).toMatchObject({ commandId: "deploy-staging" });
+  });
+
+  it("shows one Command control at a time — a selection is a rule or a node, never both", () => {
+    // Not tidiness: two live selections would put two panels' worth of controls
+    // in one slot, and two controls under one accessible name.
+    render(<OrchestratorDrawer {...props({ flows: [wiredCommand()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByLabelText("Command")).toBeTruthy();
+
+    selectChip("deploy-staging");
+    expect(screen.queryByLabelText("Command")).toBeNull();
+    expect(screen.getByLabelText("Command for deploy-staging")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.queryByTestId("orch-node-inspector")).toBeNull();
+    expect(screen.getByLabelText("Command")).toBeTruthy();
+  });
+
+  it("opens on a node clicked on the canvas as well as one picked from the Actions chip", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [loneCommand()] })} />);
+    fireEvent.pointerDown(screen.getByTestId("orch-node-n1"), { clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(window);
+    const box = screen.getByLabelText(`Command to run for ${COMMAND_NOT_SET}`);
+    fireEvent.change(box, { target: { value: "make deploy" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).nodes[0]).toMatchObject({ run: "make deploy" });
+  });
+
+  // A notify node's `message` is node data too, and it was edited through the
+  // same edge proxy — the edge inspector's "Notify message" and an open list
+  // row's. `addNotify` seeds "say something", so a notify node is never
+  // unrunnable the way a blank command node is, but the DEFECT is the same one:
+  // add a notify terminal, and there is nowhere to change what it says until a
+  // rule points at it. The node inspector covers it with no new mechanism —
+  // the same selection, the same panel, the same node-keyed writer.
+  it("edits a notify node's message in a flow with no edges at all", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [loneNotify()] })} />);
+    selectChip("notify");
+    const box = screen.getByLabelText("Message for notify");
+    fireEvent.change(box, { target: { value: "the migration landed" } });
+    fireEvent.blur(box);
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes[0]).toMatchObject({ kind: "notify", message: "the migration landed" });
+    expect(saved.edges).toEqual([]);
+  });
+
+  it("keeps the empty state for a node that has nothing this panel edits", () => {
+    // A place's conditions and a planned node's mode/destination belong to the
+    // RULE that spends them, so selecting one must not open an empty panel.
+    render(<OrchestratorDrawer {...props({ flows: [wiredCommand()] })} />);
+    expect(screen.getByTestId("orch-inspector").textContent).toBe(INSPECTOR_NONE);
+    fireEvent.pointerDown(screen.getByTestId("orch-node-n1"), { clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(window);
+    expect(screen.queryByTestId("orch-node-inspector")).toBeNull();
+    expect(screen.getByTestId("orch-inspector").textContent).toBe(INSPECTOR_NONE);
+  });
+
+  it("says a node is selectable, now that one is", () => {
+    // The old copy — "Select a connection to set its condition." — was about to
+    // become false, and it was worse than incomplete: it told a user who had just
+    // added a command node that their only move was to wire something first.
+    render(<OrchestratorDrawer {...props({ flows: [loneCommand()] })} />);
+    const text = screen.getByTestId("orch-inspector").textContent ?? "";
+    expect(text).toBe(INSPECTOR_NONE);
+    expect(text).toMatch(/connection/i);
+    expect(text).toMatch(/command or notify node/i);
+  });
+});
+
+describe("the Add-command picker with nothing configured", () => {
+  it("says where named commands come from, and never lets that line be picked", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, commands: [] })} />);
+    const picker = screen.getByLabelText("Add a command") as HTMLSelectElement;
+    const hint = Array.from(picker.querySelectorAll("option")).find(
+      (o) => (o as HTMLOptionElement).value === COMMAND_NONE,
+    ) as HTMLOptionElement;
+    expect(hint).toBeDefined();
+    expect(hint.textContent).toBe(COMMAND_NONE_LABEL);
+    // The actionable half: the setting a user would have to open to have any.
+    expect(hint.textContent).toContain("agentFlow.commands");
+    expect(hint.disabled).toBe(true);
+    // `disabled` is the markup half. A <select>'s own `value` setter honours a
+    // disabled option (jsdom's included), so the refusal that actually holds is
+    // the handler's — without it this sentinel lands on a node as a command id.
+    fireEvent.change(picker, { target: { value: COMMAND_NONE } });
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("is absent the moment there is a command to offer", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    const values = Array.from(
+      screen.getByLabelText("Add a command").querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).not.toContain(COMMAND_NONE);
+    expect(values).toEqual(["", "deploy-staging", "smoke", COMMAND_FREE_TEXT]);
+  });
+});
+
 describe("arming", () => {
   it("offers Arm for a disarmed flow", () => {
     const onArm = vi.fn();
