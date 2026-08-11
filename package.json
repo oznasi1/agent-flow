@@ -339,8 +339,15 @@
         },
         "agentFlow.commands": {
           "type": "array",
-          "default": [],
-          "markdownDescription": "Commands an Orchestrator rule can run when its condition is met — a deploy, a webhook call, a smoke test. Each has an `id`, a `label` shown in the picker, the `run` command itself, and an optional `detail` line. `run` may contain `{note}`, replaced with the rule's own free text — **spliced in unquoted**, exactly as typed, so the note can extend the command (`--env={note}` plus a note of `prod; rm -rf ~` runs both); quoting it yourself (`--env=\"{note}\"`) does not fully neutralise it either, since a `\"` inside the note still breaks out. Only use `{note}` where you trust whoever fills in a rule's note. **These run unattended on your machine**, so a flow asks before its FIRST command and then runs commands on its own. That question is separate from the one a launch asks: approving a flow's launches never approves its commands, so a flow you already armed and confirmed still asks before it runs anything in a shell. Unlike `#agentFlow.promptModes#` there are no built-ins: an empty list means no named commands.",
+          "default": [
+            {
+              "id": "verify-on-dev",
+              "label": "Verify on dev",
+              "detail": "Example — replace the command with your own check",
+              "run": "echo verify the feature on {note}"
+            }
+          ],
+          "markdownDescription": "Commands an Orchestrator rule can run when its condition is met — a deploy, a webhook call, a smoke test. Each has an `id`, a `label` shown in the picker, the `run` command itself, and an optional `detail` line. `run` may contain `{note}`, replaced with the rule's own free text — **spliced in unquoted**, exactly as typed, so the note can extend the command (`--env={note}` plus a note of `prod; rm -rf ~` runs both); quoting it yourself (`--env=\"{note}\"`) does not fully neutralise it either, since a `\"` inside the note still breaks out. Only use `{note}` where you trust whoever fills in a rule's note. **These run unattended on your machine**, so a flow asks before its FIRST command and then runs commands on its own. That question is separate from the one a launch asks: approving a flow's launches never approves its commands, so a flow you already armed and confirmed still asks before it runs anything in a shell. The one default here is an inert example (`echo`, cannot fail or mutate anything) so the picker has something to show; replace or remove it, or clear the list entirely, to run your own.",
           "items": {
             "type": "object",
             "required": ["id", "run"],

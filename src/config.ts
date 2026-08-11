@@ -117,9 +117,20 @@ export const DEFAULT_EXPLORE_VERIFY_PROMPT =
  * explore prompt its own setting. */
 export const DEFAULT_ENVIRONMENTS = ["dev", "staging", "production"];
 
-/** No built-ins ship for `agentFlow.commands` — an empty list is what a fresh
- * install starts with, and stays with, until the user opts in. */
-export const DEFAULT_COMMANDS: FlowCommand[] = [];
+/** Exactly one built-in ships for `agentFlow.commands`, and it is inert by
+ * construction: `echo` cannot fail or mutate anything, so a user who never
+ * configured this setting still gets a real row in the picker — one that
+ * demonstrates `{note}` substitution — instead of a picker that looks empty
+ * and gives no sign named commands are even a thing. See `readCommands`'
+ * doc comment for the rule this single entry has to satisfy. */
+export const DEFAULT_COMMANDS: FlowCommand[] = [
+  {
+    id: "verify-on-dev",
+    label: "Verify on dev",
+    detail: "Example — replace the command with your own check",
+    run: "echo verify the feature on {note}",
+  },
+];
 
 /** Where Agent Flow starts a session. */
 export type AgentSurface = "extension" | "terminal";
@@ -423,10 +434,16 @@ function readEnvironments(c: vscode.WorkspaceConfiguration): string[] {
   return seen.size ? [...seen] : [...DEFAULT_ENVIRONMENTS];
 }
 
-/** No built-ins to layer over, unlike `promptModes` — so an empty result is
- * returned as-is rather than falling back to defaults. A command list is
- * something the user opts into; inventing entries would put commands in a
- * picker that nobody asked to be able to run.
+/** Unlike `promptModes`, the built-in here isn't a menu of real options to
+ * layer a customization over — it's a single example, `DEFAULT_COMMANDS`,
+ * shown so a user who never configured this setting can see that named
+ * commands are a thing and how `{note}` reaches one. That is only safe
+ * because the rule survives from this comment's earlier shape: a command
+ * list is something the user opts into running, so no default entry may
+ * have real effects — inventing (or shipping) anything that could act would
+ * put a runnable command into a picker nobody configured. The one example
+ * is `echo`, which cannot fail or mutate anything; the next built-in added
+ * here has to clear the same bar, not just be plausible-looking.
  *
  * An entry with no usable `id` or no `run` is dropped: the id is how a node
  * refers to it, and a command with nothing to execute is a picker row that
