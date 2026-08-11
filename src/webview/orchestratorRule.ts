@@ -27,7 +27,7 @@ import {
   PlannedNode,
 } from "../engine/orchestrator/model";
 import { hasNote } from "../engine/prompt";
-import { BranchCiStatus, FlowPromptMode, RunStatus } from "../types";
+import { BranchCiStatus, FlowCommand, FlowPromptMode, RunStatus } from "../types";
 
 /** The drawer's own wording for a condition. `describeCond` says what a place
  * currently looks like; this says what the rule is. Both are needed and they
@@ -568,6 +568,33 @@ export function withNote(flow: Flow, edge: FlowEdge, note: string): Flow {
  * trick `DRAG_SEP` uses for the Deck's drag payload. */
 export const COMMAND_FREE_TEXT = "\u0000free-text";
 
+/** The Add-command picker's value for the line it shows when `agentFlow.commands`
+ * is EMPTY — which is the default, since this extension ships no built-in
+ * commands. Same NUL trick as `COMMAND_FREE_TEXT` above, for the same reason, and
+ * for one more: this value must never be mistaken for a command id by
+ * `addCommand`, which guards it as well as rendering its option `disabled`. A
+ * `<select>`'s `value` setter honours a disabled option (jsdom's does too), so
+ * "not selectable" has to be true in the HANDLER, not only in the markup. */
+export const COMMAND_NONE = "\u0000none";
+
+/** What that line SAYS. Without it the picker's whole story, for a user who has
+ * configured nothing, is "+ Add command…" and "Free-text command…" — two entries
+ * that between them never mention that named, reusable commands exist at all, or
+ * where they would come from. The setting's own id is the only actionable thing
+ * to say, so it is what this says; the not-set voice ("(no command set)",
+ * "(not configured)") is the register it says it in. */
+export const COMMAND_NONE_LABEL = "(none configured — set agentFlow.commands)";
+
+/** The inspector's empty state, when nothing is selected. Names BOTH selectable
+ * things, because both now open a panel: a connection (its condition, and what
+ * the rule does with it) and an action node (a command node's command, a notify
+ * node's message — node data, see `withNodeCommandId` below). It used to name a
+ * connection alone, which is what made a freshly added command node look like
+ * something the inspector had nothing to say about: the panel actively told the
+ * user their only move was to wire it up first. */
+export const INSPECTOR_NONE =
+  "Select a connection to set its condition, or a command or notify node to set what it does.";
+
 /** Add a command node. `seed` is exactly what the picker chose: a configured
  * command's id, or the free-text shape — an EMPTY `run`, which is the node
  * saying "free text, not yet typed". Never both fields: `resolveCommand`
@@ -589,31 +616,60 @@ export function addCommandNode(flow: Flow, seed: { commandId: string } | { run: 
   };
 }
 
-/** Name a configured command on this rule's target node, clearing any free text
- * that was there — see `addCommandNode` on why both can never be set at once.
- * Written on the NODE, not the edge, for the same reason a launch's mode and
- * destination are: the command is the node's own configuration, and
- * `performEdge` resolves it from there. */
-export function withCommandId(flow: Flow, edge: FlowEdge, commandId: string): Flow {
+/** Name a configured command on a command node, clearing any free text that was
+ * there — see `addCommandNode` on why both can never be set at once.
+ *
+ * Keyed on the NODE's own id, because that is whose field this is. The edge-shaped
+ * `withCommandId` below is a thin call through to this one, and that is the whole
+ * guarantee the two surfaces that write a command need: the inspector reached from
+ * a selected RULE and the inspector reached from a selected NODE cannot disagree
+ * about what "set this command" means, because there is one implementation of it.
+ * They used to be one function only because there was one caller — an edge — and
+ * that accident is what made a command node unconfigurable until it was wired
+ * into a rule (the picker creates `run: ""` for the user to fill in, and every
+ * control that could fill it in was keyed on `edge.id`). */
+export function withNodeCommandId(flow: Flow, nodeId: string, commandId: string): Flow {
   return {
     ...flow,
     nodes: flow.nodes.map((n) =>
-      n.id === edge.to && n.kind === "command" ? { ...n, commandId, run: undefined } : n,
+      n.id === nodeId && n.kind === "command" ? { ...n, commandId, run: undefined } : n,
     ),
   };
 }
 
-/** Put free text on this rule's target command node, clearing any configured id.
- * A BLANK string is a legitimate value here — it is what "free text, nothing
- * typed yet" looks like, and `resolveCommand` refuses to run it (see its
- * "run is blank" arm) rather than execute an empty shell line. */
-export function withCommandRun(flow: Flow, edge: FlowEdge, run: string): Flow {
+/** Put free text on a command node, clearing any configured id. A BLANK string is
+ * a legitimate value here — it is what "free text, nothing typed yet" looks like,
+ * and `resolveCommand` refuses to run it (see its "run is blank" arm) rather than
+ * execute an empty shell line. Node-keyed for the same reason as
+ * `withNodeCommandId` above. */
+export function withNodeCommandRun(flow: Flow, nodeId: string, run: string): Flow {
   return {
     ...flow,
     nodes: flow.nodes.map((n) =>
-      n.id === edge.to && n.kind === "command" ? { ...n, run, commandId: undefined } : n,
+      n.id === nodeId && n.kind === "command" ? { ...n, run, commandId: undefined } : n,
     ),
   };
+}
+
+/** A notify node's own message, keyed on the node — `withNotifyMessage` below is
+ * the edge-shaped call through to it, exactly as with the two command writers. */
+export function withNodeNotifyMessage(flow: Flow, nodeId: string, message: string): Flow {
+  return {
+    ...flow,
+    nodes: flow.nodes.map((n) => (n.id === nodeId && n.kind === "notify" ? { ...n, message } : n)),
+  };
+}
+
+/** Name a configured command on this rule's target node. Written on the NODE, not
+ * the edge, for the same reason a launch's mode and destination are: the command
+ * is the node's own configuration, and `performEdge` resolves it from there. */
+export function withCommandId(flow: Flow, edge: FlowEdge, commandId: string): Flow {
+  return withNodeCommandId(flow, edge.to, commandId);
+}
+
+/** Put free text on this rule's target command node. See `withNodeCommandRun`. */
+export function withCommandRun(flow: Flow, edge: FlowEdge, run: string): Flow {
+  return withNodeCommandRun(flow, edge.to, run);
 }
 
 /** The target command node of this rule, or `undefined` when it points at
@@ -624,9 +680,39 @@ export function commandTargetOf(flow: Flow, e: FlowEdge): CommandNode | undefine
 }
 
 export function withNotifyMessage(flow: Flow, edge: FlowEdge, message: string): Flow {
+  return withNodeNotifyMessage(flow, edge.to, message);
+}
+
+/** What a command node's two controls read, for whichever node they are about —
+ * the node a selected rule points at, or the selected node itself. THREE surfaces
+ * derived these same three values from the same fields by hand (the canvas
+ * inspector, the list's open row, and now the node inspector), which is three
+ * chances for one node to be described two ways; `commandLabel` above already
+ * lives here for the identical reason. */
+export interface CommandFields {
+  /** The Command select's value: a configured id, `COMMAND_FREE_TEXT` when the
+   * node is in the free-text shape, or `""` for a node carrying neither (only a
+   * hand-edited file — every picker sets one). `commandId` wins when a file
+   * somehow carries both, matching `commandLabel`; `resolveCommand` is what
+   * refuses that shape at fire time rather than picking a side. */
+  value: string;
+  /** Does the select already have an option for `value`? Free text always does
+   * (its option is unconditional), and so does a configured id still in the
+   * setting. When it does not, the caller renders the extra option that says so —
+   * a `<select>` whose value matches none of its options shows its FIRST one
+   * instead, which would read as a command that exists. */
+  idExists: boolean;
+  /** The free-text field's value, and — by being `undefined` for a configured
+   * command — whether that field renders at all. */
+  run: string | undefined;
+}
+
+export function commandFieldsOf(node: CommandNode | undefined, commands: FlowCommand[]): CommandFields {
+  const value = node?.commandId ?? (node?.run !== undefined ? COMMAND_FREE_TEXT : "");
   return {
-    ...flow,
-    nodes: flow.nodes.map((n) => (n.id === edge.to && n.kind === "notify" ? { ...n, message } : n)),
+    value,
+    idExists: value === COMMAND_FREE_TEXT || commands.some((c) => c.id === value),
+    run: node?.commandId === undefined ? node?.run : undefined,
   };
 }
 
