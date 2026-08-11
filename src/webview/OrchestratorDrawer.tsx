@@ -665,12 +665,14 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       onChange={(ev) => addCommand(ev.currentTarget.value)}
     >
       <option value="">+ Add command…</option>
-      {/* The empty case, given a voice. `agentFlow.commands` ships no built-ins,
-          so for most users this list is empty — and a picker offering only
-          "+ Add command…" and "Free-text command…" never says that named,
-          reusable commands exist or where they come from. Disabled, so it is a
-          line to read rather than something to pick (`addCommand` refuses the
-          value as well — see its own comment). */}
+      {/* The empty case, given a voice. `agentFlow.commands` ships one inert
+          example, so an untouched install reaches the branch below instead —
+          this one is for a user who has explicitly cleared the list to `[]`,
+          which a picker offering only "+ Add command…" and "Free-text
+          command…" would otherwise leave looking like a dead end rather than
+          a deliberate choice. Disabled, so it is a line to read rather than
+          something to pick (`addCommand` refuses the value as well — see its
+          own comment). */}
       {p.commands.length === 0 ? (
         <option value={COMMAND_NONE} disabled>{COMMAND_NONE_LABEL}</option>
       ) : (
@@ -678,9 +680,9 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           <option key={c.id} value={c.id}>{c.label}</option>
         ))
       )}
-      {/* Last, and always present: `agentFlow.commands` ships no built-ins, so
-          for most users this is the only entry — and the user explicitly chose
-          free-text commands over a config-only list. */}
+      {/* Last, and always present: the user may want a one-off command that
+          isn't worth naming in settings, so free text stays offered even when
+          `agentFlow.commands` already has entries. */}
       <option value={COMMAND_FREE_TEXT}>Free-text command…</option>
     </select>
   );

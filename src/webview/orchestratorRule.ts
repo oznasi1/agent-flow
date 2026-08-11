@@ -569,8 +569,9 @@ export function withNote(flow: Flow, edge: FlowEdge, note: string): Flow {
 export const COMMAND_FREE_TEXT = "\u0000free-text";
 
 /** The Add-command picker's value for the line it shows when `agentFlow.commands`
- * is EMPTY — which is the default, since this extension ships no built-in
- * commands. Same NUL trick as `COMMAND_FREE_TEXT` above, for the same reason, and
+ * is EMPTY — no longer the default (one inert example ships), but still reachable
+ * for a user who clears the list on purpose. Same NUL trick as `COMMAND_FREE_TEXT`
+ * above, for the same reason, and
  * for one more: this value must never be mistaken for a command id by
  * `addCommand`, which guards it as well as rendering its option `disabled`. A
  * `<select>`'s `value` setter honours a disabled option (jsdom's does too), so

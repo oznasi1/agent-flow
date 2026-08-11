@@ -1784,7 +1784,12 @@ describe("a command node", () => {
     expect(saved.nodes[0]).not.toHaveProperty("commandId");
   });
 
-  it("stays reachable with no commands configured at all — no built-ins ship", () => {
+  // `commands: []` here is not what an untouched install actually gets any
+  // more — `agentFlow.commands` now ships one inert example — but a user can
+  // still clear the list to empty on purpose, and that path has to stay
+  // reachable and not throw. This prop is the component's own contract, set
+  // directly rather than routed through config.ts's DEFAULT_COMMANDS.
+  it("stays reachable when commands is cleared to an empty list", () => {
     const onSave = vi.fn();
     render(<OrchestratorDrawer {...props({ onSave, commands: [] })} />);
     const values = Array.from(
@@ -3048,9 +3053,9 @@ describe("building a whole flow from the keyboard", () => {
     let saved = onSave.mock.calls.at(-1)![0] as Flow;
     rerenderWith(saved);
 
-    // A command node, in the free-text shape — the option that exists because
-    // `agentFlow.commands` ships no built-ins, so for most users it is the only
-    // entry in this picker.
+    // A command node, in the free-text shape — offered regardless of what
+    // `agentFlow.commands` holds, for a one-off command not worth naming in
+    // settings.
     fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: COMMAND_FREE_TEXT } });
     saved = onSave.mock.calls.at(-1)![0] as Flow;
     rerenderWith(saved);

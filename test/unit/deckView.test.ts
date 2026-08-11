@@ -171,8 +171,10 @@ const h = vi.hoisted(() => ({
   // so the re-mint-on-collision path is reachable. A constant would make the
   // retry loop indistinguishable from a refusal.
   idSeq: 0,
-  // `agentFlow.commands` (Task 4). Empty by default: no built-ins ship, and a
-  // free-text `run` node needs none — the cases about a configured command say so.
+  // `agentFlow.commands` (Task 4). Empty here by fixture choice, not because
+  // that's what a real install gets any more (`DEFAULT_COMMANDS` ships one
+  // inert example) — a free-text `run` node needs none, and the cases about a
+  // configured command set `h.commands` themselves.
   commands: [] as FlowCommand[],
   // The ONE call in this feature that would reach a real shell (Task 6). Succeeds
   // silently by default with output on both streams, so every case that is not
@@ -379,9 +381,9 @@ vi.mock("../../src/config", async (importActual) => {
       agentProvider: h.agentProvider,
       prReviewStatus: "PR initiated",
       // The named commands a `run` rule's node can point at by `commandId`. Steered
-      // per test rather than sourced from the real getConfig(): no built-ins ship,
-      // so the real value is always the empty list, which would make "the runner got
-      // the CONFIGURED command's text, not its label" untestable.
+      // per test rather than sourced from the real getConfig(): the real default is
+      // now DEFAULT_COMMANDS' single inert example, which would make "the runner got
+      // the CONFIGURED command's text, not its label" untestable against a fixed id.
       commands: h.commands,
       // Sourced from the real getConfig() (itself driven by the globally-mocked
       // vscode module) rather than hardcoded here, so a test's setConfig({
@@ -3238,7 +3240,7 @@ describe("orchestrator flows", () => {
     ]);
   });
 
-  it("posts an empty command list when none is configured — no built-ins ship", async () => {
+  it("posts an empty command list through when the harness has none — a user can clear the setting", async () => {
     setConfig({ orchestrator: true });
     h.commands = [];
     const { p } = await openPanel();

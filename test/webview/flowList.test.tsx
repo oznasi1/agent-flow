@@ -23,9 +23,10 @@ const MODES = [
 ];
 
 /** `agentFlow.commands`, as the host posts it. The ids are made up for this
- * file on purpose — nothing ships built-in — so a picker showing one of these
- * can only have read the prop, never a hardcoded list. Same fixture and same
- * reasoning as OrchestratorDrawer.test.tsx's own, since one list feeds both
+ * file on purpose — distinct from the one id `DEFAULT_COMMANDS` ships
+ * (`verify-on-dev`) — so a picker showing one of these can only have read the
+ * prop, never a hardcoded list. Same fixture and same reasoning as
+ * OrchestratorDrawer.test.tsx's own, since one list feeds both
  * presentations. */
 const COMMANDS = [
   { id: "deploy-staging", label: "Deploy to staging", run: "deploy.sh --env=staging" },
