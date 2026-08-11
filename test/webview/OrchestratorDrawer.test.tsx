@@ -2123,6 +2123,12 @@ describe("a selected node's own configuration", () => {
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     expect(screen.queryByTestId("orch-node-inspector")).toBeNull();
     expect(screen.getByLabelText("Command")).toBeTruthy();
+    // And the canvas stops marking the node as selected. Asserted because the
+    // inspector alone cannot see it: with both selections live the edge wins the
+    // slot either way, so a `sel` left behind by selecting a rule would show up
+    // only here — as a highlighted node ring beside a highlighted edge, two
+    // claims about one selection.
+    expect(screen.getByTestId("orch-node-n2").classList.contains("sel")).toBe(false);
   });
 
   it("opens on a node clicked on the canvas as well as one picked from the Actions chip", () => {
