@@ -9,7 +9,10 @@ import {
   ACTION_LABEL,
   addCommandNode,
   COMMAND_FREE_TEXT,
+  COMMAND_NONE,
+  COMMAND_NONE_LABEL,
   COMMAND_NOT_SET,
+  commandFieldsOf,
   commandTargetOf,
   condOffered,
   condOptionLabel,
@@ -17,6 +20,7 @@ import {
   defaultCondFor,
   DEST_LABEL,
   endLabel,
+  INSPECTOR_NONE,
   isMigrationNotice,
   launchDestOf,
   modeValueOf,
@@ -36,6 +40,9 @@ import {
   withCond,
   withDest,
   withMode,
+  withNodeCommandId,
+  withNodeCommandRun,
+  withNodeNotifyMessage,
   withNote,
   withNotifyMessage,
   withoutEdge,
@@ -483,6 +490,24 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     });
   };
 
+  /** Selection is EXCLUSIVE: one connection or one node, never both. It was not,
+   * and it did not matter while a node selection did nothing but add a CSS class —
+   * `sel` and `selEdge` could both be set and the inspector simply always answered
+   * to `selEdge`. Now that a selected node opens the inspector in its own right,
+   * two live selections would mean two panels' worth of controls competing for one
+   * slot (and two controls sharing one aria-label), with the older selection
+   * silently winning. So each setter clears the other, in one pair of functions
+   * rather than at each of the four call sites that select something. */
+  const selectNode = (id: string) => {
+    setSel(id);
+    setSelEdge(null);
+  };
+
+  const selectEdge = (id: string) => {
+    setSelEdge(id);
+    setSel(null);
+  };
+
   const startResize = (e: React.PointerEvent) => {
     setResizing({ startX: e.clientX, startW: width });
   };
@@ -514,7 +539,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     const node = flow.nodes.find((n) => n.id === id);
     if (!node) return;
     const box = graphRef.current?.getBoundingClientRect();
-    setSel(id);
+    selectNode(id);
     setDrag({
       id,
       dx: e.clientX - (box?.left ?? 0) - node.x,
@@ -577,12 +602,28 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     if (flow.edges.some((e) => e.from === from && e.to === toId)) return;
     const id = nextEdgeId(flow);
     const edge: FlowEdge = { id, from, to: toId, cond: defaultCondFor(flow, from) };
-    setSelEdge(id);
+    selectEdge(id);
     p.onSave({ ...flow, edges: [...flow.edges, edge] });
   };
 
+  /** Add a node and SELECT it, so the inspector below opens on the thing that was
+   * just created rather than on nothing. This is the whole shape of the defect
+   * this fixes: the picker created a node whose own configuration had no home in
+   * the UI until a rule pointed at it, so "add" and "configure" were separated by
+   * "wire it up first". Selecting the new node is what closes that gap without the
+   * user having to guess that a node is selectable at all.
+   *
+   * The id comes from the SAVED flow's last node rather than from a second
+   * `nextNodeId(flow)` call beside the builder's own: two calls agreeing today is
+   * an accident waiting to end, and the builders all append. */
+  const addAndSelect = (next: Flow) => {
+    const added = next.nodes[next.nodes.length - 1];
+    if (added) selectNode(added.id);
+    p.onSave(next);
+  };
+
   const addNotify = () =>
-    p.onSave({
+    addAndSelect({
       ...flow,
       nodes: [...flow.nodes, { id: nextNodeId(flow), kind: "notify", x: 320, y: 24, join: "any", message: "say something" }],
     });
@@ -603,8 +644,12 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * is typed, not discovered — so it goes through `onSave` like every other
    * node this drawer builds. */
   const addCommand = (value: string) => {
-    if (!value) return;
-    p.onSave(addCommandNode(flow, value === COMMAND_FREE_TEXT ? { run: "" } : { commandId: value }));
+    // `COMMAND_NONE` is the picker's "nothing configured" line. Its option is
+    // `disabled`, but a `<select>`'s own `value` setter honours a disabled option
+    // (jsdom's does), so the refusal has to live here too or the sentinel would
+    // land on a node as a command id.
+    if (!value || value === COMMAND_NONE) return;
+    addAndSelect(addCommandNode(flow, value === COMMAND_FREE_TEXT ? { run: "" } : { commandId: value }));
   };
 
   /** The picker itself, rendered on both the canvas's Graph bar and the list
@@ -620,9 +665,19 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       onChange={(ev) => addCommand(ev.currentTarget.value)}
     >
       <option value="">+ Add command…</option>
-      {p.commands.map((c) => (
-        <option key={c.id} value={c.id}>{c.label}</option>
-      ))}
+      {/* The empty case, given a voice. `agentFlow.commands` ships no built-ins,
+          so for most users this list is empty — and a picker offering only
+          "+ Add command…" and "Free-text command…" never says that named,
+          reusable commands exist or where they come from. Disabled, so it is a
+          line to read rather than something to pick (`addCommand` refuses the
+          value as well — see its own comment). */}
+      {p.commands.length === 0 ? (
+        <option value={COMMAND_NONE} disabled>{COMMAND_NONE_LABEL}</option>
+      ) : (
+        p.commands.map((c) => (
+          <option key={c.id} value={c.id}>{c.label}</option>
+        ))
+      )}
       {/* Last, and always present: `agentFlow.commands` ships no built-ins, so
           for most users this is the only entry — and the user explicitly chose
           free-text commands over a config-only list. */}
@@ -662,23 +717,32 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * mode that will run while the flow is actually about to error. See the extra
    * `<option>` this gates, below. */
   const modeExists = modeValue !== "" && p.promptModes.some((m) => m.id === modeValue);
-  /** The selected rule's target command node, when it has one. */
+  /** The selected rule's target command node, when it has one, and what its two
+   * controls read — through `commandFieldsOf`, the same function the node
+   * inspector below and the list's own row spend, so one node cannot be described
+   * three ways. */
   const commandNode = edge ? commandTargetOf(flow, edge) : undefined;
-  /** The Command select's value: a configured id, the free-text sentinel when
-   * the node is in the free-text shape, or `""` for a node carrying neither
-   * (only a hand-edited file — the picker always sets one). `commandId` wins
-   * when a file somehow carries both, matching `commandLabel`; `resolveCommand`
-   * is what refuses that shape at fire time rather than picking a side. */
-  const commandValue =
-    commandNode?.commandId ?? (commandNode?.run !== undefined ? COMMAND_FREE_TEXT : "");
-  /** Is `commandValue` something the select already has an option for? Free text
-   * always is (its option is unconditional), and so is a configured id that is
-   * still in the setting. */
-  const commandIdExists =
-    commandValue === COMMAND_FREE_TEXT || p.commands.some((c) => c.id === commandValue);
-  /** The free-text field's value, and — by being `undefined` for a configured
-   * command — whether that field renders at all. */
-  const commandRun = commandNode?.commandId === undefined ? commandNode?.run : undefined;
+  const cmd = commandFieldsOf(commandNode, p.commands);
+
+  /** The node the inspector answers to when NO connection is selected — a
+   * command node's command and a notify node's message are the node's own data
+   * (`withNodeCommandId`, `withNodeNotifyMessage`), and until now the only
+   * controls that wrote them were keyed on an edge, so a node had to be wired
+   * into a rule before it could be configured at all. A place or a planned node
+   * is deliberately not here: neither has a field this panel edits (a launch's
+   * mode and destination are set on the rule that spends them), so selecting one
+   * leaves the empty state up rather than opening an empty panel. */
+  const inspNode = !edge && sel ? flow.nodes.find((n) => n.id === sel) : undefined;
+  const nodeInsp = inspNode && (inspNode.kind === "command" || inspNode.kind === "notify") ? inspNode : undefined;
+  /** How the node inspector names the node it is about — the same `endLabel`
+   * every other surface names it with. Also what its controls' aria-labels are
+   * scoped by: "Command", bare, is the edge inspector's and an open list row's
+   * label, and both can be on screen at the same time as this panel (an open row
+   * in the list view, right beside it). One accessible name for two controls is
+   * an ambiguity a screen reader cannot resolve — and would break a query for
+   * either. */
+  const nodeInspName = nodeInsp ? endLabel(flow, nodeInsp.id) : "";
+  const nodeCmd = commandFieldsOf(nodeInsp?.kind === "command" ? nodeInsp : undefined, p.commands);
 
   const setCond = (e: FlowEdge, kind: Condition["kind"]) => {
     const next = withCond(flow, e.id, kind);
@@ -704,6 +768,20 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * never reach the "carries both" shape `resolveCommand` refuses. */
   const setCommand = (e: FlowEdge, value: string) =>
     p.onSave(value === COMMAND_FREE_TEXT ? withCommandRun(flow, e, "") : withCommandId(flow, e, value));
+
+  /** The same choice, made about a SELECTED NODE rather than about the node a
+   * selected rule points at. Deliberately the node-keyed pair of the very same
+   * writers `setCommand` above calls through (`withCommandId` is one line of
+   * `withNodeCommandId`), which is what makes "both paths write the same node
+   * fields" a property of the code rather than a promise: there is one
+   * implementation of each write, and this reaches it by node id directly instead
+   * of via `edge.to`. */
+  const setNodeCommand = (nodeId: string, value: string) =>
+    p.onSave(
+      value === COMMAND_FREE_TEXT
+        ? withNodeCommandRun(flow, nodeId, "")
+        : withNodeCommandId(flow, nodeId, value),
+    );
 
   const deleteEdge = (e: FlowEdge) => {
     setSelEdge(null);
@@ -756,6 +834,143 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * the SILENCE of (see this file's own task brief): a clipped node with no
    * cue at all that anything is hidden. */
   const clippedRight = flow.nodes.some((n) => posOf(n).x + boxOf(n).w > renderWidth - GRAPH_H_INSET);
+
+  /** The nodes a rule ACTS on, and — new here — the way to SELECT one. Written
+   * once and rendered by BOTH views, rather than left in the canvas branch where
+   * it was: the list view is the keyboard path, its rows are one per RULE, and a
+   * node that no rule points at yet appears in none of them. Without this section
+   * the list could create a command node (its own Add bar does) and then offer no
+   * way to configure it — precisely the gap this fix is about, reopened for
+   * keyboard users only.
+   *
+   * The identifier is a `<button>` for that reason: it is a real, natively
+   * focusable Tab stop in both views, so reaching a node's own configuration never
+   * requires a pointer on a div-and-pointer-events canvas. */
+  const actionsSection = actionNodes.length > 0 ? (
+    <div className="orch-sect">
+      <div className="orch-sect-hd">
+        <span className="t">Actions</span>
+        <span className="rule" />
+      </div>
+      <div className="orch-tray" data-testid="orch-actions">
+        {actionNodes.map((n) => (
+          <span className={`orch-tchip${sel === n.id ? " on" : ""}`} key={n.id}>
+            {/* `endLabel`, the same function the canvas chip and both rule
+                sentences spend, so one node is never named two ways.
+                `aria-pressed` is the App.tsx idiom for on/off state (its
+                filter/size/status groups all use it), and the accessible name
+                says what pressing does rather than repeating the identifier
+                alone. */}
+            <button
+              type="button"
+              className="k"
+              aria-pressed={sel === n.id}
+              aria-label={`Configure ${endLabel(flow, n.id)}`}
+              onClick={() => selectNode(n.id)}
+            >
+              {endLabel(flow, n.id)}
+            </button>
+            <span className="sub">{n.kind === "notify" ? n.message : "runs a command"}</span>
+            <button
+              type="button"
+              className="rm"
+              aria-label={`Remove ${endLabel(flow, n.id)}`}
+              onClick={() => removeNode(n.id)}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
+  /** The inspector, opened on a selected NODE rather than on a rule. The fields
+   * are the node's own (`withNodeCommandId`/`withNodeCommandRun`/
+   * `withNodeNotifyMessage`) — the same writers the edge inspector reaches through
+   * `edge.to`, called here by id — so the two paths cannot disagree about what
+   * they set. There is no note row and no condition row: a note lives on the EDGE
+   * (`withNote`), and a node has no condition.
+   *
+   * Rendered by both views. On the canvas it replaces the empty state whenever a
+   * command or notify node is selected and no rule is; in the list it sits under
+   * the Actions section whose buttons select one. */
+  const nodeInspector = nodeInsp ? (
+    <div className="orch-insp" data-testid="orch-node-inspector">
+      <div className="t">
+        <span>
+          {nodeInsp.kind === "command" ? "Command" : "Notify"}
+          {/* The identifier, exempt from this row's uppercase (see
+              `.orch-insp .t .k`): a free-text command is case-sensitive shell
+              text, and "DEPLOY.SH --ENV=STAGING" is not the command that runs.
+              A notify node has no identifier to print — its message is prose,
+              which this row would shout — so the kind word stands alone. */}
+          {nodeInsp.kind === "command" && (
+            <>
+              {" · "}
+              <span className="k" style={{ fontFamily: "var(--mono)" }}>{nodeInspName}</span>
+            </>
+          )}
+        </span>
+      </div>
+      {nodeInsp.kind === "command" ? (
+        <>
+          <div className="orch-clause">
+            <span className="orch-kw">RUNS</span>
+            <select
+              className="orch-sel"
+              aria-label={`Command for ${nodeInspName}`}
+              value={nodeCmd.value}
+              onChange={(ev) => setNodeCommand(nodeInsp.id, ev.currentTarget.value)}
+            >
+              {/* The same extra option the edge inspector renders, for the same
+                  reason: a `<select>` whose value matches none of its options
+                  shows its FIRST one instead, so a node naming a command that is
+                  not (or no longer) configured would read as one that is. */}
+              {!nodeCmd.idExists && (
+                <option value={nodeCmd.value}>
+                  {nodeCmd.value === "" ? COMMAND_NOT_SET : `${nodeCmd.value} (not configured)`}
+                </option>
+              )}
+              {p.commands.map((c) => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+              <option value={COMMAND_FREE_TEXT}>Free-text command…</option>
+            </select>
+          </div>
+          {/* THE field this whole fix exists for: shown whenever the node is IN
+              the free-text shape (`run` present, even blank), which is exactly
+              what "Free-text command…" creates. Before this it rendered only
+              inside the edge inspector, so a node with no rule pointing at it had
+              nowhere to type at all. */}
+          {nodeCmd.run !== undefined && (
+            <div className="orch-clause">
+              <span className="orch-kw" />
+              <input
+                className="orch-msg"
+                aria-label={`Command to run for ${nodeInspName}`}
+                key={nodeInsp.id}
+                defaultValue={nodeCmd.run}
+                placeholder="deploy.sh --env=staging"
+                onBlur={(ev) => p.onSave(withNodeCommandRun(flow, nodeInsp.id, ev.currentTarget.value))}
+              />
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="orch-clause">
+          <span className="orch-kw">SAYS</span>
+          <input
+            className="orch-msg"
+            aria-label={`Message for ${nodeInspName}`}
+            key={nodeInsp.id}
+            defaultValue={nodeInsp.message}
+            onBlur={(ev) => p.onSave(withNodeNotifyMessage(flow, nodeInsp.id, ev.currentTarget.value))}
+          />
+        </div>
+      )}
+    </div>
+  ) : null;
 
   return (
     <aside
@@ -951,6 +1166,16 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 ))}
               </select>
             </div>
+            {/* The same two blocks the canvas renders, in the same order they read
+                in: what the flow's rules ACT on, and the panel that configures
+                whichever of them is selected. They belong here because this view's
+                rows are one per RULE — a command node no rule points at yet shows
+                up in none of them, so "+ Add command…" one bar above could create
+                a node this view could never finish. That is the canvas's own defect
+                (nowhere to type until you wire something) in the presentation whose
+                whole reason for existing is that it works from the keyboard. */}
+            {actionsSection}
+            {nodeInspector}
             {/* The keyboard path onto the same rules the canvas draws — see
                 flowList.tsx's own header comment for why it exists and what it
                 deliberately does not (yet) do. Same `flow` prop, same
@@ -1021,33 +1246,9 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             different questions — "Agents" is what conditions are about, "Actions"
             is what rules do (`ACTION_LABEL`'s `notify` and `run`). Rendered only
             when there is something in it, so a flow with no terminals gains no
-            empty box. */}
-        {actionNodes.length > 0 && (
-          <div className="orch-sect">
-            <div className="orch-sect-hd">
-              <span className="t">Actions</span>
-              <span className="rule" />
-            </div>
-            <div className="orch-tray" data-testid="orch-actions">
-              {actionNodes.map((n) => (
-                <span className="orch-tchip" key={n.id}>
-                  {/* `endLabel`, the same function the canvas chip and both rule
-                      sentences spend, so one node is never named two ways. */}
-                  <span className="k">{endLabel(flow, n.id)}</span>
-                  <span className="sub">{n.kind === "notify" ? n.message : "runs a command"}</span>
-                  <button
-                    type="button"
-                    className="rm"
-                    aria-label={`Remove ${endLabel(flow, n.id)}`}
-                    onClick={() => removeNode(n.id)}
-                  >
-                    ✕
-                  </button>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
+            empty box. Built above (`actionsSection`) rather than inline here,
+            because the list view renders the same section. */}
+        {actionsSection}
         <div className="orch-bar">
           <span className="t" style={{ fontSize: "var(--t-micro)", letterSpacing: ".06em", textTransform: "uppercase", color: "var(--dim)" }}>
             Graph
@@ -1167,7 +1368,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 data-testid={`orch-edge-${e.id}`}
                 className={`orch-edge${selEdge === e.id ? " sel" : ""}${BAD_CONDS.has(e.cond.kind) ? " bad" : ""}`}
                 style={{ left: `${mid.x}px`, top: `${mid.y}px` }}
-                onClick={() => setSelEdge(e.id)}
+                onClick={() => selectEdge(e.id)}
               >
                 {/* `condOptionLabel`, not `COND_LABEL`: the closed list row, the
                     list's own options and this inspector's options all spend the
@@ -1193,9 +1394,16 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           {clippedRight && <div className="orch-graph-fade" data-testid="orch-graph-fade" aria-hidden="true" />}
         </div>
         {!edge ? (
-          <div className="orch-insp none" data-testid="orch-inspector">
-            Select a connection to set its condition.
-          </div>
+          // A selected command or notify node opens the inspector in its own
+          // right — its command, or its message, is the node's own data. The
+          // empty state is only for a selection that has nothing to configure
+          // (nothing selected at all, or a place/planned node, whose launch
+          // settings belong to the rule that spends them).
+          nodeInspector ?? (
+            <div className="orch-insp none" data-testid="orch-inspector">
+              {INSPECTOR_NONE}
+            </div>
+          )
         ) : (
           <div className="orch-insp" data-testid="orch-inspector">
             <div className="t">
@@ -1299,7 +1507,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   <select
                     className="orch-sel"
                     aria-label="Command"
-                    value={commandValue}
+                    value={cmd.value}
                     onChange={(ev) => setCommand(edge, ev.currentTarget.value)}
                   >
                     {/* Same reasoning as the Mode select's own extra option
@@ -1311,9 +1519,9 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                         with neither field — a hand-edited file, since the
                         picker never builds one — must say so rather than look
                         like the first configured command. */}
-                    {!commandIdExists && (
-                      <option value={commandValue}>
-                        {commandValue === "" ? COMMAND_NOT_SET : `${commandValue} (not configured)`}
+                    {!cmd.idExists && (
+                      <option value={cmd.value}>
+                        {cmd.value === "" ? COMMAND_NOT_SET : `${cmd.value} (not configured)`}
                       </option>
                     )}
                     {p.commands.map((c) => (
@@ -1328,14 +1536,14 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                     creates — so a user who chooses it has somewhere to type,
                     and a node already carrying free text shows it in full
                     rather than eliding it the way the sentence does. */}
-                {commandRun !== undefined && (
+                {cmd.run !== undefined && (
                   <div className="orch-clause">
                     <span className="orch-kw" />
                     <input
                       className="orch-msg"
                       aria-label="Command to run"
                       key={edge.id}
-                      defaultValue={commandRun}
+                      defaultValue={cmd.run}
                       placeholder="deploy.sh --env=staging"
                       onBlur={(ev) => p.onSave(withCommandRun(flow, edge, ev.currentTarget.value))}
                     />

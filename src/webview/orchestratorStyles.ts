@@ -216,6 +216,23 @@ export const ORCH_CSS = `
     border: 1px solid var(--hair); border-radius: var(--r-chip);
     background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent); }
   .orch-tchip .k { font-family: var(--mono); font-size: var(--t-data); }
+  /* An ACTION chip's identifier is a button: it selects the node, which is what
+     opens the inspector on the node's own configuration (a command's command, a
+     notify's message). A real button rather than a click handler on the span
+     because this is the keyboard route to those fields — the list view has no
+     canvas to click, and the canvas itself is divs and pointer events. The reset
+     restates font-family/font-size AFTER \`font: inherit\`, which would otherwise
+     undo the \`.orch-tchip .k\` rule above (this selector is the more specific of
+     the two). */
+  .orch-tchip button.k { border: 0; padding: 0; background: transparent; cursor: pointer;
+    color: inherit; font: inherit; font-family: var(--mono); font-size: var(--t-data); }
+  .orch-tchip button.k:hover { color: var(--vscode-foreground); }
+  /* Selected: weight and foreground, never a fill — the same on-state language
+     CONTROLS_CSS spends, and the same house rule that keeps Arm the only filled
+     control on this surface. The chip's own hairline firms up with it so the
+     selection is legible without colour. */
+  .orch-tchip button.k[aria-pressed="true"] { color: var(--vscode-foreground); font-weight: 600; }
+  .orch-tchip.on { border-color: color-mix(in srgb, var(--vscode-foreground) 30%, var(--hair)); }
   .orch-tchip .sub { font-size: var(--t-micro); color: var(--dim); }
   .orch-tchip .rm { border: 0; background: transparent; color: var(--dim); cursor: pointer;
     font-size: 9px; padding: 0 1px; }

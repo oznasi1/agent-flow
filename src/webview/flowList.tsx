@@ -21,6 +21,7 @@ import {
   ACTION_LABEL,
   COMMAND_FREE_TEXT,
   COMMAND_NOT_SET,
+  commandFieldsOf,
   commandTargetOf,
   condOffered,
   condOptionLabel,
@@ -106,22 +107,12 @@ function ruleSentence(
   // never as a reason to pick a verb.
   const derived = edgeAction(flow, e);
   /** The rule's target command node, when it has one — the `run` counterpart of
-   * the planned target `modeValueOf`/`launchDestOf` read. */
-  const commandNode = commandTargetOf(flow, e);
-  /** The Command select's value: a configured id, the free-text sentinel when the
-   * node is in the free-text shape, or `""` for a node carrying neither (only a
-   * hand-edited file — the picker always sets one). Resolved exactly as the
-   * inspector's own does, so the two surfaces cannot read one node two ways. */
-  const commandValue =
-    commandNode?.commandId ?? (commandNode?.run !== undefined ? COMMAND_FREE_TEXT : "");
-  /** Is `commandValue` something the select already has an option for? Free text
-   * always is (its option is unconditional), and so is a configured id still in
-   * the setting. */
-  const commandIdExists =
-    commandValue === COMMAND_FREE_TEXT || commands.some((c) => c.id === commandValue);
-  /** The free-text field's value, and — by being `undefined` for a configured
-   * command — whether that field renders at all. */
-  const commandRun = commandNode?.commandId === undefined ? commandNode?.run : undefined;
+   * the planned target `modeValueOf`/`launchDestOf` read — and what its two
+   * controls read. Through `commandFieldsOf`, which the canvas's two inspectors
+   * spend as well: this row used to derive the same three values from the same
+   * fields by hand, "exactly as the inspector's own does", which is a comment
+   * rather than a guarantee. */
+  const cmd = commandFieldsOf(commandTargetOf(flow, e), commands);
 
   const setCond = (kind: Condition["kind"]) => {
     const next = withCond(flow, e.id, kind);
@@ -248,7 +239,7 @@ function ruleSentence(
               <select
                 className="orch-sel"
                 aria-label="Command"
-                value={commandValue}
+                value={cmd.value}
                 onChange={(ev) =>
                   onSave(
                     ev.currentTarget.value === COMMAND_FREE_TEXT
@@ -264,9 +255,9 @@ function ruleSentence(
                     the first configured one while `resolveCommand` refuses it
                     outright — and a hand-edited node carrying neither field must
                     say so rather than look like a command that exists. */}
-                {!commandIdExists && (
-                  <option value={commandValue}>
-                    {commandValue === "" ? COMMAND_NOT_SET : `${commandValue} (not configured)`}
+                {!cmd.idExists && (
+                  <option value={cmd.value}>
+                    {cmd.value === "" ? COMMAND_NOT_SET : `${cmd.value} (not configured)`}
                   </option>
                 )}
                 {commands.map((c) => (
@@ -284,12 +275,12 @@ function ruleSentence(
                   keyboard path complete: without it, a free-text command node
                   added from the keyboard could only ever be filled in on the
                   canvas. */}
-              {commandRun !== undefined && (
+              {cmd.run !== undefined && (
                 <input
                   className="orch-msg"
                   aria-label="Command to run"
                   key={`${e.id}-run`}
-                  defaultValue={commandRun}
+                  defaultValue={cmd.run}
                   placeholder="deploy.sh --env=staging"
                   onBlur={(ev) => onSave(withCommandRun(flow, e, ev.currentTarget.value))}
                 />

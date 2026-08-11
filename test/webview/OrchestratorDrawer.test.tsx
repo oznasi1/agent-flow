@@ -11,7 +11,14 @@ import type { Flow } from "../../src/engine/orchestrator/model";
 import { readFlows, writeFlow } from "../../src/engine/orchestrator/store";
 import { edgeAction } from "../../src/engine/orchestrator/model";
 import { branchCiKey } from "../../src/engine/orchestrator/branchCi";
-import { ACTION_LABEL, COMMAND_FREE_TEXT, COMMAND_NOT_SET } from "../../src/webview/orchestratorRule";
+import {
+  ACTION_LABEL,
+  COMMAND_FREE_TEXT,
+  COMMAND_NONE,
+  COMMAND_NONE_LABEL,
+  COMMAND_NOT_SET,
+  INSPECTOR_NONE,
+} from "../../src/webview/orchestratorRule";
 import { anchor, edgePath, GRID, labelPoint, NODE_H, NODE_W } from "../../src/engine/orchestrator/layout";
 import type { PrEntryMap, RunStatus } from "../../src/types";
 
@@ -1783,7 +1790,10 @@ describe("a command node", () => {
     const values = Array.from(
       screen.getByLabelText("Add a command").querySelectorAll("option"),
     ).map((o) => (o as HTMLOptionElement).value);
-    expect(values).toEqual(["", COMMAND_FREE_TEXT]);
+    // The empty case now has a voice between the two entries it used to be the
+    // whole of — see "says where named commands come from…" below for what it
+    // says and why it can never be picked.
+    expect(values).toEqual(["", COMMAND_NONE, COMMAND_FREE_TEXT]);
   });
 
   it("is reachable from the list view too, not only from the canvas", () => {

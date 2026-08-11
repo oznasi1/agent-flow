@@ -1395,7 +1395,9 @@ describe("a deck:flows payload missing a field a newer webview reads", () => {
     const values = Array.from(
       screen.getByLabelText("Add a command").querySelectorAll("option"),
     ).map((o) => (o as HTMLOptionElement).value);
-    expect(values).toHaveLength(2); // the placeholder, and free text
+    // The placeholder, the "(none configured — set agentFlow.commands)" line an
+    // empty list now gets a voice from, and free text.
+    expect(values).toHaveLength(3);
   });
 
   it("survives every other missing list on that message too", () => {
