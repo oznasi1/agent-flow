@@ -10,6 +10,11 @@ import type { SerializedCaps } from "../tasks/provider";
 import { GaugeMark } from "./GaugeMark";
 import { Notepad } from "./Notepad";
 import { PlayIcon } from "./icons";
+// The combo scaffolding both this sidebar's repo controls and the Deck's
+// Orchestrator combo run on. It lived here until the drawer needed it too, and
+// importing THIS file from the Deck bundle would have dragged Fuse.js and the
+// whole sidebar along with it.
+import { useComboFilter } from "./combo";
 
 let toastSeq = 0;
 
@@ -984,43 +989,6 @@ function CardDetail(props: {
       <RepoPicker available={available} onAdd={add} />
     </div>
   );
-}
-
-/** Shared scaffolding for the inline command-palette combos (RepoPicker,
- * RepoMultiSelect): open/query/active state, focus-on-open, active-reset on
- * change, click-outside-to-close, and Arrow/Enter/Escape handling. The consumer
- * supplies what Enter does via `onEnter`. */
-export function useComboFilter(items: string[], onEnter: (item: string) => void) {
-  const [open, setOpen] = React.useState(false);
-  const [q, setQ] = React.useState("");
-  const [active, setActive] = React.useState(0);
-  const inputRef = React.useRef<HTMLInputElement>(null);
-  const rootRef = React.useRef<HTMLDivElement>(null);
-
-  const filtered = React.useMemo(
-    () => items.filter((r) => r.toLowerCase().includes(q.toLowerCase())),
-    [items, q],
-  );
-
-  React.useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
-  React.useEffect(() => setActive(0), [q, open]);
-  React.useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setActive((a) => Math.min(a + 1, filtered.length - 1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setActive((a) => Math.max(a - 1, 0)); }
-    else if (e.key === "Enter") { e.preventDefault(); if (filtered[active]) onEnter(filtered[active]); }
-    else if (e.key === "Escape") { e.preventDefault(); setOpen(false); }
-  };
-
-  return { open, setOpen, q, setQ, active, setActive, filtered, inputRef, rootRef, onKeyDown };
 }
 
 /** Command-palette-style repo picker: filter-as-you-type, keyboard-navigable,

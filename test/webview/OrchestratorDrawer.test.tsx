@@ -199,6 +199,46 @@ describe("OrchestratorDrawer", () => {
 const drop = (el: Element, payload: string) =>
   fireEvent.drop(el, { dataTransfer: { getData: () => payload, dropEffect: "copy" } });
 
+/** Open one of the Add bar's `MultiCombo`s and hand back its popup. Every combo
+ * test starts here, so the trigger's own contract (aria-label, aria-expanded)
+ * is exercised by all of them rather than asserted once and then bypassed. */
+const openCombo = (ariaLabel: string): HTMLElement => {
+  const trigger = screen.getByRole("button", { name: ariaLabel });
+  fireEvent.click(trigger);
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  return screen.getByRole("listbox", { name: ariaLabel });
+};
+
+/** The whole gesture: open, tick each named row, press Add. Rows are addressed
+ * by their accessible name — the run key plus its repo, or a command's label
+ * plus its detail — which is what the user actually reads.
+ *
+ * `mouseDown`, not `click`: the rows commit on mousedown so that the search
+ * input never loses focus mid-gesture (`preventDefault` on a click would come
+ * too late), and firing the event the component listens for is the difference
+ * between testing the picker and testing `fireEvent`. */
+const pickFromCombo = (ariaLabel: string, rowNames: (string | RegExp)[]): void => {
+  const list = openCombo(ariaLabel);
+  for (const name of rowNames) {
+    const rows = within(list).getAllByRole("option");
+    const row = rows.find((r) =>
+      typeof name === "string" ? (r.textContent ?? "").includes(name) : name.test(r.textContent ?? ""),
+    );
+    expect(row, `no row matching ${String(name)} in ${rows.map((r) => r.textContent).join(" | ")}`).toBeTruthy();
+    fireEvent.mouseDown(row!);
+    expect(row!.getAttribute("aria-selected")).toBe("true");
+  }
+  fireEvent.mouseDown(screen.getByRole("button", { name: "Add" }));
+};
+
+/** The Add-command combo's footer action: a node with an empty `run`, for the
+ * inspector to fill in. Its own helper because half this file's flows are built
+ * from free text specifically so they depend on nothing being configured. */
+const pickFreeTextCommand = (): void => {
+  openCombo("Add a command");
+  fireEvent.mouseDown(screen.getByRole("button", { name: "Free-text command…" }));
+};
+
 // Task 5: the keyboard path. The toggle itself lives in this file (it is
 // part of the drawer's own header, not flowList.tsx's concern); flowList.tsx
 // and its own test file cover what the list view renders and how its rows
@@ -1734,38 +1774,43 @@ describe("a command node", () => {
     expect(ORCH_CSS).toContain(".orch-insp .t .k { text-transform: none;");
   });
 
-  it("offers every configured command, and a free-text option", () => {
+  it("offers every configured command, and a free-text action", () => {
     render(<OrchestratorDrawer {...props()} />);
-    const values = Array.from(
-      screen.getByLabelText("Add a command").querySelectorAll("option"),
-    ).map((o) => (o as HTMLOptionElement).value);
-    // The host's own list, in order, plus the placeholder and free text — never
-    // a hardcoded set, which is why COMMANDS' ids are made up for this file.
-    expect(values).toEqual(["", "deploy-staging", "smoke", COMMAND_FREE_TEXT]);
-    expect(screen.getByText("Deploy to staging")).toBeTruthy();
+    const rows = within(openCombo("Add a command")).getAllByRole("option");
+    // The host's own list, in order — never a hardcoded set, which is why
+    // COMMANDS' ids are made up for this file.
+    expect(rows.map((r) => r.textContent)).toEqual(["Deploy to staging", "Smoke test"]);
+    // Free text is an ACTION, not a tickable row: there is nothing to batch about
+    // "a command I have not typed yet", so it sits in the footer and fires at once.
+    expect(screen.getByRole("button", { name: "Free-text command…" })).toBeTruthy();
   });
 
   // The visual half, which no computed style can assert under jsdom (the sheet is
   // never injected): what CAN be pinned is the contract the styling depends on —
-  // the picker lives inside an `.orch-bar`, which is the selector that gives it
-  // its neighbours' weight. Both halves asserted together, so moving the control
-  // out of the bar or dropping the rule each break this.
+  // the trigger sits inside an `.orch-bar` beside the quiet `.orch-mini` buttons,
+  // and `.combo-trigger` is the rule that gives it their weight. Both halves
+  // asserted together, so moving the control out of the bar or dropping the rule
+  // each break this.
   it("reads at the same weight as the buttons beside it", () => {
     render(<OrchestratorDrawer {...props()} />);
-    const picker = screen.getByLabelText("Add a command");
-    const bar = picker.closest(".orch-bar");
+    const trigger = screen.getByRole("button", { name: "Add a command" });
+    const bar = trigger.closest(".orch-bar");
     expect(bar).not.toBeNull();
     // Its neighbours are the quiet `.orch-mini` buttons, and this must not be
     // heavier than them — Arm is this surface's only accented control.
     expect(within(bar as HTMLElement).getByRole("button", { name: "+ Notify" }).className).toBe("orch-mini");
-    expect(picker.className).toBe("orch-sel");
-    expect(ORCH_CSS).toContain(".orch-bar .orch-sel");
+    expect(trigger.className).toBe("combo-trigger");
+    expect(ORCH_CSS).toContain(".combo-trigger {");
+    // 20px and --t-micro are `.orch-mini`'s own metrics. A trigger that drifted
+    // to the inspector's 22px/--t-body would be the heaviest thing in the row.
+    expect(ORCH_CSS).toMatch(/\.combo-trigger \{[^}]*height: 20px/);
+    expect(ORCH_CSS).toMatch(/\.combo-trigger \{[^}]*font-size: var\(--t-micro\)/);
   });
 
   it("adds a node for a configured command", () => {
     const onSave = vi.fn();
     render(<OrchestratorDrawer {...props({ onSave })} />);
-    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: "deploy-staging" } });
+    pickFromCombo("Add a command", ["Deploy to staging"]);
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.nodes).toEqual([
       expect.objectContaining({ kind: "command", commandId: "deploy-staging" }),
@@ -1775,10 +1820,77 @@ describe("a command node", () => {
     expect(saved.nodes[0]).not.toHaveProperty("run");
   });
 
+  // The reason this picker stopped being a `<select>`: the feature's own headline
+  // example is a chain (deploy, then smoke-test), and a select creates exactly one
+  // node per trip. Two ticks, ONE save — and the two nodes must not collide on the
+  // id or the y that `addCommandNode` mints from the flow it is handed.
+  it("adds one node per ticked command, in a single save", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave })} />);
+    pickFromCombo("Add a command", ["Deploy to staging", "Smoke test"]);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0] as Flow;
+    expect(saved.nodes.map((n) => (n.kind === "command" ? n.commandId : n.kind))).toEqual([
+      "deploy-staging",
+      "smoke",
+    ]);
+    expect(new Set(saved.nodes.map((n) => n.id)).size).toBe(2);
+    expect(new Set(saved.nodes.map((n) => n.y)).size).toBe(2);
+  });
+
+  it("orders a batch by the picker's own list, not by the order they were ticked", () => {
+    // Stable output for one set of ticks. Ticking bottom-up is the same batch as
+    // ticking top-down, which is what makes the fold above reproducible.
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave })} />);
+    pickFromCombo("Add a command", ["Smoke test", "Deploy to staging"]);
+    const saved = onSave.mock.calls[0][0] as Flow;
+    expect(saved.nodes.map((n) => (n.kind === "command" ? n.commandId : n.kind))).toEqual([
+      "deploy-staging",
+      "smoke",
+    ]);
+  });
+
+  it("finds a command by typing part of its label", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    const list = openCombo("Add a command");
+    fireEvent.change(screen.getByPlaceholderText("Filter commands…"), { target: { value: "smo" } });
+    expect(within(list).getAllByRole("option").map((r) => r.textContent)).toEqual(["Smoke test"]);
+  });
+
+  it("adds nothing when Add is pressed with no row ticked", () => {
+    // The button is present from the moment the popup opens (the gesture should be
+    // discoverable before it is available), so it has to refuse an empty commit
+    // rather than save a flow with no new node in it.
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave })} />);
+    openCombo("Add a command");
+    const add = screen.getByRole("button", { name: "Add" });
+    expect(add).toBeDisabled();
+    fireEvent.mouseDown(add);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("forgets what was ticked when the popup is dismissed without adding", () => {
+    // Escape is a cancel, not a pause: reopening must not carry a stale tick that
+    // the next Add would then commit silently.
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave })} />);
+    const list = openCombo("Add a command");
+    fireEvent.mouseDown(within(list).getAllByRole("option")[0]);
+    fireEvent.keyDown(screen.getByPlaceholderText("Filter commands…"), { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Add a command" })).toBeNull();
+    const reopened = openCombo("Add a command");
+    expect(within(reopened).getAllByRole("option")[0].getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByRole("button", { name: "Add" })).toBeDisabled();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it("adds a node for a free-text command, in the shape that says 'not typed yet'", () => {
     const onSave = vi.fn();
     render(<OrchestratorDrawer {...props({ onSave })} />);
-    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: COMMAND_FREE_TEXT } });
+    openCombo("Add a command");
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Free-text command…" }));
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.nodes[0]).toMatchObject({ kind: "command", run: "" });
     expect(saved.nodes[0]).not.toHaveProperty("commandId");
@@ -1792,13 +1904,12 @@ describe("a command node", () => {
   it("stays reachable when commands is cleared to an empty list", () => {
     const onSave = vi.fn();
     render(<OrchestratorDrawer {...props({ onSave, commands: [] })} />);
-    const values = Array.from(
-      screen.getByLabelText("Add a command").querySelectorAll("option"),
-    ).map((o) => (o as HTMLOptionElement).value);
-    // The empty case now has a voice between the two entries it used to be the
-    // whole of — see "says where named commands come from…" below for what it
-    // says and why it can never be picked.
-    expect(values).toEqual(["", COMMAND_NONE, COMMAND_FREE_TEXT]);
+    const list = openCombo("Add a command");
+    // No tickable rows at all — and the two things that are not options survive:
+    // the line that says where commands come from, and free text.
+    expect(within(list).queryAllByRole("option")).toEqual([]);
+    expect(within(list).getByText(COMMAND_NONE_LABEL)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Free-text command…" })).toBeTruthy();
   });
 
   it("is reachable from the list view too, not only from the canvas", () => {
@@ -1807,7 +1918,7 @@ describe("a command node", () => {
     const onSave = vi.fn();
     render(<OrchestratorDrawer {...props({ onSave, flows: [twoPlaces()] })} />);
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
-    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: "smoke" } });
+    pickFromCombo("Add a command", ["Smoke test"]);
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
     expect(saved.nodes.filter((n) => n.kind === "command")).toEqual([
       expect.objectContaining({ commandId: "smoke" }),
@@ -1935,7 +2046,7 @@ describe("a command node", () => {
 
     // A command node, from the picker — free text, so nothing about this test
     // depends on the user having configured anything.
-    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: COMMAND_FREE_TEXT } });
+    pickFreeTextCommand();
     rerenderWith(lastSaved());
 
     // A rule between them, by wiring the ports.
@@ -2058,7 +2169,7 @@ describe("a selected node's own configuration", () => {
     const onSave = vi.fn();
     const initial = props({ onSave, flows: [flow()] });
     const { rerender } = render(<OrchestratorDrawer {...initial} />);
-    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: COMMAND_FREE_TEXT } });
+    pickFreeTextCommand();
     rerender(<OrchestratorDrawer {...initial} flows={[onSave.mock.calls.at(-1)![0] as Flow]} />);
 
     const box = screen.getByLabelText(`Command to run for ${COMMAND_NOT_SET}`);
@@ -2077,7 +2188,7 @@ describe("a selected node's own configuration", () => {
     const initial = props({ onSave, flows: [flow()] });
     const { rerender } = render(<OrchestratorDrawer {...initial} />);
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
-    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: COMMAND_FREE_TEXT } });
+    pickFreeTextCommand();
     rerender(<OrchestratorDrawer {...initial} flows={[onSave.mock.calls.at(-1)![0] as Flow]} />);
 
     // Still the list view, and it has no rule rows to edit anything through.
@@ -2190,32 +2301,33 @@ describe("a selected node's own configuration", () => {
 });
 
 describe("the Add-command picker with nothing configured", () => {
-  it("says where named commands come from, and never lets that line be picked", () => {
+  it("says where named commands come from, in a line that is not an option", () => {
     const onSave = vi.fn();
     render(<OrchestratorDrawer {...props({ onSave, commands: [] })} />);
-    const picker = screen.getByLabelText("Add a command") as HTMLSelectElement;
-    const hint = Array.from(picker.querySelectorAll("option")).find(
-      (o) => (o as HTMLOptionElement).value === COMMAND_NONE,
-    ) as HTMLOptionElement;
-    expect(hint).toBeDefined();
-    expect(hint.textContent).toBe(COMMAND_NONE_LABEL);
+    const list = openCombo("Add a command");
+    const hint = within(list).getByText(COMMAND_NONE_LABEL);
     // The actionable half: the setting a user would have to open to have any.
     expect(hint.textContent).toContain("agentFlow.commands");
-    expect(hint.disabled).toBe(true);
-    // `disabled` is the markup half. A <select>'s own `value` setter honours a
-    // disabled option (jsdom's included), so the refusal that actually holds is
-    // the handler's — without it this sentinel lands on a node as a command id.
-    fireEvent.change(picker, { target: { value: COMMAND_NONE } });
+    // Prose, not a row. The `<select>` this replaced needed a sentinel VALUE for
+    // this line and a `disabled` flag to keep it unpickable — and jsdom honoured
+    // neither, so the refusal had to be duplicated in the handler. A combo has no
+    // value channel to smuggle a sentinel through: the line is a plain div, so
+    // clicking it cannot commit anything.
+    expect(hint.getAttribute("role")).toBeNull();
+    expect(within(list).queryAllByRole("option")).toEqual([]);
+    fireEvent.mouseDown(hint);
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Add" }));
     expect(onSave).not.toHaveBeenCalled();
   });
 
   it("is absent the moment there is a command to offer", () => {
     render(<OrchestratorDrawer {...props()} />);
-    const values = Array.from(
-      screen.getByLabelText("Add a command").querySelectorAll("option"),
-    ).map((o) => (o as HTMLOptionElement).value);
-    expect(values).not.toContain(COMMAND_NONE);
-    expect(values).toEqual(["", "deploy-staging", "smoke", COMMAND_FREE_TEXT]);
+    const list = openCombo("Add a command");
+    expect(within(list).queryByText(COMMAND_NONE_LABEL)).toBeNull();
+    expect(within(list).getAllByRole("option").map((r) => r.textContent)).toEqual([
+      "Deploy to staging",
+      "Smoke test",
+    ]);
   });
 });
 
@@ -2908,7 +3020,7 @@ describe("the list view's add-node controls", () => {
     openList({ flows: [twoPlaces()] });
     expect(screen.getByRole("button", { name: "+ Notify" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "+ Add planned work" })).toBeTruthy();
-    expect(screen.getByLabelText("Add a place")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Add a place" })).toBeTruthy();
   });
 
   it("+ Notify works from the list view too, through the same addNotify the canvas uses", () => {
@@ -2925,31 +3037,83 @@ describe("the list view's add-node controls", () => {
     expect(send).toHaveBeenCalledWith({ type: "flow:addPlanned", id: "f1" });
   });
 
-  it("the place picker is an ordinary, keyboard-navigable select", () => {
+  it("the place picker is an ordinary, keyboard-reachable control", () => {
     openList({ flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
-    const select = screen.getByLabelText("Add a place") as HTMLSelectElement;
-    expect(select.tagName).toBe("SELECT");
-    expect(select).not.toHaveAttribute("tabindex", "-1");
-    expect(select).not.toBeDisabled();
+    const trigger = screen.getByRole("button", { name: "Add a place" });
+    expect(trigger.tagName).toBe("BUTTON");
+    expect(trigger).not.toHaveAttribute("tabindex", "-1");
+    expect(trigger).not.toBeDisabled();
+    // Closed until asked, and it says so — the only cue a keyboard user has that
+    // this control holds a list rather than firing on press.
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(trigger.getAttribute("aria-haspopup")).toBe("listbox");
   });
 
-  it("choosing a run from the place picker adds it, through the same attachAt the drag path uses", () => {
+  it("choosing a run from the place picker adds it, through the same attach the drag path uses", () => {
     const onSave = vi.fn();
     openList({ onSave, flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
-    fireEvent.change(screen.getByLabelText("Add a place"), { target: { value: `ASM-1${DRAG_SEP}agent-flow` } });
+    pickFromCombo("Add a place", ["ASM-1"]);
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.nodes).toEqual([
       expect.objectContaining({ kind: "place", runKey: "ASM-1", repo: "agent-flow" }),
     ]);
   });
 
+  it("attaches several places in one save", () => {
+    // Two repos of one run, both wanted. Through a `<select>` this was two trips;
+    // the risk the fold has to answer is that both nodes get their own id and y
+    // rather than the second overwriting what the first computed.
+    const onSave = vi.fn();
+    const twoRepo = runStatus("ASM-1", "web", {
+      repos: [
+        { name: "web", path: "/r/web", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
+        { name: "api", path: "/r/api", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
+      ],
+    });
+    openList({ onSave, flows: [flow()], runs: [twoRepo] });
+    pickFromCombo("Add a place", ["web", "api"]);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0] as Flow;
+    expect(saved.nodes.map((n) => (n.kind === "place" ? n.repo : n.kind))).toEqual(["web", "api"]);
+    expect(new Set(saved.nodes.map((n) => n.id)).size).toBe(2);
+    expect(new Set(saved.nodes.map((n) => n.y)).size).toBe(2);
+  });
+
+  it("prints a run key as an identifier, the same way the tray's chips do", () => {
+    // Both halves together, since jsdom loads no sheet: the row really does mark
+    // its key as mono, and the sheet really does give that class the mono family.
+    // A command's label goes through the same component and must NOT — see the
+    // per-option `mono` flag.
+    openList({ flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
+    const row = within(openCombo("Add a place")).getAllByRole("option")[0];
+    expect(row.querySelector(".l")!.className).toBe("l k");
+    expect(ORCH_CSS).toContain(".combo-t .l.k { font-family: var(--mono)");
+  });
+
+  it("finds a place by typing its repo, which is the row's second line", () => {
+    // The repo is printed as the row's detail, so filtering on the run key alone
+    // would put a name on screen that cannot be typed.
+    const twoRepo = runStatus("ASM-1", "web", {
+      repos: [
+        { name: "web", path: "/r/web", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
+        { name: "api", path: "/r/api", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
+      ],
+    });
+    openList({ flows: [flow()], runs: [twoRepo] });
+    const list = openCombo("Add a place");
+    fireEvent.change(screen.getByPlaceholderText("Filter places…"), { target: { value: "api" } });
+    const rows = within(list).getAllByRole("option");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("api");
+  });
+
   it("excludes a run/repo pair already attached to this flow — choosing it again would silently do nothing", () => {
     const already = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" }] });
     openList({ flows: [already], runs: [runStatus("ASM-1", "agent-flow")] });
-    const options = Array.from(screen.getByLabelText("Add a place").querySelectorAll("option")).map(
-      (o) => (o as HTMLOptionElement).value,
-    );
-    expect(options).not.toContain(`ASM-1${DRAG_SEP}agent-flow`);
+    const list = openCombo("Add a place");
+    expect(within(list).queryAllByRole("option")).toEqual([]);
+    // And it says why, rather than showing an empty box that looks broken.
+    expect(within(list).getByText(/Nothing left to attach/)).toBeTruthy();
   });
 
   it("offers every repo of a multi-repo run, not only whichever one an agent happens to be bound to", () => {
@@ -2960,11 +3124,8 @@ describe("the list view's add-node controls", () => {
       ],
     });
     openList({ flows: [flow()], runs: [twoRepo] });
-    const options = Array.from(screen.getByLabelText("Add a place").querySelectorAll("option")).map(
-      (o) => (o as HTMLOptionElement).value,
-    );
-    expect(options).toContain(`ASM-1${DRAG_SEP}web`);
-    expect(options).toContain(`ASM-1${DRAG_SEP}api`);
+    const rows = within(openCombo("Add a place")).getAllByRole("option");
+    expect(rows.map((r) => r.textContent)).toEqual(["ASM-1web", "ASM-1api"]);
   });
 });
 
@@ -2997,7 +3158,7 @@ describe("building a whole flow from the keyboard", () => {
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
 
     // A place, from the keyboard picker.
-    fireEvent.change(screen.getByLabelText("Add a place"), { target: { value: `ASM-1${DRAG_SEP}agent-flow` } });
+    pickFromCombo("Add a place", ["ASM-1"]);
     let saved = onSave.mock.calls.at(-1)![0] as Flow;
     rerenderWith(saved);
 
@@ -3049,14 +3210,14 @@ describe("building a whole flow from the keyboard", () => {
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
 
     // A place to watch.
-    fireEvent.change(screen.getByLabelText("Add a place"), { target: { value: `ASM-1${DRAG_SEP}agent-flow` } });
+    pickFromCombo("Add a place", ["ASM-1"]);
     let saved = onSave.mock.calls.at(-1)![0] as Flow;
     rerenderWith(saved);
 
     // A command node, in the free-text shape — offered regardless of what
     // `agentFlow.commands` holds, for a one-off command not worth naming in
     // settings.
-    fireEvent.change(screen.getByLabelText("Add a command"), { target: { value: COMMAND_FREE_TEXT } });
+    pickFreeTextCommand();
     saved = onSave.mock.calls.at(-1)![0] as Flow;
     rerenderWith(saved);
     const place = saved.nodes.find((n) => n.kind === "place")!;

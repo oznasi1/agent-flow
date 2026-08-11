@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as React from "react";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, within } from "@testing-library/react";
 
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
@@ -1390,14 +1390,15 @@ describe("a deck:flows payload missing a field a newer webview reads", () => {
     expect(chip()).toBeInTheDocument();
     fireEvent.click(chip());
     expect(drawer()).not.toBeNull();
-    // And the picker the missing field feeds still works, offering the one
-    // option a build with no configured commands should offer.
-    const values = Array.from(
-      screen.getByLabelText("Add a command").querySelectorAll("option"),
-    ).map((o) => (o as HTMLOptionElement).value);
-    // The placeholder, the "(none configured — set agentFlow.commands)" line an
-    // empty list now gets a voice from, and free text.
-    expect(values).toHaveLength(3);
+    // And the picker the missing field feeds still opens, saying what an empty
+    // list means rather than showing a blank popup.
+    fireEvent.click(screen.getByRole("button", { name: "Add a command" }));
+    const list = screen.getByRole("listbox", { name: "Add a command" });
+    expect(within(list).queryAllByRole("option")).toEqual([]);
+    expect(within(list).getByText(/set agentFlow.commands/)).toBeTruthy();
+    // Free text stays offered, so a build that received no commands is still a
+    // build you can add one in.
+    expect(screen.getByRole("button", { name: "Free-text command…" })).toBeTruthy();
   });
 
   it("survives every other missing list on that message too", () => {

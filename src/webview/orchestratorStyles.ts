@@ -258,28 +258,93 @@ export const ORCH_CSS = `
     pointer-events: none; background: linear-gradient(to right, transparent, var(--vscode-editor-background)); }
   .orch-bar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
   .orch-bar .sp { flex: 1; }
-  /* An "add a node" picker sitting in a bar of buttons. \`.orch-sel\`'s own
-     metrics (22px, --t-body, an input-coloured fill) belong to the inspector's
-     sentence rows, where a select IS the sentence; on this bar the same element
-     sat beside three \`.orch-mini\` buttons and became the heaviest thing in the
-     row — taller, filled where they are transparent, and stretched to its widest
-     option — which on a surface whose one accented control is Arm is a claim it
-     has no business making. So it borrows \`.orch-mini\`'s height, type, border
-     and dim foreground: the row reads as four controls of one weight, and the
-     chevron still says (honestly, unlike a button) that this one opens a list.
 
-     Not a new class, and not applied per element: scoping by the BAR is what
-     makes it cover the place picker in the list view's own \`.orch-bar\` too —
-     that select had exactly the same mismatch and the same fix, and a modifier
-     class would have fixed whichever one someone remembered.
+  /* The "add a node" combo (combo.tsx) — the sidebar's repo filter, re-expressed
+     in this surface's own language. It replaced two native \`<select>\`s, and the
+     reason is not decoration: a select creates ONE node per trip, so staging
+     three commands meant opening the same menu three times, and a menu of run
+     keys had no way to find one by typing.
+     Same PATTERN as \`.repo-pop\` in styles.ts (search row, ticked rows, footer),
+     deliberately not the same rules: that sheet predates the token module and
+     spends raw px and \`--vscode-input-*\` directly. Sharing one stylesheet would
+     mean either restyling the sidebar's combos in this pass (a regression risk
+     for a control this task does not touch) or importing sidebar CSS into the
+     Deck bundle. The COMPONENT is shared, which is where the behaviour lives. */
+  .combo { position: relative; }
+  /* Bar weight, not input weight. The trigger stands beside \`.orch-mini\`
+     buttons and borrows their metrics for the same reason the \`<select>\` it
+     replaced did (see \`.orch-bar .orch-sel\` above): on a surface whose one
+     accented control is Arm, an "add" picker must not be the heaviest thing in
+     its row. The caret is what says, honestly, that this one opens a list. */
+  .combo-trigger { display: inline-flex; align-items: center; gap: 4px; height: 20px;
+    padding: 0 6px 0 7px; border: 1px solid var(--edge); border-radius: var(--r-chip);
+    background: transparent; color: var(--dim); cursor: pointer;
+    font-size: var(--t-micro); white-space: nowrap; }
+  .combo-trigger:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+  .combo-trigger[aria-expanded="true"] { color: var(--vscode-foreground); border-color: var(--vscode-focusBorder); }
+  .combo-caret { opacity: .6; }
 
-     \`max-width\` because a select's intrinsic width is its widest OPTION
-     ("Deploy to staging", or a run key plus a repo), which is what stretched the
-     row; the closed control only ever shows its own short placeholder, and the
-     popup the browser opens is sized to its contents regardless of this cap. */
-  .orch-bar .orch-sel { height: 20px; padding: 0 4px 0 7px; font-size: var(--t-micro);
-    max-width: 150px; color: var(--dim); background: transparent; }
-  .orch-bar .orch-sel:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+  /* Floats, and needs to: the bar it hangs off is one row tall, and an inline
+     panel would push the graph (or the rule list) down by its own height every
+     time it opened. \`.orch-body\` is \`overflow: hidden\`, so this is clipped by
+     the drawer's own bottom edge rather than escaping to the page — which is
+     the correct boundary for a panel that belongs to the drawer, and is why the
+     list is capped at 190px instead of growing with the option count. */
+  /* RIGHT-anchored, and measured rather than guessed: both Add bars push their
+     controls to the right edge with a spacer, so a popup that grew rightwards
+     from \`left: 0\` ran straight off the drawer — the screenshot showed the Add
+     button itself clipped by the window edge. Growing leftwards from the
+     trigger's right edge keeps it inside the drawer at every width, with no
+     measurement in JS. */
+  .combo-pop { position: absolute; z-index: 20; top: calc(100% + 4px); right: 0; min-width: 240px;
+    border: 1px solid var(--vscode-focusBorder); border-radius: var(--r-ctl); overflow: hidden;
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    box-shadow: 0 6px 20px -8px rgba(0,0,0,.5); }
+  .combo-search { display: flex; align-items: center; gap: 6px; padding: 6px 9px;
+    border-bottom: 1px solid var(--hair); }
+  .combo-search svg { flex: none; opacity: .55; }
+  .combo-search input { flex: 1; min-width: 0; border: 0; outline: none; background: transparent;
+    color: var(--vscode-foreground); font: inherit; font-size: var(--t-body); }
+  .combo-search input::placeholder { color: var(--vscode-input-placeholderForeground, var(--dim)); }
+  .combo-list { max-height: 190px; overflow-y: auto; padding: 4px; }
+  .combo-opt { display: flex; align-items: flex-start; gap: 8px; padding: 4px 6px;
+    border-radius: var(--r-chip); cursor: pointer; color: var(--vscode-foreground); }
+  .combo-opt.active { background: var(--vscode-list-activeSelectionBackground);
+    color: var(--vscode-list-activeSelectionForeground); }
+  .combo-box { flex: none; width: 13px; height: 13px; margin-top: 1px; border-radius: 3px;
+    border: 1px solid var(--edge); display: flex; align-items: center; justify-content: center;
+    font-size: var(--t-micro); line-height: 1; }
+  /* The ticked state is a fill, and this is the one place on this surface where
+     that is right: a checkbox with no fill is a checkbox you cannot read at a
+     glance. It takes the theme's own button colours rather than \`--brand\`, so
+     it never reads as a second primary beside Arm. */
+  .combo-opt.checked .combo-box { background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground); border-color: var(--vscode-button-background); }
+  .combo-t { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .combo-t .l { font-size: var(--t-body); }
+  /* A run key, not a sentence. Same treatment the tray's own chips give the same
+     string (\`.orch-tchip .k\`), so one identifier does not read two ways on one
+     surface — and set per OPTION, never per control: a command's label
+     ("Deploy to staging") is prose and must stay in the UI font. */
+  .combo-t .l.k { font-family: var(--mono); font-size: var(--t-data); }
+  /* A command's own \`detail\` from settings — the sentence that says what it
+     does. Second line rather than a title attribute: this is the only place the
+     picker can explain a command before it becomes a node. */
+  .combo-t .d { font-size: var(--t-micro); color: var(--dim); }
+  .combo-opt.active .combo-t .d { color: inherit; opacity: .8; }
+  .combo-empty { padding: 9px 7px; font-size: var(--t-body); color: var(--dim); }
+  .combo-foot { display: flex; align-items: center; gap: 8px; padding: 6px 9px;
+    border-top: 1px solid var(--hair); font-size: var(--t-micro); color: var(--dim); }
+  .combo-foot .sp { flex: 1; }
+  .combo-extra { border: 0; background: transparent; padding: 0; cursor: pointer;
+    font-size: var(--t-micro); color: var(--vscode-textLink-foreground); }
+  .combo-add { height: 19px; padding: 0 9px; border-radius: var(--r-chip);
+    border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
+    font-size: var(--t-micro); cursor: pointer; }
+  .combo-add:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground); }
+  /* Nothing ticked yet: the button stays visible so the gesture is discoverable
+     before it is available, but it cannot fire an empty add. */
+  .combo-add:disabled { opacity: .45; cursor: default; color: var(--dim); }
 
   /* 168px is enough for a state dot, the key, and the one fact the rules read.
      Narrower and a node degenerates into a bare key. */

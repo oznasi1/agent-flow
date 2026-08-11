@@ -3,13 +3,13 @@ import { placeActivity } from "../engine/orchestrator/conditions";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, edgeAction, Flow, FlowEdge, FlowNode, isSettled, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
+import { MultiCombo } from "./combo";
 import { FlowList } from "./flowList";
 import { ORCH_ANIM_MS, ORCH_EDGE_PAINT_DY } from "./orchestratorStyles";
 import {
   ACTION_LABEL,
   addCommandNode,
   COMMAND_FREE_TEXT,
-  COMMAND_NONE,
   COMMAND_NONE_LABEL,
   COMMAND_NOT_SET,
   commandFieldsOf,
@@ -143,23 +143,48 @@ function parseDrag(raw: string): { runKey: string; repo: string } | null {
  * the one node kind Task 6 found with no non-pointer way in. Every repo of
  * every run currently on the board, minus whichever pairs are already a
  * place node in this flow: offering one of those would be a selection that
- * silently does nothing, since `attachAt` itself refuses the duplicate (see
- * its own dedup check). Keyed in the exact string `attachAt`/`parseDrag`
+ * silently does nothing, since `attached` itself refuses the duplicate (see
+ * its own dedup check). Keyed in the exact string `attached`/`parseDrag`
  * already agree on — DRAG_SEP-joined `runKey`+`repo` — so the picker built on
- * this list calls `attachAt` itself rather than a second implementation of
- * what a valid attach is. */
-function placeCandidates(flow: Flow, runs: RunStatus[]): { key: string; label: string }[] {
-  const out: { key: string; label: string }[] = [];
+ * this list calls `attachMany` (and through it `attached`) rather than a second
+ * implementation of what a valid attach is.
+ *
+ * The two halves are returned separately, not pre-joined into one label: the
+ * picker prints the run key as the row and the repo underneath it, the same
+ * split the tray's own chips use (`.orch-tchip`'s `.k` and `.sub`), and its
+ * search matches across both. */
+function placeCandidates(flow: Flow, runs: RunStatus[]): { key: string; runKey: string; repo: string }[] {
+  const out: { key: string; runKey: string; repo: string }[] = [];
   for (const r of runs) {
     for (const repo of r.repos) {
       const dup = flow.nodes.some(
         (n) => n.kind === "place" && n.runKey === r.run.key && n.repo === repo.name,
       );
       if (dup) continue;
-      out.push({ key: `${r.run.key}${DRAG_SEP}${repo.name}`, label: `${r.run.key} · ${repo.name}` });
+      out.push({ key: `${r.run.key}${DRAG_SEP}${repo.name}`, runKey: r.run.key, repo: repo.name });
     }
   }
   return out;
+}
+
+/** The flow with one more place node in it, at `x`/`y` — or `null` when there is
+ * nothing to add: an unparseable drag payload, or a place this flow already has.
+ * (The same place twice would give two nodes that can never disagree.)
+ *
+ * Pure, and returning the next flow rather than saving it, so the batch path
+ * (`attachMany`) can fold it over its own output and write once. The single-drop
+ * path (`attachAt`) is the same function with an immediate save. */
+function attached(flow: Flow, raw: string, x: number, y: number): Flow | null {
+  const parsed = parseDrag(raw);
+  if (!parsed) return null;
+  const dup = flow.nodes.some(
+    (n) => n.kind === "place" && n.runKey === parsed.runKey && n.repo === parsed.repo,
+  );
+  if (dup) return null;
+  return {
+    ...flow,
+    nodes: [...flow.nodes, { id: nextNodeId(flow), kind: "place", x, y, join: "any", ...parsed }],
+  };
 }
 
 /** The tray shows what a condition can attach to: a place already on disk, or
@@ -457,20 +482,25 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const resume = p.pendingResume.find((r) => r.flowId === flow.id) ?? null;
 
   const attachAt = (raw: string, x: number, y: number) => {
-    const parsed = parseDrag(raw);
-    if (!parsed) return;
-    // The same place twice would give two nodes that can never disagree.
-    const dup = flow.nodes.some(
-      (n) => n.kind === "place" && n.runKey === parsed.runKey && n.repo === parsed.repo,
-    );
-    if (dup) return;
-    p.onSave({
-      ...flow,
-      nodes: [
-        ...flow.nodes,
-        { id: nextNodeId(flow), kind: "place", x, y, join: "any", ...parsed },
-      ],
-    });
+    const next = attached(flow, raw, x, y);
+    if (next) p.onSave(next);
+  };
+
+  /** Attach several places in ONE save. Folding `attached` over its own result is
+   * the whole point: each step sees the nodes the previous step added, so ids
+   * come out distinct and the stack does not pile every new node at one `y`.
+   * Calling `attachAt` in a loop instead would hand every iteration the same
+   * captured `flow` and save N times, and only the last write would survive.
+   *
+   * A key that no longer attaches (already a place, or unparseable) is skipped
+   * rather than aborting the batch — `attached` already owns that judgement, and
+   * the picker's own candidate list excludes duplicates anyway. */
+  const attachMany = (keys: string[]) => {
+    let next = flow;
+    for (const raw of keys) {
+      next = attached(next, raw, 24, 24 + next.nodes.length * 88) ?? next;
+    }
+    if (next !== flow) addAndSelect(next);
   };
 
   const removeNode = (id: string) => {
@@ -637,54 +667,52 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   // `addPlanned`.
   const addPlanned = () => send({ type: "flow:addPlanned", id: flow.id });
 
-  /** Add a command node from the picker below. Two shapes, one control: a
-   * configured command (its own id) or free text, which lands as an empty `run`
-   * for the inspector to fill in. Unlike a `planned` node this needs no host
-   * round trip — `agentFlow.commands` is already here as a prop, and free text
-   * is typed, not discovered — so it goes through `onSave` like every other
+  /** Add one command node per ticked entry, in ONE save. Same fold, same reason
+   * as `attachMany`: `addCommandNode` mints its id and its `y` from the flow it
+   * is handed, so each step has to see the previous step's node or two commands
+   * added together would collide on both. `addAndSelect` then opens the
+   * inspector on the LAST of them.
+   *
+   * Unlike a `planned` node this needs no host round trip — `agentFlow.commands`
+   * is already here as a prop — so it goes through `onSave` like every other
    * node this drawer builds. */
-  const addCommand = (value: string) => {
-    // `COMMAND_NONE` is the picker's "nothing configured" line. Its option is
-    // `disabled`, but a `<select>`'s own `value` setter honours a disabled option
-    // (jsdom's does), so the refusal has to live here too or the sentinel would
-    // land on a node as a command id.
-    if (!value || value === COMMAND_NONE) return;
-    addAndSelect(addCommandNode(flow, value === COMMAND_FREE_TEXT ? { run: "" } : { commandId: value }));
+  const addCommands = (ids: string[]) => {
+    let next = flow;
+    for (const id of ids) next = addCommandNode(next, { commandId: id });
+    if (next !== flow) addAndSelect(next);
   };
+
+  /** The one-off: a command that isn't worth naming in settings. Lands as an
+   * empty `run` for the node inspector to fill in, which is why it is an ACTION
+   * in the picker's footer rather than a tickable row — there is nothing to
+   * batch, and ticking it alongside two configured commands would ask what
+   * "three commands, one of them blank" means. */
+  const addFreeTextCommand = () => addAndSelect(addCommandNode(flow, { run: "" }));
 
   /** The picker itself, rendered on both the canvas's Graph bar and the list
    * view's Add bar — one element, two call sites, because a node kind reachable
    * from only one of the two views is the gap Task 6 closed for a place and
-   * this task must not reopen for a command. Value pinned to `""` so it always
-   * reads "+ Add command…" and choosing the same entry twice fires again. */
+   * this task must not reopen for a command.
+   *
+   * A `MultiCombo` rather than the `<select>` this used to be: a select creates
+   * exactly one node per trip, so the feature's own headline example (stage a
+   * deploy, then a smoke test) meant opening the same menu twice, and it offered
+   * no way to find a command by typing once settings hold more than a handful.
+   * The empty-state line is a line to READ, not an option — the sentinel value a
+   * disabled `<option>` needed (`COMMAND_NONE`) has no counterpart here, because
+   * the combo has no value channel to smuggle it through. */
   const addCommandPicker = (
-    <select
-      className="orch-sel"
-      aria-label="Add a command"
-      value=""
-      onChange={(ev) => addCommand(ev.currentTarget.value)}
-    >
-      <option value="">+ Add command…</option>
-      {/* The empty case, given a voice. `agentFlow.commands` ships one inert
-          example, so an untouched install reaches the branch below instead —
-          this one is for a user who has explicitly cleared the list to `[]`,
-          which a picker offering only "+ Add command…" and "Free-text
-          command…" would otherwise leave looking like a dead end rather than
-          a deliberate choice. Disabled, so it is a line to read rather than
-          something to pick (`addCommand` refuses the value as well — see its
-          own comment). */}
-      {p.commands.length === 0 ? (
-        <option value={COMMAND_NONE} disabled>{COMMAND_NONE_LABEL}</option>
-      ) : (
-        p.commands.map((c) => (
-          <option key={c.id} value={c.id}>{c.label}</option>
-        ))
-      )}
-      {/* Last, and always present: the user may want a one-off command that
-          isn't worth naming in settings, so free text stays offered even when
-          `agentFlow.commands` already has entries. */}
-      <option value={COMMAND_FREE_TEXT}>Free-text command…</option>
-    </select>
+    <MultiCombo
+      trigger="+ Add command…"
+      ariaLabel="Add a command"
+      searchPlaceholder="Filter commands…"
+      options={p.commands.map((c) => ({ value: c.id, label: c.label, detail: c.detail }))}
+      // For a user who has explicitly cleared `agentFlow.commands` to `[]`. The
+      // shipped default holds one example, so an untouched install never sees it.
+      emptyLabel={COMMAND_NONE_LABEL}
+      onCommit={addCommands}
+      extra={{ label: "Free-text command…", onPick: addFreeTextCommand }}
+    />
   );
 
   const onTidy = () => p.onSave({ ...flow, nodes: tidy(flow) });
@@ -1153,20 +1181,24 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               <button type="button" className="orch-mini" onClick={addNotify}>+ Notify</button>
               <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
               {addCommandPicker}
-              <select
-                className="orch-sel"
-                aria-label="Add a place"
-                value=""
-                onChange={(ev) => {
-                  const val = ev.currentTarget.value;
-                  if (val) attachAt(val, 24, 24 + flow.nodes.length * 88);
-                }}
-              >
-                <option value="">+ Add place…</option>
-                {placeCandidates(flow, p.runs).map((c) => (
-                  <option key={c.key} value={c.key}>{c.label}</option>
-                ))}
-              </select>
+              <MultiCombo
+                trigger="+ Add place…"
+                ariaLabel="Add a place"
+                searchPlaceholder="Filter places…"
+                options={placeCandidates(flow, p.runs).map((c) => ({
+                  value: c.key,
+                  label: c.runKey,
+                  detail: c.repo,
+                  // A ticket key is an identifier; a command's label is not. See
+                  // `ComboOption.mono`.
+                  mono: true,
+                }))}
+                // Every board run is already attached, or the board is empty. Both
+                // are answered by the board, not in here, so the line says what is
+                // true rather than offering a search over nothing.
+                emptyLabel="Nothing left to attach — every place is already here"
+                onCommit={attachMany}
+              />
             </div>
             {/* The same two blocks the canvas renders, in the same order they read
                 in: what the flow's rules ACT on, and the panel that configures
