@@ -457,10 +457,17 @@ describe("getConfig — commands", () => {
     ]);
   });
 
-  // Unlike promptModes there are no built-ins to layer over — an empty list is
-  // a legitimate answer, and must not fall back to anything.
-  it("returns an empty list when the setting is absent", () => {
-    expect(getConfig().commands).toEqual([]);
+  // Unlike promptModes there is nothing to layer a customization over — this
+  // pins the fallback itself, not any particular content of it. setConfig()
+  // stubs the workspace configuration directly, bypassing VS Code's manifest
+  // defaulting, so `c.get("commands")` here returns undefined exactly as it
+  // would for a real user who never touched the setting. What this is really
+  // pinning is that readCommands' `!Array.isArray(raw)` guard spreads from
+  // the DEFAULT_COMMANDS export — not a bare `[]` literal — so a mutation to
+  // that export is what a fresh install actually gets, with nothing here
+  // free to drift from it.
+  it("falls back to DEFAULT_COMMANDS when the setting is absent", () => {
+    expect(getConfig().commands).toEqual(DEFAULT_COMMANDS);
   });
 
   it("falls back to a label when one is missing, never to a blank picker row", () => {
@@ -480,9 +487,12 @@ describe("getConfig — commands", () => {
   // object is not iterable, so weakening `!Array.isArray(raw)` to `raw ==
   // null` reaches a `for...of` that throws, which is what actually pins the
   // guard.
-  it("returns an empty list when the setting is not an array", () => {
+  // Same guard, same fallback as the "absent" case above — a non-array value
+  // is caught by the same `!Array.isArray(raw)` check and gets the same
+  // DEFAULT_COMMANDS spread, not a bare empty list.
+  it("falls back to DEFAULT_COMMANDS when the setting is not an array", () => {
     setConfig({ commands: { id: "deploy", run: "true" } });
-    expect(getConfig().commands).toEqual([]);
+    expect(getConfig().commands).toEqual(DEFAULT_COMMANDS);
   });
 
   it("drops a duplicate id, keeping the first entry", () => {
@@ -857,10 +867,13 @@ describe("package.json ⇄ config constants", () => {
   });
 
   // Same rationale as the promptModes/environments parity checks above: an
-  // untouched setting resolves to the manifest default, so a manifest typo
-  // that invented a non-empty default would put commands in a picker nobody
-  // asked to be able to run, and this is the only test that would catch it.
-  it("keeps the commands schema default equal to DEFAULT_COMMANDS (empty)", () => {
+  // untouched setting resolves to the manifest default, so the code constant
+  // alone being right (and inert) reaches nobody — a manifest edit that drifted
+  // from DEFAULT_COMMANDS, or swapped in something that actually does
+  // something, is exactly what this test exists to catch. Confirmed to fail if
+  // only the manifest default's label is mutated, independent of the code
+  // constant.
+  it("keeps the commands schema default equal to DEFAULT_COMMANDS", () => {
     expect(props["agentFlow.commands"].default).toEqual(DEFAULT_COMMANDS);
   });
 

@@ -29,7 +29,9 @@ describe("settingsSnapshot", () => {
     expect(s.review_writes).toBe(false);
     expect(s.orchestrator).toBe(false);
     expect(s.repo_blocklist_count).toBe(0);
-    expect(s.commands_count).toBe(0);
+    // One, not zero: DEFAULT_COMMANDS now ships a single inert example, and an
+    // untouched setting resolves to it.
+    expect(s.commands_count).toBe(1);
     expect(s.review_mode).toBe("ask");
     expect(s.review_modes_count).toBe(1);
     expect(s.review_modes_overridden).toBe(0);
