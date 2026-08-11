@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { window, ViewColumn, env, workspace, commands, setConfig, ConfigurationTarget, fireConfigurationChanged } from "../_mocks/vscode";
-import { DEFAULT_PROMPT_MODES } from "../../src/config";
+import { window, ViewColumn, env, workspace, commands, setConfig, setConfigScope, configUpdateTargets, ConfigurationTarget, fireConfigurationChanged } from "../_mocks/vscode";
+import { DEFAULT_COMMANDS, DEFAULT_PROMPT_MODES } from "../../src/config";
 import { composeAgentPrompt } from "../../src/engine/prompt";
 import { fakeContext } from "../_helpers/factories";
 import type { ChangedFile } from "../../src/engine/git";
@@ -3567,6 +3567,151 @@ describe("orchestrator flows", () => {
       expect(added.x).toBe(24);
       expect(added.y).toBe(200);
       expect(saved.nodes.some((n) => n.id !== added.id && n.x === added.x && n.y === added.y)).toBe(false);
+    });
+  });
+
+  describe("flow:saveCommand — keeping a free-text command in settings", () => {
+    const commands = () => workspace.getConfiguration().get("commands") as any[];
+
+    it("appends the command to agentFlow.commands under a slugged id", async () => {
+      setConfig({ orchestrator: true, commands: [{ id: "smoke", label: "Smoke", run: "npm run smoke" }] });
+      const { send } = await openPanel();
+      await send({ type: "flow:saveCommand", run: "deploy.sh --env=staging", label: "Deploy to staging" });
+      expect(commands()).toEqual([
+        { id: "smoke", label: "Smoke", run: "npm run smoke" },
+        { id: "deploy-to-staging", label: "Deploy to staging", run: "deploy.sh --env=staging" },
+      ]);
+    });
+
+    it("seeds an untouched setting from the shipped default, so the picker never LOSES an entry", async () => {
+      // An explicit array REPLACES the default (see readCommands), so writing
+      // `[mine]` would silently drop the example the user is looking at out of the
+      // very picker they just used.
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+      expect(commands()).toEqual([
+        ...DEFAULT_COMMANDS,
+        { id: "deploy", label: "Deploy", run: "deploy.sh" },
+      ]);
+    });
+
+    it("writes to the scope the user's own value lives in, never promoting it to global", async () => {
+      // The rule modesNotice's hide-write already follows. A workspace list of
+      // repo-specific deploy commands promoted to global would follow the user
+      // into every other project they open.
+      setConfig({ orchestrator: true, commands: [] });
+      setConfigScope("commands", "workspace");
+      const { send } = await openPanel();
+      await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+      expect(configUpdateTargets.commands).toBe(ConfigurationTarget.Workspace);
+    });
+
+    it("writes to global when the setting is untouched", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+      expect(configUpdateTargets.commands).toBe(ConfigurationTarget.Global);
+    });
+
+    it("names what it saved, so the picker's new entry is findable", async () => {
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy to staging" });
+      expect(posts(p)).toContainEqual(
+        expect.objectContaining({ type: "toast", message: expect.stringContaining("Deploy to staging") }),
+      );
+    });
+
+    it("re-posts the flows message, so the drawer's picker holds the entry immediately", async () => {
+      // The config-change listener would eventually do this, but not
+      // synchronously — and the toast says "saved" now. What the payload CARRIES
+      // is not assertable here: this file stubs `getConfig()` (see the vi.mock at
+      // the top) and feeds `commands` from its own fixture, so the settings write
+      // itself is pinned by the append tests above instead.
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      const before = posts(p).filter((m) => m.type === "deck:flows").length;
+      await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+      expect(posts(p).filter((m) => m.type === "deck:flows").length).toBeGreaterThan(before);
+    });
+
+    it("posts no flows message when the write failed", async () => {
+      // The other half of the same claim: a re-post says "the picker changed", and
+      // it must not say that when nothing was written.
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      const factory = workspace.getConfiguration.getMockImplementation()!;
+      workspace.getConfiguration.mockImplementation((section?: string) => {
+        const c = factory(section);
+        (c.update as any).mockRejectedValue(new Error("EROFS"));
+        return c;
+      });
+      const before = posts(p).filter((m) => m.type === "deck:flows").length;
+      await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+      expect(posts(p).filter((m) => m.type === "deck:flows").length).toBe(before);
+    });
+
+    it("says a command is already saved rather than writing a second copy", async () => {
+      setConfig({ orchestrator: true, commands: [{ id: "d", label: "Deploy to staging", run: "deploy.sh" }] });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Ship it" });
+      expect(commands()).toHaveLength(1);
+      expect(posts(p)).toContainEqual(
+        expect.objectContaining({ type: "toast", message: expect.stringContaining("Already saved as") }),
+      );
+    });
+
+    it("refuses a save with no name, and says so rather than writing a nameless entry", async () => {
+      // Unreachable from the drawer, which disables Save without a name. This is a
+      // message handler: the webview is not the only thing that can post one.
+      setConfig({ orchestrator: true, commands: [] });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:saveCommand", run: "deploy.sh", label: "  " });
+      expect(commands()).toEqual([]);
+      expect(posts(p)).toContainEqual(
+        expect.objectContaining({ type: "toast", message: expect.stringContaining("needs a name") }),
+      );
+    });
+
+    it("replaces a non-array value in the scope that holds it, rather than appending to it", async () => {
+      // A hand-edited settings.json can put anything under the key. There is
+      // nothing to append to — but the user's configuration still lives in that
+      // scope, so the replacement belongs there too.
+      setConfig({ orchestrator: true, commands: "not a list" });
+      setConfigScope("commands", "workspace");
+      const { send } = await openPanel();
+      await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+      expect(commands()).toEqual([
+        ...DEFAULT_COMMANDS,
+        { id: "deploy", label: "Deploy", run: "deploy.sh" },
+      ]);
+      expect(configUpdateTargets.commands).toBe(ConfigurationTarget.Workspace);
+    });
+
+    it("says so when the settings write itself fails, instead of looking like it saved", async () => {
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      // `getConfiguration()` hands back a FRESH stub per call, so mocking `update`
+      // on a handle this test holds would not be the handle the panel writes
+      // through. Wrap the factory instead, leaving everything else about it intact.
+      const factory = workspace.getConfiguration.getMockImplementation()!;
+      workspace.getConfiguration.mockImplementation((section?: string) => {
+        const c = factory(section);
+        (c.update as any).mockRejectedValue(new Error("EROFS"));
+        return c;
+      });
+      await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+      expect(posts(p)).toContainEqual(
+        expect.objectContaining({ type: "toast", level: "error", message: expect.stringContaining("EROFS") }),
+      );
+    });
+
+    it("writes nothing when the orchestrator setting is off", async () => {
+      setConfig({ orchestrator: false, commands: [] });
+      const { send } = await openPanel();
+      await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+      expect(commands()).toEqual([]);
     });
   });
 });

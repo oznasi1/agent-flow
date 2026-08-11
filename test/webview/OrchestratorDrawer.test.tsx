@@ -2142,6 +2142,124 @@ describe("a selected node's own configuration", () => {
     expect(saved.edges).toEqual([]);
   });
 
+  // "Save it in settings.json for next time" — the drawer's one control whose
+  // subject is the SETTING rather than the graph. The write is the host's (a
+  // webview has no fs); what these pin is which text is offered, when, and that
+  // the graph is left alone.
+  describe("keeping a free-text command in settings", () => {
+    const saveButton = () => screen.getByRole("button", { name: "Save to settings" });
+    const nameField = () => screen.getByLabelText("Name for settings");
+
+    it("posts the command and the name the user typed", () => {
+      // Deliberately NOT COMMANDS' own "deploy.sh --env=staging": that text is
+      // already a configured command, which is the "already saved" case below.
+      render(<OrchestratorDrawer {...props({ flows: [loneCommand({ run: "deploy.sh --env=prod" })] })} />);
+      selectChip("deploy.sh --env=prod");
+      fireEvent.change(nameField(), { target: { value: "  Deploy to staging  " } });
+      fireEvent.click(saveButton());
+      // Trimmed here as well as host-side: the label is echoed straight back in a
+      // toast, and the host's own trim is what lands in settings.
+      expect(send).toHaveBeenCalledWith({
+        type: "flow:saveCommand",
+        run: "deploy.sh --env=prod",
+        label: "Deploy to staging",
+      });
+    });
+
+    it("saves the command that is ON SCREEN, not the one the flow last committed", () => {
+      // The command field is uncontrolled and commits on blur, so the flow's copy
+      // is one edit behind whatever was just typed. A Save that read the flow would
+      // quietly store the previous command under the new name — and in a real
+      // browser the blur would usually mask it, which is exactly the kind of bug
+      // that reaches a user and not a test.
+      const onSave = vi.fn();
+      render(<OrchestratorDrawer {...props({ onSave, flows: [loneCommand({ run: "old.sh" })] })} />);
+      selectChip("old.sh");
+      fireEvent.change(screen.getByLabelText("Command to run for old.sh"), { target: { value: "new.sh" } });
+      fireEvent.change(nameField(), { target: { value: "Deploy" } });
+      fireEvent.click(saveButton());
+      expect(send).toHaveBeenCalledWith({ type: "flow:saveCommand", run: "new.sh", label: "Deploy" });
+    });
+
+    it("touches the flow not at all — saving is about the setting", () => {
+      const onSave = vi.fn();
+      render(<OrchestratorDrawer {...props({ onSave, flows: [loneCommand({ run: "deploy.sh" })] })} />);
+      selectChip("deploy.sh");
+      fireEvent.change(nameField(), { target: { value: "Deploy" } });
+      fireEvent.click(saveButton());
+      // Not rewritten to `{ commandId }` either: `resolveCommand` refuses a node
+      // carrying both, so a half-applied pair from one gesture is an errored rule.
+      expect(onSave).not.toHaveBeenCalled();
+    });
+
+    it("clears the name after a save, so the next one starts empty", () => {
+      render(<OrchestratorDrawer {...props({ flows: [loneCommand({ run: "deploy.sh" })] })} />);
+      selectChip("deploy.sh");
+      fireEvent.change(nameField(), { target: { value: "Deploy" } });
+      fireEvent.click(saveButton());
+      expect((nameField() as HTMLInputElement).value).toBe("");
+    });
+
+    it("saves on Enter in the name field", () => {
+      // The gesture a one-field row invites. There is no form to submit, so the key
+      // does nothing at all unless it is wired.
+      render(<OrchestratorDrawer {...props({ flows: [loneCommand({ run: "deploy.sh" })] })} />);
+      selectChip("deploy.sh");
+      fireEvent.change(nameField(), { target: { value: "Deploy" } });
+      fireEvent.keyDown(nameField(), { key: "Enter" });
+      expect(send).toHaveBeenCalledWith({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+    });
+
+    it("refuses to post without a name", () => {
+      render(<OrchestratorDrawer {...props({ flows: [loneCommand({ run: "deploy.sh" })] })} />);
+      selectChip("deploy.sh");
+      expect(saveButton()).toBeDisabled();
+      fireEvent.change(nameField(), { target: { value: "   " } });
+      expect(saveButton()).toBeDisabled();
+      fireEvent.keyDown(nameField(), { key: "Enter" });
+      expect(send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "flow:saveCommand" }));
+    });
+
+    it("is not offered for a command with nothing typed yet", () => {
+      // `run: ""` is what "Free-text command…" creates. There is nothing to keep.
+      render(<OrchestratorDrawer {...props({ flows: [loneCommand({ run: "" })] })} />);
+      selectChip(COMMAND_NOT_SET);
+      expect(screen.queryByLabelText("Name for settings")).toBeNull();
+    });
+
+    it("is not offered for a node that already names a configured command", () => {
+      render(<OrchestratorDrawer {...props({ flows: [loneCommand({ commandId: "deploy-staging" })] })} />);
+      selectChip("deploy-staging");
+      expect(screen.queryByLabelText("Name for settings")).toBeNull();
+    });
+
+    it("says a command is already saved instead of offering to save it twice", () => {
+      // Matched on the COMMAND, not the name: COMMANDS' own "Smoke test" runs
+      // `npm run smoke -- {note}`, and a node carrying that exact text IS that
+      // command however it got there.
+      render(<OrchestratorDrawer {...props({ flows: [loneCommand({ run: "npm run smoke -- {note}" })] })} />);
+      selectChip("npm run smoke -- {note}");
+      expect(screen.queryByLabelText("Name for settings")).toBeNull();
+      expect(screen.getByTestId("orch-command-saved").textContent).toContain("Smoke test");
+    });
+
+    it("does not carry a half-typed name to another node", () => {
+      // Two command nodes, one name field. Without the `key`, switching selection
+      // would offer the name typed for the first command as the name for the second.
+      const twoCommands = flow({
+        nodes: [
+          { id: "n1", kind: "command", x: 320, y: 24, join: "any", run: "one.sh" },
+          { id: "n2", kind: "command", x: 320, y: 112, join: "any", run: "two.sh" },
+        ],
+      });
+      render(<OrchestratorDrawer {...props({ flows: [twoCommands] })} />);
+      selectChip("one.sh");
+      fireEvent.change(nameField(), { target: { value: "First" } });
+      selectChip("two.sh");
+      expect((nameField() as HTMLInputElement).value).toBe("");
+    });
+  });
+
   it("names a configured command on a node in a flow with no edges at all", () => {
     const onSave = vi.fn();
     render(<OrchestratorDrawer {...props({ onSave, flows: [loneCommand()] })} />);

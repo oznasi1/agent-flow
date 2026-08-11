@@ -296,3 +296,60 @@ export async function runCommand(
     return { ok: false, message: `Couldn't run ${fallbackLabel(node)}: ${e}`, label: fallbackLabel(node) };
   }
 }
+
+/** A saved command's id, slugged from the label the user typed and made unique
+ * against `taken`. Ids are what a node stores, so one has to be stable, readable
+ * in a hand-edited settings.json, and free of the characters JSON keys and shell
+ * eyes trip over — hence the slug rather than a random token.
+ *
+ * `command` when a label slugs to nothing at all (say "…"): a label of pure
+ * punctuation is still a label the user chose, and refusing it would be a dead
+ * end where a generic id is merely a plain one. */
+export function commandIdFrom(label: string, taken: ReadonlySet<string>): string {
+  const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "command";
+  if (!taken.has(base)) return base;
+  // `-2` first, not `-1`: the un-suffixed id IS the first one.
+  for (let n = 2; ; n++) {
+    const candidate = `${base}-${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/** What "save this command to settings" should do to the user's own
+ * `agentFlow.commands` array.
+ *
+ * `entries` is the array EXACTLY as authored — `unknown[]`, straight off
+ * `inspect()`, never the sanitized list `readCommands` returns. Appending to the
+ * sanitized list would silently delete whatever malformed entries the user has
+ * in there; a save must add one line, not rewrite the file. It is also why the
+ * duplicate and id checks below read defensively rather than trusting a shape.
+ */
+export type CommandSave =
+  | { kind: "invalid" }
+  /** Already in settings, under this label — nothing to write. */
+  | { kind: "duplicate"; duplicateLabel: string }
+  | { kind: "added"; entries: unknown[]; command: FlowCommand };
+
+export function withSavedCommand(entries: unknown[], run: string, label: string): CommandSave {
+  const cleanRun = run.trim();
+  const cleanLabel = label.trim();
+  if (!cleanRun || !cleanLabel) return { kind: "invalid" };
+
+  const taken = new Set<string>();
+  for (const e of entries) {
+    if (!e || typeof e !== "object") continue;
+    const entry = e as { id?: unknown; run?: unknown; label?: unknown };
+    if (typeof entry.id === "string" && entry.id.trim()) taken.add(entry.id.trim());
+    // Matched on the COMMAND, not on the label: two names for one command line is
+    // how a picker fills up with entries that do the same thing, and the user is
+    // usually reaching for "keep this" rather than "keep a second copy of this".
+    if (typeof entry.run === "string" && entry.run.trim() === cleanRun) {
+      const named = typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : undefined;
+      const id = typeof entry.id === "string" && entry.id.trim() ? entry.id.trim() : undefined;
+      return { kind: "duplicate", duplicateLabel: named ?? id ?? cleanRun };
+    }
+  }
+
+  const command: FlowCommand = { id: commandIdFrom(cleanLabel, taken), label: cleanLabel, run: cleanRun };
+  return { kind: "added", entries: [...entries, command], command };
+}

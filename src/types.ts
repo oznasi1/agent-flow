@@ -453,6 +453,15 @@ export type InboundMessage =
   // anything itself — see DeckPanel.advanceArmedFlows.
   | { type: "flow:resumeApprove"; id: string }
   | { type: "flow:resumeDisarm"; id: string }
+  // Keep a free-text command: append it to `agentFlow.commands` under a name, so
+  // the next node can pick it from the list instead of retyping it. Carries no
+  // flow id and touches no flow — the webview cannot write settings (no fs), and
+  // this is the one thing in the drawer whose subject is the SETTING rather than
+  // the graph. The host slugs the id, refuses a command it already holds, and
+  // writes to the scope that already carries the setting; see deckView.ts's
+  // `saveCommand`. The node itself is deliberately left as free text — see that
+  // method's own comment.
+  | { type: "flow:saveCommand"; run: string; label: string }
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }

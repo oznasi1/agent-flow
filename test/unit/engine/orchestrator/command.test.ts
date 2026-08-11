@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { COMMAND_KILLED_EXIT_CODE, COMMAND_TIMEOUT_MS, chainSourcePlace, resolveCommand, runCommand } from "../../../../src/engine/orchestrator/command";
+import { COMMAND_KILLED_EXIT_CODE, COMMAND_TIMEOUT_MS, chainSourcePlace, commandIdFrom, resolveCommand, runCommand, withSavedCommand } from "../../../../src/engine/orchestrator/command";
 import { emptyFlow } from "../../../../src/engine/orchestrator/model";
 import type { CommandNode, Flow, FlowEdge, FlowNode } from "../../../../src/engine/orchestrator/model";
 import { LOCK_TTL_MS } from "../../../../src/engine/orchestrator/lock";
@@ -336,5 +336,102 @@ describe("chainSourcePlace", () => {
       [edge("e1", "n3", "n2"), edge("e2", "n2", "n3"), edge("e3", "n1", "n3"), edge("e4", "n3", "n4")],
     );
     expect(chainSourcePlace(f, "n4")?.id).toBe("n1");
+  });
+});
+
+// Saving a free-text command into `agentFlow.commands` (the drawer's Save-to-
+// settings row). Pure on purpose: the host half is one `update()` call, and
+// everything that could get a user's settings file wrong lives here.
+describe("commandIdFrom", () => {
+  it("slugs a label into something a node can store and a human can read", () => {
+    expect(commandIdFrom("Deploy to staging", new Set())).toBe("deploy-to-staging");
+    expect(commandIdFrom("Smoke test (staging!)", new Set())).toBe("smoke-test-staging");
+  });
+
+  it("trims the punctuation it would otherwise leave dangling at either end", () => {
+    expect(commandIdFrom("— deploy —", new Set())).toBe("deploy");
+  });
+
+  it("falls back to a generic id rather than an empty one", () => {
+    // A label of pure punctuation is still a label the user chose. An empty id is
+    // an entry `readCommands` drops on sight, so the save would silently do nothing.
+    expect(commandIdFrom("…", new Set())).toBe("command");
+    expect(commandIdFrom("", new Set())).toBe("command");
+  });
+
+  it("suffixes from -2, because the bare id is the first one", () => {
+    expect(commandIdFrom("Deploy", new Set(["deploy"]))).toBe("deploy-2");
+    expect(commandIdFrom("Deploy", new Set(["deploy", "deploy-2"]))).toBe("deploy-3");
+    // Including the generic fallback, which two unnameable labels would collide on.
+    expect(commandIdFrom("…", new Set(["command"]))).toBe("command-2");
+  });
+});
+
+describe("withSavedCommand", () => {
+  it("appends the command with a slugged id, leaving the existing entries untouched", () => {
+    const existing = [{ id: "smoke", label: "Smoke", run: "npm run smoke" }];
+    const out = withSavedCommand(existing, "deploy.sh --env=staging", "Deploy to staging");
+    expect(out).toEqual({
+      kind: "added",
+      command: { id: "deploy-to-staging", label: "Deploy to staging", run: "deploy.sh --env=staging" },
+      entries: [existing[0], { id: "deploy-to-staging", label: "Deploy to staging", run: "deploy.sh --env=staging" }],
+    });
+    // The caller writes `entries` back to settings, so an accidental mutation of
+    // the user's own array is a corrupted settings.json rather than a stale read.
+    expect(existing).toHaveLength(1);
+  });
+
+  it("preserves entries it cannot understand, rather than sanitizing them away", () => {
+    // Straight off `inspect()`, so a hand-edited file can hold anything. A save
+    // must ADD a line; rewriting the array through a validator would silently
+    // delete whatever the user is midway through typing.
+    const junk = [42, { label: "no run" }, null];
+    const out = withSavedCommand(junk, "echo hi", "Hi");
+    expect(out.kind).toBe("added");
+    if (out.kind !== "added") return;
+    expect(out.entries.slice(0, 3)).toEqual(junk);
+  });
+
+  it("trims both halves before storing them", () => {
+    const out = withSavedCommand([], "  deploy.sh  ", "  Deploy  ");
+    expect(out).toMatchObject({ kind: "added", command: { label: "Deploy", run: "deploy.sh", id: "deploy" } });
+  });
+
+  it("refuses a save with no name or nothing to run", () => {
+    expect(withSavedCommand([], "deploy.sh", "   ")).toEqual({ kind: "invalid" });
+    expect(withSavedCommand([], "   ", "Deploy")).toEqual({ kind: "invalid" });
+  });
+
+  it("reports a command it already holds instead of saving a second copy", () => {
+    // Matched on the COMMAND, not the name: two names for one command line is how
+    // a picker fills with entries that do the same thing.
+    const out = withSavedCommand(
+      [{ id: "d", label: "Deploy to staging", run: "deploy.sh --env=staging" }],
+      "  deploy.sh --env=staging  ",
+      "Ship it",
+    );
+    expect(out).toEqual({ kind: "duplicate", duplicateLabel: "Deploy to staging" });
+  });
+
+  it("names a duplicate by its id when the entry has no label", () => {
+    const out = withSavedCommand([{ id: "d", run: "deploy.sh" }], "deploy.sh", "Ship it");
+    expect(out).toEqual({ kind: "duplicate", duplicateLabel: "d" });
+  });
+
+  it("does not reuse an id an existing entry already holds", () => {
+    // Two commands sharing an id is one command as far as `readCommands` is
+    // concerned — it drops the second — so the save would look like it worked and
+    // then not be there.
+    const out = withSavedCommand(
+      [{ id: "deploy", label: "Deploy", run: "old.sh" }],
+      "new.sh",
+      "Deploy",
+    );
+    expect(out).toMatchObject({ kind: "added", command: { id: "deploy-2", run: "new.sh" } });
+  });
+
+  it("counts a malformed entry's id as taken, since the file still holds it", () => {
+    const out = withSavedCommand([{ id: "deploy" }], "new.sh", "Deploy");
+    expect(out).toMatchObject({ kind: "added", command: { id: "deploy-2" } });
   });
 });

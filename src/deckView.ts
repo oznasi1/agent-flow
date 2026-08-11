@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { exec } from "child_process";
-import { getConfig, providerLabel, type AgentProvider } from "./config";
+import { DEFAULT_COMMANDS, getConfig, providerLabel, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
@@ -15,7 +15,7 @@ import { unfirableRules } from "./engine/orchestrator/armability";
 import { ActOutcome, applyFired, notifyLines } from "./engine/orchestrator/runner";
 import { promoteToPlace } from "./engine/orchestrator/promote";
 import { LaunchTicketDetail, launchPlanned } from "./engine/orchestrator/launch";
-import { COMMAND_KILLED_EXIT_CODE, CommandRunner, chainSourcePlace, resolveCommand, runCommand } from "./engine/orchestrator/command";
+import { COMMAND_KILLED_EXIT_CODE, CommandRunner, chainSourcePlace, resolveCommand, runCommand, withSavedCommand } from "./engine/orchestrator/command";
 import { buildRunStatus } from "./engine/status";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
@@ -38,6 +38,9 @@ import { inferTicket, localRunFor } from "./engine/localRuns";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity } from "./engine/transcript";
 import { canon } from "./engine/paths";
+// The scope picker the modes-notice hide-write already uses: a settings write must
+// land where the user's value already lives. Saving a command is the same problem.
+import { pickExplicit } from "./modesNotice";
 import { CardAgent, FlowPromptMode, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
 
 export const POLL_MS = 6000;
@@ -2681,6 +2684,11 @@ export class DeckPanel {
         this.postFlows();
         return;
       }
+      case "flow:saveCommand": {
+        if (!getConfig().orchestrator) return;
+        await this.saveCommand(m.run, m.label);
+        return;
+      }
       case "openExternal": {
         const u = vscode.Uri.parse(m.url);
         // f.url and every failing check's detailsUrl/targetUrl now come from
@@ -2693,6 +2701,77 @@ export class DeckPanel {
         break;
       }
     }
+  }
+
+  /**
+   * Append one free-text command to `agentFlow.commands` under the name the user
+   * typed in the drawer, so the next node can pick it instead of retyping it.
+   *
+   * Three deliberate decisions:
+   *
+   * 1. It appends to the array EXACTLY as authored (`inspect`, via `pickExplicit`),
+   *    and writes back to the scope that already holds it — never promoting a
+   *    workspace override to global, the same rule `modesNotice`'s hide-write
+   *    follows. An untouched setting seeds from `DEFAULT_COMMANDS` rather than from
+   *    `[]`, because an explicit array REPLACES the default: writing `[mine]` would
+   *    silently drop the shipped example out of the picker the user is looking at.
+   *    So the invariant is "the list gains an entry", never "the list is replaced".
+   *
+   * 2. The NODE is left alone. Rewriting it from `{ run }` to `{ commandId }` would
+   *    be a second write, on a different store, from one gesture — and
+   *    `resolveCommand` refuses a node carrying both, so a half-applied pair is an
+   *    errored rule. Saving means "keep this for next time", and the drawer says so
+   *    by showing the node as already saved rather than by changing what it is.
+   *
+   * 3. Nothing about the command reaches telemetry. A `run` string carries
+   *    hostnames, paths and sometimes tokens; only `commands_count` is ever
+   *    emitted, and `settingsSnapshot` already derives that on its own.
+   */
+  private async saveCommand(run: string, label: string): Promise<void> {
+    const c = vscode.workspace.getConfiguration("agentFlow");
+    const explicit = pickExplicit<unknown>(c.inspect<unknown>("commands"));
+    // A non-array value under the key (a hand-edited file can hold anything) is
+    // not something to append to — but its SCOPE is still where the user's
+    // configuration lives, so the replacement lands there rather than in global.
+    const authored = explicit && Array.isArray(explicit.value) ? (explicit.value as unknown[]) : undefined;
+    const entries = authored ?? [...DEFAULT_COMMANDS];
+    const target = explicit?.target ?? vscode.ConfigurationTarget.Global;
+
+    const outcome = withSavedCommand(entries, run, label);
+    if (outcome.kind === "invalid") {
+      // Unreachable from the drawer, which disables Save without both halves. Kept
+      // because this is a message handler: the webview is not the only thing that
+      // could ever post one, and a blank id in settings is a command that can
+      // never be picked.
+      this.post({ type: "toast", level: "info", message: "A saved command needs a name and something to run." });
+      return;
+    }
+    if (outcome.kind === "duplicate") {
+      this.post({
+        type: "toast",
+        level: "info",
+        message: `Already saved as “${outcome.duplicateLabel}” — pick it from the command list.`,
+      });
+      return;
+    }
+    try {
+      await c.update("commands", outcome.entries, target);
+    } catch (e) {
+      // A settings write can genuinely fail (a read-only settings.json, a
+      // Workspace target with no workspace open). Say so: the alternative is a
+      // drawer that looks like it saved and a picker that never gains the entry.
+      this.post({ type: "toast", level: "error", message: `Couldn't save the command: ${e}` });
+      return;
+    }
+    // The config-change listener re-posts flows on its own, but not synchronously
+    // and not from every scope in every host build — posting here means the picker
+    // holds the new entry by the time the toast is read.
+    this.postFlows();
+    this.post({
+      type: "toast",
+      level: "info",
+      message: `Saved “${outcome.command.label}” to agentFlow.commands.`,
+    });
   }
 
   /**

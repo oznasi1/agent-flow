@@ -412,6 +412,18 @@ export const ORCH_CSS = `
   .orch-msg { flex: 1; min-width: 120px; height: 22px; padding: 0 7px; border-radius: var(--r-chip);
     border: 1px solid var(--edge); background: var(--vscode-input-background);
     color: var(--vscode-foreground); font: inherit; font-size: var(--t-body); }
+  /* "Saved in settings as …" — the end state of the Save-to-settings row, and a
+     statement rather than a control, so it takes the quiet voice every other
+     receipt on this surface uses. No tick, no green: nothing was accomplished
+     that the sentence does not already say, and \`--c-done\` is spent on a RULE
+     that fired.
+
+     Indented to the fields above it, not to the panel: 46px is \`.orch-kw\`'s own
+     40px keyword column plus \`.orch-clause\`'s 6px gap, so the sentence starts
+     where every value in this panel starts. Change either of those and this
+     follows. */
+  .orch-savedline { margin-top: 6px; padding-left: 46px; font-size: var(--t-micro); color: var(--dim); }
+
   .orch-obs { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--hair);
     font-size: var(--t-micro); color: var(--dim); display: flex; align-items: center; gap: 8px; }
   .orch-obs .sp { flex: 1; }

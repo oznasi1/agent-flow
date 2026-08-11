@@ -29,6 +29,21 @@ export function setDefaultConfig(values: Record<string, unknown>): void {
   defaultsStore = { ...defaultsStore, ...values };
 }
 
+// Which scope `inspect()` should report a key's explicit value under. Keys absent
+// from here read as global — the shape every test predating this relied on. Set it
+// when what is under test is WHERE a write lands: a code path that appends to a
+// user's list must write back to the scope holding it, and a mock that only ever
+// says "global" cannot tell a correct implementation from one that promotes a
+// workspace override.
+type ConfigScope = "global" | "workspace" | "workspaceFolder";
+let scopeStore: Record<string, ConfigScope> = {};
+export function setConfigScope(key: string, scope: ConfigScope): void {
+  scopeStore[key] = scope;
+}
+
+/** The last `update()` call's target, per key — what a scope assertion reads. */
+export const configUpdateTargets: Record<string, unknown> = {};
+
 function makeConfig() {
   return {
     get: vi.fn((key: string, def?: unknown) => {
@@ -36,12 +51,17 @@ function makeConfig() {
       if (key in defaultsStore) return defaultsStore[key];
       return def;
     }),
-    update: vi.fn(async (key: string, value: unknown, _target?: unknown): Promise<void> => {
+    update: vi.fn(async (key: string, value: unknown, target?: unknown): Promise<void> => {
       configStore[key] = value;
+      configUpdateTargets[key] = target;
     }),
-    inspect: vi.fn((key: string) =>
-      key in configStore ? { key, globalValue: configStore[key] } : { key },
-    ),
+    inspect: vi.fn((key: string) => {
+      if (!(key in configStore)) return { key };
+      const scope = scopeStore[key] ?? "global";
+      if (scope === "workspace") return { key, workspaceValue: configStore[key] };
+      if (scope === "workspaceFolder") return { key, workspaceFolderValue: configStore[key] };
+      return { key, globalValue: configStore[key] };
+    }),
   };
 }
 
@@ -274,6 +294,8 @@ export const Uri = {
 export function resetVscodeMocks(): void {
   configStore = {};
   defaultsStore = {};
+  scopeStore = {};
+  for (const k of Object.keys(configUpdateTargets)) delete configUpdateTargets[k];
 
   window.showInputBox.mockReset().mockResolvedValue(undefined);
   window.showQuickPick.mockReset().mockResolvedValue(undefined);

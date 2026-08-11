@@ -187,6 +187,50 @@ function attached(flow: Flow, raw: string, x: number, y: number): Flow | null {
   };
 }
 
+/** "Keep this one": name a free-text command and append it to
+ * `agentFlow.commands`, so the next node picks it from the list instead of
+ * retyping it. The host owns the write — a webview has no fs and cannot touch
+ * settings (see `flow:saveCommand`).
+ *
+ * `runNow` is a GETTER, not the text: the command field beside this is
+ * uncontrolled and commits on blur, so the flow's own copy can be one edit behind
+ * what is on screen when Save is pressed. Reading the live field at press time is
+ * what makes "type a command, press Save" save the command you typed. (The
+ * VISIBILITY of this row keys off the committed value instead — a row that
+ * appeared and vanished per keystroke would be worse than one that waits.)
+ *
+ * Its own state, and its own `key` at the call site, so switching to another node
+ * clears a half-typed name rather than offering it for the wrong command. */
+function SaveCommandRow({ runNow }: { runNow: () => string }): JSX.Element {
+  const [label, setLabel] = React.useState("");
+  const clean = label.trim();
+  const save = () => {
+    const run = runNow().trim();
+    if (!run || !clean) return;
+    send({ type: "flow:saveCommand", run, label: clean });
+    setLabel("");
+  };
+  return (
+    <div className="orch-clause">
+      <span className="orch-kw" />
+      <input
+        className="orch-msg"
+        aria-label="Name for settings"
+        value={label}
+        placeholder="Name it to keep it — e.g. Deploy to staging"
+        onChange={(ev) => setLabel(ev.currentTarget.value)}
+        // Enter is the gesture a name field invites, and this one has a button
+        // right beside it rather than a form to submit — so the key has to be
+        // wired by hand or it does nothing at all.
+        onKeyDown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); save(); } }}
+      />
+      <button type="button" className="orch-mini" disabled={clean === ""} onClick={save}>
+        Save to settings
+      </button>
+    </div>
+  );
+}
+
 /** The tray shows what a condition can attach to: a place already on disk, or
  * work not yet launched. Named by the two kinds it admits, not by the ones it
  * excludes — `!== "notify"` once let a `CommandNode` through too (TypeScript
@@ -338,6 +382,13 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * handler reads this ref (written synchronously in `move`) rather than the
    * `width` this effect closed over. */
   const resizeRef = React.useRef<number | null>(null);
+  /** The node inspector's free-text command field, so the Save-to-settings row can
+   * read what is ON SCREEN rather than the copy the flow committed on the last
+   * blur. Declared up here with the other hooks, not beside the JSX that uses it:
+   * everything below `if (!flow) return null` is past an early return, and a
+   * `useRef` there changes the hook count between renders — React's "rendered
+   * fewer hooks than expected", which the closing-animation tests caught. */
+  const runRef = React.useRef<HTMLInputElement>(null);
 
   // Same shape as the drag effect above, and for the same reason: one pointer
   // handler pair on `window`, live while a resize is in progress, torn down
@@ -773,6 +824,15 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * either. */
   const nodeInspName = nodeInsp ? endLabel(flow, nodeInsp.id) : "";
   const nodeCmd = commandFieldsOf(nodeInsp?.kind === "command" ? nodeInsp : undefined, p.commands);
+  /** The configured command whose `run` is character-for-character this node's own
+   * (trimmed, since that is what the host stores and compares). Its presence is
+   * what turns the Save row into "already saved" — matched on the COMMAND, not on
+   * a name, because the same command under a second name is the duplicate the host
+   * refuses to write. */
+  const savedCommand =
+    nodeCmd.run !== undefined && nodeCmd.run.trim() !== ""
+      ? p.commands.find((c) => c.run.trim() === nodeCmd.run!.trim())
+      : undefined;
 
   const setCond = (e: FlowEdge, kind: Condition["kind"]) => {
     const next = withCond(flow, e.id, kind);
@@ -980,11 +1040,31 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 className="orch-msg"
                 aria-label={`Command to run for ${nodeInspName}`}
                 key={nodeInsp.id}
+                ref={runRef}
                 defaultValue={nodeCmd.run}
                 placeholder="deploy.sh --env=staging"
                 onBlur={(ev) => p.onSave(withNodeCommandRun(flow, nodeInsp.id, ev.currentTarget.value))}
               />
             </div>
+          )}
+          {/* Keeping a one-off. Offered only for a command that is actually free
+              text and actually typed — there is nothing to save about a blank
+              field, and a node already naming a configured command is already
+              saved. Lives HERE, in the node's own panel, rather than beside all
+              three places a command can be typed: the Actions tray selects a node
+              from either view, so this is reachable from both without three copies
+              of the same affordance.
+              Once the run text matches an entry in `agentFlow.commands`, the row
+              gives way to a line saying so — the honest end state, and the reason
+              pressing Save twice cannot fill the picker with duplicates. */}
+          {nodeCmd.run !== undefined && nodeCmd.run.trim() !== "" && (
+            savedCommand ? (
+              <div className="orch-savedline" data-testid="orch-command-saved">
+                Saved in settings as “{savedCommand.label}”
+              </div>
+            ) : (
+              <SaveCommandRow key={nodeInsp.id} runNow={() => runRef.current?.value ?? nodeCmd.run ?? ""} />
+            )
           )}
         </>
       ) : (

@@ -66,6 +66,43 @@ describe("tokens.ts", () => {
 });
 
 describe.each(SURFACES)("%s sheet", (_name, sheet) => {
+  // These sheets are template literals full of long prose comments, and a stray
+  // `*/` in one is invisible: TypeScript compiles it, the bundle builds, and the
+  // browser silently discards the prose AND the rule that follows it, because
+  // together they read as one invalid selector. It has happened three times in
+  // this file's lifetime; the last one shipped a "Saved in settings as…" line at
+  // the wrong size and the wrong indent, found by eye in a screenshot.
+  //
+  // Walking the delimiters is what catches it: outside a comment, `*/` cannot
+  // appear, and at the end every comment must be closed.
+  it("has balanced comment delimiters, so no rule is silently discarded", () => {
+    let i = 0;
+    let inComment = false;
+    const problems: string[] = [];
+    while (i < sheet.length) {
+      const open = sheet.indexOf("/*", i);
+      const close = sheet.indexOf("*/", i);
+      if (!inComment) {
+        if (close !== -1 && (open === -1 || close < open)) {
+          problems.push(`stray "*/" at index ${close}: ${sheet.slice(Math.max(0, close - 60), close + 2).trim()}`);
+          i = close + 2;
+          continue;
+        }
+        if (open === -1) break;
+        inComment = true;
+        i = open + 2;
+      } else {
+        if (close === -1) {
+          problems.push(`unclosed "/*" at index ${i}`);
+          break;
+        }
+        inComment = false;
+        i = close + 2;
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
   it("never redeclares a token tokens.ts owns", () => {
     const clashes = declarationsIn(sheet).filter((t) => OWNED.includes(t));
     expect(clashes).toEqual([]);
