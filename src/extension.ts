@@ -148,6 +148,12 @@ export function activate(context: vscode.ExtensionContext): void {
       };
       stamp();
       context.subscriptions.push(vscode.window.onDidChangeWindowState(stamp));
+      // `roots` now decides which repos' diff, dirty state and PRs render on this
+      // window's card — stale the moment a folder is added or removed from an
+      // open multi-root workspace, since that alone does not reload the
+      // extension host and restamp on its own. onDidChangeWindowState only fires
+      // on focus change, which could be a long wait after an edit like this.
+      context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(stamp));
     }
 
     // Lifecycle analytics. `isFirstEver` is the install signal: globalState is empty

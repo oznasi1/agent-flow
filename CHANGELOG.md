@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-08-11
+
+### Added
+
+- **A card names the workspace its session runs in.** A Claude Code session opened inside
+  a multi-root `.code-workspace` used to produce a card naming only the folder that
+  session ran in — the workspace itself was invisible. Every folder of that window now
+  belongs to one card, behind a single chip that unfolds its repo chips, with their diff
+  and dirty markers, on hover, keyboard focus or click. A single-repo task's card is
+  unchanged.
+
+### Fixed
+
+- **An agent card's branch line names that agent's own repo.** On a card spanning two
+  repos, the line used to read the first repo's branch — which the session may never have
+  touched.
+- **A repo nobody is working in no longer speaks for the card.** A workspace root with no
+  session in it shows as a chip, but its pull request can no longer render as the card's
+  own or drag the card into Done, its leftover transcript can no longer hold the card at
+  "ended turn", and its month-old branch can no longer name the card's ticket. A root that
+  a launched task already owns is dropped from the card rather than counted twice.
+
 ## [0.12.1] — 2026-08-10
 
 ### Fixed

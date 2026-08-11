@@ -245,6 +245,7 @@ export const workspace = {
     // really unregister, not just be a recorded no-op call.
     return { dispose: vi.fn(() => { configChangeCbs = configChangeCbs.filter((c) => c !== cb); }) };
   }),
+  onDidChangeWorkspaceFolders: vi.fn((_cb: (e: unknown) => void) => ({ dispose: vi.fn() })),
 };
 
 // Real VS Code's `Uri.toString()` percent-encodes aggressively so the result "can
@@ -337,6 +338,7 @@ export function resetVscodeMocks(): void {
   workspace.registerTextDocumentContentProvider.mockReset().mockImplementation(() => ({ dispose: vi.fn() }));
   configChangeCbs = [];
   workspace.onDidChangeConfiguration.mockClear();
+  workspace.onDidChangeWorkspaceFolders.mockReset().mockImplementation(() => ({ dispose: vi.fn() }));
 
   Uri.parse.mockClear();
   Uri.file.mockClear();

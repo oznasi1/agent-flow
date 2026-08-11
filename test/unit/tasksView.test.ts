@@ -450,8 +450,8 @@ describe("ready", () => {
 describe("state — liveCount", () => {
   it("reports the live window count from the same source as the open-target picker", async () => {
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, updatedAt: 9 },
-      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 8 },
+      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, roots: ["/repos/account-service"], updatedAt: 9 },
+      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, roots: ["/repos/centaur"], updatedAt: 8 },
     ]);
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
@@ -459,10 +459,10 @@ describe("state — liveCount", () => {
   });
 
   it("excludes the current window from the count, same as the picker", async () => {
-    vi.mocked(windowIdentity).mockReturnValue({ identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1 });
+    vi.mocked(windowIdentity).mockReturnValue({ identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, roots: ["/repos/account-service"] });
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, updatedAt: 9 },
-      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 8 },
+      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, roots: ["/repos/account-service"], updatedAt: 9 },
+      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, roots: ["/repos/centaur"], updatedAt: 8 },
     ]);
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
@@ -472,7 +472,7 @@ describe("state — liveCount", () => {
   it("omits liveCount from state when window tracking is off, rather than reporting zero", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, trackOpenWindows: false });
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 8 },
+      { pid: 1, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, roots: ["/repos/centaur"], updatedAt: 8 },
     ]);
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
@@ -530,7 +530,7 @@ describe("fetch", () => {
 
   it("carries liveCount on tasks too, from the same source as state's, so the gauge is not a mount-time snapshot", async () => {
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, updatedAt: 9 },
+      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, roots: ["/repos/account-service"], updatedAt: 9 },
     ]);
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mine", size: "any" });
@@ -3605,7 +3605,7 @@ describe("live-window open targets", () => {
   it("lists an open workspace window and opens the task into it (merge path)", async () => {
     askCfg();
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/ws/team.code-workspace", kind: "workspace", label: "team.code-workspace", folders: 2, updatedAt: 9 },
+      { pid: 1, identity: "/ws/team.code-workspace", kind: "workspace", label: "team.code-workspace", folders: 2, roots: ["/repos/account-service", "/repos/centaur"], updatedAt: 9 },
     ]);
     // The open-target picker returns the live workspace window's mapped target.
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "existing", file: "/ws/team.code-workspace" } } as never);
@@ -3621,7 +3621,7 @@ describe("live-window open targets", () => {
   it("lists an open folder window and opens the task into it (focus + seed)", async () => {
     askCfg();
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, updatedAt: 9 },
+      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, roots: ["/repos/account-service"], updatedAt: 9 },
     ]);
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/account-service" } } as never);
 
@@ -3635,10 +3635,10 @@ describe("live-window open targets", () => {
 
   it("excludes the current window from the live list", async () => {
     askCfg();
-    vi.mocked(windowIdentity).mockReturnValue({ identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1 });
+    vi.mocked(windowIdentity).mockReturnValue({ identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, roots: ["/repos/account-service"] });
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, updatedAt: 9 },
-      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 8 },
+      { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, roots: ["/repos/account-service"], updatedAt: 9 },
+      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, roots: ["/repos/centaur"], updatedAt: 8 },
     ]);
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "new" } } as never);
 
@@ -3691,7 +3691,7 @@ describe("explore — open target", () => {
   it("opens an Explore session into a live folder window", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 9 },
+      { pid: 1, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, roots: ["/repos/centaur"], updatedAt: 9 },
     ]);
     vi.mocked(window.showInputBox).mockResolvedValueOnce("poke around");
     vi.mocked(window.showQuickPick)
@@ -3801,7 +3801,7 @@ describe("explore — open target", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/repos/centaur/.claude/worktrees/ASM-5885", kind: "folder", label: "ASM-5885", folders: 1, updatedAt: 9 },
+      { pid: 1, identity: "/repos/centaur/.claude/worktrees/ASM-5885", kind: "folder", label: "ASM-5885", folders: 1, roots: ["/repos/centaur/.claude/worktrees/ASM-5885"], updatedAt: 9 },
     ]);
     vi.mocked(window.showInputBox).mockResolvedValueOnce("poke around");
     vi.mocked(window.showQuickPick)

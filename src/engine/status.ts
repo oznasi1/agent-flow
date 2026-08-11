@@ -1,4 +1,8 @@
-import { CardAgent, Run, RunStatus, PrEntryMap } from "../types";
+import { AgentActivity, AgentState, CardAgent, Run, RunStatus, PrEntryMap, runKind } from "../types";
+// `mostActive` moved to ./activity on this branch (a leaf that imports types and
+// nothing else) so the webview's browser bundle can reach it without dragging in
+// this module's child_process/fs/path/os graph. main's own change here only added
+// type imports, so the merge is the union of the two.
 import { mostActive, UNKNOWN_ACTIVITY } from "./activity";
 import { gitState } from "./git";
 import { runTarget } from "./runs";
@@ -29,6 +33,15 @@ export interface BuildRunStatusInput {
   prs?: PrEntryMap;
   /** Open sessions in this run's directories. */
   agents?: CardAgent[];
+  /** Local-only: restricts the per-repo transcript read (the `readAgentActivity`
+   * fallback below) to roots that actually have a live session. `run.repos` on a
+   * grouped local card now carries every root of the workspace, sibling folders
+   * included — a warm transcript in one a session merely exited from must not
+   * hold the whole card in "ended turn" on a sibling's behalf. Absent for every
+   * tracked run: this is shared code, and a tracked run's repos are all
+   * genuinely its own regardless of whether an agent happens to be open in each
+   * one right now — the default (every repo) keeps that path byte-identical. */
+  activityRoots?: ReadonlySet<string>;
 }
 
 /** Reconcile a durable Run with every observable source into the status a card
@@ -37,14 +50,24 @@ export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
   const { run, ticket, projectsRoot, nowMs } = i;
   const agents = i.agents ?? [];
   const prs = i.prs ?? {};
-  const repos = run.repos.map((r) => gitState(r.name, r.path));
+  // A local card's `run.repos[].branch` was just read, in this same refresh tick,
+  // by whatever inferred its ticket — handing it back to gitState here skips a
+  // second `rev-parse` that could only repeat the same answer. A tracked run's
+  // stored branch can be stale (checked out elsewhere since Take), so it always
+  // re-reads live.
+  const local = runKind(run) === "local";
+  const repos = run.repos.map((r) => gitState(r.name, r.path, local ? r.branch ?? null : undefined));
   // The union of both readings. An open session is exact — addressed by its own
   // sessionId, so two in one worktree report two states — and the per-repo read
   // covers a repo with no session open, which is what stops a tracked card whose
-  // agent has since exited from dropping to parked.
+  // agent has since exited from dropping to parked. `activityRoots`, when set,
+  // narrows the per-repo half to roots with a live session — see its doc comment.
+  const activityRepos = i.activityRoots
+    ? run.repos.filter((r) => i.activityRoots!.has(canon(r.path)))
+    : run.repos;
   const agent = mostActive([
     ...agents.map((a) => a.activity),
-    ...run.repos.map((r) => readAgentActivity(projectsRoot, r.path, r.branch ?? null, nowMs)),
+    ...activityRepos.map((r) => readAgentActivity(projectsRoot, r.path, r.branch ?? null, nowMs)),
   ]);
   const pr = prSignals(prs);
   const column = deriveBucket({

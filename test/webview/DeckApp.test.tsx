@@ -1716,3 +1716,101 @@ describe("the drawer's callbacks", () => {
     expect(sent).toHaveBeenCalledWith({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
   });
 });
+
+const wsStatus = () => mkStatus({
+  run: {
+    key: "ASM-9", summary: "e2e flake", url: "https://jira/ASM-9", createdAt: 1,
+    mode: "multiroot", workspaceFile: "/ws/centaur+e2e.code-workspace",
+    repos: [
+      { name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-9-x" },
+      { name: "automation_e2e", path: "/r/automation_e2e", isGit: true, branch: "main" },
+    ],
+    briefPaths: [],
+  },
+  repos: [
+    { name: "centaur", path: "/r/centaur", branch: "ASM-9-x", dirty: true, ahead: 0, added: 0, removed: 0, files: 0 },
+    { name: "automation_e2e", path: "/r/automation_e2e", branch: "main", dirty: false, ahead: 1, added: 12, removed: 2, files: 3 },
+  ],
+});
+
+describe("workspace chip", () => {
+  it("names the workspace and counts its repos", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    const chip = container.querySelector(".c-ws .ws")!;
+    expect(chip.textContent).toContain("centaur+e2e");
+    expect(chip.textContent).toContain("2 repos");
+    expect(chip.textContent).not.toContain(".code-workspace");
+  });
+
+  it("tooltips the chip with the workspace file's own path, not a generic sentence", () => {
+    // The path is the only thing that tells apart two open .code-workspace files
+    // sharing a label — a generic sentence can't disambiguate them.
+    const { container } = render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    const chip = container.querySelector(".c-ws .ws")!;
+    expect(chip.getAttribute("title")).toBe("/ws/centaur+e2e.code-workspace");
+  });
+
+  it("keeps both repo chips in the fold, with their git signal", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    const fold = container.querySelector(".c-ws .ws-fold")!;
+    expect(Array.from(fold.querySelectorAll(".repo")).map((r) => r.textContent))
+      .toEqual(["centaur●", "automation_e2e+12−2↑1"]);
+  });
+
+  it("replaces the flat chip row, so the card says the workspace once", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    expect(container.querySelector(".c-repos")).toBeNull();
+  });
+
+  it("toggles the fold open for keyboard and touch", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    const wrap = container.querySelector(".c-ws")!;
+    expect(wrap.className).not.toContain("open");
+    fireEvent.click(container.querySelector(".ws")!);
+    expect(container.querySelector(".c-ws")!.className).toContain("open");
+  });
+
+  it("leaves a single-repo run on the plain chip row", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(container.querySelector(".c-ws")).toBeNull();
+    expect(container.querySelector(".c-repos .repo")!.textContent).toContain("svc");
+  });
+
+  it("leaves a multi-repo run with no workspace file on the plain chip row", () => {
+    // Nothing to name: two folders opened side by side are not a workspace.
+    const s = wsStatus();
+    const { container } = render(<DeckApp />);
+    host(runsMsg([{ ...s, run: { ...s.run, workspaceFile: undefined, mode: "per-window" } }]));
+    expect(container.querySelector(".c-ws")).toBeNull();
+    expect(container.querySelectorAll(".c-repos .repo")).toHaveLength(2);
+  });
+});
+
+describe("branch line", () => {
+  it("shows the branch of the repo this agent runs in", () => {
+    // repos[0] is centaur on ASM-9-x; the agent runs in automation_e2e on main.
+    const s = wsStatus();
+    const agent: CardAgent = {
+      session: { pid: 2, sessionId: "s9", cwd: "/r/automation_e2e", startedAt: 1, name: "e2e-3a" },
+      activity: { state: "working", lastActivityMs: 2_000, slug: null },
+      repo: "automation_e2e",
+    };
+    // The board mounts on the Agents lens (DeckApp.tsx:364), so this run renders
+    // as one card per agent with no toggling.
+    const { container } = render(<DeckApp />);
+    host(runsMsg([{ ...s, agents: [agent] }]));
+    expect(container.querySelector(".c-branch .bn")!.textContent).toContain("main");
+  });
+
+  it("falls back to the run's first repo on a card with no agent", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    expect(container.querySelector(".c-branch .bn")!.textContent).toContain("ASM-9-x");
+  });
+});

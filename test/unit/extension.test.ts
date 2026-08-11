@@ -326,6 +326,20 @@ describe("activate", () => {
     expect(writePresence).toHaveBeenCalledTimes(1);
   });
 
+  it("re-stamps presence when a folder is added or removed from the workspace", () => {
+    // `roots` now decides which repos render on this window's card — adding or
+    // removing a folder from an already-open multi-root workspace does not
+    // reload the extension host, so onDidChangeWindowState's focus-change
+    // trigger alone would leave it stale until the user next switches windows.
+    const { context } = fakeContext();
+    activate(context);
+    const cb = vi.mocked(workspace.onDidChangeWorkspaceFolders).mock.calls[0]?.[0] as (() => void) | undefined;
+    expect(cb).toBeTypeOf("function");
+    vi.mocked(writePresence).mockClear();
+    cb!();
+    expect(writePresence).toHaveBeenCalledTimes(1);
+  });
+
   it("initialises telemetry before the commands are registered", () => {
     const { context } = fakeContext();
     activate(context);

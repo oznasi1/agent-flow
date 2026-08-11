@@ -44,29 +44,112 @@ export function localKey(place: string): string {
   return `local-${slug || "place"}-${createHash("sha1").update(place).digest("hex").slice(0, 8)}`;
 }
 
+/** A card's worth of places: one multi-root window's session directories, or a
+ * single directory that no live window claims. */
+export interface LocalGroup {
+  /** The .code-workspace this card stands for, or null for a lone place. */
+  workspaceFile: string | null;
+  /** Every folder the card covers, in window order. `[place]` when standalone. */
+  roots: string[];
+  /** The session places inside this group, in input order — never empty. */
+  places: string[];
+}
+
+/** A workspace file's display name — "centaur+e2e.code-workspace" → "centaur+e2e". */
+function workspaceName(file: string): string {
+  return path.basename(file).replace(/\.code-workspace$/, "");
+}
+
 /**
- * The card for a place Agent Flow Deck never launched, shaped as a Run so the whole
- * existing pipeline — gitState, deriveBucket, prSignals, presence, Open, Diff —
- * renders it with no special case. Never written to the runs store unless the
+ * The card for a group of places Agent Flow Deck never launched, shaped as a Run so
+ * the whole existing pipeline — gitState, deriveBucket, prSignals, presence, Open,
+ * Diff — renders it with no special case. Never written to the runs store unless the
  * user picks Track it.
+ *
+ * A group covering a real .code-workspace keys off that file rather than any one of
+ * its folders: two sessions in the same workspace must land on the same card, and
+ * the key outlives whichever of them started first. `runTarget` then opens the
+ * workspace, which is what the user was actually working in.
  */
 export function localRunFor(
-  place: string,
+  group: LocalGroup,
   sessions: OpenSession[],
-  git: { isGit: boolean; branch: string | null },
+  git: (root: string) => { isGit: boolean; branch: string | null },
   ticket: InferredTicket | null,
   nowMs: number,
 ): Run {
-  const name = path.basename(place) || place;
   const started = sessions.map((s) => s.startedAt).filter((n) => n > 0);
+  const fallbackName = group.workspaceFile
+    ? workspaceName(group.workspaceFile)
+    : path.basename(group.roots[0]) || group.roots[0];
   return {
-    key: localKey(place),
-    summary: ticket?.summary ?? name,
+    key: localKey(group.workspaceFile ?? group.roots[0]),
+    summary: ticket?.summary ?? fallbackName,
     url: ticket?.url ?? "",
     createdAt: started.length > 0 ? Math.min(...started) : nowMs,
     kind: "local",
-    mode: "per-window",
-    repos: [{ name, path: place, isGit: git.isGit, ...(git.branch ? { branch: git.branch } : {}) }],
+    mode: group.workspaceFile ? "multiroot" : "per-window",
+    ...(group.workspaceFile ? { workspaceFile: group.workspaceFile } : {}),
+    repos: group.roots.map((root) => {
+      const g = git(root);
+      return {
+        name: path.basename(root) || root,
+        path: root,
+        isGit: g.isGit,
+        ...(g.branch ? { branch: g.branch } : {}),
+      };
+    }),
     briefPaths: [],
   };
+}
+
+/**
+ * Fold session places into the multi-root window that holds them.
+ *
+ * Only a window with a .code-workspace and more than one root groups anything: a
+ * single-folder window *is* the place, so grouping it would rename the card after
+ * a file that adds no information. A window whose record carries no `roots` was
+ * written by an older extension host and claims nothing — that record cannot say
+ * which folders it holds, and guessing from the workspace file would mean reading
+ * and parsing it on every refresh.
+ *
+ * Every input place comes back in exactly one group, in first-appearance order —
+ * that much is stable refresh to refresh. Which WINDOW a folder shared by two
+ * open workspaces gets grouped under is not: ownership goes to whichever window
+ * lists it first in `windows`, and that order is `readLiveWindows`' updatedAt-DESC
+ * sort, which every window re-stamps on focus. Focusing the other window can
+ * therefore hand the folder to a different owner on the very next refresh — a
+ * different `run.key`, a remounted card, and any PR facts cached under the old
+ * key orphaned. Pre-existing, and not what this pass redesigns.
+ */
+export function groupPlacesByWindow(
+  places: string[],
+  windows: { identity: string; kind: "workspace" | "folder"; roots?: string[] }[],
+): LocalGroup[] {
+  const owner = new Map<string, { identity: string; roots: string[] }>();
+  for (const w of windows) {
+    const roots = w.roots ?? [];
+    if (w.kind !== "workspace" || roots.length < 2) continue;
+    for (const root of roots) {
+      if (!owner.has(root)) owner.set(root, { identity: w.identity, roots });
+    }
+  }
+  const groups: LocalGroup[] = [];
+  const byWorkspace = new Map<string, LocalGroup>();
+  for (const place of places) {
+    const win = owner.get(place);
+    if (!win) {
+      groups.push({ workspaceFile: null, roots: [place], places: [place] });
+      continue;
+    }
+    const existing = byWorkspace.get(win.identity);
+    if (existing) {
+      existing.places.push(place);
+      continue;
+    }
+    const group: LocalGroup = { workspaceFile: win.identity, roots: win.roots, places: [place] };
+    byWorkspace.set(win.identity, group);
+    groups.push(group);
+  }
+  return groups;
 }

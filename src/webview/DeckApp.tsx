@@ -163,6 +163,33 @@ function RepoChip({ g }: { g: RepoGit }): JSX.Element {
   );
 }
 
+/** The repos of a multi-root run, behind the workspace that holds them. A card
+ * for a two-repo task used to spend a line on chips whose names the workspace
+ * already implies; at rest this says the one thing that identifies the task, and
+ * hovering it gives back every chip with its own git signal.
+ *
+ * Hover and focus reveal the fold in CSS, with no state to keep in sync. The
+ * click toggle exists for touch and for a keyboard user who tabs past: `.open`
+ * survives the pointer leaving, which a :hover rule cannot. */
+function WorkspaceChip({ label, repos, filePath }: { label: string; repos: RepoGit[]; filePath: string }): JSX.Element {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className={`c-ws ${open ? "open" : ""}`}>
+      {/* The workspace file's own path, not a generic sentence — it is the only
+        * thing that tells apart two open .code-workspace files that happen to
+        * share a label. */}
+      <button type="button" className="ws" onClick={() => setOpen((o) => !o)} title={filePath}>
+        <span className="wsi">{open ? "▾" : "▸"}</span>
+        <span className="n">{label}</span>
+        <span className="ct">{repos.length} repos</span>
+      </button>
+      <div className="ws-fold">
+        {repos.map((g) => <RepoChip key={g.name} g={g} />)}
+      </div>
+    </div>
+  );
+}
+
 const AGENT_STATE: Record<AgentActivity["state"], { text: string; tone: Tone }> = {
   working: { text: "working", tone: "working" },
   "needs-you": { text: "ended turn", tone: "attn" },
@@ -322,17 +349,25 @@ function Card({ r, prReviewStatus, onForget, agent, column, sourceLabel }: {
           half-empty branch row followed by "launched …" trailing the repo chips, where
           it read as one more chip that had lost its border. */}
       <div className="c-branch">
-        {r.run.repos[0]?.branch && (
-          <span className="bn" title={r.run.repos[0].branch}>⎇ {r.run.repos[0].branch}</span>
-        )}
+        {/* The agent's own repo, not repos[0]: on a multi-root card the first repo
+            may be one this session never touched. */}
+        {(() => {
+          const own = agent?.repo ? r.run.repos.find((x) => x.name === agent.repo) : undefined;
+          const branch = (own ?? r.run.repos[0])?.branch;
+          return branch && <span className="bn" title={branch}>⎇ {branch}</span>;
+        })()}
         <span className="elapsed">launched {timeAgo(r.run.createdAt)}</span>
       </div>
 
-      {r.repos.length > 0 && (
-        <div className="c-repos">
-          {r.repos.map((g) => <RepoChip key={g.name} g={g} />)}
-        </div>
-      )}
+      {(() => {
+        const ws = workspaceLabel(r.run);
+        if (ws && r.repos.length > 1) return <WorkspaceChip label={ws} repos={r.repos} filePath={r.run.workspaceFile ?? ws} />;
+        return r.repos.length > 0 && (
+          <div className="c-repos">
+            {r.repos.map((g) => <RepoChip key={g.name} g={g} />)}
+          </div>
+        );
+      })()}
 
       {(() => {
         const withPr = Object.entries(r.prs).filter(([, e]) => e.facts !== null) as [string, { facts: PrFacts }][];
