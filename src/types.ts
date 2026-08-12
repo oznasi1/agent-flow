@@ -37,6 +37,11 @@ export interface Task {
   updated: string; // ISO
   url: string;
   estimateSeconds: number | null; // original time estimate
+  /** The source's own type name — "Story", "Sub-task", "Spike". Raw on purpose:
+   * a project that renamed its types should have the tooltip say what it renamed
+   * them to. `ticketKind()` (webview) is what turns this into a render kind.
+   * Optional so nothing that already builds a Task has to change. */
+  type?: string;
   services?: string[]; // lightweight guess for display
 }
 
@@ -398,6 +403,10 @@ export type InboundMessage =
   | { type: "notepad:delete"; id: string }
   | { type: "notepad:clearCompleted" }
   | { type: "notepad:run"; id: string }
+  /** The ids of the notes VISIBLE in the panel, in the order the drop produced.
+   * Hidden notes are not named and keep their absolute slots (see applyReorder). */
+  | { type: "notepad:reorder"; order: string[] }
+  | { type: "notepad:resetOrder" }
   | { type: "openExternal"; url: string }
   | { type: "signIn" }
   | { type: "runSetup" }
@@ -524,7 +533,9 @@ export type OutboundMessage =
   // mutation, and on a poll tick so a badge cannot go stale while the panel sits
   // open. The whole array every time: it is a handful of small records, and a
   // diff protocol would buy nothing but a chance to desynchronise.
-  | { type: "notepad:notes"; notes: NotepadItemView[] }
+  /** `ordered` is true when a manual order exists — the webview shows its
+   * "Reset order" control only then, and cannot read the order key itself. */
+  | { type: "notepad:notes"; notes: NotepadItemView[]; ordered: boolean }
   // The Deck
   /** The lens, seeded once on ready and re-sent only if the setting changes under
    * the panel. Deliberately not a field on deck:runs: that message costs a full

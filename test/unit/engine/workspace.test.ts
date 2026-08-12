@@ -183,6 +183,56 @@ describe("openWorkspace — per-window", () => {
   });
 });
 
+describe("openWorkspace — promptSuffix", () => {
+  const planMatches = () => {
+    const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
+    return JSON.parse(String(planWrite![1])).matches as { matchPath: string; prompt: string }[];
+  };
+  // Free text the user wrote, carrying every placeholder renderPrompt substitutes.
+  const SUFFIX = "Details from the note:\n\n{summary} {key} {url} {brief} {files}";
+
+  it("appends the suffix to the seeded prompt verbatim, placeholders and all", async () => {
+    await openWorkspace(baseReq({ promptSuffix: SUFFIX }));
+    const [{ prompt }] = planMatches();
+    // Verbatim: the note is the user's own words, so a `{summary}` inside it stays
+    // `{summary}` rather than being filled with the ticket's summary.
+    expect(prompt).toBe(`Start ASM-1: Do the thing https://jira/ASM-1\n\n${SUFFIX}`);
+  });
+
+  it("keeps the suffix after the relevant-files block", async () => {
+    execSync.mockReturnValue("src/export.py\n"); // git ls-files result
+    await openWorkspace(baseReq({ descriptionText: "see src/export.py", promptSuffix: "Details from the note:\n\nlook here" }));
+    const [{ prompt }] = planMatches();
+    expect(prompt.indexOf("look here")).toBeGreaterThan(prompt.indexOf("Relevant files:"));
+  });
+
+  it("gives every window its own copy on a per-window launch", async () => {
+    await openWorkspace(baseReq({ mode: "per-window", promptSuffix: "Details from the note:\n\ntwo windows" }));
+    const matches = planMatches();
+    expect(matches).toHaveLength(2);
+    expect(matches.every((m) => m.prompt.endsWith("Details from the note:\n\ntwo windows"))).toBe(true);
+  });
+
+  it("carries it into a window seeded in place", async () => {
+    await openWorkspace(
+      baseReq({
+        openIn: "current",
+        currentWindow: { identity: "/repos/account-service", kind: "folder", roots: [{ name: "account-service", path: "/repos/account-service" }] },
+        promptSuffix: "Details from the note:\n\nseeded here",
+      }),
+    );
+    expect(planMatches()[0].prompt).toContain("Details from the note:\n\nseeded here");
+  });
+
+  it("leaves the prompt untouched when absent or blank", async () => {
+    await openWorkspace(baseReq());
+    const plain = planMatches()[0].prompt;
+    writeFileSync.mockClear();
+    await openWorkspace(baseReq({ promptSuffix: "   \n  " }));
+    expect(planMatches()[0].prompt).toBe(plain);
+  });
+});
+
 describe("openWorkspace — git exclude", () => {
   it("appends .pick-task/ to info/exclude when absent", async () => {
     await openWorkspace(baseReq({ services: mkRepos(["solo"]) }));

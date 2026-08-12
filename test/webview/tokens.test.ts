@@ -11,6 +11,7 @@ const OWNED = [
   "--r-card", "--r-ctl", "--r-chip",
   "--c-progress", "--c-attn", "--c-review", "--c-done", "--c-idle", "--c-danger",
   "--k-skill", "--k-command", "--k-agent", "--k-hook", "--k-plugin",
+  "--k-story", "--k-epic", "--k-task", "--k-subtask", "--k-bug", "--k-other",
   "--hair", "--edge", "--mono", "--dim",
   "--brand", "--brand-ink",
 ];
@@ -216,6 +217,59 @@ describe("brand accent", () => {
   });
 });
 
+describe("ticket kind hues", () => {
+  // Red on a card means a real failure. A bug ticket is an ordinary, healthy
+  // ticket, so it gets a muted red derived from --c-danger rather than the alarm
+  // colour itself — and never --c-attn, which the Highest chip owns alone.
+  it("mutes the bug hue away from the alarm red and the attention amber", () => {
+    const bug = TOKENS_CSS.match(/--k-bug:\s*([^;]+);/);
+    expect(bug).not.toBeNull();
+    expect(bug![1]).toContain("color-mix");
+    expect(bug![1]).toContain("--c-danger");
+    expect(bug![1]).not.toContain("--c-attn");
+    expect(bug![1].trim()).not.toBe("var(--c-danger)");
+    // color-mix(in srgb, var(--c-danger) 100%, transparent) mutes nothing — it's
+    // still 100% danger red, just alpha-blended over whatever sits behind it.
+    // --vscode-foreground is the second colour that actually does the muting.
+    expect(bug![1]).toContain("--vscode-foreground");
+  });
+
+  // Task and sub-task share a hue, as they do in Jira; their glyphs differ. Every
+  // other kind is distinct, so a scan down the list separates them by colour.
+  it("gives each kind a hue, sharing exactly one between task and sub-task", () => {
+    const hue = (name: string) => TOKENS_CSS.match(new RegExp(`--k-${name}:\\s*([^;]+);`))![1].trim();
+    const kinds = ["story", "epic", "task", "subtask", "bug", "other"];
+    for (const k of kinds) expect(hue(k), k).toBeTruthy();
+    expect(hue("task")).toBe(hue("subtask"));
+    const distinct = new Set(kinds.map(hue));
+    expect(distinct.size).toBe(5);
+  });
+});
+
+describe("ticket type marker rules", () => {
+  // The orphan check above only runs uses→declared: a --k-* token with no
+  // .ty-<kind> rule left to spend it is invisible to it, since "declared but
+  // unused" isn't a failure that check looks for. Deleting the whole .ty block
+  // from styles.ts would leave every existing test green while every glyph
+  // silently lost its hue and its flex: none. This guards that gap directly.
+  it("gives .ty a fixed 12px box that flex can never squeeze out of the row", () => {
+    const ty = ruleBlocks(CSS).find((r) => r.selector === ".ty");
+    expect(ty).toBeDefined();
+    expect(ty!.body).toMatch(/flex:\s*none/);
+    expect(ty!.body).toMatch(/width:\s*12px/);
+    expect(ty!.body).toMatch(/height:\s*12px/);
+  });
+
+  it("gives each kind's .ty-<kind> rule its own --k-<kind> hue", () => {
+    const kinds = ["story", "epic", "task", "subtask", "bug", "other"];
+    for (const kind of kinds) {
+      const rule = ruleBlocks(CSS).find((r) => r.selector === `.ty-${kind}`);
+      expect(rule, `.ty-${kind}`).toBeDefined();
+      expect(rule!.body, `.ty-${kind}`).toContain(`var(--k-${kind})`);
+    }
+  });
+});
+
 describe("no raw hex colour", () => {
   // tokens.ts (TOKENS_CSS) owns the brand triplet's literal hexes and every
   // --c-*/--k-* fallback; it is the token module, not a surface, and isn't part
@@ -308,5 +362,121 @@ describe("notepad fields", () => {
     expect(rest).toBeDefined();
     expect(rest!.body).not.toMatch(/border:\s*1px solid var\(--vscode-input-border,\s*transparent\)/);
     expect(rest!.body).toMatch(/border:\s*1px solid var\(--vscode-input-border,\s*var\(--hair\)\)/);
+  });
+});
+
+describe("notepad note layout", () => {
+  // The note reads as text beside its actions: one column takes whatever width is
+  // left and wraps inside it, the other is exactly as wide as the action cluster.
+  // Stacking the cluster under the text (as a plain block flow does) gave the note a
+  // dead band of empty card to the right of every title.
+  it("puts the text and the actions in two columns", () => {
+    const item = ruleBlocks(CSS).find((r) => r.selector === ".np-item");
+    expect(item).toBeDefined();
+    expect(item!.body).toMatch(/display:\s*grid/);
+    expect(item!.body).toMatch(/grid-template-columns:\s*1fr max-content/);
+  });
+
+  // The cluster is taller than a one-line note, and a row-spanning item's excess
+  // height is distributed into the auto tracks it spans — that is track sizing, not
+  // free space, so align-content cannot touch it. Left alone it pushed the title off
+  // the cluster's top edge and opened a gap above the body. A flexible third track
+  // takes the excess instead, which keeps the title and body at content height. The
+  // empty track collapses to nothing whenever the text is the taller side.
+  it("absorbs the cluster's excess height in a track of its own", () => {
+    const item = ruleBlocks(CSS).find((r) => r.selector === ".np-item")!;
+    expect(item.body).toMatch(/grid-template-rows:\s*max-content max-content 1fr/);
+  });
+
+  it("keeps the title and the body in the text column", () => {
+    for (const selector of [".np-top", ".np-body"]) {
+      const rule = ruleBlocks(CSS).find((r) => r.selector === selector);
+      expect(rule, selector).toBeDefined();
+      expect(rule!.body, selector).toMatch(/grid-column:\s*1/);
+    }
+  });
+
+  // The grip sits ahead of the checkbox in .np-top, pushing the title right by
+  // the grip's own width. .np-body has no grip beside it, so its left margin
+  // must add that same width back in from --grip-w, the one place it is
+  // defined — a hardcoded literal here could drift from the grip's real width
+  // and misalign the body under the title.
+  it("derives the body's left offset from the grip's own width", () => {
+    const body = ruleBlocks(CSS).find((r) => r.selector === ".np-body")!;
+    expect(body.body).toMatch(/margin:\s*3px 0 0 calc\(var\(--grip-w\)\s*\+\s*7px\s*\+\s*20px\)/);
+  });
+
+  // Top of the card, right-hand side, however many lines the text runs to: the
+  // cluster spans every row so the text cannot push it down, and align-self keeps it
+  // from stretching to the note's full height.
+  it("pins the action cluster to the top of the second column", () => {
+    const acts = ruleBlocks(CSS).find((r) => r.selector === ".np-acts")!;
+    expect(acts.body).toMatch(/grid-column:\s*2/);
+    expect(acts.body).toMatch(/grid-row:\s*1 \/ -1/);
+    expect(acts.body).toMatch(/align-self:\s*start/);
+    // Its own column now places it; the auto margin that used to push it right would
+    // fight that placement.
+    expect(acts.body).not.toMatch(/margin:[^;]*\bauto\b/);
+  });
+});
+
+describe("notepad note text", () => {
+  // A dictated or pasted title can be one unbroken string, which has no wrap
+  // opportunity. The title is a flex child at flex: 1, and a flex child's default
+  // min-width: auto refuses to shrink below its min-content — so the string ran off
+  // the panel's right edge instead of wrapping. min-width: 0 is what allows it to be
+  // constrained at all; overflow-wrap is what breaks the string once it is.
+  it("wraps a title with no wrap opportunity instead of overflowing the panel", () => {
+    const title = ruleBlocks(CSS).find((r) => r.selector === ".np-top .np-title");
+    expect(title).toBeDefined();
+    expect(title!.body).toMatch(/min-width:\s*0/);
+    expect(title!.body).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it("wraps an unbroken body the same way", () => {
+    const body = ruleBlocks(CSS).find((r) => r.selector === ".np-body");
+    expect(body!.body).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  // The note is the user's own text: it wraps to as many lines as it needs, and
+  // nothing is ever cut. Truncating would hide what they wrote with no way to read
+  // it in place.
+  it("never truncates or clamps the text it wraps", () => {
+    const noteRules = ruleBlocks(CSS).filter((r) => /\.np-(title|body)\b/.test(r.selector));
+    expect(noteRules.length).toBeGreaterThan(0);
+    expect(noteRules.filter((r) => /text-overflow|line-clamp/.test(r.body))).toEqual([]);
+  });
+});
+
+describe("notepad actions cluster", () => {
+  const acts = () => ruleBlocks(CSS).find((r) => r.selector === ".np-acts")!;
+
+  // Start sits above edit and delete, and the pair spans exactly Start's width.
+  // A two-column grid is what ties the two rows to one measure; a flex row cannot,
+  // and hardcoding the cluster width would drift the moment the label or the body
+  // font size changes.
+  it("lays the cluster out as two equal columns sized to its content", () => {
+    expect(acts()).toBeDefined();
+    expect(acts().body).toMatch(/display:\s*grid/);
+    expect(acts().body).toMatch(/grid-template-columns:\s*1fr 1fr/);
+    expect(acts().body).toMatch(/width:\s*max-content/);
+  });
+
+  it("spans Start across both columns", () => {
+    const take = ruleBlocks(CSS).find((r) => r.selector === ".np-acts .take");
+    expect(take).toBeDefined();
+    expect(take!.body).toMatch(/grid-column:\s*1 \/ -1/);
+    expect(take!.body).toMatch(/justify-content:\s*center/);
+  });
+
+  // .quiet.icon-only is pinned to 24px for the Tasks tab's inline rows. Left at that
+  // width the pair would sit at 54px under an ~80px Start — the mismatch this whole
+  // change is about. The release is scoped to .np-acts so Tasks keeps its 24px.
+  it("releases the icon pair's global 24px width, inside the notepad only", () => {
+    const iconOnly = ruleBlocks(CSS).find((r) => r.selector === ".np-acts .quiet.icon-only");
+    expect(iconOnly).toBeDefined();
+    expect(iconOnly!.body).toMatch(/width:\s*auto/);
+    const shared = ruleBlocks(CSS).find((r) => r.selector === ".sprint-remove.icon-only, .quiet.icon-only");
+    expect(shared!.body).toMatch(/width:\s*24px/);
   });
 });

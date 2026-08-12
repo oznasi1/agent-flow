@@ -23,6 +23,19 @@ export const TOKENS_CSS = `
     --k-hook:    var(--vscode-charts-yellow, #d7a531);
     --k-plugin:  var(--vscode-descriptionForeground);
 
+    /* Ticket taxonomy — the same "what KIND of thing is this" axis as the
+       Marketplace block above, for the Tasks list's type marker. Task and
+       sub-task share Jira's blue; the glyphs are what separate them.
+       --k-bug is a muted red, NOT --c-danger: red on a card means a real
+       failure, and a bug ticket is not one. Not --c-attn either — amber on a
+       card means exactly one thing, the Highest chip. */
+    --k-story:   var(--vscode-charts-green, #4ac26b);
+    --k-epic:    var(--vscode-charts-purple, #b083f0);
+    --k-task:    var(--vscode-charts-blue, #4aa3df);
+    --k-subtask: var(--vscode-charts-blue, #4aa3df);
+    --k-bug:     color-mix(in srgb, var(--c-danger) 72%, var(--vscode-foreground));
+    --k-other:   var(--vscode-descriptionForeground);
+
     --hair: var(--vscode-panel-border);
     /* Controls need an edge that survives sitting on a card, which is already 4%
        lighter than the editor background — panelBorder disappears against it. */

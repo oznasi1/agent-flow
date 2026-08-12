@@ -3,13 +3,13 @@ import Fuse from "fuse.js";
 import { send } from "./vscodeApi";
 import {
   addOnce, deriveStatuses, effectiveFilter, fmtEst, gateCopy, isPrReviewStatus, isTopPriority,
-  matchesStatus, moveKey, railClass, visibleFilters,
+  matchesStatus, moveKey, railClass, ticketKind, visibleFilters,
 } from "./helpers";
 import { Filter, FilterVisibility, Task, OutboundMessage, Size, NotepadItemView } from "../types";
 import type { SerializedCaps } from "../tasks/provider";
 import { GaugeMark } from "./GaugeMark";
 import { Notepad } from "./Notepad";
-import { PlayIcon } from "./icons";
+import { PlayIcon, TypeIcon } from "./icons";
 // The combo scaffolding both this sidebar's repo controls and the Deck's
 // Orchestrator combo run on. It lived here until the drawer needed it too, and
 // importing THIS file from the Deck bundle would have dragged Fuse.js and the
@@ -172,6 +172,7 @@ export function App(): JSX.Element {
   // opens on Tasks, which is what the sidebar is primarily for.
   const [tab, setTab] = React.useState<"tasks" | "notepad">("tasks");
   const [notes, setNotes] = React.useState<NotepadItemView[]>([]);
+  const [notesOrdered, setNotesOrdered] = React.useState(false);
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [toasts, setToasts] = React.useState<
@@ -190,7 +191,7 @@ export function App(): JSX.Element {
   const commitDrop = (targetKey: string, pos: "before" | "after") => {
     const dk = dragKeyRef.current;
     if (dk && dk !== targetKey) {
-      const next = moveKey(tasksRef.current, dk, targetKey, pos);
+      const next = moveKey(tasksRef.current, dk, targetKey, pos, (t) => t.key);
       setTasks(next);
       send({ type: "reorder", order: next.map((t) => t.key) });
     }
@@ -313,6 +314,7 @@ export function App(): JSX.Element {
           break;
         case "notepad:notes":
           setNotes(m.notes);
+          setNotesOrdered(m.ordered);
           break;
         case "toast": {
           const id = ++toastSeq;
@@ -527,7 +529,7 @@ export function App(): JSX.Element {
         </span>
       </div>
 
-      {tab === "notepad" && <Notepad notes={notes} />}
+      {tab === "notepad" && <Notepad notes={notes} ordered={notesOrdered} />}
 
       {tab === "tasks" && <>
       <div className="lenses">
@@ -829,6 +831,7 @@ function TaskCard(props: {
             >⠿</span>
           )}
           <span className={`chev${open ? " open" : ""}`}>›</span>
+          <TypeIcon kind={ticketKind(task.type ?? "")} label={task.type || "unknown"} />
           <a
             className="key"
             href={task.url}

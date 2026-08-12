@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, matchesStatus, moveKey, railClass, visibleFilters } from "../../src/webview/helpers";
+import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, matchesStatus, moveKey, railClass, ticketKind, visibleFilters } from "../../src/webview/helpers";
 import type { Filter, Task } from "../../src/types";
 import { mkTask } from "../_helpers/factories";
 
@@ -120,33 +120,38 @@ describe("isPrReviewStatus", () => {
 
 describe("moveKey", () => {
   it("moves a key before a target", () => {
-    expect(keys(moveKey(tasks("A", "B", "C"), "C", "A", "before"))).toEqual(["C", "A", "B"]);
+    expect(keys(moveKey(tasks("A", "B", "C"), "C", "A", "before", (t) => t.key))).toEqual(["C", "A", "B"]);
   });
 
   it("moves a key after a target", () => {
-    expect(keys(moveKey(tasks("A", "B", "C"), "A", "B", "after"))).toEqual(["B", "A", "C"]);
+    expect(keys(moveKey(tasks("A", "B", "C"), "A", "B", "after", (t) => t.key))).toEqual(["B", "A", "C"]);
   });
 
   it("is a no-op when from === to", () => {
     const list = tasks("A", "B");
-    expect(moveKey(list, "A", "A", "before")).toBe(list);
+    expect(moveKey(list, "A", "A", "before", (t) => t.key)).toBe(list);
   });
 
   it("returns the list unchanged when the from key is missing", () => {
     const list = tasks("A", "B");
-    expect(moveKey(list, "Z", "A", "before")).toBe(list);
+    expect(moveKey(list, "Z", "A", "before", (t) => t.key)).toBe(list);
   });
 
   it("returns the list unchanged when the to key is missing", () => {
     const list = tasks("A", "B");
-    expect(moveKey(list, "A", "Z", "before")).toBe(list);
+    expect(moveKey(list, "A", "Z", "before", (t) => t.key)).toBe(list);
   });
 
   it("does not mutate the input list", () => {
     const list = tasks("A", "B", "C");
     const snapshot = keys(list);
-    moveKey(list, "C", "A", "before");
+    moveKey(list, "C", "A", "before", (t) => t.key);
     expect(keys(list)).toEqual(snapshot);
+  });
+
+  it("moves any keyed item, not just tasks", () => {
+    const notes = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    expect(moveKey(notes, "c", "a", "before", (n) => n.id).map((n) => n.id)).toEqual(["c", "a", "b"]);
   });
 });
 
@@ -234,5 +239,47 @@ describe("effectiveFilter", () => {
     for (const { configured, supported } of cases) {
       expect(visibleFilters(supported)).toContain(effectiveFilter(configured, supported));
     }
+  });
+});
+
+describe("ticketKind", () => {
+  it("maps each of the five type names Jira ships by default", () => {
+    expect(ticketKind("Story")).toBe("story");
+    expect(ticketKind("Epic")).toBe("epic");
+    expect(ticketKind("Task")).toBe("task");
+    expect(ticketKind("Bug")).toBe("bug");
+    expect(ticketKind("Sub-task")).toBe("subtask");
+  });
+
+  // Jira Server writes "Sub-task", Jira Cloud has shipped "Subtask" — both are the
+  // same kind, and a site that uses the other spelling must not fall to "other".
+  it("accepts both sub-task spellings", () => {
+    expect(ticketKind("Subtask")).toBe("subtask");
+    expect(ticketKind("sub-task")).toBe("subtask");
+  });
+
+  it("ignores casing and surrounding whitespace", () => {
+    expect(ticketKind("BUG")).toBe("bug");
+    expect(ticketKind("  story  ")).toBe("story");
+  });
+
+  // A project can define any type it likes. Falling to "other" is what keeps the
+  // card marked rather than blank.
+  it("falls to other for a type it does not know", () => {
+    expect(ticketKind("Spike")).toBe("other");
+    expect(ticketKind("Incident")).toBe("other");
+    expect(ticketKind("Improvement")).toBe("other");
+  });
+
+  it("falls to other when the source named no type at all", () => {
+    expect(ticketKind("")).toBe("other");
+    expect(ticketKind("   ")).toBe("other");
+  });
+
+  // Guards the lookup against a prototype key: `{}["constructor"]` is a function,
+  // and a bare `MAP[key] || "other"` would return it.
+  it("does not resolve an inherited object property to a kind", () => {
+    expect(ticketKind("constructor")).toBe("other");
+    expect(ticketKind("toString")).toBe("other");
   });
 });

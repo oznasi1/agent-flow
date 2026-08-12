@@ -602,6 +602,49 @@ describe("My-sprint reorder bar", () => {
   });
 });
 
+describe("notepad message routing", () => {
+  // App.tsx's "notepad:notes" handler stores both the notes and whether the
+  // host reports them as manually ordered — the latter drives Notepad's own
+  // "Reset order" affordance. Nothing else in the suite posts this message,
+  // so without this test the handler's two lines have no coverage at all.
+  it("renders the notes and shows Reset order once the host reports a saved order", () => {
+    render(<App />);
+    authed();
+    fireEvent.click(screen.getByRole("tab", { name: "Notepad" }));
+    host({
+      type: "notepad:notes",
+      notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
+      ordered: true,
+    });
+    expect(screen.getByText("Buy milk")).toBeInTheDocument();
+    expect(screen.getByText("Reset order")).toBeInTheDocument();
+  });
+
+  // Drives the flag through both directions rather than asserting against
+  // React.useState(false)'s initial value: the previous version of this test
+  // posted straight to `ordered: false` and passed even when the whole
+  // handler was gutted, because the false-when-untouched initial state looks
+  // identical to a genuinely-updated false. Going true → false first forces
+  // the update to have happened at all.
+  it("hides Reset order again once the host reports the order was reset", () => {
+    render(<App />);
+    authed();
+    fireEvent.click(screen.getByRole("tab", { name: "Notepad" }));
+    host({
+      type: "notepad:notes",
+      notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
+      ordered: true,
+    });
+    expect(screen.getByText("Reset order")).toBeInTheDocument();
+    host({
+      type: "notepad:notes",
+      notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
+      ordered: false,
+    });
+    expect(screen.queryByText("Reset order")).not.toBeInTheDocument();
+  });
+});
+
 describe("optimistic list updates", () => {
   it("removes a card when a status change reports removal", () => {
     render(<App />);
@@ -680,6 +723,31 @@ describe("task card actions", () => {
     withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
     fireEvent.click(screen.getByRole("button", { name: "Take" }));
     expect(sent).toHaveBeenCalledWith({ type: "take", key: "ASM-1", services: undefined });
+  });
+
+  it("marks a card with its ticket type", () => {
+    withTask(mkTask({ key: "ASM-1", type: "Bug" }));
+    expect(screen.getByRole("img", { name: "Type: Bug" })).toHaveClass("ty-bug");
+  });
+
+  // A project's own type still gets a marker, named for what the project calls it.
+  it("marks a type it does not recognise, under the source's own name", () => {
+    withTask(mkTask({ key: "ASM-1", type: "Spike" }));
+    expect(screen.getByRole("img", { name: "Type: Spike" })).toHaveClass("ty-other");
+  });
+
+  it("still marks a task whose source named no type", () => {
+    withTask(mkTask({ key: "ASM-1" }));
+    expect(screen.getByRole("img", { name: "Type: unknown" })).toHaveClass("ty-other");
+  });
+
+  // Left of the key, and inside the top row — not floated into the action cluster.
+  it("puts the marker before the key in the card's top row", () => {
+    withTask(mkTask({ key: "ASM-1", summary: "Fix the bug", type: "Story", url: "https://jira/browse/ASM-1" }));
+    const keyLink = screen.getByRole("link", { name: "ASM-1" });
+    const top = keyLink.closest(".card-top")!;
+    const marker = within(top as HTMLElement).getByRole("img", { name: "Type: Story" });
+    expect(marker.compareDocumentPosition(keyLink)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("rails a card by its status category, not its priority", () => {

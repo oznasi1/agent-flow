@@ -97,14 +97,17 @@ export function fmtEst(sec: number): string {
   return `${Number.isInteger(d) ? d : d.toFixed(1)}d`;
 }
 
-/** Move `fromKey` to sit before/after `toKey` within a task list. Pure. */
-export function moveKey(list: Task[], fromKey: string, toKey: string, pos: "before" | "after"): Task[] {
+/** Move `fromKey` to sit before/after `toKey` within a list. `keyOf` reads the
+ *  item's identity — `t => t.key` for a task, `n => n.id` for a note. Pure. */
+export function moveKey<T>(
+  list: T[], fromKey: string, toKey: string, pos: "before" | "after", keyOf: (item: T) => string,
+): T[] {
   if (fromKey === toKey) return list;
-  const from = list.findIndex((t) => t.key === fromKey);
+  const from = list.findIndex((t) => keyOf(t) === fromKey);
   if (from < 0) return list;
   const next = [...list];
   const [moved] = next.splice(from, 1);
-  const to = next.findIndex((t) => t.key === toKey);
+  const to = next.findIndex((t) => keyOf(t) === toKey);
   if (to < 0) return list;
   next.splice(pos === "after" ? to + 1 : to, 0, moved);
   return next;
@@ -162,4 +165,27 @@ export function isTopPriority(priority: string): boolean {
  *  so an unchanged list keeps its reference and React skips the re-render. */
 export function addOnce(xs: string[], x: string): string[] {
   return xs.includes(x) ? xs : [...xs, x];
+}
+
+/** What a ticket IS, as far as the card renders it. A different axis from status:
+ * `statusCategory` says where the ticket is in the flow, this says what kind of
+ * thing it is. "other" covers every type a project defined for itself. */
+export type TicketKind = "story" | "epic" | "task" | "subtask" | "bug" | "other";
+
+// A null-prototype map, not an object literal: a plain literal would resolve
+// ticketKind("constructor") to Object's own constructor rather than to "other".
+const TICKET_KINDS: Record<string, TicketKind> = Object.assign(Object.create(null), {
+  story: "story",
+  epic: "epic",
+  task: "task",
+  bug: "bug",
+  "sub-task": "subtask",
+  subtask: "subtask",
+});
+
+/** Map a source's type name onto a render kind. Unknown names — and the empty
+ * string a source with no type produces — are "other", which still draws a
+ * marker; the raw name is what the tooltip shows. */
+export function ticketKind(typeName: string): TicketKind {
+  return TICKET_KINDS[typeName.trim().toLowerCase()] ?? "other";
 }

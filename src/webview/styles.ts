@@ -111,6 +111,17 @@ export const CSS = `
      key on every card was six links competing with the one button that matters. */
   .key { font-family: var(--mono); font-size: var(--t-data); color: var(--dim); text-decoration: none; }
   .key:hover { color: var(--vscode-textLink-foreground); }
+  /* The ticket's kind, left of its key. A kind axis, never a status one: the hue
+     says what this ticket IS, the rail already says where it is in the flow.
+     flex: none because .card-top wraps — the marker must never be squeezed. */
+  .ty { width: 12px; height: 12px; flex: none; display: inline-block; }
+  .ty svg { display: block; }
+  .ty-story   { color: var(--k-story); }
+  .ty-epic    { color: var(--k-epic); }
+  .ty-task    { color: var(--k-task); }
+  .ty-subtask { color: var(--k-subtask); }
+  .ty-bug     { color: var(--k-bug); }
+  .ty-other   { color: var(--k-other); }
 
   /* Urgency, and only at the top level. --c-attn, never --c-danger: an urgent
      ticket is not a broken one. */
@@ -316,24 +327,66 @@ export const CSS = `
   .np-empty { padding: 14px 2px; color: var(--dim); font-size: var(--t-body); }
 
   .np-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hair); }
-  .np-item { position: relative; padding: 8px 2px 9px 11px; border-bottom: 1px solid var(--hair); }
+  /* Text beside its actions: the first column takes whatever width the cluster
+     leaves and wraps inside it, the second is exactly the cluster's width. The
+     cluster spans every row and aligns to the start, so it holds the note's top
+     right corner however many lines the text runs to. */
+  /* --grip-w is the one place the grip's width lives; it's set here, on the
+     item, rather than on .np-top, because .np-body is .np-top's sibling —
+     the custom property only reaches it by inheriting down from a shared
+     ancestor. .np-body's margin below reads it back through calc() so the
+     two can never drift apart the way a second hardcoded literal would. */
+  .np-item { position: relative; display: grid; grid-template-columns: 1fr max-content;
+    grid-template-rows: max-content max-content 1fr; column-gap: 10px;
+    padding: 8px 2px 9px 11px; border-bottom: 1px solid var(--hair); --grip-w: 14px; }
   .np-item::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 9px; width: 2px;
     border-radius: 1px; background: var(--rail, transparent); }
   .np-item.r-running { --rail: var(--c-progress); }
   .np-item.r-stale   { --rail: var(--c-idle); }
   .np-item.r-done    { --rail: var(--c-done); }
   .cb { width: 13px; height: 13px; margin: 0; accent-color: var(--brand); flex: none; cursor: pointer; }
-  .np-top { display: flex; align-items: center; gap: 7px; }
-  .np-top .np-title { flex: 1; }
+  .np-top { grid-column: 1; display: flex; align-items: center; gap: 7px; }
+  /* A dictated or pasted title can be one unbroken string, which offers no wrap
+     opportunity. As a flex child at flex: 1 its default min-width: auto refuses to
+     shrink below that min-content, so the string ran off the panel's right edge:
+     min-width: 0 lets it be constrained, overflow-wrap breaks it. Nothing is cut —
+     the note is the user's own text, and it wraps to as many lines as it needs. */
+  .np-top .np-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .np-title { font-size: var(--t-body); line-height: 1.35; }
   .np-item.is-done .np-title { text-decoration: line-through; opacity: .5; }
-  .np-body { margin: 3px 0 6px 20px; font-size: var(--t-body); color: var(--dim); white-space: pre-wrap; }
-  .np-acts { display: flex; align-items: center; gap: 6px; margin: 6px 0 0 20px; }
+  /* 20px was checkbox (13px) + .np-top's 7px gap — the title's old left offset,
+     before the grip existed. The grip now sits ahead of the checkbox, pushing
+     the title right by its own width plus another gap; the body must move with
+     it by that same amount, read from --grip-w rather than re-measured by hand. */
+  .np-body { grid-column: 1; margin: 3px 0 0 calc(var(--grip-w) + 7px + 20px); font-size: var(--t-body); color: var(--dim);
+    white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Start on top, edit + delete side by side beneath it, the pair spanning exactly
+     Start's width. Two equal columns at max-content take that measure from Start's
+     own min-content, so the cluster stays true when the label or the body font size
+     changes — a hardcoded width would not. */
+  .np-acts { grid-column: 2; grid-row: 1 / -1; align-self: start;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: max-content; margin: 0; }
+  .np-acts .take { grid-column: 1 / -1; justify-content: center; }
+  /* The 24px pin belongs to the Tasks tab's inline rows; here the pair has to reach
+     Start's width, so release it inside the notepad only. */
+  .np-acts .quiet.icon-only { width: auto; }
   /* A checked-off note drops Start from filled brand teal to the quiet language —
      a finished item must not out-shout an active one — but it stays clickable. */
   .np-item.is-done .take { background: transparent; color: var(--dim); border: 1px solid var(--edge);
     font-weight: 500; padding: 2px 10px 2px 8px; }
   .np-item.is-done .take:hover { background: var(--vscode-toolbar-hoverBackground); }
+
+  /* Same drag language as the Tasks card (.card.dragging / .drop-*): the source
+     row dims, the row under the pointer shows the edge the note lands on. The
+     grip sits inside .np-top, so the rail keeps its own 2px column. */
+  .np-item.dragging { opacity: .45; }
+  .np-item.drop-before { box-shadow: inset 0 2px 0 0 var(--vscode-focusBorder); }
+  .np-item.drop-after  { box-shadow: inset 0 -2px 0 0 var(--vscode-focusBorder); }
+  /* A fixed width (rather than the glyph's intrinsic size) so --grip-w describes
+     the real space the grip occupies in .np-top's flex row — the value
+     .np-body's margin above must match to keep the body under the title. */
+  .np-top .grip { margin-left: 0; width: var(--grip-w); display: inline-flex;
+    align-items: center; justify-content: center; }
 
   /* The add form's edit-in-place row shares its layout with a note's own edit
      state (NoteRow, while editing). */

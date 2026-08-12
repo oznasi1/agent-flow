@@ -1,13 +1,12 @@
-import { Task } from "../types";
-
-/** Order tasks so keys present in `saved` come first (in saved order),
- *  then any remaining tasks in their incoming (server) order. Pure. */
-export function sortBySavedOrder(tasks: Task[], saved: string[]): Task[] {
+/** Order items so keys present in `saved` come first (in saved order),
+ *  then any remaining items in their incoming order. `keyOf` reads the item's
+ *  identity — `t => t.key` for a task, `n => n.id` for a note. Pure. */
+export function sortBySavedOrder<T>(items: T[], saved: string[], keyOf: (item: T) => string): T[] {
   const rank = new Map(saved.map((k, i) => [k, i] as const));
-  const ranked = tasks
-    .filter((t) => rank.has(t.key))
-    .sort((a, b) => rank.get(a.key)! - rank.get(b.key)!);
-  const unranked = tasks.filter((t) => !rank.has(t.key)); // preserves server order
+  const ranked = items
+    .filter((t) => rank.has(keyOf(t)))
+    .sort((a, b) => rank.get(keyOf(a))! - rank.get(keyOf(b))!);
+  const unranked = items.filter((t) => !rank.has(keyOf(t))); // preserves incoming order
   return [...ranked, ...unranked];
 }
 

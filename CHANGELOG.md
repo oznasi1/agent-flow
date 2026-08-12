@@ -5,7 +5,42 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.14.0] — 2026-08-12
+
+### Added
+
+- **A ticket's type, on its card.** Every card in the Tasks list now carries a small coloured glyph before its key saying what the ticket is — story, epic, task, sub-task or bug — so a list can be scanned for the bug or the epic without opening anything. A type the project defined for itself (a spike, an incident, a renamed default) gets a neutral glyph and is named in full in the tooltip, so no card is ever left unmarked. Bug takes a muted red rather than the alarm red: an ordinary bug ticket is not a failure.
+
+## [0.13.3] — 2026-08-12
+
+### Added
+
+- **Notepad: drag to reorder.** Each note has a grip — drag it to put the list in the order you want. The order is yours, persists across reloads, and applies under every filter; "Reset order" puts the list back to newest-first. A notepad you never drag looks exactly as it did.
+
+## [0.13.2] — 2026-08-12
+
+### Fixed
+
+- **A Notepad note's detail reaches the agent, not just its title.** Running a note seeded a
+  prompt built from the note's title alone — everything typed under it lived only in the
+  `.pick-task/TASK.md` brief, which a session is least likely to open first. The detail is
+  now appended to the seeded prompt itself, verbatim, so `{summary}`-shaped text inside a
+  note stays the user's own words. A note with no detail, and every other kind of launch,
+  seeds exactly the prompt it did before.
+
+## [0.13.1] — 2026-08-12
+
+### Fixed
+
+- **A Notepad note reads as text beside its actions.** Start sat level with — and no wider
+  than — the edit and delete buttons that follow it, and the cluster stretched under the
+  note's text, leaving every title with a dead band of empty card to its right. Start now
+  sits above the pair, which spans exactly Start's width, and the cluster holds the note's
+  top right corner while the text takes the width it leaves.
+- **A long note title wraps instead of running off the panel.** A dictated or pasted title
+  can be one unbroken string, which offered nothing to wrap on and overflowed the sidebar's
+  right edge. Both the title and the body now break mid-string when they have to, and
+  neither is ever truncated.
 
 ## [0.13.0] — 2026-08-11
 
