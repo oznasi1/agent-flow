@@ -4683,6 +4683,18 @@ describe("notepad", () => {
       expect(orderIn(store)).toEqual([a, b, c]); // b keeps the middle slot
     });
 
+    it("keeps a note hidden by the filter in its slot on a later drag, once a saved order already exists", async () => {
+      const { store, sendMsg, ids } = await threeNotes();
+      const [a, b, c] = ids;
+      // A first drag (no filter active) establishes a saved order.
+      await sendMsg({ type: "notepad:reorder", order: [a, c, b] });
+      // Now the user filters to Active with `c` done, so the visible pair is a, b,
+      // and they drag b above a — exercising the saved-order seed on a SECOND drag.
+      await sendMsg({ type: "notepad:toggleDone", id: c });
+      await sendMsg({ type: "notepad:reorder", order: [b, a] });
+      expect(orderIn(store)).toEqual([b, c, a]); // c keeps its absolute slot (index 1)
+    });
+
     it("puts a new note on top of an existing order", async () => {
       const { posted, store, sendMsg, ids } = await threeNotes();
       const [a, , c] = ids;
