@@ -185,7 +185,7 @@ export function App(): JSX.Element {
   const commitDrop = (targetKey: string, pos: "before" | "after") => {
     const dk = dragKeyRef.current;
     if (dk && dk !== targetKey) {
-      const next = moveKey(tasksRef.current, dk, targetKey, pos);
+      const next = moveKey(tasksRef.current, dk, targetKey, pos, (t) => t.key);
       setTasks(next);
       send({ type: "reorder", order: next.map((t) => t.key) });
     }

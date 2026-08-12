@@ -403,7 +403,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
               // Full sprint view: prune keys that have left the sprint.
               await this.saveOrder(pruneOrder(this.savedOrder(), tasks.map((t) => t.key)));
             }
-            outgoing = sortBySavedOrder(tasks, this.savedOrder());
+            outgoing = sortBySavedOrder(tasks, this.savedOrder(), (t) => t.key);
           }
           this.post({ type: "tasks", filter: lens, tasks: outgoing,
             liveCount: cfg.trackOpenWindows ? this.liveWindows().length : undefined });

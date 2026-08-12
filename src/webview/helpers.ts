@@ -97,14 +97,17 @@ export function fmtEst(sec: number): string {
   return `${Number.isInteger(d) ? d : d.toFixed(1)}d`;
 }
 
-/** Move `fromKey` to sit before/after `toKey` within a task list. Pure. */
-export function moveKey(list: Task[], fromKey: string, toKey: string, pos: "before" | "after"): Task[] {
+/** Move `fromKey` to sit before/after `toKey` within a list. `keyOf` reads the
+ *  item's identity — `t => t.key` for a task, `n => n.id` for a note. Pure. */
+export function moveKey<T>(
+  list: T[], fromKey: string, toKey: string, pos: "before" | "after", keyOf: (item: T) => string,
+): T[] {
   if (fromKey === toKey) return list;
-  const from = list.findIndex((t) => t.key === fromKey);
+  const from = list.findIndex((t) => keyOf(t) === fromKey);
   if (from < 0) return list;
   const next = [...list];
   const [moved] = next.splice(from, 1);
-  const to = next.findIndex((t) => t.key === toKey);
+  const to = next.findIndex((t) => keyOf(t) === toKey);
   if (to < 0) return list;
   next.splice(pos === "after" ? to + 1 : to, 0, moved);
   return next;
