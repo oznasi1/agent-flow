@@ -241,3 +241,43 @@ describe("notepad fields", () => {
     expect(rest!.body).toMatch(/border:\s*1px solid var\(--vscode-input-border,\s*var\(--hair\)\)/);
   });
 });
+
+describe("notepad actions cluster", () => {
+  const acts = () => ruleBlocks(CSS).find((r) => r.selector === ".np-acts")!;
+
+  // Start sits above edit and delete, and the pair spans exactly Start's width.
+  // A two-column grid is what ties the two rows to one measure; a flex row cannot,
+  // and hardcoding the cluster width would drift the moment the label or the body
+  // font size changes.
+  it("lays the cluster out as two equal columns sized to its content", () => {
+    expect(acts()).toBeDefined();
+    expect(acts().body).toMatch(/display:\s*grid/);
+    expect(acts().body).toMatch(/grid-template-columns:\s*1fr 1fr/);
+    expect(acts().body).toMatch(/width:\s*max-content/);
+  });
+
+  // The cluster keeps the card's right edge, where the actions have always lived —
+  // the old rule indented it 20px to sit under the note's body text instead.
+  it("pushes the cluster to the card's right edge", () => {
+    expect(acts().body).toMatch(/margin:[^;]*\bauto\b/);
+    expect(acts().body).not.toMatch(/margin:[^;]*20px/);
+  });
+
+  it("spans Start across both columns", () => {
+    const take = ruleBlocks(CSS).find((r) => r.selector === ".np-acts .take");
+    expect(take).toBeDefined();
+    expect(take!.body).toMatch(/grid-column:\s*1 \/ -1/);
+    expect(take!.body).toMatch(/justify-content:\s*center/);
+  });
+
+  // .quiet.icon-only is pinned to 24px for the Tasks tab's inline rows. Left at that
+  // width the pair would sit at 54px under an ~80px Start — the mismatch this whole
+  // change is about. The release is scoped to .np-acts so Tasks keeps its 24px.
+  it("releases the icon pair's global 24px width, inside the notepad only", () => {
+    const iconOnly = ruleBlocks(CSS).find((r) => r.selector === ".np-acts .quiet.icon-only");
+    expect(iconOnly).toBeDefined();
+    expect(iconOnly!.body).toMatch(/width:\s*auto/);
+    const shared = ruleBlocks(CSS).find((r) => r.selector === ".sprint-remove.icon-only, .quiet.icon-only");
+    expect(shared!.body).toMatch(/width:\s*24px/);
+  });
+});

@@ -124,6 +124,18 @@ describe("Notepad", () => {
     expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:update", id: "n1", title: "Ship it better", body: "body" });
   });
 
+  // The cluster is a two-column grid (Start on top, edit + delete below). The flex
+  // spacer that used to push the pair right would become a phantom grid item there,
+  // taking a cell and breaking the two rows apart.
+  it("holds only the three action buttons, with no leftover flex spacer", () => {
+    render(<Notepad notes={[note()]} />);
+    const acts = screen.getByRole("button", { name: "Start" }).parentElement!;
+    expect(acts).toHaveClass("np-acts");
+    expect(acts.querySelector(".spacer")).toBeNull();
+    expect(within(acts as HTMLElement).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent?.trim()))
+      .toEqual(["Start", "Edit note", "Delete note"]);
+  });
+
   it("says so when the filter hides everything", () => {
     render(<Notepad notes={[note({ done: true })]} />);
     expect(screen.getByText("Nothing active. Add a note above.")).toBeTruthy();

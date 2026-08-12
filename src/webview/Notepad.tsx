@@ -166,7 +166,6 @@ function NoteRow({ note, editing, onEdit, onDone }: {
         <button className="take" onClick={() => send({ type: "notepad:run", id: note.id })} title="Start this note as an agent run">
           <PlayIcon /> Start
         </button>
-        <span className="spacer" />
         <button className="quiet icon-only dim" aria-label="Edit note" title="Edit note" onClick={onEdit}>
           <PenIcon />
         </button>

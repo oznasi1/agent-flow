@@ -328,7 +328,17 @@ export const CSS = `
   .np-title { font-size: var(--t-body); line-height: 1.35; }
   .np-item.is-done .np-title { text-decoration: line-through; opacity: .5; }
   .np-body { margin: 3px 0 6px 20px; font-size: var(--t-body); color: var(--dim); white-space: pre-wrap; }
-  .np-acts { display: flex; align-items: center; gap: 6px; margin: 6px 0 0 20px; }
+  /* Start on top, edit + delete side by side beneath it, the pair spanning exactly
+     Start's width. Two equal columns at max-content take that measure from Start's
+     own min-content, so the cluster stays true when the label or the body font size
+     changes — a hardcoded width would not. It keeps the card's right edge, where the
+     actions have always sat. */
+  .np-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
+    width: max-content; margin: 6px 0 0 auto; }
+  .np-acts .take { grid-column: 1 / -1; justify-content: center; }
+  /* The 24px pin belongs to the Tasks tab's inline rows; here the pair has to reach
+     Start's width, so release it inside the notepad only. */
+  .np-acts .quiet.icon-only { width: auto; }
   /* A checked-off note drops Start from filled brand teal to the quiet language —
      a finished item must not out-shout an active one — but it stays clickable. */
   .np-item.is-done .take { background: transparent; color: var(--dim); border: 1px solid var(--edge);
