@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, createEvent } from "@testing-library/react";
 import * as React from "react";
 
 const sendSpy = vi.fn();
@@ -149,6 +149,39 @@ describe("drag to reorder", () => {
     note({ id: "n2", title: "second" }),
     note({ id: "n3", title: "third" }),
   ];
+  // jsdom has no DragEvent global, so @testing-library/dom's fireEvent.dragOver /
+  // .drop / .dragLeave fall back to a plain Event constructor — which silently
+  // drops any MouseEvent-only init field. `dataTransfer` survives only because
+  // testing-library patches it on specially (events.js's dataTransferProperties
+  // loop); `clientY` and `relatedTarget` do not, so e.clientY reads back
+  // `undefined` and e.relatedTarget reads back `undefined` no matter what the
+  // call site passes. `undefined < anything` is always false, which is the REAL
+  // reason every drop below resolves to "after": not (only) jsdom's 0x0 rects,
+  // but clientY never reaching the native event at all. These two helpers patch
+  // the field onto the event object directly — the same technique testing-library
+  // itself uses for dataTransfer — so a test can actually drive the "before" path
+  // and the onDragLeave handler's relatedTarget check.
+  const dragOverAt = (el: HTMLElement, dataTransfer: unknown, clientY: number) => {
+    const event = createEvent.dragOver(el, { dataTransfer });
+    Object.defineProperty(event, "clientY", { value: clientY, configurable: true });
+    fireEvent(el, event);
+  };
+  const dropAt = (el: HTMLElement, dataTransfer: unknown, clientY: number) => {
+    const event = createEvent.drop(el, { dataTransfer });
+    Object.defineProperty(event, "clientY", { value: clientY, configurable: true });
+    fireEvent(el, event);
+  };
+  const dragLeaveTo = (el: HTMLElement, dataTransfer: unknown, relatedTarget: EventTarget | null) => {
+    const event = createEvent.dragLeave(el, { dataTransfer });
+    Object.defineProperty(event, "relatedTarget", { value: relatedTarget, configurable: true });
+    fireEvent(el, event);
+  };
+  const stubRect = (el: HTMLElement, top: number, height: number) => {
+    el.getBoundingClientRect = () => ({
+      top, height, bottom: top + height, left: 0, right: 0, width: 0, x: 0, y: top,
+      toJSON() { return this; },
+    });
+  };
 
   it("renders notes in the order given, not by createdAt", () => {
     const { container } = render(
@@ -171,15 +204,45 @@ describe("drag to reorder", () => {
     fireEvent.dragOver(second, { dataTransfer, clientY: 5 });
     fireEvent.drop(second, { dataTransfer, clientY: 5 });
 
-    // getBoundingClientRect is 0×0 in jsdom → the drop resolves to "after".
+    // e.clientY is undefined here (see the block comment above) — the drop
+    // resolves to "after" no matter what "clientY: 5" above claims to pass.
     expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:reorder", order: ["n2", "n1", "n3"] });
+  });
+
+  it("resolves a drop on the row's top half as before, both in the class and the order", () => {
+    const { container } = render(<Notepad ordered={false} notes={three()} />);
+    const items = container.querySelectorAll(".np-item");
+    const third = items[2] as HTMLElement; // dragged
+    const first = items[0] as HTMLElement; // drop target
+    const dataTransfer = dt();
+    // A real row has real height; give the target one so a real clientY can
+    // land above its midpoint (10).
+    stubRect(first, 0, 20);
+
+    fireEvent.mouseDown(third.querySelector(".grip") as HTMLElement);
+    fireEvent.dragStart(third, { dataTransfer });
+    dragOverAt(first, dataTransfer, 2);
+    expect(first.className).toContain("drop-before");
+
+    dropAt(first, dataTransfer, 2);
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:reorder", order: ["n3", "n1", "n2"] });
   });
 
   it("does not arm a drag that did not start on the grip", () => {
     const { container } = render(<Notepad ordered={false} notes={three()} />);
     const items = container.querySelectorAll(".np-item");
-    fireEvent.dragStart(items[0] as HTMLElement, { dataTransfer: dt() });
-    fireEvent.drop(items[1] as HTMLElement, { dataTransfer: dt(), clientY: 5 });
+    const first = items[0] as HTMLElement;
+    const dataTransfer = dt();
+
+    // A mousedown with no grip involved — pressing the row's own body, e.g. its
+    // title text — must not arm the drag. Firing dragStart with no mousedown at
+    // all would pass even if the row itself armed on every mousedown, since
+    // armed.current already starts false; pressing the row is what actually
+    // exercises that guard.
+    fireEvent.mouseDown(first);
+    fireEvent.dragStart(first, { dataTransfer });
+    fireEvent.dragOver(items[1] as HTMLElement, { dataTransfer, clientY: 5 });
+    fireEvent.drop(items[1] as HTMLElement, { dataTransfer, clientY: 5 });
     expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notepad:reorder" }));
   });
 
@@ -211,6 +274,36 @@ describe("drag to reorder", () => {
     expect(items[1].className).toContain("drop-after");
     fireEvent.dragEnd(items[0]);
     expect(items[0].className).not.toContain("dragging");
+  });
+
+  it("does not draw a drop edge on the row being dragged, even when the pointer drifts back over it", () => {
+    const { container } = render(<Notepad ordered={false} notes={three()} />);
+    const items = container.querySelectorAll(".np-item");
+    const first = items[0] as HTMLElement;
+    const dataTransfer = dt();
+    fireEvent.mouseDown(first.querySelector(".grip") as HTMLElement);
+    fireEvent.dragStart(first, { dataTransfer });
+    fireEvent.dragOver(first, { dataTransfer, clientY: 5 });
+    expect(first.className).not.toMatch(/drop-before|drop-after/);
+  });
+
+  it("clears the drop hint only once the drag truly leaves the list, not when it crosses between rows", () => {
+    const { container } = render(<Notepad ordered={false} notes={three()} />);
+    const items = container.querySelectorAll(".np-item");
+    const list = container.querySelector(".np-list") as HTMLElement;
+    const dataTransfer = dt();
+    fireEvent.mouseDown(items[0].querySelector(".grip") as HTMLElement);
+    fireEvent.dragStart(items[0], { dataTransfer });
+    fireEvent.dragOver(items[1], { dataTransfer, clientY: 5 });
+    expect(items[1].className).toContain("drop-after");
+
+    // Moving from one row to another is still inside the list — the hint stays.
+    dragLeaveTo(list, dataTransfer, items[2]);
+    expect(items[1].className).toContain("drop-after");
+
+    // Leaving the list altogether (e.g. drifting up over the compose box) clears it.
+    dragLeaveTo(list, dataTransfer, document.body);
+    expect(items[1].className).not.toContain("drop-after");
   });
 
   it("shows Reset order only once an order exists, and sends it", () => {
