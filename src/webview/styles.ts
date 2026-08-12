@@ -356,6 +356,14 @@ export const CSS = `
     font-weight: 500; padding: 2px 10px 2px 8px; }
   .np-item.is-done .take:hover { background: var(--vscode-toolbar-hoverBackground); }
 
+  /* Same drag language as the Tasks card (.card.dragging / .drop-*): the source
+     row dims, the row under the pointer shows the edge the note lands on. The
+     grip sits inside .np-top, so the rail keeps its own 2px column. */
+  .np-item.dragging { opacity: .45; }
+  .np-item.drop-before { box-shadow: inset 0 2px 0 0 var(--vscode-focusBorder); }
+  .np-item.drop-after  { box-shadow: inset 0 -2px 0 0 var(--vscode-focusBorder); }
+  .np-top .grip { margin-left: 0; }
+
   /* The add form's edit-in-place row shares its layout with a note's own edit
      state (NoteRow, while editing). */
   .edit { display: flex; flex-direction: column; gap: 6px; }

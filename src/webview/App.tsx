@@ -167,6 +167,7 @@ export function App(): JSX.Element {
   // opens on Tasks, which is what the sidebar is primarily for.
   const [tab, setTab] = React.useState<"tasks" | "notepad">("tasks");
   const [notes, setNotes] = React.useState<NotepadItemView[]>([]);
+  const [notesOrdered, setNotesOrdered] = React.useState(false);
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [toasts, setToasts] = React.useState<
@@ -308,6 +309,7 @@ export function App(): JSX.Element {
           break;
         case "notepad:notes":
           setNotes(m.notes);
+          setNotesOrdered(m.ordered);
           break;
         case "toast": {
           const id = ++toastSeq;
@@ -522,7 +524,7 @@ export function App(): JSX.Element {
         </span>
       </div>
 
-      {tab === "notepad" && <Notepad notes={notes} />}
+      {tab === "notepad" && <Notepad notes={notes} ordered={notesOrdered} />}
 
       {tab === "tasks" && <>
       <div className="lenses">
