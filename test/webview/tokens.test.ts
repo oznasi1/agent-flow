@@ -10,6 +10,7 @@ const OWNED = [
   "--r-card", "--r-ctl", "--r-chip",
   "--c-progress", "--c-attn", "--c-review", "--c-done", "--c-idle", "--c-danger",
   "--k-skill", "--k-command", "--k-agent", "--k-hook", "--k-plugin",
+  "--k-story", "--k-epic", "--k-task", "--k-subtask", "--k-bug", "--k-other",
   "--hair", "--edge", "--mono", "--dim",
   "--brand", "--brand-ink",
 ];
@@ -144,6 +145,31 @@ describe("brand accent", () => {
       ...[...allowed].filter((s) => !actual.has(s)).map((s) => `"${s}" no longer spends --brand`),
     ];
     expect(problems).toEqual([]);
+  });
+});
+
+describe("ticket kind hues", () => {
+  // Red on a card means a real failure. A bug ticket is an ordinary, healthy
+  // ticket, so it gets a muted red derived from --c-danger rather than the alarm
+  // colour itself — and never --c-attn, which the Highest chip owns alone.
+  it("mutes the bug hue away from the alarm red and the attention amber", () => {
+    const bug = TOKENS_CSS.match(/--k-bug:\s*([^;]+);/);
+    expect(bug).not.toBeNull();
+    expect(bug![1]).toContain("color-mix");
+    expect(bug![1]).toContain("--c-danger");
+    expect(bug![1]).not.toContain("--c-attn");
+    expect(bug![1].trim()).not.toBe("var(--c-danger)");
+  });
+
+  // Task and sub-task share a hue, as they do in Jira; their glyphs differ. Every
+  // other kind is distinct, so a scan down the list separates them by colour.
+  it("gives each kind a hue, sharing exactly one between task and sub-task", () => {
+    const hue = (name: string) => TOKENS_CSS.match(new RegExp(`--k-${name}:\\s*([^;]+);`))![1].trim();
+    const kinds = ["story", "epic", "task", "subtask", "bug", "other"];
+    for (const k of kinds) expect(hue(k), k).toBeTruthy();
+    expect(hue("task")).toBe(hue("subtask"));
+    const distinct = new Set(kinds.map(hue));
+    expect(distinct.size).toBe(5);
   });
 });
 
