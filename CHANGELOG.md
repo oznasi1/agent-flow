@@ -5,6 +5,12 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.1] — 2026-08-12
+
+### Changed
+
+- **The README's Notepad screenshot matches the shipping panel again.** It was shot before drag-to-reorder landed, so it showed neither the per-note grip nor today's filter row. The section also documents the reordering it now pictures, and the image is centred like the panel shot at the top of the page.
+
 ## [0.15.0] — 2026-08-12
 
 ### Added
