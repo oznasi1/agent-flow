@@ -331,9 +331,14 @@ export const CSS = `
      leaves and wraps inside it, the second is exactly the cluster's width. The
      cluster spans every row and aligns to the start, so it holds the note's top
      right corner however many lines the text runs to. */
+  /* --grip-w is the one place the grip's width lives; it's set here, on the
+     item, rather than on .np-top, because .np-body is .np-top's sibling —
+     the custom property only reaches it by inheriting down from a shared
+     ancestor. .np-body's margin below reads it back through calc() so the
+     two can never drift apart the way a second hardcoded literal would. */
   .np-item { position: relative; display: grid; grid-template-columns: 1fr max-content;
     grid-template-rows: max-content max-content 1fr; column-gap: 10px;
-    padding: 8px 2px 9px 11px; border-bottom: 1px solid var(--hair); }
+    padding: 8px 2px 9px 11px; border-bottom: 1px solid var(--hair); --grip-w: 14px; }
   .np-item::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 9px; width: 2px;
     border-radius: 1px; background: var(--rail, transparent); }
   .np-item.r-running { --rail: var(--c-progress); }
@@ -349,7 +354,11 @@ export const CSS = `
   .np-top .np-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .np-title { font-size: var(--t-body); line-height: 1.35; }
   .np-item.is-done .np-title { text-decoration: line-through; opacity: .5; }
-  .np-body { grid-column: 1; margin: 3px 0 0 20px; font-size: var(--t-body); color: var(--dim);
+  /* 20px was checkbox (13px) + .np-top's 7px gap — the title's old left offset,
+     before the grip existed. The grip now sits ahead of the checkbox, pushing
+     the title right by its own width plus another gap; the body must move with
+     it by that same amount, read from --grip-w rather than re-measured by hand. */
+  .np-body { grid-column: 1; margin: 3px 0 0 calc(var(--grip-w) + 7px + 20px); font-size: var(--t-body); color: var(--dim);
     white-space: pre-wrap; overflow-wrap: anywhere; }
   /* Start on top, edit + delete side by side beneath it, the pair spanning exactly
      Start's width. Two equal columns at max-content take that measure from Start's
@@ -366,6 +375,18 @@ export const CSS = `
   .np-item.is-done .take { background: transparent; color: var(--dim); border: 1px solid var(--edge);
     font-weight: 500; padding: 2px 10px 2px 8px; }
   .np-item.is-done .take:hover { background: var(--vscode-toolbar-hoverBackground); }
+
+  /* Same drag language as the Tasks card (.card.dragging / .drop-*): the source
+     row dims, the row under the pointer shows the edge the note lands on. The
+     grip sits inside .np-top, so the rail keeps its own 2px column. */
+  .np-item.dragging { opacity: .45; }
+  .np-item.drop-before { box-shadow: inset 0 2px 0 0 var(--vscode-focusBorder); }
+  .np-item.drop-after  { box-shadow: inset 0 -2px 0 0 var(--vscode-focusBorder); }
+  /* A fixed width (rather than the glyph's intrinsic size) so --grip-w describes
+     the real space the grip occupies in .np-top's flex row — the value
+     .np-body's margin above must match to keep the body under the title. */
+  .np-top .grip { margin-left: 0; width: var(--grip-w); display: inline-flex;
+    align-items: center; justify-content: center; }
 
   /* The add form's edit-in-place row shares its layout with a note's own edit
      state (NoteRow, while editing). */

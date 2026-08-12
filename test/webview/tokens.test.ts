@@ -327,6 +327,16 @@ describe("notepad note layout", () => {
     }
   });
 
+  // The grip sits ahead of the checkbox in .np-top, pushing the title right by
+  // the grip's own width. .np-body has no grip beside it, so its left margin
+  // must add that same width back in from --grip-w, the one place it is
+  // defined — a hardcoded literal here could drift from the grip's real width
+  // and misalign the body under the title.
+  it("derives the body's left offset from the grip's own width", () => {
+    const body = ruleBlocks(CSS).find((r) => r.selector === ".np-body")!;
+    expect(body.body).toMatch(/margin:\s*3px 0 0 calc\(var\(--grip-w\)\s*\+\s*7px\s*\+\s*20px\)/);
+  });
+
   // Top of the card, right-hand side, however many lines the text runs to: the
   // cluster spans every row so the text cannot push it down, and align-self keeps it
   // from stretching to the note's full height.

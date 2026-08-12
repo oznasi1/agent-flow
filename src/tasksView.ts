@@ -49,6 +49,11 @@ const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 // globalState, not workspaceState: a notepad belongs to the user, not to whichever
 // repo happens to be open. Same storage the install-reported flag uses.
 const NOTEPAD_KEY = "agentFlow.notepad";
+// The manual note order: ids, most important first. globalState, like the notes
+// themselves — an order over the user's own notepad is not a workspace's business.
+// Empty (the default) means "no manual order", which is what every install starts
+// with and what makes this feature inert until the first drag.
+const NOTEPAD_ORDER_KEY = "agentFlow.notepadOrder";
 
 /** Said in two places — the pre-flight refusal at the top of every launch, and the
  * `resolveRemoteControl` backstop behind it. One constant so the two can never drift. */
@@ -268,10 +273,35 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.postNotepad();
   }
 
+  private noteOrder(): string[] {
+    return this.context.globalState.get<string[]>(NOTEPAD_ORDER_KEY, []);
+  }
+
+  private async saveNoteOrder(order: string[]): Promise<void> {
+    await this.context.globalState.update(NOTEPAD_ORDER_KEY, order);
+  }
+
+  /** Notes in display order: the manual order first where one exists, then
+   * anything unranked newest-first — which is exactly the whole list when no
+   * manual order exists, i.e. what the panel showed before this feature. */
+  private orderedNotes(): NotepadItem[] {
+    const newestFirst = [...this.notes()].sort((a, b) => b.createdAt - a.createdAt);
+    return sortBySavedOrder(newestFirst, this.noteOrder(), (n) => n.id);
+  }
+
+  /** Forget ids that are no longer notes. Called on every path that removes one,
+   * so the order cannot grow unbounded behind the panel. */
+  private async pruneNoteOrder(remaining: NotepadItem[]): Promise<void> {
+    const saved = this.noteOrder();
+    if (saved.length === 0) return;
+    const next = pruneOrder(saved, remaining.map((n) => n.id));
+    if (next.length !== saved.length) await this.saveNoteOrder(next);
+  }
+
   /** Post every note with its derived run status. Public because the poll tick in
    * extension.ts drives it too — a badge must not sit stale while the panel is open. */
   public postNotepad(): void {
-    const notes = this.notes();
+    const notes = this.orderedNotes();
     // Skip both directory reads entirely when nothing has ever been launched:
     // the common case is a notepad of plain items with no runs behind them.
     const anyRun = notes.some((n) => n.lastRunKey);
@@ -283,7 +313,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       const runStatus = noteStatus(n, runs, livePlaces);
       return runStatus ? { ...n, runStatus } : { ...n };
     });
-    this.post({ type: "notepad:notes", notes: view });
+    this.post({ type: "notepad:notes", notes: view, ordered: this.noteOrder().length > 0 });
   }
 
   private async addNote(title: string, body: string): Promise<void> {
@@ -292,6 +322,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // here means a stale view, not a user who needs telling.
     if (!title.trim() && !body.trim()) return;
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    // Rank it first, so a manual order does not bury the note just written. Write
+    // the order before the notes: saveNotes posts, and the post must already see it.
+    const order = this.noteOrder();
+    if (order.length > 0) await this.saveNoteOrder([id, ...order]);
     await this.saveNotes([...this.notes(), newNote(title, body, id, Date.now())]);
   }
 
@@ -306,11 +340,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async deleteNote(id: string): Promise<void> {
-    await this.saveNotes(this.notes().filter((n) => n.id !== id));
+    const remaining = this.notes().filter((n) => n.id !== id);
+    await this.pruneNoteOrder(remaining);
+    await this.saveNotes(remaining);
   }
 
   private async clearCompletedNotes(): Promise<void> {
-    await this.saveNotes(this.notes().filter((n) => !n.done));
+    const remaining = this.notes().filter((n) => !n.done);
+    await this.pruneNoteOrder(remaining);
+    await this.saveNotes(remaining);
   }
 
   public async refresh(): Promise<void> {
@@ -403,7 +441,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
               // Full sprint view: prune keys that have left the sprint.
               await this.saveOrder(pruneOrder(this.savedOrder(), tasks.map((t) => t.key)));
             }
-            outgoing = sortBySavedOrder(tasks, this.savedOrder());
+            outgoing = sortBySavedOrder(tasks, this.savedOrder(), (t) => t.key);
           }
           this.post({ type: "tasks", filter: lens, tasks: outgoing,
             liveCount: cfg.trackOpenWindows ? this.liveWindows().length : undefined });
@@ -507,6 +545,25 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
         case "notepad:run": {
           await this.runNotepadItem(m.id);
+          break;
+        }
+        case "notepad:reorder": {
+          const known = new Set(this.notes().map((n) => n.id));
+          const visible = m.order.filter((id) => known.has(id));
+          if (visible.length === 0) break;
+          // Seed from the CURRENT display order, not from the (possibly empty)
+          // saved one: applyReorder only preserves the slots of ids it can see in
+          // `saved`, so a first drag under a filter would otherwise push every
+          // hidden note to the bottom.
+          const saved = this.noteOrder();
+          const base = saved.length > 0 ? saved : this.orderedNotes().map((n) => n.id);
+          await this.saveNoteOrder(applyReorder(base, visible, new Set(visible)));
+          this.postNotepad();
+          break;
+        }
+        case "notepad:resetOrder": {
+          await this.saveNoteOrder([]);
+          this.postNotepad();
           break;
         }
         case "reorder": {

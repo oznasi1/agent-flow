@@ -7,30 +7,35 @@ const order = (ts: { key: string }[]) => ts.map((t) => t.key);
 
 describe("sortBySavedOrder", () => {
   it("ranks known keys first, in saved order", () => {
-    expect(order(sortBySavedOrder(tasks("A", "B", "C"), ["C", "A"]))).toEqual(["C", "A", "B"]);
+    expect(order(sortBySavedOrder(tasks("A", "B", "C"), ["C", "A"], (t) => t.key))).toEqual(["C", "A", "B"]);
   });
 
   it("puts unranked keys at the bottom, preserving server order", () => {
-    expect(order(sortBySavedOrder(tasks("A", "B", "C", "D"), ["C"]))).toEqual(["C", "A", "B", "D"]);
+    expect(order(sortBySavedOrder(tasks("A", "B", "C", "D"), ["C"], (t) => t.key))).toEqual(["C", "A", "B", "D"]);
   });
 
   it("is a no-op when saved order is empty", () => {
-    expect(order(sortBySavedOrder(tasks("A", "B", "C"), []))).toEqual(["A", "B", "C"]);
+    expect(order(sortBySavedOrder(tasks("A", "B", "C"), [], (t) => t.key))).toEqual(["A", "B", "C"]);
   });
 
   it("ignores saved keys not present in the task list", () => {
-    expect(order(sortBySavedOrder(tasks("A", "B"), ["Z", "B", "A"]))).toEqual(["B", "A"]);
+    expect(order(sortBySavedOrder(tasks("A", "B"), ["Z", "B", "A"], (t) => t.key))).toEqual(["B", "A"]);
   });
 
   it("returns an empty list for no tasks", () => {
-    expect(sortBySavedOrder([], ["A", "B"])).toEqual([]);
+    expect(sortBySavedOrder<{ key: string }>([], ["A", "B"], (t) => t.key)).toEqual([]);
   });
 
   it("does not mutate the input array", () => {
     const input = tasks("A", "B", "C");
     const copy = [...input];
-    sortBySavedOrder(input, ["C", "A"]);
+    sortBySavedOrder(input, ["C", "A"], (t) => t.key);
     expect(input).toEqual(copy);
+  });
+
+  it("orders any keyed item, not just tasks", () => {
+    const notes = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    expect(sortBySavedOrder(notes, ["c", "a"], (n) => n.id).map((n) => n.id)).toEqual(["c", "a", "b"]);
   });
 });
 

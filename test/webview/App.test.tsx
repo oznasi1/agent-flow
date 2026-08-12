@@ -602,6 +602,49 @@ describe("My-sprint reorder bar", () => {
   });
 });
 
+describe("notepad message routing", () => {
+  // App.tsx's "notepad:notes" handler stores both the notes and whether the
+  // host reports them as manually ordered — the latter drives Notepad's own
+  // "Reset order" affordance. Nothing else in the suite posts this message,
+  // so without this test the handler's two lines have no coverage at all.
+  it("renders the notes and shows Reset order once the host reports a saved order", () => {
+    render(<App />);
+    authed();
+    fireEvent.click(screen.getByRole("tab", { name: "Notepad" }));
+    host({
+      type: "notepad:notes",
+      notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
+      ordered: true,
+    });
+    expect(screen.getByText("Buy milk")).toBeInTheDocument();
+    expect(screen.getByText("Reset order")).toBeInTheDocument();
+  });
+
+  // Drives the flag through both directions rather than asserting against
+  // React.useState(false)'s initial value: the previous version of this test
+  // posted straight to `ordered: false` and passed even when the whole
+  // handler was gutted, because the false-when-untouched initial state looks
+  // identical to a genuinely-updated false. Going true → false first forces
+  // the update to have happened at all.
+  it("hides Reset order again once the host reports the order was reset", () => {
+    render(<App />);
+    authed();
+    fireEvent.click(screen.getByRole("tab", { name: "Notepad" }));
+    host({
+      type: "notepad:notes",
+      notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
+      ordered: true,
+    });
+    expect(screen.getByText("Reset order")).toBeInTheDocument();
+    host({
+      type: "notepad:notes",
+      notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
+      ordered: false,
+    });
+    expect(screen.queryByText("Reset order")).not.toBeInTheDocument();
+  });
+});
+
 describe("optimistic list updates", () => {
   it("removes a card when a status change reports removal", () => {
     render(<App />);

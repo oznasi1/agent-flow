@@ -5,7 +5,11 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.3] — 2026-08-12
+
+### Added
+
+- **Notepad: drag to reorder.** Each note has a grip — drag it to put the list in the order you want. The order is yours, persists across reloads, and applies under every filter; "Reset order" puts the list back to newest-first. A notepad you never drag looks exactly as it did.
 
 ## [0.13.2] — 2026-08-12
 

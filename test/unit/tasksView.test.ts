@@ -4636,4 +4636,117 @@ describe("notepad", () => {
     await sendMsg({ type: "notepad:run", id: "ghost" });
     expect(openWorkspace).not.toHaveBeenCalled();
   });
+
+  const orderIn = (store: Map<string, unknown>) => store.get("agentFlow.notepadOrder") as string[] | undefined;
+  const titles = (posted: unknown[]) =>
+    (posted.at(-1) as { notes: { title: string }[] }).notes.map((n) => n.title);
+
+  describe("reorder", () => {
+    // Three notes, added oldest-first: the panel shows them newest-first (c, b, a).
+    async function threeNotes() {
+      const h = mkProvider();
+      // Three adds this close together can land in the same millisecond, which
+      // ties their createdAt and makes the "newest first" ordering this suite
+      // asserts on non-deterministic. Force strictly increasing clock reads for
+      // the three adds only; real Date.now() resumes for anything added after.
+      let tick = 0;
+      const clock = vi.spyOn(Date, "now").mockImplementation(() => ++tick);
+      await h.sendMsg({ type: "notepad:add", title: "a", body: "" });
+      await h.sendMsg({ type: "notepad:add", title: "b", body: "" });
+      await h.sendMsg({ type: "notepad:add", title: "c", body: "" });
+      clock.mockRestore();
+      return { ...h, ids: notesIn(h.store)!.map((n) => n.id) };
+    }
+
+    it("posts newest-first and ordered:false while no order exists", async () => {
+      const { posted } = await threeNotes();
+      expect(titles(posted)).toEqual(["c", "b", "a"]);
+      expect((posted.at(-1) as { ordered: boolean }).ordered).toBe(false);
+    });
+
+    it("stores a dropped order and posts the notes in it", async () => {
+      const { posted, store, sendMsg, ids } = await threeNotes();
+      const [a, b, c] = ids;
+      await sendMsg({ type: "notepad:reorder", order: [a, c, b] });
+      expect(orderIn(store)).toEqual([a, c, b]);
+      expect(titles(posted)).toEqual(["a", "c", "b"]);
+      expect((posted.at(-1) as { ordered: boolean }).ordered).toBe(true);
+    });
+
+    it("keeps a note hidden by the filter in its slot on the first drag", async () => {
+      const { store, sendMsg, ids } = await threeNotes();
+      const [a, b, c] = ids;
+      // The panel shows c, b, a; the user filters to Active with `b` done, so the
+      // visible pair is c, a and they drag a above c.
+      await sendMsg({ type: "notepad:toggleDone", id: b });
+      await sendMsg({ type: "notepad:reorder", order: [a, c] });
+      expect(orderIn(store)).toEqual([a, b, c]); // b keeps the middle slot
+    });
+
+    it("keeps a note hidden by the filter in its slot on a later drag, once a saved order already exists", async () => {
+      const { store, sendMsg, ids } = await threeNotes();
+      const [a, b, c] = ids;
+      // A first drag (no filter active) establishes a saved order.
+      await sendMsg({ type: "notepad:reorder", order: [a, c, b] });
+      // Now the user filters to Active with `c` done, so the visible pair is a, b,
+      // and they drag b above a — exercising the saved-order seed on a SECOND drag.
+      await sendMsg({ type: "notepad:toggleDone", id: c });
+      await sendMsg({ type: "notepad:reorder", order: [b, a] });
+      expect(orderIn(store)).toEqual([b, c, a]); // c keeps its absolute slot (index 1)
+    });
+
+    it("puts a new note on top of an existing order", async () => {
+      const { posted, store, sendMsg, ids } = await threeNotes();
+      const [a, , c] = ids;
+      await sendMsg({ type: "notepad:reorder", order: [a, c, ids[1]] });
+      await sendMsg({ type: "notepad:add", title: "fresh", body: "" });
+      expect(titles(posted)).toEqual(["fresh", "a", "c", "b"]);
+      expect(orderIn(store)![0]).toBe(notesIn(store)!.find((n) => n.title === "fresh")!.id);
+    });
+
+    it("drops a deleted note's id from the order", async () => {
+      const { store, sendMsg, ids } = await threeNotes();
+      const [a, b, c] = ids;
+      await sendMsg({ type: "notepad:reorder", order: [a, c, b] });
+      await sendMsg({ type: "notepad:delete", id: c });
+      expect(orderIn(store)).toEqual([a, b]);
+    });
+
+    it("drops cleared-completed ids from the order", async () => {
+      const { store, sendMsg, ids } = await threeNotes();
+      const [a, b, c] = ids;
+      await sendMsg({ type: "notepad:reorder", order: [a, c, b] });
+      await sendMsg({ type: "notepad:toggleDone", id: a });
+      await sendMsg({ type: "notepad:clearCompleted" });
+      expect(orderIn(store)).toEqual([c, b]);
+    });
+
+    it("resets to newest-first", async () => {
+      const { posted, store, sendMsg, ids } = await threeNotes();
+      await sendMsg({ type: "notepad:reorder", order: [ids[0], ids[2], ids[1]] });
+      await sendMsg({ type: "notepad:resetOrder" });
+      expect(orderIn(store)).toEqual([]);
+      expect(titles(posted)).toEqual(["c", "b", "a"]);
+      expect((posted.at(-1) as { ordered: boolean }).ordered).toBe(false);
+    });
+
+    it("ignores ids that are not notes", async () => {
+      const { store, sendMsg, ids } = await threeNotes();
+      await sendMsg({ type: "notepad:reorder", order: ["ghost", ids[0]] });
+      expect(orderIn(store)).not.toContain("ghost");
+    });
+
+    it("ignores a reorder that names no known note", async () => {
+      const { store, sendMsg } = await threeNotes();
+      await sendMsg({ type: "notepad:reorder", order: ["ghost"] });
+      expect(orderIn(store) ?? []).toEqual([]); // nothing written at all
+    });
+
+    it("leaves the order alone when a delete removes nothing", async () => {
+      const { store, sendMsg, ids } = await threeNotes();
+      await sendMsg({ type: "notepad:reorder", order: [ids[0], ids[2], ids[1]] });
+      await sendMsg({ type: "notepad:delete", id: "ghost" });
+      expect(orderIn(store)).toEqual([ids[0], ids[2], ids[1]]);
+    });
+  });
 });

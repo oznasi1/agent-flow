@@ -120,33 +120,38 @@ describe("isPrReviewStatus", () => {
 
 describe("moveKey", () => {
   it("moves a key before a target", () => {
-    expect(keys(moveKey(tasks("A", "B", "C"), "C", "A", "before"))).toEqual(["C", "A", "B"]);
+    expect(keys(moveKey(tasks("A", "B", "C"), "C", "A", "before", (t) => t.key))).toEqual(["C", "A", "B"]);
   });
 
   it("moves a key after a target", () => {
-    expect(keys(moveKey(tasks("A", "B", "C"), "A", "B", "after"))).toEqual(["B", "A", "C"]);
+    expect(keys(moveKey(tasks("A", "B", "C"), "A", "B", "after", (t) => t.key))).toEqual(["B", "A", "C"]);
   });
 
   it("is a no-op when from === to", () => {
     const list = tasks("A", "B");
-    expect(moveKey(list, "A", "A", "before")).toBe(list);
+    expect(moveKey(list, "A", "A", "before", (t) => t.key)).toBe(list);
   });
 
   it("returns the list unchanged when the from key is missing", () => {
     const list = tasks("A", "B");
-    expect(moveKey(list, "Z", "A", "before")).toBe(list);
+    expect(moveKey(list, "Z", "A", "before", (t) => t.key)).toBe(list);
   });
 
   it("returns the list unchanged when the to key is missing", () => {
     const list = tasks("A", "B");
-    expect(moveKey(list, "A", "Z", "before")).toBe(list);
+    expect(moveKey(list, "A", "Z", "before", (t) => t.key)).toBe(list);
   });
 
   it("does not mutate the input list", () => {
     const list = tasks("A", "B", "C");
     const snapshot = keys(list);
-    moveKey(list, "C", "A", "before");
+    moveKey(list, "C", "A", "before", (t) => t.key);
     expect(keys(list)).toEqual(snapshot);
+  });
+
+  it("moves any keyed item, not just tasks", () => {
+    const notes = [{ id: "a" }, { id: "b" }, { id: "c" }];
+    expect(moveKey(notes, "c", "a", "before", (n) => n.id).map((n) => n.id)).toEqual(["c", "a", "b"]);
   });
 });
 
