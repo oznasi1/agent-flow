@@ -602,6 +602,37 @@ describe("My-sprint reorder bar", () => {
   });
 });
 
+describe("notepad message routing", () => {
+  // App.tsx's "notepad:notes" handler stores both the notes and whether the
+  // host reports them as manually ordered — the latter drives Notepad's own
+  // "Reset order" affordance. Nothing else in the suite posts this message,
+  // so without this test the handler's two lines have no coverage at all.
+  it("renders the notes and shows Reset order once the host reports a saved order", () => {
+    render(<App />);
+    authed();
+    fireEvent.click(screen.getByRole("tab", { name: "Notepad" }));
+    host({
+      type: "notepad:notes",
+      notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
+      ordered: true,
+    });
+    expect(screen.getByText("Buy milk")).toBeInTheDocument();
+    expect(screen.getByText("Reset order")).toBeInTheDocument();
+  });
+
+  it("hides Reset order while the host reports no saved order", () => {
+    render(<App />);
+    authed();
+    fireEvent.click(screen.getByRole("tab", { name: "Notepad" }));
+    host({
+      type: "notepad:notes",
+      notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
+      ordered: false,
+    });
+    expect(screen.queryByText("Reset order")).not.toBeInTheDocument();
+  });
+});
+
 describe("optimistic list updates", () => {
   it("removes a card when a status change reports removal", () => {
     render(<App />);

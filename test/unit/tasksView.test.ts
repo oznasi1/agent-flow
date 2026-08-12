@@ -4735,5 +4735,18 @@ describe("notepad", () => {
       await sendMsg({ type: "notepad:reorder", order: ["ghost", ids[0]] });
       expect(orderIn(store)).not.toContain("ghost");
     });
+
+    it("ignores a reorder that names no known note", async () => {
+      const { store, sendMsg } = await threeNotes();
+      await sendMsg({ type: "notepad:reorder", order: ["ghost"] });
+      expect(orderIn(store) ?? []).toEqual([]); // nothing written at all
+    });
+
+    it("leaves the order alone when a delete removes nothing", async () => {
+      const { store, sendMsg, ids } = await threeNotes();
+      await sendMsg({ type: "notepad:reorder", order: [ids[0], ids[2], ids[1]] });
+      await sendMsg({ type: "notepad:delete", id: "ghost" });
+      expect(orderIn(store)).toEqual([ids[0], ids[2], ids[1]]);
+    });
   });
 });
