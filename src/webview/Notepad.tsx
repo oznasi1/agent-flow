@@ -106,15 +106,24 @@ export function Notepad({ notes, ordered }: { notes: NotepadItemView[]; ordered:
             ))}
           </div>
         </div>
-        {anyDone && (
-          <button className="quiet dim np-clear" onClick={() => send({ type: "notepad:clearCompleted" })}>
-            Clear completed
-          </button>
-        )}
-        {ordered && (
-          <button className="quiet dim np-clear" onClick={() => send({ type: "notepad:resetOrder" })}>
-            Reset order
-          </button>
+        {/* Wrapped in its own .lens (a flex row, content-width) rather than left as
+            direct children of .lenses (a flex COLUMN): unwrapped, each button
+            stretched to the panel's full width and stacked, one bar per button,
+            instead of sitting beside "Clear completed" the way the spec asks. The
+            wrapper itself is conditional so an all-false case adds no empty row. */}
+        {(anyDone || ordered) && (
+          <div className="lens">
+            {anyDone && (
+              <button className="quiet dim np-clear" onClick={() => send({ type: "notepad:clearCompleted" })}>
+                Clear completed
+              </button>
+            )}
+            {ordered && (
+              <button className="quiet dim np-clear" onClick={() => send({ type: "notepad:resetOrder" })}>
+                Reset order
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -166,7 +175,15 @@ function NoteRow({ note, editing, onEdit, onDone, dnd }: {
 }): JSX.Element {
   const [title, setTitle] = React.useState(note.title);
   const [body, setBody] = React.useState(note.body);
-  const armed = React.useRef(false); // true only while a drag started from the grip
+  // State, not a ref: `draggable` below reads it directly, so the row must
+  // already be undraggable in the DOM before the browser's own drag threshold
+  // (a few pixels of mousemove past mousedown) fires — cancelling dragstart
+  // with preventDefault after the fact does NOT hand the gesture back to text
+  // selection (Blink treats "drag" and "select" as a fork made at mousedown,
+  // not one it revisits once dragstart has already been dispatched). A
+  // same-tick React state update flushes before that threshold, since the
+  // threshold needs a further mousemove event the render beats to the queue.
+  const [armed, setArmed] = React.useState(false);
   // Re-sync when the host sends a changed copy of this note while the row sits
   // open — otherwise Save would write back a value the user never saw.
   React.useEffect(() => { setTitle(note.title); setBody(note.body); }, [note.title, note.body]);
@@ -204,23 +221,29 @@ function NoteRow({ note, editing, onEdit, onDone, dnd }: {
   return (
     <li
       className={cls}
-      draggable
-      onMouseDown={() => { armed.current = false; }}
+      draggable={armed}
+      onMouseDown={() => setArmed(false)}
+      // A grip press with no drag following (e.g. a click) must not leave the
+      // row armed for whatever unrelated gesture comes next.
+      onMouseUp={() => setArmed(false)}
       onDragStart={(e) => {
-        if (!armed.current) { e.preventDefault(); return; } // only the grip arms a drag
+        // `draggable={armed}` is the real fix (see the comment on `armed` above) —
+        // this check is a backstop for whatever dispatches dragstart without the
+        // browser's own draggable gating in the way (jsdom's fireEvent, notably).
+        if (!armed) { e.preventDefault(); return; }
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", note.id);
         dnd.onBegin();
       }}
       onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; dnd.onHover(dropPos(e)); }}
       onDrop={(e) => { e.preventDefault(); dnd.onDrop(dropPos(e)); }}
-      onDragEnd={() => { armed.current = false; dnd.onEnd(); }}
+      onDragEnd={() => { setArmed(false); dnd.onEnd(); }}
     >
       <div className="np-top">
         <span
           className="grip"
           title="Drag to reorder"
-          onMouseDown={(e) => { e.stopPropagation(); armed.current = true; }}
+          onMouseDown={(e) => { e.stopPropagation(); setArmed(true); }}
         >⠿</span>
         <input
           className="cb"

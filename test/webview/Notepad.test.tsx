@@ -246,6 +246,25 @@ describe("drag to reorder", () => {
     expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notepad:reorder" }));
   });
 
+  it("is not draggable at rest, so mouse text-selection inside the row is never pre-empted", () => {
+    // A real browser only lets `preventDefault()` on dragstart cancel a drag it has
+    // already decided to start — it never hands the gesture back to text selection
+    // once dragstart has fired. Marking the row draggable unconditionally (with
+    // dragstart doing the gating instead) breaks selecting text out of a note's
+    // body at rest, which no fireEvent-level test can see: jsdom dispatches a
+    // synthetic dragstart regardless of the draggable attribute's value. Only a
+    // direct assertion on the attribute itself catches that regression.
+    const { container } = render(<Notepad ordered={false} notes={[note({ id: "n1" })]} />);
+    const row = container.querySelector(".np-item") as HTMLElement;
+    expect(row).not.toHaveAttribute("draggable", "true");
+
+    fireEvent.mouseDown(row.querySelector(".grip") as HTMLElement);
+    expect(row).toHaveAttribute("draggable", "true");
+
+    fireEvent.dragEnd(row);
+    expect(row).not.toHaveAttribute("draggable", "true");
+  });
+
   it("sends only the visible ids when a filter hides notes", () => {
     const { container } = render(
       <Notepad ordered={false} notes={[note({ id: "n1", title: "first" }),
@@ -312,6 +331,29 @@ describe("drag to reorder", () => {
     rerender(<Notepad ordered notes={three()} />);
     fireEvent.click(screen.getByRole("button", { name: "Reset order" }));
     expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:resetOrder" });
+  });
+
+  it("puts Clear completed and Reset order in the same content-width row, not two stacked bars", () => {
+    // jsdom does no layout, so it cannot see a button stretch to the panel's
+    // width — that part is verified by rendering the harness (see the fix
+    // report). What jsdom CAN pin is the DOM shape the CSS depends on: both
+    // controls must share one .lens (a flex row), not sit as .lenses's direct
+    // children (a flex column, which is what stretched each one full-width).
+    const { rerender } = render(
+      <Notepad ordered notes={[note({ id: "n1" }), note({ id: "n2", done: true })]} />,
+    );
+    const clear = screen.getByRole("button", { name: "Clear completed" });
+    const reset = screen.getByRole("button", { name: "Reset order" });
+    expect(clear.parentElement).toBe(reset.parentElement);
+    expect(clear.parentElement).toHaveClass("lens");
+
+    // With only one of the two visible, that lone button still sits inside a
+    // .lens rather than directly under .lenses — the case the finding named
+    // ("the layout must still be right when only one of them is visible").
+    rerender(<Notepad ordered={false} notes={[note({ id: "n1" }), note({ id: "n2", done: true })]} />);
+    const clearAlone = screen.getByRole("button", { name: "Clear completed" });
+    expect(clearAlone.parentElement).toHaveClass("lens");
+    expect(screen.queryByRole("button", { name: "Reset order" })).toBeNull();
   });
 
   it("does not offer a grip while a note is being edited", () => {
