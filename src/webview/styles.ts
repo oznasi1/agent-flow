@@ -324,10 +324,16 @@ export const CSS = `
   .np-item.r-done    { --rail: var(--c-done); }
   .cb { width: 13px; height: 13px; margin: 0; accent-color: var(--brand); flex: none; cursor: pointer; }
   .np-top { display: flex; align-items: center; gap: 7px; }
-  .np-top .np-title { flex: 1; }
+  /* A dictated or pasted title can be one unbroken string, which offers no wrap
+     opportunity. As a flex child at flex: 1 its default min-width: auto refuses to
+     shrink below that min-content, so the string ran off the panel's right edge:
+     min-width: 0 lets it be constrained, overflow-wrap breaks it. Nothing is cut —
+     the note is the user's own text, and it wraps to as many lines as it needs. */
+  .np-top .np-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .np-title { font-size: var(--t-body); line-height: 1.35; }
   .np-item.is-done .np-title { text-decoration: line-through; opacity: .5; }
-  .np-body { margin: 3px 0 6px 20px; font-size: var(--t-body); color: var(--dim); white-space: pre-wrap; }
+  .np-body { margin: 3px 0 6px 20px; font-size: var(--t-body); color: var(--dim);
+    white-space: pre-wrap; overflow-wrap: anywhere; }
   /* Start on top, edit + delete side by side beneath it, the pair spanning exactly
      Start's width. Two equal columns at max-content take that measure from Start's
      own min-content, so the cluster stays true when the label or the body font size

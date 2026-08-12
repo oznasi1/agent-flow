@@ -242,6 +242,34 @@ describe("notepad fields", () => {
   });
 });
 
+describe("notepad note text", () => {
+  // A dictated or pasted title can be one unbroken string, which has no wrap
+  // opportunity. The title is a flex child at flex: 1, and a flex child's default
+  // min-width: auto refuses to shrink below its min-content — so the string ran off
+  // the panel's right edge instead of wrapping. min-width: 0 is what allows it to be
+  // constrained at all; overflow-wrap is what breaks the string once it is.
+  it("wraps a title with no wrap opportunity instead of overflowing the panel", () => {
+    const title = ruleBlocks(CSS).find((r) => r.selector === ".np-top .np-title");
+    expect(title).toBeDefined();
+    expect(title!.body).toMatch(/min-width:\s*0/);
+    expect(title!.body).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  it("wraps an unbroken body the same way", () => {
+    const body = ruleBlocks(CSS).find((r) => r.selector === ".np-body");
+    expect(body!.body).toMatch(/overflow-wrap:\s*anywhere/);
+  });
+
+  // The note is the user's own text: it wraps to as many lines as it needs, and
+  // nothing is ever cut. Truncating would hide what they wrote with no way to read
+  // it in place.
+  it("never truncates or clamps the text it wraps", () => {
+    const noteRules = ruleBlocks(CSS).filter((r) => /\.np-(title|body)\b/.test(r.selector));
+    expect(noteRules.length).toBeGreaterThan(0);
+    expect(noteRules.filter((r) => /text-overflow|line-clamp/.test(r.body))).toEqual([]);
+  });
+});
+
 describe("notepad actions cluster", () => {
   const acts = () => ruleBlocks(CSS).find((r) => r.selector === ".np-acts")!;
 
