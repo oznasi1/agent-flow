@@ -620,10 +620,22 @@ describe("notepad message routing", () => {
     expect(screen.getByText("Reset order")).toBeInTheDocument();
   });
 
-  it("hides Reset order while the host reports no saved order", () => {
+  // Drives the flag through both directions rather than asserting against
+  // React.useState(false)'s initial value: the previous version of this test
+  // posted straight to `ordered: false` and passed even when the whole
+  // handler was gutted, because the false-when-untouched initial state looks
+  // identical to a genuinely-updated false. Going true → false first forces
+  // the update to have happened at all.
+  it("hides Reset order again once the host reports the order was reset", () => {
     render(<App />);
     authed();
     fireEvent.click(screen.getByRole("tab", { name: "Notepad" }));
+    host({
+      type: "notepad:notes",
+      notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
+      ordered: true,
+    });
+    expect(screen.getByText("Reset order")).toBeInTheDocument();
     host({
       type: "notepad:notes",
       notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
