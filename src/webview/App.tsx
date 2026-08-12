@@ -3,13 +3,13 @@ import Fuse from "fuse.js";
 import { send } from "./vscodeApi";
 import {
   addOnce, deriveStatuses, effectiveFilter, fmtEst, gateCopy, isPrReviewStatus, isTopPriority,
-  matchesStatus, moveKey, railClass, visibleFilters,
+  matchesStatus, moveKey, railClass, ticketKind, visibleFilters,
 } from "./helpers";
 import { Filter, FilterVisibility, Task, OutboundMessage, Size, NotepadItemView } from "../types";
 import type { SerializedCaps } from "../tasks/provider";
 import { GaugeMark } from "./GaugeMark";
 import { Notepad } from "./Notepad";
-import { PlayIcon } from "./icons";
+import { PlayIcon, TypeIcon } from "./icons";
 
 let toastSeq = 0;
 
@@ -824,6 +824,7 @@ function TaskCard(props: {
             >⠿</span>
           )}
           <span className={`chev${open ? " open" : ""}`}>›</span>
+          <TypeIcon kind={ticketKind(task.type ?? "")} label={task.type || "unknown"} />
           <a
             className="key"
             href={task.url}
