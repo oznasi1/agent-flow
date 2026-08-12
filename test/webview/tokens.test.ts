@@ -242,6 +242,51 @@ describe("notepad fields", () => {
   });
 });
 
+describe("notepad note layout", () => {
+  // The note reads as text beside its actions: one column takes whatever width is
+  // left and wraps inside it, the other is exactly as wide as the action cluster.
+  // Stacking the cluster under the text (as a plain block flow does) gave the note a
+  // dead band of empty card to the right of every title.
+  it("puts the text and the actions in two columns", () => {
+    const item = ruleBlocks(CSS).find((r) => r.selector === ".np-item");
+    expect(item).toBeDefined();
+    expect(item!.body).toMatch(/display:\s*grid/);
+    expect(item!.body).toMatch(/grid-template-columns:\s*1fr max-content/);
+  });
+
+  // The cluster is taller than a one-line note, and a row-spanning item's excess
+  // height is distributed into the auto tracks it spans — that is track sizing, not
+  // free space, so align-content cannot touch it. Left alone it pushed the title off
+  // the cluster's top edge and opened a gap above the body. A flexible third track
+  // takes the excess instead, which keeps the title and body at content height. The
+  // empty track collapses to nothing whenever the text is the taller side.
+  it("absorbs the cluster's excess height in a track of its own", () => {
+    const item = ruleBlocks(CSS).find((r) => r.selector === ".np-item")!;
+    expect(item.body).toMatch(/grid-template-rows:\s*max-content max-content 1fr/);
+  });
+
+  it("keeps the title and the body in the text column", () => {
+    for (const selector of [".np-top", ".np-body"]) {
+      const rule = ruleBlocks(CSS).find((r) => r.selector === selector);
+      expect(rule, selector).toBeDefined();
+      expect(rule!.body, selector).toMatch(/grid-column:\s*1/);
+    }
+  });
+
+  // Top of the card, right-hand side, however many lines the text runs to: the
+  // cluster spans every row so the text cannot push it down, and align-self keeps it
+  // from stretching to the note's full height.
+  it("pins the action cluster to the top of the second column", () => {
+    const acts = ruleBlocks(CSS).find((r) => r.selector === ".np-acts")!;
+    expect(acts.body).toMatch(/grid-column:\s*2/);
+    expect(acts.body).toMatch(/grid-row:\s*1 \/ -1/);
+    expect(acts.body).toMatch(/align-self:\s*start/);
+    // Its own column now places it; the auto margin that used to push it right would
+    // fight that placement.
+    expect(acts.body).not.toMatch(/margin:[^;]*\bauto\b/);
+  });
+});
+
 describe("notepad note text", () => {
   // A dictated or pasted title can be one unbroken string, which has no wrap
   // opportunity. The title is a flex child at flex: 1, and a flex child's default
@@ -282,13 +327,6 @@ describe("notepad actions cluster", () => {
     expect(acts().body).toMatch(/display:\s*grid/);
     expect(acts().body).toMatch(/grid-template-columns:\s*1fr 1fr/);
     expect(acts().body).toMatch(/width:\s*max-content/);
-  });
-
-  // The cluster keeps the card's right edge, where the actions have always lived —
-  // the old rule indented it 20px to sit under the note's body text instead.
-  it("pushes the cluster to the card's right edge", () => {
-    expect(acts().body).toMatch(/margin:[^;]*\bauto\b/);
-    expect(acts().body).not.toMatch(/margin:[^;]*20px/);
   });
 
   it("spans Start across both columns", () => {

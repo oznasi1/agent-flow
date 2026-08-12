@@ -316,14 +316,20 @@ export const CSS = `
   .np-empty { padding: 14px 2px; color: var(--dim); font-size: var(--t-body); }
 
   .np-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hair); }
-  .np-item { position: relative; padding: 8px 2px 9px 11px; border-bottom: 1px solid var(--hair); }
+  /* Text beside its actions: the first column takes whatever width the cluster
+     leaves and wraps inside it, the second is exactly the cluster's width. The
+     cluster spans every row and aligns to the start, so it holds the note's top
+     right corner however many lines the text runs to. */
+  .np-item { position: relative; display: grid; grid-template-columns: 1fr max-content;
+    grid-template-rows: max-content max-content 1fr; column-gap: 10px;
+    padding: 8px 2px 9px 11px; border-bottom: 1px solid var(--hair); }
   .np-item::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 9px; width: 2px;
     border-radius: 1px; background: var(--rail, transparent); }
   .np-item.r-running { --rail: var(--c-progress); }
   .np-item.r-stale   { --rail: var(--c-idle); }
   .np-item.r-done    { --rail: var(--c-done); }
   .cb { width: 13px; height: 13px; margin: 0; accent-color: var(--brand); flex: none; cursor: pointer; }
-  .np-top { display: flex; align-items: center; gap: 7px; }
+  .np-top { grid-column: 1; display: flex; align-items: center; gap: 7px; }
   /* A dictated or pasted title can be one unbroken string, which offers no wrap
      opportunity. As a flex child at flex: 1 its default min-width: auto refuses to
      shrink below that min-content, so the string ran off the panel's right edge:
@@ -332,15 +338,14 @@ export const CSS = `
   .np-top .np-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   .np-title { font-size: var(--t-body); line-height: 1.35; }
   .np-item.is-done .np-title { text-decoration: line-through; opacity: .5; }
-  .np-body { margin: 3px 0 6px 20px; font-size: var(--t-body); color: var(--dim);
+  .np-body { grid-column: 1; margin: 3px 0 0 20px; font-size: var(--t-body); color: var(--dim);
     white-space: pre-wrap; overflow-wrap: anywhere; }
   /* Start on top, edit + delete side by side beneath it, the pair spanning exactly
      Start's width. Two equal columns at max-content take that measure from Start's
      own min-content, so the cluster stays true when the label or the body font size
-     changes — a hardcoded width would not. It keeps the card's right edge, where the
-     actions have always sat. */
-  .np-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
-    width: max-content; margin: 6px 0 0 auto; }
+     changes — a hardcoded width would not. */
+  .np-acts { grid-column: 2; grid-row: 1 / -1; align-self: start;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: max-content; margin: 0; }
   .np-acts .take { grid-column: 1 / -1; justify-content: center; }
   /* The 24px pin belongs to the Tasks tab's inline rows; here the pair has to reach
      Start's width, so release it inside the notepad only. */
