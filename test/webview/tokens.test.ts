@@ -159,6 +159,10 @@ describe("ticket kind hues", () => {
     expect(bug![1]).toContain("--c-danger");
     expect(bug![1]).not.toContain("--c-attn");
     expect(bug![1].trim()).not.toBe("var(--c-danger)");
+    // color-mix(in srgb, var(--c-danger) 100%, transparent) mutes nothing — it's
+    // still 100% danger red, just alpha-blended over whatever sits behind it.
+    // --vscode-foreground is the second colour that actually does the muting.
+    expect(bug![1]).toContain("--vscode-foreground");
   });
 
   // Task and sub-task share a hue, as they do in Jira; their glyphs differ. Every
@@ -170,6 +174,30 @@ describe("ticket kind hues", () => {
     expect(hue("task")).toBe(hue("subtask"));
     const distinct = new Set(kinds.map(hue));
     expect(distinct.size).toBe(5);
+  });
+});
+
+describe("ticket type marker rules", () => {
+  // The orphan check above only runs uses→declared: a --k-* token with no
+  // .ty-<kind> rule left to spend it is invisible to it, since "declared but
+  // unused" isn't a failure that check looks for. Deleting the whole .ty block
+  // from styles.ts would leave every existing test green while every glyph
+  // silently lost its hue and its flex: none. This guards that gap directly.
+  it("gives .ty a fixed 12px box that flex can never squeeze out of the row", () => {
+    const ty = ruleBlocks(CSS).find((r) => r.selector === ".ty");
+    expect(ty).toBeDefined();
+    expect(ty!.body).toMatch(/flex:\s*none/);
+    expect(ty!.body).toMatch(/width:\s*12px/);
+    expect(ty!.body).toMatch(/height:\s*12px/);
+  });
+
+  it("gives each kind's .ty-<kind> rule its own --k-<kind> hue", () => {
+    const kinds = ["story", "epic", "task", "subtask", "bug", "other"];
+    for (const kind of kinds) {
+      const rule = ruleBlocks(CSS).find((r) => r.selector === `.ty-${kind}`);
+      expect(rule, `.ty-${kind}`).toBeDefined();
+      expect(rule!.body, `.ty-${kind}`).toContain(`var(--k-${kind})`);
+    }
   });
 });
 

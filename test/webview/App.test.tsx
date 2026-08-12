@@ -699,7 +699,7 @@ describe("task card actions", () => {
   });
 
   // Left of the key, and inside the top row — not floated into the action cluster.
-  it("puts the marker at the head of the card's top row, before the key", () => {
+  it("puts the marker before the key in the card's top row", () => {
     withTask(mkTask({ key: "ASM-1", summary: "Fix the bug", type: "Story", url: "https://jira/browse/ASM-1" }));
     const keyLink = screen.getByRole("link", { name: "ASM-1" });
     const top = keyLink.closest(".card-top")!;
