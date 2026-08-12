@@ -700,11 +700,11 @@ describe("task card actions", () => {
 
   // Left of the key, and inside the top row — not floated into the action cluster.
   it("puts the marker at the head of the card's top row, before the key", () => {
-    withTask(mkTask({ key: "ASM-1", type: "Story" }));
-    const top = screen.getByText("ASM-1").closest(".card-top")!;
+    withTask(mkTask({ key: "ASM-1", summary: "Fix the bug", type: "Story", url: "https://jira/browse/ASM-1" }));
+    const keyLink = screen.getByRole("link", { name: "ASM-1" });
+    const top = keyLink.closest(".card-top")!;
     const marker = within(top as HTMLElement).getByRole("img", { name: "Type: Story" });
-    expect(marker.compareDocumentPosition(screen.getByText("ASM-1")))
-      .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(marker.compareDocumentPosition(keyLink)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("rails a card by its status category, not its priority", () => {
