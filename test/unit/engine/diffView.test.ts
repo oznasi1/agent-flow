@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { BASE_SCHEME, baseUri, openTaskDiff, TaskBaseContentProvider } from "../../../src/engine/diffView";
+import { BASE_SCHEME, baseUri, diffTitle, openTaskDiff, TaskBaseContentProvider } from "../../../src/engine/diffView";
 import type { ChangedFile } from "../../../src/engine/git";
 import { commands, Uri } from "../../_mocks/vscode";
 
@@ -55,6 +55,45 @@ describe("baseUri", () => {
   it("serves empty for a URI it cannot decode instead of throwing", () => {
     const p = new TaskBaseContentProvider();
     expect(p.provideTextDocumentContent({ query: "not json" } as never)).toBe("");
+  });
+});
+
+describe("diffTitle", () => {
+  const svc = { name: "svc", path: "/r/svc" };
+  const web = { name: "web", path: "/r/web" };
+
+  it("names the one repo being diffed", () => {
+    expect(diffTitle("ASM-1", [svc])).toBe("Changes in ASM-1 — svc");
+  });
+
+  it("names the workspace when the whole multi-root task is being diffed", () => {
+    expect(diffTitle("ASM-1", [svc, web], "/ws/pay-stack.code-workspace")).toBe("Changes in ASM-1 — pay-stack");
+  });
+
+  it("says all repos when several are diffed without a workspace file", () => {
+    expect(diffTitle("ASM-1", [svc, web])).toBe("Changes in ASM-1 — all repos");
+  });
+
+  it("keeps the workspace label to the file's own name, not its directory", () => {
+    expect(diffTitle("ASM-1", [svc, web], "/ws/nested/dir/pay-stack.code-workspace")).toBe(
+      "Changes in ASM-1 — pay-stack",
+    );
+  });
+
+  it("says all repos when the workspace file has no name of its own", () => {
+    // A bare `.code-workspace` leaves nothing after the extension is stripped;
+    // "all repos" is still true, where an empty label would read as a glitch.
+    expect(diffTitle("ASM-1", [svc, web], "/ws/.code-workspace")).toBe("Changes in ASM-1 — all repos");
+  });
+
+  it("falls back to the run key alone when there is no repo to name", () => {
+    // openTaskDiff reports "empty" for this, so the title is never seen — but a
+    // trailing em dash with nothing after it would be the one visible wrong thing.
+    expect(diffTitle("ASM-1", [])).toBe("Changes in ASM-1");
+  });
+
+  it("falls back to the run key alone when the single repo has no name", () => {
+    expect(diffTitle("ASM-1", [{ name: "" }])).toBe("Changes in ASM-1");
   });
 });
 

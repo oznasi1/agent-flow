@@ -33,6 +33,36 @@ export class TaskBaseContentProvider implements vscode.TextDocumentContentProvid
   }
 }
 
+/** What to call a multi-root task: the workspace file's own name, without the
+ * extension every one of them shares. `undefined` for a task that has no
+ * workspace file, which is every single-repo and per-window run. */
+export function workspaceLabel(workspaceFile?: string): string | undefined {
+  if (!workspaceFile) return undefined;
+  const name = path.basename(workspaceFile, ".code-workspace");
+  // `basename` refuses to strip a suffix that is the whole name, so a bare
+  // `.code-workspace` comes back as itself — a label naming nothing.
+  return name === ".code-workspace" ? undefined : name;
+}
+
+/**
+ * The multi-diff editor's tab title. The repo belongs in it because that editor
+ * shows nothing else that names one: files arrive flat, and a task can span repos
+ * whose paths the tree abbreviates away.
+ *
+ * A single repo names itself; several name the workspace they were opened as, or
+ * say "all repos" when the task has no workspace file. A run with nothing to name
+ * gets the bare key rather than a dangling separator.
+ */
+export function diffTitle(key: string, repos: { name: string }[], workspaceFile?: string): string {
+  const scope =
+    repos.length === 1
+      ? repos[0].name
+      : repos.length > 1
+        ? workspaceLabel(workspaceFile) ?? "all repos"
+        : "";
+  return scope ? `Changes in ${key} — ${scope}` : `Changes in ${key}`;
+}
+
 /** What came of trying to show a task's diff. The caller owns the messaging, so
  * this reports rather than toasts. */
 export type DiffOutcome = "opened" | "empty" | "binary-only" | "unsupported";

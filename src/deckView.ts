@@ -21,7 +21,7 @@ import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { currentBranch, gitState, prEligible, repoRoot, taskDiff } from "./engine/git";
-import { openTaskDiff } from "./engine/diffView";
+import { diffTitle, openTaskDiff, workspaceLabel } from "./engine/diffView";
 import { RetireVerdict, retireVerdict } from "./engine/retire";
 import { BRANCH_CI_ARGS, BranchCiStatus, branchCiKey, mapBranchStatus } from "./engine/orchestrator/branchCi";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
@@ -41,7 +41,7 @@ import { canon } from "./engine/paths";
 // The scope picker the modes-notice hide-write already uses: a settings write must
 // land where the user's value already lives. Saving a command is the same problem.
 import { pickExplicit } from "./modesNotice";
-import { CardAgent, FlowPromptMode, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, isTicketRun, runKind, ticketKeyFor } from "./types";
+import { CardAgent, FlowPromptMode, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, ServiceRef, isTicketRun, runKind, ticketKeyFor } from "./types";
 
 export const POLL_MS = 6000;
 const TICKET_TTL_MS = 30_000;
@@ -2993,6 +2993,27 @@ export class DeckPanel {
     return readRuns(defaultRunsDir()).find((r) => r.key === key) ?? this.localRuns.get(key);
   }
 
+  /**
+   * Which of a run's repos to diff. One repo — because the run has one, or because
+   * the card acts on one — is its own answer and asks nothing.
+   *
+   * Beyond that the multi-diff editor is the wrong place to find out: it lists
+   * files flat, so a task spanning repos gives no reliable sign of whose file is
+   * on screen. Asking first buys a title that names the answer.
+   *
+   * `undefined` means dismissed, which is distinct from "no repos".
+   */
+  private async reposToDiff(run: Run, repoName?: string): Promise<ServiceRef[] | undefined> {
+    const scoped = repoName ? run.repos.filter((r) => r.name === repoName) : run.repos;
+    if (scoped.length <= 1) return scoped;
+    const all = { label: "All repos", detail: workspaceLabel(run.workspaceFile) ?? `${scoped.length} repos`, repos: scoped };
+    const picked = await vscode.window.showQuickPick(
+      [all, ...scoped.map((r) => ({ label: r.name, detail: r.path, repos: [r] }))],
+      { title: `Diff ${run.key} — which repo?`, placeHolder: "Pick a repo to diff", ignoreFocusOut: true },
+    );
+    return picked?.repos;
+  }
+
   private async inspect(key: string, action: "open" | "diff", repoName?: string): Promise<void> {
     const run = this.run(key);
     if (!run) {
@@ -3011,8 +3032,9 @@ export class DeckPanel {
     }
     // diff — everything this task changed, committed work included, in the editor's
     // own multi-file diff view.
-    const repos = repoName ? run.repos.filter((r) => r.name === repoName) : run.repos;
-    const outcome = await openTaskDiff(`Changes in ${run.key}`, repos);
+    const repos = await this.reposToDiff(run, repoName);
+    if (!repos) return; // picker dismissed — the same silent refusal as elsewhere
+    const outcome = await openTaskDiff(diffTitle(run.key, repos, run.workspaceFile), repos);
     if (outcome === "opened") return;
     if (outcome === "empty") {
       this.toast("info", `No changes to show for ${key}.`);
@@ -3028,7 +3050,9 @@ export class DeckPanel {
     const chunks: string[] = [];
     for (const r of repos) {
       const d = taskDiff(r.path);
-      if (d.trim()) chunks.push(run.repos.length > 1 ? `# ${r.name}\n${d}` : d);
+      // Keyed on what is actually being shown, not on what the run spans: with one
+      // repo picked, a header above the only patch there is names nothing useful.
+      if (d.trim()) chunks.push(repos.length > 1 ? `# ${r.name}\n${d}` : d);
     }
     if (chunks.length === 0) {
       this.toast("info", `No changes to show for ${key}.`);

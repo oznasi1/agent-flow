@@ -5,6 +5,12 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **A task's diff says which repo you are looking at.** The multi-file diff editor lists files flat, so on a task spanning repos nothing on screen named the repo whose file was open — the tab said only `Changes in ASM-1`. It now names the scope: `Changes in ASM-1 — svc` for one repo, the workspace's own name for a whole multi-root task, `all repos` otherwise. Diffing a task that spans repos asks which one first, with **All repos** as the first answer; a single-repo task, or a card already acting on one repo, still opens straight into the diff.
+
 ## [0.15.2] — 2026-08-12
 
 ### Fixed
