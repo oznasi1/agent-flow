@@ -5,6 +5,15 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] — 2026-08-12
+
+### Added
+
+- **The Deck Orchestrator.** Off by default — turn on `agentFlow.orchestrator` and the Deck header gains a chip that opens a drawer where you draw what should happen next. Drag a card from the board to attach it, connect two nodes, and the connection carries a condition: a PR merged, CI passed, review approved, no unresolved threads, the tree clean, an agent ended its turn, a ticket reached done. What the rule *does* comes from the node it points at — launch work that isn't started yet, seed a prompt into a live session, post a message, or run a command. Nothing happens until you **Arm** the flow, and nothing is armed for you. Both presentations are complete: a canvas for the mouse, and a list view that builds the same rules from the keyboard.
+- **A rule can run a command.** Point a rule at a command node and a met condition runs a shell command — deploy on a merge, then smoke-test after the deploy. Commands come from `agentFlow.commands` by name, or are typed on the node as a one-off, and `{note}` in either is replaced with that rule's own note. A command runs in the checkout the rule came from, with a two-minute ceiling; its full output goes to the Deck's output channel and its exit code becomes the rule's receipt. Consent is asked once per flow and **separately from agent sessions** — approving launches never silently approves shell — and the prompt names the actual command text. A failed command latches: it is never retried until you press Reset, because a deploy that fails on every poll is a real side effect on real infrastructure.
+- **Keep a one-off command.** Type a command on a node, name it, and press **Save to settings** — it is appended to `agentFlow.commands` in whichever settings scope already holds your list, so the next node can pick it from the picker instead of retyping it. Saving the same command twice tells you it is already there rather than filling the list with twins.
+- **The add-a-node pickers search, and take more than one at a time.** `+ Add command…` and `+ Add place…` filter as you type — across both lines a row shows, so a place's repo is findable and not merely visible — and every ticked entry becomes its own node in a single step. Staging a deploy and a smoke test is now one trip through the list instead of two.
+
 ## [0.14.0] — 2026-08-12
 
 ### Added
