@@ -29,6 +29,11 @@ export interface Task {
   updated: string; // ISO
   url: string;
   estimateSeconds: number | null; // original time estimate
+  /** The source's own type name — "Story", "Sub-task", "Spike". Raw on purpose:
+   * a project that renamed its types should have the tooltip say what it renamed
+   * them to. `ticketKind()` (webview) is what turns this into a render kind.
+   * Optional so nothing that already builds a Task has to change. */
+  type?: string;
   services?: string[]; // lightweight guess for display
 }
 

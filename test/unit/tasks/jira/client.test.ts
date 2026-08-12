@@ -27,6 +27,7 @@ const rawIssue = (over: Record<string, any> = {}) => ({
     components: [{ name: "account-service" }],
     updated: "2026-07-01T00:00:00.000Z",
     timeoriginalestimate: 3600,
+    issuetype: { name: "Story" },
     ...over,
   },
 });
@@ -195,6 +196,12 @@ describe("fetchTasks", () => {
     expect(bodyOf(fetchMock, 1).fields).not.toContain("customfield_10020");
     expect(tasks[0].sprint).toBeNull();
   });
+
+  it("asks Jira for the issue type alongside the other list fields", async () => {
+    const fetchMock = installFetch([jsonResponse(FIELD_LIST), jsonResponse({ issues: [rawIssue()] })]);
+    await client().fetchTasks("mine");
+    expect(bodyOf(fetchMock, 1).fields).toContain("issuetype");
+  });
 });
 
 describe("normalize (via fetchTasks)", () => {
@@ -219,6 +226,7 @@ describe("normalize (via fetchTasks)", () => {
       updated: "2026-07-01T00:00:00.000Z",
       url: `${BASE}/browse/ASM-1`,
       estimateSeconds: 3600,
+      type: "Story",
     });
   });
 
@@ -233,6 +241,7 @@ describe("normalize (via fetchTasks)", () => {
       labels: [],
       components: [],
       estimateSeconds: null,
+      type: "",
     });
   });
 
@@ -247,6 +256,16 @@ describe("normalize (via fetchTasks)", () => {
     );
     expect(t.sprint).toBe("Sprint 12");
     expect(t.inOpenSprint).toBe(true);
+  });
+
+  it("carries a project's own type name through verbatim", async () => {
+    const t = await one(rawIssue({ issuetype: { name: "Spike" } }));
+    expect(t.type).toBe("Spike");
+  });
+
+  it("carries a sub-task through as the source spells it", async () => {
+    const t = await one(rawIssue({ issuetype: { name: "Sub-task" } }));
+    expect(t.type).toBe("Sub-task");
   });
 });
 

@@ -36,7 +36,7 @@ let cachedSprintFieldId: string | null | undefined;
 const COMPONENTS_TTL_MS = 5 * 60_000;
 const cachedComponents = new Map<string, { names: string[]; at: number }>();
 
-const LIST_FIELDS =["summary", "status", "priority", "assignee", "labels", "components", "updated", "timeoriginalestimate"];
+const LIST_FIELDS = ["summary", "status", "priority", "assignee", "labels", "components", "updated", "timeoriginalestimate", "issuetype"];
 const DETAIL_FIELDS = ["summary", "description", "labels", "components", "priority", "status", "assignee"];
 
 /** A workflow transition plus the fields its screen declares — the metadata that
@@ -367,6 +367,7 @@ export class JiraClient {
       updated: f.updated ?? "",
       url: `${this.baseUrl}/browse/${issue.key}`,
       estimateSeconds: typeof f.timeoriginalestimate === "number" ? f.timeoriginalestimate : null,
+      type: f.issuetype?.name ?? "",
     };
   }
 }

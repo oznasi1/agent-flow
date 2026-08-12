@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, matchesStatus, moveKey, railClass, visibleFilters } from "../../src/webview/helpers";
+import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, matchesStatus, moveKey, railClass, ticketKind, visibleFilters } from "../../src/webview/helpers";
 import type { Filter, Task } from "../../src/types";
 import { mkTask } from "../_helpers/factories";
 
@@ -239,5 +239,47 @@ describe("effectiveFilter", () => {
     for (const { configured, supported } of cases) {
       expect(visibleFilters(supported)).toContain(effectiveFilter(configured, supported));
     }
+  });
+});
+
+describe("ticketKind", () => {
+  it("maps each of the five type names Jira ships by default", () => {
+    expect(ticketKind("Story")).toBe("story");
+    expect(ticketKind("Epic")).toBe("epic");
+    expect(ticketKind("Task")).toBe("task");
+    expect(ticketKind("Bug")).toBe("bug");
+    expect(ticketKind("Sub-task")).toBe("subtask");
+  });
+
+  // Jira Server writes "Sub-task", Jira Cloud has shipped "Subtask" — both are the
+  // same kind, and a site that uses the other spelling must not fall to "other".
+  it("accepts both sub-task spellings", () => {
+    expect(ticketKind("Subtask")).toBe("subtask");
+    expect(ticketKind("sub-task")).toBe("subtask");
+  });
+
+  it("ignores casing and surrounding whitespace", () => {
+    expect(ticketKind("BUG")).toBe("bug");
+    expect(ticketKind("  story  ")).toBe("story");
+  });
+
+  // A project can define any type it likes. Falling to "other" is what keeps the
+  // card marked rather than blank.
+  it("falls to other for a type it does not know", () => {
+    expect(ticketKind("Spike")).toBe("other");
+    expect(ticketKind("Incident")).toBe("other");
+    expect(ticketKind("Improvement")).toBe("other");
+  });
+
+  it("falls to other when the source named no type at all", () => {
+    expect(ticketKind("")).toBe("other");
+    expect(ticketKind("   ")).toBe("other");
+  });
+
+  // Guards the lookup against a prototype key: `{}["constructor"]` is a function,
+  // and a bare `MAP[key] || "other"` would return it.
+  it("does not resolve an inherited object property to a kind", () => {
+    expect(ticketKind("constructor")).toBe("other");
+    expect(ticketKind("toString")).toBe("other");
   });
 });

@@ -166,3 +166,26 @@ export function isTopPriority(priority: string): boolean {
 export function addOnce(xs: string[], x: string): string[] {
   return xs.includes(x) ? xs : [...xs, x];
 }
+
+/** What a ticket IS, as far as the card renders it. A different axis from status:
+ * `statusCategory` says where the ticket is in the flow, this says what kind of
+ * thing it is. "other" covers every type a project defined for itself. */
+export type TicketKind = "story" | "epic" | "task" | "subtask" | "bug" | "other";
+
+// A null-prototype map, not an object literal: a plain literal would resolve
+// ticketKind("constructor") to Object's own constructor rather than to "other".
+const TICKET_KINDS: Record<string, TicketKind> = Object.assign(Object.create(null), {
+  story: "story",
+  epic: "epic",
+  task: "task",
+  bug: "bug",
+  "sub-task": "subtask",
+  subtask: "subtask",
+});
+
+/** Map a source's type name onto a render kind. Unknown names — and the empty
+ * string a source with no type produces — are "other", which still draws a
+ * marker; the raw name is what the tooltip shows. */
+export function ticketKind(typeName: string): TicketKind {
+  return TICKET_KINDS[typeName.trim().toLowerCase()] ?? "other";
+}

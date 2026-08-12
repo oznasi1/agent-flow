@@ -111,6 +111,17 @@ export const CSS = `
      key on every card was six links competing with the one button that matters. */
   .key { font-family: var(--mono); font-size: var(--t-data); color: var(--dim); text-decoration: none; }
   .key:hover { color: var(--vscode-textLink-foreground); }
+  /* The ticket's kind, left of its key. A kind axis, never a status one: the hue
+     says what this ticket IS, the rail already says where it is in the flow.
+     flex: none because .card-top wraps — the marker must never be squeezed. */
+  .ty { width: 12px; height: 12px; flex: none; display: inline-block; }
+  .ty svg { display: block; }
+  .ty-story   { color: var(--k-story); }
+  .ty-epic    { color: var(--k-epic); }
+  .ty-task    { color: var(--k-task); }
+  .ty-subtask { color: var(--k-subtask); }
+  .ty-bug     { color: var(--k-bug); }
+  .ty-other   { color: var(--k-other); }
 
   /* Urgency, and only at the top level. --c-attn, never --c-danger: an urgent
      ticket is not a broken one. */

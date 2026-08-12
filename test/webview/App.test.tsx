@@ -725,6 +725,31 @@ describe("task card actions", () => {
     expect(sent).toHaveBeenCalledWith({ type: "take", key: "ASM-1", services: undefined });
   });
 
+  it("marks a card with its ticket type", () => {
+    withTask(mkTask({ key: "ASM-1", type: "Bug" }));
+    expect(screen.getByRole("img", { name: "Type: Bug" })).toHaveClass("ty-bug");
+  });
+
+  // A project's own type still gets a marker, named for what the project calls it.
+  it("marks a type it does not recognise, under the source's own name", () => {
+    withTask(mkTask({ key: "ASM-1", type: "Spike" }));
+    expect(screen.getByRole("img", { name: "Type: Spike" })).toHaveClass("ty-other");
+  });
+
+  it("still marks a task whose source named no type", () => {
+    withTask(mkTask({ key: "ASM-1" }));
+    expect(screen.getByRole("img", { name: "Type: unknown" })).toHaveClass("ty-other");
+  });
+
+  // Left of the key, and inside the top row — not floated into the action cluster.
+  it("puts the marker before the key in the card's top row", () => {
+    withTask(mkTask({ key: "ASM-1", summary: "Fix the bug", type: "Story", url: "https://jira/browse/ASM-1" }));
+    const keyLink = screen.getByRole("link", { name: "ASM-1" });
+    const top = keyLink.closest(".card-top")!;
+    const marker = within(top as HTMLElement).getByRole("img", { name: "Type: Story" });
+    expect(marker.compareDocumentPosition(keyLink)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("rails a card by its status category, not its priority", () => {
     render(<App />);
     authed();

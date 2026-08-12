@@ -5,6 +5,12 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] — 2026-08-12
+
+### Added
+
+- **A ticket's type, on its card.** Every card in the Tasks list now carries a small coloured glyph before its key saying what the ticket is — story, epic, task, sub-task or bug — so a list can be scanned for the bug or the epic without opening anything. A type the project defined for itself (a spike, an incident, a renamed default) gets a neutral glyph and is named in full in the tooltip, so no card is ever left unmarked. Bug takes a muted red rather than the alarm red: an ordinary bug ticket is not a failure.
+
 ## [0.13.3] — 2026-08-12
 
 ### Added
