@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.2] — 2026-08-12
+
 ### Fixed
 
 - **A Notepad note's detail reaches the agent, not just its title.** Running a note seeded a
