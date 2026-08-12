@@ -69,6 +69,14 @@ export interface OpenRequest {
   services: ServiceRef[];
   mode: WorkspaceMode;
   promptTemplate: string;
+  /** Free text appended to every seeded prompt AFTER the template is rendered — the
+   *  detail a notepad note carries, which the brief alone would leave to the agent to
+   *  go and find. Appended rather than substituted into the template so a user's
+   *  customized prompt keeps working untouched, and rendered-then-appended rather than
+   *  inserted first so a `{summary}` or `{files}` the user typed into their note stays
+   *  their own literal text instead of becoming a placeholder. Blank or absent leaves
+   *  every prompt byte-identical to what it is without this field. */
+  promptSuffix?: string;
   workspaceDir: string;
   seedAgent: boolean;
   openIn?: "new" | "current"; // "current" seeds THIS window in place; default "new"
@@ -219,6 +227,12 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   // Without an identity there is nothing to seed, so the request degrades to the
   // normal open path rather than silently doing nothing.
   const here = req.openIn === "current" ? req.currentWindow : undefined;
+  // Every seed site below renders through this, so the suffix reaches each window the
+  // launch opens — a per-window launch seeds one prompt per repo, and a note's detail
+  // belongs in all of them.
+  const suffix = req.promptSuffix?.trim() ? `\n\n${req.promptSuffix.trim()}` : "";
+  const seedPrompt = (mentions: string[], briefPath?: string): string =>
+    agentPrompt(ticket, mentions, promptTemplate, briefPath) + suffix;
   const hints = extractFileHints(descriptionText);
   const filesByRepo = new Map(services.map((s) => [s.name, resolveFilesInRepo(s.path, hints)]));
 
@@ -266,7 +280,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     );
     matches.push({
       matchPath: here.identity,
-      prompt: agentPrompt(ticket, mentions, promptTemplate, briefs[0]?.path),
+      prompt: seedPrompt(mentions, briefs[0]?.path),
     });
   } else if (req.existingWorkspaceFile) {
     // Only the approved folders. An empty list still calls through, so an unparseable
@@ -287,7 +301,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     // of the window (batchWorkspace does the same, for the same reason).
     matches.push({
       matchPath: workspaceFile,
-      prompt: agentPrompt(ticket, mentions, promptTemplate, briefs[0]?.path),
+      prompt: seedPrompt(mentions, briefs[0]?.path),
     });
   } else if (req.existingFolder) {
     const folder = req.existingFolder;
@@ -302,7 +316,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     }
     unaddedRepos = services.filter((s) => canon(s.path) !== canon(folder)).map((s) => s.name);
     const mentions = services.flatMap((s) => (filesByRepo.get(s.name) ?? []).map((f) => mention("per-window", s.name, f)));
-    matches.push({ matchPath: folder, prompt: agentPrompt(ticket, mentions, promptTemplate) });
+    matches.push({ matchPath: folder, prompt: seedPrompt(mentions) });
   } else if (mode === "multiroot") {
     fs.mkdirSync(workspaceDir, { recursive: true });
     workspaceFile = path.join(workspaceDir, `${ticket.key}.code-workspace`);
@@ -311,11 +325,11 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
       JSON.stringify({ folders: services.map((s) => ({ name: s.name, path: s.path })), settings: {} }, null, 2) + "\n",
     );
     const mentions = services.flatMap((s) => (filesByRepo.get(s.name) ?? []).map((f) => mention("multiroot", s.name, f)));
-    matches.push({ matchPath: workspaceFile, prompt: agentPrompt(ticket, mentions, promptTemplate) });
+    matches.push({ matchPath: workspaceFile, prompt: seedPrompt(mentions) });
   } else {
     for (const s of services) {
       const mentions = (filesByRepo.get(s.name) ?? []).map((f) => mention("per-window", s.name, f));
-      matches.push({ matchPath: s.path, prompt: agentPrompt(ticket, mentions, promptTemplate) });
+      matches.push({ matchPath: s.path, prompt: seedPrompt(mentions) });
     }
   }
 

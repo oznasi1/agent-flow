@@ -1063,6 +1063,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       `## Notepad: ${topic}\n\n_No ticket — an item you wrote in the Agent Flow notepad. ` +
       `If it turns into tracked work, open a ticket afterwards._` +
       (note.body.trim() ? `\n\n${note.body.trim()}` : "");
+    // The detail goes into the prompt as well as the brief. The generic template
+    // carries only {summary} — the note's title — so everything the user typed under
+    // it reached the agent only if it went and opened TASK.md, which is exactly what a
+    // seeded session is least likely to do first. Passed as a suffix rather than folded
+    // into the template so the user's own words are never read as placeholders.
+    const details = note.body.trim() ? `Details from the note:\n\n${note.body.trim()}` : undefined;
 
     const result = await openWorkspace({
       ticket: { key, summary: topic, url: "" },
@@ -1074,6 +1080,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         env: undefined,
         services: services.map((s) => s.name).join(", "),
       }),
+      promptSuffix: details,
       workspaceDir: cfg.workspaceDir,
       seedAgent: cfg.seedAgent,
       openIn: args.openIn,

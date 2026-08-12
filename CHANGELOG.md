@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A Notepad note's detail reaches the agent, not just its title.** Running a note seeded a
+  prompt built from the note's title alone — everything typed under it lived only in the
+  `.pick-task/TASK.md` brief, which a session is least likely to open first. The detail is
+  now appended to the seeded prompt itself, verbatim, so `{summary}`-shaped text inside a
+  note stays the user's own words. A note with no detail, and every other kind of launch,
+  seeds exactly the prompt it did before.
+
 ## [0.13.1] — 2026-08-12
 
 ### Fixed

@@ -4520,6 +4520,33 @@ describe("notepad", () => {
     expect((notesIn(store)![0] as { lastRunKey?: string }).lastRunKey).toBe(`notepad-fix-the-retry-banner-${id}`);
   });
 
+  it("carries the note's detail into the seeded prompt, not only into the brief", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "  it double-fires on 429  " });
+    await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+
+    const call = vi.mocked(openWorkspace).mock.calls.at(-1)![0];
+    // The agent reads the detail without having to open the brief — the prompt is the
+    // only thing it is guaranteed to see.
+    expect(call.promptSuffix).toBe("Details from the note:\n\nit double-fires on 429");
+    // The template itself stays the configured one: the detail rides beside it, so a
+    // customized explorePrompts.general is never rewritten.
+    expect(call.promptTemplate).toBe(CFG.exploreActions.find((a) => a.id === "general")!.prompt);
+  });
+
+  it("sends no prompt suffix for a note with no detail", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Title only", body: "" });
+    await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+    expect(vi.mocked(openWorkspace).mock.calls.at(-1)![0].promptSuffix).toBeUndefined();
+  });
+
   it("falls back to a generic slug, still suffixed with the note's id, when the note has no title", async () => {
     const repos = mkRepos(["account-service"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
