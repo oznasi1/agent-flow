@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] — 2026-08-12
+
+### Fixed
+
+- **A Notepad note reads as text beside its actions.** Start sat level with — and no wider
+  than — the edit and delete buttons that follow it, and the cluster stretched under the
+  note's text, leaving every title with a dead band of empty card to its right. Start now
+  sits above the pair, which spans exactly Start's width, and the cluster holds the note's
+  top right corner while the text takes the width it leaves.
+- **A long note title wraps instead of running off the panel.** A dictated or pasted title
+  can be one unbroken string, which offered nothing to wrap on and overflowed the sidebar's
+  right edge. Both the title and the body now break mid-string when they have to, and
+  neither is ever truncated.
+
 ## [0.13.0] — 2026-08-11
 
 ### Added

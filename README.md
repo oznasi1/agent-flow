@@ -78,7 +78,7 @@ Claude-only say so.
 Not everything worth an agent has a Jira key. The panel's second tab, **Notepad**, is a
 plain list of things you want to do: a title, optional detail, a checkbox.
 
-<img src="media/notepad.png" alt="The Notepad tab of the Agent Flow Deck sidebar panel: an add-note form (title field, detail textarea, Add note button), an All / Active / Done segmented filter with a Clear completed button beside it, and three notes. Each note has a done checkbox, its title and detail, and a filled Start button with quiet edit and delete icon buttons; one note carries a blue rail and a Running badge, another a green rail and a Finished badge." width="420" />
+<img src="media/notepad.png" alt="The Notepad tab of the Agent Flow Deck sidebar panel: an add-note form (title field, detail textarea, Add note button), an All / Active / Done segmented filter with a Clear completed button beside it, and three notes. Each note has a done checkbox, its title and detail, and — in its top right corner — a filled Start button above quiet edit and delete icon buttons that together span Start's width; one note carries a blue rail and a Running badge, another a green rail and a Finished badge." width="420" />
 
 - **Notes are yours, not the workspace's.** They're stored in the editor's global state,
   not per-workspace, so the same list is there whichever repo or workspace the panel
