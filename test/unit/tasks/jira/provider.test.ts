@@ -279,3 +279,103 @@ describe("JiraProvider", () => {
     expect(transition).toHaveBeenCalledWith("A-1", "31", {});
   });
 });
+
+describe("caps — narrowing to the detected project shape", () => {
+  const withShape = (shape: unknown) =>
+    new JiraProvider(client({ shapeSnapshot: () => shape, loadShape: vi.fn(async () => shape) }));
+
+  it("claims every lens and sprints before any probe has run", () => {
+    // The inert case, and the one that matters most: an un-probed provider must be
+    // identical to the pre-detection provider, because that is what every other test
+    // in the suite — and every first paint — sees.
+    const p = withShape(null);
+    expect(p.caps.supportedFilters).toEqual(["unassigned", "mine", "mysprint", "sprint", "backlog", "all"]);
+    expect(p.caps.sprints).toBeTruthy();
+    expect(p.caps.sizes).toBe(true);
+    expect(p.caps.labels).toBeTruthy();
+    expect(p.caps.components).toBeTruthy();
+  });
+
+  it("keeps every lens and sprints on a scrum project", () => {
+    const p = withShape({ boardId: 2, hasSprints: true, boardCount: 1 });
+    expect(p.caps.supportedFilters).toEqual(["unassigned", "mine", "mysprint", "sprint", "backlog", "all"]);
+    expect(p.caps.sprints).toBeTruthy();
+  });
+
+  it("drops the sprint-shaped lenses and sprints on a project with no scrum board", () => {
+    const p = withShape({ boardId: 5, hasSprints: false, boardCount: 1 });
+    expect(p.caps.supportedFilters).toEqual(["unassigned", "mine", "all"]);
+    expect(p.caps.sprints).toBeUndefined();
+  });
+
+  it("keeps `unassigned` on a sprintless project — stripSprint makes it 'all open, nobody on it'", () => {
+    expect(withShape({ boardId: null, hasSprints: false, boardCount: 0 }).caps.supportedFilters)
+      .toContain("unassigned");
+  });
+
+  it("keeps sizes, labels and components on a sprintless project — none are sprint-shaped", () => {
+    const p = withShape({ boardId: null, hasSprints: false, boardCount: 0 });
+    expect(p.caps.sizes).toBe(true);
+    expect(p.caps.labels).toBeTruthy();
+    expect(p.caps.components).toBeTruthy();
+  });
+
+  it("re-reads the snapshot on every access, so a probe mid-session is picked up", () => {
+    let shape: unknown = null;
+    const p = new JiraProvider(client({ shapeSnapshot: () => shape }));
+    expect(p.caps.sprints).toBeTruthy();
+    shape = { boardId: 5, hasSprints: false, boardCount: 1 };
+    expect(p.caps.sprints).toBeUndefined();
+  });
+
+  it("still routes the sprint operations to the client when it declares them", async () => {
+    // Narrowing must not break the capability it keeps: a scrum project's sprints
+    // object has to remain wired to the same three client calls it always was.
+    const getActiveSprintId = vi.fn(async () => 42);
+    const addIssueToSprint = vi.fn(async () => undefined);
+    const removeIssueFromSprint = vi.fn(async () => undefined);
+    const p = new JiraProvider(client({
+      shapeSnapshot: () => ({ boardId: 2, hasSprints: true, boardCount: 1 }),
+      getActiveSprintId, addIssueToSprint, removeIssueFromSprint,
+    }));
+    expect(await p.caps.sprints!.activeId()).toBe("42");
+    await p.caps.sprints!.add("7", "A-1");
+    await p.caps.sprints!.remove("A-1");
+    expect(addIssueToSprint).toHaveBeenCalledWith(7, "A-1");
+    expect(removeIssueFromSprint).toHaveBeenCalledWith("A-1");
+  });
+
+  it("reports a null active sprint as null rather than the string 'null'", async () => {
+    const p = new JiraProvider(client({
+      shapeSnapshot: () => ({ boardId: 2, hasSprints: true, boardCount: 1 }),
+      getActiveSprintId: vi.fn(async () => null),
+    }));
+    expect(await p.caps.sprints!.activeId()).toBeNull();
+  });
+});
+
+describe("refreshCaps", () => {
+  it("loads the shape", async () => {
+    const loadShape = vi.fn(async () => ({ boardId: 2, hasSprints: true, boardCount: 1 }));
+    await new JiraProvider(client({ loadShape, shapeSnapshot: () => null })).refreshCaps();
+    expect(loadShape).toHaveBeenCalledTimes(1);
+  });
+
+  it("swallows a failure — an unreadable board list must not fail the panel's first paint", async () => {
+    const loadShape = vi.fn(async () => { throw new Error("boom"); });
+    await expect(
+      new JiraProvider(client({ loadShape, shapeSnapshot: () => null })).refreshCaps(),
+    ).resolves.toBeUndefined();
+  });
+
+  it("survives a client that has no loadShape at all (a wholesale test mock)", async () => {
+    await expect(new JiraProvider({} as never).refreshCaps()).resolves.toBeUndefined();
+  });
+
+  it("leaves caps optimistic when the client cannot answer", async () => {
+    const p = new JiraProvider({} as never);
+    await p.refreshCaps();
+    expect(p.caps.sprints).toBeTruthy();
+    expect(p.caps.supportedFilters).toContain("mysprint");
+  });
+});
