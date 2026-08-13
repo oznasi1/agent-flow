@@ -4,6 +4,9 @@ import { parseJiraError } from "./errors";
 import { TransitionFieldMeta } from "./transitionFields";
 import { Filter, Task, Size } from "../../types";
 import { markTaskNetworkFailure, TaskAuthError } from "../provider";
+import {
+  peekShape, peekSprintField, pickBoard, ProjectShape, putShape, putSprintField, siteKey,
+} from "./shape";
 
 export class JiraAuthError extends TaskAuthError {
   constructor(message: string) {
@@ -27,12 +30,10 @@ export { JiraApiError } from "./errors";
  * which would leave the panel stuck on "loading" with no indication of why. */
 const REQUEST_TIMEOUT_MS = 15_000;
 
-// The Sprint field is a custom (greenhopper) field; its id is stable per Jira site.
-let cachedSprintFieldId: string | null | undefined;
-
-/** The project's component list, cached per project key. Short-lived on purpose:
- * a component created in Jira should become syncable without a window reload, and
- * the payload is a handful of names. */
+/** The project's component list. Short-lived on purpose: a component created in Jira
+ * should become syncable without a window reload, and the payload is a handful of
+ * names. Keyed by site AND project (`siteId`) — a project key alone let two Jira
+ * sites that both define a `PLAT` project answer each other's component reads. */
 const COMPONENTS_TTL_MS = 5 * 60_000;
 const cachedComponents = new Map<string, { names: string[]; at: number }>();
 
@@ -66,6 +67,12 @@ export class JiraClient {
     private readonly project: string,
     private readonly auth: JiraAuth,
   ) {}
+
+  /** This client's cache identity: which site, which project. A cache key, not a
+   *  display string and not a URL. */
+  private get siteId(): string {
+    return siteKey(this.baseUrl, this.project);
+  }
 
   private async request(pathname: string, init?: RequestInit): Promise<any> {
     const header = await this.auth.getAuthHeader();
@@ -151,9 +158,10 @@ export class JiraClient {
     return { id: p?.id ?? "", key: p?.key ?? key, name: p?.name ?? "" };
   }
 
-  /** Resolve (once, per site) the id of the Sprint custom field. */
+  /** Resolve (once per site, per FIELD_TTL_MS) the id of the Sprint custom field. */
   private async sprintFieldId(): Promise<string | null> {
-    if (cachedSprintFieldId !== undefined) return cachedSprintFieldId;
+    const known = peekSprintField(this.baseUrl);
+    if (known) return known.id;
     let resolved: string | null = null;
     try {
       const fields = await this.request("/rest/api/3/field");
@@ -164,8 +172,40 @@ export class JiraClient {
     } catch {
       resolved = null; // give up quietly — sprint detection just stays off
     }
-    cachedSprintFieldId = resolved;
+    putSprintField(this.baseUrl, resolved);
     return resolved;
+  }
+
+  /** The board setup of the configured project, cached per site+project.
+   *
+   * On a read failure this answers `{ boardId: null, hasSprints: true, boardCount: 0 }`
+   * — **optimistic, and deliberately not cached.** The Agile API 403s for a user
+   * without a Jira Software licence and 404s behind some proxies, and treating either
+   * as "this project has no sprints" would strip the sprint tabs off a working Scrum
+   * project over one bad request. `hasSprints: true` with `boardId: null` is exactly
+   * the pre-detection behaviour: claim sprints, and let the sprint lookup find no
+   * board and answer null. An auth failure is NOT swallowed — a dead token is a fact
+   * about the credentials, and the panel already re-gates on it. */
+  async loadShape(): Promise<ProjectShape> {
+    const known = peekShape(this.baseUrl, this.project);
+    if (known) return known;
+    let payload: unknown;
+    try {
+      payload = await this.request(
+        `/rest/agile/1.0/board?projectKeyOrId=${encodeURIComponent(this.project)}&maxResults=50`,
+      );
+    } catch (e) {
+      if (e instanceof JiraAuthError) throw e;
+      return { boardId: null, hasSprints: true, boardCount: 0 };
+    }
+    return putShape(this.baseUrl, this.project, pickBoard(payload));
+  }
+
+  /** What `loadShape` last learned, without making a request. `null` means nothing is
+   *  known yet — the caller must treat that as "behave exactly as before detection
+   *  existed", never as "no sprints". */
+  shapeSnapshot(): ProjectShape | null {
+    return peekShape(this.baseUrl, this.project);
   }
 
   async fetchTasks(filter: Filter, size: Size = "any", maxResults = 50): Promise<Task[]> {
@@ -280,7 +320,7 @@ export class JiraClient {
    *  Failures are swallowed here, so callers that need auth errors reported must
    *  read the issue *before* calling this. */
   async listComponents(): Promise<string[] | null> {
-    const hit = cachedComponents.get(this.project);
+    const hit = cachedComponents.get(this.siteId);
     if (hit && Date.now() - hit.at < COMPONENTS_TTL_MS) return hit.names;
     let names: string[];
     try {
@@ -291,7 +331,7 @@ export class JiraClient {
     } catch {
       return null;
     }
-    cachedComponents.set(this.project, { names, at: Date.now() });
+    cachedComponents.set(this.siteId, { names, at: Date.now() });
     return names;
   }
 
@@ -310,15 +350,18 @@ export class JiraClient {
     });
   }
 
-  /** The active sprint on the project's (scrum) board, or null if there is none. */
+  /** The active sprint on the project's board, or null if there is none.
+   *
+   * The board comes from `loadShape()` rather than a fresh list-and-pick, so this and
+   * every other sprint operation in a session agree on one board. That agreement is
+   * the point: the previous code took `values[0]` from whatever order Jira replied in,
+   * so on a project with several boards this lookup and a subsequent write could
+   * disagree, and "Add to my sprint" could move an issue into a sprint the user was
+   * never shown. */
   async getActiveSprintId(): Promise<number | null> {
-    const boards = await this.request(
-      `/rest/agile/1.0/board?projectKeyOrId=${encodeURIComponent(this.project)}&maxResults=50`,
-    );
-    const values = boards?.values ?? [];
-    const board = values.find((b: any) => b?.type === "scrum") ?? values[0];
-    if (!board) return null;
-    const sprints = await this.request(`/rest/agile/1.0/board/${board.id}/sprint?state=active`);
+    const { boardId } = await this.loadShape();
+    if (boardId == null) return null;
+    const sprints = await this.request(`/rest/agile/1.0/board/${boardId}/sprint?state=active`);
     return (sprints?.values ?? [])[0]?.id ?? null;
   }
 
