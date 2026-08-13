@@ -428,6 +428,11 @@ export function DeckApp(): JSX.Element {
   const [, forceTick] = React.useState(0);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string; action?: { label: string; url: string } }[]>([]);
   const [busy, setBusy] = React.useState(false);
+  // False until the very first deck:runs post. Runs starts as [] the same as a
+  // genuinely empty board would look, so without this flag the deck's first
+  // paint — before the host has read anything at all — is indistinguishable
+  // from "you have nothing in flight."
+  const [hasLoaded, setHasLoaded] = React.useState(false);
   const [grouping, setGrouping] = React.useState<"agents" | "workspaces">("agents");
   const [staleCount, setStaleCount] = React.useState(0);
   // See DEFAULT_SOURCE_LABEL's own comment for why "Jira" rather than "".
@@ -494,6 +499,7 @@ export function DeckApp(): JSX.Element {
         setPrReviewStatus(m.prReviewStatus);
         setSourceLabel(m.sourceLabel);
         setSyncedAt(Date.now());
+        setHasLoaded(true);
       } else if (m.type === "deck:grouping") {
         setGrouping(m.grouping);
       } else if (m.type === "toast") {
@@ -737,7 +743,12 @@ export function DeckApp(): JSX.Element {
         }}
       />
 
-      {live.length === 0 && closed.length === 0 ? (
+      {!hasLoaded ? (
+        <div className="empty">
+          <span className="spin on" aria-hidden="true">⟳</span>
+          <div className="big">Loading…</div>
+        </div>
+      ) : live.length === 0 && closed.length === 0 ? (
         <div className="empty">
           <div className="big">No tasks in flight</div>
           <div>Take a task from the Agent Flow Deck Tasks pool and it shows up here.</div>

@@ -70,9 +70,23 @@ describe("DeckApp", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:ready" });
   });
 
-  it("shows the empty state with no runs", () => {
+  it("shows the empty state once an empty deck:runs has actually landed", () => {
     render(<DeckApp />);
+    host(runsMsg([]));
     expect(screen.getByText(/No tasks in flight/i)).toBeInTheDocument();
+  });
+
+  it("shows a loading state, not the empty state, before the first deck:runs lands", () => {
+    render(<DeckApp />);
+    expect(screen.queryByText(/No tasks in flight/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/loading/i)).toBeInTheDocument();
+  });
+
+  it("replaces the loading state once deck:runs lands, even with cards present", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
+    expect(screen.getByText("ASM-1")).toBeInTheDocument();
   });
 
   it("renders a card with key, summary, Jira status and diff stat", () => {
