@@ -2,7 +2,7 @@
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
   "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a coding agent already briefed — Claude Code, or GitHub Copilot.",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",
   "license": "MIT",
@@ -350,12 +350,27 @@
           "markdownDescription": "Commands an Orchestrator rule can run when its condition is met — a deploy, a webhook call, a smoke test. Each has an `id`, a `label` shown in the picker, the `run` command itself, and an optional `detail` line. The Orchestrator drawer can append to this list for you: type a one-off command on a node, then name it under **Save to settings**. `run` may contain `{note}`, replaced with the rule's own free text — **spliced in unquoted**, exactly as typed, so the note can extend the command (`--env={note}` plus a note of `prod; rm -rf ~` runs both); quoting it yourself (`--env=\"{note}\"`) does not fully neutralise it either, since a `\"` inside the note still breaks out. Only use `{note}` where you trust whoever fills in a rule's note. **These run unattended on your machine**, so a flow asks before its FIRST command and then runs commands on its own. That question is separate from the one a launch asks: approving a flow's launches never approves its commands, so a flow you already armed and confirmed still asks before it runs anything in a shell. The one default here is an inert example (`echo`, cannot fail or mutate anything) so the picker has something to show; replace or remove it, or clear the list entirely, to run your own.",
           "items": {
             "type": "object",
-            "required": ["id", "run"],
+            "required": [
+              "id",
+              "run"
+            ],
             "properties": {
-              "id": { "type": "string", "description": "Stable id, referenced by a flow's command node." },
-              "label": { "type": "string", "description": "Shown in the rule picker. Defaults to the id." },
-              "detail": { "type": "string", "description": "Optional line shown under the label." },
-              "run": { "type": "string", "description": "The command to run. May contain {note}, spliced in unquoted and verbatim — quoting it in the template does not fully sanitise it." }
+              "id": {
+                "type": "string",
+                "description": "Stable id, referenced by a flow's command node."
+              },
+              "label": {
+                "type": "string",
+                "description": "Shown in the rule picker. Defaults to the id."
+              },
+              "detail": {
+                "type": "string",
+                "description": "Optional line shown under the label."
+              },
+              "run": {
+                "type": "string",
+                "description": "The command to run. May contain {note}, spliced in unquoted and verbatim — quoting it in the template does not fully sanitise it."
+              }
             }
           }
         },

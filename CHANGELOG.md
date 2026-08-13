@@ -5,6 +5,15 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.17.1] — 2026-08-13
+
+### Fixed
+
+- **Take button height matches its neighbors.** It had no explicit height and
+  rendered slightly shorter than Address PR and the sprint-remove control.
+
 ## [0.17.0] — 2026-08-13
 
 ### Changed
