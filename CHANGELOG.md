@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.3] — 2026-08-13
+
+### Fixed
+
+- **Loading state before the first sync.** The board showed "No tasks in
+  flight" during the brief window between mount and the first `deck:runs`
+  post, indistinguishable from a genuinely empty board. It now shows a
+  loading state until real data has landed.
+
 ## [0.17.2] — 2026-08-13
 
 ### Docs
