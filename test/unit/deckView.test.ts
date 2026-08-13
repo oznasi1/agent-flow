@@ -1269,6 +1269,56 @@ describe("DeckPanel open agents", () => {
   });
 });
 
+describe("session ownership — one agent, one card", () => {
+  const NOW = Date.now();
+  const MIN = 60_000;
+  // Four notepad runs launched in place, all on one checkout. This is the real
+  // shape: two live agents used to render as 4 x 2 = 8 cards.
+  const notepad = (key: string, createdAt: number): Run =>
+    mkRun({ key, kind: "notepad", url: "", createdAt, summary: key,
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }] });
+
+  beforeEach(() => {
+    h.runs = [
+      notepad("notepad-a", NOW - 90 * MIN),
+      notepad("notepad-b", NOW - 60 * MIN),
+      notepad("notepad-c", NOW - 30 * MIN),
+      notepad("notepad-d", NOW - 10 * MIN),
+    ];
+    h.openSessions = [
+      sess({ sessionId: "s1", cwd: "/r/svc", startedAt: NOW - 45 * MIN }),
+      sess({ pid: 2, sessionId: "s2", cwd: "/r/svc", startedAt: NOW - 5 * MIN }),
+    ];
+  });
+
+  it("attaches each session exactly once across every run sharing the checkout", async () => {
+    show();
+    await settled();
+    const attached = ["notepad-a", "notepad-b", "notepad-c", "notepad-d"]
+      .flatMap((k) => builtFor(k).agents.map((a) => a.session.sessionId));
+    expect(attached.sort()).toEqual(["s1", "s2"]);
+  });
+
+  it("gives each session to the newest run created at or before it started", async () => {
+    show();
+    await settled();
+    expect(builtFor("notepad-b").agents.map((a) => a.session.sessionId)).toEqual(["s1"]);
+    expect(builtFor("notepad-d").agents.map((a) => a.session.sessionId)).toEqual(["s2"]);
+    expect(builtFor("notepad-a").agents).toEqual([]);
+    expect(builtFor("notepad-c").agents).toEqual([]);
+  });
+
+  it("still claims the place, so it does not also become a local card", async () => {
+    show();
+    await settled();
+    // The place belongs to a tracked run whether or not that run owns the
+    // session in it, so no synthetic local card may be built for it.
+    const localCalls = h.buildRunStatus.mock.calls
+      .map((c) => c[0] as { run: Run }).filter((i) => i.run.kind === "local");
+    expect(localCalls).toEqual([]);
+  });
+});
+
 describe("DeckPanel settings without a reload", () => {
   it("re-seeds prFacts from the setting and re-probes gh when it turns on", async () => {
     h.prFacts = false;

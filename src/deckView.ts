@@ -38,6 +38,7 @@ import { groupPlacesByWindow, inferTicket, localRunFor } from "./engine/localRun
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity } from "./engine/transcript";
 import { canon } from "./engine/paths";
+import { OwnedRun, resolveOwnership } from "./engine/ownership";
 // The scope picker the modes-notice hide-write already uses: a settings write must
 // land where the user's value already lives. Saving a command is the same problem.
 import { pickExplicit } from "./modesNotice";
@@ -2086,6 +2087,15 @@ export class DeckPanel {
     const allPlaces = groupByPlace(readOpenSessions(defaultSessionsDir()));
     const places = this.openAgents ? allPlaces : new Map<string, OpenSession[]>();
     const livePlaces = new Set(allPlaces.keys());
+    // Ownership is resolved from `allPlaces`, NOT `places`: `openAgents` is a
+    // display toggle, and a run whose agents are merely hidden must not read as
+    // a run with nobody working in it. The shelf rule below depends on this.
+    const ownedRuns: OwnedRun[] = tracked.map((r) => ({
+      key: r.key,
+      createdAt: r.createdAt,
+      paths: r.repos.map((repo) => canon(repo.path)),
+    }));
+    const ownership = resolveOwnership({ runs: ownedRuns, sessionsByPlace: allPlaces });
     const claimed = new Set<string>();
     const agentsByKey = new Map<string, CardAgent[]>();
     for (const run of tracked) {
@@ -2096,6 +2106,9 @@ export class DeckPanel {
         if (!sessions) continue;
         claimed.add(place);
         for (const s of sessions) {
+          // One session, one card. Several runs can hold the same in-place
+          // checkout; only its owner renders it as an agent.
+          if (ownership.sessionOwner.get(s.sessionId) !== run.key) continue;
           mine.push({
             session: s,
             // Addressed by sessionId, so two sessions in one worktree report
