@@ -235,6 +235,13 @@ export function App(): JSX.Element {
           setAgentLabel(m.agentLabel ?? DEFAULT_AGENT_LABEL);
           setCaps(m.caps);
           break;
+        // The source finished asking its server what it can do. Folded into the same
+        // state `state` set, so a session where this never arrives — a connector with
+        // no refreshCaps, or one whose probe failed — renders exactly what `state`
+        // already established.
+        case "caps":
+          setCaps(m.caps);
+          break;
         case "error":
           setLoading(false);
           setError({ message: m.message, canRetry: m.canRetry, canRunDoctor: m.canRunDoctor });
