@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.2] — 2026-08-13
+
+### Fixed
+
+- **An Action required card with no agent open no longer reads as disabled.** A
+  card reaches that column without an agent because a PR is blocked, but its
+  state line read the parked grey — `parked · git + Jira only`, the wording for
+  "nothing is happening" — on the one column that means act now. On a board with
+  no agents open anywhere, that was every card in the column, so a column of
+  real work looked uniformly greyed out. The line now leads with `pr blocked` in
+  the column's own tone, the way a `done` card has always let its column
+  outrank the agent read. The PR block beneath still names the failing check,
+  the review and the conflict.
+
 ## [0.19.1] — 2026-08-13
 
 ### Fixed
