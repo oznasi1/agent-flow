@@ -4513,6 +4513,102 @@ describe("notepad", () => {
     expect(without).not.toHaveProperty("imageUris");
   });
 
+  it("writes a pasted image and stores its record on the note", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    seedNote(store);
+    await sendMsg({ type: "notepad:addImage", id: "n1", dataBase64: Buffer.from("PNGDATA").toString("base64"), mime: "image/png", name: "shot.png" });
+    const images = imagesOf(store)!;
+    expect(images).toHaveLength(1);
+    expect(images[0]).toMatchObject({ ext: "png", name: "shot.png" });
+    expect(fs.readFileSync(path.join(imageDir, `${images[0].id}.png`), "utf8")).toBe("PNGDATA");
+  });
+
+  it("toasts the reason and stores nothing when the type is unsupported", async () => {
+    const { store, sendMsg, posted, imageDir } = mkProvider();
+    seedNote(store);
+    await sendMsg({ type: "notepad:addImage", id: "n1", dataBase64: "AAAA", mime: "application/pdf", name: "paper.pdf" });
+    const toast = (posted as { type: string; level?: string; message?: string }[]).find((m) => m.type === "toast");
+    expect(toast).toMatchObject({ level: "error" });
+    expect(toast!.message).toContain("paper.pdf");
+    expect(imagesOf(store)).toBeUndefined();
+    expect(fs.existsSync(imageDir)).toBe(false);
+  });
+
+  it("ignores an addImage for a note that no longer exists", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    store.set("agentFlow.notepad", []);
+    await sendMsg({ type: "notepad:addImage", id: "gone", dataBase64: "AAAA", mime: "image/png", name: "a.png" });
+    expect(fs.existsSync(imageDir)).toBe(false);
+  });
+
+  it("attaches the pending images that arrive with notepad:add", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({
+      type: "notepad:add",
+      title: "New",
+      body: "",
+      images: [{ dataBase64: Buffer.from("A").toString("base64"), mime: "image/png", name: "a.png" }],
+    });
+    expect(imagesOf(store)).toHaveLength(1);
+  });
+
+  it("adds a note that is nothing but an image", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({
+      type: "notepad:add",
+      title: "",
+      body: "",
+      images: [{ dataBase64: Buffer.from("A").toString("base64"), mime: "image/png", name: "a.png" }],
+    });
+    expect(notesIn(store)).toHaveLength(1);
+  });
+
+  it("removes an image from the note and unlinks its file", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    seedFiles(imageDir, "i1.png", "i2.png");
+    seedNote(store, { images: [{ id: "i1", ext: "png", name: "a.png" }, { id: "i2", ext: "png", name: "b.png" }] });
+    await sendMsg({ type: "notepad:removeImage", id: "n1", imageId: "i1" });
+    expect(imagesOf(store)!.map((i) => i.id)).toEqual(["i2"]);
+    expect(fs.existsSync(path.join(imageDir, "i1.png"))).toBe(false);
+    expect(fs.existsSync(path.join(imageDir, "i2.png"))).toBe(true);
+  });
+
+  it("drops the images key entirely once the last image is removed", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    seedFiles(imageDir, "i1.png");
+    seedNote(store, { images: [{ id: "i1", ext: "png", name: "a.png" }] });
+    await sendMsg({ type: "notepad:removeImage", id: "n1", imageId: "i1" });
+    expect((store.get("agentFlow.notepad") as object[])[0]).not.toHaveProperty("images");
+  });
+
+  it("reads the picked file itself and attaches it", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    const src = path.join(path.dirname(imageDir), "pick.png");
+    fs.writeFileSync(src, "PICKED");
+    window.showOpenDialog.mockResolvedValue([{ fsPath: src }]);
+    seedNote(store);
+    await sendMsg({ type: "notepad:pickImage", id: "n1" });
+    expect(imagesOf(store)![0]).toMatchObject({ ext: "png", name: "pick.png" });
+  });
+
+  it("does nothing when the picker is cancelled", async () => {
+    const { store, sendMsg } = mkProvider();
+    window.showOpenDialog.mockResolvedValue(undefined);
+    seedNote(store);
+    await sendMsg({ type: "notepad:pickImage", id: "n1" });
+    expect(imagesOf(store)).toBeUndefined();
+  });
+
+  it("opens a thumbnail through the vscode.open command", async () => {
+    const { store, sendMsg } = mkProvider();
+    seedNote(store, { images: [{ id: "i1", ext: "gif", name: "a.gif" }] });
+    await sendMsg({ type: "notepad:openImage", id: "n1", imageId: "i1" });
+    expect(commands.executeCommand).toHaveBeenCalledWith(
+      "vscode.open",
+      expect.objectContaining({ fsPath: expect.stringContaining(path.join("notepad-images", "i1.gif")) }),
+    );
+  });
+
   it("adds a note and posts the new list back", async () => {
     const { posted, store, sendMsg } = mkProvider();
     await sendMsg({ type: "notepad:add", title: "Write the thing", body: "details" });

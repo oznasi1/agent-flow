@@ -465,8 +465,20 @@ export type InboundMessage =
   | { type: "addToMySprint"; key: string }
   | { type: "explore" }
   // The Notepad tab (same webview as the task pool, second view)
-  | { type: "notepad:add"; title: string; body: string }
+  /** `images` is absent unless the add form actually holds pending attachments, so
+   * a plain note's message is byte-identical to what it was before images existed. */
+  | { type: "notepad:add"; title: string; body: string; images?: PendingImage[] }
   | { type: "notepad:update"; id: string; title: string; body: string }
+  /** Paste or file-drop onto a saved note. Base64 because postMessage is a JSON
+   * channel — one message per attachment, never something the poll repeats. */
+  | { type: "notepad:addImage"; id: string; dataBase64: string; mime: string; name: string }
+  /** The Attach button. The host runs the picker and reads the bytes itself, so
+   * nothing is encoded across the wire on this path. */
+  | { type: "notepad:pickImage"; id: string }
+  | { type: "notepad:removeImage"; id: string; imageId: string }
+  /** A thumbnail click. Carries the note id too, so the host can look the record up
+   * and learn the extension — the webview only ever holds the derived URI. */
+  | { type: "notepad:openImage"; id: string; imageId: string }
   | { type: "notepad:toggleDone"; id: string }
   | { type: "notepad:delete"; id: string }
   | { type: "notepad:clearCompleted" }

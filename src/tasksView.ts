@@ -31,13 +31,15 @@ import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { newNote, newSection, noteStatus, sanitizeNotes, sanitizeSections } from "./notepad";
-import { IMAGE_DIR, imageFileName } from "./notepadImages";
+import { IMAGE_DIR, deleteImages, imageFileName, imagePath, saveImage } from "./notepadImages";
 import {
   Filter,
   InboundMessage,
+  NotepadImage,
   NotepadItem,
   NotepadItemView,
   NotepadSection,
+  PendingImage,
   Task,
   OutboundMessage,
   PromptMode,
@@ -63,6 +65,25 @@ const NOTEPAD_SECTIONS_KEY = "agentFlow.notepadSections";
 // Which section ids are collapsed right now. globalState, so a collapsed
 // section stays collapsed across a reload rather than resetting to expanded.
 const NOTEPAD_COLLAPSED_KEY = "agentFlow.notepadCollapsed";
+
+// The inverse of the image store's own mime map, for the one attach path that
+// starts from a file path instead of a clipboard item. Kept here rather than
+// exported from the store so the store's whitelist stays the single gate — this
+// only PROPOSES a mime, which saveImage is still free to refuse.
+const MIME_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+};
+
+/** A note with no images left keeps NO `images` key, so it serialises exactly like
+ * a note that never had one — the shape every pre-existing install stores. */
+function stripImages(note: NotepadItem): NotepadItem {
+  const { images: _images, ...rest } = note;
+  return rest;
+}
 
 /** Said in two places — the pre-flight refusal at the top of every launch, and the
  * `resolveRemoteControl` backstop behind it. One constant so the two can never drift. */
@@ -372,17 +393,80 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.post({ type: "notepad:notes", notes: view, ordered: this.noteOrder().length > 0, sections });
   }
 
-  private async addNote(title: string, body: string): Promise<void> {
+  private async addNote(title: string, body: string, pending?: PendingImage[]): Promise<void> {
     // A note with neither a title nor a body is nothing at all — silently ignored
     // rather than toasted: the webview already disables the button, so reaching
-    // here means a stale view, not a user who needs telling.
-    if (!title.trim() && !body.trim()) return;
+    // here means a stale view, not a user who needs telling. A note carrying only
+    // an image IS something, though: the screenshot is the content.
+    if (!title.trim() && !body.trim() && !(pending && pending.length > 0)) return;
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    // Written before the note, so the single saveNotes below (which posts) already
+    // carries them — the add form's thumbnails must not blink out and back in.
+    const images: NotepadImage[] = [];
+    for (const p of pending ?? []) {
+      const imageId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const saved = saveImage(this.imageDir(), Buffer.from(p.dataBase64, "base64"), p.mime, p.name, imageId);
+      if (saved.ok) images.push(saved.image);
+      else this.toast("error", saved.reason);
+    }
     // Rank it first, so a manual order does not bury the note just written. Write
     // the order before the notes: saveNotes posts, and the post must already see it.
     const order = this.noteOrder();
     if (order.length > 0) await this.saveNoteOrder([id, ...order]);
-    await this.saveNotes([...this.notes(), newNote(title, body, id, Date.now())]);
+    const note = newNote(title, body, id, Date.now());
+    await this.saveNotes([...this.notes(), images.length > 0 ? { ...note, images } : note]);
+  }
+
+  /** Attach one image to a saved note. A refusal is toasted with the store's own
+   * reason rather than swallowed: the user just pasted something and is owed an
+   * answer. Unlike title and body — a draft that waits on Save — an attachment is
+   * immediate, like toggleDone: it is on disk the moment it lands, and Cancel in
+   * the edit form does not take it back. */
+  private async attachImage(id: string, bytes: Uint8Array, mime: string, name: string): Promise<void> {
+    // A stale view can name a note the store no longer has. There is nothing to
+    // attach to, and writing the file anyway would hand the sweep an instant orphan.
+    if (!this.notes().some((n) => n.id === id)) return;
+    const imageId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const saved = saveImage(this.imageDir(), bytes, mime, name, imageId);
+    if (!saved.ok) {
+      this.toast("error", saved.reason);
+      return;
+    }
+    await this.saveNotes(
+      this.notes().map((n) => (n.id === id ? { ...n, images: [...(n.images ?? []), saved.image] } : n)),
+    );
+  }
+
+  private async pickImage(id: string): Promise<void> {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      openLabel: "Attach",
+      filters: { Images: ["png", "jpg", "jpeg", "gif", "webp"] },
+    });
+    const file = picked?.[0];
+    if (!file) return;
+    // A picker hands back a path, not a type, so the mime comes from the extension
+    // here. The filter above is a hint the user can defeat ("All Files"), which is
+    // why an unlisted extension still has to fail the store's own whitelist.
+    const mime = MIME_BY_EXT[path.extname(file.fsPath).slice(1).toLowerCase()] ?? "";
+    await this.attachImage(id, fs.readFileSync(file.fsPath), mime, path.basename(file.fsPath));
+  }
+
+  private async removeImage(id: string, imageId: string): Promise<void> {
+    const note = this.notes().find((n) => n.id === id);
+    const image = note?.images?.find((i) => i.id === imageId);
+    if (!note || !image) return;
+    deleteImages(this.imageDir(), [image]);
+    const images = (note.images ?? []).filter((i) => i.id !== imageId);
+    await this.saveNotes(
+      this.notes().map((n) => (n.id === id ? (images.length > 0 ? { ...n, images } : stripImages(n)) : n)),
+    );
+  }
+
+  private async openImage(id: string, imageId: string): Promise<void> {
+    const image = this.notes().find((n) => n.id === id)?.images?.find((i) => i.id === imageId);
+    if (!image) return;
+    await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(imagePath(this.imageDir(), image)));
   }
 
   private async updateNote(id: string, title: string, body: string): Promise<void> {
@@ -611,11 +695,27 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "notepad:add": {
-          await this.addNote(m.title, m.body);
+          await this.addNote(m.title, m.body, m.images);
           break;
         }
         case "notepad:update": {
           await this.updateNote(m.id, m.title, m.body);
+          break;
+        }
+        case "notepad:addImage": {
+          await this.attachImage(m.id, Buffer.from(m.dataBase64, "base64"), m.mime, m.name);
+          break;
+        }
+        case "notepad:pickImage": {
+          await this.pickImage(m.id);
+          break;
+        }
+        case "notepad:removeImage": {
+          await this.removeImage(m.id, m.imageId);
+          break;
+        }
+        case "notepad:openImage": {
+          await this.openImage(m.id, m.imageId);
           break;
         }
         case "notepad:toggleDone": {
