@@ -9,6 +9,12 @@ const root = path.join(__dirname, "..");
 const head = fs.readFileSync(path.join(root, "preview/head.html"), "utf8");
 const bundle = fs.readFileSync(path.join(root, "dist/webview.js"), "utf8");
 
-const out = head.replace("</body>", `  <script>${bundle}</script>\n</body>`);
+// The replacement is a FUNCTION, not a string, and must stay one. A string
+// replacement is scanned for $-patterns, and a minified bundle contains `$&` —
+// which expands to the matched text, silently pasting a stray "</body>" into the
+// middle of the JavaScript being injected. That lands inside a string literal
+// often enough to go unnoticed, and produces an unparseable page when it doesn't.
+// A function's return value is used verbatim, so `$` means `$`.
+const out = head.replace("</body>", () => `  <script>${bundle}</script>\n</body>`);
 fs.writeFileSync(path.join(root, "preview/agent-flow-preview.html"), out);
 console.log("preview → preview/agent-flow-preview.html");
