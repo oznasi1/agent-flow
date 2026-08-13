@@ -41,6 +41,15 @@ export function buildJql(project: string, filter: Filter, size: Size = "any"): s
   return `${where}${sz ? ` AND ${sz}` : ""} ${ORDER}`;
 }
 
+/** Drop the priority term from the sort — fallback for a project where `priority` is
+ * hidden, unavailable or unindexed, which makes Jira reject the whole query rather
+ * than ignore the sort. Keeps `updated DESC` so the result is still newest-first
+ * rather than arbitrary. Touches only the ORDER BY, never the WHERE, and leaves a
+ * query that never sorted by priority exactly as it was. */
+export function stripPriorityOrder(jql: string): string {
+  return jql.replace(/ORDER BY priority DESC,\s*/i, "ORDER BY ");
+}
+
 /** Strip sprint clauses — fallback for projects without a sprint board. */
 export function stripSprint(jql: string): string {
   return jql

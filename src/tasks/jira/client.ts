@@ -1,5 +1,5 @@
 import { JiraAuth } from "./auth";
-import { buildJql, stripSprint } from "./jql";
+import { buildJql, stripPriorityOrder, stripSprint } from "./jql";
 import { parseJiraError } from "./errors";
 import { TransitionFieldMeta } from "./transitionFields";
 import { Filter, Task, Size } from "../../types";
@@ -220,6 +220,11 @@ export class JiraClient {
       push(noSize);
       push(stripSprint(noSize));
     }
+    // Sort-stripped variants go LAST, after every WHERE-stripped candidate: a wrong
+    // sort is cosmetic and a wrong filter is a wrong list, so the ladder should
+    // exhaust everything that keeps the sort before trading it away. Iterating over a
+    // copy — `push` appends to `candidates` as we go.
+    for (const q of [...candidates]) push(stripPriorityOrder(q));
 
     const sprintField = await this.sprintFieldId();
     const fields = sprintField ? [...LIST_FIELDS, sprintField] : LIST_FIELDS;

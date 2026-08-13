@@ -201,6 +201,36 @@ describe("fetchTasks", () => {
     expect(tasks[0].sprint).toBeNull();
   });
 
+  it("degrades to a priority-free sort once every other candidate has failed", async () => {
+    // A project with priority hidden or unindexed rejects every candidate that sorts by
+    // it. The sort-stripped queries sit LAST in the ladder, so this is only reached
+    // after the sprint- and size-stripped ones have already been refused.
+    const fetchMock = installFetch([
+      jsonResponse(FIELD_LIST),
+      textResponse("Field 'priority' does not exist", 400),
+      jsonResponse({ issues: [rawIssue()] }),
+    ]);
+    const tasks = await client().fetchTasks("mine");
+    expect(tasks).toHaveLength(1);
+    expect(bodyOf(fetchMock, 1).jql).toContain("ORDER BY priority DESC");
+    expect(bodyOf(fetchMock, 2).jql).toBe(
+      "project = ASM AND statusCategory != Done AND assignee = currentUser() ORDER BY updated DESC",
+    );
+  });
+
+  it("keeps the priority sort for as long as anything with it still works", async () => {
+    // The reverse guard: the sort-stripped variants must never pre-empt a candidate
+    // that keeps it. A wrong sort is cosmetic; a wrong filter is a wrong list.
+    const fetchMock = installFetch([
+      jsonResponse(FIELD_LIST),
+      textResponse("no board", 400),
+      jsonResponse({ issues: [rawIssue()] }),
+    ]);
+    await client().fetchTasks("mysprint");
+    expect(bodyOf(fetchMock, 2).jql).toContain("ORDER BY priority DESC");
+    expect(bodyOf(fetchMock, 2).jql).not.toContain("openSprints()");
+  });
+
   it("asks Jira for the issue type alongside the other list fields", async () => {
     const fetchMock = installFetch([jsonResponse(FIELD_LIST), jsonResponse({ issues: [rawIssue()] })]);
     await client().fetchTasks("mine");
