@@ -1069,6 +1069,61 @@ describe("DeckApp — Address PR", () => {
   });
 });
 
+// An Action required card with no agent open got there because a PR is blocked —
+// deriveBucket has no other route into `needs` without an agent. Its state line used
+// to read the parked grey, which says "nothing is happening" on the one column that
+// means act now, and with no agents anywhere that made the whole column read as
+// disabled.
+describe("DeckApp — an agentless Action required card", () => {
+  const blocked = (over: Partial<PrFacts> = {}) => mkStatus({
+    column: "needs",
+    agent: { state: "unknown", lastActivityMs: null, slug: null },
+    agents: [],
+    prs: { svc: { facts: prFacts({ review: "changes_requested", ...over }), fetchedAt: 1 } },
+  });
+
+  it("names the block in the attn tone instead of the parked grey", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([blocked()]));
+    const status = container.querySelector(".status") as HTMLElement;
+    expect(status.textContent).toContain("pr blocked");
+    expect(status.className).toContain("tone-attn");
+    expect(status.className).not.toContain("tone-parked");
+    expect(screen.queryByText(/parked · git \+ Jira only/)).not.toBeInTheDocument();
+  });
+
+  it("carries the attn dot, so the column's leading edge scans as one signal", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([blocked()]));
+    expect(container.querySelector(".sdot.tone-attn")).not.toBeNull();
+  });
+
+  it("reaches the line through a failing check too, not only a review", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([blocked({ review: "none", ci: { passing: 1, pending: 0, failing: [{ name: "unit", url: "" }] } })]));
+    expect((container.querySelector(".status") as HTMLElement).textContent).toContain("pr blocked");
+  });
+
+  // The guard matters: `needs` with no agent and nothing blocking is a state the
+  // ladder shouldn't produce, and inventing "pr blocked" for it would be a lie.
+  it("keeps the parked line when nothing about the PR is actually blocking", () => {
+    render(<DeckApp />);
+    host(runsMsg([blocked({ review: "approved" })]));
+    expect(screen.getByText(/parked · git \+ Jira only/)).toBeInTheDocument();
+  });
+
+  it("leaves an agentless card in another column parked", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "review",
+      agent: { state: "unknown", lastActivityMs: null, slug: null },
+      agents: [],
+      prs: { svc: { facts: prFacts({ review: "changes_requested" }), fetchedAt: 1 } },
+    })]));
+    expect(screen.getByText(/parked · git \+ Jira only/)).toBeInTheDocument();
+  });
+});
+
 describe("Agents view", () => {
   it("renders one card per agent when their states put them in different columns", () => {
     render(<DeckApp />);
