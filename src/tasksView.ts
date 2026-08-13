@@ -30,12 +30,13 @@ import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/ses
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
-import { newNote, noteStatus, sanitizeNotes } from "./notepad";
+import { newNote, newSection, noteStatus, sanitizeNotes, sanitizeSections } from "./notepad";
 import {
   Filter,
   InboundMessage,
   NotepadItem,
   NotepadItemView,
+  NotepadSection,
   Task,
   OutboundMessage,
   PromptMode,
@@ -55,6 +56,12 @@ const NOTEPAD_KEY = "agentFlow.notepad";
 // Empty (the default) means "no manual order", which is what every install starts
 // with and what makes this feature inert until the first drag.
 const NOTEPAD_ORDER_KEY = "agentFlow.notepadOrder";
+// User-defined groups notes can be filed under. Sections are opt-in — this list
+// starts empty on every install, same as notepadOrder starting empty.
+const NOTEPAD_SECTIONS_KEY = "agentFlow.notepadSections";
+// Which section ids are collapsed right now. globalState, so a collapsed
+// section stays collapsed across a reload rather than resetting to expanded.
+const NOTEPAD_COLLAPSED_KEY = "agentFlow.notepadCollapsed";
 
 /** Said in two places — the pre-flight refusal at the top of every launch, and the
  * `resolveRemoteControl` backstop behind it. One constant so the two can never drift. */
@@ -282,6 +289,24 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     await this.context.globalState.update(NOTEPAD_ORDER_KEY, order);
   }
 
+  private sections(): NotepadSection[] {
+    return sanitizeSections(this.context.globalState.get<unknown>(NOTEPAD_SECTIONS_KEY, []));
+  }
+
+  private async saveSections(sections: NotepadSection[]): Promise<void> {
+    await this.context.globalState.update(NOTEPAD_SECTIONS_KEY, sections);
+    this.postNotepad();
+  }
+
+  private collapsedSectionIds(): string[] {
+    return this.context.globalState.get<string[]>(NOTEPAD_COLLAPSED_KEY, []);
+  }
+
+  private async saveCollapsedSectionIds(ids: string[]): Promise<void> {
+    await this.context.globalState.update(NOTEPAD_COLLAPSED_KEY, ids);
+    this.postNotepad();
+  }
+
   /** Notes in display order: the manual order first where one exists, then
    * anything unranked newest-first — which is exactly the whole list when no
    * manual order exists, i.e. what the panel showed before this feature. */
@@ -314,7 +339,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       const runStatus = noteStatus(n, runs, livePlaces);
       return runStatus ? { ...n, runStatus } : { ...n };
     });
-    this.post({ type: "notepad:notes", notes: view, ordered: this.noteOrder().length > 0 });
+    const collapsed = new Set(this.collapsedSectionIds());
+    const sections = this.sections().map((s) => ({ ...s, collapsed: collapsed.has(s.id) }));
+    this.post({ type: "notepad:notes", notes: view, ordered: this.noteOrder().length > 0, sections });
   }
 
   private async addNote(title: string, body: string): Promise<void> {
@@ -350,6 +377,37 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const remaining = this.notes().filter((n) => !n.done);
     await this.pruneNoteOrder(remaining);
     await this.saveNotes(remaining);
+  }
+
+  private async addSection(name: string): Promise<void> {
+    if (!name.trim()) return;
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    await this.saveSections([...this.sections(), newSection(name, id, Date.now())]);
+  }
+
+  private async renameSection(id: string, name: string): Promise<void> {
+    if (!name.trim()) return;
+    await this.saveSections(this.sections().map((s) => (s.id === id ? { ...s, name: name.trim() } : s)));
+  }
+
+  /** The section goes away; its notes do not — they fall back to ungrouped,
+   * same as a note whose section was never set. */
+  private async deleteSection(id: string): Promise<void> {
+    await this.saveSections(this.sections().filter((s) => s.id !== id));
+    await this.saveNotes(this.notes().map((n) => (n.sectionId === id ? { ...n, sectionId: undefined } : n)));
+    const collapsed = this.collapsedSectionIds();
+    if (collapsed.includes(id)) await this.saveCollapsedSectionIds(collapsed.filter((c) => c !== id));
+  }
+
+  private async setNoteSection(id: string, sectionId: string | undefined): Promise<void> {
+    await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, sectionId } : n)));
+  }
+
+  private async toggleSectionCollapsed(id: string): Promise<void> {
+    const collapsed = this.collapsedSectionIds();
+    await this.saveCollapsedSectionIds(
+      collapsed.includes(id) ? collapsed.filter((c) => c !== id) : [...collapsed, id],
+    );
   }
 
   public async refresh(): Promise<void> {
@@ -565,6 +623,26 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         case "notepad:resetOrder": {
           await this.saveNoteOrder([]);
           this.postNotepad();
+          break;
+        }
+        case "notepad:addSection": {
+          await this.addSection(m.name);
+          break;
+        }
+        case "notepad:renameSection": {
+          await this.renameSection(m.id, m.name);
+          break;
+        }
+        case "notepad:deleteSection": {
+          await this.deleteSection(m.id);
+          break;
+        }
+        case "notepad:setSection": {
+          await this.setNoteSection(m.id, m.sectionId);
+          break;
+        }
+        case "notepad:toggleSectionCollapsed": {
+          await this.toggleSectionCollapsed(m.id);
           break;
         }
         case "reorder": {

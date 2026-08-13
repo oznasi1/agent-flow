@@ -7,10 +7,14 @@ const sendSpy = vi.fn();
 vi.mock("../../src/webview/vscodeApi", () => ({ send: (m: unknown) => sendSpy(m) }));
 
 import { Notepad } from "../../src/webview/Notepad";
-import type { NotepadItemView } from "../../src/types";
+import type { NotepadItemView, NotepadSectionView } from "../../src/types";
 
 const note = (over: Partial<NotepadItemView> = {}): NotepadItemView => ({
   id: "n1", title: "Ship the thing", body: "body", done: false, createdAt: 1, ...over,
+});
+
+const section = (over: Partial<NotepadSectionView> = {}): NotepadSectionView => ({
+  id: "s1", name: "Bugs", createdAt: 1, collapsed: false, ...over,
 });
 
 beforeEach(() => sendSpy.mockClear());
@@ -360,5 +364,149 @@ describe("drag to reorder", () => {
     const { container } = render(<Notepad ordered={false} notes={[note({ id: "n1" })]} />);
     fireEvent.click(screen.getByRole("button", { name: "Edit note" }));
     expect(container.querySelector(".grip")).toBeNull();
+  });
+});
+
+describe("sections", () => {
+  it("groups a note under its section's header and leaves an unsectioned note headerless", () => {
+    render(
+      <Notepad
+        ordered={false}
+        notes={[note({ id: "a", title: "in a section", sectionId: "s1" }), note({ id: "b", title: "no section" })]}
+        sections={[section()]}
+      />,
+    );
+    expect(screen.getByText("Bugs")).toBeInTheDocument();
+    expect(screen.getByText("in a section")).toBeInTheDocument();
+    expect(screen.getByText("no section")).toBeInTheDocument();
+  });
+
+  it("hides a collapsed section's notes but keeps its header", () => {
+    render(
+      <Notepad
+        ordered={false}
+        notes={[note({ id: "a", title: "hidden note", sectionId: "s1" })]}
+        sections={[section({ collapsed: true })]}
+      />,
+    );
+    expect(screen.getByText("Bugs")).toBeInTheDocument();
+    expect(screen.queryByText("hidden note")).toBeNull();
+  });
+
+  it("sends notepad:toggleSectionCollapsed from the section's chevron", () => {
+    render(<Notepad ordered={false} notes={[]} sections={[section()]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Bugs" }));
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:toggleSectionCollapsed", id: "s1" });
+  });
+
+  it("labels a collapsed section's toggle as Expand", () => {
+    render(<Notepad ordered={false} notes={[]} sections={[section({ collapsed: true })]} />);
+    expect(screen.getByRole("button", { name: "Expand Bugs" })).toBeInTheDocument();
+  });
+
+  it("adds a section from the Add section control and clears the input", () => {
+    render(<Notepad ordered={false} notes={[]} sections={[]} />);
+    const input = screen.getByPlaceholderText("New section name");
+    fireEvent.change(input, { target: { value: "Ideas" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add section" }));
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:addSection", name: "Ideas" });
+    expect((input as HTMLInputElement).value).toBe("");
+  });
+
+  it("disables Add section until a name is typed", () => {
+    render(<Notepad ordered={false} notes={[]} sections={[]} />);
+    expect(screen.getByRole("button", { name: "Add section" })).toBeDisabled();
+  });
+
+  it("renames a section from its header", () => {
+    render(<Notepad ordered={false} notes={[]} sections={[section()]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Rename section" }));
+    const nameInput = screen.getByDisplayValue("Bugs");
+    fireEvent.change(nameInput, { target: { value: "Bugs & fixes" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save section name" }));
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:renameSection", id: "s1", name: "Bugs & fixes" });
+  });
+
+  it("deletes a section from its header", () => {
+    render(<Notepad ordered={false} notes={[]} sections={[section()]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Delete section" }));
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:deleteSection", id: "s1" });
+  });
+
+  it("files a note into a section from the edit form's picker", () => {
+    render(<Notepad ordered={false} notes={[note()]} sections={[section()]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit note" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Section" }), { target: { value: "s1" } });
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:setSection", id: "n1", sectionId: "s1" });
+  });
+
+  it("clears a note's section from the edit form's picker", () => {
+    render(<Notepad ordered={false} notes={[note({ sectionId: "s1" })]} sections={[section()]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit note" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Section" }), { target: { value: "" } });
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:setSection", id: "n1", sectionId: undefined });
+  });
+});
+
+describe("drag across sections", () => {
+  const dt = () => ({ setData: vi.fn(), getData: vi.fn(), effectAllowed: "", dropEffect: "" });
+
+  it("reassigns and reorders when dropped on a note in a different section", () => {
+    const { container } = render(
+      <Notepad
+        ordered={false}
+        notes={[note({ id: "a", title: "dragged" }), note({ id: "b", title: "target", sectionId: "s1" })]}
+        sections={[section()]}
+      />,
+    );
+    const dragged = screen.getByText("dragged").closest(".np-item") as HTMLElement;
+    const target = screen.getByText("target").closest(".np-item") as HTMLElement;
+    const dataTransfer = dt();
+
+    fireEvent.mouseDown(dragged.querySelector(".grip") as HTMLElement);
+    fireEvent.dragStart(dragged, { dataTransfer });
+    fireEvent.dragOver(target, { dataTransfer, clientY: 5 });
+    fireEvent.drop(target, { dataTransfer, clientY: 5 });
+
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:reorder", order: ["b", "a"] });
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:setSection", id: "a", sectionId: "s1" });
+  });
+
+  it("only reorders, without reassigning, when dropped within the same section", () => {
+    render(
+      <Notepad
+        ordered={false}
+        notes={[note({ id: "a", title: "first", sectionId: "s1" }), note({ id: "b", title: "second", sectionId: "s1" })]}
+        sections={[section()]}
+      />,
+    );
+    const first = screen.getByText("first").closest(".np-item") as HTMLElement;
+    const second = screen.getByText("second").closest(".np-item") as HTMLElement;
+    const dataTransfer = dt();
+
+    fireEvent.mouseDown(first.querySelector(".grip") as HTMLElement);
+    fireEvent.dragStart(first, { dataTransfer });
+    fireEvent.dragOver(second, { dataTransfer, clientY: 5 });
+    fireEvent.drop(second, { dataTransfer, clientY: 5 });
+
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:reorder", order: ["b", "a"] });
+    expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notepad:setSection" }));
+  });
+
+  it("files a note into a section when dropped on its header, without reordering", () => {
+    render(
+      <Notepad ordered={false} notes={[note({ id: "a", title: "dragged" })]} sections={[section()]} />,
+    );
+    const dragged = screen.getByText("dragged").closest(".np-item") as HTMLElement;
+    const header = screen.getByText("Bugs").closest(".np-section-head") as HTMLElement;
+    const dataTransfer = dt();
+
+    fireEvent.mouseDown(dragged.querySelector(".grip") as HTMLElement);
+    fireEvent.dragStart(dragged, { dataTransfer });
+    fireEvent.dragOver(header, { dataTransfer });
+    fireEvent.drop(header, { dataTransfer });
+
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:setSection", id: "a", sectionId: "s1" });
+    expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notepad:reorder" }));
   });
 });

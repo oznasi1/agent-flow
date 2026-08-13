@@ -6,7 +6,7 @@
 // `canon` does touch `fs` (via `fs.realpathSync`), same as `src/engine/runs.ts`
 // which imports it the same way — that's fine here, per the same reasoning:
 // this file's purity bar is "no vscode / no mocked context", not "no fs".
-import { NotepadItem, NotepadRunStatus, Run } from "./types";
+import { NotepadItem, NotepadRunStatus, NotepadSection, Run } from "./types";
 import { canon } from "./engine/paths";
 
 /** A note's run status, from the two cheap signals `describeActiveTasks` already
@@ -52,6 +52,12 @@ export function newNote(title: string, body: string, id: string, createdAt: numb
   return { id, title: title.trim(), body: body.trim(), done: false, createdAt };
 }
 
+/** A fresh section. Same injection pattern as `newNote` — `id`/`createdAt` are
+ * passed in so this stays pure. */
+export function newSection(name: string, id: string, createdAt: number): NotepadSection {
+  return { id, name: name.trim(), createdAt };
+}
+
 /** Notes as read back from globalState, which is untyped storage that a previous
  * version — or a hand-edited state file — may have left in any shape. Anything
  * without a usable id is dropped; everything else is coerced to the current
@@ -71,7 +77,30 @@ export function sanitizeNotes(raw: unknown): NotepadItem[] {
       createdAt: typeof e.createdAt === "number" ? e.createdAt : 0,
     };
     if (typeof e.lastRunKey === "string") note.lastRunKey = e.lastRunKey;
+    if (typeof e.sectionId === "string") note.sectionId = e.sectionId;
     out.push(note);
+  }
+  return out;
+}
+
+/** Sections as read back from globalState, same defensive stance as
+ * `sanitizeNotes`. A section with no usable id OR no usable (non-empty,
+ * trimmed) name is dropped rather than coerced: an unnamed header is not a
+ * section anyone could recognise, unlike a note's title, which can be blank —
+ * a note still has its body to identify it, a section header has nothing else. */
+export function sanitizeSections(raw: unknown): NotepadSection[] {
+  if (!Array.isArray(raw)) return [];
+  const out: NotepadSection[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    if (typeof e.id !== "string" || e.id.length === 0) continue;
+    if (typeof e.name !== "string" || e.name.trim().length === 0) continue;
+    out.push({
+      id: e.id,
+      name: e.name,
+      createdAt: typeof e.createdAt === "number" ? e.createdAt : 0,
+    });
   }
   return out;
 }
