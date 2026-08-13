@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] — 2026-08-13
+
+### Fixed
+
+- **An Action required card puts its accent on Address PR, not Open.** A card
+  carries one primary button and Open held it unconditionally, so the orange
+  call to action landed on Open while Address PR — the verb the board is
+  actually asking for — sat at the secondary treatment's rest opacity and read
+  as disabled. Address PR now takes the primary weight when it is on the card,
+  and Open keeps it everywhere else.
+
 ## [0.19.0] — 2026-08-13
 
 ### Changed
