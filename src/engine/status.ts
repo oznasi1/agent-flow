@@ -90,5 +90,9 @@ export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
     windowOpen,
     prs,
     agents,
+    // The board's own membership rule needs path ownership across *every* run,
+    // which only `buildAll` can see — it overwrites this before the status
+    // reaches a card. "board" is the safe placeholder: it hides nothing.
+    shelf: "board",
   };
 }

@@ -33,6 +33,7 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   windowOpen: false,
   prs: {},
   agents: [],
+  shelf: "board",
   ...over,
 });
 

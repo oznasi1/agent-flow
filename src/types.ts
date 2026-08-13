@@ -121,6 +121,12 @@ export interface Run {
    * three-week task would retire the instant it landed. Absent on every record
    * written before this field existed, and on every run still in flight. */
   finishedAt?: number;
+  /** When this run was first observed to have no live work left — no agent of its
+   * own open, no PR, no active ticket, nothing uncommitted or unpushed. Stamped by
+   * the Deck's retire sweep and cleared again the moment any of that comes back, so
+   * the Recently-closed window survives a panel reload. Absent on every record
+   * written before this field existed, and on every run still on the board. */
+  closedAt?: number;
 }
 
 const RUN_KINDS = new Set(["task", "explore", "review", "local", "notepad"]);
@@ -220,6 +226,9 @@ export interface RunStatus {
    * connector (see `ticketKeyFor`), because the webview has no connector of its
    * own to parse a url with — this is the one place that value crosses the wire. */
   inferredTicketKey?: string;
+  /** Board or Recently-closed strip. Computed host-side because the rule needs
+   * path ownership, which needs canonical paths and therefore `fs`. */
+  shelf: Shelf;
 }
 
 // ── PR & CI observation ─────────────────────────────────────────────────────

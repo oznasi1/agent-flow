@@ -25,6 +25,7 @@ const status = (key: string, over: { merged?: boolean; agents?: CardAgent[]; unk
     run, column: "progress", ticketStatus: null, ticketCategory: null, repos: [git],
     agent: { state: over.unknownAgent ? "unknown" : "working", lastActivityMs: NOW, slug: null },
     windowOpen: false, prs, agents: over.agents ?? [],
+    shelf: "board",
   };
 };
 

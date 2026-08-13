@@ -39,6 +39,7 @@ import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/ses
 import { readSessionActivity } from "./engine/transcript";
 import { canon } from "./engine/paths";
 import { OwnedRun, resolveOwnership } from "./engine/ownership";
+import { landed, shelfFor } from "./engine/visibility";
 // The scope picker the modes-notice hide-write already uses: a settings write must
 // land where the user's value already lives. Saving a command is the same problem.
 import { pickExplicit } from "./modesNotice";
@@ -2273,7 +2274,11 @@ export class DeckPanel {
         // inferred key crosses the wire pre-computed — through the same
         // connector and the same ticketKeyFor every other caller here uses,
         // rather than a second parser living in the webview.
-        out.push(run.url ? { ...status, inferredTicketKey: ticketKeyFor(run, this.connector) } : status);
+        // A local card exists only because a session is open in it, so it is on
+        // the board by construction.
+        out.push(run.url
+          ? { ...status, shelf: "board" as const, inferredTicketKey: ticketKeyFor(run, this.connector) }
+          : { ...status, shelf: "board" as const });
         continue;
       }
       if (this.applyVerdict(run, this.verdictFor(status, livePlaces, now))) continue;
@@ -2281,7 +2286,18 @@ export class DeckPanel {
       // second call is free of side effects — `verdictFor` is pure, and only
       // `applyVerdict` ever writes.
       if (this.verdictFor(status, livePlaces, now, true).action === "retire") stale++;
-      out.push(status);
+      // Which shelf this run sits on. `hasLiveSession` comes from `ownership`
+      // rather than `status.agents`, because `agents` is gated on the openAgents
+      // display toggle and a hidden agent is still an agent.
+      const ownsPath = (p: string) => ownership.pathOwner.get(canon(p)) === run.key;
+      const shelf = getConfig().inflightShowAll ? "board" : shelfFor({
+        hasLiveSession: ownership.runsWithSession.has(run.key),
+        prOpen: Object.values(status.prs).some((e) => e.facts?.state === "OPEN"),
+        landed: landed(status.prs, status.ticketCategory),
+        ticketActive: isTicketRun(run) && status.ticketCategory !== "done",
+        hasWorkToLose: status.repos.some((r) => ownsPath(r.path) && (r.dirty || r.ahead > 0)),
+      });
+      out.push({ ...status, shelf });
     }
     this.sweepReviewRuns(livePlaces, now, false, () => stale++);
     this.staleCount = stale;

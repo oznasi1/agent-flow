@@ -21,7 +21,7 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   column: "progress", ticketStatus: "In Progress", ticketCategory: "indeterminate",
   repos: [{ name: "api", path: "/r/api", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
   agent: { state: "unknown", lastActivityMs: null, slug: null },
-  windowOpen: false, prs: {}, agents: [], ...over,
+  windowOpen: false, prs: {}, agents: [], shelf: "board", ...over,
 });
 
 describe("projectCards", () => {

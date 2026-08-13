@@ -591,6 +591,7 @@ describe("the canvas", () => {
         activity: { state: "needs-you", lastActivityMs: 9, slug: null },
         repo: agentRepo,
       }],
+      shelf: "board",
     });
 
     const boundTo = (repo: string): Flow =>
@@ -1214,7 +1215,7 @@ const runStatus = (key: string, repo: string, over: Partial<RunStatus> = {}): Ru
     column: "progress", ticketStatus: "In Progress", ticketCategory: "indeterminate",
     repos: [{ name: repo, path: `/r/${repo}`, branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
     agent: { state: "working", lastActivityMs: 1, slug: null },
-    windowOpen: true, prs, agents: [], ...over,
+    windowOpen: true, prs, agents: [], shelf: "board", ...over,
   };
 };
 

@@ -35,7 +35,7 @@ const ctx = (over: Partial<RunStatus> = {}, prs: PrEntryMap = {}): CondContext =
   status: {
     run, column: "progress", ticketStatus: null, ticketCategory: null,
     repos: [git()], agent: { state: "unknown", lastActivityMs: null, slug: null },
-    windowOpen: false, prs, agents: [], ...over,
+    windowOpen: false, prs, agents: [], shelf: "board", ...over,
   },
 });
 
@@ -140,6 +140,7 @@ describe("evalCond — agent state", () => {
         agent: { state: "needs-you", lastActivityMs: NOW, slug: null }, // the web agent, aggregated
         windowOpen: false, prs: {},
         agents: [cardAgent("needs-you", NOW, "web")],
+        shelf: "board",
       },
     };
     expect(met({ kind: "agent-ended-turn" }, c)).toBe(false);
