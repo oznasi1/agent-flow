@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-08-13
+
+### Added
+
+- **Notepad sections.** Notes can be grouped under sections you create,
+  rename, and delete from the Notepad tab, each collapsing independently and
+  remembering its state across reloads. Sections are opt-in — an existing
+  notepad renders unchanged until the first one is created. Drag a note onto
+  another section's note, or onto a section's own header, to refile it there.
+
 ## [0.17.3] — 2026-08-13
 
 ### Fixed
