@@ -90,6 +90,10 @@ export type AgentState = "working" | "needs-you" | "idle" | "unknown";
 /** The board column a run lands in. */
 export type DeckColumn = "progress" | "needs" | "review" | "done";
 
+/** Where a run sits on the In-flight view: a board column, or the Recently
+ * closed strip. Membership only — `DeckColumn` still says which column. */
+export type Shelf = "board" | "closed";
+
 /** A durable record of a task launched via Agent Flow Deck — the Deck's source of truth.
  * Written at take-time; enriched with live status on the fly. */
 export interface Run {

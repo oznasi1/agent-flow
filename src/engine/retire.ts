@@ -1,4 +1,5 @@
-import { PrEntryMap, PrFacts, RepoGit, Run, isTicketRun } from "../types";
+import { PrEntryMap, RepoGit, Run, isTicketRun } from "../types";
+import { landed } from "./visibility";
 
 /** Why a run was retired. Reaches the log, never the user. */
 export type RetireReason = "unreachable" | "finished" | "abandoned";
@@ -35,18 +36,6 @@ export interface RetireInput {
   exists: (p: string) => boolean;
 }
 
-/** Has this run's work landed? Either every PR-bearing repo merged, or the ticket
- * is done and no PR is still open. `state === "OPEN"` deliberately rather than
- * `prSignals().open`, which excludes drafts: a draft PR is unmerged work, and its
- * worktree must keep the pointer that leads back to it. */
-function landed(i: RetireInput): boolean {
-  const all = Object.values(i.prs)
-    .map((e) => e.facts)
-    .filter((f): f is PrFacts => f !== null);
-  if (all.length > 0 && all.every((f) => f.state === "MERGED")) return true;
-  return i.ticketCategory === "done" && !all.some((f) => f.state === "OPEN");
-}
-
 /**
  * What to do with one run. Three rules, every one of them requiring that no agent
  * is open in the run — see the design spec for the full rationale.
@@ -74,7 +63,7 @@ export function retireVerdict(i: RetireInput): RetireVerdict {
   const hasWorkToLose = i.repos.some((r) => r.dirty || r.ahead > 0);
 
   // Rule 2 — finished, after its grace window.
-  if (landed(i) && !hasWorkToLose) {
+  if (landed(i.prs, i.ticketCategory) && !hasWorkToLose) {
     if (i.finishedAfterMs <= 0) return { action: "retire", reason: "finished" };
     if (stamped === null) return { action: "stamp", finishedAt: i.nowMs };
     if (i.nowMs - stamped >= i.finishedAfterMs) return { action: "retire", reason: "finished" };
