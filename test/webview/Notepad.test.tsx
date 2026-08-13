@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, within, createEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within, createEvent } from "@testing-library/react";
 import * as React from "react";
 
 const sendSpy = vi.fn();
 vi.mock("../../src/webview/vscodeApi", () => ({ send: (m: unknown) => sendSpy(m) }));
 
 import { Notepad } from "../../src/webview/Notepad";
-import type { NotepadItemView, NotepadSectionView } from "../../src/types";
+import type { NotepadImage, NotepadItemView, NotepadSectionView } from "../../src/types";
 
 const note = (over: Partial<NotepadItemView> = {}): NotepadItemView => ({
   id: "n1", title: "Ship the thing", body: "body", done: false, createdAt: 1, ...over,
@@ -508,5 +508,116 @@ describe("drag across sections", () => {
 
     expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:setSection", id: "a", sectionId: "s1" });
     expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notepad:reorder" }));
+  });
+});
+
+describe("Notepad — images", () => {
+  const fileOf = (type: string, name = "shot.png") => new File(["AAAA"], name, { type });
+  // jsdom's FileReader is real and asynchronous, and its load event does NOT land
+  // within a setTimeout(0) — a test that only flushed the task queue would finish
+  // before the read, and its send would then fire during the NEXT test. Every
+  // assertion that depends on a read therefore waits for the effect itself.
+  const image = (over: Partial<NotepadImage> = {}): NotepadImage => ({ id: "i1", ext: "png", name: "a.png", ...over });
+
+  it("renders a thumbnail per attached image", () => {
+    render(<Notepad ordered={false} notes={[note({
+      images: [image(), image({ id: "i2", name: "b.png" })],
+      imageUris: ["vscode-webview://a.png", "vscode-webview://b.png"],
+    })]} />);
+    expect(screen.getAllByRole("img")).toHaveLength(2);
+  });
+
+  it("renders nothing for a note whose URIs never arrived", () => {
+    // Positional pairing is all there is, so a record with no URI beside it is not
+    // drawn rather than drawn broken.
+    render(<Notepad ordered={false} notes={[note({ images: [image()] })]} />);
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
+  });
+
+  it("renders no image strip for a note without images", () => {
+    render(<Notepad notes={[note()]} ordered={false} />);
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
+  });
+
+  it("sends notepad:openImage when a thumbnail is clicked", () => {
+    render(<Notepad ordered={false} notes={[note({ images: [image()], imageUris: ["vscode-webview://a.png"] })]} />);
+    fireEvent.click(screen.getByRole("button", { name: /Open a\.png/ }));
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:openImage", id: "n1", imageId: "i1" });
+  });
+
+  it("sends notepad:addImage when an image is pasted into a saved note's body", async () => {
+    render(<Notepad notes={[note()]} ordered={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit note" }));
+    fireEvent.paste(screen.getByDisplayValue("body"), {
+      clipboardData: { files: [fileOf("image/png")], types: ["Files"], getData: () => "" },
+    });
+    await waitFor(() => expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: "notepad:addImage", id: "n1", mime: "image/png", name: "shot.png",
+    })));
+  });
+
+  it("ignores a paste with no image on the clipboard", async () => {
+    render(<Notepad notes={[note()]} ordered={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit note" }));
+    fireEvent.paste(screen.getByDisplayValue("body"), {
+      clipboardData: { files: [fileOf("text/plain", "notes.txt")], types: ["text/plain"], getData: () => "text" },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notepad:addImage" }));
+  });
+
+  it("carries pending images with notepad:add and clears them after", async () => {
+    render(<Notepad notes={[]} ordered={false} />);
+    fireEvent.paste(screen.getByPlaceholderText("Any detail the agent should know (optional)"), {
+      clipboardData: { files: [fileOf("image/png")], types: ["Files"], getData: () => "" },
+    });
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+    expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({
+      type: "notepad:add",
+      images: [expect.objectContaining({ mime: "image/png", name: "shot.png" })],
+    }));
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
+  });
+
+  it("drops a pending image from the add form without telling the host", async () => {
+    render(<Notepad notes={[]} ordered={false} />);
+    fireEvent.paste(screen.getByPlaceholderText("Any detail the agent should know (optional)"), {
+      clipboardData: { files: [fileOf("image/png")], types: ["Files"], getData: () => "" },
+    });
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(1));
+    fireEvent.click(screen.getByRole("button", { name: /Remove shot\.png/ }));
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
+    // Nothing is on disk yet, so there is nothing for the host to unlink.
+    expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notepad:removeImage" }));
+  });
+
+  it("omits the images key from notepad:add when nothing is pending", () => {
+    render(<Notepad notes={[]} ordered={false} />);
+    fireEvent.change(screen.getByPlaceholderText("What needs doing?"), { target: { value: "Plain" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }));
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:add", title: "Plain", body: "" });
+  });
+
+  it("attaches a dropped file and does not reorder", async () => {
+    render(<Notepad ordered={false} notes={[note({ id: "a" }), note({ id: "b", title: "second" })]} />);
+    const row = screen.getByText("Ship the thing").closest(".np-item") as HTMLElement;
+    fireEvent.drop(row, { dataTransfer: { types: ["Files"], files: [fileOf("image/png")], getData: vi.fn(), setData: vi.fn(), dropEffect: "" } });
+    await waitFor(() => expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({ type: "notepad:addImage", id: "a" })));
+    expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notepad:reorder" }));
+  });
+
+  it("sends notepad:pickImage from the Attach button in edit mode", () => {
+    render(<Notepad notes={[note()]} ordered={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit note" }));
+    fireEvent.click(screen.getByRole("button", { name: "Attach image" }));
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:pickImage", id: "n1" });
+  });
+
+  it("sends notepad:removeImage from a thumbnail's remove control in edit mode", () => {
+    render(<Notepad ordered={false} notes={[note({ images: [image()], imageUris: ["vscode-webview://a.png"] })]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit note" }));
+    fireEvent.click(screen.getByRole("button", { name: /Remove a\.png/ }));
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:removeImage", id: "n1", imageId: "i1" });
   });
 });
