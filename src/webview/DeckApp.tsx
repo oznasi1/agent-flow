@@ -234,11 +234,15 @@ function workspaceLabel(run: Run): string | undefined {
   return run.workspaceFile?.split(/[\\/]/).pop()?.replace(/\.code-workspace$/, "");
 }
 
-function Card({ r, prReviewStatus, onForget, agent, column, sourceLabel }: {
+function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel }: {
   r: RunStatus; prReviewStatus: string; onForget: (key: string) => void;
   /** Non-null on the Agents board: this card is that one session, and its state
-   * line, name and action target come from the agent rather than the run. */
+   * line and action target come from the agent rather than the run. */
   agent: CardAgent | null;
+  /** Every agent this card lists via `AgentsRow` when `agent` is null — the
+   * whole run's agents on the Workspaces board, or a same-column group on the
+   * Agents board. Unused (and irrelevant) when `agent` is set. */
+  agents: CardAgent[];
   column: DeckColumn;
   sourceLabel: string;
 }): JSX.Element {
@@ -308,11 +312,6 @@ function Card({ r, prReviewStatus, onForget, agent, column, sourceLabel }: {
           <span className={`sdot tone-${sv.tone} ${sv.tone === "working" ? "pulse" : ""}`} />
           {sv.text}
         </span>
-        {agent && (
-          <span className="c-agent" title={`${agent.activity.slug ? `${agent.activity.slug} — ` : ""}Claude Code session in ${agent.repo ?? workspaceLabel(r.run) ?? r.run.repos[0]?.name ?? "this run"}`}>
-            {agent.session.name ?? agent.session.sessionId.slice(0, 8)}
-          </span>
-        )}
         {inferredKey ? (
           <span className="key-wrap">
             <span className="chip" title="Read from the branch name — Agent Flow Deck did not launch this">~inferred</span>
@@ -370,7 +369,7 @@ function Card({ r, prReviewStatus, onForget, agent, column, sourceLabel }: {
 
       {/* An agent card IS one of those rows — nesting the whole list inside every
           sibling card would say the same thing four times. */}
-      {agent === null && <AgentsRow agents={r.agents} />}
+      {agent === null && <AgentsRow agents={agents} />}
 
       <div className="c-foot">
         {r.ticketStatus && <span className="pill" title={`${sourceLabel} status: ${r.ticketStatus}`}>{r.ticketStatus}</span>}
@@ -620,7 +619,7 @@ export function DeckApp(): JSX.Element {
   const closed = runs.filter((r) => r.shelf === "closed");
   const cards: DeckCard[] = grouping === "agents"
     ? projectCards(live)
-    : live.map((r) => ({ id: `w:${r.run.key}`, status: r, agent: null, column: r.column }));
+    : live.map((r) => ({ id: `w:${r.run.key}`, status: r, agent: null, agents: r.agents, column: r.column }));
   // The label mirrors the card's own key chip, so the strip and the board name
   // the same run the same way.
   const closedRows: ClosedRow[] = closed.map((r) => ({
@@ -776,7 +775,7 @@ export function DeckApp(): JSX.Element {
                 <div className="col-body">
                   {list.map((c) => (
                     <Card key={c.id} r={c.status} prReviewStatus={prReviewStatus}
-                      onForget={forget} agent={c.agent} column={c.column} sourceLabel={sourceLabel} />
+                      onForget={forget} agent={c.agent} agents={c.agents} column={c.column} sourceLabel={sourceLabel} />
                   ))}
                 </div>
               </section>

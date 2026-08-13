@@ -25,10 +25,21 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
 });
 
 describe("projectCards", () => {
-  it("makes one card per agent, keyed by session id", () => {
-    const cards = projectCards([mkStatus({ agents: [mkAgent("s1", "working"), mkAgent("s2", "idle")] })]);
+  it("makes one card per agent when each lands in a different column", () => {
+    const cards = projectCards([mkStatus({ agents: [mkAgent("s1", "working"), mkAgent("s2", "needs-you")] })]);
     expect(cards.map((c) => c.id)).toEqual(["a:s1", "a:s2"]);
     expect(cards.every((c) => c.agent !== null)).toBe(true);
+    expect(cards.map((c) => c.agents)).toEqual([[cards[0].agent], [cards[1].agent]]);
+  });
+
+  it("merges agents that land in the same column into one card", () => {
+    const s1 = mkAgent("s1", "working");
+    const s2 = mkAgent("s2", "idle");
+    const cards = projectCards([mkStatus({ agents: [s1, s2] })]);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].id).toBe("g:ASM-1:progress");
+    expect(cards[0].agent).toBeNull();
+    expect(cards[0].agents).toEqual([s1, s2]);
   });
 
   it("splits one run across columns by each agent's own state", () => {

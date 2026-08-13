@@ -151,16 +151,6 @@ export const DECK_CSS = `
   .chip { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 3px;
     border: 1px solid var(--vscode-panel-border, var(--dim)); color: var(--dim);
     font-size: var(--t-data); opacity: .8; vertical-align: baseline; }
-  /* An agent's name is an identifier, so it earns the mono treatment. Sits with
-     the key at the trailing edge, so the state dot stays at one x down the
-     whole column. */
-  /* An agent's name is an identifier, so it earns the mono treatment. Ordered
-     last so it trails the ticket it belongs to, and so it is the one item that
-     wraps: state and ticket keep their places, and the dot stays at one x down
-     the whole column whichever way the name falls. */
-  .c-agent { order: 3; margin-left: auto; flex: 0 1 auto; min-width: 0; max-width: 100%;
-    font-family: var(--mono); color: var(--vscode-foreground); font-size: var(--t-data);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .key-wrap { margin-left: auto; display: flex; align-items: baseline; gap: 4px; min-width: 0; }
   .key-wrap .key { margin-left: 0; }
   .sdot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); flex: none; }

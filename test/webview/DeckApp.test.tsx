@@ -1053,14 +1053,16 @@ describe("DeckApp — Address PR", () => {
 });
 
 describe("Agents view", () => {
-  it("renders one card per agent, each with its own state and name", () => {
+  it("renders one card per agent when their states put them in different columns", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [
       { ...mkAgent("agent-flow-2e", "working", 100), repo: "svc" },
       { ...mkAgent("svc-7f", "needs-you", 200), repo: "svc" },
     ] })]));
-    expect(screen.getByText("agent-flow-2e")).toBeInTheDocument();
-    expect(screen.getByText("svc-7f")).toBeInTheDocument();
+    // Claude's own session name/slug never renders on a card — it's not a
+    // user-facing name, it's CLI-internal (e.g. "agent-flow-2e").
+    expect(screen.queryByText("agent-flow-2e")).not.toBeInTheDocument();
+    expect(screen.queryByText("svc-7f")).not.toBeInTheDocument();
     expect(screen.getByText(/working ·/)).toBeInTheDocument();
     expect(screen.getByText(/ended turn ·/)).toBeInTheDocument();
     // One run, two cards, so the ticket appears twice.
@@ -1134,79 +1136,34 @@ describe("Agents view", () => {
     ] })]));
     const columns = Array.from(document.querySelectorAll(".col")).map((c) => ({
       name: c.querySelector(".nm")!.textContent,
-      cards: Array.from(c.querySelectorAll(".c-agent")).map((a) => a.textContent),
+      cardCount: c.querySelectorAll(".card").length,
     }));
-    expect(columns.find((c) => c.name === "In progress")!.cards).toEqual(["a-working"]);
-    expect(columns.find((c) => c.name === "Action required")!.cards).toEqual(["a-ended"]);
+    expect(columns.find((c) => c.name === "In progress")!.cardCount).toBe(1);
+    expect(columns.find((c) => c.name === "Action required")!.cardCount).toBe(1);
   });
 
-  it("falls back to the workspace name, not the first repo, when an agent's repo is unresolved", () => {
+  it("merges same-column agents into one card instead of showing look-alike duplicates", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({
-      run: {
-        ...mkStatus().run,
-        mode: "multiroot",
-        workspaceFile: "/Users/x/.agentflow/workspaces/ASM-1+2.code-workspace",
-        repos: [
-          { name: "svc-api", path: "/r/svc-api", isGit: true, branch: "ASM-1-x" },
-          { name: "svc-web", path: "/r/svc-web", isGit: true, branch: "ASM-1-x" },
-        ],
-      },
-      agents: [mkAgent("agent-flow-2e", "working", 100)],
-    })]));
-    expect(screen.getByTitle(/Claude Code session in ASM-1\+2/)).toBeInTheDocument();
-    expect(screen.queryByTitle(/Claude Code session in svc-api/)).not.toBeInTheDocument();
-  });
-
-  it("still falls back to the first repo when the run has no workspace file", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus({
-      agents: [mkAgent("agent-flow-2e", "working", 100)],
-    })]));
-    expect(screen.getByTitle(/Claude Code session in svc/)).toBeInTheDocument();
-  });
-
-  it("extracts workspace name from Windows-style paths", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus({
-      run: {
-        ...mkStatus().run,
-        mode: "multiroot",
-        workspaceFile: "C:\\Users\\x\\.agentflow\\workspaces\\WIN-1.code-workspace",
-        repos: [
-          { name: "svc-api", path: "C:\\r\\svc-api", isGit: true, branch: "WIN-1-x" },
-        ],
-      },
-      agents: [mkAgent("agent-flow-2e", "working", 100)],
-    })]));
-    expect(screen.getByTitle(/Claude Code session in WIN-1/)).toBeInTheDocument();
-    expect(screen.queryByTitle(/Claude Code session in C:\\/)).not.toBeInTheDocument();
-  });
-
-  it("leads the agent chip tooltip with the session slug when one is known", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus({
-      agents: [{ ...mkAgent("agent-flow-2e", "working", 100), activity: { state: "working", lastActivityMs: 100, slug: "export-streaming-fix" } }],
-    })]));
-    expect(screen.getByTitle(/^export-streaming-fix — Claude Code session in svc$/)).toBeInTheDocument();
-  });
-
-  it("keeps the repo-only tooltip when no slug is known yet", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus({
-      agents: [mkAgent("agent-flow-2e", "working", 100)],
-    })]));
-    expect(screen.getByTitle(/^Claude Code session in svc$/)).toBeInTheDocument();
+    host(runsMsg([mkStatus({ agents: [
+      { ...mkAgent("a-working-1", "working", 100), repo: "svc" },
+      { ...mkAgent("a-working-2", "working", 200), repo: "svc" },
+    ] })]));
+    const inProgress = Array.from(document.querySelectorAll(".col")).find((c) => c.querySelector(".nm")!.textContent === "In progress")!;
+    expect(inProgress.querySelectorAll(".card")).toHaveLength(1);
+    // The merged card lists both sessions in its collapsed agents row.
+    expect(screen.getByText("2 agents")).toBeInTheDocument();
   });
 
   it("counts cards, not runs, in the stat tiles", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [
       { ...mkAgent("a1", "working", 100), repo: "svc" },
-      { ...mkAgent("a2", "working", 200), repo: "svc" },
+      { ...mkAgent("a2", "needs-you", 200), repo: "svc" },
     ] })]));
     const tiles = Array.from(document.querySelectorAll(".stat")).map((s) => [s.querySelector(".l")!.textContent, s.querySelector(".n")!.textContent]);
-    expect(tiles).toContainEqual(["In progress", "2"]);
+    // One run, one agent per column — two cards total, not one per run.
+    expect(tiles).toContainEqual(["In progress", "1"]);
+    expect(tiles).toContainEqual(["Action required", "1"]);
   });
 
   it("offers Clear stale only when something is actually stale", () => {
