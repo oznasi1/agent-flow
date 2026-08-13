@@ -1050,6 +1050,23 @@ describe("DeckApp — Address PR", () => {
     const labels = Array.from(document.querySelectorAll(".actions .act")).map((b) => b.textContent);
     expect(labels).toEqual(["Address PR", "Open", "Diff"]);
   });
+
+  // A card gets exactly one primary. Address PR is the verb the board is asking for
+  // when it is there, so it takes that weight and Open gives it up — which is also
+  // what puts the accent on the right button on an attn card, where .card.attn
+  // .act.primary is the only colored call to action.
+  it("takes the primary weight from Open when it is on the card", () => {
+    render(<DeckApp />);
+    host(runsMsg([prCard()]));
+    expect(screen.getByRole("button", { name: "Address PR" })).toHaveClass("primary");
+    expect(screen.getByRole("button", { name: "Open" })).not.toHaveClass("primary");
+  });
+
+  it("leaves Open the primary on a card that has no Address PR", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ ticketStatus: "In Progress" })]));
+    expect(screen.getByRole("button", { name: "Open" })).toHaveClass("primary");
+  });
 });
 
 describe("Agents view", () => {
