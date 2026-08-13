@@ -4609,6 +4609,40 @@ describe("notepad", () => {
     );
   });
 
+  it("unlinks a deleted note's images", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    seedFiles(imageDir, "i1.png");
+    seedNote(store, { images: [{ id: "i1", ext: "png", name: "a.png" }] });
+    await sendMsg({ type: "notepad:delete", id: "n1" });
+    expect(fs.existsSync(path.join(imageDir, "i1.png"))).toBe(false);
+  });
+
+  it("unlinks the images of every note cleared as completed, and only those", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    seedFiles(imageDir, "i1.png", "i2.png");
+    store.set("agentFlow.notepad", [
+      { id: "n1", title: "done", body: "", done: true, createdAt: 1, images: [{ id: "i1", ext: "png", name: "a.png" }] },
+      { id: "n2", title: "open", body: "", done: false, createdAt: 2, images: [{ id: "i2", ext: "png", name: "b.png" }] },
+    ]);
+    await sendMsg({ type: "notepad:clearCompleted" });
+    expect(fs.existsSync(path.join(imageDir, "i1.png"))).toBe(false);
+    expect(fs.existsSync(path.join(imageDir, "i2.png"))).toBe(true);
+  });
+
+  it("sweeps image files no note references", () => {
+    const { provider, store, imageDir } = mkProvider();
+    seedFiles(imageDir, "i1.png", "orphan.png");
+    seedNote(store, { images: [{ id: "i1", ext: "png", name: "a.png" }] });
+    provider.sweepNotepadImages();
+    expect(fs.existsSync(path.join(imageDir, "orphan.png"))).toBe(false);
+    expect(fs.existsSync(path.join(imageDir, "i1.png"))).toBe(true);
+  });
+
+  it("is a no-op when nothing was ever attached", () => {
+    const { provider } = mkProvider();
+    expect(() => provider.sweepNotepadImages()).not.toThrow();
+  });
+
   it("adds a note and posts the new list back", async () => {
     const { posted, store, sendMsg } = mkProvider();
     await sendMsg({ type: "notepad:add", title: "Write the thing", body: "details" });

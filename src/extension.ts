@@ -80,6 +80,17 @@ export function activate(context: vscode.ExtensionContext): void {
     log(`telemetry: init failed (extension still active): ${e instanceof Error ? e.message : String(e)}`);
   }
 
+  // Notepad image files nothing points at any more — a crash between an unlink and
+  // the state write that follows it, or a note deleted by an older version. Once per
+  // activate is enough; it is deliberately not on the poll, which could race a
+  // half-written state file. Its own try/catch for the reason above: an uncaught
+  // throw here would dispose every registration below.
+  try {
+    provider.sweepNotepadImages();
+  } catch (e) {
+    log(`notepad: image sweep failed (extension still active): ${e instanceof Error ? e.message : String(e)}`);
+  }
+
   context.subscriptions.push(
     vscode.workspace.registerTextDocumentContentProvider(BASE_SCHEME, new TaskBaseContentProvider()),
     output,

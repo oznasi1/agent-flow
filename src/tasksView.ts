@@ -31,7 +31,7 @@ import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { newNote, newSection, noteStatus, sanitizeNotes, sanitizeSections } from "./notepad";
-import { IMAGE_DIR, deleteImages, imageFileName, imagePath, saveImage } from "./notepadImages";
+import { IMAGE_DIR, deleteImages, imageFileName, imagePath, saveImage, sweepOrphans } from "./notepadImages";
 import {
   Filter,
   InboundMessage,
@@ -480,15 +480,34 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async deleteNote(id: string): Promise<void> {
+    const gone = this.notes().find((n) => n.id === id);
     const remaining = this.notes().filter((n) => n.id !== id);
+    if (gone?.images?.length) deleteImages(this.imageDir(), gone.images);
     await this.pruneNoteOrder(remaining);
     await this.saveNotes(remaining);
   }
 
   private async clearCompletedNotes(): Promise<void> {
     const remaining = this.notes().filter((n) => !n.done);
+    const images = this.notes().filter((n) => n.done).flatMap((n) => n.images ?? []);
+    if (images.length > 0) deleteImages(this.imageDir(), images);
     await this.pruneNoteOrder(remaining);
     await this.saveNotes(remaining);
+  }
+
+  /** Delete image files no note references. Called once on activate. Every other
+   * cleanup path is a best-effort write that a crash — or an older version, or a
+   * hand-edited state file — can leave half-done, so without this the store only
+   * grows. It is also the only writer that deletes on the strength of the notes
+   * alone, which is why it never runs on the poll: a poll racing a half-written
+   * state file would delete files a note still points at. */
+  public sweepNotepadImages(): void {
+    try {
+      const keep = new Set(this.notes().flatMap((n) => (n.images ?? []).map((i) => i.id)));
+      sweepOrphans(this.imageDir(), keep);
+    } catch (e) {
+      this.log(`notepad: image sweep failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   private async addSection(name: string): Promise<void> {
