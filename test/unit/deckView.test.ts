@@ -761,14 +761,14 @@ describe("DeckPanel", () => {
     expect(workspace.openTextDocument).not.toHaveBeenCalled();
   });
 
-  it("inspect diff opens the native multi-file editor titled with the run key", async () => {
+  it("inspect diff opens the native multi-file editor titled with the run key and the repo", async () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     show();
     const p = lastPanel();
     await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
     const call = commands.executeCommand.mock.calls.at(-1)!;
     expect(call[0]).toBe("vscode.changes");
-    expect(call[1]).toBe("Changes in ASM-1");
+    expect(call[1]).toBe("Changes in ASM-1 — svc");
     expect(workspace.openTextDocument).not.toHaveBeenCalled();
   });
 
@@ -794,6 +794,8 @@ describe("DeckPanel", () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     h.taskDiff.mockReturnValue("diff --git a/a.txt b/a.txt\n+x\n");
     commands.executeCommand.mockRejectedValueOnce(new Error("no such command"));
+    // A run spanning repos asks which one first; this is the "all of them" answer.
+    window.showQuickPick.mockImplementationOnce(async (items: unknown) => (items as unknown[])[0]);
     show();
     const p = lastPanel();
     await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
@@ -837,6 +839,101 @@ describe("DeckPanel", () => {
     await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff", repo: "web" });
     expect(h.taskChangedFiles).toHaveBeenCalledWith("/r/web");
     expect(h.taskChangedFiles).not.toHaveBeenCalledWith("/r/svc");
+  });
+
+  // ── which repo am I looking at? (multi-repo diff scoping) ──────────────────
+  const twoRepoRun = (over: Partial<Run> = {}) => mkRun({ repos: [
+    { name: "svc", path: "/r/svc", isGit: true, branch: "b" },
+    { name: "web", path: "/r/web", isGit: true, branch: "b" },
+  ], ...over });
+  /** The picker's items, as the host offered them. */
+  const pickItems = () => (window.showQuickPick.mock.calls.at(-1)![0] as { label: string }[]).map((i) => i.label);
+  /** Answer the repo picker with the item whose label matches. */
+  const pickRepo = (label: string) =>
+    window.showQuickPick.mockImplementationOnce(async (items: unknown) =>
+      (items as { label: string }[]).find((i) => i.label === label));
+
+  it("asks which repo to diff when a run spans more than one", async () => {
+    h.runs = [twoRepoRun()];
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
+    pickRepo("web");
+    show();
+    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    expect(pickItems()).toEqual(["All repos", "svc", "web"]);
+    expect(h.taskChangedFiles).toHaveBeenCalledWith("/r/web");
+    expect(h.taskChangedFiles).not.toHaveBeenCalledWith("/r/svc");
+  });
+
+  it("names the picked repo in the diff editor's title", async () => {
+    h.runs = [twoRepoRun()];
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
+    pickRepo("web");
+    show();
+    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    expect(commands.executeCommand.mock.calls.at(-1)![1]).toBe("Changes in ASM-1 — web");
+  });
+
+  it("diffs every repo and names the workspace when All repos is picked", async () => {
+    h.runs = [twoRepoRun({ mode: "multiroot", workspaceFile: "/ws/pay-stack.code-workspace" })];
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
+    pickRepo("All repos");
+    show();
+    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    expect(h.taskChangedFiles).toHaveBeenCalledWith("/r/svc");
+    expect(h.taskChangedFiles).toHaveBeenCalledWith("/r/web");
+    expect(commands.executeCommand.mock.calls.at(-1)![1]).toBe("Changes in ASM-1 — pay-stack");
+  });
+
+  it("offers the workspace's name as the All repos detail so the picker says what all means", async () => {
+    h.runs = [twoRepoRun({ mode: "multiroot", workspaceFile: "/ws/pay-stack.code-workspace" })];
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
+    pickRepo("All repos");
+    show();
+    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    const items = window.showQuickPick.mock.calls.at(-1)![0] as { label: string; detail?: string }[];
+    expect(items[0].detail).toContain("pay-stack");
+  });
+
+  it("does not ask when the run has only one repo", async () => {
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
+    show();
+    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(commands.executeCommand.mock.calls.at(-1)![1]).toBe("Changes in ASM-1 — svc");
+  });
+
+  it("does not ask when the card already acts on one repo", async () => {
+    h.runs = [twoRepoRun()];
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
+    show();
+    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff", repo: "web" });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(commands.executeCommand.mock.calls.at(-1)![1]).toBe("Changes in ASM-1 — web");
+  });
+
+  it("opens nothing and says nothing when the repo picker is dismissed", async () => {
+    h.runs = [twoRepoRun()];
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
+    show(); // the mock's showQuickPick resolves undefined by default — a dismissal
+    const p = lastPanel();
+    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    expect(commands.executeCommand).not.toHaveBeenCalledWith("vscode.changes", expect.anything(), expect.anything());
+    expect(workspace.openTextDocument).not.toHaveBeenCalled();
+    expect(posts(p).find((m) => m.type === "toast")).toBeUndefined();
+  });
+
+  it("labels no chunk in the fallback document once the diff is scoped to one repo", async () => {
+    // The header exists to tell two repos' patches apart; with one repo picked it
+    // is noise above the only patch there is.
+    h.runs = [twoRepoRun()];
+    h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
+    h.taskDiff.mockReturnValue("diff --git a/a.txt b/a.txt\n+x\n");
+    commands.executeCommand.mockRejectedValueOnce(new Error("no such command"));
+    pickRepo("web");
+    show();
+    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    const arg = workspace.openTextDocument.mock.calls.at(-1)![0] as { content: string };
+    expect(arg.content).not.toContain("# web");
   });
 
   it("toasts an error when inspecting an unknown run", async () => {
