@@ -134,3 +134,40 @@ describe("sanitizeSections", () => {
     ]);
   });
 });
+
+describe("sanitizeNotes — images", () => {
+  it("keeps a well-formed images array", () => {
+    const raw = [{ id: "n1", title: "t", body: "b", images: [{ id: "i1", ext: "png", name: "a.png" }] }];
+    expect(sanitizeNotes(raw)[0].images).toEqual([{ id: "i1", ext: "png", name: "a.png" }]);
+  });
+
+  it("leaves a legacy note without the field untouched", () => {
+    expect(sanitizeNotes([{ id: "n1", title: "t", body: "b" }])[0]).not.toHaveProperty("images");
+  });
+
+  it("drops the field entirely when it is not an array", () => {
+    expect(sanitizeNotes([{ id: "n1", images: "nope" }])[0]).not.toHaveProperty("images");
+  });
+
+  it("drops a malformed entry while keeping its siblings", () => {
+    const raw = [{
+      id: "n1",
+      images: [
+        { id: "good", ext: "png", name: "a.png" },
+        { id: "", ext: "png", name: "b.png" },
+        { id: "noext", name: "c.png" },
+        "junk",
+      ],
+    }];
+    expect(sanitizeNotes(raw)[0].images).toEqual([{ id: "good", ext: "png", name: "a.png" }]);
+  });
+
+  it("coerces a missing name rather than dropping the image", () => {
+    const raw = [{ id: "n1", images: [{ id: "i1", ext: "gif" }] }];
+    expect(sanitizeNotes(raw)[0].images).toEqual([{ id: "i1", ext: "gif", name: "image.gif" }]);
+  });
+
+  it("omits the field when every entry was malformed", () => {
+    expect(sanitizeNotes([{ id: "n1", images: [{ ext: "png" }] }])[0]).not.toHaveProperty("images");
+  });
+});

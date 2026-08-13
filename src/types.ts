@@ -387,6 +387,35 @@ export interface NotepadItem {
    * ungrouped — sections are opt-in, so an existing user's notes need no
    * migration and a note never has to pick one. */
   sectionId?: string;
+  /** Images attached to this note's description. Absent means none, which is what
+   * every note written before this existed has — so there is no migration to get
+   * wrong, and such a note still serialises byte-identically. */
+  images?: NotepadImage[];
+}
+
+/** One image attached to a note. `ext` comes from the accepted mime type, never
+ * from the source filename: a file called `shot.png` that is really a PDF must not
+ * end up stored under `.png`, where the webview would ask for an image the editor
+ * cannot decode. `name` is the user's own filename, kept for display and for
+ * naming the copy that reaches the agent.
+ *
+ * The bytes live at `<globalStorageUri>/notepad-images/<id>.<ext>` and nothing
+ * about them is in globalState, which is serialised into the webview on every
+ * poll, rides Settings Sync, and has no eviction. */
+export interface NotepadImage {
+  id: string;
+  ext: string;
+  name: string;
+}
+
+/** An image the webview holds but the host has not written yet. The add form has
+ * no note id to attach to, so its pending bytes ride along with `notepad:add`
+ * rather than giving the host a draft store — a second lifetime to reason about,
+ * and one that would leak bytes for every note the user starts and abandons. */
+export interface PendingImage {
+  dataBase64: string;
+  mime: string;
+  name: string;
 }
 
 /** A user-defined group notes can be filed into. Display order is creation
@@ -415,7 +444,14 @@ export type NotepadRunStatus = "running" | "stale" | "finished";
 /** What crosses the wire: the stored note plus its derived status. The status is
  * computed host-side per post and never persisted — the webview cannot read the
  * runs store itself (it must not import a module that touches `fs`). */
-export type NotepadItemView = NotepadItem & { runStatus?: NotepadRunStatus };
+export type NotepadItemView = NotepadItem & {
+  runStatus?: NotepadRunStatus;
+  /** Webview-safe URIs for `images`, positionally parallel to it. Derived per post
+   * from `asWebviewUri` and never persisted, for the same reason `runStatus` is:
+   * the webview has no `vscode.Uri` and must not import a module that touches
+   * `fs`. Omitted entirely when the note has no images. */
+  imageUris?: string[];
+};
 
 // Messages: webview → host
 export type InboundMessage =
