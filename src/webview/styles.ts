@@ -326,7 +326,38 @@ export const CSS = `
   .np-add-btn { align-self: flex-start; }
   .np-empty { padding: 14px 2px; color: var(--dim); font-size: var(--t-body); }
 
-  .np-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--hair); }
+  /* The "Add section" control sits right below the filter row, matching where
+     "Add note" sits above it — both are the one-line entry point for the thing
+     the list below is made of. */
+  .np-add-section { display: flex; gap: 6px; margin-bottom: 10px; }
+  .np-section-input { flex: 1; padding: 5px 7px;
+    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, var(--hair)); border-radius: var(--r-ctl);
+    font-family: inherit; font-size: var(--t-body); }
+  .np-section-input:focus { outline: none; border-color: var(--vscode-focusBorder); }
+
+  /* Now a div (it wraps one or more .np-group lists, one per section, plus the
+     ungrouped one) rather than the single <ul> it used to be — .np-group below
+     carries the list reset that used to live here, list-style included since a
+     bare <ul> still needs it. */
+  .np-list { margin: 0; padding: 0; border-top: 1px solid var(--hair); }
+  .np-group { list-style: none; margin: 0; padding: 0; }
+  .np-section + .np-section, .np-group + .np-section { border-top: 1px solid var(--hair); }
+  .np-section-head { display: flex; align-items: center; gap: 6px; padding: 7px 2px 7px 4px; }
+  .np-section-head.editing { padding: 6px 2px; gap: 6px; }
+  .np-section-toggle { width: 16px; flex: none; }
+  .np-section-name { flex: 1; min-width: 0; overflow-wrap: anywhere;
+    font-size: var(--t-body); font-weight: 600; }
+  .np-section-name-input { flex: 1; padding: 4px 6px;
+    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, var(--hair)); border-radius: var(--r-ctl);
+    font-family: inherit; font-size: var(--t-body); font-weight: 600; }
+  .np-section-name-input:focus { outline: none; border-color: var(--vscode-focusBorder); }
+  .np-section-select { width: 100%; padding: 5px 7px;
+    background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border, var(--hair)); border-radius: var(--r-ctl);
+    font-family: inherit; font-size: var(--t-body); }
+  .np-section-select:focus { outline: none; border-color: var(--vscode-focusBorder); }
   /* Text beside its actions: the first column takes whatever width the cluster
      leaves and wraps inside it, the second is exactly the cluster's width. The
      cluster spans every row and aligns to the start, so it holds the note's top

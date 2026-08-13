@@ -615,6 +615,7 @@ describe("notepad message routing", () => {
       type: "notepad:notes",
       notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
       ordered: true,
+      sections: [],
     });
     expect(screen.getByText("Buy milk")).toBeInTheDocument();
     expect(screen.getByText("Reset order")).toBeInTheDocument();
@@ -634,12 +635,14 @@ describe("notepad message routing", () => {
       type: "notepad:notes",
       notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
       ordered: true,
+      sections: [],
     });
     expect(screen.getByText("Reset order")).toBeInTheDocument();
     host({
       type: "notepad:notes",
       notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
       ordered: false,
+      sections: [],
     });
     expect(screen.queryByText("Reset order")).not.toBeInTheDocument();
   });

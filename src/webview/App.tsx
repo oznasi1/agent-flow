@@ -5,7 +5,7 @@ import {
   addOnce, deriveStatuses, effectiveFilter, fmtEst, gateCopy, isPrReviewStatus, isTopPriority,
   matchesStatus, moveKey, railClass, ticketKind, visibleFilters,
 } from "./helpers";
-import { Filter, FilterVisibility, Task, OutboundMessage, Size, NotepadItemView } from "../types";
+import { Filter, FilterVisibility, Task, OutboundMessage, Size, NotepadItemView, NotepadSectionView } from "../types";
 import type { SerializedCaps } from "../tasks/provider";
 import { GaugeMark } from "./GaugeMark";
 import { Notepad } from "./Notepad";
@@ -173,6 +173,7 @@ export function App(): JSX.Element {
   const [tab, setTab] = React.useState<"tasks" | "notepad">("tasks");
   const [notes, setNotes] = React.useState<NotepadItemView[]>([]);
   const [notesOrdered, setNotesOrdered] = React.useState(false);
+  const [noteSections, setNoteSections] = React.useState<NotepadSectionView[]>([]);
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [toasts, setToasts] = React.useState<
@@ -315,6 +316,7 @@ export function App(): JSX.Element {
         case "notepad:notes":
           setNotes(m.notes);
           setNotesOrdered(m.ordered);
+          setNoteSections(m.sections);
           break;
         case "toast": {
           const id = ++toastSeq;
@@ -529,7 +531,7 @@ export function App(): JSX.Element {
         </span>
       </div>
 
-      {tab === "notepad" && <Notepad notes={notes} ordered={notesOrdered} />}
+      {tab === "notepad" && <Notepad notes={notes} ordered={notesOrdered} sections={noteSections} />}
 
       {tab === "tasks" && <>
       <div className="lenses">

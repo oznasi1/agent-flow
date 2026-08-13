@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { newNote, noteStatus, sanitizeNotes } from "../../src/notepad";
-import type { NotepadItem, Run } from "../../src/types";
+import { newNote, newSection, noteStatus, sanitizeNotes, sanitizeSections } from "../../src/notepad";
+import type { NotepadItem, NotepadSection, Run } from "../../src/types";
 
 function run(over: Partial<Run> = {}): Run {
   return { key: "notepad-a", summary: "s", url: "", createdAt: 1, kind: "notepad",
@@ -97,5 +97,40 @@ describe("sanitizeNotes", () => {
     ]);
     expect(out[0].lastRunKey).toBe("notepad-x");
     expect(out[1].lastRunKey).toBeUndefined();
+  });
+
+  it("preserves sectionId when present and omits it when not a string", () => {
+    const out = sanitizeNotes([
+      { id: "a", sectionId: "s1" },
+      { id: "b", sectionId: 42 },
+    ]);
+    expect(out[0].sectionId).toBe("s1");
+    expect(out[1].sectionId).toBeUndefined();
+  });
+});
+
+describe("newSection", () => {
+  it("trims the name", () => {
+    expect(newSection("  Bugs  ", "id-1", 7)).toEqual({ id: "id-1", name: "Bugs", createdAt: 7 });
+  });
+});
+
+describe("sanitizeSections", () => {
+  it("returns an empty array for anything that is not an array", () => {
+    expect(sanitizeSections(undefined)).toEqual([]);
+    expect(sanitizeSections({ nope: true })).toEqual([]);
+  });
+
+  it("drops entries with no usable id or name, and coerces the rest", () => {
+    const out = sanitizeSections([
+      { id: "keep", name: "Bugs", createdAt: 5 },
+      { name: "no id" },
+      { id: "no-name" },
+      { id: "coerce", name: "Ideas" },
+    ]);
+    expect(out).toEqual([
+      { id: "keep", name: "Bugs", createdAt: 5 },
+      { id: "coerce", name: "Ideas", createdAt: 0 },
+    ]);
   });
 });

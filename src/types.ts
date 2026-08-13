@@ -383,7 +383,26 @@ export interface NotepadItem {
   done: boolean;
   createdAt: number; // epoch ms
   lastRunKey?: string;
+  /** Which user-defined section this note is filed under. Absent means
+   * ungrouped — sections are opt-in, so an existing user's notes need no
+   * migration and a note never has to pick one. */
+  sectionId?: string;
 }
+
+/** A user-defined group notes can be filed into. Display order is creation
+ * order (the array order in storage) — sections are not independently
+ * drag-reorderable, only the notes inside (and across) them are. */
+export interface NotepadSection {
+  id: string;
+  name: string;
+  createdAt: number; // epoch ms
+}
+
+/** What crosses the wire for one section: the stored record plus whether it's
+ * collapsed. Collapse state persists (see `agentFlow.notepadCollapsed`) but is
+ * never part of the stored section record itself, the same split `runStatus`
+ * has on `NotepadItemView` below. */
+export type NotepadSectionView = NotepadSection & { collapsed: boolean };
 
 /** A note's most recent run, as far as the two cheap signals can tell:
  * "running" — a Claude Code session is open in one of its repos right now;
@@ -420,6 +439,14 @@ export type InboundMessage =
    * Hidden notes are not named and keep their absolute slots (see applyReorder). */
   | { type: "notepad:reorder"; order: string[] }
   | { type: "notepad:resetOrder" }
+  | { type: "notepad:addSection"; name: string }
+  | { type: "notepad:renameSection"; id: string; name: string }
+  | { type: "notepad:deleteSection"; id: string }
+  | { type: "notepad:toggleSectionCollapsed"; id: string }
+  /** File a note under a section, or drop it back to ungrouped when `sectionId`
+   * is undefined. Fired by both the cross-section drag-drop and the edit form's
+   * section picker. */
+  | { type: "notepad:setSection"; id: string; sectionId?: string }
   | { type: "openExternal"; url: string }
   | { type: "signIn" }
   | { type: "runSetup" }
@@ -548,7 +575,7 @@ export type OutboundMessage =
   // diff protocol would buy nothing but a chance to desynchronise.
   /** `ordered` is true when a manual order exists — the webview shows its
    * "Reset order" control only then, and cannot read the order key itself. */
-  | { type: "notepad:notes"; notes: NotepadItemView[]; ordered: boolean }
+  | { type: "notepad:notes"; notes: NotepadItemView[]; ordered: boolean; sections: NotepadSectionView[] }
   // The Deck
   /** The lens, seeded once on ready and re-sent only if the setting changes under
    * the panel. Deliberately not a field on deck:runs: that message costs a full

@@ -4753,4 +4753,103 @@ describe("notepad", () => {
       expect(orderIn(store)).toEqual([ids[0], ids[2], ids[1]]);
     });
   });
+
+  describe("sections", () => {
+    const sectionsIn = (store: Map<string, unknown>) =>
+      store.get("agentFlow.notepadSections") as { id: string; name: string }[] | undefined;
+    const collapsedIn = (store: Map<string, unknown>) =>
+      store.get("agentFlow.notepadCollapsed") as string[] | undefined;
+    const postedSections = (posted: unknown[]) =>
+      (posted.at(-1) as { sections: { id: string; name: string; collapsed: boolean }[] }).sections;
+
+    it("adds a section and posts it back uncollapsed", async () => {
+      const { posted, store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:addSection", name: "Bugs" });
+      expect(sectionsIn(store)!.map((s) => s.name)).toEqual(["Bugs"]);
+      const id = sectionsIn(store)![0].id;
+      expect(postedSections(posted)).toMatchObject([{ id, name: "Bugs", collapsed: false }]);
+    });
+
+    it("ignores an add whose name is blank", async () => {
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:addSection", name: "   " });
+      expect(sectionsIn(store) ?? []).toEqual([]);
+    });
+
+    it("renames a section in place", async () => {
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:addSection", name: "Bugs" });
+      const id = sectionsIn(store)![0].id;
+      await sendMsg({ type: "notepad:renameSection", id, name: "Bugs & fixes" });
+      expect(sectionsIn(store)![0].name).toBe("Bugs & fixes");
+    });
+
+    it("ignores a rename whose name is blank", async () => {
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:addSection", name: "Bugs" });
+      const id = sectionsIn(store)![0].id;
+      await sendMsg({ type: "notepad:renameSection", id, name: "  " });
+      expect(sectionsIn(store)![0].name).toBe("Bugs");
+    });
+
+    it("deletes a section and ungroups the notes filed under it", async () => {
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:addSection", name: "Bugs" });
+      const sectionId = sectionsIn(store)![0].id;
+      await sendMsg({ type: "notepad:add", title: "fix it", body: "" });
+      const noteId = notesIn(store)![0].id;
+      await sendMsg({ type: "notepad:setSection", id: noteId, sectionId });
+
+      await sendMsg({ type: "notepad:deleteSection", id: sectionId });
+
+      expect(sectionsIn(store)).toEqual([]);
+      expect((notesIn(store)![0] as { sectionId?: string }).sectionId).toBeUndefined();
+    });
+
+    it("files a note under a section, and clears it back to ungrouped", async () => {
+      const { posted, store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:addSection", name: "Bugs" });
+      const sectionId = sectionsIn(store)![0].id;
+      await sendMsg({ type: "notepad:add", title: "fix it", body: "" });
+      const noteId = notesIn(store)![0].id;
+
+      await sendMsg({ type: "notepad:setSection", id: noteId, sectionId });
+      expect((notesIn(store)![0] as { sectionId?: string }).sectionId).toBe(sectionId);
+      expect((posted.at(-1) as { notes: { sectionId?: string }[] }).notes[0].sectionId).toBe(sectionId);
+
+      await sendMsg({ type: "notepad:setSection", id: noteId, sectionId: undefined });
+      expect((notesIn(store)![0] as { sectionId?: string }).sectionId).toBeUndefined();
+    });
+
+    it("toggles a section collapsed and back, persisting across posts", async () => {
+      const { posted, store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:addSection", name: "Bugs" });
+      const id = sectionsIn(store)![0].id;
+
+      await sendMsg({ type: "notepad:toggleSectionCollapsed", id });
+      expect(collapsedIn(store)).toEqual([id]);
+      expect(postedSections(posted)[0].collapsed).toBe(true);
+
+      await sendMsg({ type: "notepad:toggleSectionCollapsed", id });
+      expect(collapsedIn(store)).toEqual([]);
+      expect(postedSections(posted)[0].collapsed).toBe(false);
+    });
+
+    it("drops a deleted section's id from the collapsed set", async () => {
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:addSection", name: "Bugs" });
+      const id = sectionsIn(store)![0].id;
+      await sendMsg({ type: "notepad:toggleSectionCollapsed", id });
+
+      await sendMsg({ type: "notepad:deleteSection", id });
+      expect(collapsedIn(store)).toEqual([]);
+    });
+
+    it("survives a globalState value that is not an array", async () => {
+      const { provider, store, posted } = mkProvider();
+      store.set("agentFlow.notepadSections", { corrupt: true });
+      provider.postNotepad();
+      expect(postedSections(posted)).toEqual([]);
+    });
+  });
 });
