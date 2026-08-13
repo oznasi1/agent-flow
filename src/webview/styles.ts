@@ -139,7 +139,7 @@ export const CSS = `
   .status--new, .status--indeterminate, .status--done { color: var(--dim); }
   .spacer { flex: 1; }
   .take { display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-body); font-weight: 600;
-    padding: 3px 11px 3px 9px; border-radius: var(--r-ctl); cursor: pointer; border: none;
+    height: 24px; padding: 0 11px 0 9px; border-radius: var(--r-ctl); cursor: pointer; border: none;
     background: var(--brand); color: var(--brand-ink);
     transition: background .12s ease; }
   .take:hover { background: color-mix(in srgb, var(--brand) 84%, var(--vscode-foreground)); }
