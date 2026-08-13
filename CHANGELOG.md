@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-08-13
+
+### Changed
+
+- **Cards no longer show Claude Code's own session label.** A card's top row
+  carried a CLI-internal identifier (e.g. `agent-flow-0a`) — not a name anyone
+  picked or recognises. The source chip beside it already says where the work
+  came from, as a ticket link or a notepad/explore/local label.
+- **Agents in the same column now share one card.** The Agents board projects
+  one card per session, so two agents on one task rendered as two cards that,
+  without their session labels, looked identical. They now merge into a single
+  card listing both in its collapsible agents row. Agents in *different*
+  columns still appear separately — a task with one agent working and one
+  awaiting you genuinely belongs in two columns at once.
+
 ## [0.18.0] — 2026-08-13
 
 ### Added
