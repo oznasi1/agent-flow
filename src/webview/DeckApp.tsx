@@ -376,7 +376,7 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel 
         <div className="actions">
           {canAddressPr && (
             <button
-              className="act"
+              className="act primary"
               title={`Address the PR for ${r.run.key} — open its workspace and work through the review feedback`}
               onClick={() => send({ type: "deck:addressPr", key: r.run.key })}
             >
@@ -386,9 +386,11 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel 
           {/* An already-open window used to say so in a line of its own on every such
               card. The button that behaves differently is the right place to explain
               it: a 5px marker carries "there is something to focus", the tooltip
-              carries what Open will actually do. */}
+              carries what Open will actually do. Only Open's own primary once Address
+              PR isn't sitting beside it to claim that weight — a card can't spend two
+              buttons' worth of "the one thing to do here" on itself. */}
           <button
-            className={`act primary ${r.windowOpen ? "live" : ""}`}
+            className={`act ${canAddressPr ? "" : "primary"} ${r.windowOpen ? "live" : ""}`}
             title={r.windowOpen ? "Open now — Open focuses the window already running this task" : "Open this task's workspace"}
             onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open", ...(agent?.repo ? { repo: agent.repo } : {}) })}
           >
