@@ -5,7 +5,7 @@ import type { Flow } from "../engine/orchestrator/model";
 import { DeckCard, projectCards } from "./deckCards";
 import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
-import { isPrReviewStatus } from "./helpers";
+import { isPrReviewStatus, timeAgo } from "./helpers";
 
 /** The Orchestrator's mark: one node on the left feeding two on the right
  * through elbow connectors — the drawer's own object, drawn. It replaced a ⚡
@@ -52,15 +52,6 @@ const COLUMNS: { id: DeckColumn; label: string; varName: string }[] = [
   { id: "review", label: "In review", varName: "--c-review" },
   { id: "done", label: "Done", varName: "--c-done" },
 ];
-
-function timeAgo(ms: number | null): string {
-  if (!ms) return "";
-  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
-}
 
 /** A copy of `r` with `key` removed. Used to clear a per-row flag or body
  * without leaving a stale `false`/`""` entry sitting in the map forever. */

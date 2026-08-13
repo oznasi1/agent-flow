@@ -483,4 +483,38 @@ export const DECK_CSS = `
      --c-danger: nothing here is broken — GitHub may well have taken the review —
      this is "go check", the same register as the stale-queue note above. */
   .rv-fail { flex-basis: 100%; font-size: var(--t-body); color: var(--c-attn); }
+
+  /* ── Recently closed ──────────────────────────────────────────────────
+     Everything that left the board. Quiet by construction: no accent, no
+     saturated color, row actions revealed only on hover or focus. Saturated
+     color is spent on attention debt, and a closed run owes nothing. */
+  .rc { margin: 10px 14px 0; border-top: 1px solid var(--vscode-panel-border); }
+  .rc-hd { display: flex; align-items: center; padding: 3px 0; }
+  .rc-toggle { display: flex; align-items: center; gap: 8px; background: none;
+    border: 0; padding: 6px 2px; cursor: pointer; font: inherit; text-align: left;
+    color: var(--vscode-descriptionForeground); }
+  .rc-toggle:hover { color: var(--vscode-foreground); }
+  .rc-caret { font-size: 9px; opacity: .8; }
+  .rc-nm { color: var(--vscode-foreground); }
+  /* A count is a number, so it earns the mono treatment; the label beside it is
+     prose and must not. */
+  .rc-ct { font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .75; }
+  .rc-sp { flex: 1; }
+  .rc-clear { background: none; border: 0; color: var(--vscode-descriptionForeground);
+    font: inherit; font-size: 11px; cursor: pointer; padding: 2px 6px; border-radius: 4px; }
+  .rc-clear:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
+  .rc-rows { display: flex; flex-direction: column; padding-bottom: 8px; }
+  .rc-row { display: flex; align-items: center; gap: 10px; padding: 5px 4px;
+    border-radius: 4px; font-size: 12px; }
+  .rc-row:hover { background: var(--vscode-list-hoverBackground); }
+  .rc-row .sdot { flex: none; }
+  .rc-key { font-family: var(--vscode-editor-font-family); font-size: 11px;
+    color: var(--vscode-descriptionForeground); flex: none; min-width: 84px; }
+  .rc-ttl { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rc-when { color: var(--vscode-descriptionForeground); font-size: 11px; flex: none; }
+  .rc-act { background: none; border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px; color: var(--vscode-descriptionForeground); font: inherit;
+    font-size: 11px; padding: 1px 7px; cursor: pointer; flex: none; opacity: 0; }
+  .rc-row:hover .rc-act, .rc-act:focus { opacity: 1; }
+  .rc-act:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
 `;
