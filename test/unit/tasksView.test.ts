@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { commands, env, window } from "../_mocks/vscode";
 import { fakeAuth, fakeContext, mkRepos } from "../_helpers/factories";
 
@@ -357,6 +360,17 @@ const answerPicks = (...answers: unknown[]) => {
   }
   pick.mockResolvedValue(undefined as never);
 };
+
+describe("resolveWebviewView", () => {
+  it("allows the notepad's image store as a webview resource root", () => {
+    const { view } = setup();
+    const roots = ((view.webview.options as { localResourceRoots?: { fsPath: string }[] }).localResourceRoots ?? [])
+      .map((u) => u.fsPath);
+    // Without globalStorage every notepad thumbnail 404s; without the extension
+    // root the panel's own bundle does.
+    expect(roots).toEqual(["/ext", "/globalstorage"]);
+  });
+});
 
 describe("ready", () => {
   it("reports authed state with the current user and auto-fetches", async () => {
@@ -4420,12 +4434,25 @@ describe("a refused write that names fields to retry", () => {
 });
 
 describe("notepad", () => {
+  // Image stores handed out by mkProvider, removed after each test. This file does
+  // NOT mock `fs`, so the notepad's image code writes and unlinks for real here and
+  // the assertions read the disk.
+  const imageDirs: string[] = [];
+  afterEach(() => {
+    while (imageDirs.length > 0) fs.rmSync(imageDirs.pop()!, { recursive: true, force: true });
+  });
+
   // A provider wired to a context whose globalState is a real in-memory map, so
   // these tests assert on what was actually persisted rather than on a spy.
   function mkProvider() {
     const store = new Map<string, unknown>();
+    const storageDir = fs.mkdtempSync(path.join(os.tmpdir(), "np-store-"));
+    imageDirs.push(storageDir);
     const ctx = {
       ...fakeContext(),
+      // Top level, not nested: the provider reads `this.context.globalStorageUri`,
+      // and what this object spreads in is fakeContext's RESULT, not its context.
+      globalStorageUri: { fsPath: storageDir, scheme: "file", toString: () => storageDir },
       globalState: {
         get: (k: string, d?: unknown) => (store.has(k) ? store.get(k) : d),
         update: async (k: string, v: unknown) => void store.set(k, v),
@@ -4435,18 +4462,56 @@ describe("notepad", () => {
     const provider = new TasksViewProvider(ctx, makeFixtureConnector(), () => {});
     // The provider posts through its resolved webview; stand one in.
     (provider as unknown as { view: unknown }).view = {
-      webview: { postMessage: (m: unknown) => void posted.push(m) },
+      webview: {
+        postMessage: (m: unknown) => void posted.push(m),
+        // postNotepad converts each attached image's path through this, so a note
+        // with images would throw against a stub that had only postMessage.
+        asWebviewUri: (u: unknown) => u,
+      },
     };
     // `onMessage` is private on the class — these tests drive it directly because
     // it IS the unit under test, matching how the rest of this file reaches it
     // (see the `send`/`handler` helpers above).
     const sendMsg = (m: InboundMessage) =>
       (provider as unknown as { onMessage(m: InboundMessage): Promise<void> }).onMessage(m);
-    return { provider, posted, store, sendMsg };
+    return { provider, posted, store, sendMsg, imageDir: path.join(storageDir, "notepad-images") };
   }
 
   const notesIn = (store: Map<string, unknown>) =>
     store.get("agentFlow.notepad") as { id: string; title: string; done: boolean }[] | undefined;
+
+  const imagesOf = (store: Map<string, unknown>, i = 0) =>
+    (store.get("agentFlow.notepad") as { images?: { id: string; ext: string; name: string }[] }[])[i].images;
+
+  const seedNote = (store: Map<string, unknown>, over: Record<string, unknown> = {}) =>
+    store.set("agentFlow.notepad", [{ id: "n1", title: "t", body: "", done: false, createdAt: 1, ...over }]);
+
+  /** Put `<name>` files straight into a provider's image store, for the paths that
+   * read or delete files the host did not just write. */
+  const seedFiles = (imageDir: string, ...names: string[]): void => {
+    fs.mkdirSync(imageDir, { recursive: true });
+    for (const n of names) fs.writeFileSync(path.join(imageDir, n), "A");
+  };
+
+  it("posts one imageUris entry per stored image, and omits the field otherwise", () => {
+    const { provider, posted, store } = mkProvider();
+    store.set("agentFlow.notepad", [
+      { id: "n1", title: "with", body: "", done: false, createdAt: 1,
+        images: [{ id: "i1", ext: "png", name: "a.png" }, { id: "i2", ext: "webp", name: "b.webp" }] },
+      { id: "n2", title: "without", body: "", done: false, createdAt: 2 },
+    ]);
+    provider.postNotepad();
+    const last = posted.at(-1) as { type: string; notes: { id: string; imageUris?: string[] }[] };
+    expect(last.type).toBe("notepad:notes");
+    // Found by id, not by position: with no manual order the list posts
+    // newest-first, so n2 leads.
+    const withImages = last.notes.find((n) => n.id === "n1")!;
+    const without = last.notes.find((n) => n.id === "n2")!;
+    expect(withImages.imageUris).toHaveLength(2);
+    expect(String(withImages.imageUris![0])).toContain("notepad-images/i1.png");
+    expect(String(withImages.imageUris![1])).toContain("i2.webp");
+    expect(without).not.toHaveProperty("imageUris");
+  });
 
   it("adds a note and posts the new list back", async () => {
     const { posted, store, sendMsg } = mkProvider();

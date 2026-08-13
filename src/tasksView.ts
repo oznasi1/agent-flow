@@ -31,6 +31,7 @@ import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { newNote, newSection, noteStatus, sanitizeNotes, sanitizeSections } from "./notepad";
+import { IMAGE_DIR, imageFileName } from "./notepadImages";
 import {
   Filter,
   InboundMessage,
@@ -179,7 +180,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.view = view;
     view.webview.options = {
       enableScripts: true,
-      localResourceRoots: [this.context.extensionUri],
+      // globalStorage as well as the bundle: the notepad's attached images live
+      // there, and without this root every thumbnail resolves to nothing. The CSP
+      // itself needs no change — `img-src` already allows `webview.cspSource`.
+      localResourceRoots: [this.context.extensionUri, this.context.globalStorageUri],
     };
     view.webview.html = this.html(view.webview);
     view.webview.onDidReceiveMessage((m: InboundMessage) => this.onMessage(m));
@@ -281,6 +285,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.postNotepad();
   }
 
+  /** Absolute path of the notepad's image store. One place computes it so the
+   * attach paths, the sweep, and the run handoff cannot drift onto different
+   * directories — a drift the sweep would then read as "every file is an orphan". */
+  private imageDir(): string {
+    return path.join(this.context.globalStorageUri.fsPath, IMAGE_DIR);
+  }
+
   private noteOrder(): string[] {
     return this.context.globalState.get<string[]>(NOTEPAD_ORDER_KEY, []);
   }
@@ -335,9 +346,26 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const livePlaces = anyRun
       ? new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys())
       : new Set<string>();
+    const webview = this.view?.webview;
     const view: NotepadItemView[] = notes.map((n) => {
       const runStatus = noteStatus(n, runs, livePlaces);
-      return runStatus ? { ...n, runStatus } : { ...n };
+      const base: NotepadItemView = runStatus ? { ...n, runStatus } : { ...n };
+      const images = n.images ?? [];
+      // One entry per STORED image, positionally parallel to `images`: a file that
+      // vanished under us renders as a broken thumbnail rather than shifting every
+      // later index onto the wrong record. Pruning records is the activate-time
+      // sweep's job, never the poll's — a poll that raced a half-written state file
+      // would drop images a note still points at. Without a webview there is
+      // nothing to convert against, and the post is a no-op in that state anyway.
+      if (images.length === 0 || !webview) return base;
+      return {
+        ...base,
+        imageUris: images.map((img) =>
+          webview
+            .asWebviewUri(vscode.Uri.joinPath(this.context.globalStorageUri, IMAGE_DIR, imageFileName(img)))
+            .toString(),
+        ),
+      };
     });
     const collapsed = new Set(this.collapsedSectionIds());
     const sections = this.sections().map((s) => ({ ...s, collapsed: collapsed.has(s.id) }));

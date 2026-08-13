@@ -112,15 +112,20 @@ export function fakeContext(init: {
   const globalState = init.sharedGlobalState ?? memento(init.globalState);
   const secrets = fakeSecrets(init.secrets);
   const extensionUri = { fsPath: "/ext", scheme: "file", toString: () => "/ext" };
+  // Mirrors extensionUri's shape. The notepad's image store resolves under this,
+  // and the Uri.joinPath in the vscode mock reads `.fsPath` — a test wanting real
+  // files on disk overrides it with an fs.mkdtempSync path.
+  const globalStorageUri = { fsPath: "/globalstorage", scheme: "file", toString: () => "/globalstorage" };
   const context = {
     subscriptions: [] as { dispose(): void }[],
     workspaceState,
     globalState,
     secrets,
     extensionUri,
+    globalStorageUri,
     extensionMode: init.extensionMode ?? ExtensionMode.Test,
   } as unknown as vscode.ExtensionContext;
-  return { context, workspaceState, globalState, secrets, extensionUri };
+  return { context, workspaceState, globalState, secrets, extensionUri, globalStorageUri };
 }
 
 // ── fetch mocking (for JiraClient) ──────────────────────────────────────────
