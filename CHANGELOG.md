@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.2] — 2026-08-13
+
+### Docs
+
+- **Orchestrator commands reference.** `docs/ORCHESTRATOR_COMMANDS.md` documents
+  what happens on each poll pass when a rule ends in a shell command — lock,
+  evaluate, consent, run, latch — and the boundaries around it.
+
 ## [0.17.1] — 2026-08-13
 
 ### Fixed
