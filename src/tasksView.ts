@@ -22,7 +22,7 @@ import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prompt";
-import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, type MergeCandidate } from "./engine/workspace";
+import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, attachmentFileName, BRIEF_DIR, type MergeCandidate } from "./engine/workspace";
 import { briefMarkdown } from "./engine/brief";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, PresenceRecord, type CurrentWindow } from "./engine/presence";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
@@ -1342,21 +1342,43 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // SAME note still reuses this exact key, which is intended: it replaces that
     // note's own previous run rather than accumulating orphaned records.
     const key = `notepad-${slugify(note.title.trim()) || "note"}-${note.id}`;
+    // Where each attached image will sit once openWorkspace has copied it, and under
+    // which name — the same `attachmentFileName` the copy itself uses, so the paths
+    // named below cannot drift from the files that land.
+    const attachments = (note.images ?? []).map((img, i, all) => ({
+      path: imagePath(this.imageDir(), img),
+      name: attachmentFileName(all.map((im) => ({ path: imagePath(this.imageDir(), im), name: im.name })), i),
+    }));
+    // Repo-relative, not relative to the brief: the agent's cwd is the repo root, so a
+    // bare `images/foo.png` names no file from there — the trap batchWorkspace.ts
+    // already records for brief-relative references.
+    const imageLines = attachments.map((a) => `- \`${BRIEF_DIR}/images/${a.name}\``).join("\n");
     const planMd =
       `## Notepad: ${topic}\n\n_No ticket — an item you wrote in the Agent Flow notepad. ` +
       `If it turns into tracked work, open a ticket afterwards._` +
-      (note.body.trim() ? `\n\n${note.body.trim()}` : "");
+      (note.body.trim() ? `\n\n${note.body.trim()}` : "") +
+      (attachments.length > 0 ? `\n\n## Attached images\n\n${imageLines}` : "");
     // The detail goes into the prompt as well as the brief. The generic template
     // carries only {summary} — the note's title — so everything the user typed under
     // it reached the agent only if it went and opened TASK.md, which is exactly what a
     // seeded session is least likely to do first. Passed as a suffix rather than folded
-    // into the template so the user's own words are never read as placeholders.
-    const details = note.body.trim() ? `Details from the note:\n\n${note.body.trim()}` : undefined;
+    // into the template so the user's own words are never read as placeholders. The
+    // images are named for the same reason, doubly: one the agent never opens is one
+    // the user typed nothing to replace.
+    const imageNote = attachments.length > 0
+      ? `The user attached ${attachments.length === 1 ? "an image" : "images"} to this note. ` +
+        `Read ${attachments.length === 1 ? "it" : "them"} before starting:\n${imageLines}`
+      : undefined;
+    const details = [
+      note.body.trim() ? `Details from the note:\n\n${note.body.trim()}` : undefined,
+      imageNote,
+    ].filter(Boolean).join("\n\n") || undefined;
 
     const result = await openWorkspace({
       ticket: { key, summary: topic, url: "" },
       planMd,
       descriptionText: note.body,
+      attachments: attachments.length > 0 ? attachments : undefined,
       services,
       mode: args.mode,
       promptTemplate: applyExploreVars(injectSlackDm(generic?.prompt ?? "", generic?.slackDm ?? false), {

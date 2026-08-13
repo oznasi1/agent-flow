@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A note's description takes images.** Paste a screenshot into the detail
+  field, drop an image file onto a note, or use **Attach** while editing one.
+  Thumbnails render under the note's text and open full size in an editor tab;
+  removing one, deleting the note, or clearing completed notes deletes the file.
+  **Start** copies a note's images into `.pick-task/images/` beside the brief and
+  names their repo-relative paths in both the brief and the seeded prompt, so the
+  agent opens what you saw rather than working from a description of it. PNG,
+  JPEG, GIF and WebP up to 10 MB each; the bytes live under the editor's global
+  storage, never in the note record itself.
+
 ## [0.19.2] — 2026-08-13
 
 ### Fixed

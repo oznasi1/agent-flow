@@ -13,12 +13,20 @@ vi.mock("../../src/config", async () => {
   return { ...actual, getConfig: vi.fn() };
 });
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn() }));
-vi.mock("../../src/engine/workspace", () => ({
-  openWorkspace: vi.fn(),
-  listWorkspaceFiles: vi.fn(() => []),
-  workspaceFolderPaths: vi.fn(() => []),
-  planWorkspaceMerge: vi.fn(() => ({ add: [], duplicates: [], redundant: [], present: [], ok: true })),
-}));
+// Partial: only the four entry points that open windows or touch the filesystem are
+// stubbed. BRIEF_DIR and attachmentFileName stay REAL — they are a constant and a
+// pure path function, and the notepad's image handoff names paths with them that the
+// engine then copies files to, so a stub here would let the two drift silently.
+vi.mock("../../src/engine/workspace", async () => {
+  const actual = await vi.importActual<typeof import("../../src/engine/workspace")>("../../src/engine/workspace");
+  return {
+    ...actual,
+    openWorkspace: vi.fn(),
+    listWorkspaceFiles: vi.fn(() => []),
+    workspaceFolderPaths: vi.fn(() => []),
+    planWorkspaceMerge: vi.fn(() => ({ add: [], duplicates: [], redundant: [], present: [], ok: true })),
+  };
+});
 // repoRootOfWorktree is a pure path function (no fs/git side effects) — keep the real one
 // so the derivation tests exercise the genuine convention, and stub only createWorktrees,
 // the entry point that shells out to git. Same reasoning as the batchWorkspace mock below.
@@ -4734,6 +4742,41 @@ describe("notepad", () => {
     // The template itself stays the configured one: the detail rides beside it, so a
     // customized explorePrompts.general is never rewritten.
     expect(call.promptTemplate).toBe(CFG.exploreActions.find((a) => a.id === "general")!.prompt);
+  });
+
+  it("names the note's images in the brief and the prompt, and passes them as attachments", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { store, sendMsg, imageDir } = mkProvider();
+    seedFiles(imageDir, "i1.png");
+    store.set("agentFlow.notepad", [{ id: "n1", title: "Rail colour", body: "see shots", done: false, createdAt: 1,
+      images: [{ id: "i1", ext: "png", name: "before.png" }] }]);
+    await sendMsg({ type: "notepad:run", id: "n1" });
+
+    const call = vi.mocked(openWorkspace).mock.calls.at(-1)![0];
+    expect(call.attachments).toEqual([
+      { path: path.join(imageDir, "i1.png"), name: "before.png" },
+    ]);
+    expect(call.planMd).toContain("## Attached images");
+    expect(call.planMd).toContain(".pick-task/images/before.png");
+    // Both halves of the suffix: the note's own words AND the images, since an
+    // image the agent never opens is one the user typed nothing to replace.
+    expect(call.promptSuffix).toContain("Details from the note:");
+    expect(call.promptSuffix).toContain(".pick-task/images/before.png");
+  });
+
+  it("leaves the brief and the prompt untouched for a note with no images", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { store, sendMsg } = mkProvider();
+    store.set("agentFlow.notepad", [{ id: "n1", title: "Plain", body: "detail", done: false, createdAt: 1 }]);
+    await sendMsg({ type: "notepad:run", id: "n1" });
+
+    const call = vi.mocked(openWorkspace).mock.calls.at(-1)![0];
+    expect(call.attachments).toBeUndefined();
+    expect(call.planMd).not.toContain("Attached images");
   });
 
   it("sends no prompt suffix for a note with no detail", async () => {

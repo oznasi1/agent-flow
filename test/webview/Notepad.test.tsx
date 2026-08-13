@@ -580,6 +580,24 @@ describe("Notepad — images", () => {
     expect(screen.queryAllByRole("img")).toHaveLength(0);
   });
 
+  it("holds a file dropped on the add form as pending, telling the host nothing yet", async () => {
+    render(<Notepad notes={[]} ordered={false} />);
+    const body = screen.getByPlaceholderText("Any detail the agent should know (optional)");
+    fireEvent.dragOver(body, { dataTransfer: { types: ["Files"], files: [], getData: vi.fn(), dropEffect: "" } });
+    fireEvent.drop(body, { dataTransfer: { types: ["Files"], files: [fileOf("image/png")], getData: vi.fn(), dropEffect: "" } });
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(1));
+    // There is no note to attach to yet, so the bytes stay in the webview until Add.
+    expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notepad:addImage" }));
+  });
+
+  it("leaves a non-file drag on the add form alone", async () => {
+    render(<Notepad notes={[]} ordered={false} />);
+    const body = screen.getByPlaceholderText("Any detail the agent should know (optional)");
+    fireEvent.drop(body, { dataTransfer: { types: ["text/plain"], files: [], getData: vi.fn(), dropEffect: "" } });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
+  });
+
   it("drops a pending image from the add form without telling the host", async () => {
     render(<Notepad notes={[]} ordered={false} />);
     fireEvent.paste(screen.getByPlaceholderText("Any detail the agent should know (optional)"), {
