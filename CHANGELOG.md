@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.3] — 2026-08-13
+
+### Changed
+
+- **Development tooling only, with no change to the extension itself.** The
+  browser-preview builder injected the built bundle through a string
+  replacement, which is scanned for `$` patterns first — and every bundle
+  contains `$&`, the pattern meaning "the text that matched". Each occurrence
+  pasted a stray `</body>` into the middle of the injected JavaScript, inert
+  while it landed inside a string literal and fatal to the page when it did not.
+  The replacement is now a function, whose return value is inserted verbatim.
+
 ## [0.19.2] — 2026-08-13
 
 ### Fixed
