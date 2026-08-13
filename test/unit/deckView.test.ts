@@ -1508,6 +1508,43 @@ describe("retire sweep", () => {
     expect(lastRuns().map((r) => r.run.key)).not.toContain("ASM-OLD");
   });
 
+  it("stamps closedAt on a run the board shelved as closed, and keeps rendering it", async () => {
+    h.runs = [mkRun({ key: "notepad-x", kind: "notepad", url: "", createdAt: Date.now() - 3_600_000 })];
+    await sweep();
+    expect(h.writeRun).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ key: "notepad-x", closedAt: expect.any(Number) }),
+    );
+    expect(h.removeRun).not.toHaveBeenCalled();
+    expect(lastRuns().map((r) => r.run.key)).toContain("notepad-x");
+  });
+
+  it("retires a closed run once its stamp is older than the window", async () => {
+    setConfig({ retireClosedAfterHours: 1 });
+    h.runs = [mkRun({
+      key: "notepad-old", kind: "notepad", url: "",
+      createdAt: Date.now() - 3_600_000, closedAt: Date.now() - 2 * 3_600_000,
+    })];
+    await sweep();
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "notepad-old");
+    expect(lastRuns().map((r) => r.run.key)).not.toContain("notepad-old");
+  });
+
+  it("clears closedAt when a run comes back to the board", async () => {
+    // An agent reopened in its checkout: the window must restart from scratch
+    // rather than resume mid-count.
+    h.runs = [mkRun({
+      key: "notepad-live", kind: "notepad", url: "", createdAt: Date.now() - 3_600_000,
+      closedAt: Date.now() - 3_600_000, repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }],
+    })];
+    h.openSessions = [sess({ sessionId: "s1", cwd: "/r/svc", startedAt: Date.now() })];
+    await sweep();
+    const written = h.writeRun.mock.calls.at(-1)![1] as Run;
+    expect(written.key).toBe("notepad-live");
+    expect("closedAt" in written).toBe(false);
+    expect(h.removeRun).not.toHaveBeenCalled();
+  });
+
   it("clears the stamp when a run stops being finished", async () => {
     h.runs = [mkRun({ key: "ASM-BACK", finishedAt: Date.now() - 3_600_000 })];
     await sweep();
