@@ -839,4 +839,29 @@ describe("getActiveSprintId — board reuse", () => {
     expect(await c.getActiveSprintId()).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("throws when the board list cannot be read, rather than reporting 'no active sprint'", async () => {
+    // The caller (addToMySprint in tasksView.ts) turns a null into the toast "No
+    // active sprint on the X board." Answering null for a request that never arrived
+    // would state something confident and false about the user's Jira, so the read
+    // failure has to surface here — the pre-detection behaviour.
+    installFetch([textResponse("upstream exploded", 500)]);
+    await expect(client().getActiveSprintId()).rejects.toThrow();
+  });
+
+  it("still reports a genuinely board-less project as null, not an error", async () => {
+    installFetch([jsonResponse({ values: [] })]);
+    expect(await client().getActiveSprintId()).toBeNull();
+  });
+
+  it("does not consume loadShape's degraded answer when it has one", async () => {
+    // loadShape swallows a non-auth failure into { boardId: null, hasSprints: true }
+    // and caches nothing. getActiveSprintId must not read that as "no board" — it
+    // must go and ask, and fail if the answer still is not there.
+    const c = client();
+    installFetch([textResponse("upstream exploded", 500)]);
+    expect(await c.loadShape()).toEqual({ boardId: null, hasSprints: true, boardCount: 0 });
+    installFetch([textResponse("upstream exploded", 500)]);
+    await expect(c.getActiveSprintId()).rejects.toThrow();
+  });
 });

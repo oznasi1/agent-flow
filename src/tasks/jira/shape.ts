@@ -38,12 +38,8 @@ export const FIELD_TTL_MS = 10 * 60_000;
  * one because a project key is user input: `siteKey("https://a.test", "AB|C")` and
  * `siteKey("https://a.test|AB", "C")` must not collide, and NUL can appear in
  * neither a URL nor a Jira project key. */
-function key(baseUrl: string, project: string): string {
-  return `${baseUrl}\u0000${project}`;
-}
-
 export function siteKey(baseUrl: string, project: string): string {
-  return key(baseUrl, project);
+  return `${baseUrl}\u0000${project}`;
 }
 
 const shapes = new Map<string, { shape: ProjectShape; at: number }>();
@@ -53,7 +49,7 @@ const sprintFields = new Map<string, { id: string | null; at: number }>();
  * I/O-free on purpose: `JiraProvider.caps` is a synchronous getter that reads this,
  * and a `caps` that awaited anything would change the seam for every connector. */
 export function peekShape(baseUrl: string, project: string): ProjectShape | null {
-  const k = key(baseUrl, project);
+  const k = siteKey(baseUrl, project);
   const hit = shapes.get(k);
   if (!hit) return null;
   if (Date.now() - hit.at >= SHAPE_TTL_MS) {
@@ -65,7 +61,7 @@ export function peekShape(baseUrl: string, project: string): ProjectShape | null
 
 /** Returns what it stored so a caller can cache-and-return in one expression. */
 export function putShape(baseUrl: string, project: string, shape: ProjectShape): ProjectShape {
-  shapes.set(key(baseUrl, project), { shape, at: Date.now() });
+  shapes.set(siteKey(baseUrl, project), { shape, at: Date.now() });
   return shape;
 }
 

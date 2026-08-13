@@ -187,17 +187,28 @@ export class JiraClient {
    * board and answer null. An auth failure is NOT swallowed — a dead token is a fact
    * about the credentials, and the panel already re-gates on it. */
   async loadShape(): Promise<ProjectShape> {
-    const known = peekShape(this.baseUrl, this.project);
+    const known = this.shapeSnapshot();
     if (known) return known;
-    let payload: unknown;
     try {
-      payload = await this.request(
-        `/rest/agile/1.0/board?projectKeyOrId=${encodeURIComponent(this.project)}&maxResults=50`,
-      );
+      return await this.fetchShape();
     } catch (e) {
       if (e instanceof JiraAuthError) throw e;
       return { boardId: null, hasSprints: true, boardCount: 0 };
     }
+  }
+
+  /** `loadShape` with the swallowing removed — the board setup, or the reason we
+   *  could not read it. Exists because the two callers need opposite things from a
+   *  failure: narrowing capabilities must degrade quietly (an unreadable board list
+   *  is not a reason to shout at someone who only opened the panel), while a sprint
+   *  WRITE must not turn "couldn't reach Jira" into `boardId: null`, which its caller
+   *  reports to the user as the confident and false "No active sprint on the X
+   *  board." Caches on success exactly as `loadShape` does, so the two share one
+   *  answer per session. */
+  private async fetchShape(): Promise<ProjectShape> {
+    const payload = await this.request(
+      `/rest/agile/1.0/board?projectKeyOrId=${encodeURIComponent(this.project)}&maxResults=50`,
+    );
     return putShape(this.baseUrl, this.project, pickBoard(payload));
   }
 
@@ -364,7 +375,12 @@ export class JiraClient {
    * disagree, and "Add to my sprint" could move an issue into a sprint the user was
    * never shown. */
   async getActiveSprintId(): Promise<number | null> {
-    const { boardId } = await this.loadShape();
+    // `fetchShape`, not `loadShape`: a board list we could not read must fail here
+    // rather than answer `boardId: null`, which this method's caller reports as
+    // "No active sprint on the X board." — a confident claim about the user's Jira
+    // built from a request that never arrived. A `null` from a shape we genuinely
+    // read is the honest version of that message, and still returns null.
+    const { boardId } = this.shapeSnapshot() ?? (await this.fetchShape());
     if (boardId == null) return null;
     const sprints = await this.request(`/rest/agile/1.0/board/${boardId}/sprint?state=active`);
     return (sprints?.values ?? [])[0]?.id ?? null;
