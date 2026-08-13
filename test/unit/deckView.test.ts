@@ -62,6 +62,7 @@ const h = vi.hoisted(() => ({
   prFacts: true as boolean,
   ttlSeconds: 120,
   openAgents: true as boolean,
+  inflightShowAll: false as boolean,
   // Review-requests strip (Task 7): a gh-backed search, an on-disk cache, and the
   // repos discoverable on this machine — independent of the PR-facts fixtures above.
   reviewSearch: vi.fn(async (): Promise<{ issueCount: number; requests: ReviewRequest[] } | null> => ({
@@ -421,6 +422,10 @@ vi.mock("../../src/config", async (importActual) => {
       deckGrouping: actual.getConfig().deckGrouping,
       retireFinishedAfterHours: actual.getConfig().retireFinishedAfterHours,
       retireAbandonedAfterDays: actual.getConfig().retireAbandonedAfterDays,
+      retireClosedAfterHours: actual.getConfig().retireClosedAfterHours,
+      // Steered per test the way openAgents is: the shelf rule's escape hatch has
+      // to be flippable without going through the real config store.
+      inflightShowAll: h.inflightShowAll,
       // Same reason: a test steers this through setConfig({ orchestrator }),
       // which only reaches deckView.ts if this mock forwards the real,
       // vscode-configStore-backed value rather than a field frozen here.
@@ -463,6 +468,7 @@ const mkRun = (over: Partial<Run> = {}): Run => ({
 const statusFor = (run: Run, ticketCategory: string | null = null): RunStatus => ({
   run, column: "progress", ticketStatus: null, ticketCategory, repos: [],
   agent: { state: "unknown", lastActivityMs: null, slug: null }, windowOpen: false, prs: {}, agents: [],
+  shelf: "board" as const,
 });
 const reviewFixture = (): ReviewRequest => ({
   id: "CyberJackGit/aws-ops#8491", repo: "CyberJackGit/aws-ops", repoName: "aws-ops",
@@ -576,6 +582,7 @@ beforeEach(() => {
   h.prFacts = true;
   h.ttlSeconds = 120;
   h.openAgents = true;
+  h.inflightShowAll = false;
   h.writePrEntry.mockClear();
   h.removePrEntries.mockClear();
   h.prFetch.mockClear().mockResolvedValue({ ok: true, facts: null });
@@ -1269,6 +1276,133 @@ describe("DeckPanel open agents", () => {
   });
 });
 
+describe("session ownership — one agent, one card", () => {
+  const NOW = Date.now();
+  const MIN = 60_000;
+  // Four notepad runs launched in place, all on one checkout. This is the real
+  // shape: two live agents used to render as 4 x 2 = 8 cards.
+  const notepad = (key: string, createdAt: number): Run =>
+    mkRun({ key, kind: "notepad", url: "", createdAt, summary: key,
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }] });
+
+  beforeEach(() => {
+    h.runs = [
+      notepad("notepad-a", NOW - 90 * MIN),
+      notepad("notepad-b", NOW - 60 * MIN),
+      notepad("notepad-c", NOW - 30 * MIN),
+      notepad("notepad-d", NOW - 10 * MIN),
+    ];
+    h.openSessions = [
+      sess({ sessionId: "s1", cwd: "/r/svc", startedAt: NOW - 45 * MIN }),
+      sess({ pid: 2, sessionId: "s2", cwd: "/r/svc", startedAt: NOW - 5 * MIN }),
+    ];
+  });
+
+  it("attaches each session exactly once across every run sharing the checkout", async () => {
+    show();
+    await settled();
+    const attached = ["notepad-a", "notepad-b", "notepad-c", "notepad-d"]
+      .flatMap((k) => builtFor(k).agents.map((a) => a.session.sessionId));
+    expect(attached.sort()).toEqual(["s1", "s2"]);
+  });
+
+  it("gives each session to the newest run created at or before it started", async () => {
+    show();
+    await settled();
+    expect(builtFor("notepad-b").agents.map((a) => a.session.sessionId)).toEqual(["s1"]);
+    expect(builtFor("notepad-d").agents.map((a) => a.session.sessionId)).toEqual(["s2"]);
+    expect(builtFor("notepad-a").agents).toEqual([]);
+    expect(builtFor("notepad-c").agents).toEqual([]);
+  });
+
+  it("still claims the place, so it does not also become a local card", async () => {
+    show();
+    await settled();
+    // The place belongs to a tracked run whether or not that run owns the
+    // session in it, so no synthetic local card may be built for it.
+    const localCalls = h.buildRunStatus.mock.calls
+      .map((c) => c[0] as { run: Run }).filter((i) => i.run.kind === "local");
+    expect(localCalls).toEqual([]);
+  });
+});
+
+describe("shelf", () => {
+  const NOW = Date.now();
+  const MIN = 60_000;
+  // shelf is attached AFTER the mocked buildRunStatus returns, so it is only
+  // visible on the real posted message — not on what was passed in.
+  const shelfOf = (key: string) => lastRunsPost().runs.find((r: RunStatus) => r.run.key === key)?.shelf;
+  const notepad = (key: string, createdAt: number): Run =>
+    mkRun({ key, kind: "notepad", url: "", createdAt, summary: key,
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }] });
+
+  it("keeps an active ticket run on the board with no agent and no PR", async () => {
+    h.runs = [mkRun()]; // mkRun's url is a real Jira url, so isTicketRun is true
+    show();
+    await settled();
+    expect(shelfOf("ASM-1")).toBe("board");
+  });
+
+  it("closes a notepad run with no agent, no PR and a clean tree", async () => {
+    h.runs = [notepad("notepad-a", NOW - 90 * MIN)];
+    h.openSessions = [];
+    show();
+    await settled();
+    expect(shelfOf("notepad-a")).toBe("closed");
+  });
+
+  it("keeps a notepad run with a live agent on the board", async () => {
+    h.runs = [notepad("notepad-a", NOW - 90 * MIN)];
+    h.openSessions = [sess({ sessionId: "s1", cwd: "/r/svc", startedAt: NOW - 10 * MIN })];
+    show();
+    await settled();
+    expect(shelfOf("notepad-a")).toBe("board");
+  });
+
+  it("counts a shared checkout's dirty state only for the run that owns it", async () => {
+    // Without path ownership this one dirty tree reads as work to lose on BOTH
+    // runs and neither ever leaves the board — the defect this exists for.
+    h.runs = [notepad("notepad-old", NOW - 90 * MIN), notepad("notepad-new", NOW - 10 * MIN)];
+    h.openSessions = [];
+    h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "main", dirty: true, ahead: 0, added: 1, removed: 0, files: 1 }],
+    }));
+    show();
+    await settled();
+    expect(shelfOf("notepad-new")).toBe("board");   // newest holder owns the path
+    expect(shelfOf("notepad-old")).toBe("closed");
+  });
+
+  it("does not close a run merely because openAgents hides its agents", async () => {
+    // openAgents is a DISPLAY toggle. Ownership reads allPlaces regardless, so a
+    // run with somebody working in it must not shelve as closed.
+    h.openAgents = false;
+    h.runs = [notepad("notepad-a", NOW - 90 * MIN)];
+    h.openSessions = [sess({ sessionId: "s1", cwd: "/r/svc", startedAt: NOW - 10 * MIN })];
+    show();
+    await settled();
+    expect(shelfOf("notepad-a")).toBe("board");
+  });
+
+  it("keeps every run on the board when inflightShowAll is on", async () => {
+    h.inflightShowAll = true;
+    h.runs = [notepad("notepad-a", NOW - 90 * MIN)];
+    h.openSessions = [];
+    show();
+    await settled();
+    expect(shelfOf("notepad-a")).toBe("board");
+  });
+
+  it("puts a local card on the board — it exists only because a session is open", async () => {
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    show();
+    await settled();
+    expect(lastRunsPost().runs.map((r: RunStatus) => r.shelf)).toEqual(["board"]);
+  });
+});
+
 describe("DeckPanel settings without a reload", () => {
   it("re-seeds prFacts from the setting and re-probes gh when it turns on", async () => {
     h.prFacts = false;
@@ -1372,6 +1506,43 @@ describe("retire sweep", () => {
     await sweep();
     expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "ASM-OLD");
     expect(lastRuns().map((r) => r.run.key)).not.toContain("ASM-OLD");
+  });
+
+  it("stamps closedAt on a run the board shelved as closed, and keeps rendering it", async () => {
+    h.runs = [mkRun({ key: "notepad-x", kind: "notepad", url: "", createdAt: Date.now() - 3_600_000 })];
+    await sweep();
+    expect(h.writeRun).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ key: "notepad-x", closedAt: expect.any(Number) }),
+    );
+    expect(h.removeRun).not.toHaveBeenCalled();
+    expect(lastRuns().map((r) => r.run.key)).toContain("notepad-x");
+  });
+
+  it("retires a closed run once its stamp is older than the window", async () => {
+    setConfig({ retireClosedAfterHours: 1 });
+    h.runs = [mkRun({
+      key: "notepad-old", kind: "notepad", url: "",
+      createdAt: Date.now() - 3_600_000, closedAt: Date.now() - 2 * 3_600_000,
+    })];
+    await sweep();
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "notepad-old");
+    expect(lastRuns().map((r) => r.run.key)).not.toContain("notepad-old");
+  });
+
+  it("clears closedAt when a run comes back to the board", async () => {
+    // An agent reopened in its checkout: the window must restart from scratch
+    // rather than resume mid-count.
+    h.runs = [mkRun({
+      key: "notepad-live", kind: "notepad", url: "", createdAt: Date.now() - 3_600_000,
+      closedAt: Date.now() - 3_600_000, repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }],
+    })];
+    h.openSessions = [sess({ sessionId: "s1", cwd: "/r/svc", startedAt: Date.now() })];
+    await sweep();
+    const written = h.writeRun.mock.calls.at(-1)![1] as Run;
+    expect(written.key).toBe("notepad-live");
+    expect("closedAt" in written).toBe(false);
+    expect(h.removeRun).not.toHaveBeenCalled();
   });
 
   it("clears the stamp when a run stops being finished", async () => {
@@ -3505,6 +3676,7 @@ const prStatus = (key: string, repo: string, state: "OPEN" | "MERGED"): RunStatu
     repos: [{ name: repo, path: `/r/${repo}`, isGit: true }], briefPaths: [],
   },
   column: "progress",
+  shelf: "board",
   ticketStatus: "In Progress",
   ticketCategory: "indeterminate",
   repos: [{ name: repo, path: `/r/${repo}`, branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
@@ -5499,6 +5671,7 @@ describe("a met seed rule acts", () => {
       briefPaths: [],
     },
     column: "progress", ticketStatus: "In Progress", ticketCategory: "indeterminate",
+    shelf: "board",
     repos: [{ name: "aws-ops", path: "/r/aws-ops", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
     agent: { state: "working", lastActivityMs: 1, slug: null },
     windowOpen: true,
@@ -5924,6 +6097,7 @@ describe("a met run rule acts", () => {
       briefPaths: [],
     },
     column: "progress", ticketStatus: "In Progress", ticketCategory: "indeterminate",
+    shelf: "board",
     repos: [{ name: "aws-ops", path: "/r/aws-ops", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
     agent: { state: "working", lastActivityMs: 1, slug: null },
     windowOpen: true,

@@ -38,6 +38,8 @@ import { groupPlacesByWindow, inferTicket, localRunFor } from "./engine/localRun
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity } from "./engine/transcript";
 import { canon } from "./engine/paths";
+import { OwnedRun, resolveOwnership } from "./engine/ownership";
+import { landed, shelfFor } from "./engine/visibility";
 // The scope picker the modes-notice hide-write already uses: a settings write must
 // land where the user's value already lives. Saving a command is the same problem.
 import { pickExplicit } from "./modesNotice";
@@ -2086,6 +2088,15 @@ export class DeckPanel {
     const allPlaces = groupByPlace(readOpenSessions(defaultSessionsDir()));
     const places = this.openAgents ? allPlaces : new Map<string, OpenSession[]>();
     const livePlaces = new Set(allPlaces.keys());
+    // Ownership is resolved from `allPlaces`, NOT `places`: `openAgents` is a
+    // display toggle, and a run whose agents are merely hidden must not read as
+    // a run with nobody working in it. The shelf rule below depends on this.
+    const ownedRuns: OwnedRun[] = tracked.map((r) => ({
+      key: r.key,
+      createdAt: r.createdAt,
+      paths: r.repos.map((repo) => canon(repo.path)),
+    }));
+    const ownership = resolveOwnership({ runs: ownedRuns, sessionsByPlace: allPlaces });
     const claimed = new Set<string>();
     const agentsByKey = new Map<string, CardAgent[]>();
     for (const run of tracked) {
@@ -2096,6 +2107,9 @@ export class DeckPanel {
         if (!sessions) continue;
         claimed.add(place);
         for (const s of sessions) {
+          // One session, one card. Several runs can hold the same in-place
+          // checkout; only its owner renders it as an agent.
+          if (ownership.sessionOwner.get(s.sessionId) !== run.key) continue;
           mine.push({
             session: s,
             // Addressed by sessionId, so two sessions in one worktree report
@@ -2260,15 +2274,33 @@ export class DeckPanel {
         // inferred key crosses the wire pre-computed — through the same
         // connector and the same ticketKeyFor every other caller here uses,
         // rather than a second parser living in the webview.
-        out.push(run.url ? { ...status, inferredTicketKey: ticketKeyFor(run, this.connector) } : status);
+        // A local card exists only because a session is open in it, so it is on
+        // the board by construction.
+        out.push(run.url
+          ? { ...status, shelf: "board" as const, inferredTicketKey: ticketKeyFor(run, this.connector) }
+          : { ...status, shelf: "board" as const });
         continue;
       }
-      if (this.applyVerdict(run, this.verdictFor(status, livePlaces, now))) continue;
+      // Which shelf this run sits on. `hasLiveSession` comes from `ownership`
+      // rather than `status.agents`, because `agents` is gated on the openAgents
+      // display toggle and a hidden agent is still an agent.
+      // Computed before the sweep, not after: rule 2b reads the shelf off the
+      // status it is handed, so the verdict has to see the shelved one.
+      const ownsPath = (p: string) => ownership.pathOwner.get(canon(p)) === run.key;
+      const shelf = getConfig().inflightShowAll ? "board" : shelfFor({
+        hasLiveSession: ownership.runsWithSession.has(run.key),
+        prOpen: Object.values(status.prs).some((e) => e.facts?.state === "OPEN"),
+        landed: landed(status.prs, status.ticketCategory),
+        ticketActive: isTicketRun(run) && status.ticketCategory !== "done",
+        hasWorkToLose: status.repos.some((r) => ownsPath(r.path) && (r.dirty || r.ahead > 0)),
+      });
+      const shelved = { ...status, shelf };
+      if (this.applyVerdict(run, this.verdictFor(shelved, livePlaces, now))) continue;
       // Counted, not cleared: this is exactly what Clear stale would take. The
       // second call is free of side effects — `verdictFor` is pure, and only
       // `applyVerdict` ever writes.
-      if (this.verdictFor(status, livePlaces, now, true).action === "retire") stale++;
-      out.push(status);
+      if (this.verdictFor(shelved, livePlaces, now, true).action === "retire") stale++;
+      out.push(shelved);
     }
     this.sweepReviewRuns(livePlaces, now, false, () => stale++);
     this.staleCount = stale;
@@ -2291,6 +2323,14 @@ export class DeckPanel {
         return false;
       case "unstamp": {
         const { finishedAt: _dropped, ...rest } = run;
+        writeRun(dir, rest);
+        return false;
+      }
+      case "stampClosed":
+        writeRun(dir, { ...run, closedAt: v.closedAt });
+        return false;
+      case "unstampClosed": {
+        const { closedAt: _dropped, ...rest } = run;
         writeRun(dir, rest);
         return false;
       }
@@ -2342,8 +2382,13 @@ export class DeckPanel {
       prs: s.prs,
       hasLiveSession: s.run.repos.some((r) => livePlaces.has(canon(r.path))),
       prsAuthoritative: this.prFacts,
+      // `inflightShowAll` already forces every shelf to "board" in buildAll, so
+      // this is belt and braces — and it keeps the setting's promise ("nothing is
+      // retired for being closed") true even if a caller hands over a stale status.
+      shelf: cfg.inflightShowAll ? "board" : s.shelf,
       finishedAfterMs: overrideGates ? 0 : cfg.retireFinishedAfterHours * 3_600_000,
       abandonedAfterMs: overrideGates ? 1 : cfg.retireAbandonedAfterDays * 86_400_000,
+      closedAfterMs: overrideGates ? 0 : cfg.retireClosedAfterHours * 3_600_000,
       nowMs,
       exists: (p) => fs.existsSync(p),
     });
@@ -2388,6 +2433,10 @@ export class DeckPanel {
       prs: {},
       hasLiveSession: run.repos.some((r) => livePlaces.has(canon(r.path))),
       prsAuthoritative: true,
+      // A review run never renders a card, so it has no shelf. "board" keeps
+      // rule 2b inert and leaves rules 1, 2 and 3 to sweep it as they always have.
+      shelf: "board",
+      closedAfterMs: 0,
       finishedAfterMs: overrideGates ? 0 : cfg.retireFinishedAfterHours * 3_600_000,
       abandonedAfterMs: overrideGates ? 1 : cfg.retireAbandonedAfterDays * 86_400_000,
       nowMs,

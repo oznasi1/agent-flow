@@ -304,6 +304,11 @@ export interface AgentFlowConfig {
   // How long an abandoned run (no ticket, no PR, nothing uncommitted) may sit
   // untouched before its record is retired. 0 = never.
   retireAbandonedAfterDays: number;
+  // How long a closed run stays in the Recently closed strip before its record
+  // is deleted. 0 retires on sight.
+  retireClosedAfterHours: number;
+  // Show every run record on the board, pre-strip behaviour. The escape hatch.
+  inflightShowAll: boolean;
   // Show the Deck's review-requests strip: open PRs that ask for your review.
   reviewRequests: boolean;
   // How stale the cached review queue may be before a refetch. Floored at 60s —
@@ -535,6 +540,8 @@ export function getConfig(): AgentFlowConfig {
     // running backwards.
     retireFinishedAfterHours: Math.max(0, c.get<number>("retireFinishedAfterHours") ?? 24),
     retireAbandonedAfterDays: Math.max(0, c.get<number>("retireAbandonedAfterDays") ?? 7),
+    retireClosedAfterHours: Math.max(0, c.get<number>("retireClosedAfterHours") ?? 24),
+    inflightShowAll: c.get<boolean>("inflightShowAll") ?? false,
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,

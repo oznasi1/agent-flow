@@ -1,11 +1,12 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
 import { AgentActivity, BranchCiStatus, CardAgent, DeckColumn, FlowCommand, FlowPromptMode, OutboundMessage, PendingResume, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
+import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
 import { DeckCard, projectCards } from "./deckCards";
 import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
-import { isPrReviewStatus } from "./helpers";
+import { isPrReviewStatus, timeAgo } from "./helpers";
 
 /** The Orchestrator's mark: one node on the left feeding two on the right
  * through elbow connectors — the drawer's own object, drawn. It replaced a ⚡
@@ -52,15 +53,6 @@ const COLUMNS: { id: DeckColumn; label: string; varName: string }[] = [
   { id: "review", label: "In review", varName: "--c-review" },
   { id: "done", label: "Done", varName: "--c-done" },
 ];
-
-function timeAgo(ms: number | null): string {
-  if (!ms) return "";
-  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
-}
 
 /** A copy of `r` with `key` removed. Used to clear a per-row flag or body
  * without leaving a stale `false`/`""` entry sitting in the map forever. */
@@ -444,6 +436,8 @@ export function DeckApp(): JSX.Element {
     { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false, loading: false },
   );
   const [reviewsCollapsed, setReviewsCollapsed] = React.useState(false);
+  // Collapsed is the point: a closed run should cost one line, not a card.
+  const [closedCollapsed, setClosedCollapsed] = React.useState(true);
   const [expanded, setExpanded] = React.useState<string | null>(null);
   // `null` means the host tried this id's per-PR detail call and it failed —
   // distinct from absent (never asked yet), which is what lets the row show
@@ -613,9 +607,22 @@ export function DeckApp(): JSX.Element {
   // One list either way, so the columns, counts, stat tiles and sort all read
   // from the same shape. Workspaces mode is today's board exactly: one card per
   // run, agent nested, bucketed by the run's own column.
+  // A closed run is not a card. Partitioning here rather than filtering the
+  // columns keeps the stat tiles, the column counts and the board reading from
+  // one list, which is what they already promise each other.
+  const live = runs.filter((r) => r.shelf !== "closed");
+  const closed = runs.filter((r) => r.shelf === "closed");
   const cards: DeckCard[] = grouping === "agents"
-    ? projectCards(runs)
-    : runs.map((r) => ({ id: `w:${r.run.key}`, status: r, agent: null, column: r.column }));
+    ? projectCards(live)
+    : live.map((r) => ({ id: `w:${r.run.key}`, status: r, agent: null, column: r.column }));
+  // The label mirrors the card's own key chip, so the strip and the board name
+  // the same run the same way.
+  const closedRows: ClosedRow[] = closed.map((r) => ({
+    key: r.run.key,
+    title: r.run.summary,
+    label: isTicketRun(r.run) ? r.run.key : runKind(r.run) === "notepad" ? "notepad" : "explore",
+    closedAt: r.run.closedAt ?? null,
+  }));
   const needs = cards.filter((c) => c.column === "needs").length;
   // With arming real, the count that matters on the chip is how many flows are
   // armed — that is the thing quietly spending your attention while the drawer
@@ -730,7 +737,7 @@ export function DeckApp(): JSX.Element {
         }}
       />
 
-      {runs.length === 0 ? (
+      {live.length === 0 && closed.length === 0 ? (
         <div className="empty">
           <div className="big">No tasks in flight</div>
           <div>Take a task from the Agent Flow Deck Tasks pool and it shows up here.</div>
@@ -767,6 +774,15 @@ export function DeckApp(): JSX.Element {
         </div>
       )}
 
+      <ClosedStrip
+        rows={closedRows}
+        collapsed={closedCollapsed}
+        onCollapse={(c) => setClosedCollapsed(c)}
+        onReopen={(key) => send({ type: "deck:inspect", key, action: "open" })}
+        onForget={forget}
+        onClearAll={() => closedRows.forEach((r) => forget(r.key))}
+      />
+
       <div className="legend">
         {COLUMNS.map((c) => (
           <span className="lg" key={c.id}><span className="dot" style={{ background: `var(${c.varName})` }} />{c.label}</span>
@@ -796,6 +812,8 @@ export function DeckApp(): JSX.Element {
         <OrchestratorDrawer
           flows={flows}
           openId={openFlowId}
+          // The full list, not `live`: a flow's place node binds a run key, and a
+          // run shelving as closed must not make its own node unresolvable.
           runs={runs}
           pendingResume={pendingResume}
           promptModes={promptModes}

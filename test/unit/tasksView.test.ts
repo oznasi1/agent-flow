@@ -150,6 +150,8 @@ const CFG = {
   deckGrouping: "agents" as const,
   retireFinishedAfterHours: 24,
   retireAbandonedAfterDays: 7,
+  retireClosedAfterHours: 24,
+  inflightShowAll: false,
   reviewRequests: true,
   reviewRequestsTtlSeconds: 300,
   reviewWrites: false,

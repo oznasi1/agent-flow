@@ -189,3 +189,14 @@ const TICKET_KINDS: Record<string, TicketKind> = Object.assign(Object.create(nul
 export function ticketKind(typeName: string): TicketKind {
   return TICKET_KINDS[typeName.trim().toLowerCase()] ?? "other";
 }
+
+/** "4m ago" from an epoch-ms stamp. `null` and 0 both render "" — a session
+ * record with no startedAt must not read as "open 56y ago". */
+export function timeAgo(ms: number | null): string {
+  if (!ms) return "";
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}

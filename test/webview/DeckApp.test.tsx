@@ -33,6 +33,7 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   windowOpen: false,
   prs: {},
   agents: [],
+  shelf: "board",
   ...over,
 });
 
@@ -1812,5 +1813,85 @@ describe("branch line", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
     expect(container.querySelector(".c-branch .bn")!.textContent).toContain("ASM-9-x");
+  });
+});
+
+describe("Recently closed strip", () => {
+  const closed = (key: string, summary: string) => mkStatus({
+    shelf: "closed",
+    run: { key, summary, url: "", kind: "notepad", createdAt: 1, mode: "per-window",
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }], briefPaths: [],
+      closedAt: Date.now() - 2 * 3_600_000 },
+    repos: [], agents: [], column: "progress", ticketStatus: null, ticketCategory: null,
+  });
+
+  it("shows no strip when every run is on the board", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(screen.getByText("Export fails on large accounts")).toBeInTheDocument();
+    expect(screen.queryByText("Recently closed")).not.toBeInTheDocument();
+  });
+
+  it("moves a closed run off the board and into the strip, collapsed", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus(), closed("notepad-a", "Add drag and drop to the notepad")]));
+    expect(screen.getByText("Recently closed")).toBeInTheDocument();
+    expect(screen.queryByText("Add drag and drop to the notepad")).not.toBeInTheDocument();
+  });
+
+  it("leaves a closed run out of the column count and the stat tile", () => {
+    render(<DeckApp />);
+    // Both are column "progress"; only the board one may be counted.
+    host(runsMsg([mkStatus(), closed("notepad-a", "Add drag and drop to the notepad")]));
+    // "In progress" names both the stat tile and the column header, so the tile
+    // is addressed through .stats rather than by its label alone.
+    const tile = document.querySelector(".stats .stat");
+    expect(tile?.querySelector(".l")?.textContent).toBe("In progress");
+    expect(tile?.querySelector(".n")?.textContent).toBe("1");
+    // ...and the column header agrees: one card, not two.
+    const col = [...document.querySelectorAll(".col-hd")]
+      .find((h) => h.querySelector(".nm")?.textContent === "In progress");
+    expect(col?.querySelector(".ct")?.textContent).toBe("1");
+  });
+
+  it("reopens a strip row by its run key", () => {
+    render(<DeckApp />);
+    host(runsMsg([closed("notepad-a", "Add drag and drop to the notepad")]));
+    fireEvent.click(screen.getByText("Recently closed"));
+    fireEvent.click(screen.getByRole("button", { name: "Reopen" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "notepad-a", action: "open" });
+  });
+
+  it("forgets a strip row through the same optimistic path as a card", () => {
+    render(<DeckApp />);
+    host(runsMsg([closed("notepad-a", "Add drag and drop to the notepad")]));
+    fireEvent.click(screen.getByText("Recently closed"));
+    fireEvent.click(screen.getByRole("button", { name: "Forget" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "notepad-a" });
+    // Optimistic: the row leaves now, before any deck:runs comes back.
+    expect(screen.queryByText("Add drag and drop to the notepad")).not.toBeInTheDocument();
+  });
+
+  it("clears every closed record at once", () => {
+    render(<DeckApp />);
+    host(runsMsg([closed("notepad-a", "one"), closed("notepad-b", "two")]));
+    fireEvent.click(screen.getByText("Recently closed"));
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "notepad-a" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "notepad-b" });
+    expect(screen.queryByText("Recently closed")).not.toBeInTheDocument();
+  });
+
+  it("shows the strip rather than the empty state when nothing is live but something closed", () => {
+    render(<DeckApp />);
+    host(runsMsg([closed("notepad-a", "Add drag and drop to the notepad")]));
+    expect(screen.queryByText("No tasks in flight")).not.toBeInTheDocument();
+    expect(screen.getByText("Recently closed")).toBeInTheDocument();
+  });
+
+  it("still shows the empty state when nothing has been launched at all", () => {
+    render(<DeckApp />);
+    host(runsMsg([]));
+    expect(screen.getByText("No tasks in flight")).toBeInTheDocument();
   });
 });

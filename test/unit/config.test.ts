@@ -807,6 +807,19 @@ describe("deck grouping and retirement settings", () => {
     expect(c.deckGrouping).toBe("agents");
     expect(c.retireFinishedAfterHours).toBe(24);
     expect(c.retireAbandonedAfterDays).toBe(7);
+    expect(c.retireClosedAfterHours).toBe(24);
+    expect(c.inflightShowAll).toBe(false);
+  });
+
+  it("honours a custom closed window and the show-all escape hatch", () => {
+    setConfig({ retireClosedAfterHours: 3, inflightShowAll: true });
+    expect(getConfig().retireClosedAfterHours).toBe(3);
+    expect(getConfig().inflightShowAll).toBe(true);
+  });
+
+  it("floors a negative closed window at zero", () => {
+    setConfig({ retireClosedAfterHours: -2 });
+    expect(getConfig().retireClosedAfterHours).toBe(0);
   });
 
   it("honours the workspaces grouping", () => {
@@ -929,6 +942,13 @@ describe("package.json ⇄ config constants", () => {
     const ab = props["agentFlow.retireAbandonedAfterDays"] as { default?: unknown; minimum?: unknown };
     expect(ab.default).toBe(7);
     expect(ab.minimum).toBe(0);
+  });
+
+  it("declares inflightShowAll defaulting to false and retireClosedAfterHours to 24", () => {
+    expect(props["agentFlow.inflightShowAll"].default).toBe(false);
+    const closed = props["agentFlow.retireClosedAfterHours"] as { default?: unknown; minimum?: unknown };
+    expect(closed.default).toBe(24);
+    expect(closed.minimum).toBe(0);
   });
 
   it("declares reviewRequests defaulting to true — the review strip is on unless turned off", () => {

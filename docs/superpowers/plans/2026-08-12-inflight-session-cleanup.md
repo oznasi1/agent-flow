@@ -1195,6 +1195,7 @@ outrank it, so no record is ever deleted out from under real work."
 - Create: `src/webview/ClosedStrip.tsx`
 - Create: `test/webview/ClosedStrip.test.tsx`
 - Modify: `src/webview/deckStyles.ts` (append CSS before the closing backtick)
+- Modify: `src/webview/helpers.ts` (receives `timeAgo`), `src/webview/DeckApp.tsx` (imports it instead of declaring it)
 
 **Interfaces:**
 - Consumes: `RunStatus` (Task 4, for the `shelf` field — though the component takes only the rows it needs).
@@ -1302,12 +1303,36 @@ describe("ClosedStrip", () => {
 Run: `npx vitest run test/webview/ClosedStrip.test.tsx`
 Expected: FAIL — module not found.
 
-- [ ] **Step 3: Write the component**
+- [ ] **Step 3: Lift `timeAgo` into the shared helpers**
 
-Create `src/webview/ClosedStrip.tsx`:
+`DeckApp.tsx` declares `timeAgo` module-locally at line 56 and the strip needs the same function. Move it — do not write a second copy.
+
+Cut it out of `src/webview/DeckApp.tsx` verbatim, **signature unchanged**, and paste it into `src/webview/helpers.ts` as an export:
+
+```ts
+/** "4m ago" from an epoch-ms stamp. `null` and 0 both render "" — a session
+ * record with no startedAt must not read as "open 56y ago". */
+export function timeAgo(ms: number | null): string {
+  if (!ms) return "";
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+```
+
+Then add `timeAgo` to `DeckApp.tsx`'s existing `import { isPrReviewStatus } from "./helpers";`. Keep the `number | null` signature exactly: `DeckApp.tsx:230` relies on `timeAgo(0)` returning `""`, and narrowing the parameter to `number` would break that guard's intent.
+
+Run `npm test` before continuing — every existing DeckApp test must still pass, since nothing about the function changed.
+
+- [ ] **Step 4: Write the component**
+
+Create `src/webview/ClosedStrip.tsx`. It imports `timeAgo` rather than declaring one:
 
 ```tsx
 import * as React from "react";
+import { timeAgo } from "./helpers";
 
 /** One run that has left the board: no agent of its own, no PR, no active
  * ticket, nothing uncommitted. It retires on its own after
@@ -1319,14 +1344,6 @@ export interface ClosedRow {
   label: string;
   /** null on a record written before `closedAt` existed. */
   closedAt: number | null;
-}
-
-function timeAgo(ms: number): string {
-  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86400)}d ago`;
 }
 
 /**
@@ -1387,7 +1404,7 @@ export function ClosedStrip({ rows, collapsed, onCollapse, onReopen, onForget, o
 }
 ```
 
-- [ ] **Step 4: Add the CSS**
+- [ ] **Step 5: Add the CSS**
 
 In `src/webview/deckStyles.ts`, append inside the `DECK_CSS` template literal, before the closing backtick. Reuse the existing `.sdot` and `tone-parked` rules — do not redefine them.
 
@@ -1427,26 +1444,26 @@ In `src/webview/deckStyles.ts`, append inside the `DECK_CSS` template literal, b
   .rc-act:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
 ```
 
-- [ ] **Step 5: Run to verify it passes**
+- [ ] **Step 6: Run to verify it passes**
 
 Run: `npx vitest run test/webview/ClosedStrip.test.tsx`
 Expected: PASS, 9 tests.
 
-- [ ] **Step 6: Mutation-check**
+- [ ] **Step 7: Mutation-check**
 
 1. Change `if (rows.length === 0) return null;` to `if (false)`. Re-run — "renders nothing when nothing has closed" must FAIL. Restore.
 2. Change `onCollapse(!collapsed)` to `onCollapse(collapsed)`. Re-run — the toggle test must FAIL. Restore.
 3. Change `onReopen(r.key)` to `onReopen(r.title)`. Re-run — the reopen test must FAIL. Restore.
 
-- [ ] **Step 7: Gates**
+- [ ] **Step 8: Gates**
 
 Run: `npm run typecheck && npm test && npm run test:cov && npm run build`
 Expected: pass. `npm run build` is the gate that matters here — if `ClosedStrip.tsx` pulled in anything Node-only, this is the only command that says so.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/webview/ClosedStrip.tsx src/webview/deckStyles.ts test/webview/ClosedStrip.test.tsx
+git add src/webview/ClosedStrip.tsx src/webview/helpers.ts src/webview/DeckApp.tsx src/webview/deckStyles.ts test/webview/ClosedStrip.test.tsx
 git commit -m "feat(webview): add the Recently closed strip
 
 One collapsed line for everything that left the board, expanding to a row per

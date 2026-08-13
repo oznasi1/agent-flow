@@ -5,6 +5,24 @@ All notable changes to **Agent Flow Deck** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **In-flight board shows only work that is moving.** A card stays while it has an
+  agent open, a pull request, an active ticket, or uncommitted work. Everything else
+  collapses into a new **Recently closed** strip below the board and retires on its
+  own after `agentFlow.retireClosedAfterHours` (default 24). Set
+  `agentFlow.inflightShowAll` to `true` for the previous behaviour.
+
+### Fixed
+
+- **One agent, one card.** Notepad and Explore runs launch in place rather than in a
+  worktree, so several run records could point at the same checkout — and every one
+  of them claimed every Claude Code session running there. Four notepad runs over one
+  repo rendered two live agents as eight cards. Each session now belongs to exactly
+  one run.
+
 ## [0.16.0] — 2026-08-12
 
 ### Changed

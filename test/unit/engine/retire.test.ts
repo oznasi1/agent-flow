@@ -26,7 +26,68 @@ const input = (over: Partial<RetireInput> = {}): RetireInput => ({
   run: run(), repos: [repo()], ticketCategory: "indeterminate", prs: {},
   hasLiveSession: false, prsAuthoritative: true,
   finishedAfterMs: 24 * HOUR, abandonedAfterMs: 7 * DAY, nowMs: NOW,
+  shelf: "board", closedAfterMs: 24 * HOUR,
   exists: () => true, ...over,
+});
+
+describe("rule 2b — closed", () => {
+  it("stamps closedAt the first time a run shelves as closed", () => {
+    expect(retireVerdict(input({ shelf: "closed" })))
+      .toEqual({ action: "stampClosed", closedAt: NOW });
+  });
+
+  it("keeps a stamped run until its window elapses", () => {
+    expect(retireVerdict(input({ shelf: "closed", run: run({ closedAt: NOW - 1 * HOUR }) })))
+      .toEqual({ action: "keep" });
+  });
+
+  it("retires once the window elapses", () => {
+    expect(retireVerdict(input({ shelf: "closed", run: run({ closedAt: NOW - 25 * HOUR }) })))
+      .toEqual({ action: "retire", reason: "closed" });
+  });
+
+  it("retires exactly on the boundary, not a tick after it", () => {
+    expect(retireVerdict(input({ shelf: "closed", run: run({ closedAt: NOW - 24 * HOUR }) })))
+      .toEqual({ action: "retire", reason: "closed" });
+  });
+
+  it("retires on sight when the window is zero", () => {
+    expect(retireVerdict(input({ shelf: "closed", closedAfterMs: 0 })))
+      .toEqual({ action: "retire", reason: "closed" });
+  });
+
+  it("unstamps a run that came back to the board", () => {
+    expect(retireVerdict(input({ shelf: "board", run: run({ closedAt: NOW - 1 * HOUR }) })))
+      .toEqual({ action: "unstampClosed" });
+  });
+
+  it("never fires for a run with uncommitted work, however long it has been closed", () => {
+    // The veto is the safety property: a record is the only pointer to its worktree.
+    expect(retireVerdict(input({
+      shelf: "closed", run: run({ closedAt: NOW - 40 * HOUR }), repos: [repo({ dirty: true })],
+    }))).toEqual({ action: "keep" });
+  });
+
+  it("never fires for a run with unpushed commits", () => {
+    expect(retireVerdict(input({
+      shelf: "closed", run: run({ closedAt: NOW - 40 * HOUR }), repos: [repo({ ahead: 2 })],
+    }))).toEqual({ action: "keep" });
+  });
+
+  it("keeps a non-owner run with somebody working in its directory", () => {
+    // shelf is ownership-scoped (one card per agent); the retire veto is not
+    // (never delete a record out from under a live session). Both hold at once:
+    // the run sits in the strip and refuses to retire.
+    expect(retireVerdict(input({
+      shelf: "closed", hasLiveSession: true, run: run({ closedAt: NOW - 40 * HOUR }),
+    }))).toEqual({ action: "unstampClosed" });
+  });
+
+  it("lets rule 2 win for landed work, which belongs in Done not the strip", () => {
+    expect(retireVerdict(input({
+      shelf: "board", prs: prs(facts({ state: "MERGED" })), finishedAfterMs: 24 * HOUR,
+    }))).toEqual({ action: "stamp", finishedAt: NOW });
+  });
 });
 
 describe("rule 1 — unreachable", () => {

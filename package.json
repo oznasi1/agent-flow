@@ -571,6 +571,17 @@
           "minimum": 0,
           "markdownDescription": "How long a run with no Jira ticket, no pull request and nothing uncommitted may sit untouched before its record is deleted (never the worktree, branch, or commits). `0` disables this cleanup."
         },
+        "agentFlow.retireClosedAfterHours": {
+          "type": "number",
+          "default": 24,
+          "minimum": 0,
+          "markdownDescription": "How long a closed run stays in the In-flight board's **Recently closed** strip — no agent of its own open, no pull request, no active ticket, and nothing uncommitted or unpushed. When the window elapses the run record is deleted (never the worktree, branch, or commits). `0` retires it as soon as it closes."
+        },
+        "agentFlow.inflightShowAll": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Show **every** run record on the In-flight board, the way Agent Flow Deck did before the Recently closed strip existed — nothing is moved off the board and nothing is retired for being closed. Leave this off unless you used stale cards as a to-do list."
+        },
         "agentFlow.prFactsTtlSeconds": {
           "type": "number",
           "default": 120,
