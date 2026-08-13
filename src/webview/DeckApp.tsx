@@ -4,6 +4,9 @@ import { AgentActivity, BranchCiStatus, CardAgent, DeckColumn, FlowCommand, Flow
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
 import { DeckCard, projectCards } from "./deckCards";
+// Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
+// free of fs-touching imports, which bucket.test.ts enforces.
+import { prSignals } from "../engine/bucket";
 import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
 import { isPrReviewStatus, timeAgo } from "./helpers";
@@ -72,6 +75,22 @@ function allMerged(prs: PrEntryMap): boolean {
 
 function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Tone } {
   if (r.column === "done") return { text: allMerged(r.prs) ? "merged" : "done", tone: "merged" };
+  /* An Action required card with no agent open is there because a PR is blocked:
+     deriveBucket has no other route into `needs` without an agent state to read.
+     Reading the agent first told that card "nothing is happening" in the parked
+     grey, on the one column that means act now — and a board with no agents open
+     anywhere is *all* such cards, which is how a column of real work came to look
+     uniformly disabled. So the column leads here, exactly as `done` leads above:
+     where the column knows more than the agent read, it says so.
+
+     The line names the reason rather than restating the specifics — the PR block
+     directly beneath already enumerates the failing check, the review and the
+     conflict. `blocked` is still required, not assumed from the column: `needs`
+     with no agent and nothing blocking is a state the ladder should not produce,
+     and announcing a block that no fact supports would be a lie on the card. */
+  if (r.column === "needs" && r.agent.state === "unknown" && prSignals(r.prs).blocked) {
+    return { text: "pr blocked", tone: "attn" };
+  }
   if (r.agent.state === "unknown") return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
