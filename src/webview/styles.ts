@@ -324,6 +324,15 @@ export const CSS = `
   .np-field-row { display: flex; gap: 6px; align-items: flex-start; }
   .np-field-row > input, .np-field-row > textarea { flex: 1; }
   .np-add-btn { align-self: flex-start; }
+  /* Add note and Attach image share one row: both act on the form above them, and
+     stacking them would read as two separate steps. */
+  .np-add-row { display: flex; gap: 6px; align-items: center; }
+  /* The label carries the button chrome (.quiet), so the input must take no space of
+     its own. Positioned off-screen rather than display:none — a hidden input is not
+     focusable, which would take the control off the keyboard path entirely. */
+  .np-attach { position: relative; overflow: hidden; }
+  .np-attach input[type="file"] { position: absolute; width: 1px; height: 1px;
+    opacity: 0; left: 0; top: 0; }
   .np-empty { padding: 14px 2px; color: var(--dim); font-size: var(--t-body); }
 
   /* The "Add section" control sits right below the filter row, matching where
@@ -391,6 +400,24 @@ export const CSS = `
      it by that same amount, read from --grip-w rather than re-measured by hand. */
   .np-body { grid-column: 1; margin: 3px 0 0 calc(var(--grip-w) + 7px + 20px); font-size: var(--t-body); color: var(--dim);
     white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Attachments sit under the title on the body's own left offset, not under the
+     grip — same calc, for the same reason. A fixed height with cover cropping keeps
+     the row even: screenshots are usually wide, and honouring each one's aspect
+     ratio makes a ragged strip out of two of them. */
+  .np-images { grid-column: 1; display: flex; flex-wrap: wrap; gap: 4px;
+    margin: 4px 0 0 calc(var(--grip-w) + 7px + 20px); }
+  .np-thumb-wrap { position: relative; display: inline-flex; line-height: 0; }
+  .np-thumb { display: inline-flex; padding: 0; border: 1px solid var(--vscode-panel-border);
+    border-radius: 3px; background: none; cursor: pointer; line-height: 0; }
+  .np-thumb img { height: 64px; max-width: 128px; object-fit: cover; display: block; border-radius: 2px; }
+  .np-thumb:hover { border-color: var(--vscode-focusBorder); }
+  /* Over the tile's top-right corner, on a chip of panel background so the glyph
+     stays legible against whatever the screenshot happens to show there. */
+  .np-thumb-remove { position: absolute; top: 2px; right: 2px; padding: 2px;
+    background: var(--vscode-editor-background); border-radius: 2px; opacity: .75; }
+  .np-thumb-remove:hover { opacity: 1; }
+  /* The add form's own strip is not inside a note's grid, so it needs no offset. */
+  .np-add .np-images { margin-left: 0; }
   /* Start on top, edit + delete side by side beneath it, the pair spanning exactly
      Start's width. Two equal columns at max-content take that measure from Start's
      own min-content, so the cluster stays true when the label or the body font size

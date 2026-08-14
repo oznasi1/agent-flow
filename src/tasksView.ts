@@ -22,7 +22,7 @@ import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prompt";
-import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, type MergeCandidate } from "./engine/workspace";
+import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, attachmentFileName, BRIEF_DIR, type MergeCandidate } from "./engine/workspace";
 import { briefMarkdown } from "./engine/brief";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, PresenceRecord, type CurrentWindow } from "./engine/presence";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
@@ -31,12 +31,15 @@ import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { newNote, newSection, noteStatus, sanitizeNotes, sanitizeSections } from "./notepad";
+import { IMAGE_DIR, deleteImages, imageFileName, imagePath, saveImage, sweepOrphans } from "./notepadImages";
 import {
   Filter,
   InboundMessage,
+  NotepadImage,
   NotepadItem,
   NotepadItemView,
   NotepadSection,
+  PendingImage,
   Task,
   OutboundMessage,
   PromptMode,
@@ -62,6 +65,25 @@ const NOTEPAD_SECTIONS_KEY = "agentFlow.notepadSections";
 // Which section ids are collapsed right now. globalState, so a collapsed
 // section stays collapsed across a reload rather than resetting to expanded.
 const NOTEPAD_COLLAPSED_KEY = "agentFlow.notepadCollapsed";
+
+// The inverse of the image store's own mime map, for the one attach path that
+// starts from a file path instead of a clipboard item. Kept here rather than
+// exported from the store so the store's whitelist stays the single gate — this
+// only PROPOSES a mime, which saveImage is still free to refuse.
+const MIME_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+};
+
+/** A note with no images left keeps NO `images` key, so it serialises exactly like
+ * a note that never had one — the shape every pre-existing install stores. */
+function stripImages(note: NotepadItem): NotepadItem {
+  const { images: _images, ...rest } = note;
+  return rest;
+}
 
 /** Said in two places — the pre-flight refusal at the top of every launch, and the
  * `resolveRemoteControl` backstop behind it. One constant so the two can never drift. */
@@ -179,7 +201,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.view = view;
     view.webview.options = {
       enableScripts: true,
-      localResourceRoots: [this.context.extensionUri],
+      // globalStorage as well as the bundle: the notepad's attached images live
+      // there, and without this root every thumbnail resolves to nothing. The CSP
+      // itself needs no change — `img-src` already allows `webview.cspSource`.
+      localResourceRoots: [this.context.extensionUri, this.context.globalStorageUri],
     };
     view.webview.html = this.html(view.webview);
     view.webview.onDidReceiveMessage((m: InboundMessage) => this.onMessage(m));
@@ -281,6 +306,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     this.postNotepad();
   }
 
+  /** Absolute path of the notepad's image store. One place computes it so the
+   * attach paths, the sweep, and the run handoff cannot drift onto different
+   * directories — a drift the sweep would then read as "every file is an orphan". */
+  private imageDir(): string {
+    return path.join(this.context.globalStorageUri.fsPath, IMAGE_DIR);
+  }
+
   private noteOrder(): string[] {
     return this.context.globalState.get<string[]>(NOTEPAD_ORDER_KEY, []);
   }
@@ -335,26 +367,106 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const livePlaces = anyRun
       ? new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys())
       : new Set<string>();
+    const webview = this.view?.webview;
     const view: NotepadItemView[] = notes.map((n) => {
       const runStatus = noteStatus(n, runs, livePlaces);
-      return runStatus ? { ...n, runStatus } : { ...n };
+      const base: NotepadItemView = runStatus ? { ...n, runStatus } : { ...n };
+      const images = n.images ?? [];
+      // One entry per STORED image, positionally parallel to `images`: a file that
+      // vanished under us renders as a broken thumbnail rather than shifting every
+      // later index onto the wrong record. Pruning records is the activate-time
+      // sweep's job, never the poll's — a poll that raced a half-written state file
+      // would drop images a note still points at. Without a webview there is
+      // nothing to convert against, and the post is a no-op in that state anyway.
+      if (images.length === 0 || !webview) return base;
+      return {
+        ...base,
+        imageUris: images.map((img) =>
+          webview
+            .asWebviewUri(vscode.Uri.joinPath(this.context.globalStorageUri, IMAGE_DIR, imageFileName(img)))
+            .toString(),
+        ),
+      };
     });
     const collapsed = new Set(this.collapsedSectionIds());
     const sections = this.sections().map((s) => ({ ...s, collapsed: collapsed.has(s.id) }));
     this.post({ type: "notepad:notes", notes: view, ordered: this.noteOrder().length > 0, sections });
   }
 
-  private async addNote(title: string, body: string): Promise<void> {
+  private async addNote(title: string, body: string, pending?: PendingImage[]): Promise<void> {
     // A note with neither a title nor a body is nothing at all — silently ignored
     // rather than toasted: the webview already disables the button, so reaching
-    // here means a stale view, not a user who needs telling.
-    if (!title.trim() && !body.trim()) return;
+    // here means a stale view, not a user who needs telling. A note carrying only
+    // an image IS something, though: the screenshot is the content.
+    if (!title.trim() && !body.trim() && !(pending && pending.length > 0)) return;
     const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    // Written before the note, so the single saveNotes below (which posts) already
+    // carries them — the add form's thumbnails must not blink out and back in.
+    const images: NotepadImage[] = [];
+    for (const p of pending ?? []) {
+      const imageId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+      const saved = saveImage(this.imageDir(), Buffer.from(p.dataBase64, "base64"), p.mime, p.name, imageId);
+      if (saved.ok) images.push(saved.image);
+      else this.toast("error", saved.reason);
+    }
     // Rank it first, so a manual order does not bury the note just written. Write
     // the order before the notes: saveNotes posts, and the post must already see it.
     const order = this.noteOrder();
     if (order.length > 0) await this.saveNoteOrder([id, ...order]);
-    await this.saveNotes([...this.notes(), newNote(title, body, id, Date.now())]);
+    const note = newNote(title, body, id, Date.now());
+    await this.saveNotes([...this.notes(), images.length > 0 ? { ...note, images } : note]);
+  }
+
+  /** Attach one image to a saved note. A refusal is toasted with the store's own
+   * reason rather than swallowed: the user just pasted something and is owed an
+   * answer. Unlike title and body — a draft that waits on Save — an attachment is
+   * immediate, like toggleDone: it is on disk the moment it lands, and Cancel in
+   * the edit form does not take it back. */
+  private async attachImage(id: string, bytes: Uint8Array, mime: string, name: string): Promise<void> {
+    // A stale view can name a note the store no longer has. There is nothing to
+    // attach to, and writing the file anyway would hand the sweep an instant orphan.
+    if (!this.notes().some((n) => n.id === id)) return;
+    const imageId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const saved = saveImage(this.imageDir(), bytes, mime, name, imageId);
+    if (!saved.ok) {
+      this.toast("error", saved.reason);
+      return;
+    }
+    await this.saveNotes(
+      this.notes().map((n) => (n.id === id ? { ...n, images: [...(n.images ?? []), saved.image] } : n)),
+    );
+  }
+
+  private async pickImage(id: string): Promise<void> {
+    const picked = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      openLabel: "Attach",
+      filters: { Images: ["png", "jpg", "jpeg", "gif", "webp"] },
+    });
+    const file = picked?.[0];
+    if (!file) return;
+    // A picker hands back a path, not a type, so the mime comes from the extension
+    // here. The filter above is a hint the user can defeat ("All Files"), which is
+    // why an unlisted extension still has to fail the store's own whitelist.
+    const mime = MIME_BY_EXT[path.extname(file.fsPath).slice(1).toLowerCase()] ?? "";
+    await this.attachImage(id, fs.readFileSync(file.fsPath), mime, path.basename(file.fsPath));
+  }
+
+  private async removeImage(id: string, imageId: string): Promise<void> {
+    const note = this.notes().find((n) => n.id === id);
+    const image = note?.images?.find((i) => i.id === imageId);
+    if (!note || !image) return;
+    deleteImages(this.imageDir(), [image]);
+    const images = (note.images ?? []).filter((i) => i.id !== imageId);
+    await this.saveNotes(
+      this.notes().map((n) => (n.id === id ? (images.length > 0 ? { ...n, images } : stripImages(n)) : n)),
+    );
+  }
+
+  private async openImage(id: string, imageId: string): Promise<void> {
+    const image = this.notes().find((n) => n.id === id)?.images?.find((i) => i.id === imageId);
+    if (!image) return;
+    await vscode.commands.executeCommand("vscode.open", vscode.Uri.file(imagePath(this.imageDir(), image)));
   }
 
   private async updateNote(id: string, title: string, body: string): Promise<void> {
@@ -368,15 +480,34 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async deleteNote(id: string): Promise<void> {
+    const gone = this.notes().find((n) => n.id === id);
     const remaining = this.notes().filter((n) => n.id !== id);
+    if (gone?.images?.length) deleteImages(this.imageDir(), gone.images);
     await this.pruneNoteOrder(remaining);
     await this.saveNotes(remaining);
   }
 
   private async clearCompletedNotes(): Promise<void> {
     const remaining = this.notes().filter((n) => !n.done);
+    const images = this.notes().filter((n) => n.done).flatMap((n) => n.images ?? []);
+    if (images.length > 0) deleteImages(this.imageDir(), images);
     await this.pruneNoteOrder(remaining);
     await this.saveNotes(remaining);
+  }
+
+  /** Delete image files no note references. Called once on activate. Every other
+   * cleanup path is a best-effort write that a crash — or an older version, or a
+   * hand-edited state file — can leave half-done, so without this the store only
+   * grows. It is also the only writer that deletes on the strength of the notes
+   * alone, which is why it never runs on the poll: a poll racing a half-written
+   * state file would delete files a note still points at. */
+  public sweepNotepadImages(): void {
+    try {
+      const keep = new Set(this.notes().flatMap((n) => (n.images ?? []).map((i) => i.id)));
+      sweepOrphans(this.imageDir(), keep);
+    } catch (e) {
+      this.log(`notepad: image sweep failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   private async addSection(name: string): Promise<void> {
@@ -596,11 +727,27 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "notepad:add": {
-          await this.addNote(m.title, m.body);
+          await this.addNote(m.title, m.body, m.images);
           break;
         }
         case "notepad:update": {
           await this.updateNote(m.id, m.title, m.body);
+          break;
+        }
+        case "notepad:addImage": {
+          await this.attachImage(m.id, Buffer.from(m.dataBase64, "base64"), m.mime, m.name);
+          break;
+        }
+        case "notepad:pickImage": {
+          await this.pickImage(m.id);
+          break;
+        }
+        case "notepad:removeImage": {
+          await this.removeImage(m.id, m.imageId);
+          break;
+        }
+        case "notepad:openImage": {
+          await this.openImage(m.id, m.imageId);
           break;
         }
         case "notepad:toggleDone": {
@@ -1208,21 +1355,43 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // SAME note still reuses this exact key, which is intended: it replaces that
     // note's own previous run rather than accumulating orphaned records.
     const key = `notepad-${slugify(note.title.trim()) || "note"}-${note.id}`;
+    // Where each attached image will sit once openWorkspace has copied it, and under
+    // which name — the same `attachmentFileName` the copy itself uses, so the paths
+    // named below cannot drift from the files that land.
+    const attachments = (note.images ?? []).map((img, i, all) => ({
+      path: imagePath(this.imageDir(), img),
+      name: attachmentFileName(all.map((im) => ({ path: imagePath(this.imageDir(), im), name: im.name })), i),
+    }));
+    // Repo-relative, not relative to the brief: the agent's cwd is the repo root, so a
+    // bare `images/foo.png` names no file from there — the trap batchWorkspace.ts
+    // already records for brief-relative references.
+    const imageLines = attachments.map((a) => `- \`${BRIEF_DIR}/images/${a.name}\``).join("\n");
     const planMd =
       `## Notepad: ${topic}\n\n_No ticket — an item you wrote in the Agent Flow notepad. ` +
       `If it turns into tracked work, open a ticket afterwards._` +
-      (note.body.trim() ? `\n\n${note.body.trim()}` : "");
+      (note.body.trim() ? `\n\n${note.body.trim()}` : "") +
+      (attachments.length > 0 ? `\n\n## Attached images\n\n${imageLines}` : "");
     // The detail goes into the prompt as well as the brief. The generic template
     // carries only {summary} — the note's title — so everything the user typed under
     // it reached the agent only if it went and opened TASK.md, which is exactly what a
     // seeded session is least likely to do first. Passed as a suffix rather than folded
-    // into the template so the user's own words are never read as placeholders.
-    const details = note.body.trim() ? `Details from the note:\n\n${note.body.trim()}` : undefined;
+    // into the template so the user's own words are never read as placeholders. The
+    // images are named for the same reason, doubly: one the agent never opens is one
+    // the user typed nothing to replace.
+    const imageNote = attachments.length > 0
+      ? `The user attached ${attachments.length === 1 ? "an image" : "images"} to this note. ` +
+        `Read ${attachments.length === 1 ? "it" : "them"} before starting:\n${imageLines}`
+      : undefined;
+    const details = [
+      note.body.trim() ? `Details from the note:\n\n${note.body.trim()}` : undefined,
+      imageNote,
+    ].filter(Boolean).join("\n\n") || undefined;
 
     const result = await openWorkspace({
       ticket: { key, summary: topic, url: "" },
       planMd,
       descriptionText: note.body,
+      attachments: attachments.length > 0 ? attachments : undefined,
       services,
       mode: args.mode,
       promptTemplate: applyExploreVars(injectSlackDm(generic?.prompt ?? "", generic?.slackDm ?? false), {

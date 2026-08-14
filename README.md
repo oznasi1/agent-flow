@@ -93,6 +93,14 @@ plain list of things you want to do: a title, optional detail, a checkbox.
   **Running** while an agent is attached, **Stale** once nothing is, **Finished** when the
   Deck records it as landed. Re-running a note replaces that note's previous run rather
   than piling up a second record.
+- **A screenshot is a detail too.** Paste an image straight into the detail field — the
+  field says so — drop an image file onto a note, or pick one with **Attach image**,
+  which sits beside **Add note** and in a note's edit form. Thumbnails sit under the
+  note's text and open full size in an editor tab. **Start** copies them into
+  `.pick-task/images/` beside the brief and names them in both the brief and the seeded
+  prompt, so the agent reads what you saw instead of your description of it. PNG, JPEG,
+  GIF and WebP, up to 10 MB each; the files live beside your notes in the editor's global
+  storage and go when the note or the image does.
 - **Order is yours.** Each note has a grip — drag it to put the list in whatever order you
   want. That order persists across reloads and holds under every filter; **Reset order**
   (it appears once you've dragged something) puts the list back to newest-first.

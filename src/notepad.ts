@@ -6,7 +6,7 @@
 // `canon` does touch `fs` (via `fs.realpathSync`), same as `src/engine/runs.ts`
 // which imports it the same way — that's fine here, per the same reasoning:
 // this file's purity bar is "no vscode / no mocked context", not "no fs".
-import { NotepadItem, NotepadRunStatus, NotepadSection, Run } from "./types";
+import { NotepadImage, NotepadItem, NotepadRunStatus, NotepadSection, Run } from "./types";
 import { canon } from "./engine/paths";
 
 /** A note's run status, from the two cheap signals `describeActiveTasks` already
@@ -58,6 +58,24 @@ export function newSection(name: string, id: string, createdAt: number): Notepad
   return { id, name: name.trim(), createdAt };
 }
 
+/** A note's images as read back from globalState. An entry with no usable id or no
+ * usable ext is dropped rather than coerced: a record naming no readable file is
+ * not an attachment, and a guessed extension would point the webview at a URI that
+ * resolves to nothing. `name` is display-only, so it is coerced like a title. */
+function sanitizeImages(raw: unknown): NotepadImage[] {
+  if (!Array.isArray(raw)) return [];
+  const out: NotepadImage[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    if (typeof e.id !== "string" || e.id.length === 0) continue;
+    if (typeof e.ext !== "string" || e.ext.length === 0) continue;
+    const name = typeof e.name === "string" && e.name.trim().length > 0 ? e.name : `image.${e.ext}`;
+    out.push({ id: e.id, ext: e.ext, name });
+  }
+  return out;
+}
+
 /** Notes as read back from globalState, which is untyped storage that a previous
  * version — or a hand-edited state file — may have left in any shape. Anything
  * without a usable id is dropped; everything else is coerced to the current
@@ -78,6 +96,10 @@ export function sanitizeNotes(raw: unknown): NotepadItem[] {
     };
     if (typeof e.lastRunKey === "string") note.lastRunKey = e.lastRunKey;
     if (typeof e.sectionId === "string") note.sectionId = e.sectionId;
+    // Left OFF the note when nothing survives, so a note that never had images
+    // serialises exactly as it did before they existed.
+    const images = sanitizeImages(e.images);
+    if (images.length > 0) note.images = images;
     out.push(note);
   }
   return out;

@@ -24,6 +24,18 @@ export const TrashIcon = (): JSX.Element => (
   </svg>
 );
 
+// A framed picture: a rectangle with a sun and a hill, the conventional shorthand
+// for "image" at this size — a camera reads as "take a photo", which is not what
+// the Attach button does.
+export const ImageIcon = (): JSX.Element => (
+  <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true">
+    <path
+      fill="currentColor"
+      d="M1.6 2.4h12.8v11.2H1.6zm1.3 1.3v6.1l3-3 2.4 2.4 2.2-2.2 2.6 2.6V3.7zM5 4.6a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2z"
+    />
+  </svg>
+);
+
 // Ticket type glyphs. 12×12, currentColor, hue supplied by the .ty-<kind> rule in
 // styles.ts. Shapes follow Jira's own vocabulary closely enough to be recognised
 // without borrowing its icon URLs, which would be a network fetch per card and a

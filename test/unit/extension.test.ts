@@ -34,6 +34,7 @@ const providerStub = {
   refresh: vi.fn(async () => undefined),
   takeTask: vi.fn(async () => undefined),
   postNotepad: vi.fn(() => undefined),
+  sweepNotepadImages: vi.fn(() => undefined),
 };
 
 const trackSpy = vi.fn();
@@ -168,6 +169,24 @@ describe("activate", () => {
     // view provider → "command 'agentFlow.setup' not found" and a dead panel.
     vi.mocked(watchPlansAndSeed).mockImplementationOnce(() => {
       throw new Error("EACCES: cannot watch ~/.agentflow/plans");
+    });
+    const { context } = fakeContext();
+    expect(() => activate(context)).not.toThrow();
+    const ids = vi.mocked(commands.registerCommand).mock.calls.map((c) => c[0]);
+    expect(ids).toEqual(expect.arrayContaining(["agentFlow.setup", "agentFlow.refresh"]));
+  });
+
+  it("sweeps orphaned notepad images once on activation", () => {
+    const { context } = fakeContext();
+    activate(context);
+    expect(providerStub.sweepNotepadImages).toHaveBeenCalledTimes(1);
+  });
+
+  it("survives a failing image sweep — activate does not throw and commands stay registered", () => {
+    // The sweep reads and unlinks under globalStorage. A throw there must not bubble
+    // out of activate(), for the same reason the live-seeding failure above must not.
+    providerStub.sweepNotepadImages.mockImplementationOnce(() => {
+      throw new Error("EACCES: cannot read globalStorage");
     });
     const { context } = fakeContext();
     expect(() => activate(context)).not.toThrow();

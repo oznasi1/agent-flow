@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
+import { attachmentFileName, openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
 import { commands, env, setConfig, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -144,6 +144,51 @@ describe("openWorkspace — multiroot", () => {
     // run record exactly as before. If the default ever flips, this is what fails.
     await openWorkspace(baseReq());
     expect(writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"))).toBeTruthy();
+  });
+});
+
+describe("openWorkspace — attachments", () => {
+  const copyFileSync = vi.mocked(fs.copyFileSync);
+  const targets = () => copyFileSync.mock.calls.map((c) => String(c[1]));
+
+  beforeEach(() => copyFileSync.mockReset());
+
+  it("copies each attachment into .pick-task/images/ in every repo", async () => {
+    await openWorkspace(baseReq({ attachments: [{ path: "/store/i1.png", name: "shot.png" }] }));
+    expect(targets()).toContain("/repos/account-service/.pick-task/images/shot.png");
+    expect(targets()).toContain("/repos/centaur/.pick-task/images/shot.png");
+  });
+
+  it("disambiguates two attachments that share a filename", async () => {
+    await openWorkspace(baseReq({
+      services: mkRepos(["account-service"]),
+      attachments: [
+        { path: "/store/i1.png", name: "shot.png" },
+        { path: "/store/i2.png", name: "shot.png" },
+      ],
+    }));
+    expect(new Set(targets()).size).toBe(2);
+    expect(targets().every((t) => t.startsWith("/repos/account-service/.pick-task/images/"))).toBe(true);
+  });
+
+  it("creates no images directory and copies nothing when there are no attachments", async () => {
+    await openWorkspace(baseReq());
+    expect(targets()).toEqual([]);
+    expect(mkdirSync.mock.calls.map((c) => String(c[0])).some((p) => p.includes("/images"))).toBe(false);
+  });
+});
+
+describe("attachmentFileName", () => {
+  it("keeps each name when they differ", () => {
+    const all = [{ path: "/s/i1.png", name: "a.png" }, { path: "/s/i2.png", name: "b.png" }];
+    expect(attachmentFileName(all, 0)).toBe("a.png");
+    expect(attachmentFileName(all, 1)).toBe("b.png");
+  });
+
+  it("folds the source stem into a name an earlier attachment already claimed", () => {
+    const all = [{ path: "/s/i1.png", name: "shot.png" }, { path: "/s/i2.png", name: "shot.png" }];
+    expect(attachmentFileName(all, 0)).toBe("shot.png");
+    expect(attachmentFileName(all, 1)).toBe("shot-i2.png");
   });
 });
 

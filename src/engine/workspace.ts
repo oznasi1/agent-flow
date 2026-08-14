@@ -77,6 +77,12 @@ export interface OpenRequest {
    *  their own literal text instead of becoming a placeholder. Blank or absent leaves
    *  every prompt byte-identical to what it is without this field. */
   promptSuffix?: string;
+  /** Files to place beside the brief — today, a notepad note's images. Copied into
+   *  `<repo>/.pick-task/images/`, which `ensureGitExcluded` already excludes whole,
+   *  so the agent opens a real file at a repo-relative path instead of being told
+   *  about bytes it has no way to reach. Absent or empty copies nothing and creates
+   *  no directory, leaving every existing launch byte-identical. */
+  attachments?: { path: string; name: string }[];
   workspaceDir: string;
   seedAgent: boolean;
   openIn?: "new" | "current"; // "current" seeds THIS window in place; default "new"
@@ -207,6 +213,20 @@ ${svcLines}
 `;
 }
 
+/** The filename one attachment lands under: its own name, unless an earlier
+ * attachment in the same launch already claimed that name, in which case the source
+ * file's stem is folded in. Deterministic and exported because the brief NAMES these
+ * paths — the copy and the text have to agree, and they are produced by different
+ * callers (this module writes the files, tasksView writes the lines). */
+export function attachmentFileName(all: readonly { path: string; name: string }[], index: number): string {
+  const att = all[index];
+  const claimedEarlier = all.slice(0, index).some((a) => a.name === att.name);
+  if (!claimedEarlier) return att.name;
+  const stem = path.basename(att.path, path.extname(att.path));
+  const ext = path.extname(att.name);
+  return `${path.basename(att.name, ext)}-${stem}${ext}`;
+}
+
 export function agentPrompt(t: TicketRef, mentions: string[], template: string, briefPath?: string): string {
   return renderPrompt(
     template,
@@ -266,6 +286,18 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     // way, so a kept brief still resolves the seeded prompt's `{brief}`.
     if (!(req.keepExistingBrief && fs.existsSync(briefPath))) {
       fs.writeFileSync(briefPath, briefMarkdown(ticket, planMd, services, s.name, files));
+    }
+    // Attachments ride with the brief because they are part of it: the brief names
+    // their repo-relative paths, so they have to exist in EVERY repo the launch
+    // seeds, not only the first. Written even when the brief itself was kept — a
+    // kept brief still resolves those paths.
+    const attachments = req.attachments ?? [];
+    if (attachments.length > 0) {
+      const imagesDir = path.join(dir, "images");
+      fs.mkdirSync(imagesDir, { recursive: true });
+      for (const [i, att] of attachments.entries()) {
+        fs.copyFileSync(att.path, path.join(imagesDir, attachmentFileName(attachments, i)));
+      }
     }
     return { repo: s.name, path: briefPath, gitExcluded: ensureGitExcluded(s.path, `${BRIEF_DIR}/`), files: files.length };
   });

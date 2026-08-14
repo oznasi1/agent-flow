@@ -1,7 +1,7 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { NotepadItemView, NotepadRunStatus, NotepadSectionView } from "../types";
-import { PenIcon, PlayIcon, TrashIcon } from "./icons";
+import { NotepadImage, NotepadItemView, NotepadRunStatus, NotepadSectionView } from "../types";
+import { ImageIcon, PenIcon, PlayIcon, TrashIcon } from "./icons";
 import { moveKey } from "./helpers";
 
 /** Which notes the list shows. Local state, defaulting to Active on every mount:
@@ -29,6 +29,51 @@ const RAIL_CLASS: Record<NotepadRunStatus, string> = {
   finished: "r-done",
 };
 
+/** The detail field's placeholder. Exported because it is the ONLY thing telling a
+ * user that the field takes a screenshot, so its wording is behaviour and the tests
+ * assert against this constant rather than a copy of the string. A placeholder was
+ * chosen over a line of help text under the field: this panel's rule is that
+ * persistent explanatory text is noise, and a placeholder disappears the moment the
+ * user starts typing. */
+export const DETAIL_PLACEHOLDER = "Any detail — paste a screenshot here too (optional)";
+
+/** An image the add form is holding: what `notepad:add` needs, plus the data URL
+ * the thumbnail renders from. Both come out of one read, so the bytes are never
+ * decoded twice. */
+interface PendingLocal {
+  dataBase64: string;
+  mime: string;
+  name: string;
+  dataUrl: string;
+}
+
+/** Read one file into what the host needs. Returns null for anything that is not
+ * an image, so a pasted text file or a dragged folder is ignored here rather than
+ * sent for the host to refuse — the refusal toast is for files the user plainly
+ * MEANT as an image, not for every stray clipboard item. */
+async function readImage(file: File): Promise<PendingLocal | null> {
+  if (!file.type.startsWith("image/")) return null;
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  // readAsDataURL gives `data:<mime>;base64,<payload>`. The payload is what the
+  // host decodes; the whole URL doubles as the pending thumbnail's src.
+  return { dataBase64: dataUrl.slice(dataUrl.indexOf(",") + 1), mime: file.type, name: file.name, dataUrl };
+}
+
+const imageFiles = (list: FileList | File[] | null | undefined): File[] =>
+  Array.from(list ?? []).filter((f) => f.type.startsWith("image/"));
+
+/** A drag carrying files from outside the webview (Finder, Explorer) rather than a
+ * note being dragged to a new position. Checked FIRST in both drag handlers: the
+ * reorder path and the attach path share one row, and a file drop that fell through
+ * to the reorder path would silently reshuffle the list instead of attaching. */
+const isFileDrag = (e: React.DragEvent): boolean =>
+  Array.from(e.dataTransfer?.types ?? []).includes("Files");
+
 const EMPTY: Record<NoteFilter, string> = {
   active: "Nothing active. Add a note above.",
   done: "Nothing done yet.",
@@ -45,6 +90,10 @@ export function Notepad({ notes, ordered, sections = [] }: {
   const [filter, setFilter] = React.useState<NoteFilter>("active");
   const [title, setTitle] = React.useState("");
   const [body, setBody] = React.useState("");
+  // Attachments for the ADD form only. The note does not exist yet, so there is
+  // nothing for the host to file them against; they ride along with notepad:add.
+  // If the user never presses Add, the bytes were never written anywhere.
+  const [pending, setPending] = React.useState<PendingLocal[]>([]);
   const [editing, setEditing] = React.useState<string | null>(null);
   const [sectionName, setSectionName] = React.useState("");
   const [editingSection, setEditingSection] = React.useState<string | null>(null);
@@ -56,7 +105,9 @@ export function Notepad({ notes, ordered, sections = [] }: {
 
   const shown = notes.filter((n) => (filter === "all" ? true : filter === "done" ? n.done : !n.done));
   const anyDone = notes.some((n) => n.done);
-  const canAdd = title.trim().length > 0 || body.trim().length > 0;
+  // A pasted screenshot is content in its own right, so it alone can make a note
+  // worth adding — the host's own guard agrees.
+  const canAdd = title.trim().length > 0 || body.trim().length > 0 || pending.length > 0;
   // A note pointing at a section that no longer exists (the section was deleted
   // out from under a stale view, or a corrupt record) renders ungrouped rather
   // than vanishing — same defensive stance as the rest of this file.
@@ -65,9 +116,21 @@ export function Notepad({ notes, ordered, sections = [] }: {
 
   const add = () => {
     if (!canAdd) return;
-    send({ type: "notepad:add", title, body });
+    // The `images` key is omitted when nothing is pending, so a plain note's message
+    // stays exactly what it was before attachments existed.
+    send(pending.length > 0
+      ? { type: "notepad:add", title, body, images: pending.map(({ dataBase64, mime, name }) => ({ dataBase64, mime, name })) }
+      : { type: "notepad:add", title, body });
     setTitle("");
     setBody("");
+    setPending([]);
+  };
+
+  /** Read every image among these files into the add form's pending list. Shared by
+   * its paste and its drop, which differ only in where the FileList comes from. */
+  const holdPending = async (files: File[]): Promise<void> => {
+    const read = (await Promise.all(files.map(readImage))).filter((r): r is PendingLocal => r !== null);
+    if (read.length > 0) setPending((prev) => [...prev, ...read]);
   };
 
   const addSection = () => {
@@ -128,13 +191,73 @@ export function Notepad({ notes, ordered, sections = [] }: {
         <div className="np-field-row">
           <textarea
             className="np-body-input"
-            placeholder="Any detail the agent should know (optional)"
+            placeholder={DETAIL_PLACEHOLDER}
             rows={2}
             value={body}
             onChange={(e) => setBody(e.target.value)}
+            // A text paste is left completely alone — preventDefault only fires once
+            // an image is actually on the clipboard, so pasting a URL or a paragraph
+            // behaves exactly as it always has.
+            onPaste={(e) => {
+              const files = imageFiles(e.clipboardData?.files);
+              if (files.length === 0) return;
+              e.preventDefault();
+              void holdPending(files);
+            }}
+            onDragOver={(e) => { if (isFileDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
+            onDrop={(e) => {
+              if (!isFileDrag(e)) return;
+              e.preventDefault();
+              void holdPending(imageFiles(e.dataTransfer.files));
+            }}
           />
         </div>
-        <button className="quiet np-add-btn" disabled={!canAdd} onClick={add}>Add note</button>
+        {pending.length > 0 && (
+          <div className="np-images">
+            {pending.map((p, i) => (
+              <span className="np-thumb-wrap" key={`${p.name}-${i}`}>
+                <span className="np-thumb" title={p.name}>
+                  <img src={p.dataUrl} alt={p.name} />
+                </span>
+                <button
+                  className="quiet icon-only dim np-thumb-remove"
+                  aria-label={`Remove ${p.name}`}
+                  title={`Remove ${p.name}`}
+                  // Local only: nothing is on disk until Add, so there is nothing
+                  // for the host to unlink.
+                  onClick={() => setPending((prev) => prev.filter((_, j) => j !== i))}
+                >
+                  <TrashIcon />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="np-add-row">
+          <button className="quiet np-add-btn" disabled={!canAdd} onClick={add}>Add note</button>
+          {/* A file input, not a host round trip: the note does not exist yet, so the
+              host would have nowhere to put the bytes and would have to hand them
+              back across the wire. Reading the File here is the same path paste and
+              drop already take. The label IS the button — the input itself is
+              off-screen rather than `display: none`, so it keeps its accessible name
+              and stays keyboard-reachable. */}
+          <label className="quiet dim np-attach" title="Attach an image — or paste one into the detail field">
+            <ImageIcon /> Attach image
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              multiple
+              aria-label="Attach image"
+              onChange={(e) => {
+                const files = imageFiles(e.target.files);
+                // A file input fires no change event when the value is unchanged, so
+                // without this reset re-picking the SAME screenshot does nothing.
+                e.target.value = "";
+                if (files.length > 0) void holdPending(files);
+              }}
+            />
+          </label>
+        </div>
       </div>
 
       <div className="lenses">
@@ -315,6 +438,50 @@ function SectionHeader({ section, editing, onEdit, onDone, onDropNote }: {
   );
 }
 
+/** A saved note's attachments. `imageUris` is positionally parallel to `images`,
+ * both derived host-side from the same array, so index is the only pairing there
+ * is — a record without a URI (a poll that reached the webview before the host
+ * had a webview to convert against) renders nothing rather than a broken tile.
+ * `onRemove` is absent outside edit mode, which is what hides the remove control. */
+function ImageStrip({ note, onRemove }: {
+  note: NotepadItemView;
+  onRemove?: (imageId: string) => void;
+}): JSX.Element | null {
+  const images = note.images ?? [];
+  const uris = note.imageUris ?? [];
+  if (images.length === 0 || uris.length === 0) return null;
+  return (
+    <div className="np-images">
+      {images.map((image: NotepadImage, i: number) => {
+        const uri = uris[i];
+        if (!uri) return null;
+        return (
+          <span className="np-thumb-wrap" key={image.id}>
+            <button
+              className="np-thumb"
+              title={image.name}
+              aria-label={`Open ${image.name}`}
+              onClick={() => send({ type: "notepad:openImage", id: note.id, imageId: image.id })}
+            >
+              <img src={uri} alt={image.name} />
+            </button>
+            {onRemove && (
+              <button
+                className="quiet icon-only dim np-thumb-remove"
+                aria-label={`Remove ${image.name}`}
+                title={`Remove ${image.name}`}
+                onClick={() => onRemove(image.id)}
+              >
+                <TrashIcon />
+              </button>
+            )}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 interface NoteDnd {
   onBegin: () => void;
   onHover: (pos: "before" | "after") => void;
@@ -347,12 +514,36 @@ function NoteRow({ note, sections, editing, onEdit, onDone, dnd }: {
   // open — otherwise Save would write back a value the user never saw.
   React.useEffect(() => { setTitle(note.title); setBody(note.body); }, [note.title, note.body]);
 
+  /** Send every image among these files to the host, which writes them and reposts.
+   * Unlike the add form's pending list this needs no local state: the note exists,
+   * so an attachment is immediate — like toggleDone, not like the title draft. */
+  const attach = async (files: File[]): Promise<void> => {
+    for (const file of files) {
+      const read = await readImage(file);
+      if (read) {
+        send({ type: "notepad:addImage", id: note.id, dataBase64: read.dataBase64, mime: read.mime, name: read.name });
+      }
+    }
+  };
+
   if (editing) {
     return (
       <li className="np-item">
         <div className="edit">
           <input className="np-title-input" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <textarea className="np-body-input" rows={3} value={body} onChange={(e) => setBody(e.target.value)} />
+          <textarea
+            className="np-body-input"
+            rows={3}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            onPaste={(e) => {
+              const files = imageFiles(e.clipboardData?.files);
+              if (files.length === 0) return; // a plain text paste, untouched
+              e.preventDefault();
+              void attach(files);
+            }}
+          />
+          <ImageStrip note={note} onRemove={(imageId) => send({ type: "notepad:removeImage", id: note.id, imageId })} />
           {sections.length > 0 && (
             // Fires immediately on change, unlike title/body: it is a filing
             // action like toggleDone, not a draft that waits on Save.
@@ -369,6 +560,16 @@ function NoteRow({ note, sections, editing, onEdit, onDone, dnd }: {
             </select>
           )}
           <div className="row">
+            <button
+              className="quiet"
+              aria-label="Attach image"
+              title="Attach an image"
+              // The host owns the picker: it hands back a path, and only the host can
+              // read one. Paste and drop cover the cases where bytes are already in hand.
+              onClick={() => send({ type: "notepad:pickImage", id: note.id })}
+            >
+              <ImageIcon /> Attach
+            </button>
             <button className="quiet" onClick={() => { send({ type: "notepad:update", id: note.id, title, body }); onDone(); }}>
               Save
             </button>
@@ -409,8 +610,19 @@ function NoteRow({ note, sections, editing, onEdit, onDone, dnd }: {
         e.dataTransfer.setData("text/plain", note.id);
         dnd.onBegin();
       }}
-      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; dnd.onHover(dropPos(e)); }}
-      onDrop={(e) => { e.preventDefault(); dnd.onDrop(dropPos(e)); }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        // A file drag is not a reorder: it keeps the copy cursor and shows no
+        // before/after hint, or the row would advertise a move it will not perform.
+        if (isFileDrag(e)) { e.dataTransfer.dropEffect = "copy"; return; }
+        e.dataTransfer.dropEffect = "move";
+        dnd.onHover(dropPos(e));
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        if (isFileDrag(e)) { void attach(imageFiles(e.dataTransfer.files)); return; }
+        dnd.onDrop(dropPos(e));
+      }}
       onDragEnd={() => { setArmed(false); dnd.onEnd(); }}
     >
       <div className="np-top">
@@ -432,6 +644,7 @@ function NoteRow({ note, sections, editing, onEdit, onDone, dnd }: {
         )}
       </div>
       {note.body && <div className="np-body">{note.body}</div>}
+      <ImageStrip note={note} />
       <div className="np-acts">
         <button className="take" onClick={() => send({ type: "notepad:run", id: note.id })} title="Start this note as an agent run">
           <PlayIcon /> Start

@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { commands, env, window } from "../_mocks/vscode";
 import { fakeAuth, fakeContext, mkRepos } from "../_helpers/factories";
 
@@ -10,12 +13,20 @@ vi.mock("../../src/config", async () => {
   return { ...actual, getConfig: vi.fn() };
 });
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn() }));
-vi.mock("../../src/engine/workspace", () => ({
-  openWorkspace: vi.fn(),
-  listWorkspaceFiles: vi.fn(() => []),
-  workspaceFolderPaths: vi.fn(() => []),
-  planWorkspaceMerge: vi.fn(() => ({ add: [], duplicates: [], redundant: [], present: [], ok: true })),
-}));
+// Partial: only the four entry points that open windows or touch the filesystem are
+// stubbed. BRIEF_DIR and attachmentFileName stay REAL — they are a constant and a
+// pure path function, and the notepad's image handoff names paths with them that the
+// engine then copies files to, so a stub here would let the two drift silently.
+vi.mock("../../src/engine/workspace", async () => {
+  const actual = await vi.importActual<typeof import("../../src/engine/workspace")>("../../src/engine/workspace");
+  return {
+    ...actual,
+    openWorkspace: vi.fn(),
+    listWorkspaceFiles: vi.fn(() => []),
+    workspaceFolderPaths: vi.fn(() => []),
+    planWorkspaceMerge: vi.fn(() => ({ add: [], duplicates: [], redundant: [], present: [], ok: true })),
+  };
+});
 // repoRootOfWorktree is a pure path function (no fs/git side effects) — keep the real one
 // so the derivation tests exercise the genuine convention, and stub only createWorktrees,
 // the entry point that shells out to git. Same reasoning as the batchWorkspace mock below.
@@ -363,6 +374,17 @@ const answerPicks = (...answers: unknown[]) => {
   }
   pick.mockResolvedValue(undefined as never);
 };
+
+describe("resolveWebviewView", () => {
+  it("allows the notepad's image store as a webview resource root", () => {
+    const { view } = setup();
+    const roots = ((view.webview.options as { localResourceRoots?: { fsPath: string }[] }).localResourceRoots ?? [])
+      .map((u) => u.fsPath);
+    // Without globalStorage every notepad thumbnail 404s; without the extension
+    // root the panel's own bundle does.
+    expect(roots).toEqual(["/ext", "/globalstorage"]);
+  });
+});
 
 describe("ready", () => {
   it("reports authed state with the current user and auto-fetches", async () => {
@@ -4426,12 +4448,25 @@ describe("a refused write that names fields to retry", () => {
 });
 
 describe("notepad", () => {
+  // Image stores handed out by mkProvider, removed after each test. This file does
+  // NOT mock `fs`, so the notepad's image code writes and unlinks for real here and
+  // the assertions read the disk.
+  const imageDirs: string[] = [];
+  afterEach(() => {
+    while (imageDirs.length > 0) fs.rmSync(imageDirs.pop()!, { recursive: true, force: true });
+  });
+
   // A provider wired to a context whose globalState is a real in-memory map, so
   // these tests assert on what was actually persisted rather than on a spy.
   function mkProvider() {
     const store = new Map<string, unknown>();
+    const storageDir = fs.mkdtempSync(path.join(os.tmpdir(), "np-store-"));
+    imageDirs.push(storageDir);
     const ctx = {
       ...fakeContext(),
+      // Top level, not nested: the provider reads `this.context.globalStorageUri`,
+      // and what this object spreads in is fakeContext's RESULT, not its context.
+      globalStorageUri: { fsPath: storageDir, scheme: "file", toString: () => storageDir },
       globalState: {
         get: (k: string, d?: unknown) => (store.has(k) ? store.get(k) : d),
         update: async (k: string, v: unknown) => void store.set(k, v),
@@ -4441,18 +4476,186 @@ describe("notepad", () => {
     const provider = new TasksViewProvider(ctx, makeFixtureConnector(), () => {});
     // The provider posts through its resolved webview; stand one in.
     (provider as unknown as { view: unknown }).view = {
-      webview: { postMessage: (m: unknown) => void posted.push(m) },
+      webview: {
+        postMessage: (m: unknown) => void posted.push(m),
+        // postNotepad converts each attached image's path through this, so a note
+        // with images would throw against a stub that had only postMessage.
+        asWebviewUri: (u: unknown) => u,
+      },
     };
     // `onMessage` is private on the class — these tests drive it directly because
     // it IS the unit under test, matching how the rest of this file reaches it
     // (see the `send`/`handler` helpers above).
     const sendMsg = (m: InboundMessage) =>
       (provider as unknown as { onMessage(m: InboundMessage): Promise<void> }).onMessage(m);
-    return { provider, posted, store, sendMsg };
+    return { provider, posted, store, sendMsg, imageDir: path.join(storageDir, "notepad-images") };
   }
 
   const notesIn = (store: Map<string, unknown>) =>
     store.get("agentFlow.notepad") as { id: string; title: string; done: boolean }[] | undefined;
+
+  const imagesOf = (store: Map<string, unknown>, i = 0) =>
+    (store.get("agentFlow.notepad") as { images?: { id: string; ext: string; name: string }[] }[])[i].images;
+
+  const seedNote = (store: Map<string, unknown>, over: Record<string, unknown> = {}) =>
+    store.set("agentFlow.notepad", [{ id: "n1", title: "t", body: "", done: false, createdAt: 1, ...over }]);
+
+  /** Put `<name>` files straight into a provider's image store, for the paths that
+   * read or delete files the host did not just write. */
+  const seedFiles = (imageDir: string, ...names: string[]): void => {
+    fs.mkdirSync(imageDir, { recursive: true });
+    for (const n of names) fs.writeFileSync(path.join(imageDir, n), "A");
+  };
+
+  it("posts one imageUris entry per stored image, and omits the field otherwise", () => {
+    const { provider, posted, store } = mkProvider();
+    store.set("agentFlow.notepad", [
+      { id: "n1", title: "with", body: "", done: false, createdAt: 1,
+        images: [{ id: "i1", ext: "png", name: "a.png" }, { id: "i2", ext: "webp", name: "b.webp" }] },
+      { id: "n2", title: "without", body: "", done: false, createdAt: 2 },
+    ]);
+    provider.postNotepad();
+    const last = posted.at(-1) as { type: string; notes: { id: string; imageUris?: string[] }[] };
+    expect(last.type).toBe("notepad:notes");
+    // Found by id, not by position: with no manual order the list posts
+    // newest-first, so n2 leads.
+    const withImages = last.notes.find((n) => n.id === "n1")!;
+    const without = last.notes.find((n) => n.id === "n2")!;
+    expect(withImages.imageUris).toHaveLength(2);
+    expect(String(withImages.imageUris![0])).toContain("notepad-images/i1.png");
+    expect(String(withImages.imageUris![1])).toContain("i2.webp");
+    expect(without).not.toHaveProperty("imageUris");
+  });
+
+  it("writes a pasted image and stores its record on the note", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    seedNote(store);
+    await sendMsg({ type: "notepad:addImage", id: "n1", dataBase64: Buffer.from("PNGDATA").toString("base64"), mime: "image/png", name: "shot.png" });
+    const images = imagesOf(store)!;
+    expect(images).toHaveLength(1);
+    expect(images[0]).toMatchObject({ ext: "png", name: "shot.png" });
+    expect(fs.readFileSync(path.join(imageDir, `${images[0].id}.png`), "utf8")).toBe("PNGDATA");
+  });
+
+  it("toasts the reason and stores nothing when the type is unsupported", async () => {
+    const { store, sendMsg, posted, imageDir } = mkProvider();
+    seedNote(store);
+    await sendMsg({ type: "notepad:addImage", id: "n1", dataBase64: "AAAA", mime: "application/pdf", name: "paper.pdf" });
+    const toast = (posted as { type: string; level?: string; message?: string }[]).find((m) => m.type === "toast");
+    expect(toast).toMatchObject({ level: "error" });
+    expect(toast!.message).toContain("paper.pdf");
+    expect(imagesOf(store)).toBeUndefined();
+    expect(fs.existsSync(imageDir)).toBe(false);
+  });
+
+  it("ignores an addImage for a note that no longer exists", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    store.set("agentFlow.notepad", []);
+    await sendMsg({ type: "notepad:addImage", id: "gone", dataBase64: "AAAA", mime: "image/png", name: "a.png" });
+    expect(fs.existsSync(imageDir)).toBe(false);
+  });
+
+  it("attaches the pending images that arrive with notepad:add", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({
+      type: "notepad:add",
+      title: "New",
+      body: "",
+      images: [{ dataBase64: Buffer.from("A").toString("base64"), mime: "image/png", name: "a.png" }],
+    });
+    expect(imagesOf(store)).toHaveLength(1);
+  });
+
+  it("adds a note that is nothing but an image", async () => {
+    const { store, sendMsg } = mkProvider();
+    await sendMsg({
+      type: "notepad:add",
+      title: "",
+      body: "",
+      images: [{ dataBase64: Buffer.from("A").toString("base64"), mime: "image/png", name: "a.png" }],
+    });
+    expect(notesIn(store)).toHaveLength(1);
+  });
+
+  it("removes an image from the note and unlinks its file", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    seedFiles(imageDir, "i1.png", "i2.png");
+    seedNote(store, { images: [{ id: "i1", ext: "png", name: "a.png" }, { id: "i2", ext: "png", name: "b.png" }] });
+    await sendMsg({ type: "notepad:removeImage", id: "n1", imageId: "i1" });
+    expect(imagesOf(store)!.map((i) => i.id)).toEqual(["i2"]);
+    expect(fs.existsSync(path.join(imageDir, "i1.png"))).toBe(false);
+    expect(fs.existsSync(path.join(imageDir, "i2.png"))).toBe(true);
+  });
+
+  it("drops the images key entirely once the last image is removed", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    seedFiles(imageDir, "i1.png");
+    seedNote(store, { images: [{ id: "i1", ext: "png", name: "a.png" }] });
+    await sendMsg({ type: "notepad:removeImage", id: "n1", imageId: "i1" });
+    expect((store.get("agentFlow.notepad") as object[])[0]).not.toHaveProperty("images");
+  });
+
+  it("reads the picked file itself and attaches it", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    const src = path.join(path.dirname(imageDir), "pick.png");
+    fs.writeFileSync(src, "PICKED");
+    window.showOpenDialog.mockResolvedValue([{ fsPath: src }]);
+    seedNote(store);
+    await sendMsg({ type: "notepad:pickImage", id: "n1" });
+    expect(imagesOf(store)![0]).toMatchObject({ ext: "png", name: "pick.png" });
+  });
+
+  it("does nothing when the picker is cancelled", async () => {
+    const { store, sendMsg } = mkProvider();
+    window.showOpenDialog.mockResolvedValue(undefined);
+    seedNote(store);
+    await sendMsg({ type: "notepad:pickImage", id: "n1" });
+    expect(imagesOf(store)).toBeUndefined();
+  });
+
+  it("opens a thumbnail through the vscode.open command", async () => {
+    const { store, sendMsg } = mkProvider();
+    seedNote(store, { images: [{ id: "i1", ext: "gif", name: "a.gif" }] });
+    await sendMsg({ type: "notepad:openImage", id: "n1", imageId: "i1" });
+    expect(commands.executeCommand).toHaveBeenCalledWith(
+      "vscode.open",
+      expect.objectContaining({ fsPath: expect.stringContaining(path.join("notepad-images", "i1.gif")) }),
+    );
+  });
+
+  it("unlinks a deleted note's images", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    seedFiles(imageDir, "i1.png");
+    seedNote(store, { images: [{ id: "i1", ext: "png", name: "a.png" }] });
+    await sendMsg({ type: "notepad:delete", id: "n1" });
+    expect(fs.existsSync(path.join(imageDir, "i1.png"))).toBe(false);
+  });
+
+  it("unlinks the images of every note cleared as completed, and only those", async () => {
+    const { store, sendMsg, imageDir } = mkProvider();
+    seedFiles(imageDir, "i1.png", "i2.png");
+    store.set("agentFlow.notepad", [
+      { id: "n1", title: "done", body: "", done: true, createdAt: 1, images: [{ id: "i1", ext: "png", name: "a.png" }] },
+      { id: "n2", title: "open", body: "", done: false, createdAt: 2, images: [{ id: "i2", ext: "png", name: "b.png" }] },
+    ]);
+    await sendMsg({ type: "notepad:clearCompleted" });
+    expect(fs.existsSync(path.join(imageDir, "i1.png"))).toBe(false);
+    expect(fs.existsSync(path.join(imageDir, "i2.png"))).toBe(true);
+  });
+
+  it("sweeps image files no note references", () => {
+    const { provider, store, imageDir } = mkProvider();
+    seedFiles(imageDir, "i1.png", "orphan.png");
+    seedNote(store, { images: [{ id: "i1", ext: "png", name: "a.png" }] });
+    provider.sweepNotepadImages();
+    expect(fs.existsSync(path.join(imageDir, "orphan.png"))).toBe(false);
+    expect(fs.existsSync(path.join(imageDir, "i1.png"))).toBe(true);
+  });
+
+  it("is a no-op when nothing was ever attached", () => {
+    const { provider } = mkProvider();
+    expect(() => provider.sweepNotepadImages()).not.toThrow();
+  });
 
   it("adds a note and posts the new list back", async () => {
     const { posted, store, sendMsg } = mkProvider();
@@ -4545,6 +4748,41 @@ describe("notepad", () => {
     // The template itself stays the configured one: the detail rides beside it, so a
     // customized explorePrompts.general is never rewritten.
     expect(call.promptTemplate).toBe(CFG.exploreActions.find((a) => a.id === "general")!.prompt);
+  });
+
+  it("names the note's images in the brief and the prompt, and passes them as attachments", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { store, sendMsg, imageDir } = mkProvider();
+    seedFiles(imageDir, "i1.png");
+    store.set("agentFlow.notepad", [{ id: "n1", title: "Rail colour", body: "see shots", done: false, createdAt: 1,
+      images: [{ id: "i1", ext: "png", name: "before.png" }] }]);
+    await sendMsg({ type: "notepad:run", id: "n1" });
+
+    const call = vi.mocked(openWorkspace).mock.calls.at(-1)![0];
+    expect(call.attachments).toEqual([
+      { path: path.join(imageDir, "i1.png"), name: "before.png" },
+    ]);
+    expect(call.planMd).toContain("## Attached images");
+    expect(call.planMd).toContain(".pick-task/images/before.png");
+    // Both halves of the suffix: the note's own words AND the images, since an
+    // image the agent never opens is one the user typed nothing to replace.
+    expect(call.promptSuffix).toContain("Details from the note:");
+    expect(call.promptSuffix).toContain(".pick-task/images/before.png");
+  });
+
+  it("leaves the brief and the prompt untouched for a note with no images", async () => {
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { store, sendMsg } = mkProvider();
+    store.set("agentFlow.notepad", [{ id: "n1", title: "Plain", body: "detail", done: false, createdAt: 1 }]);
+    await sendMsg({ type: "notepad:run", id: "n1" });
+
+    const call = vi.mocked(openWorkspace).mock.calls.at(-1)![0];
+    expect(call.attachments).toBeUndefined();
+    expect(call.planMd).not.toContain("Attached images");
   });
 
   it("sends no prompt suffix for a note with no detail", async () => {
