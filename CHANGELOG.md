@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **A note's description takes images.** Paste a screenshot into the detail
-  field, drop an image file onto a note, or use **Attach** while editing one.
+  field — whose placeholder now says so — drop an image file onto a note, or pick
+  one with **Attach image**, beside **Add note** and in a note's edit form.
   Thumbnails render under the note's text and open full size in an editor tab;
   removing one, deleting the note, or clearing completed notes deletes the file.
   **Start** copies a note's images into `.pick-task/images/` beside the brief and

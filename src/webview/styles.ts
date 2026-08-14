@@ -324,6 +324,15 @@ export const CSS = `
   .np-field-row { display: flex; gap: 6px; align-items: flex-start; }
   .np-field-row > input, .np-field-row > textarea { flex: 1; }
   .np-add-btn { align-self: flex-start; }
+  /* Add note and Attach image share one row: both act on the form above them, and
+     stacking them would read as two separate steps. */
+  .np-add-row { display: flex; gap: 6px; align-items: center; }
+  /* The label carries the button chrome (.quiet), so the input must take no space of
+     its own. Positioned off-screen rather than display:none — a hidden input is not
+     focusable, which would take the control off the keyboard path entirely. */
+  .np-attach { position: relative; overflow: hidden; }
+  .np-attach input[type="file"] { position: absolute; width: 1px; height: 1px;
+    opacity: 0; left: 0; top: 0; }
   .np-empty { padding: 14px 2px; color: var(--dim); font-size: var(--t-body); }
 
   /* The "Add section" control sits right below the filter row, matching where

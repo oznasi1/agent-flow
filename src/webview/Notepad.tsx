@@ -29,6 +29,14 @@ const RAIL_CLASS: Record<NotepadRunStatus, string> = {
   finished: "r-done",
 };
 
+/** The detail field's placeholder. Exported because it is the ONLY thing telling a
+ * user that the field takes a screenshot, so its wording is behaviour and the tests
+ * assert against this constant rather than a copy of the string. A placeholder was
+ * chosen over a line of help text under the field: this panel's rule is that
+ * persistent explanatory text is noise, and a placeholder disappears the moment the
+ * user starts typing. */
+export const DETAIL_PLACEHOLDER = "Any detail — paste a screenshot here too (optional)";
+
 /** An image the add form is holding: what `notepad:add` needs, plus the data URL
  * the thumbnail renders from. Both come out of one read, so the bytes are never
  * decoded twice. */
@@ -183,7 +191,7 @@ export function Notepad({ notes, ordered, sections = [] }: {
         <div className="np-field-row">
           <textarea
             className="np-body-input"
-            placeholder="Any detail the agent should know (optional)"
+            placeholder={DETAIL_PLACEHOLDER}
             rows={2}
             value={body}
             onChange={(e) => setBody(e.target.value)}
@@ -225,7 +233,31 @@ export function Notepad({ notes, ordered, sections = [] }: {
             ))}
           </div>
         )}
-        <button className="quiet np-add-btn" disabled={!canAdd} onClick={add}>Add note</button>
+        <div className="np-add-row">
+          <button className="quiet np-add-btn" disabled={!canAdd} onClick={add}>Add note</button>
+          {/* A file input, not a host round trip: the note does not exist yet, so the
+              host would have nowhere to put the bytes and would have to hand them
+              back across the wire. Reading the File here is the same path paste and
+              drop already take. The label IS the button — the input itself is
+              off-screen rather than `display: none`, so it keeps its accessible name
+              and stays keyboard-reachable. */}
+          <label className="quiet dim np-attach" title="Attach an image — or paste one into the detail field">
+            <ImageIcon /> Attach image
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              multiple
+              aria-label="Attach image"
+              onChange={(e) => {
+                const files = imageFiles(e.target.files);
+                // A file input fires no change event when the value is unchanged, so
+                // without this reset re-picking the SAME screenshot does nothing.
+                e.target.value = "";
+                if (files.length > 0) void holdPending(files);
+              }}
+            />
+          </label>
+        </div>
       </div>
 
       <div className="lenses">

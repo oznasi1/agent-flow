@@ -6,7 +6,7 @@ import * as React from "react";
 const sendSpy = vi.fn();
 vi.mock("../../src/webview/vscodeApi", () => ({ send: (m: unknown) => sendSpy(m) }));
 
-import { Notepad } from "../../src/webview/Notepad";
+import { DETAIL_PLACEHOLDER, Notepad } from "../../src/webview/Notepad";
 import type { NotepadImage, NotepadItemView, NotepadSectionView } from "../../src/types";
 
 const note = (over: Partial<NotepadItemView> = {}): NotepadItemView => ({
@@ -40,7 +40,7 @@ describe("Notepad", () => {
   it("sends notepad:add with the typed title and body, then clears the form", () => {
     render(<Notepad notes={[]} ordered={false} />);
     const title = screen.getByPlaceholderText("What needs doing?");
-    const body = screen.getByPlaceholderText("Any detail the agent should know (optional)");
+    const body = screen.getByPlaceholderText(DETAIL_PLACEHOLDER);
     fireEvent.change(title, { target: { value: "New task" } });
     fireEvent.change(body, { target: { value: "with detail" } });
     fireEvent.click(screen.getByRole("button", { name: "Add note" }));
@@ -513,6 +513,46 @@ describe("drag across sections", () => {
 
 describe("Notepad — images", () => {
   const fileOf = (type: string, name = "shot.png") => new File(["AAAA"], name, { type });
+
+  it("invites a paste from the detail field's own placeholder", () => {
+    render(<Notepad notes={[]} ordered={false} />);
+    // The affordance is copy on the field, not a hint line under it — see the
+    // notepad's own rule about persistent explanatory text.
+    expect(screen.getByPlaceholderText(DETAIL_PLACEHOLDER)).toBeTruthy();
+    expect(DETAIL_PLACEHOLDER).toMatch(/paste/i);
+  });
+
+  it("holds a file chosen through the add form's Attach control as pending", async () => {
+    render(<Notepad notes={[]} ordered={false} />);
+    const input = screen.getByLabelText("Attach image") as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [fileOf("image/png")] } });
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(1));
+    // No note exists yet, so nothing reaches the host until Add.
+    expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notepad:addImage" }));
+    expect(sendSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "notepad:pickImage" }));
+  });
+
+  it("ignores a non-image chosen through the add form's Attach control", async () => {
+    render(<Notepad notes={[]} ordered={false} />);
+    fireEvent.change(screen.getByLabelText("Attach image"), { target: { files: [fileOf("application/pdf", "paper.pdf")] } });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
+  });
+
+  // NOT tested here: that the Attach input resets its own `value` so the same file
+  // can be picked twice. jsdom never populates `value` from a synthetic change event,
+  // so any assertion on it passes with the reset deleted — it reads as proof of
+  // something it cannot see. Verified in the dev host instead (pick one file, remove
+  // the thumbnail, pick the same file again).
+
+  it("accumulates a second chosen file rather than replacing the first", async () => {
+    render(<Notepad notes={[]} ordered={false} />);
+    const input = screen.getByLabelText("Attach image");
+    fireEvent.change(input, { target: { files: [fileOf("image/png", "one.png")] } });
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(1));
+    fireEvent.change(input, { target: { files: [fileOf("image/png", "two.png")] } });
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(2));
+  });
   // jsdom's FileReader is real and asynchronous, and its load event does NOT land
   // within a setTimeout(0) — a test that only flushed the task queue would finish
   // before the read, and its send would then fire during the NEXT test. Every
@@ -568,7 +608,7 @@ describe("Notepad — images", () => {
 
   it("carries pending images with notepad:add and clears them after", async () => {
     render(<Notepad notes={[]} ordered={false} />);
-    fireEvent.paste(screen.getByPlaceholderText("Any detail the agent should know (optional)"), {
+    fireEvent.paste(screen.getByPlaceholderText(DETAIL_PLACEHOLDER), {
       clipboardData: { files: [fileOf("image/png")], types: ["Files"], getData: () => "" },
     });
     await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(1));
@@ -582,7 +622,7 @@ describe("Notepad — images", () => {
 
   it("holds a file dropped on the add form as pending, telling the host nothing yet", async () => {
     render(<Notepad notes={[]} ordered={false} />);
-    const body = screen.getByPlaceholderText("Any detail the agent should know (optional)");
+    const body = screen.getByPlaceholderText(DETAIL_PLACEHOLDER);
     fireEvent.dragOver(body, { dataTransfer: { types: ["Files"], files: [], getData: vi.fn(), dropEffect: "" } });
     fireEvent.drop(body, { dataTransfer: { types: ["Files"], files: [fileOf("image/png")], getData: vi.fn(), dropEffect: "" } });
     await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(1));
@@ -592,7 +632,7 @@ describe("Notepad — images", () => {
 
   it("leaves a non-file drag on the add form alone", async () => {
     render(<Notepad notes={[]} ordered={false} />);
-    const body = screen.getByPlaceholderText("Any detail the agent should know (optional)");
+    const body = screen.getByPlaceholderText(DETAIL_PLACEHOLDER);
     fireEvent.drop(body, { dataTransfer: { types: ["text/plain"], files: [], getData: vi.fn(), dropEffect: "" } });
     await new Promise((r) => setTimeout(r, 5));
     expect(screen.queryAllByRole("img")).toHaveLength(0);
@@ -600,7 +640,7 @@ describe("Notepad — images", () => {
 
   it("drops a pending image from the add form without telling the host", async () => {
     render(<Notepad notes={[]} ordered={false} />);
-    fireEvent.paste(screen.getByPlaceholderText("Any detail the agent should know (optional)"), {
+    fireEvent.paste(screen.getByPlaceholderText(DETAIL_PLACEHOLDER), {
       clipboardData: { files: [fileOf("image/png")], types: ["Files"], getData: () => "" },
     });
     await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(1));
