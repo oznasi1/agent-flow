@@ -188,6 +188,12 @@ function makeClient() {
     addIssueToSprint: vi.fn(async () => undefined),
     removeIssueFromSprint: vi.fn(async () => undefined),
     assignIssue: vi.fn(async () => undefined),
+    // `shapeSnapshot` answering null keeps JIRA_CAPS — the constant every `state`
+    // assertion below compares against — correct without editing any of them: a null
+    // snapshot is specified to mean "claim what the connector claimed before board
+    // detection existed". A test that wants the narrowed answer overrides it locally.
+    loadShape: vi.fn(async () => ({ boardId: 2, hasSprints: true, boardCount: 1 })),
+    shapeSnapshot: vi.fn(() => null as null | { boardId: number | null; hasSprints: boolean; boardCount: number }),
   };
 }
 
@@ -4851,5 +4857,47 @@ describe("notepad", () => {
       provider.postNotepad();
       expect(postedSections(posted)).toEqual([]);
     });
+  });
+});
+
+describe("caps refresh", () => {
+  it("posts the narrowed caps once the shape probe resolves", async () => {
+    // The tab bar renders from the caps in `state`, which is posted before the shape is
+    // known. This message is how a Kanban project's panel loses the three tabs it
+    // cannot answer, without a second full `state` post — which also carries `me` and
+    // would clobber a display name that had already arrived.
+    clientStub.shapeSnapshot.mockReturnValue({ boardId: 5, hasSprints: false, boardCount: 1 });
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(clientStub.loadShape).toHaveBeenCalledTimes(1);
+    expect(posted()).toContainEqual({
+      type: "caps",
+      caps: {
+        supportedFilters: ["unassigned", "mine", "all"],
+        sizes: true, labels: true, sprints: false, components: true,
+      },
+    });
+  });
+
+  it("still posts caps when the shape changes nothing, so the message is not itself a narrowing signal", async () => {
+    // shapeSnapshot stays null (a scrum project, or an unreadable board list): the
+    // posted caps must equal the ones `state` already carried, not a narrowed set.
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual({ type: "caps", caps: JIRA_CAPS });
+  });
+
+  it("posts no caps message for a connector that has no refreshCaps", async () => {
+    const { posted } = await mountWith(makeFixtureConnector());
+    expect(posted.filter((m) => m.type === "caps")).toEqual([]);
+  });
+
+  it("does not fail the first paint when the shape probe rejects", async () => {
+    // refreshCaps is specified never to reject, but the host must not depend on a
+    // connector honouring that — the task list is the real payload.
+    clientStub.loadShape.mockRejectedValue(new Error("boom"));
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "tasks" }));
   });
 });

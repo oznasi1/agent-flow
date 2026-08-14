@@ -1219,3 +1219,41 @@ describe("capability gating", () => {
     expect(screen.getByRole("button", { name: "Sign in to Fixture" })).toBeInTheDocument();
   });
 });
+
+describe("caps arriving after state", () => {
+  const filterTabs = () =>
+    within(document.querySelector('[role="group"][aria-label="Task filter"]') as HTMLElement)
+      .getAllByRole("button")
+      .map((b) => b.textContent);
+
+  const SPRINTLESS = {
+    supportedFilters: ["unassigned", "mine", "all"] as const,
+    sizes: true, labels: true, sprints: false, components: true,
+  };
+
+  it("drops the sprint-shaped tabs when a caps message narrows them", () => {
+    render(<App />);
+    authed();
+    expect(filterTabs()).toEqual(["My sprint", "Mine", "Sprint", "Backlog", "Unassigned"]);
+
+    host({ type: "caps", caps: { ...SPRINTLESS, supportedFilters: [...SPRINTLESS.supportedFilters] } });
+    // "all" is a real Filter that no tab bar has ever rendered (FILTER_ORDER in
+    // src/webview/helpers.ts), so three supported filters means two tabs.
+    expect(filterTabs()).toEqual(["Mine", "Unassigned"]);
+  });
+
+  it("keeps the size, label and component affordances when caps narrow only the filters", () => {
+    // The narrowing is sprint-shaped, not a general downgrade: a Kanban project still
+    // has estimates and components.
+    render(<App />);
+    authed();
+    host({ type: "caps", caps: { ...SPRINTLESS, supportedFilters: [...SPRINTLESS.supportedFilters] } });
+    expect(document.querySelector('[aria-label="Size"]')).not.toBeNull();
+  });
+
+  it("leaves the tab bar alone when no caps message ever arrives", () => {
+    render(<App />);
+    authed();
+    expect(filterTabs()).toEqual(["My sprint", "Mine", "Sprint", "Backlog", "Unassigned"]);
+  });
+});

@@ -13,6 +13,18 @@ const ALL_FILTERS: readonly Filter[] = [
   "unassigned", "mine", "mysprint", "sprint", "backlog", "all",
 ];
 
+/** What a project with no Scrum board can honestly answer. `mysprint`, `sprint` and
+ * `backlog` are gone because all three are *defined* by `sprint in openSprints()` in
+ * `buildJql` — without a sprint board the fallback ladder strips that clause and all
+ * three degrade into duplicates of `mine`/`all`, which rendered as three tabs showing
+ * the same list and explaining nothing.
+ *
+ * `unassigned` stays: sprint-stripped it reads "every open issue in the project with
+ * nobody on it", which is a genuinely distinct and useful lens. `all` stays for the
+ * same reason it is in ALL_FILTERS — it is the JQL builder's fallback default and no
+ * tab bar has ever rendered it (see FILTER_ORDER in src/webview/helpers.ts). */
+const SPRINTLESS_FILTERS: readonly Filter[] = ["unassigned", "mine", "all"];
+
 /** Adapts JiraClient — the raw REST surface — to the source-agnostic
  * TaskProvider. Everything a view used to know about Jira transitions lives
  * here: which screen fields can be prompted for, how an answer becomes Jira's
@@ -63,23 +75,55 @@ export class JiraProvider implements TaskProvider {
 
   constructor(private readonly client: JiraClient) {}
 
-  readonly caps: Capabilities = {
-    supportedFilters: ALL_FILTERS,
-    sizes: true,
-    labels: { add: (key, label) => this.client.addLabel(key, label) },
-    sprints: {
-      activeId: async () => {
-        const id = await this.client.getActiveSprintId();
-        return id == null ? null : String(id);
+  /** Read fresh on every access, from a synchronous snapshot the client keeps — NOT a
+   * field computed in the constructor. Two reasons, both load-bearing:
+   *
+   * A provider is built per operation, but the shape probe is one async round trip that
+   * lands *after* the provider that started it is already in use. A field would freeze
+   * the optimistic answer into the very instance the panel is reading.
+   *
+   * And a `null` snapshot must mean "behave exactly as this connector did before
+   * detection existed" — every lens, sprints on — not "no sprints". Getting that
+   * backwards would strip three tabs off every Scrum user's panel for the lifetime of
+   * one failed request. `test/unit/tasksView.test.ts`'s `JIRA_CAPS` constant pins the
+   * un-probed answer, so that inertness is enforced rather than merely intended. */
+  get caps(): Capabilities {
+    const hasSprints = this.client.shapeSnapshot?.()?.hasSprints ?? true;
+    return {
+      supportedFilters: hasSprints ? ALL_FILTERS : SPRINTLESS_FILTERS,
+      sizes: true,
+      labels: { add: (key, label) => this.client.addLabel(key, label) },
+      ...(hasSprints
+        ? {
+            sprints: {
+              activeId: async () => {
+                const id = await this.client.getActiveSprintId();
+                return id == null ? null : String(id);
+              },
+              add: (sprintId: string, key: string) =>
+                this.client.addIssueToSprint(Number(sprintId), key),
+              remove: (key: string) => this.client.removeIssueFromSprint(key),
+            },
+          }
+        : {}),
+      components: {
+        list: () => this.client.listComponents(),
+        update: (key, delta) => this.client.updateComponents(key, delta),
       },
-      add: (sprintId, key) => this.client.addIssueToSprint(Number(sprintId), key),
-      remove: (key) => this.client.removeIssueFromSprint(key),
-    },
-    components: {
-      list: () => this.client.listComponents(),
-      update: (key, delta) => this.client.updateComponents(key, delta),
-    },
-  };
+    };
+  }
+
+  /** Learn the project's board setup, so `caps` can narrow. Never rejects: a client
+   * with no `loadShape` (the wholesale mock in `test/unit/tasksView.test.ts`) and a
+   * board list that cannot be read both mean the same thing here — keep claiming what
+   * we already claimed. */
+  async refreshCaps(): Promise<void> {
+    try {
+      await this.client.loadShape?.();
+    } catch {
+      /* an unlearnable shape leaves the optimistic caps in place, on purpose */
+    }
+  }
 
   list(lens: Filter, size: Size, max = 50): Promise<Task[]> {
     return this.client.fetchTasks(lens, size, max);

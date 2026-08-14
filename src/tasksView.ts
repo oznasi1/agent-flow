@@ -442,6 +442,19 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         .catch(() => {
           /* display name is best-effort — the task list is the real payload */
         }),
+      // Best-effort, and its own message on purpose — see the `caps` message in
+      // types.ts. A source whose capabilities are static has no refreshCaps and
+      // nothing is posted; a source that has one but cannot answer keeps whatever it
+      // already claimed, because refreshCaps is specified never to reject. The catch
+      // is a backstop for a connector that breaks that promise: a board list nobody
+      // asked for must not take out the panel's first paint.
+      (async () => {
+        if (!provider.refreshCaps) return;
+        await provider.refreshCaps();
+        this.post({ type: "caps", caps: serializeCaps(provider.caps) });
+      })().catch(() => {
+        /* a source that cannot learn its own shape keeps the caps it already posted */
+      }),
       // The configured lens goes through unclamped ON PURPOSE: the `fetch` case is
       // the single choke point where a filter reaches a provider, and it clamps
       // there — see `effectiveFilter` in that handler. A second clamp here would be

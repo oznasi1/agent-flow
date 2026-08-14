@@ -123,10 +123,11 @@ downstream can check one flag and reach for a differently-named method.
 
 | Capability | Unlocks | Degrades to, when absent |
 |---|---|---|
-| `supportedFilters` | Which of the task-pool's five tab-bar lenses (`mysprint`, `mine`, `sprint`, `backlog`, `unassigned`) render at all, via `visibleFilters()` in `src/webview/helpers.ts`. | Any tab you don't list simply never renders — no error, no disabled state. **This says which of the UI's five existing tabs you can answer, not which tabs exist.** `"all"` is a real `Filter` value (the JQL builder's fallback, and Jira declares it in `supportedFilters`) but no UI has ever shown it as a sixth tab — returning it does not add one. |
+| `supportedFilters` | Which of the task-pool's five tab-bar lenses (`mysprint`, `mine`, `sprint`, `backlog`, `unassigned`) render at all, via `visibleFilters()` in `src/webview/helpers.ts`. **May change after `refreshCaps()`** — the Jira connector drops the three sprint-shaped lenses once it learns the project has no Scrum board. | Any tab you don't list simply never renders — no error, no disabled state. **This says which of the UI's five existing tabs you can answer, not which tabs exist.** `"all"` is a real `Filter` value (the JQL builder's fallback, and Jira declares it in `supportedFilters`) but no UI has ever shown it as a sixth tab — returning it does not add one. |
 | `sizes` | The size-filter control (`XS`/`S`/`M`/`L` chips) above the task list. | The control doesn't render at all (`caps.sizes && filters.size && …` in `App.tsx`). Every `Task.estimateSeconds` should be `null` if you don't set `sizes: true` — there's nothing to size by. |
 | `sprints` | The "add to my sprint" action, the "My sprint" tab's drag-to-reorder, and the "remove from sprint" (with Undo) action on a card. | All three disappear from the UI (`caps.sprints` gates each). Calling any of `TasksViewProvider`'s sprint handlers directly (e.g. from the command palette after a stale webview render) reports `"{label} doesn't have sprints."` rather than throwing — see `sprints()` in `src/tasksView.ts`. |
 | `components` | The component-derived state on each repo chip in a task's detail panel — on-the-ticket (solid) vs. not (dashed, with a `↑` that pushes it) — and the two-way sync behind it. | The repo selection itself still renders, and is still editable: which repos a task touches is what `take` sends as `services`, and it is inferred from summary, description and labels as much as from components. Only the three-state classification goes: every chip renders plain, with no dash, no `↑`, and no title — there is nothing about the ticket to claim (`componentsSupported={caps.components}` in `App.tsx`; the same plain rendering also covers a components-having source whose list couldn't be read). |
+| `refreshCaps?()` | Not a `caps` member but the thing that can change one: a source that must ask its own server what it can do. The Jira connector reads the project's boards and, when there is no Scrum board, drops `mysprint`/`sprint`/`backlog` and `sprints`. The host calls it once per panel init, alongside the first `list()`, and posts a `caps` message with the result. | Nothing is called and nothing is posted; the `caps` in the initial `state` message are final. A connector whose capabilities are static (the fixture connector) should **omit** it rather than implement a no-op. |
 | `labels` | Provenance stamping — writing `agentFlow.provenanceLabel` onto a task after Agent Flow acts on it, when `agentFlow.stampLabelOnWrite` is on. | **A silent no-op**, not an error and not a toast: `stampProvenance()` in `src/tasksView.ts` returns immediately if `caps.labels` is absent. The write that mattered (the status change, the assignment) already succeeded; failing the whole operation over a label a source doesn't have would be the wrong trade. If you don't have labels, you don't need to do anything to make this safe — just don't declare the capability. |
 
 One more field degrades the same way but isn't a `caps` entry:
@@ -298,7 +299,7 @@ export interface TaskConnector {
 
 ## 7. The inherited assumptions
 
-Three things a connector author will hit that the seam does not (yet) make
+Five things a connector author will hit that the seam does not (yet) make
 source-agnostic:
 
 - **`estimateSeconds` is rendered against an 8-hour workday.**
@@ -331,6 +332,31 @@ source-agnostic:
   but nobody has designed it against a real second branch convention yet.
   Connector #2's author is the first person with a real case in hand, and
   should design it then rather than have it guessed at here.
+
+- **`caps` is read on every access, not once — if you implement `refreshCaps`.**
+  The Jira provider's `caps` is a getter over a cached project shape, so the
+  same provider instance answers differently before and after `refreshCaps()`
+  resolves. A field captured in your constructor would freeze the pre-probe
+  answer into the very instance the panel is already reading. And make the
+  un-probed answer your **optimistic** one: a failed probe must leave the user
+  with the capabilities you would have claimed before detection existed, never
+  with the narrowest set. One unreadable board list must not strip three tabs
+  off a project that really does have sprints.
+
+- **The `statusCategory != Done` in every Jira query matches a display name,
+  and display names are localized.** Investigated 2026-08-13, deliberately left
+  alone. Atlassian's advanced-searching reference gives `statusCategory` three
+  locale-invariant aliases — `New`, `Indeterminate`, `Complete` — and ids
+  (`statusCategory = 3` is the done category), alongside the localized display
+  names `To Do` / `In Progress` / `Done` that `buildJql` uses today. So an
+  escape hatch exists, but **nothing confirms a non-English site actually
+  rejects `Done`**, and the literal is pinned by six assertions in
+  `test/unit/tasks/jira/jql.test.ts`. If a localized site ever does reject it,
+  the failure is loud rather than silent — the clause is in *every* candidate
+  the fallback ladder tries, none of which strip it, so the panel surfaces a raw
+  API error instead of degrading. The fix at that point is `statusCategory != 3`
+  or the `Complete` alias, plus those six assertions. Don't spend them on the
+  hypothesis alone.
 
 - **Config is one shared, hand-written surface — and two of its fields are
   Jira's despite their generic names.** There is no `AgentFlowConfig.<id>`

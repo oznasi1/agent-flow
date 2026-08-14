@@ -539,6 +539,15 @@ export type OutboundMessage =
       /** Which optional affordances to render. Flat booleans: the capability
        * objects on TaskProvider cannot be structured-cloned. */
       caps: SerializedCaps }
+  /** Capabilities that changed after `state` was posted, because the source had to ask
+   * its server what it can do (`TaskProvider.refreshCaps`) — the Jira connector reads
+   * the project's boards and drops the sprint-shaped lenses when there is no Scrum
+   * board. Its own message rather than a second `state` post for one reason: `state`
+   * also carries `me`, and the caps refresh resolves on a different beat from the
+   * identity lookup, so re-posting `state` from here would clobber a display name that
+   * had already arrived with `null`. The webview folds this into the same caps state
+   * `state` set, so arriving or not arriving are both valid histories. */
+  | { type: "caps"; caps: SerializedCaps }
   // Recomputed on every pool refresh (same trackOpenWindows gate and liveWindows()
   // source as `state`'s liveCount), so the header gauge doesn't go stale between
   // `state` posts — it was previously a mount-time snapshot only.

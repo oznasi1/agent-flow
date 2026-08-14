@@ -105,6 +105,21 @@ export interface TaskProvider {
    * with a write must therefore check `id`, not merely non-`null` (see
    * `addToMySprint` in src/tasksView.ts). */
   me(): Promise<{ id: string; displayName: string } | null>;
+  /** Resolve whatever `caps` depends on, then resolve. **`caps` may read differently
+   * after this settles** — that is the entire purpose. Optional: a source whose
+   * capabilities are static (the fixture connector, any source with no server-side
+   * configuration to discover) simply omits it, and callers treat its absence as
+   * "caps are already final."
+   *
+   * Never rejects for an ordinary "couldn't find out" — a connector that cannot learn
+   * its own shape must fall back to whatever it already claimed. Callers invoke this
+   * as a best-effort side quest alongside the first `list()`, so a rejection here
+   * would surface as a failed first paint for a fact the user never asked about.
+   *
+   * A connector that implements this must make `caps` a **getter**: a field captured
+   * in the constructor freezes the pre-probe answer into the very instance the panel
+   * is already reading. */
+  refreshCaps?(): Promise<void>;
   readonly caps: Capabilities;
 }
 

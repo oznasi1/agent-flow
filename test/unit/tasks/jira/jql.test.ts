@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildJql, stripSprint } from "../../../../src/tasks/jira/jql";
+import { buildJql, stripPriorityOrder, stripSprint } from "../../../../src/tasks/jira/jql";
 
 const ORDER = "ORDER BY priority DESC, updated DESC";
 
@@ -107,5 +107,51 @@ describe("stripSprint — no-board fallback", () => {
     const stripped = stripSprint(buildJql("ASM", "mysprint", "s"));
     expect(stripped).not.toContain("openSprints()");
     expect(stripped).toContain('originalEstimate <= "4h"');
+  });
+});
+
+describe("stripPriorityOrder — no-priority fallback", () => {
+  it("drops the priority term and keeps the updated sort", () => {
+    expect(stripPriorityOrder(buildJql("ASM", "mine"))).toBe(
+      "project = ASM AND statusCategory != Done AND assignee = currentUser() ORDER BY updated DESC",
+    );
+  });
+
+  it("leaves the WHERE clause untouched", () => {
+    const stripped = stripPriorityOrder(buildJql("ASM", "mysprint", "s"));
+    expect(stripped).toContain("sprint in openSprints()");
+    expect(stripped).toContain('originalEstimate <= "4h"');
+    expect(stripped).toContain("assignee = currentUser()");
+  });
+
+  it("is idempotent", () => {
+    const once = stripPriorityOrder(buildJql("ASM", "mine"));
+    expect(stripPriorityOrder(once)).toBe(once);
+  });
+
+  it("leaves a query with no priority sort alone", () => {
+    const q = "project = ASM ORDER BY updated DESC";
+    expect(stripPriorityOrder(q)).toBe(q);
+  });
+
+  it("never leaves a bare ORDER BY behind for any lens or size", () => {
+    // A malformed sort is worse than the sort we were trying to escape: it makes every
+    // candidate in the ladder fail, including the ones that would have worked.
+    for (const f of ["unassigned", "mine", "mysprint", "sprint", "backlog", "all"] as const) {
+      for (const s of ["any", "s", "m", "l"] as const) {
+        const q = stripPriorityOrder(buildJql("ASM", f, s));
+        expect(q).toContain("ORDER BY updated DESC");
+        expect(q).not.toContain("priority");
+        expect(q).not.toMatch(/ORDER BY\s*$/);
+        expect(q).not.toMatch(/ORDER BY\s+,/);
+      }
+    }
+  });
+
+  it("composes with stripSprint in either order", () => {
+    const a = stripPriorityOrder(stripSprint(buildJql("ASM", "mysprint")));
+    const b = stripSprint(stripPriorityOrder(buildJql("ASM", "mysprint")));
+    expect(a).toBe(b);
+    expect(a).toBe("project = ASM AND assignee = currentUser() AND statusCategory != Done ORDER BY updated DESC");
   });
 });

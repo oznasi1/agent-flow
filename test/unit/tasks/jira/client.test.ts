@@ -2,8 +2,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fakeAuth, installFetch, jsonResponse, textResponse, emptyResponse } from "../../../_helpers/factories";
 import { isTaskNetworkError } from "../../../../src/tasks/provider";
 
-// The Sprint-field id is cached in a module-level variable; reset the whole module
-// between tests so the cache never leaks across cases.
+// The Sprint-field id and the project shape live in module-level maps in
+// `shape.ts`. Resetting the registry and re-importing the client gives it a FRESH
+// `shape.ts` instance each test, so those maps start empty without an explicit
+// clear — and an explicit clear would in fact be a no-op here, since a static
+// import at the top of this file would hold the pre-reset instance, not the one
+// the client under test is using.
 let mod: typeof import("../../../../src/tasks/jira/client");
 beforeEach(async () => {
   vi.resetModules();
@@ -195,6 +199,36 @@ describe("fetchTasks", () => {
     const tasks = await client().fetchTasks("mine");
     expect(bodyOf(fetchMock, 1).fields).not.toContain("customfield_10020");
     expect(tasks[0].sprint).toBeNull();
+  });
+
+  it("degrades to a priority-free sort once every other candidate has failed", async () => {
+    // A project with priority hidden or unindexed rejects every candidate that sorts by
+    // it. The sort-stripped queries sit LAST in the ladder, so this is only reached
+    // after the sprint- and size-stripped ones have already been refused.
+    const fetchMock = installFetch([
+      jsonResponse(FIELD_LIST),
+      textResponse("Field 'priority' does not exist", 400),
+      jsonResponse({ issues: [rawIssue()] }),
+    ]);
+    const tasks = await client().fetchTasks("mine");
+    expect(tasks).toHaveLength(1);
+    expect(bodyOf(fetchMock, 1).jql).toContain("ORDER BY priority DESC");
+    expect(bodyOf(fetchMock, 2).jql).toBe(
+      "project = ASM AND statusCategory != Done AND assignee = currentUser() ORDER BY updated DESC",
+    );
+  });
+
+  it("keeps the priority sort for as long as anything with it still works", async () => {
+    // The reverse guard: the sort-stripped variants must never pre-empt a candidate
+    // that keeps it. A wrong sort is cosmetic; a wrong filter is a wrong list.
+    const fetchMock = installFetch([
+      jsonResponse(FIELD_LIST),
+      textResponse("no board", 400),
+      jsonResponse({ issues: [rawIssue()] }),
+    ]);
+    await client().fetchTasks("mysprint");
+    expect(bodyOf(fetchMock, 2).jql).toContain("ORDER BY priority DESC");
+    expect(bodyOf(fetchMock, 2).jql).not.toContain("openSprints()");
   });
 
   it("asks Jira for the issue type alongside the other list fields", async () => {
@@ -615,6 +649,21 @@ describe("listComponents", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("does not serve one site's components to another site with the same project key", async () => {
+    // The cache was keyed by project key alone, so two Jira sites that both define a
+    // `ASM` project shared one entry for five minutes and the second site was answered
+    // with the first's component names — names its own project would then reject on a
+    // write. Keyed by site+project, each gets its own read.
+    const fetchMock = installFetch([
+      jsonResponse([{ name: "billing-service" }]),
+      jsonResponse([{ name: "totally-different" }]),
+    ]);
+    await new mod.JiraClient("https://a.test", "ASM", fakeAuth()).listComponents();
+    await expect(new mod.JiraClient("https://b.test", "ASM", fakeAuth()).listComponents())
+      .resolves.toEqual(["totally-different"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("refetches once the 5-minute TTL has passed", async () => {
     vi.useFakeTimers();
     try {
@@ -681,5 +730,190 @@ describe("updateComponents", () => {
     await client().updateComponents("ASM-1", {});
     await client().updateComponents("ASM-1", { add: [], remove: [] });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("loadShape", () => {
+  const BOARDS = { values: [{ id: 7, type: "kanban" }, { id: 2, type: "scrum" }] };
+
+  it("reads the project's boards and reports a scrum project", async () => {
+    const fetchMock = installFetch([jsonResponse(BOARDS)]);
+    expect(await client().loadShape()).toEqual({ boardId: 2, hasSprints: true, boardCount: 2 });
+    expect(urlOf(fetchMock, 0)).toContain("/rest/agile/1.0/board?projectKeyOrId=ASM");
+  });
+
+  it("reports a kanban-only project as sprintless", async () => {
+    installFetch([jsonResponse({ values: [{ id: 5, type: "kanban" }] })]);
+    expect(await client().loadShape()).toEqual({ boardId: 5, hasSprints: false, boardCount: 1 });
+  });
+
+  it("caches the shape — a second call makes no request", async () => {
+    const fetchMock = installFetch([jsonResponse(BOARDS)]);
+    const c = client();
+    await c.loadShape();
+    await c.loadShape();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares the cache across client instances for the same site and project", async () => {
+    const fetchMock = installFetch([jsonResponse(BOARDS)]);
+    await client().loadShape();
+    // A fresh client per operation is the connector's contract (`provider()`), so a
+    // cache that did not survive the instance would be no cache at all.
+    expect(await client().loadShape()).toEqual({ boardId: 2, hasSprints: true, boardCount: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not answer one project with another project's shape", async () => {
+    const fetchMock = installFetch([
+      jsonResponse(BOARDS),
+      jsonResponse({ values: [{ id: 5, type: "kanban" }] }),
+    ]);
+    await new mod.JiraClient(BASE, "ASM", fakeAuth()).loadShape();
+    expect(await new mod.JiraClient(BASE, "OTHER", fakeAuth()).loadShape())
+      .toEqual({ boardId: 5, hasSprints: false, boardCount: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("degrades to the optimistic shape when the board list cannot be read, and does not cache it", async () => {
+    // A 404 on the Agile API — Jira Software not installed on the site, or a proxy
+    // that does not route /rest/agile — must not be remembered as "this project has no
+    // sprints": that would silently strip the sprint tabs off a working Scrum project
+    // over one failed request. Optimistic here means claim sprints, exactly as the
+    // pre-detection code did, and cache nothing so the next call retries.
+    const fetchMock = installFetch([textResponse("no such endpoint", 404), jsonResponse(BOARDS)]);
+    const c = client();
+    expect(await c.loadShape()).toEqual({ boardId: null, hasSprints: true, boardCount: 0 });
+    expect(c.shapeSnapshot()).toBeNull();
+    expect(await c.loadShape()).toEqual({ boardId: 2, hasSprints: true, boardCount: 2 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("degrades on a network-level failure too", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("ENOTFOUND"));
+    (globalThis as { fetch: unknown }).fetch = fetchMock;
+    expect(await client().loadShape()).toEqual({ boardId: null, hasSprints: true, boardCount: 0 });
+  });
+
+  it("lets an auth failure through — a dead token is not a project shape", async () => {
+    // Both 401 and 403 land here, because `request()` classifies each as an auth
+    // failure for every endpoint. That means an Agile 403 (a user with no Jira
+    // Software licence) re-gates the panel rather than degrading — pre-existing
+    // behaviour of `request()`, asserted here so a future reader knows the degrade
+    // path above is reachable only for non-auth statuses.
+    for (const status of [401, 403]) {
+      installFetch([textResponse("", status)]);
+      await expect(client().loadShape()).rejects.toBeInstanceOf(mod.JiraAuthError);
+    }
+  });
+});
+
+describe("shapeSnapshot — stale but never forgotten", () => {
+  it("keeps answering a sprintless project past the re-read interval", async () => {
+    // The regression this guards: while the snapshot expired to null, JiraProvider.caps
+    // read that as "nothing known" and returned its optimistic every-lens answer, so a
+    // Kanban project's three dead sprint tabs reappeared on the next state post.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      installFetch([jsonResponse({ values: [{ id: 5, type: "kanban" }] })]);
+      const c = client();
+      await c.loadShape();
+      vi.setSystemTime(60 * 60_000); // an hour later, well past SHAPE_TTL_MS
+      expect(c.shapeSnapshot()).toEqual({ boardId: 5, hasSprints: false, boardCount: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-reads once stale, and adopts a project that has gained a scrum board", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      const fetchMock = installFetch([
+        jsonResponse({ values: [{ id: 5, type: "kanban" }] }),
+        jsonResponse({ values: [{ id: 5, type: "kanban" }, { id: 9, type: "scrum" }] }),
+      ]);
+      const c = client();
+      expect((await c.loadShape()).hasSprints).toBe(false);
+      vi.setSystemTime(60 * 60_000);
+      expect((await c.loadShape()).hasSprints).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the stale answer when the re-read fails, rather than re-widening to optimistic", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      installFetch([jsonResponse({ values: [{ id: 5, type: "kanban" }] })]);
+      const c = client();
+      await c.loadShape();
+      vi.setSystemTime(60 * 60_000);
+      installFetch([textResponse("upstream exploded", 500)]);
+      expect(await c.loadShape()).toEqual({ boardId: 5, hasSprints: false, boardCount: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("shapeSnapshot", () => {
+  it("is null before any probe and the shape after one, with no request of its own", async () => {
+    const fetchMock = installFetch([jsonResponse({ values: [{ id: 2, type: "scrum" }] })]);
+    const c = client();
+    expect(c.shapeSnapshot()).toBeNull();
+    await c.loadShape();
+    expect(c.shapeSnapshot()).toEqual({ boardId: 2, hasSprints: true, boardCount: 1 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("getActiveSprintId — board reuse", () => {
+  it("reuses an already-probed board instead of listing boards again", async () => {
+    const fetchMock = installFetch([
+      jsonResponse({ values: [{ id: 7, type: "kanban" }, { id: 2, type: "scrum" }] }),
+      jsonResponse({ values: [{ id: 99 }] }),
+    ]);
+    const c = client();
+    await c.loadShape();
+    expect(await c.getActiveSprintId()).toBe(99);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(urlOf(fetchMock, 1)).toContain("/board/2/sprint");
+  });
+
+  it("returns null without a sprint request when the project has no board", async () => {
+    const fetchMock = installFetch([jsonResponse({ values: [] })]);
+    const c = client();
+    await c.loadShape();
+    expect(await c.getActiveSprintId()).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("throws when the board list cannot be read, rather than reporting 'no active sprint'", async () => {
+    // The caller (addToMySprint in tasksView.ts) turns a null into the toast "No
+    // active sprint on the X board." Answering null for a request that never arrived
+    // would state something confident and false about the user's Jira, so the read
+    // failure has to surface here — the pre-detection behaviour.
+    installFetch([textResponse("upstream exploded", 500)]);
+    await expect(client().getActiveSprintId()).rejects.toThrow();
+  });
+
+  it("still reports a genuinely board-less project as null, not an error", async () => {
+    installFetch([jsonResponse({ values: [] })]);
+    expect(await client().getActiveSprintId()).toBeNull();
+  });
+
+  it("does not consume loadShape's degraded answer when it has one", async () => {
+    // loadShape swallows a non-auth failure into { boardId: null, hasSprints: true }
+    // and caches nothing. getActiveSprintId must not read that as "no board" — it
+    // must go and ask, and fail if the answer still is not there.
+    const c = client();
+    installFetch([textResponse("upstream exploded", 500)]);
+    expect(await c.loadShape()).toEqual({ boardId: null, hasSprints: true, boardCount: 0 });
+    installFetch([textResponse("upstream exploded", 500)]);
+    await expect(c.getActiveSprintId()).rejects.toThrow();
   });
 });

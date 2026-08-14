@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Jira projects without a Scrum board no longer show three sprint filter tabs
+  that silently returned the same list as **Mine**. The connector now reads the
+  project's boards once per session and offers only the lenses it can answer —
+  **Mine** and **Unassigned** on a Kanban or board-less project. Scrum projects
+  are unaffected, and a board list that can't be read leaves every tab in place
+  rather than hiding any.
+- Every sprint operation in a session now uses one stable board, chosen by
+  lowest id with Scrum boards preferred. A project with several boards could
+  previously have its active sprint read from one board while **Add to my
+  sprint** wrote to another, because each call took whichever board Jira
+  happened to return first.
+- The Sprint-field and component caches are keyed by Jira site, so changing
+  `agentFlow.jira.baseUrl` mid-session no longer answers with the previous
+  site's data, and two sites that define the same project key no longer share a
+  cache entry. A failed Sprint-field lookup is now retried after ten minutes
+  instead of disabling sprint detection until the window is reloaded.
+- A project that rejects a query sorted by `priority` — the field hidden or
+  unindexed — now falls back to sorting by `updated` instead of showing an
+  error with no task list behind it.
+
 ## [0.19.3] — 2026-08-13
 
 ### Changed
