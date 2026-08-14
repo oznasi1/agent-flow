@@ -21,9 +21,13 @@ export interface ProjectShape {
   boardCount: number;
 }
 
-/** Board setup changes when someone reconfigures a project — rarely, but a user who
- * creates their first Scrum board should not have to reload the window to get their
- * sprint tabs. Ten minutes is the same order as the component list's own TTL. */
+/** How long before the remembered shape is re-read. Board setup changes when someone
+ * reconfigures a project — rarely, but a user who creates their first Scrum board
+ * should not have to reload the window to get their sprint tabs. Ten minutes is the
+ * same order as the component list's own TTL.
+ *
+ * This is a *re-read* interval, not a lifetime: an aged-out shape is still returned by
+ * `lastShape`. See its comment for why forgetting would be worse than remembering. */
 export const SHAPE_TTL_MS = 10 * 60_000;
 
 /** The Sprint custom field id is stable per SITE, not per project — but a resolved
@@ -45,18 +49,26 @@ export function siteKey(baseUrl: string, project: string): string {
 const shapes = new Map<string, { shape: ProjectShape; at: number }>();
 const sprintFields = new Map<string, { id: string | null; at: number }>();
 
-/** The cached shape, or null when nothing is known — never a guess. Synchronous and
- * I/O-free on purpose: `JiraProvider.caps` is a synchronous getter that reads this,
- * and a `caps` that awaited anything would change the seam for every connector. */
-export function peekShape(baseUrl: string, project: string): ProjectShape | null {
-  const k = siteKey(baseUrl, project);
-  const hit = shapes.get(k);
-  if (!hit) return null;
-  if (Date.now() - hit.at >= SHAPE_TTL_MS) {
-    shapes.delete(k);
-    return null;
-  }
-  return hit.shape;
+/** The last shape learned for this project, **however old**, or null when nothing has
+ * ever been learned. Synchronous and I/O-free on purpose: `JiraProvider.caps` is a
+ * synchronous getter that reads this, and a `caps` that awaited anything would change
+ * the seam for every connector.
+ *
+ * Staleness deliberately does NOT erase the answer — that is `isShapeFresh`'s job, and
+ * only the code deciding whether to re-read consults it. An expiring *delete* here
+ * would mean `caps` briefly saw "nothing known", which it maps to the optimistic
+ * every-lens answer: a Kanban project's three dead sprint tabs would flicker back the
+ * moment anything re-posted state after the TTL. A shape that is ten minutes old is
+ * still a far better basis for that decision than a guess. */
+export function lastShape(baseUrl: string, project: string): ProjectShape | null {
+  return shapes.get(siteKey(baseUrl, project))?.shape ?? null;
+}
+
+/** Whether the remembered shape is recent enough to skip a re-read. False when nothing
+ * is known at all, so a first read always happens. */
+export function isShapeFresh(baseUrl: string, project: string): boolean {
+  const hit = shapes.get(siteKey(baseUrl, project));
+  return !!hit && Date.now() - hit.at < SHAPE_TTL_MS;
 }
 
 /** Returns what it stored so a caller can cache-and-return in one expression. */

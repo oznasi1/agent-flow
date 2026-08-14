@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  peekShape, putShape, peekSprintField, putSprintField, pickBoard, resetShapeCaches,
-  SHAPE_TTL_MS, FIELD_TTL_MS,
+  lastShape, isShapeFresh, putShape, peekSprintField, putSprintField, pickBoard,
+  resetShapeCaches, SHAPE_TTL_MS, FIELD_TTL_MS,
 } from "../../../../src/tasks/jira/shape";
 
 beforeEach(() => resetShapeCaches());
@@ -46,28 +46,18 @@ describe("pickBoard", () => {
 describe("shape cache keying", () => {
   it("does not answer one site with another site's shape", () => {
     putShape("https://a.test", "PLAT", { boardId: 1, hasSprints: true, boardCount: 1 });
-    expect(peekShape("https://b.test", "PLAT")).toBeNull();
+    expect(lastShape("https://b.test", "PLAT")).toBeNull();
   });
 
   it("does not answer one project with another project's shape on the same site", () => {
     putShape("https://a.test", "PLAT", { boardId: 1, hasSprints: true, boardCount: 1 });
-    expect(peekShape("https://a.test", "OTHER")).toBeNull();
+    expect(lastShape("https://a.test", "OTHER")).toBeNull();
   });
 
   it("returns the stored shape for the same site and project", () => {
     const shape = { boardId: 1, hasSprints: true, boardCount: 1 };
     putShape("https://a.test", "PLAT", shape);
-    expect(peekShape("https://a.test", "PLAT")).toEqual(shape);
-  });
-
-  it("expires a shape after SHAPE_TTL_MS so a project that gains a board is noticed", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-    putShape("https://a.test", "PLAT", { boardId: null, hasSprints: false, boardCount: 0 });
-    vi.setSystemTime(SHAPE_TTL_MS - 1);
-    expect(peekShape("https://a.test", "PLAT")).not.toBeNull();
-    vi.setSystemTime(SHAPE_TTL_MS + 1);
-    expect(peekShape("https://a.test", "PLAT")).toBeNull();
+    expect(lastShape("https://a.test", "PLAT")).toEqual(shape);
   });
 
   it("putShape returns the shape it stored, so a caller can cache-and-return in one line", () => {
@@ -79,7 +69,48 @@ describe("shape cache keying", () => {
     // The separator must not be forgeable from either half: ("https://a.test", "AB|C")
     // and ("https://a.test|AB", "C") must land in different buckets.
     putShape("https://a.test", "AB|C", { boardId: 1, hasSprints: true, boardCount: 1 });
-    expect(peekShape("https://a.test|AB", "C")).toBeNull();
+    expect(lastShape("https://a.test|AB", "C")).toBeNull();
+  });
+});
+
+describe("shape staleness — remembered forever, re-read on a TTL", () => {
+  it("goes stale after SHAPE_TTL_MS so a project that gains a board is noticed", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    putShape("https://a.test", "PLAT", { boardId: null, hasSprints: false, boardCount: 0 });
+    vi.setSystemTime(SHAPE_TTL_MS - 1);
+    expect(isShapeFresh("https://a.test", "PLAT")).toBe(true);
+    vi.setSystemTime(SHAPE_TTL_MS + 1);
+    expect(isShapeFresh("https://a.test", "PLAT")).toBe(false);
+  });
+
+  it("KEEPS answering with a stale shape rather than forgetting it", () => {
+    // The whole point. `caps` is a synchronous getter over this, and it maps "nothing
+    // known" to the optimistic every-lens answer. If expiry deleted the entry, a
+    // Kanban project's three dead sprint tabs would reappear the moment anything
+    // re-posted state after the TTL — which is the exact bug this branch removes.
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const shape = { boardId: 5, hasSprints: false, boardCount: 1 };
+    putShape("https://a.test", "PLAT", shape);
+    vi.setSystemTime(SHAPE_TTL_MS * 100);
+    expect(lastShape("https://a.test", "PLAT")).toEqual(shape);
+    expect(isShapeFresh("https://a.test", "PLAT")).toBe(false);
+  });
+
+  it("reports nothing known as not fresh, so a first read always happens", () => {
+    expect(isShapeFresh("https://a.test", "NEVER-SEEN")).toBe(false);
+    expect(lastShape("https://a.test", "NEVER-SEEN")).toBeNull();
+  });
+
+  it("a re-read replaces the stale answer and restores freshness", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    putShape("https://a.test", "PLAT", { boardId: 5, hasSprints: false, boardCount: 1 });
+    vi.setSystemTime(SHAPE_TTL_MS + 1);
+    putShape("https://a.test", "PLAT", { boardId: 2, hasSprints: true, boardCount: 2 });
+    expect(isShapeFresh("https://a.test", "PLAT")).toBe(true);
+    expect(lastShape("https://a.test", "PLAT")).toEqual({ boardId: 2, hasSprints: true, boardCount: 2 });
   });
 });
 

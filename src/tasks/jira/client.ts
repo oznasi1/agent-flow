@@ -5,7 +5,8 @@ import { TransitionFieldMeta } from "./transitionFields";
 import { Filter, Task, Size } from "../../types";
 import { markTaskNetworkFailure, TaskAuthError } from "../provider";
 import {
-  peekShape, peekSprintField, pickBoard, ProjectShape, putShape, putSprintField, siteKey,
+  isShapeFresh, lastShape, peekSprintField, pickBoard, ProjectShape, putShape,
+  putSprintField, siteKey,
 } from "./shape";
 
 export class JiraAuthError extends TaskAuthError {
@@ -188,12 +189,15 @@ export class JiraClient {
    * about the credentials, and the panel already re-gates on it. */
   async loadShape(): Promise<ProjectShape> {
     const known = this.shapeSnapshot();
-    if (known) return known;
+    if (known && isShapeFresh(this.baseUrl, this.project)) return known;
     try {
       return await this.fetchShape();
     } catch (e) {
       if (e instanceof JiraAuthError) throw e;
-      return { boardId: null, hasSprints: true, boardCount: 0 };
+      // A stale answer beats the optimistic guess: it is what this project actually
+      // looked like ten minutes ago, and the alternative silently re-widens the
+      // capabilities we already narrowed.
+      return known ?? { boardId: null, hasSprints: true, boardCount: 0 };
     }
   }
 
@@ -212,11 +216,15 @@ export class JiraClient {
     return putShape(this.baseUrl, this.project, pickBoard(payload));
   }
 
-  /** What `loadShape` last learned, without making a request. `null` means nothing is
-   *  known yet — the caller must treat that as "behave exactly as before detection
-   *  existed", never as "no sprints". */
+  /** What `loadShape` last learned, without making a request — **including an answer
+   *  past its re-read interval**, which is why this reads `lastShape` rather than
+   *  gating on freshness. `null` means nothing has ever been learned, and the caller
+   *  must treat that as "behave exactly as before detection existed", never as "no
+   *  sprints". Re-reading is `loadShape`'s job; this method never lets a shape we once
+   *  knew turn back into "unknown", because `JiraProvider.caps` maps unknown to the
+   *  every-lens answer and would re-grow the tabs it had already dropped. */
   shapeSnapshot(): ProjectShape | null {
-    return peekShape(this.baseUrl, this.project);
+    return lastShape(this.baseUrl, this.project);
   }
 
   async fetchTasks(filter: Filter, size: Size = "any", maxResults = 50): Promise<Task[]> {

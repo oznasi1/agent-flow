@@ -808,6 +808,58 @@ describe("loadShape", () => {
   });
 });
 
+describe("shapeSnapshot — stale but never forgotten", () => {
+  it("keeps answering a sprintless project past the re-read interval", async () => {
+    // The regression this guards: while the snapshot expired to null, JiraProvider.caps
+    // read that as "nothing known" and returned its optimistic every-lens answer, so a
+    // Kanban project's three dead sprint tabs reappeared on the next state post.
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      installFetch([jsonResponse({ values: [{ id: 5, type: "kanban" }] })]);
+      const c = client();
+      await c.loadShape();
+      vi.setSystemTime(60 * 60_000); // an hour later, well past SHAPE_TTL_MS
+      expect(c.shapeSnapshot()).toEqual({ boardId: 5, hasSprints: false, boardCount: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("re-reads once stale, and adopts a project that has gained a scrum board", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      const fetchMock = installFetch([
+        jsonResponse({ values: [{ id: 5, type: "kanban" }] }),
+        jsonResponse({ values: [{ id: 5, type: "kanban" }, { id: 9, type: "scrum" }] }),
+      ]);
+      const c = client();
+      expect((await c.loadShape()).hasSprints).toBe(false);
+      vi.setSystemTime(60 * 60_000);
+      expect((await c.loadShape()).hasSprints).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the stale answer when the re-read fails, rather than re-widening to optimistic", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(0);
+      installFetch([jsonResponse({ values: [{ id: 5, type: "kanban" }] })]);
+      const c = client();
+      await c.loadShape();
+      vi.setSystemTime(60 * 60_000);
+      installFetch([textResponse("upstream exploded", 500)]);
+      expect(await c.loadShape()).toEqual({ boardId: 5, hasSprints: false, boardCount: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("shapeSnapshot", () => {
   it("is null before any probe and the shape after one, with no request of its own", async () => {
     const fetchMock = installFetch([jsonResponse({ values: [{ id: 2, type: "scrum" }] })]);
