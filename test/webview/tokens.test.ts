@@ -67,10 +67,9 @@ describe("tokens.ts", () => {
     const rule = ruleBlocks(BASE_CSS).find((r) => r.selector === ".lmark .ldot");
     expect(rule).toBeDefined();
     const opacity = Number(/opacity:\s*([\d.]+)/.exec(rule!.body)?.[1]);
+    const frames = /@keyframes mark-comet[^\n]*/.exec(BASE_CSS)![0];
     const dimmest = Math.min(
-      ...[...BASE_CSS.matchAll(/@keyframes mark-comet[^\n]*/g)]
-        .flatMap((m) => [...m[0].matchAll(/opacity:\s*([\d.]+)/g)])
-        .map((m) => Number(m[1])),
+      ...[...frames.matchAll(/opacity:\s*([\d.]+)/g)].map((m) => Number(m[1])),
     );
     expect(opacity).toBeGreaterThan(dimmest);
     expect(opacity).toBeGreaterThanOrEqual(0.8);

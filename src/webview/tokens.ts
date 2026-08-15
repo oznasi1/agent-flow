@@ -1,3 +1,5 @@
+import { CYCLE_MS } from "./markGeometry";
+
 // The design tokens every webview surface shares. Values moved here verbatim from
 // deckStyles.ts, which is the surface they were designed on — the sidebar and the
 // Marketplace previously hardcoded their own near-misses of the same hues.
@@ -70,10 +72,12 @@ export const TOKENS_CSS = `
      needs no opt-out. */
 `;
 
-// box-sizing and the reduced-motion query were common to all three surfaces;
-// the button reset and :focus-visible outline were deckStyles.ts's alone,
-// unified here on purpose — the sidebar and Marketplace had no keyboard focus
-// indicator before this.
+// The shared reset, plus the primitives every surface draws rather than each
+// sheet restating them. box-sizing and the reduced-motion query were common to
+// all three surfaces; the button reset and :focus-visible outline were
+// deckStyles.ts's alone, unified here on purpose — the sidebar and Marketplace
+// had no keyboard focus indicator before this. The loading mark joined for the
+// same reason: all three surfaces wait on something.
 export const BASE_CSS = `
   * { box-sizing: border-box; }
   button { font: inherit; color: inherit; }
@@ -96,7 +100,7 @@ export const BASE_CSS = `
      the line height; this keeps the two centred on each other. */
   .lrow { display: flex; align-items: center; gap: 7px; }
   .lmark .tex { fill: currentColor; opacity: .85; }
-  .lmark .ldot { fill: var(--brand); opacity: .9; animation: mark-comet 1400ms linear infinite; }
+  .lmark .ldot { fill: var(--brand); opacity: .9; animation: mark-comet ${CYCLE_MS}ms linear infinite; }
   @keyframes mark-comet { 0% { opacity: 1; } 8% { opacity: .58; } 16% { opacity: .3; } 30%, 100% { opacity: .12; } }
 `;
 

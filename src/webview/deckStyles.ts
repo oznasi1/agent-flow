@@ -160,9 +160,9 @@ export const DECK_CSS = `
   .sdot.tone-parked, .sdot.tone-merged { background: transparent; border: 1.5px solid var(--dim); }
   .sdot.pulse { animation: pulse 1.7s ease-out infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--c-done); } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+  /* The refresh button's glyph at rest. It no longer turns: the mark takes over
+     while a refresh is in flight, so nothing sets an "on" modifier any more. */
   .spin { display: inline-block; font-size: 12px; }
-  .spin.on { animation: spin .9s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   /* Clamped so long summaries can't stretch one card out of the column's rhythm; the full
      text stays available on hover. */

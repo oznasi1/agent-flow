@@ -79,6 +79,7 @@ describe("mount + auth gate", () => {
     host({ type: "loading", loading: true });
     expect(container.querySelector(".loading svg.lmark")).toBeInTheDocument();
     host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "ASM-1", summary: "Fix the bug" })] });
+    expect(container.querySelector(".loading svg.lmark")).toBeInTheDocument();
     host({ type: "loading", loading: false });
     expect(container.querySelector("svg.lmark")).not.toBeInTheDocument();
   });
