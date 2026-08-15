@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.2] — 2026-08-15
+
+### Changed
+
+- **Marketplace discoverability.** The extension now lists itself under the **AI**
+  category alongside **SCM Providers**, and its search keywords cover the four things
+  people actually search for when they want this: Jira and sprint work, coding agents
+  (Claude Code, Copilot), git worktrees and multi-repo workspaces, and PR review. On
+  Open VSX keywords are the highest-weighted field an extension controls after its
+  name, so the previous seven left most searches unreachable. No behaviour changes.
+
 ## [0.21.1] — 2026-08-15
 
 ### Fixed
