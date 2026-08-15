@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.3] — 2026-08-15
+
+### Fixed
+
+- **A repo the ticket merely mentions is no longer treated as scope.** The task brief
+  embeds the Jira description verbatim above its **Repos in scope** list, and
+  descriptions routinely name repos nobody checked out for the task. Nothing said
+  which list wins, so an agent could go hunting for — or clone — a repo that was only
+  ever a suggestion. The brief now states outright that the listed repos are the only
+  ones checked out, and asks the agent to say so if the task genuinely cannot be done
+  within them. Repo selection itself was already correct; only the wording changed,
+  in the one function every seeding path shares.
+
 ## [0.21.2] — 2026-08-15
 
 ### Changed
