@@ -20,6 +20,7 @@ npm install
 | `npm test` | Run the Vitest unit/webview suite. |
 | `npm run test:watch` | Vitest in watch mode. |
 | `npm run test:cov` | Run tests with V8 coverage (thresholds enforced). |
+| `npm run test:ct` | Run the Playwright component tests (real Chromium; covers measured-layout behavior jsdom cannot). |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run package` | Build a `.vsix` with `vsce`. |
 

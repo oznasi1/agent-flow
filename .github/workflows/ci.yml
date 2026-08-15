@@ -17,4 +17,17 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:ct
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-ct-report
+          path: playwright-report/
+          retention-days: 7
       - run: npm run build
