@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Waiting looks like Agent Flow.** Every loading indicator is now the product's
+  own mark with one dot lit and chasing round its ring — the Deck's full-screen
+  wait and its refresh button, the review strip, the sidebar's task list and
+  ticket detail, the Marketplace scan, and the file preview. The `⟳` glyphs and
+  the bare **Loading…** lines they replace never said which product was thinking.
+  The mark keeps the lockup's exact geometry, drops its inner texture dots at
+  small sizes where they smear, and rests fully lit, so readers who ask for
+  reduced motion get a still mark rather than a blank space. The review strip's
+  skeleton rows are unchanged — they show the shape of what is coming, which a
+  mark cannot.
+
 ## [0.21.3] — 2026-08-15
 
 ### Fixed

@@ -99,6 +99,8 @@ export const BASE_CSS = `
      is display:block, so a bare svg beside text would sit on the baseline and jitter
      the line height; this keeps the two centred on each other. */
   .lrow { display: flex; align-items: center; gap: 7px; }
+  /* Identical to ".gauge .tex" in styles.ts on purpose — same dots, same coordinates,
+     so they must look the same. Change one and change the other. */
   .lmark .tex { fill: currentColor; opacity: .85; }
   .lmark .ldot { fill: var(--brand); opacity: .9; animation: mark-comet ${CYCLE_MS}ms linear infinite; }
   @keyframes mark-comet { 0% { opacity: 1; } 8% { opacity: .58; } 16% { opacity: .3; } 30%, 100% { opacity: .12; } }

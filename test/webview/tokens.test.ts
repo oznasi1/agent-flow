@@ -4,6 +4,7 @@ import { CSS } from "../../src/webview/styles";
 import { DECK_CSS } from "../../src/webview/deckStyles";
 import { MARKETPLACE_CSS } from "../../src/webview/marketplaceStyles";
 import { ORCH_CSS } from "../../src/webview/orchestratorStyles";
+import { CYCLE_MS } from "../../src/webview/markGeometry";
 
 /** The tokens tokens.ts owns. A surface may USE these; none may DECLARE them. */
 const OWNED = [
@@ -66,6 +67,11 @@ describe("tokens.ts", () => {
   it("rests the loading mark lit, so reduced motion leaves a visible mark", () => {
     const rule = ruleBlocks(BASE_CSS).find((r) => r.selector === ".lmark .ldot");
     expect(rule).toBeDefined();
+    // The dots move because of this one declaration — the per-dot delays only decide
+    // WHICH dot is lit when. Drop it and every loader in the product silently becomes
+    // a static logo, with nothing else in the suite noticing. The duration is matched
+    // against markGeometry's constant because that is the pairing the stagger assumes.
+    expect(rule!.body).toMatch(new RegExp(`animation:\\s*mark-comet\\s+${CYCLE_MS}ms`));
     const opacity = Number(/opacity:\s*([\d.]+)/.exec(rule!.body)?.[1]);
     const frames = /@keyframes mark-comet[^\n]*/.exec(BASE_CSS)![0];
     const dimmest = Math.min(
@@ -217,6 +223,16 @@ describe("brand accent", () => {
   // does, and compare it exactly, so `--brand-ink` cannot stand in for `--brand`.
   const spendsBrandFill = (body: string): boolean =>
     [...body.matchAll(/var\(\s*(--[a-z0-9-]+)/g)].some((m) => m[1] === "--brand");
+
+  // SURFACES covers the five surface sheets, and BASE_CSS is none of them — but it
+  // is injected into all three webviews, so a --brand spend added here reaches every
+  // surface while the per-sheet allowlists above stay green. The loading mark is the
+  // one rule that may spend it; this keeps BASE_CSS from becoming the blind spot the
+  // allowlists exist to prevent.
+  it("spends --brand in BASE_CSS on exactly the loading mark", () => {
+    const spenders = ruleBlocks(BASE_CSS).filter((r) => spendsBrandFill(r.body)).map((r) => r.selector);
+    expect(spenders).toEqual([".lmark .ldot"]);
+  });
 
   it.each(SURFACES)("%s spends --brand on exactly its agreed selectors", (name, sheet) => {
     const actual = new Set(

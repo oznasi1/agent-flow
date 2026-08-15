@@ -16,6 +16,9 @@ export const CSS = `
   .gauge { flex: none; display: block; }
   .gauge .lit { fill: var(--brand); }
   .gauge .unlit { fill: currentColor; opacity: .85; }
+  /* The loading mark draws the same texture dots from the same coordinates, and its
+     copy of this rule is ".lmark .tex" in tokens.ts. They are deliberately identical:
+     change one and change the other, or the lockup and the loader stop matching. */
   .gauge .tex { fill: currentColor; opacity: .85; }
   /* The pool's one filled control is Take. Explore is the way out when no ticket
      fits — useful, not primary — so it shares the secondary action language below

@@ -32,7 +32,9 @@ const TEXTURE_FLOOR = 14;
  * rest state: motion off leaves a legible static mark, not a blank ring.
  */
 export function LoadingMark({ size = 15, label }: { size?: number; label?: string }): JSX.Element {
-  const named = label !== undefined;
+  // Truthiness, not `!== undefined`: an empty label would otherwise announce the mark
+  // as an image with no accessible name, which is worse than not announcing it at all.
+  const named = !!label;
 
   return (
     <svg
