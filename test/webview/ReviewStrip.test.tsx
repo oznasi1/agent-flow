@@ -380,6 +380,15 @@ describe("ReviewStrip", () => {
       expect(screen.getByText(/checking for PRs waiting on your review/i)).toBeInTheDocument();
     });
 
+    // The skeleton rows stay as they are — they carry the shape of what is coming,
+    // which the mark cannot. Only the ⟳ in the header gives way to it.
+    it("marks the search with the animated logo, keeping the skeleton rows", () => {
+      const { container } = render(<ReviewStrip {...loading()} />);
+      expect(container.querySelector("svg.lmark")).toBeInTheDocument();
+      expect(container.querySelector(".spin")).not.toBeInTheDocument();
+      expect(container.querySelector(".sk")).toBeInTheDocument();
+    });
+
     it("never claims a count it does not have", () => {
       render(<ReviewStrip {...loading()} />);
       expect(screen.queryByText(/0 PRs waiting/i)).not.toBeInTheDocument();

@@ -59,6 +59,23 @@ describe("tokens.ts", () => {
     expect(OWNED.filter((t) => !declared.has(t))).toEqual([]);
   });
 
+  // BASE_CSS turns every animation off under prefers-reduced-motion, which freezes
+  // the loader on whatever its unanimated rule says. The comet's dim phase is nearly
+  // invisible, so the rule has to rest LIT and let the keyframes dim from there —
+  // otherwise reduced-motion users get a blank hole where the mark should be.
+  it("rests the loading mark lit, so reduced motion leaves a visible mark", () => {
+    const rule = ruleBlocks(BASE_CSS).find((r) => r.selector === ".lmark .ldot");
+    expect(rule).toBeDefined();
+    const opacity = Number(/opacity:\s*([\d.]+)/.exec(rule!.body)?.[1]);
+    const dimmest = Math.min(
+      ...[...BASE_CSS.matchAll(/@keyframes mark-comet[^\n]*/g)]
+        .flatMap((m) => [...m[0].matchAll(/opacity:\s*([\d.]+)/g)])
+        .map((m) => Number(m[1])),
+    );
+    expect(opacity).toBeGreaterThan(dimmest);
+    expect(opacity).toBeGreaterThanOrEqual(0.8);
+  });
+
   it("carries the shared reset, not the tokens", () => {
     expect(BASE_CSS).toContain("box-sizing");
     expect(BASE_CSS).toContain("prefers-reduced-motion");

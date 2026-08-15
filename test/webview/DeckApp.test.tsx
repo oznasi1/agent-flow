@@ -82,6 +82,12 @@ describe("DeckApp", () => {
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
   });
 
+  it("runs the animated logo in the first-load state instead of the old glyph", () => {
+    const { container } = render(<DeckApp />);
+    expect(container.querySelector(".empty svg.lmark")).toBeInTheDocument();
+    expect(container.querySelector(".empty .spin")).not.toBeInTheDocument();
+  });
+
   it("replaces the loading state once deck:runs lands, even with cards present", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
@@ -279,6 +285,20 @@ describe("DeckApp", () => {
     expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
     host(runsMsg([mkStatus()]));
     expect(screen.getByText("ASM-1")).toBeInTheDocument();
+  });
+
+  // The refresh button keeps its ⟳ at rest: a static logo on a button reads as
+  // branding, not as something you can press. The mark takes over only in flight.
+  it("swaps the refresh glyph for the animated logo while syncing, and back after", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(container.querySelector(".hd svg.lmark")).not.toBeInTheDocument();
+    expect(container.querySelector(".hd .spin")).toBeInTheDocument();
+    host({ type: "deck:loading", loading: true });
+    expect(container.querySelector(".hd svg.lmark")).toBeInTheDocument();
+    expect(container.querySelector(".hd .spin")).not.toBeInTheDocument();
+    host({ type: "deck:loading", loading: false });
+    expect(container.querySelector(".hd svg.lmark")).not.toBeInTheDocument();
   });
 
   it("shows a syncing indicator while the host is refreshing", () => {

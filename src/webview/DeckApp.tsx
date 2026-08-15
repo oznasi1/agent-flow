@@ -9,6 +9,7 @@ import { DeckCard, projectCards } from "./deckCards";
 import { prSignals } from "../engine/bucket";
 import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
+import { LoadingMark } from "./LoadingMark";
 import { isPrReviewStatus, timeAgo } from "./helpers";
 
 /** The Orchestrator's mark: one node on the left feeding two on the right
@@ -720,7 +721,10 @@ export function DeckApp(): JSX.Element {
           </button>
         )}
         <button type="button" className="ctl" title={`Re-read git, ${sourceLabel} and PR state now`} onClick={() => send({ type: "deck:refresh" })}>
-          <span className={`spin ${busy ? "on" : ""}`}>⟳</span>
+          {/* At rest this stays the ⟳: a static logo sitting on a button reads as
+              branding rather than as something you can press. In flight the mark
+              takes over, and its motion is the same motion every other wait uses. */}
+          {busy ? <LoadingMark size={12} /> : <span className="spin">⟳</span>}
           <span className="synced">{busy ? "syncing…" : syncedAt ? `synced ${timeAgo(syncedAt)}` : "refresh"}</span>
         </button>
       </div>
@@ -765,7 +769,7 @@ export function DeckApp(): JSX.Element {
 
       {!hasLoaded ? (
         <div className="empty">
-          <span className="spin on" aria-hidden="true">⟳</span>
+          <LoadingMark size={28} />
           <div className="big">Loading…</div>
         </div>
       ) : live.length === 0 && closed.length === 0 ? (

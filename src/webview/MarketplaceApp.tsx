@@ -4,6 +4,7 @@ import { fuzzyScore, phraseScore } from "../engine/fuzzy";
 import { categoryLabel, orderSections, sectionKey, Section } from "../engine/sections";
 import { AssetType, AssetView, ClaudeAssetsView, OutboundMessage, PluginRowView } from "../types";
 import { FilePreview } from "./FilePreview";
+import { LoadingMark } from "./LoadingMark";
 import { PickerItem, PluginPicker } from "./PluginPicker";
 
 let toastSeq = 0;
@@ -410,7 +411,7 @@ export function MarketplaceApp(): JSX.Element {
         )}
       </div>
 
-      {loading && <div className="loading">Scanning ~/.claude…</div>}
+      {loading && <div className="loading lrow"><LoadingMark size={12} />Scanning ~/.claude…</div>}
 
       {view.notSetUp ? (
         <div className="empty">

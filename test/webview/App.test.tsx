@@ -71,6 +71,18 @@ describe("mount + auth gate", () => {
     expect(document.querySelector(".header")).toBeNull();
   });
 
+  // The host owns this flag start to finish — tasksView posts `loading: false`
+  // alongside the tasks, and a `tasks` message on its own never clears it.
+  it("runs the animated logo beside the loading line, and stops when the host says the fetch is over", () => {
+    const { container } = render(<App />);
+    authed();
+    host({ type: "loading", loading: true });
+    expect(container.querySelector(".loading svg.lmark")).toBeInTheDocument();
+    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "ASM-1", summary: "Fix the bug" })] });
+    host({ type: "loading", loading: false });
+    expect(container.querySelector("svg.lmark")).not.toBeInTheDocument();
+  });
+
   it("keeps the gauge and Explore in the tab row on both tabs", () => {
     render(<App />);
     host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane",
@@ -897,6 +909,14 @@ describe("task card actions", () => {
     expect(screen.getByText(/1h/)).toBeInTheDocument();
     // ~ marks it as inferred, matching the Deck's ~inferred convention.
     expect(screen.getByText("~centaur")).toBeInTheDocument();
+  });
+
+  it("runs the animated logo while the ticket detail is in flight, and stops once it lands", () => {
+    withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
+    fireEvent.click(screen.getByText("Fix bug"));
+    expect(document.querySelector(".detail svg.lmark")).toBeInTheDocument();
+    host({ type: "detail", key: "ASM-1", descriptionText: "The full description", inferred: [], repos: [], sourceComponents: [], mappable: {} });
+    expect(document.querySelector(".detail svg.lmark")).not.toBeInTheDocument();
   });
 
   it("shows ticket detail once it arrives", () => {

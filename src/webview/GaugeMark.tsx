@@ -1,16 +1,6 @@
 import * as React from "react";
-
-// The eight large dots of the existing mark (media/agent-flow.svg), in ring order
-// starting at twelve o'clock. They carry the count.
-const OUTER: [number, number][] = [
-  [12, 3.12], [18.28, 5.72], [20.88, 12], [18.28, 18.28],
-  [12, 20.88], [5.72, 18.28], [3.12, 12], [5.72, 5.72],
-];
-// The eight small dots between them. Texture, not data — fixed opacity always.
-const INNER: [number, number][] = [
-  [15.4, 3.8], [20.2, 8.6], [20.2, 15.4], [15.4, 20.2],
-  [8.6, 20.2], [3.8, 15.4], [3.8, 8.6], [8.6, 3.8],
-];
+import { OUTER, INNER, OUTER_R, INNER_R, VIEW_BOX } from "./markGeometry";
+// The outer dots carry the count; the inner ones are texture, at fixed opacity always.
 
 /** Dots lit when the host isn't reporting a count — the brand's resting state. */
 const STATIC_LIT = 6;
@@ -32,16 +22,16 @@ export function GaugeMark({ live, size = 15 }: { live?: number; size?: number })
       className="gauge"
       width={size}
       height={size}
-      viewBox="0 0 24 24"
+      viewBox={VIEW_BOX}
       role={known ? "img" : undefined}
       aria-label={label}
       aria-hidden={known ? undefined : true}
     >
       {OUTER.map(([cx, cy], i) => (
-        <circle key={`o${i}`} cx={cx} cy={cy} r={2.02} className={i < count ? "lit" : "unlit"} />
+        <circle key={`o${i}`} cx={cx} cy={cy} r={OUTER_R} className={i < count ? "lit" : "unlit"} />
       ))}
       {INNER.map(([cx, cy], i) => (
-        <circle key={`i${i}`} cx={cx} cy={cy} r={1.21} className="tex" />
+        <circle key={`i${i}`} cx={cx} cy={cy} r={INNER_R} className="tex" />
       ))}
     </svg>
   );

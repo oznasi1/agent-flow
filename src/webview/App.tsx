@@ -8,6 +8,7 @@ import {
 import { Filter, FilterVisibility, Task, OutboundMessage, Size, NotepadItemView, NotepadSectionView } from "../types";
 import type { SerializedCaps } from "../tasks/provider";
 import { GaugeMark } from "./GaugeMark";
+import { LoadingMark } from "./LoadingMark";
 import { Notepad } from "./Notepad";
 import { PlayIcon, TypeIcon } from "./icons";
 // The combo scaffolding both this sidebar's repo controls and the Deck's
@@ -631,7 +632,7 @@ export function App(): JSX.Element {
         </div>
       )}
 
-      {loading && <div className="loading">Loading…</div>}
+      {loading && <div className="loading lrow"><LoadingMark size={12} />Loading…</div>}
       {!loading && authed !== null && visibleTasks.length === 0 && (
         <div className="empty">
           {q
@@ -940,7 +941,7 @@ function CardDetail(props: {
   onPush: (repo: string) => void;
 }): JSX.Element {
   const { taskKey, project, sourceLabel, componentsSupported, detail, onSelect, onPush } = props;
-  if (!detail || detail.loading) return <div className="detail"><div className="detail-loading">Loading ticket…</div></div>;
+  if (!detail || detail.loading) return <div className="detail"><div className="detail-loading lrow"><LoadingMark size={12} />Loading ticket…</div></div>;
 
   const selected = detail.selected ?? [];
   const sourceComponents = detail.sourceComponents ?? [];

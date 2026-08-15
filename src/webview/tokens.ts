@@ -81,6 +81,23 @@ export const BASE_CSS = `
   @media (prefers-reduced-motion: reduce) {
     * { transition: none !important; animation: none !important; }
   }
+
+  /* The loading mark: the product's own logo, running. Shared by all three surfaces
+     because all three wait on something. Geometry lives in markGeometry.ts, and each
+     dot's animation-delay is set inline by LoadingMark.tsx — that stagger, not any
+     transform, is what carries the lit dot round the ring.
+
+     The dots rest LIT and the keyframes dim them, never the other way round: the rule
+     above kills the animation outright under reduced motion, and a rule that rested
+     dim would freeze into an all-but-invisible mark. */
+  .lmark { flex: none; display: block; }
+  /* Pairs the mark with the line of text that says what is being waited on. The mark
+     is display:block, so a bare svg beside text would sit on the baseline and jitter
+     the line height; this keeps the two centred on each other. */
+  .lrow { display: flex; align-items: center; gap: 7px; }
+  .lmark .tex { fill: currentColor; opacity: .85; }
+  .lmark .ldot { fill: var(--brand); opacity: .9; animation: mark-comet 1400ms linear infinite; }
+  @keyframes mark-comet { 0% { opacity: 1; } 8% { opacity: .58; } 16% { opacity: .3; } 30%, 100% { opacity: .12; } }
 `;
 
 // One control language, shared by the sidebar and the Marketplace. Derived from
