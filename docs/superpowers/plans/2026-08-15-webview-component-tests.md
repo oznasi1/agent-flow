@@ -60,7 +60,7 @@ Stands up the runner and proves the recording double works end to end. Nothing h
 - Consumes: nothing (first task).
 - Produces: `host(page, msg): Promise<void>`, `posted(page): Promise<InboundMessage[]>`, `mkTask(over?: Partial<Task>): Task`, `mkNote(over?: Partial<NotepadItemView>): NotepadItemView`, and the npm script `test:ct`.
 
-- [ ] **Step 1: Install pinned Playwright CT**
+- [x] **Step 1: Install pinned Playwright CT**
 
 ```bash
 npm install -D --save-exact @playwright/experimental-ct-react@1.49.1 @playwright/test@1.49.1
@@ -76,7 +76,7 @@ grep -c "codeartifact" package-lock.json          # expect 0
 
 If `codeartifact` appears, restore with `git checkout package-lock.json` and re-run the install with `--registry=https://registry.npmjs.org`.
 
-- [ ] **Step 2: Add the CT config**
+- [x] **Step 2: Add the CT config**
 
 Create `playwright-ct.config.ts`:
 
@@ -126,7 +126,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 3: Add the CT mount page and entry**
+- [x] **Step 3: Add the CT mount page and entry**
 
 Create `playwright/index.html`:
 
@@ -152,7 +152,7 @@ beforeMount(async () => {
 });
 ```
 
-- [ ] **Step 4: Add the recording double**
+- [x] **Step 4: Add the recording double**
 
 Create `test-ct/_doubles/vscodeApi.ts`. It must export the same shape as the real
 module (`vscodeApi` and `send`):
@@ -190,7 +190,7 @@ declare global {
 export {};
 ```
 
-- [ ] **Step 5: Add the bridge helpers and factories**
+- [x] **Step 5: Add the bridge helpers and factories**
 
 Create `test-ct/_helpers/host.ts`:
 
@@ -241,7 +241,7 @@ export const JIRA_CAPS: SerializedCaps = {
 };
 ```
 
-- [ ] **Step 6: Wire tsconfig, scripts and gitignore**
+- [x] **Step 6: Wire tsconfig, scripts and gitignore**
 
 In `tsconfig.json`, extend `include` so the new files are typechecked:
 
@@ -263,7 +263,7 @@ test-results/
 playwright/.cache/
 ```
 
-- [ ] **Step 7: Write the smoke spec**
+- [x] **Step 7: Write the smoke spec**
 
 Create `test-ct/smoke.spec.tsx`. `App` posts `{ type: "ready" }` on mount, so this
 proves mounting, the JSX runtime, and the recording double all work together.
@@ -280,7 +280,7 @@ test("the harness mounts App and records its outbound messages", async ({ mount,
 });
 ```
 
-- [ ] **Step 8: Run the smoke spec**
+- [x] **Step 8: Run the smoke spec**
 
 Run: `npm run test:ct`
 Expected: PASS, 1 test.
@@ -289,7 +289,7 @@ If it fails with `acquireVsCodeApi is not defined`, the stub plugin did not matc
 print the resolved id inside `resolveId` and widen the condition. If it fails with
 `React is not defined`, the `esbuild` JSX block in `ctViteConfig` is missing.
 
-- [ ] **Step 9: Verify the repo gates still pass**
+- [x] **Step 9: Verify the repo gates still pass**
 
 Run each and confirm:
 
@@ -299,7 +299,7 @@ npm test            # 3769 passed
 npm run build       # succeeds
 ```
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add playwright-ct.config.ts playwright test-ct package.json package-lock.json tsconfig.json .gitignore
@@ -327,7 +327,7 @@ executed by any test. Real Chromium is the only way to reach it.
 Verified ground truth for the assertion (from `test/webview/helpers.test.ts:121-128`):
 `moveKey([A,B,C], from "A", to "C", "before")` → `["B","A","C"]`; with `"after"` → `["B","C","A"]`.
 
-- [ ] **Step 1: Write the spec**
+- [x] **Step 1: Write the spec**
 
 Create `test-ct/App.reorder.spec.tsx`:
 
@@ -402,7 +402,7 @@ test("dropping on the bottom half reorders AFTER the target", async ({ mount, pa
 });
 ```
 
-- [ ] **Step 2: Run the spec**
+- [x] **Step 2: Run the spec**
 
 Run: `npm run test:ct -- test-ct/App.reorder.spec.tsx`
 Expected: PASS, 2 tests.
@@ -424,7 +424,7 @@ await to.dispatchEvent("dragover", { clientY, dataTransfer: await page.evaluateH
 await to.dispatchEvent("drop", { clientY, dataTransfer: await page.evaluateHandle(() => new DataTransfer()) });
 ```
 
-- [ ] **Step 3: Mutation-check the test — prove it is not vacuous**
+- [x] **Step 3: Mutation-check the test — prove it is not vacuous**
 
 This tests behavior that already exists, so there is no natural red phase. That
 makes a mutation check mandatory, not optional: a test that cannot fail is worse
@@ -447,12 +447,12 @@ git checkout src/webview/App.tsx
 git diff --exit-code src/webview/App.tsx   # must print nothing
 ```
 
-- [ ] **Step 4: Re-run to confirm green after revert**
+- [x] **Step 4: Re-run to confirm green after revert**
 
 Run: `npm run test:ct -- test-ct/App.reorder.spec.tsx`
 Expected: PASS, 2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add test-ct/App.reorder.spec.tsx
@@ -477,7 +477,7 @@ same jsdom blind spot, and emits `{ type: "notepad:reorder", order }`.
 `Notepad` takes props directly (`{ notes, ordered, sections }`) rather than
 listening for a host message, so no `host()` call is needed.
 
-- [ ] **Step 1: Write the spec**
+- [x] **Step 1: Write the spec**
 
 Create `test-ct/Notepad.reorder.spec.tsx`:
 
@@ -530,7 +530,7 @@ test("dropping a note on the bottom half files it AFTER the target", async ({ mo
 });
 ```
 
-- [ ] **Step 2: Run the spec**
+- [x] **Step 2: Run the spec**
 
 Run: `npm run test:ct -- test-ct/Notepad.reorder.spec.tsx`
 Expected: PASS, 2 tests.
@@ -538,7 +538,7 @@ Expected: PASS, 2 tests.
 If the grip selector does not match, open `src/webview/Notepad.tsx` and use the
 actual class on the note's drag handle; do not change the component.
 
-- [ ] **Step 3: Mutation-check the test**
+- [x] **Step 3: Mutation-check the test**
 
 Temporarily invert `src/webview/Notepad.tsx:587`:
 
@@ -556,12 +556,12 @@ git checkout src/webview/Notepad.tsx
 git diff --exit-code src/webview/Notepad.tsx   # must print nothing
 ```
 
-- [ ] **Step 4: Re-run to confirm green after revert**
+- [x] **Step 4: Re-run to confirm green after revert**
 
 Run: `npm run test:ct -- test-ct/Notepad.reorder.spec.tsx`
 Expected: PASS, 2 tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add test-ct/Notepad.reorder.spec.tsx
@@ -582,7 +582,7 @@ lane (Layer B, not in this increment) gates merge and release.
 - Consumes: the `test:ct` script from Task 1.
 - Produces: a required PR check.
 
-- [ ] **Step 1: Add the CT step to CI**
+- [x] **Step 1: Add the CT step to CI**
 
 In `.github/workflows/ci.yml`, after the existing `npm test` step and before
 `npm run build`, add:
@@ -606,7 +606,7 @@ In `.github/workflows/ci.yml`, after the existing `npm test` step and before
 The `if: failure()` upload is what makes a red CT run debuggable — it carries the
 trace and the failure screenshot.
 
-- [ ] **Step 2: Document the command**
+- [x] **Step 2: Document the command**
 
 In `CONTRIBUTING.md`, add a row to the "Everyday commands" table:
 
@@ -614,7 +614,7 @@ In `CONTRIBUTING.md`, add a row to the "Everyday commands" table:
 | `npm run test:ct` | Run the Playwright component tests (real Chromium; covers measured-layout behavior jsdom cannot). |
 ```
 
-- [ ] **Step 3: Verify the full gate locally**
+- [x] **Step 3: Verify the full gate locally**
 
 Run all four and confirm each passes:
 
@@ -625,7 +625,7 @@ npm run test:ct
 npm run build
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add .github/workflows/ci.yml CONTRIBUTING.md
