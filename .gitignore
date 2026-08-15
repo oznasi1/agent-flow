@@ -10,3 +10,8 @@ preview/
 # Design mockups are generated from the local ~/.claude tree and embed real
 # plugin inventories — keep them out of this public repo.
 docs/mockups/
+
+# Playwright component-test artifacts.
+playwright-report/
+test-results/
+playwright/.cache/

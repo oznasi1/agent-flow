@@ -722,11 +722,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
+    "test:ct": "playwright test -c playwright-ct.config.ts",
     "typecheck": "tsc --noEmit",
     "vscode:prepublish": "npm run build -- --production",
     "package": "rm -f *.vsix && vsce package --no-dependencies"
   },
   "devDependencies": {
+    "@playwright/experimental-ct-react": "1.49.1",
+    "@playwright/test": "1.49.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
