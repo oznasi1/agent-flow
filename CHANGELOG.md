@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.4] — 2026-08-15
+
 ### Changed
 
 - **Waiting looks like Agent Flow.** Every loading indicator is now the product's
