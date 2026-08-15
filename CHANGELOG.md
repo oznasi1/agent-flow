@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.1] — 2026-08-15
+
+### Fixed
+
+- **A task no longer offers to add itself to the sprint it is already in.** In the
+  **My sprint** lens a card could carry both **Add to my sprint** and the
+  remove-from-sprint action at once, two contradictory answers to the same
+  question. The two read different facts — remove from the lens, add from the
+  task's own in-sprint flag — and that flag reads false for every task whenever
+  Jira's Sprint field can't be resolved, which the connector remembers for a while
+  once it happens. Where remove is offered the lens decides, since it is the one
+  lens whose query is "in an open sprint". Every other tab is unchanged, including
+  an unassigned card whose **Add to my sprint** also assigns it to you.
+
 ## [0.21.0] — 2026-08-14
 
 ### Added
