@@ -638,7 +638,7 @@ git commit -m "ci: run the webview component tests on every PR"
 
 Named explicitly so nobody assumes they were forgotten:
 
-1. **`OrchestratorDrawer` graph layout** — listed as a Layer A priority in the spec (four `getBoundingClientRect` sites: `:455`, `:622`, `:1385`). Deferred because its props surface (`OrchestratorDrawerProps`) is large enough to need its own investigation, and the harness should be proven on the two simpler drag surfaces first. This is the first follow-up.
+1. ~~**`OrchestratorDrawer` graph layout**~~ — **done** in `test-ct/OrchestratorDrawer.canvas.spec.tsx`. The gap turned out to be sharper than "untested": all three measured sites correct a coordinate by the canvas origin with a `?? 0` fallback, and jsdom's zero rect makes the correction and the fallback the same number. Deleting the subtraction outright leaves all 226 existing drawer tests green — measured, not assumed. The node-drag sites (`:455`, `:622`) share that origin and remain uncovered; they need a settled-box drag rather than a drop.
 2. **`DeckApp` drag surface**, and CT for `MarketplaceApp` / `PluginPicker` / `ReviewStrip`.
 3. **Layer B — real-host E2E** (`@vscode/test-electron` + Playwright `_electron`, fake Jira, temp repos) and **Layer C — the verify-feature report on the PR**. These are the larger half of the spec and need their own plan.
 
