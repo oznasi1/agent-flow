@@ -822,6 +822,26 @@ describe("task card actions", () => {
     expect(remove).toHaveAttribute("aria-label", expect.stringContaining("ASM-1"));
   });
 
+  it("never offers Add and Remove on the same card", () => {
+    render(<App />);
+    authed();
+    // Both cards report `inOpenSprint: false` while sitting in the My-sprint lens,
+    // whose query is `sprint in openSprints()` — the shape a site produces whenever
+    // the Sprint custom field's id cannot be resolved (it is cached as "this site
+    // has no Sprint field" for the field TTL, which zeroes the flag for every task).
+    // One card is mine, the other unassigned: the two ways the Add button turns on.
+    host({
+      type: "tasks",
+      filter: "mysprint",
+      tasks: [
+        mkTask({ key: "ASM-1", assignee: "Jane", inOpenSprint: false }),
+        mkTask({ key: "ASM-2", assignee: "Unassigned", inOpenSprint: false }),
+      ],
+    });
+    expect(screen.queryAllByRole("button", { name: /Add to my sprint/i })).toHaveLength(0);
+    expect(screen.getAllByRole("button", { name: /from your active sprint/i })).toHaveLength(2);
+  });
+
   it("does not show Remove on other tabs", () => {
     render(<App />);
     authed();

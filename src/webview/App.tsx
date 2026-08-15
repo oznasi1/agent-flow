@@ -770,7 +770,15 @@ function TaskCard(props: {
   // with no sprint concept at all still has to report `false`, which would
   // otherwise make this true for both an unassigned task and one already assigned
   // to the current user, and render a button with no working action behind it.
-  const showAddToSprint = caps.sprints && (unassigned || (isMe && !task.inOpenSprint));
+  // Gated on `onRemoveFromSprint` too, so a card never offers both directions at
+  // once. The two used to answer to independent facts — Remove to the lens, Add to
+  // `task.inOpenSprint` — and `inOpenSprint` reads false for every task whenever the
+  // Sprint custom field's id fails to resolve (the lookup caches "this site has no
+  // Sprint field" for the field TTL). That rendered "Add to my sprint" beside
+  // "Remove from my sprint" on cards that were plainly already in the sprint. Where
+  // Remove is offered the lens is the better authority: it is the My-sprint lens
+  // alone, and that query is `sprint in openSprints()`.
+  const showAddToSprint = caps.sprints && !onRemoveFromSprint && (unassigned || (isMe && !task.inOpenSprint));
   // Offer "Address PR" once the ticket reaches the configured PR-review status.
   const canAddressPr = isPrReviewStatus(task.status, prReviewStatus);
   const armed = React.useRef(false); // true only while a drag started from the grip
