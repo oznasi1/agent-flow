@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { attachmentFileName, openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
+import { attachmentFileName, briefMarkdown, openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
 import { commands, env, setConfig, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -2150,5 +2150,33 @@ describe("mentionInWorkspace", () => {
   it("does not treat a sibling with a shared prefix as containment", () => {
     const roots = [{ path: "/repos/api" }];
     expect(mentionInWorkspace(roots, "/repos/api-gateway", "src/x.ts")).toBeUndefined();
+  });
+});
+
+describe("briefMarkdown — repo scope", () => {
+  const ticket = { key: "ASM-12", summary: "Isolate renew queue", url: "https://j/ASM-12" };
+  const services = [
+    { name: "centaur", path: "/repos/centaur", isGit: true },
+    { name: "infra", path: "/repos/infra", isGit: true },
+  ];
+
+  it("tells the agent the listed repos are the only scope", () => {
+    // A ticket description naming a repo nobody checked out is the common case:
+    // without this the agent goes hunting for `billing-svc` instead of working here.
+    const plan = "## Ticket description\n\nMight also need changes in billing-svc.";
+    const out = briefMarkdown(ticket, plan, services, "centaur", []);
+    const scopeAt = out.indexOf("## Repos in scope");
+    const ruleAt = out.indexOf("These are the only repos checked out for this task.");
+    expect(scopeAt).toBeGreaterThan(-1);
+    expect(ruleAt).toBeGreaterThan(scopeAt);
+    expect(out).toContain("is a suggestion, not scope");
+    expect(out).toContain("do not go looking");
+  });
+
+  it("still names every in-scope repo and marks the current one", () => {
+    const out = briefMarkdown(ticket, "", services, "infra", []);
+    expect(out).toContain("- `centaur` — /repos/centaur");
+    expect(out).toContain("- `infra` — /repos/infra  ← you are here");
+    expect(out).toContain("**Repos in scope:** centaur, infra");
   });
 });

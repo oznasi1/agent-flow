@@ -210,6 +210,11 @@ ${filesSection}
 
 ## Repos in scope
 ${svcLines}
+
+These are the only repos checked out for this task. A repo named anywhere else in this
+brief — the ticket description included — is a suggestion, not scope: do not go looking
+for it or clone it. Work in the repos listed above, and say so if the task genuinely
+cannot be done within them.
 `;
 }
 
