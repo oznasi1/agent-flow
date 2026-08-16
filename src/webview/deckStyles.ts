@@ -521,4 +521,38 @@ export const DECK_CSS = `
     font-size: 11px; padding: 1px 7px; cursor: pointer; flex: none; opacity: 0; }
   .rc-row:hover .rc-act, .rc-act:focus { opacity: 1; }
   .rc-act:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+
+  /* The selected card's detail. Same geometry as the Orchestrator drawer — below
+     the header, anchored right, no scrim — because it is the same kind of object
+     and the two are mutually exclusive. 460px is the narrowest width at which a
+     .pr-block's label column and value column both fit without wrapping. */
+  .dd { position: fixed; top: 53px; right: 0; bottom: 0; width: 460px; z-index: 40;
+    display: flex; flex-direction: column; overflow: auto;
+    background: var(--vscode-editorWidget-background);
+    border-left: 1px solid var(--hair); box-shadow: -10px 0 26px rgba(0,0,0,.28); }
+  .dd-hd { display: flex; align-items: center; gap: 8px; padding: 9px 12px;
+    border-bottom: 1px solid var(--hair); }
+  .dd-hd .k { font-family: var(--vscode-editor-font-family); font-size: 12px; white-space: nowrap; }
+  .dd-hd .t { font-size: var(--t-body); color: var(--dim);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dd-x { margin-left: auto; background: none; border: none; cursor: pointer;
+    color: var(--dim); font-size: 13px; padding: 2px 5px; }
+  .dd-x:hover { color: var(--vscode-foreground); }
+  .dd-sec { padding: 10px 12px; }
+  .dd-sec + .dd-sec { border-top: 1px solid var(--hair); }
+  .dd-lbl { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--dim); opacity: .8; margin-bottom: 7px; }
+  .dd-count { padding: 9px 12px 0; margin: 0; }
+  .dd-none { font-size: var(--t-body); color: var(--dim); }
+  /* A list row, not a button slab: twelve bordered controls in a column would
+     read as twelve competing calls to action. */
+  .dd-act { display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left;
+    background: none; border: none; border-radius: var(--r-ctl); cursor: pointer;
+    padding: 5px 7px; color: var(--vscode-foreground); font-size: var(--t-body); }
+  .dd-act:hover { background: var(--vscode-toolbar-hoverBackground); }
+  .dd-act:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+  .dd-act.danger { color: var(--c-attn); }
+  .dd-act .h { margin-left: auto; font-family: var(--vscode-editor-font-family);
+    font-size: 11.5px; color: var(--dim);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `;
