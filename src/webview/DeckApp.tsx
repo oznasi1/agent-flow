@@ -257,9 +257,17 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel,
 
       {(() => {
         const withPr = Object.entries(r.prs).filter(([, e]) => e.facts !== null) as [string, { facts: PrFacts }][];
-        return withPr.map(([name, e]) => (
-          <PrBlock key={name} repo={name} f={e.facts} showRepo={withPr.length > 1} />
-        ));
+        if (withPr.length === 0) return null;
+        // Same click guard as WorkspaceChip/AgentsRow above: PrBlock renders a
+        // button per PR link and per failing check, and opening one of those
+        // must not also select the card.
+        return (
+          <div onClick={(e) => e.stopPropagation()}>
+            {withPr.map(([name, e]) => (
+              <PrBlock key={name} repo={name} f={e.facts} showRepo={withPr.length > 1} />
+            ))}
+          </div>
+        );
       })()}
 
       {/* An agent card IS one of those rows — nesting the whole list inside every

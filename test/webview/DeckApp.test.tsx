@@ -2117,4 +2117,11 @@ describe("card selection", () => {
     // `.dd` assertion above alone cannot tell "closed" from "never closed."
     expect(document.querySelector(".orch.closing")).not.toBeNull();
   });
+
+  it("does not select when a PR link is clicked", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts(), fetchedAt: 1 } } })]));
+    fireEvent.click(within(card()).getByRole("button", { name: /#4821/ }));
+    expect(document.querySelector(".dd")).toBeNull();
+  });
 });
