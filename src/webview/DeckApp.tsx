@@ -1,9 +1,9 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { AgentActivity, BranchCiStatus, CardAgent, DeckColumn, FlowCommand, FlowPromptMode, OutboundMessage, PendingResume, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
+import { AgentActivity, BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromptMode, OutboundMessage, PendingResume, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
-import { DeckCard, projectCards } from "./deckCards";
+import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
 import { prSignals } from "../engine/bucket";
@@ -57,6 +57,25 @@ const COLUMNS: { id: DeckColumn; label: string; varName: string }[] = [
   { id: "review", label: "In review", varName: "--c-review" },
   { id: "done", label: "Done", varName: "--c-done" },
 ];
+
+// Bands inside the two columns that hold visibly different news, most actionable
+// first. Sidebar width has no room for a fifth column, and neither split earns
+// one: they are the same stage of the same work, read differently.
+//
+// Lowercase, because a lane is a sub-header under a column and should not compete
+// with it. `up` marks the lane that is good news — the only lane with any colour.
+// A column with a lane list renders no unlaned cards: deriveLane answers for every
+// card `review` and `done` can hold, and deckCards.test.ts holds it to that.
+const LANES: Partial<Record<DeckColumn, { id: DeckLane; label: string; up?: boolean }[]>> = {
+  review: [
+    { id: "ready", label: "ready to merge", up: true },
+    { id: "waiting", label: "waiting on review" },
+  ],
+  done: [
+    { id: "merged", label: "merged", up: true },
+    { id: "unmerged", label: "done · not merged" },
+  ],
+};
 
 /** A copy of `r` with `key` removed. Used to clear a per-row flag or body
  * without leaving a stale `false`/`""` entry sitting in the map forever. */
@@ -641,7 +660,10 @@ export function DeckApp(): JSX.Element {
   const closed = runs.filter((r) => r.shelf === "closed");
   const cards: DeckCard[] = grouping === "agents"
     ? projectCards(live)
-    : live.map((r) => ({ id: `w:${r.run.key}`, status: r, agent: null, agents: r.agents, column: r.column }));
+    : live.map((r) => ({
+        id: `w:${r.run.key}`, status: r, agent: null, agents: r.agents,
+        column: r.column, lane: laneOf(r, r.column),
+      }));
   // The label mirrors the card's own key chip, so the strip and the board name
   // the same run the same way.
   const closedRows: ClosedRow[] = closed.map((r) => ({
@@ -663,6 +685,13 @@ export function DeckApp(): JSX.Element {
     setRuns((rs) => rs.filter((r) => r.run.key !== key));
     send({ type: "deck:forget", key });
   }, []);
+
+  // One card, wherever it lands — a lane renders exactly what an unlaned column
+  // does, so a lane can never quietly grow its own kind of card.
+  const card = (c: DeckCard): JSX.Element => (
+    <Card key={c.id} r={c.status} prReviewStatus={prReviewStatus}
+      onForget={forget} agent={c.agent} agents={c.agents} column={c.column} sourceLabel={sourceLabel} />
+  );
 
   return (
     <>
@@ -798,10 +827,20 @@ export function DeckApp(): JSX.Element {
                   <span className="rule" />
                 </div>
                 <div className="col-body">
-                  {list.map((c) => (
-                    <Card key={c.id} r={c.status} prReviewStatus={prReviewStatus}
-                      onForget={forget} agent={c.agent} agents={c.agents} column={c.column} sourceLabel={sourceLabel} />
-                  ))}
+                  {LANES[col.id]
+                    ? LANES[col.id]!.flatMap((lane) => {
+                        const inLane = list.filter((c) => c.lane === lane.id);
+                        if (inLane.length === 0) return [];
+                        return [
+                          <div className={`lane-hd${lane.up ? " up" : ""}`} key={`h:${lane.id}`}>
+                            <span className="nm">{lane.label}</span>
+                            <span className="ct">{inLane.length}</span>
+                            <span className="rule" />
+                          </div>,
+                          ...inLane.map(card),
+                        ];
+                      })
+                    : list.map(card)}
                 </div>
               </section>
             );

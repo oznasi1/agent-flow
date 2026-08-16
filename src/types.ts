@@ -90,6 +90,12 @@ export type AgentState = "working" | "needs-you" | "idle" | "unknown";
 /** The board column a run lands in. */
 export type DeckColumn = "progress" | "needs" | "review" | "done";
 
+/** A band inside a column, for the two columns that hold visibly different work:
+ * an approved, green, conflict-free PR is not the same news as one nobody has
+ * opened, and a merged run is not the same news as a ticket someone marked done.
+ * `null` on the columns that mean one thing. Derived, never posted by the host. */
+export type DeckLane = "ready" | "waiting" | "merged" | "unmerged";
+
 /** Where a run sits on the In-flight view: a board column, or the Recently
  * closed strip. Membership only — `DeckColumn` still says which column. */
 export type Shelf = "board" | "closed";

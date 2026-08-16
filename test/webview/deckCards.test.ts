@@ -79,3 +79,38 @@ describe("projectCards", () => {
     expect(projectCards([])).toEqual([]);
   });
 });
+
+describe("projectCards lanes", () => {
+  it("lands an idle agent on an approved, green PR in the ready-to-merge lane", () => {
+    const cards = projectCards([mkStatus({
+      agents: [mkAgent("s1", "idle")],
+      prs: prs(facts({ review: "approved" })),
+    })]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["review", "ready"]]);
+  });
+
+  it("keeps a PR nobody has approved in the waiting lane of the same column", () => {
+    const cards = projectCards([mkStatus({ agents: [mkAgent("s1", "idle")], prs: prs(facts()) })]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["review", "waiting"]]);
+  });
+
+  it("splits merged from otherwise-done in the Done column", () => {
+    const merged = projectCards([mkStatus({ agents: [mkAgent("s1", "idle")], prs: prs(facts({ state: "MERGED" })) })]);
+    const ticketDone = projectCards([mkStatus({ agents: [mkAgent("s2", "idle")], ticketCategory: "done" })]);
+    expect(merged.map((c) => [c.column, c.lane])).toEqual([["done", "merged"]]);
+    expect(ticketDone.map((c) => [c.column, c.lane])).toEqual([["done", "unmerged"]]);
+  });
+
+  it("leaves cards in the single-lane columns unlaned, ready PR or not", () => {
+    const cards = projectCards([mkStatus({
+      agents: [mkAgent("s1", "working"), mkAgent("s2", "needs-you")],
+      prs: prs(facts({ review: "approved" })),
+    })]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["progress", null], ["needs", null]]);
+  });
+
+  it("lanes a parked card from the host's column and the run's own PRs", () => {
+    const cards = projectCards([mkStatus({ agents: [], column: "review", prs: prs(facts({ review: "approved" })) })]);
+    expect(cards.map((c) => [c.id, c.lane])).toEqual([["p:ASM-1", "ready"]]);
+  });
+});

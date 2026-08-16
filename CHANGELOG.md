@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Ready to merge is its own lane.** A PR that is approved, green and
+  conflict-free is the most actionable thing on the board, and it used to sit in
+  **In review** looking exactly like a PR nobody had opened yet. That column now
+  splits into **ready to merge** above **waiting on review**, and **Done** splits
+  into **merged** above **done · not merged** — a run that actually landed no
+  longer reads the same as a ticket someone marked done. Lanes, not new columns:
+  the sidebar has no room for a fifth, and both splits are the same stage of the
+  same work read differently. Every fact behind them was already on the card, so
+  nothing new is fetched.
+
 ## [0.21.4] — 2026-08-15
 
 ### Changed

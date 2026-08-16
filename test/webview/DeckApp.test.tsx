@@ -574,9 +574,11 @@ describe("DeckApp PR block", () => {
 
 describe("DeckApp PR-facts chrome", () => {
   it("says merged only when a PR actually merged", () => {
-    render(<DeckApp />);
+    const { container } = render(<DeckApp />);
     host(runsMsg([mkStatus({ column: "done", prs: { svc: { facts: prFacts({ state: "MERGED" }), fetchedAt: 1 } } })]));
-    expect(screen.getByText("merged")).toBeTruthy();
+    // Scoped to the card: Done's merged lane header carries the same word, and
+    // this is about what the card's own status line says.
+    expect(within(container.querySelector(".card") as HTMLElement).getByText("merged")).toBeTruthy();
   });
 
   it("says done for a Jira-done run with no merged PR", () => {
@@ -1956,5 +1958,69 @@ describe("Recently closed strip", () => {
     render(<DeckApp />);
     host(runsMsg([]));
     expect(screen.getByText("No tasks in flight")).toBeInTheDocument();
+  });
+});
+
+describe("column lanes", () => {
+  /** The `.col` section whose header carries `label`. */
+  const column = (label: string): HTMLElement =>
+    [...document.querySelectorAll<HTMLElement>(".col")]
+      .find((c) => c.querySelector(".col-hd .nm")?.textContent === label)!;
+
+  const lanes = (label: string) =>
+    [...column(label).querySelectorAll(".lane-hd")].map((h) => [
+      h.querySelector(".nm")?.textContent,
+      h.querySelector(".ct")?.textContent,
+    ]);
+
+  /** Every lane header and card key in the column, in render order — the one
+   * assertion that catches a lane header sitting above the wrong cards. */
+  const flow = (label: string) =>
+    [...column(label).querySelectorAll(".lane-hd .nm, .card .key")].map((n) => n.textContent);
+
+  const inReview = (key: string, over: Partial<PrFacts>): RunStatus => mkStatus({
+    run: { ...mkStatus().run, key },
+    column: "review", agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null },
+    prs: { svc: { facts: prFacts(over), fetchedAt: 1 } },
+  });
+
+  it("puts a ready-to-merge run in its own lane above the ones still waiting", () => {
+    render(<DeckApp />);
+    host(runsMsg([inReview("ASM-2", { review: "none" }), inReview("ASM-1", { review: "approved" })]));
+    expect(lanes("In review")).toEqual([["ready to merge", "1"], ["waiting on review", "1"]]);
+    expect(flow("In review")).toEqual(["ready to merge", "ASM-1", "waiting on review", "ASM-2"]);
+  });
+
+  it("still names the lane when every card in the column is ready", () => {
+    render(<DeckApp />);
+    host(runsMsg([inReview("ASM-1", { review: "approved" })]));
+    expect(lanes("In review")).toEqual([["ready to merge", "1"]]);
+  });
+
+  it("keeps the column header counting the whole column", () => {
+    render(<DeckApp />);
+    host(runsMsg([inReview("ASM-2", { review: "none" }), inReview("ASM-1", { review: "approved" })]));
+    expect(column("In review").querySelector(".col-hd .ct")?.textContent).toBe("2");
+  });
+
+  it("separates a merged run from a ticket someone merely marked done", () => {
+    render(<DeckApp />);
+    const done = (key: string, over: Partial<RunStatus>) => mkStatus({
+      run: { ...mkStatus().run, key },
+      column: "done", ticketCategory: "done", agents: [],
+      agent: { state: "unknown", lastActivityMs: null, slug: null }, ...over,
+    });
+    host(runsMsg([
+      done("ASM-9", {}),
+      done("ASM-8", { prs: { svc: { facts: prFacts({ state: "MERGED" }), fetchedAt: 1 } } }),
+    ]));
+    expect(flow("Done")).toEqual(["merged", "ASM-8", "done · not merged", "ASM-9"]);
+  });
+
+  it("leaves the columns that mean one thing without sub-headers", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(lanes("In progress")).toEqual([]);
+    expect(lanes("Action required")).toEqual([]);
   });
 });

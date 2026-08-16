@@ -1,4 +1,4 @@
-import { AgentState, DeckColumn, PrEntryMap } from "../types";
+import { AgentState, DeckColumn, DeckLane, PrEntryMap } from "../types";
 
 /** Inputs to the column decision — every field observable, none required. */
 export interface BucketInput {
@@ -39,23 +39,58 @@ export function deriveBucket(i: BucketInput): DeckColumn {
   return "progress";
 }
 
+/** What a run's PRs say, reduced across every repo it touches. */
+export interface PrSignals {
+  open: boolean;
+  blocked: boolean;
+  merged: boolean;
+  ready: boolean;
+}
+
 /**
- * Reduce a run's per-repo PR entries to the three booleans the ladder needs, each
- * the worst state across the run. `blocked` only considers OPEN PRs — a closed
- * PR's stale red checks must not pin a card in Needs you forever. `merged` needs
- * *every* PR-bearing repo: a run whose backend landed and whose frontend has not
- * is not done. Pure.
+ * Reduce a run's per-repo PR entries to the booleans the ladder and the lanes
+ * need, each the worst state across the run. `blocked` only considers OPEN PRs —
+ * a closed PR's stale red checks must not pin a card in Needs you forever.
+ * `merged` needs *every* PR-bearing repo: a run whose backend landed and whose
+ * frontend has not is not done.
+ *
+ * `ready` is the mirror image of `blocked` and deliberately stricter: every open
+ * PR approved, mergeable clean, and nothing red or still running. Where `blocked`
+ * forgives an advisory failure — a flaky optional check is not worth pinning a
+ * card in Action required — `ready` does not, because it promises there is
+ * nothing left to look at before you press merge. It needs an open PR to be true
+ * at all: a merged run has nothing left to merge, and a run with no PR has
+ * nothing to be ready about. Pure.
  */
-export function prSignals(prs: PrEntryMap): { open: boolean; blocked: boolean; merged: boolean } {
+export function prSignals(prs: PrEntryMap): PrSignals {
   const all = Object.values(prs)
     .map((e) => e.facts)
     .filter((f): f is NonNullable<typeof f> => f !== null);
-  if (all.length === 0) return { open: false, blocked: false, merged: false };
-  const open = all.some((f) => f.state === "OPEN" && !f.isDraft);
+  if (all.length === 0) return { open: false, blocked: false, merged: false, ready: false };
+  const openPrs = all.filter((f) => f.state === "OPEN" && !f.isDraft);
   const blocked = all.some(
     (f) =>
       f.state === "OPEN" &&
       ((f.ci.failing.length > 0 && !f.ciAdvisory) || f.review === "changes_requested" || f.mergeable === "conflicting"),
   );
-  return { open, blocked, merged: all.every((f) => f.state === "MERGED") };
+  const ready =
+    openPrs.length > 0 &&
+    openPrs.every(
+      (f) => f.review === "approved" && f.mergeable === "clean" && f.ci.failing.length === 0 && f.ci.pending === 0,
+    );
+  return { open: openPrs.length > 0, blocked, merged: all.every((f) => f.state === "MERGED"), ready };
+}
+
+/**
+ * Which band inside `column` a run belongs to, or null on a column that means one
+ * thing. Reads the same signals the column itself was derived from, so a lane can
+ * never contradict the column above it.
+ *
+ * Done's second lane is `unmerged` rather than "closed without merge": a ticket
+ * someone marked done with no PR at all lands there too, and it was never closed.
+ */
+export function deriveLane(column: DeckColumn, s: PrSignals): DeckLane | null {
+  if (column === "review") return s.ready ? "ready" : "waiting";
+  if (column === "done") return s.merged ? "merged" : "unmerged";
+  return null;
 }

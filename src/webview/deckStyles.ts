@@ -106,6 +106,20 @@ export const DECK_CSS = `
     border: 1px solid var(--hair); border-radius: 20px; padding: 1px 7px; line-height: 1.3; }
   .col-hd .rule { flex: 1; height: 1px; background: var(--hair); }
   .col-body { display: flex; flex-direction: column; gap: 10px; padding: 1px 3px 3px; }
+  /* A band inside a column. Deliberately quieter than .col-hd — no dot, no sticky, lowercase
+     from the markup — so the column header still reads as the heading and this reads as a
+     divider under it. The first lane sits tight to the column header; later ones open a gap
+     so the break between bands is visible without a heavier rule. */
+  .lane-hd { display: flex; align-items: center; gap: 7px; flex: none;
+    padding: 2px 2px 0; color: var(--dim); font-size: var(--t-micro); }
+  .lane-hd:not(:first-child) { margin-top: 6px; }
+  .lane-hd .nm { letter-spacing: .01em; white-space: nowrap; }
+  .lane-hd .ct { font-variant-numeric: tabular-nums; }
+  .lane-hd .rule { flex: 1; height: 1px; background: var(--hair); }
+  /* The one lane that is good news — an approved, green, conflict-free PR, or a run that
+     actually landed. Nothing here is a failure, so nothing here is red. */
+  .lane-hd.up { color: var(--c-done); font-weight: 600; }
+  .lane-hd.up .rule { background: color-mix(in srgb, var(--c-done) 30%, var(--hair)); }
 
   /* \`flex: none\` is load-bearing: .card sets overflow:hidden to clip the accent rail, which
      zeroes its automatic minimum size — without it the flex column squeezes every card and

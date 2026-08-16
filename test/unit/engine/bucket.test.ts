@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { deriveBucket, prSignals } from "../../../src/engine/bucket";
+import { deriveBucket, deriveLane, prSignals } from "../../../src/engine/bucket";
 import { PrEntryMap, PrFacts } from "../../../src/types";
 
 const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
@@ -74,11 +74,11 @@ describe("deriveBucket with PR signals", () => {
 
 describe("prSignals", () => {
   it("is all false for no entries", () => {
-    expect(prSignals({})).toEqual({ open: false, blocked: false, merged: false });
+    expect(prSignals({})).toEqual({ open: false, blocked: false, merged: false, ready: false });
   });
 
   it("is all false when every entry resolved to no PR", () => {
-    expect(prSignals(entries(null, null))).toEqual({ open: false, blocked: false, merged: false });
+    expect(prSignals(entries(null, null))).toEqual({ open: false, blocked: false, merged: false, ready: false });
   });
 
   it("reports open for an open non-draft PR", () => {
@@ -124,5 +124,86 @@ describe("prSignals", () => {
 
   it("ignores PR-less repos when deciding merged", () => {
     expect(prSignals(entries(prFacts({ state: "MERGED" }), null)).merged).toBe(true);
+  });
+});
+
+describe("prSignals.ready", () => {
+  it("is false with no PR at all", () => {
+    expect(prSignals({}).ready).toBe(false);
+  });
+
+  it("is true for an approved, clean, green open PR", () => {
+    expect(prSignals(entries(prFacts({ review: "approved" }))).ready).toBe(true);
+  });
+
+  it("is false while review is still pending or required", () => {
+    expect(prSignals(entries(prFacts({ review: "none" }))).ready).toBe(false);
+    expect(prSignals(entries(prFacts({ review: "review_required" }))).ready).toBe(false);
+  });
+
+  it("is false on a conflict, and on a branch merely behind its base", () => {
+    expect(prSignals(entries(prFacts({ review: "approved", mergeable: "conflicting" }))).ready).toBe(false);
+    expect(prSignals(entries(prFacts({ review: "approved", mergeable: "behind" }))).ready).toBe(false);
+    expect(prSignals(entries(prFacts({ review: "approved", mergeable: "unknown" }))).ready).toBe(false);
+  });
+
+  it("is false on a failing check even when that check is only advisory", () => {
+    // `blocked` forgives an advisory failure — a red check is not worth pinning a
+    // card in Action required. "Ready to merge" is the stricter claim: it promises
+    // there is nothing left to look at, so any red at all disqualifies.
+    const f = prFacts({ review: "approved", ciAdvisory: true, ci: { passing: 0, pending: 0, failing: [{ name: "flaky-e2e", url: "" }] } });
+    expect(prSignals(entries(f)).blocked).toBe(false);
+    expect(prSignals(entries(f)).ready).toBe(false);
+  });
+
+  it("is false while a check is still running", () => {
+    expect(prSignals(entries(prFacts({ review: "approved", ci: { passing: 1, pending: 1, failing: [] } }))).ready).toBe(false);
+  });
+
+  it("is false for a draft PR, however green", () => {
+    expect(prSignals(entries(prFacts({ review: "approved", isDraft: true }))).ready).toBe(false);
+  });
+
+  it("is false once the PR has merged — there is nothing left to merge", () => {
+    expect(prSignals(entries(prFacts({ review: "approved", state: "MERGED" }))).ready).toBe(false);
+  });
+
+  it("needs every open PR in the run, not just one", () => {
+    const approved = prFacts({ review: "approved" });
+    expect(prSignals(entries(approved, prFacts({ review: "none" }))).ready).toBe(false);
+    expect(prSignals(entries(approved, prFacts({ review: "approved" }))).ready).toBe(true);
+  });
+
+  it("ignores a repo whose PR already merged while another is still open", () => {
+    expect(prSignals(entries(prFacts({ review: "approved" }), prFacts({ state: "MERGED" }))).ready).toBe(true);
+  });
+
+  it("ignores a repo with no PR at all", () => {
+    expect(prSignals(entries(prFacts({ review: "approved" }), null)).ready).toBe(true);
+  });
+});
+
+describe("deriveLane", () => {
+  const signals = (over: Partial<ReturnType<typeof prSignals>> = {}) => ({
+    open: false, blocked: false, merged: false, ready: false, ...over,
+  });
+
+  it("splits In review into ready-to-merge and waiting-on-review", () => {
+    expect(deriveLane("review", signals({ open: true, ready: true }))).toBe("ready");
+    expect(deriveLane("review", signals({ open: true }))).toBe("waiting");
+  });
+
+  it("waits when the column came from a Jira review status with no PR", () => {
+    expect(deriveLane("review", signals())).toBe("waiting");
+  });
+
+  it("splits Done into merged and not-merged", () => {
+    expect(deriveLane("done", signals({ merged: true }))).toBe("merged");
+    expect(deriveLane("done", signals())).toBe("unmerged");
+  });
+
+  it("leaves the single-lane columns unlaned", () => {
+    expect(deriveLane("progress", signals({ ready: true }))).toBeNull();
+    expect(deriveLane("needs", signals({ merged: true }))).toBeNull();
   });
 });
