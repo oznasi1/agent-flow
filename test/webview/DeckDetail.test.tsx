@@ -103,6 +103,15 @@ describe("DeckDetail", () => {
     expect(within(container).queryByRole("button", { name: /address pr/i })).toBeNull();
   });
 
+  it("offers no Address PR outside the review column, even in the waiting lane", () => {
+    // deriveLane only ever answers "waiting" under the review column, so this
+    // combination cannot occur from projectCards/laneOf today — but DeckDetail
+    // takes a plain DeckCard and enforces nothing about how its column and lane
+    // were derived, so the column conjunct earns its own case regardless.
+    const { container } = render1(mkCard({ column: "progress" }));
+    expect(within(container).queryByRole("button", { name: /address pr/i })).toBeNull();
+  });
+
   it("links each failing check by name", () => {
     render1(mkCard({
       prs: { svc: { facts: facts({ ci: { passing: 0, pending: 0, failing: [{ name: "e2e", url: "https://ci/e2e" }] } }), fetchedAt: 1 } } as PrEntryMap,

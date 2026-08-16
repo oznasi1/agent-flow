@@ -16,9 +16,14 @@ export interface DeckDetailProps {
  * the count the header prints can never drift from the rows rendered. */
 interface Action {
   label: string;
-  /** The identifier this action acts on — a branch, a key, a url. Set in mono
-   * beside the label, and left out when the label already says everything. */
+  /** Extra context beside the label — an identifier (a branch, a key, a PR
+   * number, a path) when `id` is set, prose ("already running", "seed an
+   * agent against the review") otherwise. Only an identifier earns the mono
+   * treatment: the spec's rule is mono for identifiers, UI font for anything
+   * that reads as English. */
   hint?: string;
+  /** `hint` is an identifier, not prose — renders in the mono font. */
+  id?: true;
   danger?: boolean;
   run: () => void;
 }
@@ -65,7 +70,7 @@ export function DeckDetail({ card, sourceLabel, onClose, onForget }: DeckDetailP
             run: () => send({ type: "deck:addressPr", key }) }]
         : []),
       ...(tracked
-        ? [{ label: `Open in ${sourceLabel}`, hint: key,
+        ? [{ label: `Open in ${sourceLabel}`, hint: key, id: true as const,
             run: () => send({ type: "openExternal", url: r.run.url }) }]
         : []),
     ] },
@@ -79,11 +84,11 @@ export function DeckDetail({ card, sourceLabel, onClose, onForget }: DeckDetailP
         ]
       : [] },
     { group: "Copy", items: [
-      ...(branch ? [{ label: "Copy branch name", hint: branch, run: () => copy(branch) }] : []),
-      ...(tracked ? [{ label: "Copy ticket key", hint: key, run: () => copy(key) }] : []),
-      ...(lead ? [{ label: "Copy PR url", hint: `#${lead.number}`, run: () => copy(lead.url) }] : []),
+      ...(branch ? [{ label: "Copy branch name", hint: branch, id: true as const, run: () => copy(branch) }] : []),
+      ...(tracked ? [{ label: "Copy ticket key", hint: key, id: true as const, run: () => copy(key) }] : []),
+      ...(lead ? [{ label: "Copy PR url", hint: `#${lead.number}`, id: true as const, run: () => copy(lead.url) }] : []),
       ...((own ?? r.run.repos[0])
-        ? [{ label: "Copy worktree path", hint: (own ?? r.run.repos[0]).path,
+        ? [{ label: "Copy worktree path", hint: (own ?? r.run.repos[0]).path, id: true as const,
             run: () => copy((own ?? r.run.repos[0]).path) }]
         : []),
     ] },
@@ -138,14 +143,17 @@ export function DeckDetail({ card, sourceLabel, onClose, onForget }: DeckDetailP
         <div className="dd-sec" key={g.group}>
           <div className="dd-lbl">{g.group}</div>
           {g.items.map((a) => (
-            <button type="button" className={`dd-act${a.danger ? " danger" : ""}`} key={a.label} onClick={a.run}>
+            // Explicit aria-label: without it, an accessible name is computed from
+            // the button's full text content, folding the hint into the name (e.g.
+            // "Forget" becomes "Forget the worktree is left untouched"). The hint
+            // itself stays in the DOM and reaches assistive tech exactly as the
+            // sighted rendering shows it — "already running" tells a screen-reader
+            // user the window is open, same as it tells a sighted one, which
+            // aria-hidden-ing the span would have thrown away.
+            <button type="button" className={`dd-act${a.danger ? " danger" : ""}`} key={a.label}
+              aria-label={a.label} onClick={a.run}>
               <span className="t">{a.label}</span>
-              {/* aria-hidden: the hint is a mono-set identifier riding beside the
-                * label (a branch, a key, a url) — decoration, not part of the
-                * action's name. Folding it into the accessible name would turn
-                * "Forget" into "Forget the worktree is left untouched", which is
-                * not what a screen reader user asked their button-name query for. */}
-              {a.hint && <span className="h" aria-hidden="true">{a.hint}</span>}
+              {a.hint && <span className={`h${a.id ? " id" : ""}`}>{a.hint}</span>}
             </button>
           ))}
         </div>

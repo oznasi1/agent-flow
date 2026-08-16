@@ -552,7 +552,12 @@ export const DECK_CSS = `
   .dd-act:hover { background: var(--vscode-toolbar-hoverBackground); }
   .dd-act:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
   .dd-act.danger { color: var(--c-attn); }
-  .dd-act .h { margin-left: auto; font-family: var(--vscode-editor-font-family);
+  /* UI font by default: most hints ("already running", "give this place a
+     ticket") read as English. The .id modifier overrides to mono for the
+     hints that are actually identifiers — a branch, a ticket key, a PR
+     number, a path. */
+  .dd-act .h { margin-left: auto;
     font-size: 11.5px; color: var(--dim);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dd-act .h.id { font-family: var(--vscode-editor-font-family); }
 `;
