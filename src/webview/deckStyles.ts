@@ -594,6 +594,8 @@ export const DECK_CSS = `
   .c-sig .bad, .c-sig .warn { color: var(--c-attn); }
   .c-sig .ok { color: var(--c-done); }
   .c-diff { display: inline-flex; gap: 5px; font-family: var(--vscode-editor-font-family); }
+  .c-diff .add { color: var(--c-done); }
+  .c-diff .del { color: var(--c-danger); }
 
   .c-foot2 { display: flex; gap: 5px; margin-top: auto; padding-top: 2px; }
 `;

@@ -6,6 +6,7 @@ import { render, screen, fireEvent, act, within } from "@testing-library/react";
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
 import { DeckApp } from "../../src/webview/DeckApp";
+import { DECK_CSS } from "../../src/webview/deckStyles";
 import { DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { send } from "../../src/webview/vscodeApi";
 import type { AgentActivity, CardAgent, OutboundMessage, PrFacts, RepoGit, ReviewRequest, RunStatus } from "../../src/types";
@@ -2267,11 +2268,23 @@ describe("the card at rest", () => {
     expect(labels).not.toContain("Address PR");
   });
 
-  it("renders a diff bit with its two halves separately colored", () => {
+  it("renders a diff bit as two distinct elements, each with a color rule of its own in the stylesheet", () => {
+    // jsdom has no CSS cascade, so a resolved computed color can't be asserted
+    // here — that's exactly why a prior version of this test (asserting only
+    // textContent) passed against a real gray-on-gray bug: .c-diff had no color
+    // rules at all, and every bit inherited .c-sig's dim gray. The structural
+    // half (two distinct elements, one carrying .add and one .del) is what the
+    // CSS rules below actually key off; the stylesheet half is the only way this
+    // suite can catch either rule going missing.
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     const sig = document.querySelector(".card .c-sig")!;
-    expect(sig.querySelector(".add")!.textContent).toBe("+12");
-    expect(sig.querySelector(".del")!.textContent).toBe("−2");
+    const add = sig.querySelector(".add")!;
+    const del = sig.querySelector(".del")!;
+    expect(add).not.toBe(del);
+    expect(add.textContent).toBe("+12");
+    expect(del.textContent).toBe("−2");
+    expect(DECK_CSS).toMatch(/\.c-diff\s+\.add\s*\{\s*color:\s*var\(--c-done\)/);
+    expect(DECK_CSS).toMatch(/\.c-diff\s+\.del\s*\{\s*color:\s*var\(--c-danger\)/);
   });
 });
