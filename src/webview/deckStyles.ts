@@ -560,4 +560,11 @@ export const DECK_CSS = `
     font-size: 11.5px; color: var(--dim);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dd-act .h.id { font-family: var(--vscode-editor-font-family); }
+
+  /* At any realistic panel width there is no arrangement in which four columns
+     and a 460px drawer all fit — something is always off-screen. .board is
+     already a horizontal scroller, so this does not MOVE the columns: it adds
+     scroll run-out past the last one, which is what lets a covered column be
+     scrolled clear of the drawer. Nothing becomes unreachable. */
+  .board.dd-open { padding-right: 470px; }
 `;

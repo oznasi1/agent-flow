@@ -2024,3 +2024,97 @@ describe("column lanes", () => {
     expect(lanes("Action required")).toEqual([]);
   });
 });
+
+describe("card selection", () => {
+  const card = () => document.querySelector(".card") as HTMLElement;
+
+  it("mounts no drawer until a card is selected", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(document.querySelector(".dd")).toBeNull();
+  });
+
+  it("selects on click and opens the drawer for that card", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(card());
+    expect(document.querySelector(".dd")).not.toBeNull();
+    expect(document.querySelector(".dd-hd .k")!.textContent).toBe("ASM-1");
+    expect(card().className).toContain("sel");
+  });
+
+  it("does not select when a card action is clicked", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(within(card()).getByRole("button", { name: /^open$/i }));
+    expect(document.querySelector(".dd")).toBeNull();
+  });
+
+  it("clicking the selected card again clears it", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(card());
+    fireEvent.click(card());
+    expect(document.querySelector(".dd")).toBeNull();
+  });
+
+  it("re-targets the drawer when a second card is selected", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
+    const cards = document.querySelectorAll(".card");
+    fireEvent.click(cards[0]);
+    fireEvent.click(cards[1]);
+    expect(document.querySelectorAll(".dd")).toHaveLength(1);
+    expect(document.querySelector(".dd-hd .k")!.textContent).toBe("ASM-2");
+  });
+
+  it("clears the selection on Escape", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(card());
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    expect(document.querySelector(".dd")).toBeNull();
+  });
+
+  it("drops a selection whose card is gone from the next post", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(card());
+    expect(document.querySelector(".dd")).not.toBeNull();
+    host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "ASM-9" } })]));
+    expect(document.querySelector(".dd")).toBeNull();
+    // The `selId` state itself must clear, not just this render's recomputed
+    // `selected` — otherwise a stale selId that outlived the card's absence
+    // would silently reopen the drawer the moment a card with that same id
+    // (e.g. the same run, ASM-1) reappears in a later post, with no click.
+    host(runsMsg([mkStatus()]));
+    expect(document.querySelector(".dd")).toBeNull();
+  });
+
+  it("gives the board scroll run-out so a covered column stays reachable", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(document.querySelector(".board")!.className).not.toContain("dd-open");
+    fireEvent.click(card());
+    expect(document.querySelector(".board")!.className).toContain("dd-open");
+  });
+
+  it("closes the Orchestrator drawer when a card is selected", () => {
+    render(<DeckApp />);
+    host({ type: "deck:flows", flows: [{ id: "f1", name: "F", nodes: [], edges: [], armed: false } as never],
+      enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {} } as OutboundMessage);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByRole("button", { name: /orchestrator/i }));
+    expect(document.querySelector(".orch")).not.toBeNull();
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd")).not.toBeNull();
+    // The two drawers share the slot: selecting a card must set `openFlowId`
+    // to null so the Orchestrator drawer starts its slide-out — it stays
+    // mounted (as `.orch.closing`) for its exit animation rather than
+    // vanishing in the same frame, so `.closing` rather than absence is the
+    // proof `onSelect` actually closed it. Selecting a card always opens
+    // `.dd` regardless of `openFlowId` (they are independent state), so the
+    // `.dd` assertion above alone cannot tell "closed" from "never closed."
+    expect(document.querySelector(".orch.closing")).not.toBeNull();
+  });
+});

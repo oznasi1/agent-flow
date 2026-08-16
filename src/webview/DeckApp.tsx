@@ -12,6 +12,7 @@ import { ReviewStrip } from "./ReviewStrip";
 import { LoadingMark } from "./LoadingMark";
 import { isPrReviewStatus, timeAgo } from "./helpers";
 import { AgentsRow, PrBlock, RepoChip, WorkspaceChip, workspaceLabel, type Tone } from "./deckParts";
+import { DeckDetail } from "./DeckDetail";
 
 /** The Orchestrator's mark: one node on the left feeding two on the right
  * through elbow connectors — the drawer's own object, drawn. It replaced a ⚡
@@ -119,7 +120,7 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
   }
 }
 
-function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel }: {
+function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel, selected, onSelect }: {
   r: RunStatus; prReviewStatus: string; onForget: (key: string) => void;
   /** Non-null on the Agents board: this card is that one session, and its state
    * line and action target come from the agent rather than the run. */
@@ -130,6 +131,8 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel 
   agents: CardAgent[];
   column: DeckColumn;
   sourceLabel: string;
+  selected: boolean;
+  onSelect: () => void;
 }): JSX.Element {
   const col = COLUMNS.find((c) => c.id === column)!;
   const accent = `var(${col.varName})`;
@@ -183,16 +186,17 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel 
 
   return (
     <div
-      className={`card ${column === "needs" ? "attn" : ""}`}
+      className={`card ${column === "needs" ? "attn" : ""} ${selected ? "sel" : ""}`}
       style={{ ["--accent" as any]: accent }}
       draggable={cardDragKey !== null}
+      onClick={onSelect}
       onDragStart={(e) => {
         if (cardDragKey) e.dataTransfer.setData("text/plain", cardDragKey);
       }}
     >
       {/* State leads, identity trails: the dot sits at the same x on every card, so a column
           scans top-to-bottom as one strip of "who needs me". */}
-      <div className="c-top">
+      <div className="c-top" onClick={(e) => e.stopPropagation()}>
         <span className={`status tone-${sv.tone}`}>
           <span className={`sdot tone-${sv.tone} ${sv.tone === "working" ? "pulse" : ""}`} />
           {sv.text}
@@ -237,7 +241,13 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel 
 
       {(() => {
         const ws = workspaceLabel(r.run);
-        if (ws && r.repos.length > 1) return <WorkspaceChip label={ws} repos={r.repos} filePath={r.run.workspaceFile ?? ws} />;
+        // The wrapper, not WorkspaceChip itself, carries the click guard: its own
+        // toggle button must open/close the fold without also selecting the card.
+        if (ws && r.repos.length > 1) return (
+          <div onClick={(e) => e.stopPropagation()}>
+            <WorkspaceChip label={ws} repos={r.repos} filePath={r.run.workspaceFile ?? ws} />
+          </div>
+        );
         return r.repos.length > 0 && (
           <div className="c-repos">
             {r.repos.map((g) => <RepoChip key={g.name} g={g} />)}
@@ -253,10 +263,15 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel 
       })()}
 
       {/* An agent card IS one of those rows — nesting the whole list inside every
-          sibling card would say the same thing four times. */}
-      {agent === null && <AgentsRow agents={agents} />}
+          sibling card would say the same thing four times. Same click guard as
+          WorkspaceChip above: the fold's own toggle must not also select the card. */}
+      {agent === null && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <AgentsRow agents={agents} />
+        </div>
+      )}
 
-      <div className="c-foot">
+      <div className="c-foot" onClick={(e) => e.stopPropagation()}>
         {r.ticketStatus && <span className="pill" title={`${sourceLabel} status: ${r.ticketStatus}`}>{r.ticketStatus}</span>}
         <div className="actions">
           {canAddressPr && (
@@ -364,6 +379,10 @@ export function DeckApp(): JSX.Element {
   const [branchCi, setBranchCi] = React.useState<Record<string, BranchCiStatus>>({});
   const [orchEnabled, setOrchEnabled] = React.useState(false);
   const [openFlowId, setOpenFlowId] = React.useState<string | null>(null);
+  /** The selected card's `DeckCard.id`, not a run key: the Agents lens renders
+   * one card per session, so two cards can share a run and a key could not tell
+   * them apart. */
+  const [selId, setSelId] = React.useState<string | null>(null);
   /** The flow list the last `deck:flows` post carried. The message handler below is
    * registered once (`[]` deps, because re-running it would re-post `deck:ready`), so
    * the `flows` state variable it closes over never advances past `[]` — and telling
@@ -496,6 +515,13 @@ export function DeckApp(): JSX.Element {
     };
   }, []);
 
+  React.useEffect(() => {
+    if (selId === null) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSelId(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selId]);
+
   // One list either way, so the columns, counts, stat tiles and sort all read
   // from the same shape. Workspaces mode is today's board exactly: one card per
   // run, agent nested, bucketed by the run's own column.
@@ -518,6 +544,14 @@ export function DeckApp(): JSX.Element {
     label: isTicketRun(r.run) ? r.run.key : runKind(r.run) === "notepad" ? "notepad" : "explore",
     closedAt: r.run.closedAt ?? null,
   }));
+  // Resolved from the freshly projected list, so a selection whose run was
+  // forgotten, closed, or re-bucketed into a different card id clears itself
+  // rather than leaving the drawer rendering against a card that is no longer
+  // on the board.
+  const selected = selId === null ? null : cards.find((c) => c.id === selId) ?? null;
+  React.useEffect(() => {
+    if (selId !== null && selected === null) setSelId(null);
+  }, [selId, selected]);
   const needs = cards.filter((c) => c.column === "needs").length;
   // With arming real, the count that matters on the chip is how many flows are
   // armed — that is the thing quietly spending your attention while the drawer
@@ -536,7 +570,9 @@ export function DeckApp(): JSX.Element {
   // does, so a lane can never quietly grow its own kind of card.
   const card = (c: DeckCard): JSX.Element => (
     <Card key={c.id} r={c.status} prReviewStatus={prReviewStatus}
-      onForget={forget} agent={c.agent} agents={c.agents} column={c.column} sourceLabel={sourceLabel} />
+      onForget={forget} agent={c.agent} agents={c.agents} column={c.column} sourceLabel={sourceLabel}
+      selected={c.id === selId}
+      onSelect={() => { setOpenFlowId(null); setSelId((cur) => (cur === c.id ? null : c.id)); }} />
   );
 
   return (
@@ -557,6 +593,7 @@ export function DeckApp(): JSX.Element {
             type="button"
             className={`ctl orch-chip${armedCount > 0 ? " armed" : ""}`}
             onClick={() => {
+              setSelId(null);
               if (flows.length === 0) send({ type: "flow:create" });
               else setOpenFlowId((cur) => (cur ? null : flows[0].id));
             }}
@@ -653,7 +690,7 @@ export function DeckApp(): JSX.Element {
           <div>Take a task from the Agent Flow Deck Tasks pool and it shows up here.</div>
         </div>
       ) : (
-        <div className="board">
+        <div className={`board${selected ? " dd-open" : ""}`}>
           {COLUMNS.map((col) => {
             // Sorting reads the agent's own activity on an agent card and the run's
             // reduction on a parked one, so a column still orders by "most
@@ -749,6 +786,15 @@ export function DeckApp(): JSX.Element {
           onResumeApprove={(id) => send({ type: "flow:resumeApprove", id })}
           onResumeDisarm={(id) => send({ type: "flow:resumeDisarm", id })}
           onResetEdge={(id, edgeId) => send({ type: "flow:resetEdge", id, edgeId })}
+        />
+      )}
+
+      {selected && (
+        <DeckDetail
+          card={selected}
+          sourceLabel={sourceLabel}
+          onClose={() => setSelId(null)}
+          onForget={forget}
         />
       )}
     </>
