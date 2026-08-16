@@ -567,4 +567,33 @@ export const DECK_CSS = `
      scroll run-out past the last one, which is what lets a covered column be
      scrolled clear of the drawer. Nothing becomes unreachable. */
   .board.dd-open { padding-right: 470px; }
+
+  /* The two-tier card. A floor with no flex column would hang dead space under
+     the last row; making the card a column is what lets the footer's margin-top:
+     auto seat it on the bottom edge, so a card taller than its content reads as
+     deliberately that tall rather than as one that ran out of things to say.
+     152px is the approved density — 132 crowds a two-line title, 176 leaves a
+     hollow middle on the one-line cards that dominate a real board. */
+  .card { display: flex; flex-direction: column; min-height: 152px;
+    padding: 13px 14px 13px 16px; gap: 9px; cursor: pointer; }
+  .col-body { gap: 14px; }
+  .c-title { line-height: 1.45; }
+  .card.sel { border-color: var(--vscode-focusBorder);
+    background: color-mix(in srgb, var(--vscode-focusBorder) 7%, var(--vscode-editor-background)); }
+  .card.sel::before { opacity: 1; width: 3px; }
+
+  /* One line, always. The three-bit cap in cardSignal is not enough on its own —
+     a long branch name still pushes the third bit onto a second row — so the line
+     never wraps and the one elastic bit (the mono branch) takes the ellipsis. */
+  .c-sig { display: flex; align-items: center; gap: 7px; flex-wrap: nowrap; overflow: hidden;
+    font-size: 11.5px; color: var(--dim); }
+  .c-sig > * { flex: none; white-space: nowrap; }
+  .c-sig .m { font-family: var(--vscode-editor-font-family);
+    flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .c-sig .sep { opacity: .45; }
+  .c-sig .bad, .c-sig .warn { color: var(--c-attn); }
+  .c-sig .ok { color: var(--c-done); }
+  .c-diff { display: inline-flex; gap: 5px; font-family: var(--vscode-editor-font-family); }
+
+  .c-foot2 { display: flex; gap: 5px; margin-top: auto; padding-top: 2px; }
 `;

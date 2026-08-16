@@ -95,13 +95,15 @@ describe("DeckApp", () => {
     expect(screen.getByText("ASM-1")).toBeInTheDocument();
   });
 
-  it("renders a card with key, summary, Jira status and diff stat", () => {
+  it("renders a card with key, summary and a diff stat, and the Jira status in its drawer", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     expect(screen.getByText("ASM-1")).toBeInTheDocument();
     expect(screen.getByText("Export fails on large accounts")).toBeInTheDocument();
-    expect(screen.getByText("In Progress")).toBeInTheDocument();
     expect(screen.getByText(/\+12/)).toBeInTheDocument();
+    // The Jira status pill moved off the card's own footer into the drawer.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(within(document.querySelector(".dd") as HTMLElement).getByText("In Progress")).toBeInTheDocument();
   });
 
   it("groups runs into columns with counts", () => {
@@ -211,18 +213,20 @@ describe("DeckApp", () => {
     expect(screen.getByText(/idle ·/i)).toBeInTheDocument();
   });
 
-  it("shows the branch and a launched-ago time on a card", () => {
+  it("shows the branch on the card's signal line, and a launched-ago time in its drawer", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     expect(screen.getByText(/ASM-1-x/)).toBeInTheDocument();
-    expect(screen.getByText(/^launched/i)).toBeInTheDocument();
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(within(document.querySelector(".dd") as HTMLElement).getByText(/^launched/i)).toBeInTheDocument();
   });
 
   it("omits the Jira status pill when the run has no Jira status", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ ticketStatus: null })]));
     expect(screen.getByText("Export fails on large accounts")).toBeInTheDocument();
-    expect(screen.queryByText("—")).not.toBeInTheDocument();
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd .pill")).toBeNull();
   });
 
   it("exposes the card controls as buttons so they are keyboard reachable", () => {
@@ -231,7 +235,10 @@ describe("DeckApp", () => {
     for (const label of ["ASM-1", "Open", "Diff"]) {
       expect(screen.getByText(label).tagName).toBe("BUTTON");
     }
-    expect(screen.getByTitle(/more actions/i).tagName).toBe("BUTTON");
+    // The overflow menu's "more actions" toggle is gone — its former contents are
+    // now the drawer's always-visible action list, itself real buttons.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(screen.getByRole("button", { name: "Open workspace" }).tagName).toBe("BUTTON");
   });
 
   // The hint is the Open button's tooltip plus a marker on the button, not a line of
@@ -257,19 +264,19 @@ describe("DeckApp", () => {
     expect(container.querySelector(".act.primary.live")).toBeNull();
   });
 
-  it("forgets a run from the overflow menu", () => {
+  it("forgets a run from the drawer's action list", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByTitle(/more actions/i));
-    fireEvent.click(screen.getByText(/^Forget$/));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "ASM-1" });
   });
 
   it("removes a forgotten card immediately, without waiting for the host", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
-    fireEvent.click(screen.getAllByTitle(/more actions/i)[0]);
-    fireEvent.click(screen.getByText(/^Forget$/));
+    fireEvent.click(document.querySelectorAll(".card")[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     // No deck:runs has arrived; the card is gone regardless.
     expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
     expect(screen.getByText("ASM-2")).toBeInTheDocument();
@@ -280,8 +287,8 @@ describe("DeckApp", () => {
     // The host post is authoritative — a delete that failed must not vanish the run.
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByTitle(/more actions/i));
-    fireEvent.click(screen.getByText(/^Forget$/));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
     host(runsMsg([mkStatus()]));
     expect(screen.getByText("ASM-1")).toBeInTheDocument();
@@ -311,11 +318,11 @@ describe("DeckApp", () => {
     expect(screen.getByText(/synced/i)).toBeInTheDocument();
   });
 
-  it("opens the ticket in Jira from the overflow menu", () => {
+  it("opens the ticket in Jira from the drawer's action list", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByTitle(/more actions/i));
-    fireEvent.click(screen.getByText(/Open in Jira/i));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Open in Jira" }));
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
   });
 
@@ -342,9 +349,9 @@ describe("DeckApp", () => {
   it("does not offer to open a ticketless run in Jira", () => {
     render(<DeckApp />);
     host(runsMsg([untracked()]));
-    fireEvent.click(screen.getByTitle(/more actions/i));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.queryByText(/Open in Jira/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/^Forget$/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Forget" })).toBeInTheDocument();
   });
 
   it("keeps the Jira link on a tracked run", () => {
@@ -425,7 +432,7 @@ describe("DeckApp", () => {
   it("offers Track it and no Forget", () => {
     render(<DeckApp />);
     host(runsMsg([mkLocal()]));
-    fireEvent.click(screen.getByRole("button", { name: "⋯" }));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByRole("button", { name: "Track it" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Forget" })).toBeNull();
   });
@@ -433,7 +440,7 @@ describe("DeckApp", () => {
   it("posts deck:track", () => {
     render(<DeckApp />);
     host(runsMsg([mkLocal()]));
-    fireEvent.click(screen.getByRole("button", { name: "⋯" }));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: "Track it" }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:track", key: "local-centaur-1a2b3c4d" });
   });
@@ -441,7 +448,7 @@ describe("DeckApp", () => {
   it("still offers Forget on a tracked card", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByRole("button", { name: "⋯" }));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByRole("button", { name: "Forget" })).toBeTruthy();
   });
 
@@ -470,17 +477,24 @@ const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
 });
 
 describe("DeckApp PR block", () => {
-  it("renders no block for a run with no PR entries", () => {
+  // The PR block moved off the card into the drawer, so every case here selects
+  // the card first — none of these assert anything about the card's own DOM.
+  it("renders no block in the drawer for a run with no PR entries", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    expect(screen.queryByText("pr")).toBeNull();
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    const dd = document.querySelector(".dd") as HTMLElement;
+    expect(within(dd).queryByText("pr", { selector: ".pr-lbl" })).toBeNull();
+    expect(within(dd).getByText("No pull request yet")).toBeInTheDocument();
   });
 
   it("renders no block for a repo whose entry resolved to no PR", () => {
-    const { container } = render(<DeckApp />);
+    render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: null, fetchedAt: 1 } } })]));
-    expect(screen.queryByText("pr")).toBeNull();
-    expect(container.querySelector(".pr-block")).toBeNull();
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    const dd = document.querySelector(".dd") as HTMLElement;
+    expect(dd.querySelector(".pr-block")).toBeNull();
+    expect(within(dd).getByText("No pull request yet")).toBeInTheDocument();
   });
 
   it("shows the PR number, failing checks, review state and mergeability", () => {
@@ -491,18 +505,24 @@ describe("DeckApp PR block", () => {
         review: "changes_requested", unresolved: 3, mergeable: "blocked",
       }), fetchedAt: 1 } },
     })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
 
-    expect(screen.getByText("#4821")).toBeTruthy();
-    expect(screen.getByText("build-backend")).toBeTruthy();
-    expect(screen.getByText("lint")).toBeTruthy();
-    expect(screen.getByText(/changes/)).toBeTruthy();
-    expect(screen.getByText(/3 open/)).toBeTruthy();
-    expect(screen.getByText("blocked")).toBeTruthy();
+    // The card's own signal line now shares some of these words ("#4821",
+    // "changes") — scope to the drawer's PR block, the fact this test is
+    // actually about.
+    const dd = within(document.querySelector(".dd") as HTMLElement);
+    expect(dd.getByRole("button", { name: "#4821" })).toBeTruthy();
+    expect(dd.getByText("build-backend")).toBeTruthy();
+    expect(dd.getByText("lint")).toBeTruthy();
+    expect(dd.getByText(/changes/)).toBeTruthy();
+    expect(dd.getByText(/3 open/)).toBeTruthy();
+    expect(dd.getByText("blocked")).toBeTruthy();
   });
 
   it("keeps the merge row while the PR is open", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ mergeable: "behind" }), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByText("merge", { selector: ".pr-lbl" })).toBeTruthy();
     expect(screen.getByText("behind")).toBeTruthy();
   });
@@ -514,27 +534,31 @@ describe("DeckApp PR block", () => {
     // no longer has an answer — the rows that kept their meaning stay.
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ state, mergeable: "unknown" }), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.queryByText("merge", { selector: ".pr-lbl" })).toBeNull();
     expect(screen.queryByText("unknown")).toBeNull();
-    expect(screen.getByText("#4821")).toBeTruthy();
+    expect(within(document.querySelector(".dd") as HTMLElement).getByRole("button", { name: "#4821" })).toBeTruthy();
     expect(screen.getByText(/6 passing/)).toBeTruthy();
   });
 
   it("omits the thread count when unresolved is null", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ review: "changes_requested", unresolved: null }), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.queryByText(/open$/)).toBeNull();
   });
 
   it("shows a passing-check count when nothing is failing", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts(), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByText(/6 passing/)).toBeTruthy();
   });
 
   it("heads each block with its repo name only when more than one repo has a PR", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts(), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.queryByText("svc", { selector: ".pr-repo" })).toBeNull();
 
     host(runsMsg([mkStatus({ prs: {
@@ -548,13 +572,15 @@ describe("DeckApp PR block", () => {
   it("opens the PR externally from its number", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts(), fetchedAt: 1 } } })]));
-    fireEvent.click(screen.getByText("#4821"));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(within(document.querySelector(".dd") as HTMLElement).getByRole("button", { name: "#4821" }));
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://github.com/acme/svc/pull/4821" });
   });
 
   it("opens a failing check's run externally", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ ci: { passing: 0, pending: 0, failing: [{ name: "build", url: "https://ci/run/7" }] } }), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     fireEvent.click(screen.getByText("build"));
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://ci/run/7" });
   });
@@ -562,6 +588,7 @@ describe("DeckApp PR block", () => {
   it("does not linkify a failing check with no url", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ ci: { passing: 0, pending: 0, failing: [{ name: "build", url: "" }] } }), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     // Structural: must fail if "build" ever regresses to an <a> or a <button> — not just
     // that clicking it happens to send nothing (a dead <a href=""> or handler-less
     // <button> would pass that check too).
@@ -576,9 +603,10 @@ describe("DeckApp PR-facts chrome", () => {
   it("says merged only when a PR actually merged", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([mkStatus({ column: "done", prs: { svc: { facts: prFacts({ state: "MERGED" }), fetchedAt: 1 } } })]));
-    // Scoped to the card: Done's merged lane header carries the same word, and
-    // this is about what the card's own status line says.
-    expect(within(container.querySelector(".card") as HTMLElement).getByText("merged")).toBeTruthy();
+    // Scoped to the state line specifically: Done's merged lane header carries
+    // the same word, and so does the card's own signal line (the lead PR's CI
+    // verdict) now that it exists — this is about what stateView says.
+    expect(within(container.querySelector(".status") as HTMLElement).getByText("merged")).toBeTruthy();
   });
 
   it("says done for a Jira-done run with no merged PR", () => {
@@ -591,8 +619,10 @@ describe("DeckApp PR-facts chrome", () => {
   it("says done, not merged, when only one of two repos' PRs merged (F2)", () => {
     // The spec's prMerged rule requires EVERY PR-bearing repo to be MERGED — a
     // two-repo run whose backend merged and whose frontend is still open must
-    // not claim "merged" just because `.some()` finds one.
-    render(<DeckApp />);
+    // not claim "merged" just because `.some()` finds one. Scoped to the state
+    // line: the signal line's own lead-PR bit can legitimately say "merged"
+    // about the one repo that did, which is a different claim.
+    const { container } = render(<DeckApp />);
     host(runsMsg([mkStatus({
       column: "done",
       prs: {
@@ -600,8 +630,9 @@ describe("DeckApp PR-facts chrome", () => {
         web: { facts: prFacts({ number: 99, url: "https://github.com/acme/web/pull/99", state: "OPEN" }), fetchedAt: 1 },
       },
     })]));
-    expect(screen.getByText("done")).toBeTruthy();
-    expect(screen.queryByText("merged")).toBeNull();
+    const status = within(container.querySelector(".status") as HTMLElement);
+    expect(status.getByText("done")).toBeTruthy();
+    expect(status.queryByText("merged")).toBeNull();
   });
 
   it("shows the gh note when the host sends one", () => {
@@ -617,6 +648,8 @@ describe("DeckApp PR-facts chrome", () => {
     render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })]));
+    // The agents fold moved off the card into the drawer's Agents section.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByText("svc-7e")).toBeTruthy();
     expect(screen.queryByText(/1 agent/)).toBeNull();
   });
@@ -625,6 +658,7 @@ describe("DeckApp PR-facts chrome", () => {
     render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     const disclosure = screen.getByRole("button", { name: /2 agents/ });
     expect(screen.queryByText("svc-fa")).toBeNull();
     fireEvent.click(disclosure);
@@ -641,6 +675,7 @@ describe("DeckApp PR-facts chrome", () => {
     const solo = render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })]));
+    fireEvent.click(solo.container.querySelector(".card") as HTMLElement);
     const soloLabel = solo.container.querySelector(".ag-label")!;
     expect(soloLabel.classList.contains("id")).toBe(true);
     solo.unmount();
@@ -648,6 +683,7 @@ describe("DeckApp PR-facts chrome", () => {
     const many = render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
+    fireEvent.click(many.container.querySelector(".card") as HTMLElement);
     const manyLabel = many.container.querySelector(".ag-label")!;
     expect(manyLabel.classList.contains("id")).toBe(false);
   });
@@ -663,6 +699,7 @@ describe("DeckApp PR-facts chrome", () => {
     };
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [noStart, mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: /2 agents/ }));
     const rows = [...container.querySelectorAll(".ag-row")];
     const zeroRow = rows.find((r) => r.textContent?.includes("svc-7e"))!;
@@ -1020,68 +1057,82 @@ describe("DeckApp review writes", () => {
   });
 });
 
+// This whole describe used to be driven by a ticket-status match
+// (`isPrReviewStatus(r.ticketStatus, prReviewStatus)`), reachable from any
+// column. The design replaces that with a lane-driven rule — the button
+// belongs to the card that is waiting on a human, which is what the review
+// column's waiting lane means — so every test here is rewritten around the
+// lane rather than re-pointed at the drawer: the fact itself changed, it did
+// not just move. See "the card at rest" below for the two tests the brief
+// itself specifies (waiting lane shows it, a local card on that lane does not).
 describe("DeckApp — Address PR", () => {
-  const prCard = (over: Partial<RunStatus> = {}) => mkStatus({ ticketStatus: "PR initiated", ...over });
+  // An open PR still needing a decision: prSignals().ready is false (review
+  // isn't "approved"), so deriveLane calls the review column's lane "waiting".
+  const waitingPr = (over: Partial<RunStatus> = {}) => mkStatus({
+    column: "review",
+    prs: { svc: { facts: prFacts({ review: "review_required" }), fetchedAt: 1 } },
+    ...over,
+  });
 
-  it("shows the button when the Jira status matches the configured one", () => {
+  it("shows the button on the review column's waiting lane", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard()]));
+    host(runsMsg([waitingPr()]));
     expect(screen.getByRole("button", { name: "Address PR" })).toBeInTheDocument();
   });
 
-  it("matches the status case-insensitively and ignores surrounding space", () => {
+  it("hides the button on the review column's ready lane", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard({ ticketStatus: "  pr initiated  " })]));
-    expect(screen.getByRole("button", { name: "Address PR" })).toBeInTheDocument();
-  });
-
-  it("hides the button on a card in any other status", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus({ ticketStatus: "In Progress" })]));
+    host(runsMsg([mkStatus({
+      column: "review",
+      prs: { svc: { facts: prFacts({ review: "approved", mergeable: "clean" }), fetchedAt: 1 } },
+    })]));
     expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
   });
 
-  it("hides the button when the run has no Jira status at all", () => {
+  it("hides the button on a card outside the review column", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ ticketStatus: null })]));
+    host(runsMsg([mkStatus({ column: "progress" })]));
     expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
   });
 
-  it("hides the button when the setting is empty", () => {
+  // Proves the old path is actually dead, not just superseded in the common
+  // case: a Jira status that exactly matches the configured prReviewStatus
+  // used to be sufficient on its own, from any column. It no longer moves the
+  // needle at all — the button reads the lane, never `ticketStatus`.
+  it("does not show the button from a matching Jira status alone, off the review column", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard()], ""));
+    host(runsMsg([mkStatus({ ticketStatus: "PR initiated", column: "progress" })], "PR initiated"));
     expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
   });
 
-  it("hides the button on a local card, whose ticket key is only inferred", () => {
+  it("hides the button on a local card, whose ticket key is only inferred, even on the waiting lane", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard({ run: { ...mkStatus().run, kind: "local" } })]));
+    host(runsMsg([waitingPr({ run: { ...mkStatus().run, key: "local-a", url: "", kind: "local" } as never })]));
     expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
   });
 
   it("posts deck:addressPr with the run key on click", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard()]));
+    host(runsMsg([waitingPr()]));
     fireEvent.click(screen.getByRole("button", { name: "Address PR" }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:addressPr", key: "ASM-1" });
   });
 
-  it("leads the action row, before Open", () => {
+  it("orders the footer Open, Diff, then Address PR", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard()]));
-    const labels = Array.from(document.querySelectorAll(".actions .act")).map((b) => b.textContent);
-    expect(labels).toEqual(["Address PR", "Open", "Diff"]);
+    host(runsMsg([waitingPr()]));
+    const labels = Array.from(document.querySelectorAll(".card .c-foot2 .act")).map((b) => b.textContent);
+    expect(labels).toEqual(["Open", "Diff", "Address PR"]);
   });
 
-  // A card gets exactly one primary. Address PR is the verb the board is asking for
-  // when it is there, so it takes that weight and Open gives it up — which is also
-  // what puts the accent on the right button on an attn card, where .card.attn
-  // .act.primary is the only colored call to action.
-  it("takes the primary weight from Open when it is on the card", () => {
+  // Open is always the footer's one primary now — the design drops the old
+  // swap where Address PR took that weight instead. One card, one primary,
+  // decided the same way whether or not Address PR is also there.
+  it("keeps Open primary even when Address PR is also on the card", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard()]));
-    expect(screen.getByRole("button", { name: "Address PR" })).toHaveClass("primary");
-    expect(screen.getByRole("button", { name: "Open" })).not.toHaveClass("primary");
+    host(runsMsg([waitingPr()]));
+    expect(screen.getByRole("button", { name: "Open" })).toHaveClass("primary");
+    expect(screen.getByRole("button", { name: "Address PR" })).not.toHaveClass("primary");
   });
 
   it("leaves Open the primary on a card that has no Address PR", () => {
@@ -1197,9 +1248,10 @@ describe("Agents view", () => {
     render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [{ ...mkAgent("agent-flow-2e", "working", 100), repo: "svc" }] })]));
-    // The collapsed agents row, not a card per agent.
-    expect(screen.getByTitle(/sessions open in this directory/i)).toBeInTheDocument();
     expect(screen.getAllByText("ASM-1")).toHaveLength(1);
+    // The collapsed agents row moved into the drawer's Agents section.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(screen.getByTitle(/sessions open in this directory/i)).toBeInTheDocument();
   });
 
   it("shows the session slug as a tooltip on an expanded agent row", () => {
@@ -1208,6 +1260,7 @@ describe("Agents view", () => {
     host(runsMsg([mkStatus({
       agents: [{ ...mkAgent("agent-flow-2e", "working", 100), activity: { state: "working", lastActivityMs: 100, slug: "export-streaming-fix" } }],
     })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     fireEvent.click(screen.getByTitle(/sessions open in this directory/i));
     expect(screen.getByTitle("export-streaming-fix")).toBeInTheDocument();
   });
@@ -1218,6 +1271,7 @@ describe("Agents view", () => {
     host(runsMsg([mkStatus({
       agents: [mkAgent("agent-flow-2e", "working", 100)],
     })]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     fireEvent.click(screen.getByTitle(/sessions open in this directory/i));
     expect(container.querySelector(".ag-name")).not.toHaveAttribute("title");
   });
@@ -1314,12 +1368,13 @@ describe("DeckApp — source label", () => {
     expect(document.querySelector(".note")!.textContent).toBe("git + Jira backbone · best-effort live from ~/.claude/projects");
   });
 
-  it("renders a tracked card's Jira strings byte-for-byte: key title, status pill title, overflow menu item", () => {
+  it("renders a tracked card's Jira strings byte-for-byte: key title, status pill title, drawer action item", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     expect(screen.getByTitle("Open ASM-1 in Jira")).toBeInTheDocument();
+    // The status pill and the "Open in <source>" action both moved into the drawer.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByTitle("Jira status: In Progress")).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle(/more actions/i));
     expect(screen.getByText("Open in Jira")).toBeInTheDocument();
   });
 
@@ -1335,8 +1390,9 @@ describe("DeckApp — source label", () => {
     expect(screen.getByTitle("Re-read git, Acme and PR state now")).toBeInTheDocument();
     expect(document.querySelector(".note")!.textContent).toBe("git + Acme backbone · best-effort live from ~/.claude/projects");
     expect(screen.getByTitle("Open ASM-1 in Acme")).toBeInTheDocument();
+    // The status pill and the "Open in <source>" action both moved into the drawer.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByTitle("Acme status: In Progress")).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle(/more actions/i));
     expect(screen.getByText("Open in Acme")).toBeInTheDocument();
     // A fresh deck:runs post with an unknown agent activity is the only way left
     // to reach the parked string — the live signal is unconditional now, so
@@ -1799,10 +1855,13 @@ const wsStatus = () => mkStatus({
   ],
 });
 
+// The workspace chip (and the plain repo-chip row it replaces) moved off the
+// card into the drawer's Work section — every case here selects the card first.
 describe("workspace chip", () => {
   it("names the workspace and counts its repos", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     const chip = container.querySelector(".c-ws .ws")!;
     expect(chip.textContent).toContain("centaur+e2e");
     expect(chip.textContent).toContain("2 repos");
@@ -1814,6 +1873,7 @@ describe("workspace chip", () => {
     // sharing a label — a generic sentence can't disambiguate them.
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     const chip = container.querySelector(".c-ws .ws")!;
     expect(chip.getAttribute("title")).toBe("/ws/centaur+e2e.code-workspace");
   });
@@ -1821,20 +1881,23 @@ describe("workspace chip", () => {
   it("keeps both repo chips in the fold, with their git signal", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     const fold = container.querySelector(".c-ws .ws-fold")!;
     expect(Array.from(fold.querySelectorAll(".repo")).map((r) => r.textContent))
       .toEqual(["centaur●", "automation_e2e+12−2↑1"]);
   });
 
-  it("replaces the flat chip row, so the card says the workspace once", () => {
+  it("replaces the flat chip row, so the drawer says the workspace once", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     expect(container.querySelector(".c-repos")).toBeNull();
   });
 
   it("toggles the fold open for keyboard and touch", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     const wrap = container.querySelector(".c-ws")!;
     expect(wrap.className).not.toContain("open");
     fireEvent.click(container.querySelector(".ws")!);
@@ -1844,6 +1907,7 @@ describe("workspace chip", () => {
   it("leaves a single-repo run on the plain chip row", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([mkStatus()]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     expect(container.querySelector(".c-ws")).toBeNull();
     expect(container.querySelector(".c-repos .repo")!.textContent).toContain("svc");
   });
@@ -1853,11 +1917,13 @@ describe("workspace chip", () => {
     const s = wsStatus();
     const { container } = render(<DeckApp />);
     host(runsMsg([{ ...s, run: { ...s.run, workspaceFile: undefined, mode: "per-window" } }]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     expect(container.querySelector(".c-ws")).toBeNull();
     expect(container.querySelectorAll(".c-repos .repo")).toHaveLength(2);
   });
 });
 
+// The branch/launched row moved off the card into the drawer's Work section.
 describe("branch line", () => {
   it("shows the branch of the repo this agent runs in", () => {
     // repos[0] is centaur on ASM-9-x; the agent runs in automation_e2e on main.
@@ -1871,12 +1937,14 @@ describe("branch line", () => {
     // as one card per agent with no toggling.
     const { container } = render(<DeckApp />);
     host(runsMsg([{ ...s, agents: [agent] }]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     expect(container.querySelector(".c-branch .bn")!.textContent).toContain("main");
   });
 
   it("falls back to the run's first repo on a card with no agent", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     expect(container.querySelector(".c-branch .bn")!.textContent).toContain("ASM-9-x");
   });
 });
@@ -2118,10 +2186,92 @@ describe("card selection", () => {
     expect(document.querySelector(".orch.closing")).not.toBeNull();
   });
 
-  it("does not select when a PR link is clicked", () => {
+  // "does not select when a PR link is clicked" is deleted here, not re-pointed:
+  // the PR block no longer renders on an unselected card at all (it only exists
+  // inside `.dd`, which is itself proof the card is already selected), so there
+  // is no longer a scenario where a PR link is clickable before selection. The
+  // card's own click-guard on `.c-foot2` is exercised instead by "does not
+  // select when a card action is clicked" above.
+});
+
+describe("the card at rest", () => {
+  it("renders the signal line and no PR block, repo chips or branch row", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts(), fetchedAt: 1 } } })]));
-    fireEvent.click(within(card()).getByRole("button", { name: /#4821/ }));
-    expect(document.querySelector(".dd")).toBeNull();
+    host(runsMsg([mkStatus({
+      prs: { svc: { facts: {
+        number: 5, url: "u", title: "t", state: "OPEN", isDraft: false,
+        ci: { passing: 1, pending: 0, failing: [] }, review: "approved",
+        unresolved: 0, mergeable: "clean", ciAdvisory: false,
+      }, fetchedAt: 1 } } as never,
+    })]));
+    const card = document.querySelector(".card")!;
+    expect(card.querySelector(".c-sig")).not.toBeNull();
+    expect(card.querySelector(".pr-block")).toBeNull();
+    expect(card.querySelector(".c-repos")).toBeNull();
+    expect(card.querySelector(".c-branch")).toBeNull();
+    expect(card.querySelector(".c-agents")).toBeNull();
+    expect(card.querySelector(".pill")).toBeNull();
+  });
+
+  it("shows Open and Diff in the footer, and no overflow menu", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    const labels = Array.from(document.querySelectorAll(".card .c-foot2 .act")).map((b) => b.textContent);
+    expect(labels).toEqual(["Open", "Diff"]);
+    expect(document.querySelector(".card .more")).toBeNull();
+  });
+
+  it("adds Address PR on the review column's waiting lane", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "review",
+      prs: { svc: { facts: {
+        number: 5, url: "u", title: "t", state: "OPEN", isDraft: false,
+        ci: { passing: 1, pending: 0, failing: [] }, review: "review_required",
+        unresolved: 0, mergeable: "clean", ciAdvisory: false,
+      }, fetchedAt: 1 } } as never,
+    })]));
+    const labels = Array.from(document.querySelectorAll(".card .c-foot2 .act")).map((b) => b.textContent);
+    expect(labels).toContain("Address PR");
+  });
+
+  // Mutation-check #2 (Step 6): change `lane === "waiting"` to `lane !== null`
+  // and this must fail — the test above still passes under that mutation (the
+  // waiting lane keeps its button either way), so only the ready lane's absence
+  // catches it.
+  it("keeps Address PR off the review column's ready lane", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "review",
+      prs: { svc: { facts: {
+        number: 5, url: "u", title: "t", state: "OPEN", isDraft: false,
+        ci: { passing: 1, pending: 0, failing: [] }, review: "approved",
+        unresolved: 0, mergeable: "clean", ciAdvisory: false,
+      }, fetchedAt: 1 } } as never,
+    })]));
+    const labels = Array.from(document.querySelectorAll(".card .c-foot2 .act")).map((b) => b.textContent);
+    expect(labels).not.toContain("Address PR");
+  });
+
+  it("keeps Address PR off a local card even on that lane", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "review", run: { ...mkStatus().run, key: "local-a", url: "", kind: "local" } as never,
+      prs: { svc: { facts: {
+        number: 5, url: "u", title: "t", state: "OPEN", isDraft: false,
+        ci: { passing: 1, pending: 0, failing: [] }, review: "review_required",
+        unresolved: 0, mergeable: "clean", ciAdvisory: false,
+      }, fetchedAt: 1 } } as never,
+    })]));
+    const labels = Array.from(document.querySelectorAll(".card .c-foot2 .act")).map((b) => b.textContent);
+    expect(labels).not.toContain("Address PR");
+  });
+
+  it("renders a diff bit with its two halves separately colored", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    const sig = document.querySelector(".card .c-sig")!;
+    expect(sig.querySelector(".add")!.textContent).toBe("+12");
+    expect(sig.querySelector(".del")!.textContent).toBe("−2");
   });
 });

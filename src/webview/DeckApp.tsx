@@ -10,9 +10,10 @@ import { prSignals } from "../engine/bucket";
 import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
 import { LoadingMark } from "./LoadingMark";
-import { isPrReviewStatus, timeAgo } from "./helpers";
-import { AgentsRow, PrBlock, RepoChip, WorkspaceChip, workspaceLabel, type Tone } from "./deckParts";
+import { timeAgo } from "./helpers";
+import { type Tone } from "./deckParts";
 import { DeckDetail } from "./DeckDetail";
+import { cardSignal } from "./deckSignal";
 
 /** The Orchestrator's mark: one node on the left feeding two on the right
  * through elbow connectors — the drawer's own object, drawn. It replaced a ⚡
@@ -120,16 +121,15 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
   }
 }
 
-function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel, selected, onSelect }: {
-  r: RunStatus; prReviewStatus: string; onForget: (key: string) => void;
+function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
+  r: RunStatus;
   /** Non-null on the Agents board: this card is that one session, and its state
    * line and action target come from the agent rather than the run. */
   agent: CardAgent | null;
-  /** Every agent this card lists via `AgentsRow` when `agent` is null — the
-   * whole run's agents on the Workspaces board, or a same-column group on the
-   * Agents board. Unused (and irrelevant) when `agent` is set. */
-  agents: CardAgent[];
   column: DeckColumn;
+  /** The band within `column`, or null where the column means one thing. Address
+   * PR reads this, not the ticket status: see `canAddressPr` below. */
+  lane: DeckLane | null;
   sourceLabel: string;
   selected: boolean;
   onSelect: () => void;
@@ -157,12 +157,11 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel,
   // record on disk, so there is nothing to Forget — closing its agents is what
   // removes it.
   const local = runKind(r.run) === "local";
-  // Offer Address PR once the ticket reaches the configured PR-review status. Never on
-  // a local card: its key is read off the branch name (see inferredKey just below), so
-  // the status on it may belong to a ticket that is not ours — not something to seed an
-  // agent against on one click. A run with no ticket status needs no separate guard;
-  // isPrReviewStatus is false whenever either side is empty.
-  const canAddressPr = !local && isPrReviewStatus(r.ticketStatus ?? "", prReviewStatus);
+  // The lane, not the ticket status: Address PR belongs to the card that is
+  // waiting on a human, which is exactly what the waiting lane means. The local
+  // guard survives the change — a local card's key is inferred from its branch,
+  // so its status may belong to a ticket somebody else owns.
+  const canAddressPr = !local && column === "review" && lane === "waiting";
   // The key came from the branch, not from a launch. Say so: the branch could
   // name a ticket somebody else owns, and the ticket status on this card would
   // then be theirs. Computed host-side (the webview has no connector to parse
@@ -174,15 +173,6 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel,
   // repo's git or PR it means.
   const dragRepo = agent?.repo ?? (r.repos.length === 1 ? r.repos[0].name : undefined);
   const cardDragKey = dragRepo ? `${r.run.key}${DRAG_SEP}${dragRepo}` : null;
-  const [menuOpen, setMenuOpen] = React.useState(false);
-  React.useEffect(() => {
-    if (!menuOpen) return;
-    const close = () => setMenuOpen(false);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenuOpen(false);
-    window.addEventListener("click", close);
-    window.addEventListener("keydown", onKey);
-    return () => { window.removeEventListener("click", close); window.removeEventListener("keydown", onKey); };
-  }, [menuOpen]);
 
   return (
     <div
@@ -225,105 +215,35 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel,
         {r.run.summary}
       </div>
 
-      {/* Where the work lives and when it started, on one line: this used to be a
-          half-empty branch row followed by "launched …" trailing the repo chips, where
-          it read as one more chip that had lost its border. */}
-      <div className="c-branch">
-        {/* The agent's own repo, not repos[0]: on a multi-root card the first repo
-            may be one this session never touched. */}
-        {(() => {
-          const own = agent?.repo ? r.run.repos.find((x) => x.name === agent.repo) : undefined;
-          const branch = (own ?? r.run.repos[0])?.branch;
-          return branch && <span className="bn" title={branch}>⎇ {branch}</span>;
-        })()}
-        <span className="elapsed">launched {timeAgo(r.run.createdAt)}</span>
+      <div className="c-sig">
+        {cardSignal(r, agent).map((b, i) => (
+          <React.Fragment key={i}>
+            {i > 0 && <span className="sep">·</span>}
+            {b.kind === "diff"
+              ? <span className="c-diff"><span className="add">+{b.added}</span><span className="del">−{b.removed}</span></span>
+              : <span className={`${b.mono ? "m" : ""} ${b.tone ?? ""}`.trim()}>{b.text}</span>}
+          </React.Fragment>
+        ))}
       </div>
 
-      {(() => {
-        const ws = workspaceLabel(r.run);
-        // The wrapper, not WorkspaceChip itself, carries the click guard: its own
-        // toggle button must open/close the fold without also selecting the card.
-        if (ws && r.repos.length > 1) return (
-          <div onClick={(e) => e.stopPropagation()}>
-            <WorkspaceChip label={ws} repos={r.repos} filePath={r.run.workspaceFile ?? ws} />
-          </div>
-        );
-        return r.repos.length > 0 && (
-          <div className="c-repos">
-            {r.repos.map((g) => <RepoChip key={g.name} g={g} />)}
-          </div>
-        );
-      })()}
-
-      {(() => {
-        const withPr = Object.entries(r.prs).filter(([, e]) => e.facts !== null) as [string, { facts: PrFacts }][];
-        if (withPr.length === 0) return null;
-        // Same click guard as WorkspaceChip/AgentsRow above: PrBlock renders a
-        // button per PR link and per failing check, and opening one of those
-        // must not also select the card.
-        return (
-          <div onClick={(e) => e.stopPropagation()}>
-            {withPr.map(([name, e]) => (
-              <PrBlock key={name} repo={name} f={e.facts} showRepo={withPr.length > 1} />
-            ))}
-          </div>
-        );
-      })()}
-
-      {/* An agent card IS one of those rows — nesting the whole list inside every
-          sibling card would say the same thing four times. Same click guard as
-          WorkspaceChip above: the fold's own toggle must not also select the card. */}
-      {agent === null && (
-        <div onClick={(e) => e.stopPropagation()}>
-          <AgentsRow agents={agents} />
-        </div>
-      )}
-
-      <div className="c-foot" onClick={(e) => e.stopPropagation()}>
-        {r.ticketStatus && <span className="pill" title={`${sourceLabel} status: ${r.ticketStatus}`}>{r.ticketStatus}</span>}
-        <div className="actions">
-          {canAddressPr && (
-            <button
-              className="act primary"
-              title={`Address the PR for ${r.run.key} — open its workspace and work through the review feedback`}
-              onClick={() => send({ type: "deck:addressPr", key: r.run.key })}
-            >
-              Address PR
-            </button>
-          )}
-          {/* An already-open window used to say so in a line of its own on every such
-              card. The button that behaves differently is the right place to explain
-              it: a 5px marker carries "there is something to focus", the tooltip
-              carries what Open will actually do. Only Open's own primary once Address
-              PR isn't sitting beside it to claim that weight — a card can't spend two
-              buttons' worth of "the one thing to do here" on itself. */}
-          <button
-            className={`act ${canAddressPr ? "" : "primary"} ${r.windowOpen ? "live" : ""}`}
-            title={r.windowOpen ? "Open now — Open focuses the window already running this task" : "Open this task's workspace"}
-            onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open", ...(agent?.repo ? { repo: agent.repo } : {}) })}
-          >
-            Open
+      <div className="c-foot2" onClick={(e) => e.stopPropagation()}>
+        <button
+          className={`act primary ${r.windowOpen ? "live" : ""}`}
+          title={r.windowOpen ? "Open now — Open focuses the window already running this task" : "Open this task's workspace"}
+          onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open", ...(agent?.repo ? { repo: agent.repo } : {}) })}
+        >
+          Open
+        </button>
+        <button className="act" title="Show everything this task changed, file by file"
+          onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff", ...(agent?.repo ? { repo: agent.repo } : {}) })}>
+          Diff
+        </button>
+        {canAddressPr && (
+          <button className="act" title={`Address the PR for ${r.run.key} — open its workspace and work through the review feedback`}
+            onClick={() => send({ type: "deck:addressPr", key: r.run.key })}>
+            Address PR
           </button>
-          {/* main's multi-file diff editor, still scoped to this agent's own repo:
-              dropping the spread would silently send an agent card's Diff to the
-              run's first repo. */}
-          <button className="act" title="Show everything this task changed, file by file" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff", ...(agent?.repo ? { repo: agent.repo } : {}) })}>Diff</button>
-          <span className="more-wrap">
-            <button className="more" title="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>⋯</button>
-            {menuOpen && (
-              <div className="menu" onClick={(e) => e.stopPropagation()}>
-                {tracked && (
-                  <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "openExternal", url: r.run.url }); }}>{`Open in ${sourceLabel}`}</button>
-                )}
-                {local ? (
-                  <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "deck:track", key: r.run.key }); }}>Track it</button>
-                ) : (
-                  <button className="mi danger" onClick={() => { setMenuOpen(false); onForget(r.run.key); }}>Forget</button>
-                )}
-              </div>
-            )}
-          </span>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -577,8 +497,7 @@ export function DeckApp(): JSX.Element {
   // One card, wherever it lands — a lane renders exactly what an unlaned column
   // does, so a lane can never quietly grow its own kind of card.
   const card = (c: DeckCard): JSX.Element => (
-    <Card key={c.id} r={c.status} prReviewStatus={prReviewStatus}
-      onForget={forget} agent={c.agent} agents={c.agents} column={c.column} sourceLabel={sourceLabel}
+    <Card key={c.id} r={c.status} agent={c.agent} column={c.column} lane={c.lane} sourceLabel={sourceLabel}
       selected={c.id === selId}
       onSelect={() => { setOpenFlowId(null); setSelId((cur) => (cur === c.id ? null : c.id)); }} />
   );

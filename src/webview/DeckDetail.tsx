@@ -108,6 +108,10 @@ export function DeckDetail({ card, sourceLabel, onClose, onForget }: DeckDetailP
       <div className="dd-hd">
         <span className="k">{key}</span>
         <span className="t" title={r.run.summary}>{r.run.summary}</span>
+        {/* Moved verbatim off the card's old .c-foot — the design's own list of
+         * what relocates here names "the status pill" alongside the branch row,
+         * repo chips, PR blocks and agents fold. */}
+        {r.ticketStatus && <span className="pill" title={`${sourceLabel} status: ${r.ticketStatus}`}>{r.ticketStatus}</span>}
         <button type="button" className="dd-x" aria-label="Close" onClick={onClose}>✕</button>
       </div>
 
