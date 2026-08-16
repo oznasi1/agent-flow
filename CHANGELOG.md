@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-08-16
+
+### Changed
+
+- **The Deck card is now two tiers.** At rest a card is four rows — state and
+  key, title, one signal line, and a footer with Open and Diff. Everything it
+  used to carry (the branch row, repo chips, every PR block, the agent list,
+  the ticket-status pill and the overflow menu) moves into a detail drawer
+  that opens when you select a card. Nothing was removed; a column now reads
+  as a list of same-shaped cards instead of a stack of unrelated blocks.
+- **The signal line says at most three things**, worst fact first. A card with
+  a PR leads with its number, then how its checks stand, then whatever stands
+  between it and a merge — conflicts before requested changes. A card without
+  one falls back to branch, diff totals and how wide the work spreads. Diff
+  size never outranks PR news.
+- **Address PR now follows the board, not the ticket status.** It appears on a
+  card that has an open non-draft PR, sits in the review column's
+  waiting-on-review lane, and is not a local place. Previously it keyed off
+  `agentFlow.prReviewStatus` matching exactly. That setting still governs the
+  sidebar's Tasks card and is unchanged there.
+- The card drawer and the Orchestrator drawer share a slot, so opening either
+  closes the other.
+
 ## [0.22.0] — 2026-08-16
 
 ### Added
