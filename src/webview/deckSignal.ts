@@ -80,5 +80,6 @@ export function cardSignal(r: RunStatus, agent: CardAgent | null): SignalBit[] {
   if (r.repos.length > 1) bits.push({ kind: "text", text: `${r.repos.length} repos` });
   else if (r.agents.length > 1) bits.push({ kind: "text", text: `${r.agents.length} agents` });
 
+  // Same structural guard as above: slice caps at three bits.
   return bits.slice(0, 3);
 }

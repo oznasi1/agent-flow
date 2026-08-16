@@ -79,15 +79,13 @@ describe("cardSignal", () => {
     ]);
   });
 
-  it("reports review_required on an open PR, guarded by f.state !== MERGED check", () => {
+  it("drops the review bit on a merged PR with no review decision", () => {
     const bits = cardSignal(status({
-      prs: pr(facts({ state: "OPEN", review: "review_required", mergeable: "clean" })),
+      prs: pr(facts({ state: "MERGED", review: "review_required" })),
     }), null);
-    // Shows PR number, CI status, and review status (guarded by f.state !== "MERGED")
     expect(bits).toEqual([
       { kind: "text", text: "#10", mono: true },
-      { kind: "text", text: "✓ ci", tone: "ok" },
-      { kind: "text", text: "required" },
+      { kind: "text", text: "merged", tone: "ok" },
     ]);
   });
 
@@ -147,5 +145,15 @@ describe("cardSignal", () => {
     } as PrEntryMap;
     const bits = cardSignal(status({ prs }), null);
     expect(bits[0]).toEqual({ kind: "text", text: "#2", mono: true });
+  });
+
+  it("picks the alphabetically-first PR by repo name when all have no failures", () => {
+    const prs = {
+      zeta: { facts: facts({ number: 99 }), fetchedAt: 1 },
+      alpha: { facts: facts({ number: 11 }), fetchedAt: 1 },
+    } as PrEntryMap;
+    const bits = cardSignal(status({ prs }), null);
+    // Should pick alpha (alphabetically first), not zeta (insertion order first)
+    expect(bits[0]).toEqual({ kind: "text", text: "#11", mono: true });
   });
 });
