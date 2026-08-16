@@ -649,20 +649,24 @@ describe("DeckApp PR-facts chrome", () => {
     render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })]));
-    // The agents fold moved off the card into the drawer's Agents section.
+    // The agents fold moved off the card into the drawer's Agents section,
+    // which ships expanded by default — the name appears both on the toggle
+    // and on the row it discloses, so getAllByText rather than getByText.
     fireEvent.click(document.querySelector(".card") as HTMLElement);
-    expect(screen.getByText("svc-7e")).toBeTruthy();
+    expect(screen.getAllByText("svc-7e").length).toBeGreaterThan(0);
     expect(screen.queryByText(/1 agent/)).toBeNull();
   });
 
-  it("counts several agents and lists them when expanded", () => {
+  // The drawer's AgentsRow ships expanded (Task: the design doc requires it —
+  // "there is room; the fold existed because the card had none"), so this no
+  // longer needs a click to see every row, unlike the card-level fold
+  // AgentsRow still defaults to for any other caller (see deckParts.test.tsx).
+  it("counts several agents and shows every row without expanding", () => {
     render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
-    const disclosure = screen.getByRole("button", { name: /2 agents/ });
-    expect(screen.queryByText("svc-fa")).toBeNull();
-    fireEvent.click(disclosure);
+    expect(screen.getByRole("button", { name: /2 agents/ })).toBeTruthy();
     expect(screen.getByText("svc-fa")).toBeTruthy();
     // Each row carries its OWN state — the whole point of listing them.
     expect(screen.getByText("working")).toBeTruthy();
@@ -700,8 +704,8 @@ describe("DeckApp PR-facts chrome", () => {
     };
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [noStart, mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
+    // The drawer's AgentsRow ships expanded by default — no click needed.
     fireEvent.click(container.querySelector(".card") as HTMLElement);
-    fireEvent.click(screen.getByRole("button", { name: /2 agents/ }));
     const rows = [...container.querySelectorAll(".ag-row")];
     const zeroRow = rows.find((r) => r.textContent?.includes("svc-7e"))!;
     expect(zeroRow.querySelector(".ag-open")).toBeNull();
@@ -1106,6 +1110,17 @@ describe("DeckApp — Address PR", () => {
     expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
   });
 
+  // deriveBucket's isReviewStatus (`/review|qa|verif/i`) can land a run in the
+  // review column, and prSignals({}).ready is false, off a Jira status alone —
+  // with no PR entries at all. Without prSignals(r.prs).open in canAddressPr,
+  // this reaches the waiting lane with nothing for the button to seed an agent
+  // against.
+  it("hides the button on the waiting lane with no PR at all (prs: {})", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "review", ticketStatus: "In QA", prs: {} })]));
+    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+  });
+
   it("hides the button on a local card, whose ticket key is only inferred, even on the waiting lane", () => {
     render(<DeckApp />);
     host(runsMsg([waitingPr({ run: { ...mkStatus().run, key: "local-a", url: "", kind: "local" } as never })]));
@@ -1261,8 +1276,8 @@ describe("Agents view", () => {
     host(runsMsg([mkStatus({
       agents: [{ ...mkAgent("agent-flow-2e", "working", 100), activity: { state: "working", lastActivityMs: 100, slug: "export-streaming-fix" } }],
     })]));
+    // The drawer's AgentsRow ships expanded by default — no click needed.
     fireEvent.click(document.querySelector(".card") as HTMLElement);
-    fireEvent.click(screen.getByTitle(/sessions open in this directory/i));
     expect(screen.getByTitle("export-streaming-fix")).toBeInTheDocument();
   });
 
@@ -1272,8 +1287,8 @@ describe("Agents view", () => {
     host(runsMsg([mkStatus({
       agents: [mkAgent("agent-flow-2e", "working", 100)],
     })]));
+    // The drawer's AgentsRow ships expanded by default — no click needed.
     fireEvent.click(container.querySelector(".card") as HTMLElement);
-    fireEvent.click(screen.getByTitle(/sessions open in this directory/i));
     expect(container.querySelector(".ag-name")).not.toHaveAttribute("title");
   });
 
@@ -1703,6 +1718,21 @@ describe("the deck:flows handler", () => {
     expect(drawer()).toBeInTheDocument();
     host(flowsMsg([mkFlow("f2", "Two")]));
     expect(drawer()).toBeNull();
+  });
+
+  // The two drawers share one fixed slot at z-index 40 (.dd and .orch in
+  // deckStyles.ts) — reachable in practice because postFlows fires on every
+  // refresh, so a flow created in a second VS Code window can land here while a
+  // card is selected in this one, with no click on this window's own chip.
+  it("closes a selected card's detail when a flow it has not seen before arrives", () => {
+    render(<DeckApp />);
+    host(flowsMsg([])); // establishes seenFlowsRef, previous list []
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd")).not.toBeNull();
+    host(flowsMsg([mkFlow("f1", "New flow")])); // a fresh flow, not from this chip
+    expect(document.querySelector(".dd")).toBeNull();
+    expect(document.querySelector(".orch")).not.toBeNull();
   });
 });
 
@@ -2185,6 +2215,19 @@ describe("card selection", () => {
     // `.dd` regardless of `openFlowId` (they are independent state), so the
     // `.dd` assertion above alone cannot tell "closed" from "never closed."
     expect(document.querySelector(".orch.closing")).not.toBeNull();
+  });
+
+  // The reverse direction of the test above: the spec asks for mutual exclusion
+  // both ways, and only "selecting a card closes the Orchestrator" had a test.
+  it("closes the card detail drawer when the Orchestrator chip is clicked", () => {
+    render(<DeckApp />);
+    host({ type: "deck:flows", flows: [{ id: "f1", name: "F", nodes: [], edges: [], armed: false } as never],
+      enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {} } as OutboundMessage);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /orchestrator/i }));
+    expect(document.querySelector(".dd")).toBeNull();
   });
 
   // "does not select when a PR link is clicked" is deleted here, not re-pointed:

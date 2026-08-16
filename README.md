@@ -49,11 +49,13 @@ Claude-only say so.
   `<KEY>.code-workspace` (or one window per repo, or a per-task git worktree), and pre-fills
   your agent — the Claude Code panel, Copilot Chat, or either one's CLI in a terminal —
   with your chosen prompt mode (you press Enter to start).
-- **Address PR** — once a task reaches your PR-review status (default `PR initiated`), an
-  **Address PR** button appears on the card. From the sidebar's task card it kicks off an agent
-  **in a fresh worktree**; from a Deck card it re-seeds the workspace that run already has
-  instead, asking nothing, since the run was launched with one. Either way the agent finds the
-  task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
+- **Address PR** — an **Address PR** button appears once a task has an open PR waiting on you.
+  On the sidebar's Tasks card that means reaching your PR-review status (default `PR initiated`);
+  on a Deck card it means the review column's waiting lane, with an actual open PR behind it —
+  the two surfaces gate on different things. From the sidebar's task card the button kicks off
+  an agent **in a fresh worktree**; from a Deck card it re-seeds the workspace that run already
+  has instead, asking nothing, since the run was launched with one. Either way the agent finds
+  the task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
   for your fixes — then, by default, starts implementing the requested changes (toggle with
   `agentFlow.prReviewAutoFix`).
 - **Review queue** — a strip on the Deck lists every open PR that asks for *your* review,
@@ -417,7 +419,7 @@ repo, so they never get committed.
 | `agentFlow.retireClosedAfterHours` | `24` | How long a closed run stays in the board's **Recently closed** strip before its record is deleted. `0` retires on sight. |
 | `agentFlow.inflightShowAll` | `false` | Show every run record on the board, the way it worked before the Recently closed strip. |
 | `agentFlow.retireAbandonedAfterDays` | `7` | How long a ticketless, PR-less, clean run may sit before its record is deleted. `0` disables it. |
-| `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on a card. |
+| `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on the sidebar's Tasks card. The Deck gates its own Address PR button on the review column's waiting lane instead — this setting does not affect it. |
 | `agentFlow.prReviewAutoFix` | `true` | After the PR-review agent assesses the PR, let it implement the requested changes (off = assess only). |
 | `agentFlow.reviewRequests` | `true` | Show the Deck's review-requests strip: open GitHub PRs that ask for your review. |
 | `agentFlow.reviewRequestsTtlSeconds` | `300` | How stale the cached review queue may be before a refetch (minimum 60). |

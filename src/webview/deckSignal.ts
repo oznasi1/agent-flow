@@ -78,6 +78,9 @@ export function cardSignal(r: RunStatus, agent: CardAgent | null): SignalBit[] {
   if (tot.a > 0 || tot.d > 0) bits.push({ kind: "diff", added: tot.a, removed: tot.d });
 
   if (r.repos.length > 1) bits.push({ kind: "text", text: `${r.repos.length} repos` });
+  // r.agents.length is the RUN's agent count, not this card's — on the Agents
+  // lens `agent` is one session and the card is that one agent, so this branch
+  // only ever fires on the Workspaces lens, where a card is a run.
   else if (r.agents.length > 1) bits.push({ kind: "text", text: `${r.agents.length} agents` });
 
   // Same structural guard as above: slice caps at three bits.

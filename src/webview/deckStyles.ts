@@ -231,20 +231,17 @@ export const DECK_CSS = `
   .ag-age { margin-left: auto; flex: none; }
   .ag-open { flex: none; opacity: .7; }
 
-  .c-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; min-width: 0; }
+  /* Still live: it moved off the card's old .c-foot into the drawer header,
+     where it carries the run's tracker status (DeckDetail.tsx's .dd-hd .pill). */
   .pill { flex: 0 1 auto; min-width: 0; font-size: var(--t-body);
     border: 1px solid var(--hair); border-radius: 20px; padding: 1px 9px;
     color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* One button language, three weights of the same 26px shape. The primary is a quiet
      raised surface at rest and only takes the theme's button color under the pointer:
-     an Open slab on every card is ambient noise, not emphasis. The dimming lives on
-     the buttons, not on .actions — opacity on the container would composite the whole
-     subtree and make the overflow menu see-through. */
-  .actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 5px; }
-  .act:not(.primary), .more { opacity: .7; transition: opacity .12s ease; }
-  .card:hover .act, .card:focus-within .act,
-  .card:hover .more, .card:focus-within .more { opacity: 1; }
+     an Open slab on every card is ambient noise, not emphasis. */
+  .act:not(.primary) { opacity: .7; transition: opacity .12s ease; }
+  .card:hover .act, .card:focus-within .act { opacity: 1; }
   .act { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-body); font-weight: 500;
     height: 26px; padding: 0 11px; border-radius: var(--r-ctl); cursor: pointer; white-space: nowrap;
     border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
@@ -289,20 +286,6 @@ export const DECK_CSS = `
   .act.primary:disabled, .act.primary:disabled:hover,
   .card.attn .act.primary:disabled, .card.attn .act.primary:disabled:hover {
     cursor: default; color: var(--dim); background: transparent; border-color: var(--hair); }
-
-  .more-wrap { position: relative; display: inline-flex; }
-  .more { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
-    border: 0; background: none; border-radius: var(--r-ctl); color: var(--dim); cursor: pointer;
-    font-size: 13px; line-height: 1; }
-  .more:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
-  .menu { position: absolute; right: 0; bottom: calc(100% + 5px); z-index: 20; min-width: 132px;
-    border: 1px solid var(--hair); border-radius: 8px; padding: 4px;
-    background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
-    box-shadow: 0 8px 24px -10px rgba(0,0,0,.6); }
-  .mi { display: block; width: 100%; text-align: left; font-size: 12px; padding: 6px 9px; border: 0;
-    border-radius: var(--r-chip); cursor: pointer; background: none; color: var(--vscode-foreground); white-space: nowrap; }
-  .mi:hover { background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)); }
-  .mi.danger { color: var(--c-danger); }
 
   .empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 8px; color: var(--dim); text-align: center; padding: 40px; }
@@ -577,10 +560,21 @@ export const DECK_CSS = `
   .card { display: flex; flex-direction: column; min-height: 152px;
     padding: 13px 14px 13px 16px; gap: 9px; cursor: pointer; }
   .col-body { gap: 14px; }
-  .c-title { line-height: 1.45; }
+  /* Under the card's own flex column, margins between children don't collapse —
+     they add to .card's 9px gap — so .c-title's own margin-top: 5px (set before
+     the card was a flex column) would ship the top-to-title gap at 14px against
+     the approved 9px. Zeroing it here is what makes the gap exactly 9px. */
+  .c-title { line-height: 1.45; margin-top: 0; }
   .card.sel { border-color: var(--vscode-focusBorder);
     background: color-mix(in srgb, var(--vscode-focusBorder) 7%, var(--vscode-editor-background)); }
   .card.sel::before { opacity: 1; width: 3px; }
+  /* .card.attn:hover is (0,3,0) against .card.sel's (0,2,0), so without this a
+     selected Action-required card would revert to the attn hover tint the
+     moment the pointer sits on it. Same specificity as .card.attn:hover
+     (0,3,0), and declared after it, so the selected state wins the tie
+     whether or not the card is also hovered — without weakening .card.attn's
+     own hover treatment for a card that isn't selected. */
+  .card.attn.sel { border-color: var(--vscode-focusBorder); }
 
   /* One line, always. The three-bit cap in cardSignal is not enough on its own —
      a long branch name still pushes the third bit onto a second row — so the line

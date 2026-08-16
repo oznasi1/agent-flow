@@ -160,8 +160,15 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
   // The lane, not the ticket status: Address PR belongs to the card that is
   // waiting on a human, which is exactly what the waiting lane means. The local
   // guard survives the change — a local card's key is inferred from its branch,
-  // so its status may belong to a ticket somebody else owns.
-  const canAddressPr = !local && column === "review" && lane === "waiting";
+  // so its status may belong to a ticket somebody else owns. `column === "review"`
+  // is redundant with the lane check — deriveLane only ever answers "waiting"
+  // under the review column — kept as defence against a caller that hands this
+  // component a lane/column pair deriveLane itself never would.
+  // prSignals(r.prs).open guards against a card whose Jira status alone landed it
+  // in the review/waiting slot with no actual open PR (prs: {}) to address —
+  // deriveBucket's isReviewStatus and prSignals().ready are independent checks,
+  // so a card can reach here with nothing to seed an agent against.
+  const canAddressPr = !local && column === "review" && lane === "waiting" && prSignals(r.prs).open;
   // The key came from the branch, not from a launch. Say so: the branch could
   // name a ticket somebody else owns, and the ticket status on this card would
   // then be theirs. Computed host-side (the webview has no connector to parse
@@ -173,6 +180,7 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
   // repo's git or PR it means.
   const dragRepo = agent?.repo ?? (r.repos.length === 1 ? r.repos[0].name : undefined);
   const cardDragKey = dragRepo ? `${r.run.key}${DRAG_SEP}${dragRepo}` : null;
+  const sigBits = cardSignal(r, agent);
 
   return (
     <div
@@ -215,16 +223,21 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
         {r.run.summary}
       </div>
 
-      <div className="c-sig">
-        {cardSignal(r, agent).map((b, i) => (
-          <React.Fragment key={i}>
-            {i > 0 && <span className="sep">·</span>}
-            {b.kind === "diff"
-              ? <span className="c-diff"><span className="add">+{b.added}</span><span className="del">−{b.removed}</span></span>
-              : <span className={`${b.mono ? "m" : ""} ${b.tone ?? ""}`.trim()}>{b.text}</span>}
-          </React.Fragment>
-        ))}
-      </div>
+      {sigBits.length > 0 && (
+        <div className="c-sig">
+          {sigBits.map((b, i) => (
+            <React.Fragment key={i}>
+              {i > 0 && <span className="sep">·</span>}
+              {b.kind === "diff"
+                ? <span className="c-diff"><span className="add">+{b.added}</span><span className="del">−{b.removed}</span></span>
+                // The truncated branch's own title: .c-sig .m ellipsizes by design,
+                // so a long one is otherwise unrecoverable without opening the
+                // drawer — the old .c-branch .bn carried the same title.
+                : <span className={`${b.mono ? "m" : ""} ${b.tone ?? ""}`.trim()} title={b.mono ? b.text : undefined}>{b.text}</span>}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
 
       <div className="c-foot2" onClick={(e) => e.stopPropagation()}>
         <button
@@ -252,7 +265,6 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
 export function DeckApp(): JSX.Element {
   const [runs, setRuns] = React.useState<RunStatus[]>([]);
   const [ghNote, setGhNote] = React.useState<string | null>(null);
-  const [prReviewStatus, setPrReviewStatus] = React.useState("");
   const [syncedAt, setSyncedAt] = React.useState<number | null>(null);
   const [, forceTick] = React.useState(0);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string; action?: { label: string; url: string } }[]>([]);
@@ -329,7 +341,6 @@ export function DeckApp(): JSX.Element {
         setRuns(m.runs);
         setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
-        setPrReviewStatus(m.prReviewStatus);
         setSourceLabel(m.sourceLabel);
         setSyncedAt(Date.now());
         setHasLoaded(true);
@@ -416,9 +427,18 @@ export function DeckApp(): JSX.Element {
         flowsRef.current = posted;
         seenFlowsRef.current = true;
         setFlows(posted);
+        // A pure read of `posted`/`old`/`seenBefore` — computed here, outside the
+        // updater below, rather than inside it. React's contract is that an
+        // updater is pure and may be replayed; a fresh flow auto-opening the
+        // Orchestrator is a one-time side effect (clearing `selId`) that must
+        // happen exactly once per post, not once per replay.
+        const fresh = seenBefore ? posted.find((f) => !old.some((o) => o.id === f.id)) : undefined;
+        // The two drawers share the same fixed slot at z-index 40 (see .dd and
+        // .orch in deckStyles.ts) — a fresh flow auto-opening the Orchestrator
+        // must close any open card detail, or both mount at once.
+        if (fresh) setSelId(null);
         setOpenFlowId((cur) => {
           if (cur && posted.some((f) => f.id === cur)) return cur;
-          const fresh = seenBefore ? posted.find((f) => !old.some((o) => o.id === f.id)) : undefined;
           return fresh ? fresh.id : null;
         });
         setOrchEnabled(m.enabled);

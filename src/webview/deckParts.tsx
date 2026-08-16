@@ -116,9 +116,12 @@ const AGENT_STATE: Record<AgentActivity["state"], { text: string; tone: Tone }> 
 /** Every agent open in this card's directories. Collapsed it is one line — the
  * name when there is one agent, a count when there are more; expanded it is a
  * row each, because two sessions in one worktree are two different states and a
- * single aggregate dot cannot say both. */
-export function AgentsRow({ agents }: { agents: CardAgent[] }): JSX.Element | null {
-  const [open, setOpen] = React.useState(false);
+ * single aggregate dot cannot say both.
+ *
+ * `defaultOpen` defaults to false so nothing else that renders this changes —
+ * the drawer is the one caller with room to spare, and passes it explicitly. */
+export function AgentsRow({ agents, defaultOpen = false }: { agents: CardAgent[]; defaultOpen?: boolean }): JSX.Element | null {
+  const [open, setOpen] = React.useState(defaultOpen);
   if (agents.length === 0) return null;
   // A single agent's label IS its name — an identifier, so it earns the mono
   // treatment (.id). Falling back to "1 agent", or counting several ("N agents"),

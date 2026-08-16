@@ -88,12 +88,25 @@ describe("DeckDetail", () => {
   });
 
   it("offers Address PR on the waiting lane", () => {
-    const { container } = render1(mkCard());
+    // An actual open PR behind it — canAddressPr also requires prSignals(r.prs).open,
+    // which mkCard()'s default `prs: {}` does not satisfy (see the "no PR at all"
+    // case below).
+    const { container } = render1(mkCard({ prs: { svc: { facts: facts(), fetchedAt: 1 } } as PrEntryMap }));
     expect(within(container).getByRole("button", { name: /address pr/i })).toBeTruthy();
   });
 
   it("offers no Address PR on the ready lane", () => {
     const { container } = render1({ ...mkCard(), lane: "ready" });
+    expect(within(container).queryByRole("button", { name: /address pr/i })).toBeNull();
+  });
+
+  // A run can reach the review column's waiting lane off its Jira status alone
+  // (deriveBucket's isReviewStatus), with no PR entries behind it at all —
+  // mkCard()'s default `prs: {}` is exactly that. Without prSignals(r.prs).open
+  // in canAddressPr, the button would offer to seed an agent against a PR that
+  // does not exist.
+  it("offers no Address PR on the waiting lane with no PR at all (prs: {})", () => {
+    const { container } = render1(mkCard());
     expect(within(container).queryByRole("button", { name: /address pr/i })).toBeNull();
   });
 
@@ -133,6 +146,33 @@ describe("DeckDetail", () => {
     render1(mkCard());
     fireEvent.click(screen.getByRole("button", { name: /copy branch name/i }));
     expect(writeText).toHaveBeenCalledWith("feat/x");
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("copies the ticket key without touching the host", () => {
+    const writeText = vi.fn();
+    Object.assign(navigator, { clipboard: { writeText } });
+    render1(mkCard());
+    fireEvent.click(screen.getByRole("button", { name: /copy ticket key/i }));
+    expect(writeText).toHaveBeenCalledWith("ASM-1");
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("copies the PR url without touching the host", () => {
+    const writeText = vi.fn();
+    Object.assign(navigator, { clipboard: { writeText } });
+    render1(mkCard({ prs: { svc: { facts: facts({ url: "https://gh/pr/77" }), fetchedAt: 1 } } as PrEntryMap }));
+    fireEvent.click(screen.getByRole("button", { name: /copy pr url/i }));
+    expect(writeText).toHaveBeenCalledWith("https://gh/pr/77");
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("copies the worktree path without touching the host", () => {
+    const writeText = vi.fn();
+    Object.assign(navigator, { clipboard: { writeText } });
+    render1(mkCard());
+    fireEvent.click(screen.getByRole("button", { name: /copy worktree path/i }));
+    expect(writeText).toHaveBeenCalledWith("/r/svc");
     expect(sent).not.toHaveBeenCalled();
   });
 

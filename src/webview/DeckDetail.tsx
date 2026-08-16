@@ -2,6 +2,9 @@ import * as React from "react";
 import { send } from "./vscodeApi";
 import { isTicketRun, runKind, type PrFacts } from "../types";
 import type { DeckCard } from "./deckCards";
+// Same import DeckApp.tsx's own Card makes, and safe for the same reason: bucket.ts
+// is kept free of fs-touching imports, which bucket.test.ts enforces.
+import { prSignals } from "../engine/bucket";
 import { AgentsRow, PrBlock, RepoChip, WorkspaceChip, workspaceLabel } from "./deckParts";
 import { timeAgo } from "./helpers";
 
@@ -53,7 +56,10 @@ export function DeckDetail({ card, sourceLabel, onClose, onForget }: DeckDetailP
   // Address PR rides the lane, not the ticket status. The `local` guard stays:
   // a local card's key is read off its branch, so its status may belong to a
   // ticket somebody else owns — not something to seed an agent against.
-  const canAddressPr = !local && card.column === "review" && card.lane === "waiting";
+  // prSignals(r.prs).open guards the same hole DeckApp.tsx's own canAddressPr
+  // does: a card can reach review/waiting off its Jira status alone, with
+  // `prs: {}` and no actual PR to address.
+  const canAddressPr = !local && card.column === "review" && card.lane === "waiting" && prSignals(r.prs).open;
 
   const actions: { group: string; items: Action[] }[] = [
     { group: "This task", items: [
@@ -137,8 +143,10 @@ export function DeckDetail({ card, sourceLabel, onClose, onForget }: DeckDetailP
 
       <div className="dd-sec">
         <div className="dd-lbl">Agents</div>
+        {/* Expanded by default here — there is room in the drawer, unlike the
+          * card, where the fold existed because the card had none. */}
         {card.agents.length > 0
-          ? <AgentsRow agents={card.agents} />
+          ? <AgentsRow agents={card.agents} defaultOpen />
           : <div className="dd-none">No agent open — git + {sourceLabel} only</div>}
       </div>
 

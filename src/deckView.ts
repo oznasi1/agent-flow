@@ -3136,8 +3136,9 @@ export class DeckPanel {
       this.toast("error", `No run record for ${key}.`);
       return;
     }
-    // The webview only ever sends this for a card gated on isPrReviewStatus &&
-    // kind !== "local" — but `this.run(key)` falls back to the in-memory
+    // The webview only ever sends this for a card gated on the review column's
+    // waiting lane (with an open PR behind it) && kind !== "local" — but
+    // `this.run(key)` falls back to the in-memory
     // localRuns map, so a hand-crafted deck:addressPr naming a local key would
     // still resolve one. A local card's ticket is inferred from a branch name;
     // seeding a PR-review agent against that inference on one click is exactly
