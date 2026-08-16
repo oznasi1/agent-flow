@@ -63,6 +63,8 @@ export function cardSignal(r: RunStatus, agent: CardAgent | null): SignalBit[] {
       bits.push({ kind: "text", text: REVIEW_TEXT[f.review] });
     }
 
+    // Slice caps at three bits. Today this is structural — both branches push at most
+    // three — but the slice guards against future callers adding a fourth bit.
     return bits.slice(0, 3);
   }
 

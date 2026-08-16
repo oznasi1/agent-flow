@@ -79,6 +79,18 @@ describe("cardSignal", () => {
     ]);
   });
 
+  it("reports review_required on an open PR, guarded by f.state !== MERGED check", () => {
+    const bits = cardSignal(status({
+      prs: pr(facts({ state: "OPEN", review: "review_required", mergeable: "clean" })),
+    }), null);
+    // Shows PR number, CI status, and review status (guarded by f.state !== "MERGED")
+    expect(bits).toEqual([
+      { kind: "text", text: "#10", mono: true },
+      { kind: "text", text: "✓ ci", tone: "ok" },
+      { kind: "text", text: "required" },
+    ]);
+  });
+
   it("never puts diff totals on a card that has a PR", () => {
     const bits = cardSignal(status({
       repos: [repo({ added: 99, removed: 4 })], prs: pr(facts()),
