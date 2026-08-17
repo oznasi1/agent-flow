@@ -92,14 +92,15 @@ export interface FlowCommand {
  * `buildRunStatus` (see AgentActivity.midWork). */
 export type AgentState = "working" | "needs-you" | "stalled" | "exited" | "idle" | "unknown";
 
-/** The board column a run lands in. */
-export type DeckColumn = "progress" | "needs" | "review" | "done";
-
-/** A band inside a column, for the two columns that hold visibly different work:
- * an approved, green, conflict-free PR is not the same news as one nobody has
- * opened, and a merged run is not the same news as a ticket someone marked done.
- * `null` on the columns that mean one thing. Derived, never posted by the host. */
-export type DeckLane = "ready" | "waiting" | "merged" | "unmerged";
+/** The board column a run lands in, in board order. Attention rises left to
+ * right and ends at the merge: something is running, something wants you,
+ * something is parked on other people, something is one click from done.
+ *
+ * There is deliberately no `done`. Finished work is not a stage of work — a
+ * merged run and a ticket somebody marked done both leave the board for the
+ * Recently closed strip (see `shelfFor`), which already offers the only two
+ * things you can still do with them: reopen and forget. */
+export type DeckColumn = "progress" | "needs" | "review" | "merge";
 
 /** Where a run sits on the In-flight view: a board column, or the Recently
  * closed strip. Membership only — `DeckColumn` still says which column. */

@@ -49,10 +49,11 @@ const ruleBlocks = (sheet: string): { selector: string; body: string }[] =>
     body: m[2],
   }));
 
-// Set per-card as an inline style in DeckApp.tsx (a computed value, not a shared
-// token), so it never appears as a declaration in any stylesheet's own text —
-// excluded from the orphan check the same way --vscode-* variables are.
-const RUNTIME_ONLY = ["--accent"];
+// Set as inline styles in DeckApp.tsx (computed values, not shared tokens), so
+// they never appear as a declaration in any stylesheet's own text — excluded from
+// the orphan check the same way --vscode-* variables are. `--accent` is per-card;
+// `--zone` is per-board-column, and carries that zone's hue to every rule under it.
+const RUNTIME_ONLY = ["--accent", "--zone"];
 
 describe("tokens.ts", () => {
   it("declares every token it owns", () => {

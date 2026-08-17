@@ -23,8 +23,6 @@ export interface VisibilityInput {
   hasLiveSession: boolean;
   /** Any PR still OPEN, draft included: a draft is unmerged work in flight. */
   prOpen: boolean;
-  /** `landed()` above. */
-  landed: boolean;
   /** A ticket run whose category is not "done". */
   ticketActive: boolean;
   /** dirty || ahead > 0, counted on OWNED paths only. Without the ownership
@@ -36,15 +34,21 @@ export interface VisibilityInput {
 /**
  * Board or strip. Any single signal of live work is enough — this decides
  * *membership* only. `deriveBucket` still decides which of the four columns a
- * board card lands in, and is untouched.
+ * board card lands in.
  *
- * `landed` keeps finished work on the board so it sits in Done until the retire
- * sweep's grace window elapses, rather than skipping straight to the strip.
+ * `landed()` above is deliberately NOT one of these signals. The board has no
+ * finished column to hold landed work in: a merged run, and a ticket someone
+ * marked done, go straight to the Recently closed strip, which offers the only
+ * two things left to do with them (reopen, forget). The strip is where they wait
+ * out the retire sweep's grace window.
+ *
+ * Landing still does not *always* close a run, and that is the point of listing
+ * the signals separately: a merged PR whose ticket nobody has moved yet keeps
+ * `ticketActive`, and an agent still open in the worktree keeps `hasLiveSession`.
+ * Both are live work that happens to sit behind a merge.
  *
  * Keep this file free of `fs`-touching imports — visibility.test.ts enforces it.
  */
 export function shelfFor(i: VisibilityInput): Shelf {
-  return i.hasLiveSession || i.prOpen || i.landed || i.ticketActive || i.hasWorkToLose
-    ? "board"
-    : "closed";
+  return i.hasLiveSession || i.prOpen || i.ticketActive || i.hasWorkToLose ? "board" : "closed";
 }

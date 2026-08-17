@@ -60,13 +60,15 @@ export function DeckDetail({ card, sourceLabel, usage, onClose, onForget }: Deck
   const withPr = Object.entries(r.prs).filter(([, e]) => e.facts !== null) as [string, { facts: PrFacts }][];
   const lead = withPr[0]?.[1].facts;
 
-  // Address PR rides the lane, not the ticket status. The `local` guard stays:
-  // a local card's key is read off its branch, so its status may belong to a
-  // ticket somebody else owns — not something to seed an agent against.
-  // prSignals(r.prs).open guards the same hole DeckApp.tsx's own canAddressPr
-  // does: a card can reach review/waiting off its Jira status alone, with
-  // `prs: {}` and no actual PR to address.
-  const canAddressPr = !local && card.column === "review" && card.lane === "waiting" && prSignals(r.prs).open;
+  // Address PR rides the column, not the ticket status. In review means one thing
+  // now that ready-to-merge is a column of its own — a PR somebody still has to
+  // look at — so the old `lane === "waiting"` half of this test is what the column
+  // itself says. The `local` guard stays: a local card's key is read off its
+  // branch, so its status may belong to a ticket somebody else owns, not something
+  // to seed an agent against. prSignals(r.prs).open guards the remaining hole: a
+  // card can reach review off its Jira status alone, with `prs: {}` and no actual
+  // PR to address.
+  const canAddressPr = !local && card.column === "review" && prSignals(r.prs).open;
 
   const actions: { group: string; items: Action[] }[] = [
     { group: "This task", items: [

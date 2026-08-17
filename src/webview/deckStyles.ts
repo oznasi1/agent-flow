@@ -63,6 +63,13 @@ export const DECK_CSS = `
   .stat.attn { border-color: color-mix(in srgb, var(--c-attn) 55%, var(--hair)); }
   .stat.attn .n { color: var(--c-attn); }
   .stat.attn .l { color: color-mix(in srgb, var(--c-attn) 70%, var(--dim)); }
+  /* The good-news tile, lit on exactly the same terms as .attn and in the merge
+     column's own green. Two lit tiles in a row is the point: one says something
+     is wrong, the other says something is finished, and they are the only two
+     numbers on this header you can act on without opening anything. */
+  .stat.up { border-color: color-mix(in srgb, var(--c-done) 55%, var(--hair)); }
+  .stat.up .n { color: var(--c-done); }
+  .stat.up .l { color: color-mix(in srgb, var(--c-done) 70%, var(--dim)); }
   .hd .sp { flex: 1; }
 
   /* The header's one remaining .ctls user is the Agents/Workspaces lens: a joined
@@ -104,26 +111,36 @@ export const DECK_CSS = `
      cards pass underneath it. */
   .col-hd { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px;
     padding: 16px 2px 10px; flex: none; background: var(--vscode-editor-background); }
-  .col-hd .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .col-hd .nm { font-size: 12px; font-weight: 600; letter-spacing: -.005em; white-space: nowrap; }
+  .col-hd .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--zone); }
+  /* The halo, on the zones where the dot means something is alive right now. A
+     spread-only shadow rather than a blur ring: it reads as light coming off the
+     dot at 8px, where a blurred ring reads as a smudge. Static, not animated —
+     .sdot's pulse is reserved for one working agent, and four pulsing column
+     headers would drown it. */
+  .col-hd .dot.glow { box-shadow: 0 0 0 3px color-mix(in srgb, var(--zone) 26%, transparent),
+    0 0 9px 1px color-mix(in srgb, var(--zone) 55%, transparent); }
+  /* Mono uppercase micro, not a 12px semibold sentence: a zone label is a
+     coordinate on the board, in the same voice as every other identifier here,
+     and it must not compete with the card titles underneath it. Tracking opens up
+     because uppercase at 10px sets too tight to read otherwise. */
+  .col-hd .nm { font-family: var(--mono); font-size: var(--t-micro); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; color: var(--zone); }
+  /* Right-aligned, past the rule: the count is the answer to "how many", which you
+     ask after reading the label, and a column of counts down the board's right edge
+     is comparable at a glance in a way four counts at four label widths is not. */
   .col-hd .ct { font-size: var(--t-micro); font-variant-numeric: tabular-nums; color: var(--dim);
     border: 1px solid var(--hair); border-radius: 20px; padding: 1px 7px; line-height: 1.3; }
-  .col-hd .rule { flex: 1; height: 1px; background: var(--hair); }
-  .col-body { display: flex; flex-direction: column; gap: 10px; padding: 1px 3px 3px; }
-  /* A band inside a column. Deliberately quieter than .col-hd — no dot, no sticky, lowercase
-     from the markup — so the column header still reads as the heading and this reads as a
-     divider under it. The first lane sits tight to the column header; later ones open a gap
-     so the break between bands is visible without a heavier rule. */
-  .lane-hd { display: flex; align-items: center; gap: 7px; flex: none;
-    padding: 2px 2px 0; color: var(--dim); font-size: var(--t-micro); }
-  .lane-hd:not(:first-child) { margin-top: 6px; }
-  .lane-hd .nm { letter-spacing: .01em; white-space: nowrap; }
-  .lane-hd .ct { font-variant-numeric: tabular-nums; }
-  .lane-hd .rule { flex: 1; height: 1px; background: var(--hair); }
-  /* The one lane that is good news — an approved, green, conflict-free PR, or a run that
-     actually landed. Nothing here is a failure, so nothing here is red. */
-  .lane-hd.up { color: var(--c-done); font-weight: 600; }
-  .lane-hd.up .rule { background: color-mix(in srgb, var(--c-done) 30%, var(--hair)); }
+  .col-hd .rule { flex: 1; height: 1px; background: color-mix(in srgb, var(--zone) 22%, var(--hair)); }
+  /* The zone tint: the hue pooling at the top of the column and falling away over
+     the first card's height. Faint on purpose — it says "this is a place" without
+     fighting the cards, which carry their own accent rail and their own state
+     colour — but not so faint it reads as a rendering artefact. It sits on
+     .col-body rather than .col so it starts under the sticky header instead of
+     scrolling out from behind it, and the padding widens to give the gradient an
+     edge that is visibly inside the column rather than flush with the cards. */
+  .col-body { display: flex; flex-direction: column; gap: 10px; padding: 8px 7px 3px;
+    border-radius: var(--r-card);
+    background: linear-gradient(color-mix(in srgb, var(--zone) 9%, transparent), transparent 260px); }
 
   /* \`flex: none\` is load-bearing: .card sets overflow:hidden to clip the accent rail, which
      zeroes its automatic minimum size — without it the flex column squeezes every card and

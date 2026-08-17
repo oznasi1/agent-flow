@@ -90,12 +90,11 @@ export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
       : reduced;
   const pr = prSignals(prs);
   const column = deriveBucket({
-    ticketCategory: ticket?.category ?? null,
     ticketStatus: ticket?.status ?? null,
     agentState: agent.state,
     prOpen: pr.open,
     prBlocked: pr.blocked,
-    prMerged: pr.merged,
+    prReady: pr.ready,
   });
   const target = runTarget(run);
   const windowOpen = target ? (i.openIdentities ?? new Set<string>()).has(canon(target)) : false;

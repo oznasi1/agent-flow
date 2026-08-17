@@ -116,9 +116,12 @@ describe("buildRunStatus", () => {
     expect(s.repos[0].dirty).toBe(true);
   });
 
-  it("puts a Jira-done run in Done despite a working agent", () => {
+  it("keeps a Jira-done run with a working agent in In progress — there is no Done column", () => {
+    // The board holds live work only. A done ticket somebody still has an agent
+    // running against is live work; `shelfFor` is what takes it off the board
+    // once the agent closes, not a column here.
     const s = buildRunStatus({ run, ticket: { status: "Done", category: "done" }, projectsRoot: projRoot, nowMs: NOW });
-    expect(s.column).toBe("done");
+    expect(s.column).toBe("progress");
   });
 
   it("still renders the backbone with no Jira info", () => {
@@ -161,12 +164,21 @@ describe("buildRunStatus", () => {
     expect(s.column).toBe("needs");
   });
 
-  it("puts a run whose PR merged into Done even when Jira says in progress", () => {
+  it("gives a run whose PR is approved and green the Ready-to-merge column, over its working agent", () => {
+    const s = buildRunStatus({
+      run, ticket: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW,
+      openIdentities: new Set(), prs: entries(prFacts({ review: "approved" })),
+    });
+    expect(s.agent.state).toBe("working");
+    expect(s.column).toBe("merge");
+  });
+
+  it("claims no column for a merged PR — the run leaves the board instead", () => {
     const s = buildRunStatus({
       run, ticket: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW,
       openIdentities: new Set(), prs: entries(prFacts({ state: "MERGED" })),
     });
-    expect(s.column).toBe("done");
+    expect(s.column).toBe("progress");
   });
 
   describe("buildRunStatus with open sessions", () => {

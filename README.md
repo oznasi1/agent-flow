@@ -119,9 +119,11 @@ can't run the Web Speech API.
 
 Once you've taken tasks, the **Deck** (open it with **"Open the Deck (in-flight)"**)
 is the board of everything you've launched, in a classic pipeline —
-**In progress · Action required · In review · Done**.
+**In progress · Action required · In review · Ready to merge**. Attention rises left to
+right and ends at the merge; nothing finished takes up board space, because a merged run
+(or a ticket somebody marked done) drops into **Recently closed** underneath.
 
-<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Done). Its header carries the title, three tiles counting In progress, Action required and In review, an Agents / Workspaces lens and a refresh reading 'synced 4s ago'. Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a live agent status (working, idle, ended turn, parked, or merged), the PR and CI state, the Jira status, and Open / Diff actions. In the Agents lens one ticket with two sessions renders as two cards, and a note started from the Notepad tab sits among them marked 'notepad'. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button." />
+<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Ready to merge). Its header carries the title, four tiles counting In progress, Action required, In review and Ready to merge, an Agents / Workspaces lens and a refresh reading 'synced 4s ago'. Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a live agent status (working, idle, ended turn, parked, or ready to merge), the PR and CI state, the Jira status, and Open / Diff actions. A note started from the Notepad tab sits among the tickets marked 'notepad'. Each column carries its own hue in its dot, header rule and a faint tint down the top of the column, and a collapsed 'Recently closed' strip sits under the board. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button." />
 
 The columns are a neutral git + Jira backbone; each **card** carries the true live state.
 A best-effort **Live signal** (read from your local Claude Code transcripts) tells `working ·

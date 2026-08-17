@@ -34,8 +34,7 @@ const mkCard = (over: Partial<RunStatus> = {}, agent: DeckCard["agent"] = null):
     agent: { state: "unknown", lastActivityMs: null, slug: null },
     windowOpen: false, prs: {} as PrEntryMap, agents: [], shelf: "board", ...over,
   };
-  return { id: `p:${status.run.key}`, status, agent, agents: status.agents,
-    column: status.column, lane: "waiting" };
+  return { id: `p:${status.run.key}`, status, agent, agents: status.agents, column: status.column };
 };
 
 // `usage` is threaded as a 4th positional so every pre-existing call renders with
@@ -97,7 +96,7 @@ describe("DeckDetail", () => {
     expect(screen.queryByRole("button", { name: /diff — svc/i })).toBeNull();
   });
 
-  it("offers Address PR on the waiting lane", () => {
+  it("offers Address PR in the In review column", () => {
     // An actual open PR behind it — canAddressPr also requires prSignals(r.prs).open,
     // which mkCard()'s default `prs: {}` does not satisfy (see the "no PR at all"
     // case below).
@@ -105,33 +104,35 @@ describe("DeckDetail", () => {
     expect(within(container).getByRole("button", { name: /address pr/i })).toBeTruthy();
   });
 
-  it("offers no Address PR on the ready lane", () => {
-    const { container } = render1({ ...mkCard(), lane: "ready" });
+  it("offers no Address PR in Ready to merge — there is nothing left to address", () => {
+    const { container } = render1(mkCard({
+      column: "merge", prs: { svc: { facts: facts({ review: "approved" }), fetchedAt: 1 } } as PrEntryMap,
+    }));
     expect(within(container).queryByRole("button", { name: /address pr/i })).toBeNull();
   });
 
-  // A run can reach the review column's waiting lane off its Jira status alone
-  // (deriveBucket's isReviewStatus), with no PR entries behind it at all —
-  // mkCard()'s default `prs: {}` is exactly that. Without prSignals(r.prs).open
-  // in canAddressPr, the button would offer to seed an agent against a PR that
-  // does not exist.
-  it("offers no Address PR on the waiting lane with no PR at all (prs: {})", () => {
+  // A run can reach the review column off its Jira status alone (deriveBucket's
+  // isReviewStatus), with no PR entries behind it at all — mkCard()'s default
+  // `prs: {}` is exactly that. Without prSignals(r.prs).open in canAddressPr, the
+  // button would offer to seed an agent against a PR that does not exist.
+  it("offers no Address PR in In review with no PR at all (prs: {})", () => {
     const { container } = render1(mkCard());
     expect(within(container).queryByRole("button", { name: /address pr/i })).toBeNull();
   });
 
-  it("offers no Address PR on a local card, whatever the lane", () => {
+  it("offers no Address PR on a local card, whatever the column", () => {
     const card = mkCard({ run: { ...mkCard().status.run, key: "local-abc", url: "", kind: "local" } as never });
     const { container } = render1(card);
     expect(within(container).queryByRole("button", { name: /address pr/i })).toBeNull();
   });
 
-  it("offers no Address PR outside the review column, even in the waiting lane", () => {
-    // deriveLane only ever answers "waiting" under the review column, so this
-    // combination cannot occur from projectCards/laneOf today — but DeckDetail
-    // takes a plain DeckCard and enforces nothing about how its column and lane
-    // were derived, so the column conjunct earns its own case regardless.
-    const { container } = render1(mkCard({ column: "progress" }));
+  it("offers no Address PR outside the review column, open PR or not", () => {
+    // DeckDetail takes a plain DeckCard and enforces nothing about how its column
+    // was derived, so the column conjunct earns its own case even though
+    // deriveBucket would not put an open, unblocked PR here with no live agent.
+    const { container } = render1(mkCard({
+      column: "progress", prs: { svc: { facts: facts(), fetchedAt: 1 } } as PrEntryMap,
+    }));
     expect(within(container).queryByRole("button", { name: /address pr/i })).toBeNull();
   });
 

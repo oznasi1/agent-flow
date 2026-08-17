@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { deriveBucket, deriveLane, prSignals } from "../../../src/engine/bucket";
+import { deriveBucket, prSignals } from "../../../src/engine/bucket";
 import { PrEntryMap, PrFacts } from "../../../src/types";
 
 const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
@@ -21,12 +21,17 @@ describe("bucket.ts is webview-safe", () => {
 });
 
 describe("deriveBucket", () => {
-  it("puts a Jira-done ticket in Done even if the agent is working", () => {
-    expect(deriveBucket({ ticketCategory: "done", agentState: "working" })).toBe("done");
+  it("has no finished column to route to — a done ticket is bucketed on its live signals alone", () => {
+    // Jira-done used to short-circuit the whole ladder. It is not an input any
+    // more: `shelfFor` takes a landed run off the board before it gets here, and
+    // one that is still on the board (an agent open in it, a PR still to merge)
+    // deserves the column its live signals say.
+    expect(deriveBucket({ agentState: "working" })).toBe("progress");
+    expect(deriveBucket({ agentState: "needs-you" })).toBe("needs");
   });
 
   it("surfaces a needs-you agent even while Jira is in progress", () => {
-    expect(deriveBucket({ ticketCategory: "indeterminate", agentState: "needs-you" })).toBe("needs");
+    expect(deriveBucket({ ticketStatus: "In Progress", agentState: "needs-you" })).toBe("needs");
   });
 
   it("keeps a working agent in In-progress even in a review status (live beats review)", () => {
@@ -46,26 +51,26 @@ describe("deriveBucket", () => {
   });
 
   it("falls back to In-progress (in-flight) for an idle, plain in-progress task", () => {
-    expect(deriveBucket({ ticketCategory: "indeterminate", ticketStatus: "In Progress", agentState: "idle" })).toBe("progress");
+    expect(deriveBucket({ ticketStatus: "In Progress", agentState: "idle" })).toBe("progress");
   });
 
   it("falls back to In-progress for an unknown agent with nothing else", () => {
-    expect(deriveBucket({ ticketCategory: "new", agentState: "unknown" })).toBe("progress");
+    expect(deriveBucket({ agentState: "unknown" })).toBe("progress");
   });
 
   it("routes a stalled agent to needs — it is stuck, not calm", () => {
-    expect(deriveBucket({ ticketCategory: null, ticketStatus: null, agentState: "stalled",
-      prOpen: false, prBlocked: false, prMerged: false })).toBe("needs");
+    expect(deriveBucket({ ticketStatus: null, agentState: "stalled",
+      prOpen: false, prBlocked: false, prReady: false })).toBe("needs");
   });
 
   it("routes an exited agent to needs — it died with work in flight", () => {
-    expect(deriveBucket({ ticketCategory: null, ticketStatus: null, agentState: "exited",
-      prOpen: false, prBlocked: false, prMerged: false })).toBe("needs");
+    expect(deriveBucket({ ticketStatus: null, agentState: "exited",
+      prOpen: false, prBlocked: false, prReady: false })).toBe("needs");
   });
 
   it("still does not route an idle agent to needs", () => {
-    expect(deriveBucket({ ticketCategory: null, ticketStatus: null, agentState: "idle",
-      prOpen: false, prBlocked: false, prMerged: false })).not.toBe("needs");
+    expect(deriveBucket({ ticketStatus: null, agentState: "idle",
+      prOpen: false, prBlocked: false, prReady: false })).not.toBe("needs");
   });
 });
 
@@ -74,26 +79,39 @@ describe("deriveBucket with PR signals", () => {
     expect(deriveBucket({ agentState: "working", prBlocked: true })).toBe("needs");
   });
 
-  it("puts a merged PR in Done even when Jira has not caught up", () => {
-    expect(deriveBucket({ ticketCategory: "indeterminate", prMerged: true })).toBe("done");
-  });
-
-  it("lets Done outrank a blocked PR", () => {
-    expect(deriveBucket({ prMerged: true, prBlocked: true })).toBe("done");
-  });
-
   it("still treats an idle agent with an open, unblocked PR as In review", () => {
     expect(deriveBucket({ agentState: "idle", prOpen: true })).toBe("review");
+  });
+
+  it("gives an approved, green PR the merge column of its own", () => {
+    expect(deriveBucket({ agentState: "idle", prOpen: true, prReady: true })).toBe("merge");
+  });
+
+  it("promotes ready to merge over a working agent, mirroring the blocked rung", () => {
+    // `ready` and `blocked` are the two sides of the same PR read, and both
+    // outrank the live agent signal for the same reason: the agent cannot know.
+    expect(deriveBucket({ agentState: "working", prOpen: true, prReady: true })).toBe("merge");
+    expect(deriveBucket({ agentState: "working", prOpen: true, prBlocked: true })).toBe("needs");
+  });
+
+  it("lets a blocked PR outrank a ready one — a run with one of each needs you first", () => {
+    // prSignals can report both across repos: one PR approved and green, another
+    // conflicting. The board must ask for the fix, not offer the merge.
+    expect(deriveBucket({ prOpen: true, prReady: true, prBlocked: true })).toBe("needs");
+  });
+
+  it("keeps a needs-you agent above the merge, even on a ready PR", () => {
+    expect(deriveBucket({ agentState: "needs-you", prOpen: true, prReady: true })).toBe("needs");
   });
 });
 
 describe("prSignals", () => {
   it("is all false for no entries", () => {
-    expect(prSignals({})).toEqual({ open: false, blocked: false, merged: false, ready: false });
+    expect(prSignals({})).toEqual({ open: false, blocked: false, ready: false });
   });
 
   it("is all false when every entry resolved to no PR", () => {
-    expect(prSignals(entries(null, null))).toEqual({ open: false, blocked: false, merged: false, ready: false });
+    expect(prSignals(entries(null, null))).toEqual({ open: false, blocked: false, ready: false });
   });
 
   it("reports open for an open non-draft PR", () => {
@@ -132,13 +150,12 @@ describe("prSignals", () => {
     expect(prSignals(entries(prFacts(), prFacts({ mergeable: "conflicting" }))).blocked).toBe(true);
   });
 
-  it("reports merged only when every PR-bearing repo has merged", () => {
-    expect(prSignals(entries(prFacts({ state: "MERGED" }))).merged).toBe(true);
-    expect(prSignals(entries(prFacts({ state: "MERGED" }), prFacts({ state: "OPEN" }))).merged).toBe(false);
-  });
-
-  it("ignores PR-less repos when deciding merged", () => {
-    expect(prSignals(entries(prFacts({ state: "MERGED" }), null)).merged).toBe(true);
+  it("reports nothing at all for a run whose every PR merged — no open, no ready, no block", () => {
+    // Landing is `landed()` in visibility.ts, not a signal here. What this must
+    // guarantee is that a merged run trips none of the three rungs that would
+    // otherwise hold it on the board.
+    expect(prSignals(entries(prFacts({ state: "MERGED" }), prFacts({ state: "MERGED" }))))
+      .toEqual({ open: false, blocked: false, ready: false });
   });
 });
 
@@ -198,27 +215,13 @@ describe("prSignals.ready", () => {
   });
 });
 
-describe("deriveLane", () => {
-  const signals = (over: Partial<ReturnType<typeof prSignals>> = {}) => ({
-    open: false, blocked: false, merged: false, ready: false, ...over,
-  });
-
-  it("splits In review into ready-to-merge and waiting-on-review", () => {
-    expect(deriveLane("review", signals({ open: true, ready: true }))).toBe("ready");
-    expect(deriveLane("review", signals({ open: true }))).toBe("waiting");
-  });
-
-  it("waits when the column came from a Jira review status with no PR", () => {
-    expect(deriveLane("review", signals())).toBe("waiting");
-  });
-
-  it("splits Done into merged and not-merged", () => {
-    expect(deriveLane("done", signals({ merged: true }))).toBe("merged");
-    expect(deriveLane("done", signals())).toBe("unmerged");
-  });
-
-  it("leaves the single-lane columns unlaned", () => {
-    expect(deriveLane("progress", signals({ ready: true }))).toBeNull();
-    expect(deriveLane("needs", signals({ merged: true }))).toBeNull();
+describe("the merged run takes no column", () => {
+  // The migration's load-bearing case, run through the two functions that decide
+  // it. `shelfFor` sends this run to the Recently closed strip (visibility.test.ts
+  // owns that half); what matters here is that nothing in the ladder would have
+  // claimed it either — the fourth column is gone, not renamed.
+  it("buckets a multi-repo run whose every PR landed nowhere special", () => {
+    const merged = prSignals(entries(prFacts({ state: "MERGED" }), prFacts({ state: "MERGED" })));
+    expect(deriveBucket({ prOpen: merged.open, prReady: merged.ready, prBlocked: merged.blocked })).toBe("progress");
   });
 });
