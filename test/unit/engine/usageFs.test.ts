@@ -205,3 +205,34 @@ describe("UsageReader.readRun", () => {
     expect(new UsageReader().readRun(projects, ["/repo/ghost"]).output).toBe(0);
   });
 });
+
+describe("UsageReader as the Deck uses it", () => {
+  let projects: string;
+  beforeEach(() => { projects = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-usage-deck-")); });
+  afterEach(() => fs.rmSync(projects, { recursive: true, force: true }));
+
+  const seed = (cwd: string, rid: string, out: number, cacheRead = 0) => {
+    const dir = path.join(projects, encodeProjectDir(cwd));
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, `${rid}.jsonl`), row(rid, out, cacheRead) + "\n");
+  };
+
+  // One reader instance is held for the host's lifetime, and several runs share
+  // it. A per-file cache must not let one run's sweep consume another's bytes.
+  it("gives each run its own total from one shared reader", () => {
+    seed("/wt/task-a", "a1", 10);
+    seed("/wt/task-b", "b1", 20);
+    const r = new UsageReader();
+    expect(r.readRun(projects, ["/wt/task-a"]).output).toBe(10);
+    expect(r.readRun(projects, ["/wt/task-b"]).output).toBe(20);
+    expect(r.readRun(projects, ["/wt/task-a"]).output).toBe(10);
+  });
+
+  it("grows a run's total as its transcript grows across sweeps", () => {
+    seed("/wt/task-a", "a1", 10);
+    const r = new UsageReader();
+    expect(r.readRun(projects, ["/wt/task-a"]).output).toBe(10);
+    seed("/wt/task-a", "a2", 5);
+    expect(r.readRun(projects, ["/wt/task-a"]).output).toBe(15);
+  });
+});

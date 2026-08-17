@@ -17,6 +17,8 @@ import { promoteToPlace } from "./engine/orchestrator/promote";
 import { LaunchTicketDetail, launchPlanned } from "./engine/orchestrator/launch";
 import { COMMAND_KILLED_EXIT_CODE, CommandRunner, chainSourcePlace, resolveCommand, runCommand, withSavedCommand } from "./engine/orchestrator/command";
 import { buildRunStatus } from "./engine/status";
+import { UsageReader } from "./engine/usageFs";
+import type { UsageTotals } from "./engine/usage";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
@@ -47,6 +49,20 @@ import { CardAgent, FlowPromptMode, InboundMessage, OpenSession, OutboundMessage
 
 export const POLL_MS = 6000;
 const TICKET_TTL_MS = 30_000;
+
+/** The usage sweep's own cadence. Deliberately far slower than POLL_MS: parsing
+ * transcripts is the one read here that scales with corpus size rather than
+ * with board size, and `refresh()` must never block on it. */
+export const USAGE_POLL_MS = 60_000;
+
+/** ~/.claude/projects — where Claude Code keeps one directory of transcripts per
+ * cwd. Hoisted from the inline const the status build used, so the usage sweep
+ * and the activity read cannot drift onto two different roots. A function
+ * rather than a module-level const because `os.homedir()` at import time is a
+ * needless load-order dependency in a module the extension host loads early. */
+function claudeProjectsRoot(): string {
+  return path.join(os.homedir(), ".claude", "projects");
+}
 
 /** The footer note per reason PR facts are off. Naming the actual gap matters:
  * `gh` living somewhere the extension host's PATH cannot see it is by far the
@@ -228,6 +244,13 @@ export class DeckPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly disposables: vscode.Disposable[] = [];
   private timer: ReturnType<typeof setInterval> | undefined;
+  private usageTimer: ReturnType<typeof setInterval> | undefined;
+  /** Held for the view's lifetime — its per-file offsets and dedup sets are what
+   * make each sweep cost only the newly appended bytes. */
+  private readonly usage = new UsageReader();
+  /** run key → last swept totals. Read by the status build; written only by the
+   * sweep, so a refresh never waits on a parse. */
+  private usageByRun = new Map<string, UsageTotals>();
   private readonly ticketCache = new Map<string, { at: number; status: string | null; category: string | null }>();
   /** The last refresh's synthetic runs for places no tracked run claimed — cleared
    * and repopulated on every rebuild. A local card has no record on disk, so this
@@ -1497,12 +1520,46 @@ export class DeckPanel {
     if (this.timer) return;
     void this.refresh();
     this.timer = setInterval(() => void this.refresh(), POLL_MS);
+    // One sweep now, then on its own slow cadence. Not awaited: a blank spend
+    // figure for a few seconds is strictly better than a delayed board.
+    void Promise.resolve().then(() => this.sweepUsage(this.sweepTargets()));
+    this.usageTimer = setInterval(() => this.sweepUsage(this.sweepTargets()), USAGE_POLL_MS);
   }
 
   private stopPolling(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    if (this.usageTimer) clearInterval(this.usageTimer);
+    this.usageTimer = undefined;
     this.prQueue.clear();
+  }
+
+  /** Re-read usage for every run currently on the board. Board-scoped on
+   * purpose: the full corpus is hundreds of files and hundreds of megabytes,
+   * while a board is about ten project dirs. Never throws — a failed read
+   * leaves the previous total in place. */
+  private sweepUsage(runs: Run[]): void {
+    const root = claudeProjectsRoot();
+    const next = new Map<string, UsageTotals>();
+    for (const run of runs) {
+      try {
+        next.set(run.key, this.usage.readRun(root, run.repos.map((r) => r.path)));
+      } catch {
+        const prev = this.usageByRun.get(run.key);
+        if (prev) next.set(run.key, prev);
+      }
+    }
+    this.usageByRun = next;
+  }
+
+  /** The runs the board shows: tracked records on disk plus the in-memory local
+   * cards. Same filter as the status build — a review run has no agent and no
+   * transcripts, so it has no spend to read. */
+  private sweepTargets(): Run[] {
+    return [
+      ...readRuns(defaultRunsDir()).filter((r) => runKind(r) !== "review"),
+      ...this.localRuns.values(),
+    ];
   }
 
   /** Is `gh` usable? Kicks the probe off on first call and returns what we know
@@ -2072,7 +2129,7 @@ export class DeckPanel {
     // Review runs are work in flight, but not *your ticket's* work: they surface
     // on their strip row, not as a fifth kind of card in In progress.
     const tracked = readRuns(defaultRunsDir()).filter((r) => runKind(r) !== "review");
-    const projectsRoot = path.join(os.homedir(), ".claude", "projects");
+    const projectsRoot = claudeProjectsRoot();
     const now = Date.now();
     const authed = await this.connector.isAuthenticated();
     const ghReady = this.ghReady();
@@ -2277,8 +2334,8 @@ export class DeckPanel {
         // A local card exists only because a session is open in it, so it is on
         // the board by construction.
         out.push(run.url
-          ? { ...status, shelf: "board" as const, inferredTicketKey: ticketKeyFor(run, this.connector) }
-          : { ...status, shelf: "board" as const });
+          ? { ...status, shelf: "board" as const, inferredTicketKey: ticketKeyFor(run, this.connector), usage: this.usageByRun.get(run.key) }
+          : { ...status, shelf: "board" as const, usage: this.usageByRun.get(run.key) });
         continue;
       }
       // Which shelf this run sits on. `hasLiveSession` comes from `ownership`
@@ -2294,7 +2351,7 @@ export class DeckPanel {
         ticketActive: isTicketRun(run) && status.ticketCategory !== "done",
         hasWorkToLose: status.repos.some((r) => ownsPath(r.path) && (r.dirty || r.ahead > 0)),
       });
-      const shelved = { ...status, shelf };
+      const shelved = { ...status, shelf, usage: this.usageByRun.get(run.key) };
       if (this.applyVerdict(run, this.verdictFor(shelved, livePlaces, now))) continue;
       // Counted, not cleared: this is exactly what Clear stale would take. The
       // second call is free of side effects — `verdictFor` is pure, and only

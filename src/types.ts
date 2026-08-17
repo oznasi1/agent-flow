@@ -3,6 +3,7 @@
 // value import would be a runtime cycle. `import type` is erased at build time.
 import type { SerializedCaps, TaskConnector } from "./tasks/provider";
 import type { Flow } from "./engine/orchestrator/model";
+import type { UsageTotals } from "./engine/usage";
 // A verdict enum, not a value module — `deck:flows` carries a map of these so the
 // drawer can say what a branch-CI rule is waiting on. Re-exported because the
 // webview reads it from here: `src/webview/*` may import `branchCi.ts` safely
@@ -245,6 +246,11 @@ export interface RunStatus {
   /** Board or Recently-closed strip. Computed host-side because the rule needs
    * path ownership, which needs canonical paths and therefore `fs`. */
   shelf: Shelf;
+  /** Cumulative token usage across this run's sessions, absent until the usage
+   * sweep has read it. Absent and zero are NOT the same: a run not yet measured
+   * must not render like one that cost nothing, so the card shows no figure for
+   * `undefined` rather than "0". */
+  usage?: UsageTotals;
 }
 
 // ── PR & CI observation ─────────────────────────────────────────────────────
