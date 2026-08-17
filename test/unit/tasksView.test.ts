@@ -5826,6 +5826,28 @@ describe("takeTask: orchestrator mode", () => {
     });
   });
 
+  it("refuses to open the orchestrator in the main checkout when its own worktree fails", async () => {
+    // The parent's `-b` attempt ALWAYS fails on this path — ensureBranch has already
+    // made the branch — so createWorktrees always takes its attach path, which fails
+    // whenever the parent branch is checked out anywhere else. Proceeding would seed a
+    // session whose brief says to merge every child into that branch, in the user's own
+    // checkout: it would check the branch out over whatever they have open and write
+    // merge commits there.
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      key === "ASM-1" ? s : s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    answerOrchestrator();
+    const { provider, posted } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual({
+      type: "toast",
+      level: "error",
+      message:
+        "Couldn't create a git worktree for ASM-1 in api — not opening an orchestrator in your main checkout. The Agent Flow Deck output channel has the reason.",
+    });
+  });
+
   it("refuses the whole take when the parent branch cannot be made", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web"]));
     vi.mocked(ensureBranch).mockReturnValue(false);

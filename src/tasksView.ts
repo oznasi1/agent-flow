@@ -1845,7 +1845,30 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
     onWorktreeDecision?.(useWorktree);
     if (useWorktree) {
-      services = createWorktrees(services, detail.key, detail.summary, this.log);
+      const made = createWorktrees(services, detail.key, detail.summary, this.log);
+      // createWorktrees falls back to the main checkout when it cannot create a
+      // worktree. Only the orchestrator path refuses that: its brief instructs the
+      // agent to merge every finished child into the parent branch, so a session that
+      // landed in the main checkout would check that branch out over whatever the user
+      // has open and write merge commits there. engine/orchestrator/launch.ts refuses
+      // on this same condition for the same reason.
+      //
+      // Gated on `orchestration`, NOT on `forceWorktree`: addressPr forces a worktree
+      // too, and its behaviour for existing users must stay exactly as it is.
+      //
+      // Refusing costs nothing already on disk: createWorktrees reuses an existing
+      // worktree directory, so a retry adopts the child worktrees this take made.
+      if (orchestration) {
+        const stuck = services.find((base, i) => made[i]?.path === base.path);
+        if (stuck) {
+          this.toast(
+            "error",
+            `Couldn't create a git worktree for ${key} in ${stuck.name} — not opening an orchestrator in your main checkout. The Agent Flow Deck output channel has the reason.`,
+          );
+          return false;
+        }
+      }
+      services = made;
     }
 
     const args = await this.targetToOpenArgs(target, services.length, key, cfg);
@@ -2557,6 +2580,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       this.toast("info", `Couldn't create a worktree for ${failed.join(", ")} — dispatch those by hand.`);
     }
 
+    // `parentBranch` is NOT passed to launch as a branch to use: launch's own
+    // createWorktrees call re-derives it as branchName(detail.key, detail.summary).
+    // The two agree only because `detail` is the object `parentBranch` was computed
+    // from in takeTask — keep it that way. Divergence would sit the orchestrator on one
+    // branch while its brief told it to merge children into another, silently.
     await this.launch(
       detail,
       parentRepos,

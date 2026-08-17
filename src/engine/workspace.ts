@@ -233,10 +233,12 @@ cannot be done within them.
  *  theirs. Returns the files it wrote.
  *
  *  Deliberately no `ensureGitExcluded` call: it follows a worktree's `commondir` and
- *  writes to the repo's SHARED `info/exclude` (see gitExclude.ts), so the one entry
- *  `openWorkspace` writes for the repo already covers every worktree of it, children
- *  included. Adding a call here would re-exclude what is excluded and give this helper
- *  a second responsibility. */
+ *  writes to the repo's SHARED `info/exclude` (see gitExclude.ts), so the entry
+ *  `openWorkspace` writes later in the same take covers every worktree of that repo,
+ *  children included — one entry, not one per worktree. Until then the brief shows as
+ *  untracked inside the child worktree, and it stays that way if the take ends early at
+ *  one of `launch`'s own pickers. That transient window is the price of keeping this
+ *  helper to one responsibility. */
 export function writeBriefInto(
   services: ServiceRef[],
   ticket: TicketRef,
