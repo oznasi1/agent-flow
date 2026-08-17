@@ -217,6 +217,12 @@ const h = vi.hoisted(() => ({
   // repo" case — identity can't express that on its own.
   nonGitRoots: new Set<string>(),
   repoRootRemap: new Map<string, string>(),
+  // The usage sweep's reader (Task 5): stubbed so a test can assert which runs
+  // it was called for without touching a real ~/.claude/projects. Zeroed by
+  // default so every existing test's postedRuns stay exactly as they were
+  // before this field existed; a test that cares about the sweep's coverage
+  // overrides one call with `.mockReturnValueOnce`.
+  usageReadRun: vi.fn((_root: string, _cwds: string[]) => ({ input: 0, output: 0, cacheWrite: 0, cacheRead: 0 })),
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -289,6 +295,13 @@ vi.mock("../../src/engine/transcript", async (importActual) => ({
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: () => h.liveWindows,
   defaultWindowsDir: () => "/windows",
+}));
+// The usage sweep's reader (Task 5): a class instantiated once and held for the
+// panel's lifetime in deckView.ts, so the mock has to be a class too — a plain
+// object export would not survive `new UsageReader()`. Its one method forwards
+// to `h.usageReadRun`, the same indirection every other engine stub here uses.
+vi.mock("../../src/engine/usageFs", () => ({
+  UsageReader: vi.fn().mockImplementation(() => ({ readRun: h.usageReadRun })),
 }));
 vi.mock("../../src/engine/pr/store", () => ({
   defaultPrFactsDir: () => "/prfacts",
@@ -440,7 +453,7 @@ vi.mock("../../src/config", async (importActual) => {
     }),
   };
 });
-import { DeckPanel, POLL_MS, reviewProvenance, shellCommandRunner } from "../../src/deckView";
+import { DeckPanel, POLL_MS, USAGE_POLL_MS, reviewProvenance, shellCommandRunner } from "../../src/deckView";
 // The real ceiling, not a number restated here: a call site that passed a literal
 // (or nothing at all) would still satisfy a test that hardcoded 120_000.
 import { COMMAND_TIMEOUT_MS } from "../../src/engine/orchestrator/command";
@@ -7758,6 +7771,29 @@ describe("the poll and the close confirmation", () => {
     p._fireDispose();
     await settle();
     expect(commands.executeCommand).toHaveBeenCalledWith("agentFlow.openDeck");
+  });
+
+  // Task 5 fix round 1: sweepTargets() must cover a local card, not just tracked
+  // runs — a local card has no record in `readRuns`, only in the in-memory
+  // `localRuns` map the status build itself populates. Pins the coverage at the
+  // observable seam (a local run's own posted `usage`) rather than reaching into
+  // the private `sweepTargets`/`sweepUsage` methods.
+  it("keeps the usage sweep covering a local run, not just tracked ones", async () => {
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    const { p } = await openPanel();
+    // The panel's construction already ran one sweep (before this local card
+    // existed) and one buildAll (which just minted it) — from here, only the
+    // usage timer's own cadence sweeps again, and only then does the local
+    // card's key exist for the reader to be called with.
+    h.usageReadRun.mockReturnValueOnce({ input: 3, output: 7, cacheWrite: 0, cacheRead: 1 });
+    await settle(USAGE_POLL_MS + 1);
+    // The sweep updates `usageByRun` in memory; a fresh build is what actually
+    // reads it back onto a `RunStatus` for the webview.
+    await p._fire({ type: "deck:refresh" });
+    await settle();
+    const local = lastRunsPost().runs.find((r: RunStatus) => r.run.kind === "local");
+    expect(local?.usage).toEqual({ input: 3, output: 7, cacheWrite: 0, cacheRead: 1 });
   });
 });
 
