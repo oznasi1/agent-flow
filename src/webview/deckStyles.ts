@@ -55,6 +55,10 @@ export const DECK_CSS = `
     border: 1px solid var(--edge); background: var(--vscode-editorWidget-background, transparent); }
   .stat .n { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.05;
     letter-spacing: -.02em; }
+  /* Same muted-suffix treatment as the card's own \`.spend .u\` — the unit reads
+     as a footnote on the number, not a second figure. */
+  .stat .n .u { font-family: var(--vscode-font-family); font-size: var(--t-micro); font-weight: 400;
+    opacity: .55; margin-left: 2px; }
   .stat .l { font-size: var(--t-micro); color: var(--dim); letter-spacing: .01em; white-space: nowrap; }
   .stat.attn { border-color: color-mix(in srgb, var(--c-attn) 55%, var(--hair)); }
   .stat.attn .n { color: var(--c-attn); }
@@ -633,4 +637,40 @@ export const DECK_CSS = `
   .c-diff .del { color: var(--c-danger); }
 
   .c-foot2 { display: flex; gap: 5px; margin-top: auto; padding-top: 2px; }
+
+  /* The spend figure. A count, so it is mono — the deck's rule is mono for
+     identifiers and counts, prose in the UI font. It sits in the footer's dead
+     right side: on the top row it wraps the ticket key onto a second line
+     whenever the state text is long, and on the signal line it breaks the
+     three-bit cap and truncates the branch further. */
+  /* Spend, in the drawer only — never on the card. Counts are mono, the class
+     names beside them are prose in the UI font: the deck's standing rule is mono
+     for identifiers and numbers, UI font for anything that reads as English.
+     Right-aligned values so four rows of very different magnitudes line up on
+     their last digit and can be compared down the column. */
+  .dd-spend { display: flex; flex-direction: column; gap: 3px; }
+  .dd-spend .sp-row { display: flex; align-items: baseline; gap: 8px; font-size: var(--t-body); }
+  .dd-spend .sp-k { color: var(--dim); }
+  .dd-spend .sp-v { margin-left: auto; font-family: var(--vscode-editor-font-family);
+    font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* The weighted total is the one figure that is not a raw token count, so it is
+     separated by a hairline rather than just sitting as a fifth sibling. */
+  .dd-spend .sp-tot { margin-top: 4px; padding-top: 5px; border-top: 1px solid var(--hair); }
+  .dd-spend .sp-tot .sp-k { color: var(--vscode-foreground); cursor: help; }
+  .dd-spend .sp-tot .u { font-family: var(--vscode-font-family); opacity: .55; margin-left: 2px; }
+
+  /* One row per PR failure, each with the verb that fixes it. These REPLACE the
+     signal line on a failing card, so a card is never taller than the problems
+     it actually has — and a card with three failures grows past the 152px floor,
+     which is the intended trade: attention should follow size. */
+  .c-rows { display: flex; flex-direction: column; gap: 5px; }
+  .c-row { display: flex; align-items: center; gap: 7px; overflow: hidden;
+    font-size: 11.5px; color: var(--dim); }
+  /* The elastic member: a long list of failing check names takes the ellipsis
+     rather than pushing the button off the card. */
+  .c-row > .lbl { flex: 0 1 auto; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .c-row > .m { flex: none; font-family: var(--vscode-editor-font-family); }
+  .c-row .bad, .c-row .warn { color: var(--c-attn); }
+  .c-row .act { margin-left: auto; flex: none; height: 20px; padding: 0 7px; font-size: 11px; }
 `;

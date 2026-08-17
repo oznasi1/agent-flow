@@ -85,6 +85,38 @@ describe("openWorkspace — multiroot", () => {
     expect(plan.matches[0].prompt).toContain("Start ASM-1");
   });
 
+  it("key-qualifies a worktree root's folder name and leaves a main checkout bare", async () => {
+    // The explorer shows one row per root. A worktree row named for its repo alone is
+    // indistinguishable from the repo's own checkout sitting beside it, so it carries
+    // the key too — repo first, so a service's rows group together.
+    await openWorkspace(
+      baseReq({
+        services: [
+          { name: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1", isGit: true },
+          { name: "centaur", path: "/repos/centaur", isGit: true },
+        ],
+      }),
+    );
+    const ws = JSON.parse(String(writeArg((p) => p.endsWith(".code-workspace"))![1]));
+    expect(ws.folders).toEqual([
+      { name: "account-service-ASM-1", path: "/repos/account-service/.claude/worktrees/ASM-1" },
+      { name: "centaur", path: "/repos/centaur" },
+    ]);
+  });
+
+  it("qualifies a worktree's mentions with the same name its folder carries", async () => {
+    execSync.mockReturnValue("src/export.py\n"); // git ls-files result
+    await openWorkspace(
+      baseReq({
+        descriptionText: "see src/export.py",
+        services: [{ name: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1", isGit: true }],
+      }),
+    );
+    const plan = JSON.parse(String(writeArg((p) => p.includes("plans") && p.endsWith(".json"))![1]));
+    // `@account-service/…` would name the checkout next door, not this worktree.
+    expect(plan.matches[0].prompt).toContain("@account-service-ASM-1/src/export.py");
+  });
+
   it("falls back to openFolder when `open -a` fails", async () => {
     exec.mockImplementation(((_cmd: string, cb: (e: unknown) => void) => cb(new Error("no app"))) as never);
     const result = await openWorkspace(baseReq());
@@ -1990,12 +2022,12 @@ describe("planWorkspaceMerge", () => {
   });
 
   it("dedups a key-qualified batch label against the bare repo name", () => {
-    // The label written into the file is ASM-1-api, but dedup must compare `api`.
+    // The label written into the file is api-ASM-1, but dedup must compare `api`.
     readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/api" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("api", "/repos/api/.claude/worktrees/ASM-1", "ASM-1-api"),
+      cand("api", "/repos/api/.claude/worktrees/ASM-1", "api-ASM-1"),
     ]);
-    expect(plan.duplicates.map((c) => c.label)).toEqual(["ASM-1-api"]);
+    expect(plan.duplicates.map((c) => c.label)).toEqual(["api-ASM-1"]);
     expect(plan.add).toEqual([]);
   });
 

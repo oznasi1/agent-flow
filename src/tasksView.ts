@@ -27,7 +27,7 @@ import { briefMarkdown } from "./engine/brief";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, PresenceRecord, type CurrentWindow } from "./engine/presence";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
-import { branchName, createWorktrees, ensureBranch, repoRootOfWorktree } from "./engine/worktree";
+import { branchName, createWorktrees, ensureBranch, folderName, repoRootOfWorktree, serviceFolderName } from "./engine/worktree";
 // `currentBranch`, not `gitState`: the only thing asked here is which branch a worktree
 // is on, and that is one `rev-parse` rather than the four subprocesses gitState spends
 // on dirtiness, ahead-count and a numstat diff nobody reads. A fan-out of 20 children
@@ -35,7 +35,7 @@ import { branchName, createWorktrees, ensureBranch, repoRootOfWorktree } from ".
 // `engine/workspace.ts` makes for `repos[].branch`, at the price of the question.
 import { currentBranch } from "./engine/git";
 import { buildTree, type TreeLeaf, type TreeResult } from "./engine/taskTree";
-import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
+import { openSharedWorkspace, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { newNote, newSection, noteStatus, sanitizeNotes, sanitizeSections } from "./notepad";
 import { IMAGE_DIR, deleteImages, imageFileName, imagePath, saveImage, sweepOrphans } from "./notepadImages";
@@ -1888,7 +1888,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const additions = args.existingWorkspaceFile
       ? await this.resolveWorkspaceAdditions(
           args.existingWorkspaceFile,
-          services.map((s) => ({ label: s.name, repoName: s.name, path: s.path })),
+          services.map((s) => ({ label: serviceFolderName(detail.key, s), repoName: s.name, path: s.path })),
         )
       : { foldersToAdd: [], skipped: [], declined: false };
 

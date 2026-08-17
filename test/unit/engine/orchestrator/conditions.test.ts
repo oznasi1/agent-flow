@@ -1,8 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { evalCond, CondContext, describeCond, placeActivity } from "../../../../src/engine/orchestrator/conditions";
 import { BranchCiStatus, branchCiKey } from "../../../../src/engine/orchestrator/branchCi";
 import { Condition } from "../../../../src/engine/orchestrator/model";
 import { AgentState, CardAgent, PrEntryMap, PrFacts, RepoGit, Run, RunStatus } from "../../../../src/types";
+import { deriveActivity, encodeProjectDir, TranscriptLine } from "../../../../src/engine/transcript";
+import { buildRunStatus } from "../../../../src/engine/status";
 
 const NOW = 1_800_000_000_000;
 const REPO = "agent-flow";
@@ -182,6 +187,75 @@ describe("evalCond — agent state", () => {
     expect(met({ kind: "no-agent-left" }, ctx({ agents: [] }))).toBe(true);
     expect(met({ kind: "no-agent-left" }, ctx({ agents: [cardAgent("idle", NOW, REPO)] }))).toBe(false);
     expect(met({ kind: "no-agent-left" }, ctx({ agents: [cardAgent("idle", NOW, "elsewhere")] }))).toBe(true);
+  });
+});
+
+// Regression for C1: `agent-idle-over` used to compare `state !== "idle"`
+// directly, so it silently stopped firing the moment `AgentState` widened to
+// name `stalled` and `exited` separately — both used to arrive as plain "idle"
+// before that. States here are DERIVED from a transcript (via `deriveActivity`
+// and, for "exited", the real `buildRunStatus` promotion), not hand-picked
+// literals — a literal `{ state: "stalled", ... }` would keep passing even if
+// the fix regressed back to `=== "idle"`, since nothing would ever produce that
+// literal through the real pipeline the bug lived in.
+describe("evalCond — agent-idle-over treats every idle-like state alike (C1)", () => {
+  const line = (o: Partial<TranscriptLine>): TranscriptLine => o;
+  const userMsg = line({ type: "user" });
+  const asstTool = line({ type: "assistant", message: { role: "assistant", stop_reason: "tool_use" } });
+
+  it("fires for a stalled agent (a stuck tool call), derived from a real transcript reading", () => {
+    // Same fixture shape transcript.test.ts uses to pin "a stale tool_use reads
+    // as stalled" — reused here rather than asserted again, so this test stays
+    // honest about what actually produces the state it exercises.
+    const activity = deriveActivity([userMsg, asstTool], NOW - 11 * 60_000, NOW);
+    expect(activity.state).toBe("stalled");
+    const agent: CardAgent = {
+      session: { pid: 1, sessionId: "s-stalled", cwd: `/r/${REPO}`, startedAt: 1, name: "af-7e" },
+      activity,
+      repo: REPO,
+    };
+    expect(met({ kind: "agent-idle-over", minutes: 10 }, ctx({ agents: [agent] }))).toBe(true);
+    // Not yet past the threshold: the window comparison itself still applies to
+    // a stalled reading exactly as it does to an idle one.
+    const fresh = deriveActivity([userMsg, asstTool], NOW - 2 * 60_000, NOW);
+    expect(fresh.state).toBe("stalled");
+    const freshAgent: CardAgent = { ...agent, activity: fresh };
+    expect(met({ kind: "agent-idle-over", minutes: 10 }, ctx({ agents: [freshAgent] }))).toBe(false);
+  });
+
+  describe("an exited agent", () => {
+    let projectsRoot: string;
+    const cwd = `/r/${REPO}`;
+
+    beforeAll(() => {
+      // "exited" is not something `deriveActivity` ever returns on its own — it
+      // is `buildRunStatus`'s promotion of a stale midWork reading with no live
+      // session behind it (see status.ts). Exercising the real function against
+      // a real transcript on disk is what makes this a derived reading rather
+      // than a literal nothing in production ever assigns.
+      projectsRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-cond-idle-"));
+      const dir = path.join(projectsRoot, encodeProjectDir(cwd));
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, "s.jsonl");
+      fs.writeFileSync(file, [userMsg, asstTool].map((l) => JSON.stringify(l)).join("\n") + "\n");
+      const mtimeMs = NOW - 11 * 60_000;
+      fs.utimesSync(file, mtimeMs / 1000, mtimeMs / 1000);
+    });
+
+    afterAll(() => fs.rmSync(projectsRoot, { recursive: true, force: true }));
+
+    it("fires past the threshold", () => {
+      const status: RunStatus = buildRunStatus({
+        run: { ...run, repos: [{ name: REPO, path: cwd, isGit: true }] },
+        ticket: null,
+        projectsRoot,
+        nowMs: NOW,
+        agents: [], // no live session — the fact that promotes the reading to "exited"
+      });
+      expect(status.agent.state).toBe("exited");
+      const c: CondContext = { repo: REPO, nowMs: NOW, status };
+      expect(met({ kind: "agent-idle-over", minutes: 10 }, c)).toBe(true);
+    });
   });
 });
 

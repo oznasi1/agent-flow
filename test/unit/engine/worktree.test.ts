@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { branchName, createWorktrees, ensureBranch, repoRootOfWorktree } from "../../../src/engine/worktree";
+import { branchName, createWorktrees, ensureBranch, folderName, repoRootOfWorktree, serviceFolderName } from "../../../src/engine/worktree";
 import { ensureGitExcluded } from "../../../src/engine/gitExclude";
 import { mkRepos } from "../../_helpers/factories";
 
@@ -71,6 +71,27 @@ describe("repoRootOfWorktree", () => {
 
   it("returns undefined when there is no repo prefix", () => {
     expect(repoRootOfWorktree("/.claude/worktrees/ASM-1")).toBeUndefined();
+  });
+});
+
+describe("folderName", () => {
+  it("leads with the repo so a root names its service, and key-qualifies so two tasks in one repo stay distinct", () => {
+    expect(folderName("ASM-1", "api")).toBe("api-ASM-1");
+    expect(folderName("ASM-2", "api")).toBe("api-ASM-2");
+  });
+});
+
+describe("serviceFolderName", () => {
+  it("key-qualifies a worktree", () => {
+    expect(
+      serviceFolderName("ASM-1", { name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }),
+    ).toBe("api-ASM-1");
+  });
+
+  it("leaves a main checkout as the bare repo name", () => {
+    // The fallback createWorktrees takes when `git worktree add` fails lands here: the
+    // path is the checkout every other task shares, so no one task's key belongs on it.
+    expect(serviceFolderName("ASM-1", { name: "api", path: "/repos/api", isGit: true })).toBe("api");
   });
 });
 

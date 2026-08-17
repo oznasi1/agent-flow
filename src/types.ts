@@ -3,6 +3,7 @@
 // value import would be a runtime cycle. `import type` is erased at build time.
 import type { SerializedCaps, TaskConnector } from "./tasks/provider";
 import type { Flow } from "./engine/orchestrator/model";
+import type { UsageTotals } from "./engine/usage";
 // A verdict enum, not a value module — `deck:flows` carries a map of these so the
 // drawer can say what a branch-CI rule is waiting on. Re-exported because the
 // webview reads it from here: `src/webview/*` may import `branchCi.ts` safely
@@ -84,8 +85,12 @@ export interface FlowCommand {
 
 // ── The Deck: in-flight orchestration board ─────────────────────────────────────
 
-/** Live agent activity, inferred best-effort from the Claude Code session transcript. */
-export type AgentState = "working" | "needs-you" | "idle" | "unknown";
+/** `stalled` and `exited` both mean "look at this", and both were `idle` before:
+ * an agent waiting at a permission prompt and one that died mid-tool used to
+ * render in the calmest tone on the board. `stalled` is derived from the
+ * transcript alone; `exited` needs session liveness and so is assigned by
+ * `buildRunStatus` (see AgentActivity.midWork). */
+export type AgentState = "working" | "needs-you" | "stalled" | "exited" | "idle" | "unknown";
 
 /** The board column a run lands in. */
 export type DeckColumn = "progress" | "needs" | "review" | "done";
@@ -206,6 +211,12 @@ export interface AgentActivity {
   state: AgentState;
   lastActivityMs: number | null; // transcript file mtime
   slug: string | null; // session slug (title), when known
+  /** The transcript ends with work owed — an unanswered tool_use, or a user line
+   * with no assistant reply. `buildRunStatus` promotes this to state "exited"
+   * when no live session claims the run, which is the one thing a per-file
+   * reducer cannot know. Optional so every existing AgentActivity literal
+   * (the test suite is full of them) still compiles; absent means false. */
+  midWork?: boolean;
 }
 
 /** One open Claude Code session attached to a card, with its own live state.
@@ -244,6 +255,11 @@ export interface RunStatus {
   /** Board or Recently-closed strip. Computed host-side because the rule needs
    * path ownership, which needs canonical paths and therefore `fs`. */
   shelf: Shelf;
+  /** Cumulative token usage across this run's sessions, absent until the usage
+   * sweep has read it. Absent and zero are NOT the same: a run not yet measured
+   * must not render like one that cost nothing, so the card shows no figure for
+   * `undefined` rather than "0". */
+  usage?: UsageTotals;
 }
 
 // ── PR & CI observation ─────────────────────────────────────────────────────
@@ -269,6 +285,13 @@ export interface PrFacts {
    * (`mergeStateStatus === "UNSTABLE"`). Failing checks render, but do not block. */
   ciAdvisory: boolean;
 }
+
+/** Why an agent is being seeded against a PR. Shared vocabulary between
+ * `src/webview/deckSignal.ts` (derives it from `PrFacts`) and
+ * `src/engine/prompt.ts` (turns it into the seeded prompt's opening clause) —
+ * declared here, not in the webview module, because an `engine/` import from
+ * `webview/` would invert this codebase's layering. */
+export type PrWorkReason = "ci" | "conflict" | "review";
 
 /** What the store holds per repo. The wrapper — not `PrFacts` — carries the
  * timestamp, so that "this repo has no PR" is itself a cacheable answer. */
@@ -530,6 +553,15 @@ export type InboundMessage =
   | { type: "deck:forget"; key: string }
   | { type: "deck:track"; key: string }
   | { type: "deck:addressPr"; key: string }
+  // Sent by each per-failure row button (Task 7). `reason` and `detail` let the
+  // host build a prompt about the specific thing wrong rather than a generic
+  // review pass. Handled alongside `deck:addressPr` in Task 8's dispatch.
+  | { type: "deck:seedPrWork"; key: string; reason: PrWorkReason; detail?: string }
+  /** Read one run's token usage now. Sent when its detail drawer opens, which is
+   * the only thing that displays a per-run figure — so with the header total off
+   * (the default) a session that never opens a drawer parses no transcripts at
+   * all. The host answers with `deck:usage`. */
+  | { type: "deck:usageFor"; key: string }
   | { type: "deck:setReviewSort"; sort: ReviewSort }
   | { type: "deck:reviewExpand"; id: string }
   | { type: "deck:reviewLaunch"; id: string }
@@ -654,7 +686,17 @@ export type OutboundMessage =
    * board rebuild, so one already in flight when the user flips the lens lands
    * carrying a pre-click value and visibly reverts the control. */
   | { type: "deck:grouping"; grouping: "agents" | "workspaces" }
+  /** One run's token usage, answering a `deck:usageFor`. Its own message rather
+   * than a field on `deck:runs`: the drawer asks for exactly one run and
+   * `deck:runs` costs a full board rebuild, so riding it would make opening a
+   * drawer re-render the board. `usage` is null when nothing was readable. */
+  | { type: "deck:usage"; key: string; usage: UsageTotals | null }
   | { type: "deck:runs"; runs: RunStatus[]; ghNote: string | null; prReviewStatus: string;
+      /** Whether the header's token total is switched on. Rides deck:runs rather
+       * than being read once at mount: it is a plain boolean setting a user can
+       * flip mid-session, and the board re-posts often enough that this is the
+       * whole of keeping it live — the same reasoning as `prReviewStatus`. */
+      showTokenTotal: boolean;
       // How many runs would retire right now if both retirement windows were
       // ignored. Drives the Clear stale button, which is hidden at zero.
       staleCount: number;

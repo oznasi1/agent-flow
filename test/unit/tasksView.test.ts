@@ -168,6 +168,7 @@ const CFG = {
   environments: ["dev", "staging", "production"],
   commands: [] as { id: string; label: string; run: string; detail?: string }[],
   prReviewStatus: "PR initiated",
+  showTokenTotal: false, // matches the shipped default; the Deck header total is opt-in
   prReviewAutoFix: true,
   prReviewPrompt: "PR {key}{files}",
   worktree: "never" as const,
@@ -2201,6 +2202,29 @@ describe("takeTask", () => {
       expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ foldersToAdd: [] }));
     });
 
+    it("offers a worktree candidate under its <repo>-<KEY> label, not the bare repo name", async () => {
+      pickExisting();
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "pick-existing", worktree: "always" });
+      // A successful worktree returns a path below the checkout; the identity default
+      // this describe inherits would leave the candidate looking like a main checkout.
+      vi.mocked(createWorktrees).mockImplementationOnce((s, key) =>
+        s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+      );
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
+
+      const { provider } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+
+      // `repoName` stays bare: it drives the dedup and the prompt copy, not the row.
+      expect(planWorkspaceMerge).toHaveBeenCalledWith("/ws/team.code-workspace", [
+        {
+          label: "account-service-ASM-1",
+          repoName: "account-service",
+          path: "/repos/account-service/.claude/worktrees/ASM-1",
+        },
+      ]);
+    });
+
     it("adds the approved folders when the user accepts the prompt", async () => {
       pickExisting();
       vi.mocked(planWorkspaceMerge).mockReturnValue({
@@ -3380,13 +3404,13 @@ describe("takeBatch", () => {
       workspaceFile: undefined,
       opened: true,
       briefs: [],
-      unaddedFolders: ["ASM-1-api", "ASM-2-api"],
+      unaddedFolders: ["api-ASM-1", "api-ASM-2"],
       seeded: 2,
     });
     const { provider, posted } = setup();
     await provider.takeBatch(twoKeys, ["api"]);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
-    expect(toast.message).toContain("ASM-1-api");
+    expect(toast.message).toContain("api-ASM-1");
   });
 
   it("says so when merging into an existing workspace fails to parse", async () => {
@@ -3478,7 +3502,7 @@ describe("takeBatch", () => {
     ]);
     vi.mocked(planWorkspaceMerge).mockReturnValue({
       add: [],
-      duplicates: [{ label: "ASM-1-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+      duplicates: [{ label: "account-service-ASM-1", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
       redundant: [],
       present: [],
       ok: true,
@@ -3497,7 +3521,7 @@ describe("takeBatch", () => {
     // tasks in one repo silently became two identically-named roots.
     expect(planWorkspaceMerge).toHaveBeenCalledWith(
       "/ws/team.code-workspace",
-      [expect.objectContaining({ label: "ASM-1-account-service", repoName: "account-service" })],
+      [expect.objectContaining({ label: "account-service-ASM-1", repoName: "account-service" })],
     );
   });
 
@@ -3511,8 +3535,8 @@ describe("takeBatch", () => {
     ]);
     vi.mocked(planWorkspaceMerge).mockReturnValue({
       add: [
-        { label: "ASM-1-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" },
-        { label: "ASM-2-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-2" },
+        { label: "account-service-ASM-1", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" },
+        { label: "account-service-ASM-2", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-2" },
       ],
       duplicates: [],
       redundant: [],
@@ -3534,8 +3558,8 @@ describe("takeBatch", () => {
     expect(openSharedWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
         foldersToAdd: [
-          { name: "ASM-1-account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" },
-          { name: "ASM-2-account-service", path: "/repos/account-service/.claude/worktrees/ASM-2" },
+          { name: "account-service-ASM-1", path: "/repos/account-service/.claude/worktrees/ASM-1" },
+          { name: "account-service-ASM-2", path: "/repos/account-service/.claude/worktrees/ASM-2" },
         ],
       }),
     );
@@ -3547,7 +3571,7 @@ describe("takeBatch", () => {
       { file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 },
     ]);
     vi.mocked(planWorkspaceMerge).mockReturnValue({
-      add: [{ label: "ASM-1-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+      add: [{ label: "account-service-ASM-1", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
       duplicates: [],
       redundant: [],
       present: [],

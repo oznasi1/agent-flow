@@ -52,6 +52,21 @@ describe("deriveBucket", () => {
   it("falls back to In-progress for an unknown agent with nothing else", () => {
     expect(deriveBucket({ ticketCategory: "new", agentState: "unknown" })).toBe("progress");
   });
+
+  it("routes a stalled agent to needs — it is stuck, not calm", () => {
+    expect(deriveBucket({ ticketCategory: null, ticketStatus: null, agentState: "stalled",
+      prOpen: false, prBlocked: false, prMerged: false })).toBe("needs");
+  });
+
+  it("routes an exited agent to needs — it died with work in flight", () => {
+    expect(deriveBucket({ ticketCategory: null, ticketStatus: null, agentState: "exited",
+      prOpen: false, prBlocked: false, prMerged: false })).toBe("needs");
+  });
+
+  it("still does not route an idle agent to needs", () => {
+    expect(deriveBucket({ ticketCategory: null, ticketStatus: null, agentState: "idle",
+      prOpen: false, prBlocked: false, prMerged: false })).not.toBe("needs");
+  });
 });
 
 describe("deriveBucket with PR signals", () => {

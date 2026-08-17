@@ -19,11 +19,43 @@ import { AgentActivity, AgentState } from "../types";
 // needs-you outranks working: deriveBucket's ladder tests needs-you first, and
 // with the old order it never saw one — any working session in the run buried
 // the agent that was actually waiting on a human.
-const STATE_RANK: Record<AgentState, number> = { "needs-you": 3, working: 2, idle: 1, unknown: 0 };
+//
+// stalled outranks working for that same reason: a run with one working agent
+// and one stuck at a tool is a run that needs a human, and letting the working
+// agent bury the stuck one is the identical bug. needs-you still outranks
+// stalled — a turn that handed control back is more actionable than a tool that
+// has not returned. `exited` is assigned by buildRunStatus AFTER this reduction,
+// so it never competes as an input; its rank exists only for totality.
+const STATE_RANK: Record<AgentState, number> = {
+  "needs-you": 5,
+  stalled: 4,
+  exited: 3,
+  working: 2,
+  idle: 1,
+  unknown: 0,
+};
 
 /** No transcript, or nothing meaningful in it. The one value every reader falls
  * back to, rather than three hand-rolled copies that can drift apart. */
 export const UNKNOWN_ACTIVITY: AgentActivity = { state: "unknown", lastActivityMs: null, slug: null };
+
+/** The states that mean "not doing anything right now" for a rule like
+ * `agent-idle-over` — as opposed to `working` (in flight) or `needs-you` (control
+ * already handed back, which fires its own condition instead). `stalled` and
+ * `exited` were both folded into a single `idle` reading before the state union
+ * grew to name them separately; a caller that means "idle-like" must read this
+ * set (or `isIdleLike` below) rather than compare `state === "idle"` directly, or
+ * it silently drops back to pre-widening behaviour the next time the union grows
+ * — see conditions.ts's `agent-idle-over`, which did exactly that until this set
+ * was introduced. `needs-you`, `working` and `unknown` are deliberately absent:
+ * each already means something an idle-style rule must not fire on. */
+export const IDLE_LIKE: ReadonlySet<AgentState> = new Set<AgentState>(["idle", "stalled", "exited"]);
+
+/** Is this state "idle-like" — see `IDLE_LIKE` above for what that means and why
+ * a bare `state === "idle"` comparison is the wrong tool for this question. */
+export function isIdleLike(state: AgentState): boolean {
+  return IDLE_LIKE.has(state);
+}
 
 /** The liveliest agent across a run's repos — a multi-repo task's session may live
  * in any of them. Ties broken by most-recent activity. Pure. */
