@@ -56,12 +56,13 @@ export class UsageReader {
     if (size === e.size) return e.totals;
 
     let chunk: Buffer;
+    let read: number;
     let fd: number | undefined;
     try {
       fd = fs.openSync(file, "r");
       const len = size - e.size;
       const buf = Buffer.allocUnsafe(len);
-      const read = fs.readSync(fd, buf, 0, len, e.size);
+      read = fs.readSync(fd, buf, 0, len, e.size);
       chunk = buf.subarray(0, read);
     } catch {
       return e.totals; // leave the offset untouched; retry on the next sweep
@@ -80,7 +81,12 @@ export class UsageReader {
     const complete = nl >= 0 ? text.subarray(0, nl).toString("utf8") : "";
     // Buffer.from copies, so the (possibly large) read buffer is not retained.
     e.pendingTail = Buffer.from(nl >= 0 ? text.subarray(nl + 1) : text);
-    e.size = size;
+    // Advance by bytes actually consumed, not the stat-derived target: a short
+    // read (POSIX permits one on a regular file, and the file can also be
+    // replaced between statSync and readSync) must not skip the unread
+    // remainder. This is self-healing — size > e.size on the next sweep picks
+    // up exactly what was missed.
+    e.size += read;
 
     const lines: UsageLine[] = [];
     for (const r of complete.split("\n")) {

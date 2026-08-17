@@ -1,9 +1,31 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { UsageReader } from "../../../src/engine/usageFs";
 import { encodeProjectDir } from "../../../src/engine/transcript";
+
+// `import * as fs` produces an ES module namespace object whose properties are
+// non-configurable, so `vi.spyOn(fs, "readSync")` cannot redefine it. Replacing
+// the whole module (spread the real implementation, override just `readSync`
+// via a mutable hook) works because it swaps the module at resolution time
+// rather than mutating the namespace object afterward. Default pass-through
+// keeps every other test's real filesystem calls unaffected.
+const fsHooks = vi.hoisted(() => ({
+  readSyncOverride: null as ((...args: unknown[]) => number) | null,
+  // The real implementation, for a test's override to delegate to without
+  // recursing back through itself via the mocked `fs.readSync` binding.
+  realReadSync: null as ((...args: unknown[]) => number) | null,
+}));
+vi.mock("fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  fsHooks.realReadSync = actual.readSync as (...a: unknown[]) => number;
+  return {
+    ...actual,
+    readSync: (...args: unknown[]) =>
+      fsHooks.readSyncOverride ? fsHooks.readSyncOverride(...args) : fsHooks.realReadSync!(...args),
+  };
+});
 
 /** One assistant line with usage, as it appears on disk. */
 const row = (rid: string, out: number, cacheRead = 0): string =>
@@ -89,6 +111,45 @@ describe("UsageReader.readFile", () => {
   it("tolerates a malformed line", () => {
     fs.writeFileSync(file, ['{"usage": broken', row("r1", 11)].join("\n") + "\n");
     expect(new UsageReader().readFile(file).output).toBe(11);
+  });
+
+  // POSIX permits readSync to return fewer bytes than requested on a regular
+  // file, and the file can also be replaced in the window between statSync and
+  // readSync. The offset must advance only by what was actually consumed —
+  // jumping straight to the stat-derived size would skip the unread remainder
+  // forever, since the offset never moves backward.
+  it("advances the offset by bytes actually read, not the stat target, on a short read", () => {
+    const line1 = row("r1", 10) + "\n";
+    const line2 = row("r2", 20) + "\n";
+    fs.writeFileSync(file, line1 + line2);
+
+    const shortRead = Buffer.byteLength(line1, "utf8");
+    fsHooks.readSyncOverride = (...args: unknown[]) => {
+      // Perform the real read (so buf holds genuine file bytes), then report
+      // back fewer bytes consumed than were actually requested — exactly what
+      // a short read looks like from the caller's perspective.
+      fsHooks.realReadSync!(...args);
+      return shortRead;
+    };
+
+    const r = new UsageReader();
+    const first = r.readFile(file);
+    fsHooks.readSyncOverride = null;
+    expect(first.output).toBe(10); // only line1's bytes were reported consumed
+
+    // No append happened. If the offset had jumped to the stat-derived size on
+    // the short read, this second sweep would see size === cached offset and
+    // return the stale total (10) forever, silently losing line2.
+    const second = r.readFile(file);
+    expect(second.output).toBe(30);
+  });
+
+  // statSync succeeds on a directory and reports a non-zero size, so the open
+  // path is entered; openSync on a directory also succeeds; but readSync then
+  // throws EISDIR. That must land in the open/read catch and return zero
+  // totals rather than let the exception escape.
+  it("is zero (no throw) when the path is a directory", () => {
+    expect(new UsageReader().readFile(root).output).toBe(0);
   });
 });
 
