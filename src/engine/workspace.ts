@@ -223,6 +223,40 @@ cannot be done within them.
 `;
 }
 
+/** Write `.pick-task/TASK.md` into each of `services` — worktrees that get a brief but
+ *  deliberately no window, which is what a child worktree is: its subagent is
+ *  dispatched by the parent's session, not opened by us.
+ *
+ *  `planMd` arrives already rendered (engine/brief's `briefMarkdown`), the same way
+ *  `openWorkspace` receives it, so the two paths cannot drift into producing different
+ *  briefs. Best-effort per repo: one unwritable worktree must not cost the others
+ *  theirs. Returns the files it wrote. */
+export function writeBriefInto(
+  services: ServiceRef[],
+  ticket: TicketRef,
+  planMd: string,
+  log: (m: string) => void,
+): string[] {
+  const written: string[] = [];
+  for (const s of services) {
+    try {
+      const dir = path.join(s.path, BRIEF_DIR);
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, BRIEF_FILE);
+      // `[s]` and `s.name`, not the whole set: a child's brief names the one worktree
+      // its subagent works in, so "Repos in scope" must not list the siblings it is
+      // being kept out of. No file hints either — those come from the ticket
+      // description resolved against a repo, and the caller has already rendered the
+      // description into `planMd`.
+      fs.writeFileSync(file, briefMarkdown(ticket, planMd, [s], s.name, []));
+      written.push(file);
+    } catch (e) {
+      log(`brief ${s.name}: could not write into ${s.path} (${e})`);
+    }
+  }
+  return written;
+}
+
 /** The filename one attachment lands under: its own name, unless an earlier
  * attachment in the same launch already claimed that name, in which case the source
  * file's stem is folded in. Deterministic and exported because the brief NAMES these

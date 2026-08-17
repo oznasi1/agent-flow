@@ -22,7 +22,7 @@ import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prompt";
-import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, attachmentFileName, BRIEF_DIR, type MergeCandidate } from "./engine/workspace";
+import { openWorkspace, writeBriefInto, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, attachmentFileName, BRIEF_DIR, type MergeCandidate } from "./engine/workspace";
 import { briefMarkdown } from "./engine/brief";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, PresenceRecord, type CurrentWindow } from "./engine/presence";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
@@ -44,6 +44,7 @@ import {
   Task,
   OutboundMessage,
   PromptMode,
+  Run,
   ServiceRef,
   Size,
   WorkspaceMode,
@@ -1819,6 +1820,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     forceWorktree: boolean,
     target: OpenTarget,
     onWorktreeDecision?: (used: boolean) => void,
+    /** Orchestrator-mode extras: the child worktrees this run owns. Absent for every
+     *  other caller, which keeps their brief and their run record byte-identical. */
+    orchestration?: { children: NonNullable<Run["children"]>; parentBranch: string },
   ): Promise<boolean> {
     const cfg = getConfig();
     const key = detail.key;
@@ -1861,7 +1865,21 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // nothing opened, and take_completed records it as cancelled rather than failed.
     if (wantRemoteControl === null) return false;
 
-    const planMd = briefMarkdown(detail, providerLabel(cfg.agentProvider));
+    // The Children table is built from the rows that were actually created, never from
+    // the leaves that were intended: a subagent dispatched at a worktree that is not
+    // there would land in whatever the path resolves to instead.
+    const planMd = briefMarkdown(
+      detail,
+      providerLabel(cfg.agentProvider),
+      orchestration?.children.length
+        ? {
+            children: orchestration.children.map((c) => ({
+              key: c.key, summary: c.summary, path: c.path, branch: c.branch,
+            })),
+            parentBranch: orchestration.parentBranch,
+          }
+        : undefined,
+    );
     const result = await openWorkspace({
       ticket: { key: detail.key, summary: detail.summary, url: detail.url },
       planMd,
@@ -1877,6 +1895,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       currentWindow: args.currentWindow,
       foldersToAdd: additions.foldersToAdd,
       remoteControl: wantRemoteControl,
+      // Absent rather than empty for every non-orchestrator caller: a run record with
+      // no children has to look exactly as it did before children existed.
+      ...(orchestration?.children.length ? { children: orchestration.children } : {}),
     });
 
     const where = this.openedWhere(result, cfg.seedAgent);
@@ -2449,13 +2470,130 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return this.reposForTask(detail, repos).map((r) => r.name);
   }
 
-  /** Orchestrator-mode take: implemented in the next task. */
+  /**
+   * Orchestrator-mode take: one session in the parent's worktree, one worktree per
+   * selected leaf for it to dispatch a subagent into.
+   *
+   * The children get worktrees in the PARENT's resolved repo set, not in their own.
+   * An orchestrator can only dispatch into directories its own window can see, and a
+   * child's repos are its own ticket's inference — following those would scatter
+   * worktrees across repos this session never opens. A child that names something
+   * outside the set is said out loud rather than silently narrowed.
+   *
+   * No telemetry, for the same reason a fan-out emits none: this path never opened a
+   * funnel (see `takeTask`), so there is nothing here to terminate.
+   */
   private async takeOrchestrated(
-    _detail: TaskDetail,
-    _leaves: TreeLeaf[],
-    _parentBranch: string,
+    detail: TaskDetail,
+    leaves: TreeLeaf[],
+    parentBranch: string,
   ): Promise<void> {
-    throw new Error("orchestrator mode not wired yet");
+    const cfg = getConfig();
+    // No prompt-mode question: the mode is forced to `orchestrator` below. The
+    // destination and repo questions are resolveKickoff's own, and neither the tree-mode
+    // nor the leaf picker asked them, so this is the first time either is put up.
+    const resolved = await this.resolveKickoff(detail.key, undefined);
+    if (!resolved) return;
+    const { services: parentRepos, target } = resolved;
+
+    // The parent branch is the base every child branches off. Without it in a repo, a
+    // child worktree there would silently start from main — refuse instead. Resolved
+    // for EVERY repo before any worktree is created, so a refusal leaves nothing behind.
+    const noBranch = parentRepos.filter((r) => r.isGit && !ensureBranch(r.path, parentBranch));
+    if (noBranch.length) {
+      this.toast(
+        "error",
+        `Couldn't create the parent branch ${parentBranch} in ${noBranch.map((r) => r.name).join(", ")} — nothing was taken.`,
+      );
+      return;
+    }
+
+    const inScope = new Set(parentRepos.map((r) => r.name));
+    const discovered = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+    const children: NonNullable<Run["children"]> = [];
+    const failed: string[] = [];
+    for (const leaf of leaves) {
+      const made = createWorktrees(parentRepos, leaf.key, leaf.summary, this.log, { baseRef: parentBranch });
+      // createWorktrees hands back the ORIGINAL ref when it could not create the
+      // worktree. Launching a subagent there would put it in the parent's own
+      // checkout, so that child is dropped rather than mislocated. Index-aligned
+      // because createWorktrees maps one result per service it was handed.
+      const usable = made.filter((s, i) => s.path !== parentRepos[i].path);
+      if (!usable.length) {
+        failed.push(leaf.key);
+        continue;
+      }
+      for (const s of usable) {
+        children.push({
+          key: leaf.key,
+          summary: leaf.summary,
+          repo: s.name,
+          path: s.path,
+          branch: branchName(leaf.key, leaf.summary),
+        });
+      }
+      // Each child worktree gets its own brief, from its own ticket — a subagent reads a
+      // real brief, not a row in the parent's table. A failed read degrades to what the
+      // leaf already told us rather than costing the child its worktree or the take.
+      const childDetail = await this.provider().detail(leaf.key).catch(() => null);
+      if (childDetail) this.logReposOutsideParent(childDetail, discovered, inScope);
+      writeBriefInto(
+        usable,
+        { key: leaf.key, summary: leaf.summary, url: childDetail?.url ?? "" },
+        briefMarkdown(
+          childDetail ?? { key: leaf.key, summary: leaf.summary, descriptionText: "" },
+          providerLabel(cfg.agentProvider),
+        ),
+        this.log,
+      );
+    }
+    if (failed.length) {
+      this.toast("info", `Couldn't create a worktree for ${failed.join(", ")} — dispatch those by hand.`);
+    }
+
+    await this.launch(
+      detail,
+      parentRepos,
+      this.orchestratorTemplate(cfg),
+      true, // forceWorktree: the parent session works on the parent branch, isolated
+      target,
+      undefined,
+      { children, parentBranch },
+    );
+  }
+
+  /** Say which repos a child's own ticket names that the parent's set does not cover.
+   *  Logged, not acted on: the child works the parent's repos either way (see
+   *  `takeOrchestrated`), and a subagent quietly working somewhere its ticket never
+   *  named is the kind of surprise that has to be findable afterwards. */
+  private logReposOutsideParent(
+    childDetail: TaskDetail,
+    discovered: ServiceRef[],
+    inScope: Set<string>,
+  ): void {
+    const outside = inferServices(
+      { summary: childDetail.summary, descriptionText: childDetail.descriptionText, labels: childDetail.labels, components: childDetail.components },
+      discovered,
+    )
+      .map((r) => r.service.name)
+      .filter((n) => !inScope.has(n));
+    if (!outside.length) return;
+    this.log(
+      `orchestrator ${childDetail.key}: skipping ${outside.join(", ")} — outside the parent's repos (${[...inScope].join(", ")})`,
+    );
+  }
+
+  /** The orchestrator prompt mode's template. A user can delete or rename modes, so an
+   *  absent one falls back to the first configured mode rather than failing the take —
+   *  and says so, because the session then gets a prompt that does not mention
+   *  subagents while the brief's Children table tells it to dispatch them. */
+  private orchestratorTemplate(cfg: AgentFlowConfig): string {
+    const mode = cfg.promptModes.find((m) => m.id === "orchestrator");
+    if (mode) return mode.prompt;
+    this.log(
+      `orchestrator mode: no "orchestrator" prompt mode configured — falling back to ${cfg.promptModes[0]?.label ?? "the default prompt"}`,
+    );
+    return cfg.promptModes[0]?.prompt ?? "";
   }
 
   /** PR-review kick-off: the same open+seed flow as Take, but always in a worktree and

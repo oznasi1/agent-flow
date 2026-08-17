@@ -13,15 +13,19 @@ vi.mock("../../src/config", async () => {
   return { ...actual, getConfig: vi.fn() };
 });
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn() }));
-// Partial: only the four entry points that open windows or touch the filesystem are
+// Partial: only the five entry points that open windows or touch the filesystem are
 // stubbed. BRIEF_DIR and attachmentFileName stay REAL — they are a constant and a
 // pure path function, and the notepad's image handoff names paths with them that the
 // engine then copies files to, so a stub here would let the two drift silently.
+// `writeBriefInto` is stubbed for the same reason openWorkspace is: it writes into a
+// child worktree, and these tests run against fake `/repos` paths. Its real writing
+// behaviour is covered in test/unit/engine/workspace.test.ts.
 vi.mock("../../src/engine/workspace", async () => {
   const actual = await vi.importActual<typeof import("../../src/engine/workspace")>("../../src/engine/workspace");
   return {
     ...actual,
     openWorkspace: vi.fn(),
+    writeBriefInto: vi.fn(() => []),
     listWorkspaceFiles: vi.fn(() => []),
     workspaceFolderPaths: vi.fn(() => []),
     planWorkspaceMerge: vi.fn(() => ({ add: [], duplicates: [], redundant: [], present: [], ok: true })),
@@ -107,7 +111,7 @@ vi.mock("../../src/tasks/jira/client", async () => {
 import { parseJiraError } from "../../src/tasks/jira/errors";
 import { getConfig } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
-import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge } from "../../src/engine/workspace";
+import { openWorkspace, writeBriefInto, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge } from "../../src/engine/workspace";
 import { branchName, createWorktrees, ensureBranch } from "../../src/engine/worktree";
 import { openSharedWorkspace } from "../../src/engine/batchWorkspace";
 import { readLiveWindows, windowIdentity, currentWindow } from "../../src/engine/presence";
@@ -5594,5 +5598,311 @@ describe("takeBatch with a parent", () => {
     // Absent, not undefined: the run record must look exactly as it did before parents
     // existed (see Run.parentKey).
     expect("parentKey" in vi.mocked(openWorkspace).mock.calls[0][0]).toBe(false);
+  });
+});
+
+// ── orchestrator mode ──────────────────────────────────────────────────────────
+// One session in the PARENT's worktree, one child worktree per selected leaf for it
+// to dispatch a subagent into. The children get worktrees in the parent's resolved
+// repo set — an orchestrator can only dispatch into directories its own window sees.
+describe("takeTask: orchestrator mode", () => {
+  /** Computed from the REAL branchName and the summary the fixture's getDetail
+   *  returns, never a guessed slug. */
+  const PARENT_BRANCH = branchName("ASM-1", "Do the thing");
+  /** The shipped prompt modes include an `orchestrator` entry (src/config.ts); the
+   *  base CFG's list deliberately does not, so the fallback has its own tests below. */
+  const WITH_ORCHESTRATOR = [
+    { id: "plan", label: "Plan", prompt: "P {key}" },
+    { id: "orchestrator", label: "Orchestrator", prompt: "ORCH {key}" },
+  ];
+
+  beforeEach(() => {
+    clientStub.childrenOf = vi.fn(async (key: string) =>
+      key === "ASM-1"
+        ? [
+            { key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "new" },
+            { key: "ASM-3", summary: "second bit", type: "Sub-task", statusCategory: "new" },
+          ]
+        : [],
+    );
+    // Each ticket gets its OWN summary and description, so a brief built from the
+    // parent's detail instead of the child's is visible rather than identical.
+    clientStub.getDetail.mockImplementation(async (key: string) => ({
+      key,
+      summary: { "ASM-1": "Do the thing", "ASM-2": "first bit", "ASM-3": "second bit" }[key] ?? key,
+      descriptionText: `${key} description`,
+      labels: [],
+      components: [],
+      url: `https://jira/browse/${key}`,
+    }));
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, promptModes: WITH_ORCHESTRATOR });
+    // A *successful* worktree returns a path different from the main checkout — the
+    // path-equality test the implementation uses to drop a child it could not place.
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+  });
+  afterEach(() => {
+    // Neither implementation has a global reset (clearMocks only clears call history).
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+    vi.mocked(ensureBranch).mockReturnValue(true);
+  });
+
+  /** The three pickers this path asks, in order: how to work the leaves, which leaves,
+   *  and — from resolveKickoff, for a new window — which repos this task touches. */
+  function answerOrchestrator(
+    leaves: (items: unknown[]) => unknown = (items) => items,
+    repos: (items: unknown[]) => unknown = (items) => items,
+  ): void {
+    answerPicks((items: unknown[]) => items[1], leaves, repos);
+  }
+
+  /** The child worktree rows the parent's run carries, as the mocked createWorktrees
+   *  places them. */
+  const CHILD_ROWS = [
+    { key: "ASM-2", summary: "first bit", repo: "api", path: "/repos/api/.claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
+    { key: "ASM-3", summary: "second bit", repo: "api", path: "/repos/api/.claude/worktrees/ASM-3", branch: "ASM-3-second-bit" },
+  ];
+
+  const openArg = () => vi.mocked(openWorkspace).mock.calls[0][0];
+  /** Every createWorktrees call as [repo names, key, summary, options]. */
+  const worktreeCalls = () =>
+    vi.mocked(createWorktrees).mock.calls.map((c) => [
+      (c[0] as { name: string }[]).map((r) => r.name),
+      c[1],
+      c[2],
+      c[4],
+    ]);
+
+  it("creates one worktree per selected leaf, each off the parent branch", async () => {
+    answerOrchestrator();
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    // The children first, off the parent branch; then the parent's own worktree, which
+    // takes NO baseRef because it IS the parent branch.
+    expect(worktreeCalls()).toEqual([
+      [["api"], "ASM-2", "first bit", { baseRef: PARENT_BRANCH }],
+      [["api"], "ASM-3", "second bit", { baseRef: PARENT_BRANCH }],
+      [["api"], "ASM-1", "Do the thing", undefined],
+    ]);
+  });
+
+  it("makes the parent branch in every in-scope repo before any child worktree", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web"]));
+    answerOrchestrator();
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(vi.mocked(ensureBranch).mock.calls).toEqual([
+      ["/repos/api", PARENT_BRANCH],
+      ["/repos/web", PARENT_BRANCH],
+    ]);
+    // Order matters: a worktree created before its base branch exists would silently
+    // start from main.
+    expect(vi.mocked(ensureBranch).mock.invocationCallOrder[1]).toBeLessThan(
+      vi.mocked(createWorktrees).mock.invocationCallOrder[0],
+    );
+  });
+
+  it("gives a child one row per repo of the parent's set", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web"]));
+    answerOrchestrator((items) => [items[0]]); // one leaf, two repos
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(openArg().children).toEqual([
+      { key: "ASM-2", summary: "first bit", repo: "api", path: "/repos/api/.claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
+      { key: "ASM-2", summary: "first bit", repo: "web", path: "/repos/web/.claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
+    ]);
+  });
+
+  it("opens exactly one session, on the parent, in a worktree, with the orchestrator prompt", async () => {
+    answerOrchestrator();
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    const calls = vi.mocked(openWorkspace).mock.calls;
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0].ticket).toEqual({ key: "ASM-1", summary: "Do the thing", url: "https://jira/browse/ASM-1" });
+    // Forced, even though CFG sets worktree: "never" — the orchestrator works on the
+    // parent branch, isolated from the checkout its children branch out of.
+    expect(calls[0][0].services.map((s) => s.path)).toEqual(["/repos/api/.claude/worktrees/ASM-1"]);
+    expect(calls[0][0].promptTemplate).toBe("ORCH {key}");
+  });
+
+  it("names every child worktree in the parent's brief", async () => {
+    answerOrchestrator();
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    const { planMd } = openArg();
+    expect(planMd).toContain("## Children — one subagent each");
+    expect(planMd).toContain("| ASM-2 | first bit | `/repos/api/.claude/worktrees/ASM-2` | `ASM-2-first-bit` |");
+    expect(planMd).toContain("| ASM-3 | second bit | `/repos/api/.claude/worktrees/ASM-3` | `ASM-3-second-bit` |");
+    expect(planMd).toContain(`Merge finished children into \`${PARENT_BRANCH}\`; never into main.`);
+  });
+
+  it("records the child worktrees on the parent's run", async () => {
+    answerOrchestrator();
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(openArg().children).toEqual(CHILD_ROWS);
+  });
+
+  it("writes a brief into each child worktree, built from that child's own detail", async () => {
+    answerOrchestrator();
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    const calls = vi.mocked(writeBriefInto).mock.calls;
+    expect(calls.map((c) => [(c[0] as { path: string }[]).map((s) => s.path), c[1]])).toEqual([
+      [["/repos/api/.claude/worktrees/ASM-2"], { key: "ASM-2", summary: "first bit", url: "https://jira/browse/ASM-2" }],
+      [["/repos/api/.claude/worktrees/ASM-3"], { key: "ASM-3", summary: "second bit", url: "https://jira/browse/ASM-3" }],
+    ]);
+    // The child's own ticket text, not the parent's — a subagent reads a real brief,
+    // not a row in the parent's table.
+    expect(calls[0][2]).toContain("## ASM-2: first bit");
+    expect(calls[0][2]).toContain("ASM-2 description");
+    expect(calls[1][2]).toContain("## ASM-3: second bit");
+    expect(calls[1][2]).toContain("ASM-3 description");
+  });
+
+  it("falls back to the leaf's own key and summary when the child's detail cannot be read", async () => {
+    clientStub.getDetail.mockImplementation(async (key: string) => {
+      if (key === "ASM-3") throw new Error("500");
+      return {
+        key,
+        summary: key === "ASM-1" ? "Do the thing" : "first bit",
+        descriptionText: `${key} description`,
+        labels: [],
+        components: [],
+        url: `https://jira/browse/${key}`,
+      };
+    });
+    answerOrchestrator();
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    const calls = vi.mocked(writeBriefInto).mock.calls;
+    // A failed detail fetch degrades to what the leaf already knew — it must not cost
+    // the child its worktree, its brief, or the take.
+    expect(calls[1][1]).toEqual({ key: "ASM-3", summary: "second bit", url: "" });
+    expect(calls[1][2]).toContain("## ASM-3: second bit");
+    expect(calls[1][2]).toContain("_(No description on the ticket.)_");
+    expect(openArg().children).toEqual(CHILD_ROWS);
+  });
+
+  it("skips a child whose worktree could not be made, and says so", async () => {
+    // createWorktrees hands back the ORIGINAL ref when it could not create the
+    // worktree — a subagent dispatched there would be in the parent's own checkout.
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      key === "ASM-3" ? s : s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    answerOrchestrator();
+    const { provider, posted } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(openArg().children).toEqual([CHILD_ROWS[0]]);
+    expect(openArg().planMd).not.toContain("ASM-3");
+    // No brief in the main checkout either: the child is dropped whole.
+    expect(vi.mocked(writeBriefInto).mock.calls.map((c) => (c[1] as { key: string }).key)).toEqual(["ASM-2"]);
+    expect(posted()).toContainEqual({
+      type: "toast",
+      level: "info",
+      message: "Couldn't create a worktree for ASM-3 — dispatch those by hand.",
+    });
+  });
+
+  it("still opens the orchestrator session when no child worktree could be made", async () => {
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      key === "ASM-1" ? s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })) : s,
+    );
+    answerOrchestrator();
+    const { provider, posted } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(vi.mocked(openWorkspace).mock.calls).toHaveLength(1);
+    // Absent, not empty: a run with no children must read exactly like a run taken
+    // before children existed (see Run.children), and the brief keeps no table.
+    expect("children" in openArg()).toBe(false);
+    expect(openArg().planMd).not.toContain("## Children — one subagent each");
+    expect(posted()).toContainEqual({
+      type: "toast",
+      level: "info",
+      message: "Couldn't create a worktree for ASM-2, ASM-3 — dispatch those by hand.",
+    });
+  });
+
+  it("refuses the whole take when the parent branch cannot be made", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web"]));
+    vi.mocked(ensureBranch).mockReturnValue(false);
+    answerOrchestrator();
+    const { provider, posted } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(writeBriefInto).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(posted()).toContainEqual({
+      type: "toast",
+      level: "error",
+      message: `Couldn't create the parent branch ${PARENT_BRANCH} in api, web — nothing was taken.`,
+    });
+  });
+
+  it("takes nothing when the repo picker is cancelled", async () => {
+    answerOrchestrator((items) => items, () => undefined);
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(ensureBranch).not.toHaveBeenCalled();
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("says which of a child's own repos the parent's set leaves out", async () => {
+    // The child works the PARENT's repos: an orchestrator can only dispatch into
+    // directories its own window can see. Narrowing silently would leave a subagent
+    // working somewhere the ticket never named, with no record of why.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web"]));
+    clientStub.getDetail.mockImplementation(async (key: string) => ({
+      key,
+      summary: { "ASM-1": "Do the thing", "ASM-2": "first bit", "ASM-3": "second bit" }[key] ?? key,
+      descriptionText: "",
+      labels: key === "ASM-3" ? ["web"] : [],
+      components: [],
+      url: `https://jira/browse/${key}`,
+    }));
+    answerOrchestrator((items) => items, (items) => [items[0]]); // api only
+    const { provider, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(logged).toContain("orchestrator ASM-3: skipping web — outside the parent's repos (api)");
+    // …and it still gets its worktree, in the parent's set.
+    expect(openArg().children).toEqual(CHILD_ROWS);
+  });
+
+  it("falls back to the first configured mode, out loud, when no orchestrator mode is configured", async () => {
+    // A user can delete or rename prompt modes. Falling back silently would hand the
+    // session a prompt that never mentions subagents while the brief's Children table
+    // tells it to dispatch them.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG });
+    answerOrchestrator();
+    const { provider, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(openArg().promptTemplate).toBe("P {key}");
+    expect(logged).toContain(
+      'orchestrator mode: no "orchestrator" prompt mode configured — falling back to Plan',
+    );
+  });
+
+  it("still takes the parent when the prompt-mode list is empty", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, promptModes: [] });
+    answerOrchestrator();
+    const { provider, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(openArg().promptTemplate).toBe("");
+    expect(logged).toContain(
+      'orchestrator mode: no "orchestrator" prompt mode configured — falling back to the default prompt',
+    );
+  });
+
+  it("opens no funnel for a take that becomes an orchestrator run", async () => {
+    // Same reason fan-out emits nothing: takeOrchestrated is uninstrumented, so a
+    // take_started here would open a funnel nothing ever terminates.
+    answerOrchestrator();
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(trackSpy.mock.calls.map((c) => (c[0] as { name: string }).name)).toEqual([]);
   });
 });

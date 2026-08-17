@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { attachmentFileName, briefMarkdown, openWorkspace, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
+import { attachmentFileName, briefMarkdown, openWorkspace, writeBriefInto, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
 import { commands, env, setConfig, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -2217,5 +2217,47 @@ describe("briefMarkdown — repo scope", () => {
     expect(out).toContain("- `centaur` — /repos/centaur");
     expect(out).toContain("- `infra` — /repos/infra  ← you are here");
     expect(out).toContain("**Repos in scope:** centaur, infra");
+  });
+});
+
+// ── writeBriefInto ─────────────────────────────────────────────────────────────
+// A child worktree in orchestrator mode gets a brief but deliberately no window, so
+// it cannot go through openWorkspace. Same two functions in the same order as the
+// parent's brief: the caller renders `planMd` (engine/brief), this writes it.
+describe("writeBriefInto", () => {
+  const child: TicketRef = { key: "ASM-2", summary: "first bit", url: "https://jira/ASM-2" };
+  const worktrees = mkRepos(["api", "web"], { root: "/repos/parent/.claude/worktrees/ASM-2" });
+
+  it("writes .pick-task/TASK.md into every worktree it is handed", () => {
+    const written = writeBriefInto(worktrees, child, "## Plan\n\nsteps", () => {});
+    expect(written).toEqual([
+      "/repos/parent/.claude/worktrees/ASM-2/api/.pick-task/TASK.md",
+      "/repos/parent/.claude/worktrees/ASM-2/web/.pick-task/TASK.md",
+    ]);
+    expect(mkdirSync).toHaveBeenCalledWith("/repos/parent/.claude/worktrees/ASM-2/api/.pick-task", { recursive: true });
+    expect(mkdirSync).toHaveBeenCalledWith("/repos/parent/.claude/worktrees/ASM-2/web/.pick-task", { recursive: true });
+  });
+
+  it("names the child's own ticket and carries the rendered plan through", () => {
+    writeBriefInto([worktrees[0]], child, "## ASM-2: first bit\n\nthe child's own brief", () => {});
+    const brief = writeArg((p) => p.endsWith(BRIEF_FILE));
+    expect(String(brief![0])).toBe("/repos/parent/.claude/worktrees/ASM-2/api/.pick-task/TASK.md");
+    expect(String(brief![1])).toContain("# ASM-2 — first bit");
+    expect(String(brief![1])).toContain("the child's own brief");
+    // The brief names the worktree it sits in — a subagent has to know where it is.
+    expect(String(brief![1])).toContain("- `api` — /repos/parent/.claude/worktrees/ASM-2/api  ← you are here");
+  });
+
+  it("still writes the other worktrees when one is unwritable, and says which", () => {
+    // Best-effort per repo: one unwritable worktree must not cost the others theirs.
+    writeFileSync.mockImplementation(((p: string) => {
+      if (String(p).includes("/api/")) throw new Error("EACCES");
+    }) as never);
+    const logged: string[] = [];
+    const written = writeBriefInto(worktrees, child, "plan", (m) => logged.push(m));
+    expect(written).toEqual(["/repos/parent/.claude/worktrees/ASM-2/web/.pick-task/TASK.md"]);
+    expect(logged).toEqual([
+      "brief api: could not write into /repos/parent/.claude/worktrees/ASM-2/api (Error: EACCES)",
+    ]);
   });
 });
