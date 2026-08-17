@@ -68,4 +68,22 @@ describe("briefMarkdown with children", () => {
     const md = briefMarkdown(detail, "Claude Code", { children, parentBranch: "ASM-1-parent-work" });
     expect(md.indexOf("do the thing")).toBeLessThan(md.indexOf("## Children"));
   });
+
+  it("renders the whole Children block verbatim", () => {
+    // One exact-block assertion rather than a pile of independent `toContain`
+    // checks: those cannot see what sits BETWEEN them, so a missing separator row
+    // or a dropped instruction sentence leaves every one of them green while the
+    // rendered table is broken.
+    const md = briefMarkdown(detail, "Claude Code", { children, parentBranch: "ASM-1-parent-work" });
+    expect(md).toContain(`
+## Children — one subagent each
+
+| Ticket | Summary | Worktree | Branch |
+|---|---|---|---|
+| ASM-2 | first bit | \`.claude/worktrees/ASM-2\` | \`ASM-2-first-bit\` |
+| ASM-3 | second bit | \`.claude/worktrees/ASM-3\` | \`ASM-3-second-bit\` |
+
+Dispatch one subagent per row. Each works ONLY inside its worktree path.
+Merge finished children into \`ASM-1-parent-work\`; never into main.`);
+  });
 });
