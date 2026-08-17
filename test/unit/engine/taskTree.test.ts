@@ -62,12 +62,17 @@ describe("buildTree", () => {
     expect(out.dropped).toEqual(["K-3", "K-4"]);
   });
 
-  it("breaks a cycle and reports the repeat", async () => {
+  it("yields no leaf for a cycling node, and reports the repeat", async () => {
+    // A → B → A. B's only child is already seen, so B is not childless-and-therefore-
+    // a-leaf; the walk ends with nothing to fan out, which is the safe answer — the
+    // caller then behaves exactly as it does for a ticket with no children at all.
+    // Unreachable through Jira parent links; asserted so the walk cannot hang or throw
+    // if a source ever does emit one.
     const out = await buildTree("A", fetchFrom({
       A: [{ key: "B", summary: "b" }],
       B: [{ key: "A", summary: "a again" }],
     }));
-    expect(out.leaves.map((l) => l.key)).toEqual(["B"]);
+    expect(out.leaves).toEqual([]);
     expect(out.dropped).toEqual(["A"]);
   });
 

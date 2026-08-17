@@ -58,7 +58,6 @@ export async function buildTree(
   const maxDepth = limits.maxDepth ?? MAX_TREE_DEPTH;
   const maxLeaves = limits.maxLeaves ?? MAX_TREE_LEAVES;
   const seen = new Set<string>([rootKey]);
-  const seenDepth = new Map<string, number>([[rootKey, 0]]);
   const dropped: string[] = [];
   const leaves: TreeLeaf[] = [];
   let frontier: TreeLeaf[] = [{ key: rootKey, summary: "", depth: 0, parentKey: "" }];
@@ -84,26 +83,23 @@ export async function buildTree(
         continue;
       }
       const fresh: ChildLike[] = [];
-      let hasCycleChild = false;
       for (const k of kids) {
-        // Already seen: a cycle, or a diamond where two parents claim one child.
-        // Either way it is walked once and the repeat is reported.
-        if (seen.has(k.key)) {
-          dropped.push(k.key);
-          const childDepth = seenDepth.get(k.key) ?? -1;
-          if (childDepth < node.depth + 1) {
-            hasCycleChild = true;
-          }
-        } else fresh.push(k);
+        // Already seen: a repeat in the walk. It is walked once and the repeat is
+        // reported. A node whose only children are already claimed elsewhere in the
+        // walk is not a leaf: its work lives under whichever parent claimed them.
+        if (seen.has(k.key)) dropped.push(k.key);
+        else fresh.push(k);
       }
       if (!fresh.length) {
-        // Only mark as leaf if truly childless, or if we hit a cycle
-        if (node.depth > 0 && (kids.length === 0 || hasCycleChild)) leaves.push(node);
+        // A leaf is a node with no children. A node whose only children were already
+        // claimed elsewhere in the walk is NOT one: its work lives under whichever
+        // parent claimed them. Jira's single-parent constraint makes diamonds
+        // impossible, so this is the cheap, honest answer.
+        if (node.depth > 0 && kids.length === 0) leaves.push(node);
         continue;
       }
       for (const k of fresh) {
         seen.add(k.key);
-        seenDepth.set(k.key, node.depth + 1);
         next.push({ ...k, depth: node.depth + 1, parentKey: node.key });
       }
     }
