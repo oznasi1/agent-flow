@@ -278,6 +278,12 @@ export interface AgentFlowConfig {
   prReviewAutoFix: boolean; // after assessing, proceed to implement the PR's requested changes
   prReviewPrompt: string; // seeded prompt for the PR-review kick-off
   worktree: "ask" | "always" | "never";
+  /** Offer the child-worktree flow: a Take of a ticket with children asks whether to
+   *  fan out into a worktree per child or run one orchestrator over them. Off by
+   *  default, and the default is load-bearing — with it off, `probeTree` returns before
+   *  reading anything, so an existing user's Take is byte-identical to what it was
+   *  before this feature existed: no extra round trip, no new pickers, no new git. */
+  childWorktrees: boolean;
   // Offer Claude Code's Remote Control for the session we open: the panel is seeded
   // with /remote-control <KEY> and the task prompt goes to the clipboard.
   remoteControl: "off" | "on" | "ask";
@@ -524,6 +530,7 @@ export function getConfig(): AgentFlowConfig {
     prReviewAutoFix: c.get<boolean>("prReviewAutoFix") ?? true,
     prReviewPrompt: c.get<string>("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT,
     worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
+    childWorktrees: c.get<boolean>("childWorktrees") ?? false,
     remoteControl: (() => {
       const v = c.get<string>("remoteControl");
       return v === "on" || v === "ask" ? v : "off";

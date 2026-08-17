@@ -692,6 +692,15 @@ describe("review-request settings", () => {
     expect(getConfig().orchestrator).toBe(true);
   });
 
+  it("defaults childWorktrees to off — an existing user's Take must stay untouched", () => {
+    expect(getConfig().childWorktrees).toBe(false);
+  });
+
+  it("reads childWorktrees when turned on", () => {
+    setConfig({ childWorktrees: true });
+    expect(getConfig().childWorktrees).toBe(true);
+  });
+
   it("floors the TTL at 60 seconds", () => {
     setConfig({ reviewRequestsTtlSeconds: 5 });
     expect(getConfig().reviewRequestsTtlSeconds).toBe(60);
@@ -930,6 +939,10 @@ describe("package.json ⇄ config constants", () => {
 
   it("declares orchestrator defaulting to false — the feature that will run agents on a timer", () => {
     expect(props["agentFlow.orchestrator"].default).toBe(false);
+  });
+
+  it("declares childWorktrees defaulting to false — an existing user's Take must stay untouched", () => {
+    expect(props["agentFlow.childWorktrees"].default).toBe(false);
   });
 
   it("declares deckGrouping defaulting to agents, and both retirement windows", () => {

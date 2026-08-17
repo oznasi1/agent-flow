@@ -28,6 +28,7 @@ describe("settingsSnapshot", () => {
     expect(s.open_agents).toBe(true);
     expect(s.review_writes).toBe(false);
     expect(s.orchestrator).toBe(false);
+    expect(s.child_worktrees).toBe(false);
     expect(s.repo_blocklist_count).toBe(0);
     // One, not zero: DEFAULT_COMMANDS now ships a single inert example, and an
     // untouched setting resolves to it.
@@ -377,6 +378,14 @@ describe("settingsSnapshot — orchestrator", () => {
   });
 });
 
+describe("settingsSnapshot — childWorktrees", () => {
+  it("carries the childWorktrees setting", () => {
+    expect(settingsSnapshot(getConfig()).child_worktrees).toBe(false);
+    setConfig({ childWorktrees: true });
+    expect(settingsSnapshot(getConfig()).child_worktrees).toBe(true);
+  });
+});
+
 describe("settingsSnapshot — field-count guard", () => {
   // docs/TELEMETRY.md hand-states two counts about this exact interface: the
   // total field count ("a 38-field reduction") and how many of those fields
@@ -390,10 +399,10 @@ describe("settingsSnapshot — field-count guard", () => {
   // field is enum-ish, the "invalid" sentinel paragraph and its own field
   // list) — update the doc, don't just bump the number here.
 
-  it("emits exactly 38 fields — a count also stated in docs/TELEMETRY.md's " +
+  it("emits exactly 39 fields — a count also stated in docs/TELEMETRY.md's " +
     "'Settings snapshot' section; a mismatch means that doc is now wrong too", () => {
     const s = settingsSnapshot(getConfig());
-    expect(Object.keys(s)).toHaveLength(38);
+    expect(Object.keys(s)).toHaveLength(39);
   });
 
   it("reports the \"invalid\" sentinel on exactly 9 fields when every enum-ish " +

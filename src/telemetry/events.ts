@@ -147,6 +147,7 @@ export interface SettingsSnapshot {
   open_agents: boolean;
   review_writes: boolean;
   orchestrator: boolean;
+  child_worktrees: boolean;
   stamp_label_on_write: boolean;
   track_open_windows: boolean;
   batch_confirm_threshold: number;

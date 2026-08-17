@@ -546,6 +546,11 @@
           "default": "ask",
           "description": "Whether to isolate the task in a git worktree. Worktrees are created inside each repo at .claude/worktrees/<KEY> (git-excluded automatically)."
         },
+        "agentFlow.childWorktrees": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "When you take a ticket that has children, offer to work them as a worktree per child (a session each) or as one orchestrator session dispatching a subagent per child. Off by default: with it off, taking a ticket behaves exactly as it did before this setting existed."
+        },
         "agentFlow.remoteControl": {
           "type": "string",
           "enum": [

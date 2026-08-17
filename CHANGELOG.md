@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Child worktrees for a ticket that has them.** Off by default — turn on
+  `agentFlow.childWorktrees` and taking a ticket with subtasks asks how you
+  want to work them: a worktree and session per child, one orchestrator
+  session on the parent that dispatches a subagent into a worktree per child,
+  or just the parent, today's behaviour. Every child branches off the
+  parent's own branch rather than main, so nothing needs merging anywhere
+  but there. Leave the setting off and a Take is exactly what it was before
+  this feature existed — no extra ticket read, no children query, no picker.
+
 ## [0.23.1] — 2026-08-17
 
 ### Fixed

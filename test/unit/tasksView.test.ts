@@ -160,6 +160,7 @@ const CFG = {
   prReviewAutoFix: true,
   prReviewPrompt: "PR {key}{files}",
   worktree: "never" as const,
+  childWorktrees: false,
   remoteControl: "off" as const,
   batchLaunchConfirmThreshold: 6,
   trackOpenWindows: true,
@@ -5167,6 +5168,9 @@ describe("takeTask: a ticket with children", () => {
 
   beforeEach(() => {
     clientStub.childrenOf = vi.fn(async (key: string) => CHILDREN[key] ?? []);
+    // Every test below exercises the tree flow, which is gated off by default (Task
+    // 10) — turn it on here, once, rather than in each test.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, childWorktrees: true });
     // A *successful* worktree returns a path different from the main checkout —
     // takeBatch fails a child whose path came back unchanged (see its own describe).
     vi.mocked(createWorktrees).mockImplementation((s, key) =>
@@ -5177,6 +5181,25 @@ describe("takeTask: a ticket with children", () => {
     // Neither implementation has a global reset (clearMocks only clears call history).
     vi.mocked(createWorktrees).mockImplementation((s) => s);
     vi.mocked(ensureBranch).mockReturnValue(true);
+  });
+
+  it("does not probe for children when the setting is off", async () => {
+    // Default-off is the whole point: an existing user's Take must be byte-identical
+    // until they opt in. Asserted through observable behavior — one detail read, no
+    // tree pickers, one openWorkspace — rather than by spying on probeTree.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, childWorktrees: false });
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(clientStub.childrenOf).not.toHaveBeenCalled();
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("probes when the setting is on", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, childWorktrees: true });
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]); // cancels at the mode picker
+    expect(clientStub.childrenOf).toHaveBeenCalledWith("ASM-1");
   });
 
   it("does not probe at all when the source has no children capability", async () => {
@@ -5636,7 +5659,9 @@ describe("takeTask: orchestrator mode", () => {
       url: `https://jira/browse/${key}`,
     }));
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
-    vi.mocked(getConfig).mockReturnValue({ ...CFG, promptModes: WITH_ORCHESTRATOR });
+    // childWorktrees: true — every test below exercises the tree flow, gated off by
+    // default (Task 10).
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, promptModes: WITH_ORCHESTRATOR, childWorktrees: true });
     // A *successful* worktree returns a path different from the main checkout — the
     // path-equality test the implementation uses to drop a child it could not place.
     vi.mocked(createWorktrees).mockImplementation((s, key) =>
@@ -5952,7 +5977,7 @@ describe("takeTask: orchestrator mode", () => {
     // A user can delete or rename prompt modes. Falling back silently would hand the
     // session a prompt that never mentions subagents while the brief's Children table
     // tells it to dispatch them.
-    vi.mocked(getConfig).mockReturnValue({ ...CFG });
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, childWorktrees: true });
     answerOrchestrator();
     const { provider, logged } = setup({ authed: true });
     await provider.takeTask("ASM-1", "card");
@@ -5963,7 +5988,7 @@ describe("takeTask: orchestrator mode", () => {
   });
 
   it("still takes the parent when the prompt-mode list is empty", async () => {
-    vi.mocked(getConfig).mockReturnValue({ ...CFG, promptModes: [] });
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, promptModes: [], childWorktrees: true });
     answerOrchestrator();
     const { provider, logged } = setup({ authed: true });
     await provider.takeTask("ASM-1", "card");

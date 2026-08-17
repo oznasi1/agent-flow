@@ -2381,6 +2381,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    *  ordinary path fetches its own again, which is one extra read on a path that is
    *  already several. */
   private async probeTree(key: string): Promise<{ detail: TaskDetail; tree: TreeResult } | null> {
+    // The whole feature's off switch, and deliberately the FIRST thing here: every
+    // picker, every git write and the extra ticket read are downstream of this method,
+    // so returning here is what makes "off" mean byte-identical, not merely quieter.
+    if (!getConfig().childWorktrees) return null;
     const children = this.provider().caps.children;
     if (!children) return null;
     try {

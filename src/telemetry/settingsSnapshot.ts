@@ -110,6 +110,7 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     open_agents: cfg.openAgents,
     review_writes: cfg.reviewWrites,
     orchestrator: cfg.orchestrator,
+    child_worktrees: cfg.childWorktrees,
     stamp_label_on_write: cfg.stampLabelOnWrite,
     track_open_windows: cfg.trackOpenWindows,
     batch_confirm_threshold: cfg.batchLaunchConfirmThreshold,
