@@ -163,7 +163,9 @@ describe("buildTree", () => {
       return [];
     });
     const out = await buildTree("A", fetch);
-    expect(out.leaves.map((l) => l.key)).toEqual(["C", "B"]);
+    // B first: the walk pushes the throwing node as it processes it, and B precedes C
+    // in the frontier. C follows as an ordinary childless leaf.
+    expect(out.leaves.map((l) => l.key)).toEqual(["B", "C"]);
     expect(out.dropped).toEqual(["B"]);
   });
 
@@ -564,9 +566,14 @@ git commit -m "feat(engine): branch a worktree off a given base ref"
 - Modify: `src/tasks/provider.ts`
 - Test: `test/unit/tasks/provider.test.ts` (append)
 
+**Files (amended):** this task ALSO creates the `ChildRef` declaration in `src/tasks/jira/client.ts` — see Interfaces.
+
 **Interfaces:**
-- Consumes: `ChildRef` from `src/tasks/jira/client.ts` — declared in Task 4, so this task declares it there too (one type, two tasks touching it; Task 4 adds the method that returns it).
-- Produces: `Capabilities.children?: { of(key: string): Promise<ChildRef[]> }`, and `ChildRef` re-exported from `src/tasks/provider.ts`.
+- Consumes: nothing.
+- Produces:
+  - `interface ChildRef { key: string; summary: string; type: string; statusCategory: "new" | "indeterminate" | "done" | null }`, declared in `src/tasks/jira/client.ts` **by this task** (Task 4 adds the method that returns it). It is declared here rather than in Task 4 because every task must end with all four gates green, and a `Capabilities.children` referring to an undeclared type leaves `npm run typecheck` red.
+  - `Capabilities.children?: { of(key: string): Promise<ChildRef[]> }`
+  - `ChildRef` re-exported from `src/tasks/provider.ts`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -622,7 +629,21 @@ Expected: FAIL — `Object literal may only specify known properties, and 'child
 
 - [ ] **Step 3: Write the implementation**
 
-In `src/tasks/provider.ts`, extend the existing type import and re-export (currently `provider.ts:10` and `provider.ts:14`):
+First declare the type in `src/tasks/jira/client.ts`, beside `TaskDetail`:
+
+```ts
+/** One child of a ticket, one level down. Lives here rather than in `../provider`
+ *  for the same reason `TaskDetail` does: the connector owns the shape it produces,
+ *  and `provider.ts` re-exports it type-only. */
+export interface ChildRef {
+  key: string;
+  summary: string;
+  type: string;
+  statusCategory: "new" | "indeterminate" | "done" | null;
+}
+```
+
+Then in `src/tasks/provider.ts`, extend the existing type import and re-export (currently `provider.ts:10` and `provider.ts:14`):
 
 ```ts
 import type { ChildRef, TaskDetail } from "./jira/client";
@@ -647,7 +668,7 @@ Leave `SerializedCaps` and `serializeCaps` untouched — see Spec deviation 1.
 - [ ] **Step 4: Run the tests and typecheck**
 
 Run: `npx vitest run test/unit/tasks/provider.test.ts && npm run typecheck`
-Expected: PASS both. (`ChildRef` does not exist yet — declare it as part of Task 4 Step 3 and expect `typecheck` to stay red until then. If you are executing tasks strictly one at a time, move the `ChildRef` declaration block from Task 4 Step 3 into this step and note it in the commit.)
+Expected: PASS both.
 
 - [ ] **Step 5: Gates + commit**
 
@@ -841,19 +862,7 @@ Add the field list beside `DETAIL_FIELDS`:
 const CHILD_FIELDS = ["summary", "issuetype", "status"];
 ```
 
-Add the type beside `TaskDetail`:
-
-```ts
-/** One child of a ticket, one level down. Lives here rather than in `../provider`
- *  for the same reason `TaskDetail` does: the connector owns the shape it produces,
- *  and `provider.ts` re-exports it type-only. */
-export interface ChildRef {
-  key: string;
-  summary: string;
-  type: string;
-  statusCategory: "new" | "indeterminate" | "done" | null;
-}
-```
+`ChildRef` is already declared in this file by Task 3 — do not redeclare it.
 
 Add the method to `JiraClient`, below `getDetail`:
 
@@ -1328,7 +1337,7 @@ describe("takeBatch with a parent", () => {
     expect(task.parentKey).toBe("ASM-1");
   });
 
-  it("passes no options object when there is no parent", async () => {
+  it("passes an empty options object when there is no parent", async () => {
     const { view } = setup({ authed: true });
     await view.takeBatch(["ASM-2"], []);
     expect(ensureBranchMock).not.toHaveBeenCalled();
@@ -1338,6 +1347,8 @@ describe("takeBatch with a parent", () => {
   });
 });
 ```
+
+**The parent-branch literal.** `"ASM-1-summary-of-asm-1"` in these tests (and in Task 8's) is a stand-in: the real value is `branchName("ASM-1", <the summary this file's ticket fixture actually carries>)`. Compute it in the test from `branchName` and the fixture, or read the fixture and write the true slug — never hardcode a guessed one.
 
 Names like `answerQuickPick`, `lastQuickPickItems`, `quickPickTitles`, `takeBatchSpy`, `ensureBranchMock`, `createWorktreesMock`, `openSharedWorkspaceMock`, `toasts`, `logLines` must be wired to whatever that file already uses for the same jobs — read its top 260 lines and reuse its helpers verbatim rather than adding parallel ones. `createWorktrees`/`ensureBranch` are imported values in `tasksView.ts`, so mock the module (`vi.mock("../../src/engine/worktree")`) the way the file already mocks `../../src/engine/workspace`.
 
@@ -1740,17 +1751,23 @@ and in the `openWorkspace({...})` call:
       ...(orchestration?.children.length ? { children: orchestration.children } : {}),
 ```
 
-2. `writeBriefInto`, in `src/engine/workspace.ts` — a child worktree needs a brief but must NOT get a window, so it cannot go through `openWorkspace`. It lives in `workspace.ts` beside the brief constants it uses, which also keeps `tasksView.ts` from gaining `fs` calls of its own:
+2. `writeBriefInto`, in `src/engine/workspace.ts` — a child worktree needs a brief but must NOT get a window, so it cannot go through `openWorkspace`. It lives in `workspace.ts` beside the brief constants it uses, which also keeps `tasksView.ts` free of `fs` calls of its own.
+
+There is no naming collision to resolve: `workspace.ts` has its own `briefMarkdown(t, planMd, services, thisRepo, files)` (line 187) and does NOT import `engine/brief`'s. This helper takes the rendered `planMd` as an argument, exactly as `openWorkspace` receives it (workspace.ts:293), so a child's brief and a parent's are produced by the same two functions in the same order:
 
 ```ts
-/** Write `.pick-task/TASK.md` into each of `services` — a worktree that gets a brief
- *  but deliberately no window, which is what a child worktree is: its subagent is
- *  dispatched by the parent's session, not opened by us. Best-effort per repo: one
- *  unwritable worktree must not cost the others their briefs. */
+/** Write `.pick-task/TASK.md` into each of `services` — worktrees that get a brief but
+ *  deliberately no window, which is what a child worktree is: its subagent is
+ *  dispatched by the parent's session, not opened by us.
+ *
+ *  `planMd` arrives already rendered (engine/brief's `briefMarkdown`), the same way
+ *  `openWorkspace` receives it, so the two paths cannot drift into producing different
+ *  briefs. Best-effort per repo: one unwritable worktree must not cost the others
+ *  theirs. Returns the files it wrote. */
 export function writeBriefInto(
   services: ServiceRef[],
-  detail: { key: string; summary: string; descriptionText: string },
-  agentName: string,
+  ticket: TicketRef,
+  planMd: string,
   log: (m: string) => void,
 ): string[] {
   const written: string[] = [];
@@ -1759,10 +1776,7 @@ export function writeBriefInto(
       const dir = path.join(s.path, BRIEF_DIR);
       fs.mkdirSync(dir, { recursive: true });
       const file = path.join(dir, BRIEF_FILE);
-      fs.writeFileSync(
-        file,
-        briefMarkdown_full(detail, briefMarkdown(detail, agentName), [s], s.name, []),
-      );
+      fs.writeFileSync(file, briefMarkdown(ticket, planMd, [s], s.name, []));
       written.push(file);
     } catch (e) {
       log(`brief ${s.name}: could not write into ${s.path} (${e})`);
@@ -1772,7 +1786,19 @@ export function writeBriefInto(
 }
 ```
 
-   `briefMarkdown_full` is a placeholder name for this file's EXISTING exported `briefMarkdown` in `src/engine/workspace.ts:187` (the repos-in-scope wrapper) — it collides by name with `engine/brief.ts`'s `briefMarkdown`, which `workspace.ts` also uses. Resolve the collision the way the file already does at its import site, and keep the argument order `(ticket, planMd, services, thisRepo, files)` exactly as `workspace.ts:187` declares it. Assert the written path and its content in a new `test/unit/engine/workspace.test.ts` block.
+   The `takeOrchestrated` call site becomes:
+
+```ts
+      writeBriefInto(
+        usable,
+        { key: leaf.key, summary: leaf.summary, url: childDetail?.url ?? "" },
+        briefMarkdown(childDetail ?? { key: leaf.key, summary: leaf.summary, descriptionText: "" },
+          providerLabel(cfg.agentProvider)),
+        this.log,
+      );
+```
+
+   Add a `writeBriefInto` block to `test/unit/engine/workspace.test.ts` asserting the written path (`<worktree>/.pick-task/TASK.md`), that the content contains the child's key, and that one repo throwing still writes the other.
 
 3. `orchestratorTemplate` — the prompt already exists as the `orchestrator` prompt mode in `src/config.ts`. Resolve it by id; never duplicate its text:
 
@@ -1832,8 +1858,15 @@ describe("child worktrees", () => {
     { key: "ASM-3", summary: "second bit", repo: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-3", branch: "ASM-3-second-bit" },
   ];
 
-  it("renders nothing for a run with no children", () => {
+  it("renders nothing for a run with no children field", () => {
     renderDetail(cardFor({ key: "ASM-1" }));
+    expect(screen.queryByText("Children")).not.toBeInTheDocument();
+  });
+
+  it("renders nothing for a run with an empty children array", () => {
+    // Distinct from the case above, and the one that pins the `.length` guard: a
+    // truthiness check would render an empty Children section here.
+    renderDetail(cardFor({ key: "ASM-1", children: [] }));
     expect(screen.queryByText("Children")).not.toBeInTheDocument();
   });
 
@@ -1917,7 +1950,7 @@ Expected: PASS, and the build must stay clean — this file must not gain an `fs
 
 - [ ] **Step 5: Mutation-check one**
 
-Change the guard to `{r.run.children && (` with an empty array in the fixture — "renders nothing for a run with no children" must fail once the fixture passes `children: []`. (Add that fixture case if the guard mutation cannot otherwise be caught.)
+Change the guard to `{r.run.children && (` — "renders nothing for a run with an empty children array" must fail.
 
 - [ ] **Step 6: Full gates + commit**
 
