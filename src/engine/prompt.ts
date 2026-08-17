@@ -1,3 +1,5 @@
+import type { PrWorkReason } from "../types";
+
 export interface PromptVars {
   key: string;
   summary: string;
@@ -117,4 +119,29 @@ export function applyExploreVars(template: string, vars: { env?: string; service
   const { env, services } = vars;
   const filled = template.replace(/\{services\}/g, () => services);
   return env === undefined ? filled : filled.replace(/\{env\}/g, () => env);
+}
+
+/**
+ * The opening clause that turns a generic PR-review prompt into one about the
+ * specific thing wrong with the PR.
+ *
+ * `review` returns the empty string on purpose: that path must stay byte-identical
+ * to what `Address PR` sent before this existed, so a user's configured
+ * `prReviewPrompt` reaches the agent exactly as it always did.
+ *
+ * String concatenation only — never String.replace. `detail` comes from GitHub
+ * check names, which are user-authored, and `$&`/`$1`/`$'` in a replacement
+ * position would corrupt the prompt.
+ */
+export function prWorkClause(reason: PrWorkReason, detail?: string): string {
+  switch (reason) {
+    case "ci":
+      return detail
+        ? `CI is failing on this PR (${detail}). Find out why and make it pass.`
+        : "CI is failing on this PR. Find out why and make it pass.";
+    case "conflict":
+      return "This PR conflicts with its base branch. Rebase it onto the base and resolve the conflicts.";
+    case "review":
+      return "";
+  }
 }

@@ -31,7 +31,7 @@ import { FetchResult, GhGap, GhProvider, PrProvider, Runner, execRunner, GH_TIME
 import { resolveBin } from "./engine/pr/which";
 import { RefreshQueue } from "./engine/pr/queue";
 import { discoverRepos } from "./engine/repos";
-import { composeAgentPrompt, hasNote, prReviewTemplate } from "./engine/prompt";
+import { composeAgentPrompt, hasNote, prReviewTemplate, prWorkClause } from "./engine/prompt";
 import { launchReview, resolveReviewMode, reviewRunKey } from "./engine/review/launch";
 import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
@@ -45,7 +45,7 @@ import { landed, shelfFor } from "./engine/visibility";
 // The scope picker the modes-notice hide-write already uses: a settings write must
 // land where the user's value already lives. Saving a command is the same problem.
 import { pickExplicit } from "./modesNotice";
-import { CardAgent, FlowPromptMode, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, ServiceRef, isTicketRun, runKind, ticketKeyFor } from "./types";
+import { CardAgent, FlowPromptMode, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, PrWorkReason, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, ServiceRef, isTicketRun, runKind, ticketKeyFor } from "./types";
 
 export const POLL_MS = 6000;
 const TICKET_TTL_MS = 30_000;
@@ -2651,7 +2651,11 @@ export class DeckPanel {
         await this.track(m.key);
         break;
       case "deck:addressPr":
-        await this.addressPr(m.key);
+        // Retained alias: the review reason is exactly what this message meant.
+        await this.seedPrWork(m.key, "review");
+        break;
+      case "deck:seedPrWork":
+        await this.seedPrWork(m.key, m.reason, m.detail);
         break;
       case "flow:create": {
         if (!getConfig().orchestrator) return;
@@ -3187,7 +3191,7 @@ export class DeckPanel {
    * makes a live window seed itself when the plan lands, and openInEditor shells to
    * `open -a`, which focuses an existing window rather than opening a second one.
    */
-  private async addressPr(key: string): Promise<void> {
+  private async seedPrWork(key: string, reason: PrWorkReason, detail?: string): Promise<void> {
     const run = this.run(key);
     if (!run) {
       this.toast("error", `No run record for ${key}.`);
@@ -3204,11 +3208,17 @@ export class DeckPanel {
     // webview, so this one is too — unreachable today, but cheap insurance
     // against a future caller that isn't as careful.
     if (runKind(run) === "local") {
-      this.log(`deck: addressPr ignored for local card ${key}`);
+      this.log(`deck: seedPrWork ignored for local card ${key}`);
       return;
     }
     const cfg = getConfig();
-    const template = prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix);
+    const clause = prWorkClause(reason, detail);
+    // The user's configured review prompt, preceded by what is actually wrong.
+    // An empty clause (reason "review") leaves the template byte-identical to
+    // what Address PR has always sent.
+    const template = clause
+      ? `${clause}\n\n${prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix)}`
+      : prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix);
     // ticketKeyFor, not run.key: track() saves a promoted local card under its
     // place-hash key when the inferred Jira key was already owned by another
     // run, and that ticket then lives only in the run's url. Seeding the prompt

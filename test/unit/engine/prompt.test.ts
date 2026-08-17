@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderPrompt, injectSlackDm, insertBeforeFiles, SLACK_DM_SENTENCE, applyExploreVars, prReviewTemplate, PR_REVIEW_AUTOFIX_CLAUSE, composeAgentPrompt, type PromptVars } from "../../../src/engine/prompt";
+import { renderPrompt, injectSlackDm, insertBeforeFiles, SLACK_DM_SENTENCE, applyExploreVars, prReviewTemplate, PR_REVIEW_AUTOFIX_CLAUSE, composeAgentPrompt, prWorkClause, type PromptVars } from "../../../src/engine/prompt";
 
 const V: PromptVars = {
   key: "ASM-5412",
@@ -175,5 +175,32 @@ describe("composeAgentPrompt", () => {
   it("does not leave a {note} placeholder behind when there is no note", () => {
     // A mode author who added {note} must not ship the literal token to an agent.
     expect(composeAgentPrompt("a {note} b")).not.toContain("{note}");
+  });
+});
+
+describe("prWorkClause", () => {
+  it("names the failing checks for a ci reason", () => {
+    const c = prWorkClause("ci", "integration, lint");
+    expect(c).toContain("integration, lint");
+    expect(c.toLowerCase()).toContain("failing");
+  });
+
+  it("still says something useful for ci with no detail", () => {
+    expect(prWorkClause("ci").toLowerCase()).toContain("failing");
+  });
+
+  it("tells the agent to rebase for a conflict reason", () => {
+    expect(prWorkClause("conflict").toLowerCase()).toContain("rebase");
+  });
+
+  // The review path must stay byte-identical to what Address PR sent before, so
+  // an existing user's configured prReviewPrompt reaches the agent unchanged.
+  it("adds nothing for a review reason", () => {
+    expect(prWorkClause("review")).toBe("");
+  });
+
+  it("never interpolates a detail into a regex replacement position", () => {
+    // Detail is derived from check names, which are user-controlled on GitHub.
+    expect(prWorkClause("ci", "$& $1 $'")).toContain("$& $1 $'");
   });
 });
