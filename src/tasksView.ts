@@ -1936,26 +1936,29 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
     // A ticket with children is a different question from a ticket without them, and it
     // has to be asked before anything else: fan-out hands the whole take to takeBatch,
-    // which asks its own prompt-mode and destination questions and owns its own
-    // reporting. Ahead of take_started for the same reason the guard above is — a take
-    // that becomes a fan-out never begins here, so the funnel must get neither a start
-    // nor a terminator rather than a start it never closes. Both pickers also resolve
-    // before any git write: cancelling either leaves nothing on disk.
+    // which asks its own prompt-mode and destination questions.
+    //
+    // Ahead of take_started for the same reason the guard above is, though for the
+    // opposite cause: takeBatch emits no telemetry at all — it is deliberately
+    // uninstrumented in Phase 1, which is why `"batch"` sits reserved-but-unused in the
+    // TakeSource union (see telemetry/events.ts). So a take that becomes a fan-out must
+    // get neither a start nor a terminator; emitting take_started here would open a
+    // funnel nothing ever closes. The consequence is real and intended: fan-out takes
+    // are absent from the Take funnel entirely, and instrumenting takeBatch is its own
+    // piece of work, not this one.
+    //
+    // Both pickers also resolve before any git write: cancelling either leaves nothing
+    // on disk.
     const probed = await this.probeTree(key);
     if (probed?.tree.leaves.length) {
       const mode = await this.chooseTreeMode(key, probed.tree.leaves.length);
       if (!mode) return;
       if (mode !== "parent") {
-        const picked = await this.chooseLeaves(probed.tree.leaves);
+        const picked = await this.chooseLeaves(probed.tree);
         if (!picked) return;
         // Ticking nothing is "just the parent" said the long way round — fall through
         // to the ordinary take rather than launching an empty fan-out.
         if (picked.length) {
-          if (probed.tree.dropped.length) {
-            this.log(
-              `takeTask ${key}: tree dropped ${probed.tree.dropped.length} (${probed.tree.dropped.join(", ")})`,
-            );
-          }
           const parent = { key, branch: branchName(key, probed.detail.summary) };
           if (mode === "fanout") {
             const leafKeys = picked.map((l) => l.key);
@@ -2334,6 +2337,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         { location: { viewId: TasksViewProvider.viewType }, title: `Looking for work under ${key}…` },
         () => buildTree(key, (k) => children.of(k)),
       );
+      // Reported here rather than at the routing block, because every one of the four
+      // ways a take can continue from here drops the same leaves: a cancelled picker,
+      // "just the parent", a fan-out, and the plain take that runs when nothing was
+      // readable. Nothing is ever omitted silently, so the keys are named and not just
+      // counted.
+      if (tree.dropped.length) {
+        this.log(`probeTree ${key}: tree dropped ${tree.dropped.length} (${tree.dropped.join(", ")})`);
+        // Leaves empty with omissions recorded means the root's own children could not
+        // be read (buildTree keeps an unreadable *child* as a leaf — the work is still
+        // real — and exempts only the root). The take degrades to the ordinary one, and
+        // saying so is the same "degrade, but out loud" contract the catch below
+        // follows for a total failure.
+        if (!tree.leaves.length) {
+          this.toast("info", `Couldn't read the work under ${key} — taking the ticket on its own.`);
+        }
+      }
       return { detail, tree };
     } catch (e) {
       this.log(`probeTree ${key}: failed (${e}) — taking the ticket on its own`);
@@ -2375,16 +2394,30 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
   /** Which leaves to take. Nothing is pre-picked: a tree can be large, and every ticked
    *  row costs a worktree and a session. `undefined` is a cancel; an empty array is a
-   *  deliberate "none of them", which the caller treats as "just the parent". */
-  private async chooseLeaves(leaves: TreeLeaf[]): Promise<TreeLeaf[] | undefined> {
+   *  deliberate "none of them", which the caller treats as "just the parent".
+   *
+   *  The title carries the omissions, because truncation is a fact about the list on
+   *  screen: a toast would arrive after the user had already chosen from a list that
+   *  looked complete. Every `dropped` key is something the walk found and is not
+   *  showing — a leaf the cap cut, a repeat, or a subtree it could not read — so all
+   *  three count the same way here. */
+  private async chooseLeaves(tree: TreeResult): Promise<TreeLeaf[] | undefined> {
+    const total = tree.leaves.length + tree.dropped.length;
+    const shortfall = tree.dropped.length
+      ? ` (${tree.leaves.length} of ${total} — ${tree.dropped.length} not shown)`
+      : "";
     const picked = await vscode.window.showQuickPick(
-      leaves.map((l) => ({
+      tree.leaves.map((l) => ({
         label: `${l.key} — ${l.summary}`,
         description: l.statusCategory === "done" ? "done" : undefined,
         detail: `${l.parentKey} › ${l.key}`,
         leaf: l,
       })),
-      { title: "Which of these do you want to take?", canPickMany: true, ignoreFocusOut: true },
+      {
+        title: `Which of these do you want to take?${shortfall}`,
+        canPickMany: true,
+        ignoreFocusOut: true,
+      },
     );
     return picked?.map((p) => p.leaf);
   }

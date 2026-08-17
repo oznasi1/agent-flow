@@ -5398,31 +5398,87 @@ describe("takeTask: a ticket with children", () => {
     expect(logged).toContain("probeTree ASM-1: failed (Error: 500) — taking the ticket on its own");
   });
 
-  it("takes the ticket on its own when the children fetch fails", async () => {
+  it("says the work under the ticket could not be read, and takes it on its own", async () => {
     clientStub.childrenOf = vi.fn(async () => {
       throw new Error("500");
     });
-    const { provider } = setup({ authed: true });
+    const { provider, logged, posted } = setup({ authed: true });
     await provider.takeTask("ASM-1", "card", ["account-service"]);
-    // buildTree reports the unexplored root and yields no leaves — there is nothing to
-    // offer, so the ordinary take runs and no picker appears.
+    // buildTree reports the unreadable root and yields no leaves — there is nothing to
+    // offer, so the ordinary take runs and no picker appears…
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
+    // …but the whole subtree has just been discarded, so it is said in both places
+    // rather than nowhere: this is the path where the plain take LOOKS like success.
+    expect(logged).toContain("probeTree ASM-1: tree dropped 1 (ASM-1)");
+    expect(posted()).toContainEqual({
+      type: "toast",
+      level: "info",
+      message: "Couldn't read the work under ASM-1 — taking the ticket on its own.",
+    });
   });
 
-  it("logs what the tree dropped", async () => {
+  /** 25 children, none with children of their own: 20 leaves survive MAX_TREE_LEAVES and
+   *  K-20…K-24 are reported as dropped. */
+  function overCapTree(): void {
     clientStub.childrenOf = vi.fn(async (key: string) =>
       key === "ASM-1"
         ? Array.from({ length: 25 }, (_, i) => ({ key: `K-${i}`, summary: "x", type: "Sub-task", statusCategory: "new" }))
         : [],
     );
+  }
+
+  it("logs what the tree dropped", async () => {
+    overCapTree();
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider, logged } = setup({ authed: true });
     await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(vi.mocked(window.showQuickPick).mock.calls[0][1]).toEqual(
       expect.objectContaining({ title: "ASM-1 — 20 leaves under it. How do you want to work them?" }),
     );
-    expect(logged).toContain("takeTask ASM-1: tree dropped 5 (K-20, K-21, K-22, K-23, K-24)");
+    expect(logged).toContain("probeTree ASM-1: tree dropped 5 (K-20, K-21, K-22, K-23, K-24)");
+  });
+
+  it("names the omissions in the leaf picker's title", async () => {
+    // On screen, not in a toast: the list is short, and a message that arrives after the
+    // choice cannot fix a choice made from a list that looked complete.
+    overCapTree();
+    answerPicks(pickFirst);
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(vi.mocked(window.showQuickPick).mock.calls[1][1]).toEqual(
+      expect.objectContaining({ title: "Which of these do you want to take? (20 of 25 — 5 not shown)" }),
+    );
+  });
+
+  it("still logs the dropped leaves when the user takes just the parent", async () => {
+    // The diagnostic belongs to the probe, not to the fan-out: this path never reaches
+    // the leaf picker at all, and the leaves are dropped just the same.
+    overCapTree();
+    answerPicks((items: unknown[]) => items[2]); // "Just ASM-1"
+    const { provider, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(logged).toContain("probeTree ASM-1: tree dropped 5 (K-20, K-21, K-22, K-23, K-24)");
+  });
+
+  it("still logs the dropped leaves when the mode picker is cancelled", async () => {
+    overCapTree();
+    const { provider, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(logged).toContain("probeTree ASM-1: tree dropped 5 (K-20, K-21, K-22, K-23, K-24)");
+  });
+
+  it("does not claim the work was unreadable when the cap simply cut it", async () => {
+    // The toast is for "nothing under this ticket could be read", which is not what a
+    // 25-leaf tree is — the leaves that survived are on screen.
+    overCapTree();
+    answerPicks(pickFirst);
+    const { provider, posted } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(posted().filter((m) => m.type === "toast")).toEqual([]);
   });
 });
 
