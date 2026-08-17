@@ -2445,7 +2445,12 @@ describe("DeckApp card anatomy", () => {
     // below) reduces to the same figure, so an unscoped getByText("380k") would
     // correctly find two elements and fail for the wrong reason.
     host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 0, cacheWrite: 0, cacheRead: 3_804_000 } })]));
-    expect(within(document.querySelector(".c-foot2") as HTMLElement).getByText("380k")).toBeTruthy();
+    const spend = document.querySelector(".c-foot2 .spend") as HTMLElement;
+    expect(within(spend).getByText("380k")).toBeTruthy();
+    // I5: pinned directly on the unit element, not just "no /tok/ text anywhere"
+    // — that weaker check kept passing even with the `eq` unit span deleted
+    // outright, since deleting it does not introduce the string "tok" either.
+    expect(spend.querySelector(".u")?.textContent).toBe("eq");
     expect(screen.queryByText(/tok/)).toBeNull();
   });
 
@@ -2474,5 +2479,39 @@ describe("DeckApp card anatomy", () => {
     host(runsMsg([a, b]));
     // 2 × (20,000 × 5) = 200,000 → "200k"
     expect(screen.getByText("200k")).toBeTruthy();
+  });
+
+  // I2: the header total used to reduce over every run the host ever posted
+  // (live and closed alike), while every sibling tile in the same header —
+  // "In progress", "Action required", "In review" — reduces over the live
+  // cards only. A closed run's card leaves the board, but its tokens used to
+  // linger in "Tokens on board" forever.
+  it("excludes a closed run's tokens from the header total", () => {
+    render(<DeckApp />);
+    const a = withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
+    const b = withPr(healthyPr(), {
+      run: { ...mkStatus().run, key: "ASM-2" },
+      shelf: "closed",
+      usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 },
+    });
+    host(runsMsg([a, b]));
+    // Only `a`'s spend counts: 20,000 × 5 = 100,000 → "100k", same figure `a`'s
+    // own card footer already shows — scoped to the header so that expected
+    // coincidence doesn't read as "found twice". If the closed run's tokens
+    // were still folded in, the header would read "200k" instead.
+    const hd = document.querySelector(".hd") as HTMLElement;
+    expect(within(hd).getByText("100k")).toBeTruthy();
+    expect(within(hd).queryByText("200k")).toBeNull();
+  });
+
+  // I4: the header figure is effort-weighted exactly like the card's, so it
+  // must carry the same `eq` unit and formula tooltip — "Tokens on board" with
+  // no qualifier understates real tokens by ~6.6x and reads as a raw count.
+  it("carries the eq unit and formula tooltip on the header total, same as the card", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } })]));
+    const stat = screen.getByText("Tokens on board").closest(".stat") as HTMLElement;
+    expect(within(stat).getByText("eq")).toBeTruthy();
+    expect(stat.title).toMatch(/input×1.*cache-write×1\.25.*cache-read×0\.1.*output×5/);
   });
 });

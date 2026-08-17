@@ -177,6 +177,40 @@ describe("UsageReader.readDir", () => {
   it("is zero (no throw) for a missing directory", () => {
     expect(new UsageReader().readDir(path.join(root, "nope")).output).toBe(0);
   });
+
+  // I1: Claude Code writes subagent transcripts one level down, at
+  // <sessionId>/subagents/*.jsonl. Before this, readDir only listed the dir's
+  // own top-level files, which silently omitted every subagent transcript —
+  // roughly half of real spend on a subagent-heavy run.
+  it("recurses into a nested subagents directory", () => {
+    fs.writeFileSync(path.join(root, "top.jsonl"), row("r1", 10) + "\n");
+    fs.mkdirSync(path.join(root, "sess-1", "subagents"), { recursive: true });
+    fs.writeFileSync(path.join(root, "sess-1", "subagents", "sub.jsonl"), row("r2", 20) + "\n");
+    expect(new UsageReader().readDir(root).output).toBe(30);
+  });
+
+  // A subagent transcript's requestIds are disjoint from its parent's, so
+  // recursing must not need (or introduce) any cross-file dedup — each file
+  // keeps its own `seen` set via readFile's per-path cache.
+  it("sums a nested transcript's own dedup independently of its parent's", () => {
+    fs.writeFileSync(path.join(root, "top.jsonl"), [row("shared", 10), row("shared", 10)].join("\n") + "\n");
+    fs.mkdirSync(path.join(root, "sess-1", "subagents"), { recursive: true });
+    fs.writeFileSync(path.join(root, "sess-1", "subagents", "sub.jsonl"), row("shared", 5) + "\n");
+    // top.jsonl dedups its own repeated "shared" id to one count (10); the
+    // subagent file's "shared" id is a different file's cache entirely and is
+    // not suppressed by the parent having already seen that id.
+    expect(new UsageReader().readDir(root).output).toBe(15);
+  });
+
+  // The simplest way a recursive directory walk can go wrong: a symlinked
+  // directory that points back at an ancestor, which a naive recursion would
+  // walk forever. Skipping symlinked entries outright — including this one —
+  // is the guard; if it regressed, this test would hang rather than fail fast.
+  it("does not hang on a symlinked directory cycle", () => {
+    fs.writeFileSync(path.join(root, "top.jsonl"), row("r1", 10) + "\n");
+    fs.symlinkSync(root, path.join(root, "loop"), "dir");
+    expect(new UsageReader().readDir(root).output).toBe(10);
+  }, 2000);
 });
 
 describe("UsageReader.readRun", () => {

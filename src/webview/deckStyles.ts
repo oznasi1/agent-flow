@@ -55,6 +55,10 @@ export const DECK_CSS = `
     border: 1px solid var(--edge); background: var(--vscode-editorWidget-background, transparent); }
   .stat .n { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.05;
     letter-spacing: -.02em; }
+  /* Same muted-suffix treatment as the card's own \`.spend .u\` — the unit reads
+     as a footnote on the number, not a second figure. */
+  .stat .n .u { font-family: var(--vscode-font-family); font-size: var(--t-micro); font-weight: 400;
+    opacity: .55; margin-left: 2px; }
   .stat .l { font-size: var(--t-micro); color: var(--dim); letter-spacing: .01em; white-space: nowrap; }
   .stat.attn { border-color: color-mix(in srgb, var(--c-attn) 55%, var(--hair)); }
   .stat.attn .n { color: var(--c-attn); }

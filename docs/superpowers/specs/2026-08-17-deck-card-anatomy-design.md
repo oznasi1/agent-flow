@@ -175,7 +175,10 @@ whose totals have not been computed yet shows no figure rather than a zero —
 absent and "cost nothing" must not render the same.
 
 **Aggregation.** Per-card totals sum **every** transcript in the run's repos'
-project dirs, with **no branch join**. This is a deliberate simplification of
+project dirs — recursing into subdirectories, because Claude Code writes
+subagent transcripts one level down at `<sessionId>/subagents/*.jsonl` and
+those tokens are unambiguously part of what the task cost — with **no branch
+join**. This is a deliberate simplification of
 the join `readAgentActivity` performs, and the reason is the fast path: the
 sweep is affordable only because it rejects a line on `includes('"usage"')`
 before parsing it, and a branch join needs `gitBranch`, which lives on
@@ -191,7 +194,11 @@ it is: *"across every session in this task's directories"*.
 
 The header stat is the **sum of the cards currently on the board**, labelled
 "Tokens on board" — not "today", which would need per-line day bucketing and
-would print a figure that disagrees with the cards beneath it.
+would print a figure that disagrees with the cards beneath it. Same unit rule
+as the card (see above): the label names what it counts, but the figure itself
+still carries the `eq` unit and a tooltip stating the formula, never bare
+"Tokens" with no qualifier — a reader who never sees the card cannot otherwise
+tell this number is weighted, not a raw token count.
 
 ### 2. Honest state
 

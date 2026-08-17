@@ -39,6 +39,24 @@ const STATE_RANK: Record<AgentState, number> = {
  * back to, rather than three hand-rolled copies that can drift apart. */
 export const UNKNOWN_ACTIVITY: AgentActivity = { state: "unknown", lastActivityMs: null, slug: null };
 
+/** The states that mean "not doing anything right now" for a rule like
+ * `agent-idle-over` — as opposed to `working` (in flight) or `needs-you` (control
+ * already handed back, which fires its own condition instead). `stalled` and
+ * `exited` were both folded into a single `idle` reading before the state union
+ * grew to name them separately; a caller that means "idle-like" must read this
+ * set (or `isIdleLike` below) rather than compare `state === "idle"` directly, or
+ * it silently drops back to pre-widening behaviour the next time the union grows
+ * — see conditions.ts's `agent-idle-over`, which did exactly that until this set
+ * was introduced. `needs-you`, `working` and `unknown` are deliberately absent:
+ * each already means something an idle-style rule must not fire on. */
+export const IDLE_LIKE: ReadonlySet<AgentState> = new Set<AgentState>(["idle", "stalled", "exited"]);
+
+/** Is this state "idle-like" — see `IDLE_LIKE` above for what that means and why
+ * a bare `state === "idle"` comparison is the wrong tool for this question. */
+export function isIdleLike(state: AgentState): boolean {
+  return IDLE_LIKE.has(state);
+}
+
 /** The liveliest agent across a run's repos — a multi-repo task's session may live
  * in any of them. Ties broken by most-recent activity. Pure. */
 export function mostActive(activities: AgentActivity[]): AgentActivity {

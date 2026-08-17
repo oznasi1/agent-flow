@@ -539,7 +539,7 @@ export function DeckApp(): JSX.Element {
   const armedCount = flows.filter((f) => f.armed).length;
   // The board's own total, not "today": a day figure would need per-line
   // timestamps and would print a number that disagrees with the cards under it.
-  const boardEq = runs.reduce((s, x) => s + (x.usage ? weightedEq(x.usage) : 0), 0);
+  const boardEq = live.reduce((s, x) => s + (x.usage ? weightedEq(x.usage) : 0), 0);
 
   const forget = React.useCallback((key: string) => {
     // Optimistic: the card leaves now rather than after a full refresh (a connector
@@ -569,8 +569,11 @@ export function DeckApp(): JSX.Element {
           <div className={`stat ${needs > 0 ? "attn" : ""}`}><span className="n">{needs}</span><span className="l">Action required</span></div>
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "review").length}</span><span className="l">In review</span></div>
           {boardEq > 0 && (
-            <div className="stat">
-              <span className="n">{formatEq(boardEq)}</span>
+            <div
+              className="stat"
+              title="Effort-weighted tokens across every session on the board (input×1, cache-write×1.25, cache-read×0.1, output×5)"
+            >
+              <span className="n">{formatEq(boardEq)}<span className="u">eq</span></span>
               <span className="l">Tokens on board</span>
             </div>
           )}

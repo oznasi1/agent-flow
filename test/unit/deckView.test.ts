@@ -3678,6 +3678,49 @@ describe("DeckPanel — Address PR", () => {
   });
 });
 
+// I3: nothing here ever fired `deck:seedPrWork` before this — every existing
+// case above dispatches the older `deck:addressPr` instead, which always seeds
+// reason "review" with no detail. Proven by mutation: hardcoding the handler's
+// dispatch to seedPrWork(m.key, "review") and dropping `detail` still passed
+// every test in this file and in engine/prompt.test.ts. prWorkClause itself is
+// unit-tested there; what was missing is proof the message handler actually
+// reads `m.reason`/`m.detail` off the wire and carries them into the seeded
+// prompt, rather than ignoring them the way `deck:addressPr` always has.
+describe("DeckPanel — seedPrWork", () => {
+  it("carries the CI clause and check names from reason: \"ci\" into the seeded prompt", async () => {
+    h.runs = [mkRun()];
+    show();
+    await lastPanel()._fire({
+      type: "deck:seedPrWork", key: "ASM-1", reason: "ci", detail: "integration, lint",
+    });
+    const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { matchPath: string; prompt: string }[] };
+    expect(plan.matches).toEqual([{
+      matchPath: "/r/svc",
+      prompt: "CI is failing on this PR (integration, lint). Find out why and make it pass.\n\n"
+        + "Assess the PR for {key}.{files} [key=ASM-1 brief=(relative)]",
+    }]);
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
+  });
+
+  it("produces the plain review template for reason: \"review\", byte-identical to deck:addressPr", async () => {
+    h.runs = [mkRun()];
+    show();
+    await lastPanel()._fire({ type: "deck:seedPrWork", key: "ASM-1", reason: "review" });
+    const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { prompt: string }[] };
+    expect(plan.matches[0].prompt).toBe("Assess the PR for {key}.{files} [key=ASM-1 brief=(relative)]");
+  });
+
+  it("carries the conflict clause from reason: \"conflict\" into the seeded prompt", async () => {
+    h.runs = [mkRun()];
+    show();
+    await lastPanel()._fire({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+    const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { prompt: string }[] };
+    expect(plan.matches[0].prompt).toContain(
+      "This PR conflicts with its base branch. Rebase it onto the base and resolve the conflicts.",
+    );
+  });
+});
+
 const mkFlow = (id: string, name: string): Flow =>
   ({ id, name, armed: false, createdAt: 1_000, nodes: [], edges: [] });
 

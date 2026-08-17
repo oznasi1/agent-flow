@@ -103,21 +103,52 @@ export class UsageReader {
     return e.totals;
   }
 
-  /** Every transcript in one Claude Code project dir, summed. */
+  /** Every transcript in one Claude Code project dir, summed — including
+   * subagent transcripts, which Claude Code writes one level down at
+   * `<sessionId>/subagents/*.jsonl`. Recurses into every subdirectory rather
+   * than reading only the dir's own top-level files, or a subagent-heavy run
+   * would have roughly half its real spend silently omitted (subagent
+   * transcripts carry their own `requestId`s, disjoint from the parent
+   * session's, so nothing here would double-count them either).
+   *
+   * Per-file offsets and dedup (`readFile`'s cache, keyed by full path) apply
+   * exactly as they do for a top-level file — a nested file is just another
+   * path to the same cache. */
   readDir(dir: string): UsageTotals {
-    let names: string[];
-    try {
-      names = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
-    } catch {
-      return zeroUsage();
-    }
     const out = zeroUsage();
-    for (const n of names) {
-      const t = this.readFile(path.join(dir, n));
+    for (const file of this.collectJsonl(dir)) {
+      const t = this.readFile(file);
       out.input += t.input;
       out.output += t.output;
       out.cacheWrite += t.cacheWrite;
       out.cacheRead += t.cacheRead;
+    }
+    return out;
+  }
+
+  /** Every `.jsonl` path under `dir`, recursing into subdirectories.
+   * Best-effort at every level: a missing or unreadable directory contributes
+   * nothing rather than throwing, exactly like `readFile` degrades for a
+   * missing or unreadable file. Symlinked entries are skipped outright —
+   * the simplest guard against a symlink cycle turning this into an infinite
+   * walk, and transcripts are never themselves symlinks in practice, so this
+   * costs nothing real. */
+  private collectJsonl(dir: string): string[] {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const out: string[] = [];
+    for (const e of entries) {
+      if (e.isSymbolicLink()) continue;
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        out.push(...this.collectJsonl(p));
+      } else if (e.isFile() && e.name.endsWith(".jsonl")) {
+        out.push(p);
+      }
     }
     return out;
   }
