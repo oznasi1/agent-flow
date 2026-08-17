@@ -2389,10 +2389,33 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (!children) return null;
     try {
       const detail = await this.provider().detail(key);
+      // Cancellable, and the walk actually consults the token: a wide tree is hundreds of
+      // sequential reads, and before this the only way out of the wait was to keep
+      // waiting. A cancel returns null, which every caller already treats as "take the
+      // ticket on its own" — the same degradation an unreadable tree gets.
+      //
+      // Notification rather than this view's own progress bar — the one place in this
+      // file that does not follow `resolveKickoff`'s viewId location — because VS Code
+      // renders a cancel button ONLY for a notification. `cancellable: true` on a
+      // view-located progress is accepted and then ignored, which would have made this
+      // fix inert for exactly the user it is for.
+      let cancelled = false;
       const tree = await vscode.window.withProgress(
-        { location: { viewId: TasksViewProvider.viewType }, title: `Looking for work under ${key}…` },
-        () => buildTree(key, (k) => children.of(k)),
+        { location: vscode.ProgressLocation.Notification, title: `Looking for work under ${key}…`, cancellable: true },
+        (_p, token) =>
+          buildTree(key, (k) => children.of(k), {
+            // Latched: once cancelled the walk must stay cancelled, and the flag has to
+            // outlive the token for the check below.
+            cancelled: () => {
+              cancelled ||= token.isCancellationRequested;
+              return cancelled;
+            },
+          }),
       );
+      if (cancelled) {
+        this.log(`probeTree ${key}: cancelled — taking the ticket on its own`);
+        return null;
+      }
       // Reported here rather than at the routing block, because every one of the four
       // ways a take can continue from here drops the same leaves: a cancelled picker,
       // "just the parent", a fan-out, and the plain take that runs when nothing was

@@ -45,6 +45,11 @@ export const MAX_TREE_LEAVES = 20;
 export interface TreeLimits {
   maxDepth?: number;
   maxLeaves?: number;
+  /** Asked before every fetch. `true` abandons the walk and returns what is already
+   *  in hand, with the unwalked remainder reported in `dropped` like every other
+   *  omission. Lives on the limits object rather than as a fourth parameter because it
+   *  IS a limit on the walk — the only difference is that this one is the user's. */
+  cancelled?: () => boolean;
 }
 
 /**
@@ -74,9 +79,20 @@ export async function buildTree(
   const leaves: TreeLeaf[] = [];
   let frontier: TreeLeaf[] = [{ key: rootKey, summary: "", depth: 0, parentKey: "" }];
 
+  let cancelled = false;
   while (frontier.length) {
     const next: TreeLeaf[] = [];
-    for (const node of frontier) {
+    for (const [i, node] of frontier.entries()) {
+      // Checked per node, not merely per level: one level of a wide epic is a hundred
+      // sequential fetches, and that wait is precisely what the caller's token exists to
+      // cut short. Nothing is dropped silently, cancellation included — the unwalked
+      // remainder of this level and everything already queued below it is reported.
+      if (limits.cancelled?.()) {
+        for (const n of frontier.slice(i)) dropped.push(n.key);
+        for (const n of next) dropped.push(n.key);
+        cancelled = true;
+        break;
+      }
       // On the boundary: this node is as deep as we go, so it IS the work.
       if (node.depth >= maxDepth) {
         leaves.push(node);
@@ -115,7 +131,18 @@ export async function buildTree(
         next.push({ ...k, depth: node.depth + 1, parentKey: node.key });
       }
     }
+    if (cancelled) break;
     frontier = next;
+    // `maxLeaves` bounds the FETCH count, not just the returned list. Without this the
+    // truncation below happened after the whole tree had been walked: three levels of a
+    // 100-wide epic is 10,101 sequential round trips inside one progress notification,
+    // which reads as a hang and rate-limits the site. Once the budget is spent there is
+    // nothing a deeper level could add that would survive, so the walk stops and every
+    // key it would have descended into is reported rather than forgotten.
+    if (leaves.length >= maxLeaves) {
+      for (const n of frontier) dropped.push(n.key);
+      break;
+    }
   }
 
   if (leaves.length > maxLeaves) {

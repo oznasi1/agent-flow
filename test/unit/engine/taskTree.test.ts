@@ -62,6 +62,47 @@ describe("buildTree", () => {
     expect(out.dropped).toEqual(["K-3", "K-4"]);
   });
 
+  it("stops fetching once the leaf budget is spent, and reports the keys it never walked", async () => {
+    // Three childless stories fill a budget of 3 at level 2; S-4's children are queued
+    // for level 3 and must never be fetched. Before the budget was consulted inside the
+    // walk they were, and only the truncation at the end noticed.
+    const fetch = fetchFrom({
+      A: [
+        { key: "S-1", summary: "one" },
+        { key: "S-2", summary: "two" },
+        { key: "S-3", summary: "three" },
+        { key: "S-4", summary: "four" },
+      ],
+      "S-4": [{ key: "G-1", summary: "g one" }, { key: "G-2", summary: "g two" }],
+    });
+    const out = await buildTree("A", fetch, { maxLeaves: 3 });
+    expect(fetch.mock.calls.map((c) => c[0])).toEqual(["A", "S-1", "S-2", "S-3", "S-4"]);
+    expect(out.leaves.map((l) => l.key)).toEqual(["S-1", "S-2", "S-3"]);
+    expect(out.dropped).toEqual(["G-1", "G-2"]);
+  });
+
+  it("abandons the walk when `cancelled` turns true, reporting the unwalked remainder", async () => {
+    const fetch = fetchFrom({
+      A: [{ key: "B", summary: "b" }, { key: "C", summary: "c" }, { key: "D", summary: "d" }],
+      B: [{ key: "B1", summary: "b1" }],
+    });
+    // Cancels after the root and B have been fetched: C and D are still in the frontier,
+    // B1 is already queued below it.
+    const out = await buildTree("A", fetch, { cancelled: () => fetch.mock.calls.length >= 2 });
+    expect(fetch.mock.calls.map((c) => c[0])).toEqual(["A", "B"]);
+    expect(out.leaves).toEqual([]);
+    expect(out.dropped).toEqual(["C", "D", "B1"]);
+  });
+
+  it("fetches nothing at all when `cancelled` is true before the first read", async () => {
+    const fetch = fetchFrom({ A: [{ key: "B", summary: "b" }] });
+    const out = await buildTree("A", fetch, { cancelled: () => true });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(out.leaves).toEqual([]);
+    // The root is the only thing in the frontier, and it is what went unwalked.
+    expect(out.dropped).toEqual(["A"]);
+  });
+
   it("yields no leaf for a cycling node, and reports the repeat", async () => {
     // A → B → A. B's only child is already seen, so B is not childless-and-therefore-
     // a-leaf; the walk ends with nothing to fan out, which is the safe answer — the

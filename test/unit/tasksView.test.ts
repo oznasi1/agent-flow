@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { commands, env, window } from "../_mocks/vscode";
+import { commands, env, liveToken, noopProgress, ProgressLocation, window } from "../_mocks/vscode";
 import { fakeAuth, fakeContext, mkRepos } from "../_helpers/factories";
 
 // ── sibling modules the controller depends on ──────────────────────────────
@@ -5416,6 +5416,51 @@ describe("takeTask: a ticket with children", () => {
     vi.spyOn(provider, "takeBatch").mockResolvedValue(undefined);
     await provider.takeTask("ASM-1", "card", ["account-service"]);
     expect(trackSpy.mock.calls.map((c) => (c[0] as { name: string }).name)).toEqual([]);
+  });
+
+  it("runs the ordinary single-ticket take when a capable source reports no children", async () => {
+    // The most common real path once the setting is on, and the one whose absence hid a
+    // Critical: capability present, setting on, and the site authoritatively answers
+    // "no children". No picker, no toast, one ordinary take.
+    clientStub.childrenOf = vi.fn(async () => []);
+    const { provider, posted, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(clientStub.childrenOf).toHaveBeenCalledWith("ASM-1");
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    // The ordinary take's own success toast and nothing else — in particular not
+    // "Couldn't read the work under ASM-1", which is what the ladder's throw produced
+    // for every childless ticket on a team-managed project.
+    expect(posted().filter((m) => m.type === "toast")).toEqual([
+      {
+        type: "toast",
+        level: "success",
+        message: "Opened 1 window(s) for ASM-1. Brief seeded in each repo. Claude Code pre-seeded — press Enter to start.",
+      },
+    ]);
+    expect(logged.filter((l) => l.startsWith("probeTree "))).toEqual([]);
+    expect(createWorktrees).not.toHaveBeenCalled(); // "worktree: never" — the pre-tree flow exactly
+  });
+
+  it("offers the probe a cancel, and takes the ticket on its own when it is used", async () => {
+    // A wide tree is hundreds of sequential reads; before this the only way out of the
+    // wait was to keep waiting. Asserted on the real options object, because
+    // `cancellable` is only honoured for a notification-located progress.
+    vi.mocked(window.withProgress).mockImplementationOnce(
+      async (_opts: unknown, task: (...a: any[]) => any) => task(noopProgress(), liveToken(true)),
+    );
+    const { provider, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(vi.mocked(window.withProgress).mock.calls[0][0]).toEqual({
+      location: ProgressLocation.Notification,
+      title: "Looking for work under ASM-1…",
+      cancellable: true,
+    });
+    // The cancel routed to the ordinary take, not to an abandoned Take: no picker, and
+    // the single-ticket flow ran to its window.
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(logged).toContain("probeTree ASM-1: cancelled — taking the ticket on its own");
   });
 
   it("degrades to the ordinary take when the ticket read behind the probe fails", async () => {
