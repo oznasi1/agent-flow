@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-08-17
+
 ### Added
 
 - **Child worktrees for a ticket that has them.** Off by default — turn on
