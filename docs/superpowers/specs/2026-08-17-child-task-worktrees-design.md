@@ -55,7 +55,7 @@ gives one worktree for the parent and nothing for its children.
 
 | Module | Change |
 |---|---|
-| `src/tasks/provider.ts` | New `ChildRef { key, summary, type, statusCategory, parentKey }`. New optional `Capabilities.children?: { of(key: string): Promise<ChildRef[]> }` — one level per call. `SerializedCaps` gains `children: boolean`; `serializeCaps` sets it from `!!caps.children`. |
+| `src/tasks/provider.ts` | New `ChildRef { key, summary, type, statusCategory, parentKey }`. New optional `Capabilities.children?: { of(key: string): Promise<ChildRef[]> }` — one level per call. ~~`SerializedCaps` gains `children: boolean`~~ — **not implemented, deliberately**: nothing in the webview picks children, the choice of mode is host-side, and `serializeCaps`' wire shape is pinned by `toEqual` tests that adding a field would have forced us to edit. `test/unit/tasks/provider.test.ts` pins the absence instead. |
 | `src/tasks/jira/childJql.ts` (new) | Pure. `childrenJql(key)` returns the candidate JQL list — `parent = "KEY"` then `"Epic Link" = "KEY"` — for the candidate-fallback loop `client.ts` already uses for list queries. |
 | `src/tasks/jira/client.ts` | `childrenOf(key): Promise<ChildRef[]>`, running those candidates through `searchJql` with `LIST_FIELDS`. The connector wires it into `caps.children`. |
 | `src/engine/taskTree.ts` (new) | Pure — no `vscode`, no `fs`, no git. `buildTree(rootKey, fetch, opts)` → `{ nodes, leaves, dropped }`; `leafBranches(parentBranch, leaves)`. |
