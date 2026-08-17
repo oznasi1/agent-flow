@@ -3,7 +3,8 @@ import * as path from "path";
 import { AgentActivity } from "../types";
 import { UNKNOWN_ACTIVITY } from "./activity";
 
-// A working agent's transcript is written to within this window; older → not "working".
+// A working agent's transcript is written to within this window; older → not
+// "working" (and, with a tool still outstanding, "stalled").
 const WORKING_WINDOW_MS = 45_000;
 
 /** The subset of a Claude Code transcript line we read. */
@@ -34,17 +35,28 @@ export function encodeProjectDir(cwd: string): string {
 export function deriveActivity(lines: TranscriptLine[], mtimeMs: number, nowMs: number): AgentActivity {
   const slug = [...lines].reverse().find((l) => l.slug)?.slug ?? null;
   const meaningful = lines.filter((l) => l.type === "user" || l.type === "assistant");
-  if (meaningful.length === 0) return { state: "unknown", lastActivityMs: mtimeMs ?? null, slug };
+  if (meaningful.length === 0) return { state: "unknown", lastActivityMs: mtimeMs ?? null, slug, midWork: false };
 
   const last = meaningful[meaningful.length - 1];
   // Turn ended and control is back with the human — actionable regardless of how
   // long ago it happened.
   if (last.type === "assistant" && last.message?.stop_reason === "end_turn") {
-    return { state: "needs-you", lastActivityMs: mtimeMs, slug };
+    return { state: "needs-you", lastActivityMs: mtimeMs, slug, midWork: false };
   }
+  // A tool call that never returned. Nothing follows the last meaningful line by
+  // definition, so "no tool_result after it" needs no separate check.
+  const pendingTool = last.type === "assistant" && last.message?.stop_reason === "tool_use";
+  // Work is owed either way: a tool that has not returned, or a user line — a
+  // real prompt, or a tool_result — the agent has not answered. Note that Claude
+  // Code writes tool results as type "user".
+  const midWork = pendingTool || last.type === "user";
   const age = nowMs - mtimeMs;
-  if (age <= WORKING_WINDOW_MS) return { state: "working", lastActivityMs: mtimeMs, slug };
-  return { state: "idle", lastActivityMs: mtimeMs, slug };
+  if (age <= WORKING_WINDOW_MS) return { state: "working", lastActivityMs: mtimeMs, slug, midWork };
+  // Stale with a tool still outstanding: the agent is at a permission prompt, or
+  // a long command is running. The transcript cannot separate the two, so the
+  // label is chosen to be true under either.
+  if (pendingTool) return { state: "stalled", lastActivityMs: mtimeMs, slug, midWork };
+  return { state: "idle", lastActivityMs: mtimeMs, slug, midWork };
 }
 
 // Defined in ./activity now, so a browser bundle can reach the constant without

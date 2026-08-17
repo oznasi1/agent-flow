@@ -116,6 +116,8 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
     case "needs-you": return { text: `ended turn · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
+    case "stalled": return { text: `stalled · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
+    case "exited": return { text: `exited · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
     case "idle": return { text: `idle · ${timeAgo(r.agent.lastActivityMs)}`, tone: "idle" };
     default: return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
   }

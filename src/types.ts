@@ -84,8 +84,12 @@ export interface FlowCommand {
 
 // ── The Deck: in-flight orchestration board ─────────────────────────────────────
 
-/** Live agent activity, inferred best-effort from the Claude Code session transcript. */
-export type AgentState = "working" | "needs-you" | "idle" | "unknown";
+/** `stalled` and `exited` both mean "look at this", and both were `idle` before:
+ * an agent waiting at a permission prompt and one that died mid-tool used to
+ * render in the calmest tone on the board. `stalled` is derived from the
+ * transcript alone; `exited` needs session liveness and so is assigned by
+ * `buildRunStatus` (see AgentActivity.midWork). */
+export type AgentState = "working" | "needs-you" | "stalled" | "exited" | "idle" | "unknown";
 
 /** The board column a run lands in. */
 export type DeckColumn = "progress" | "needs" | "review" | "done";
@@ -197,6 +201,12 @@ export interface AgentActivity {
   state: AgentState;
   lastActivityMs: number | null; // transcript file mtime
   slug: string | null; // session slug (title), when known
+  /** The transcript ends with work owed — an unanswered tool_use, or a user line
+   * with no assistant reply. `buildRunStatus` promotes this to state "exited"
+   * when no live session claims the run, which is the one thing a per-file
+   * reducer cannot know. Optional so every existing AgentActivity literal
+   * (the test suite is full of them) still compiles; absent means false. */
+  midWork?: boolean;
 }
 
 /** One open Claude Code session attached to a card, with its own live state.
