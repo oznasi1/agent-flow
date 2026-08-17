@@ -2387,7 +2387,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const usable = found.filter((r) => r.isGit);
 
     if (!usable.length) {
-      this.toast("error", `No git repo among ${names.join(", ")} under ${cfg.reposRoot}. Each task opens a worktree.`);
+      // `names` can be empty — a fan-out whose repo set was already filtered to git repos
+      // hands one in when `reposRoot` holds none — and "No git repo among  under /repos"
+      // reads as a bug in the sentence rather than a fact about the machine.
+      this.toast(
+        "error",
+        names.length
+          ? `No git repo among ${names.join(", ")} under ${cfg.reposRoot}. Each task opens a worktree.`
+          : `No git repo under ${cfg.reposRoot}. Each task opens a worktree.`,
+      );
       return [];
     }
     if (missing.length) this.toast("info", `Skipping ${missing.join(", ")} — not found under ${cfg.reposRoot}.`);
@@ -2459,7 +2467,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       // readable. Nothing is ever omitted silently, so the keys are named and not just
       // counted.
       if (tree.dropped.length) {
-        this.log(`probeTree ${key}: tree dropped ${tree.dropped.length} (${tree.dropped.join(", ")})`);
+        // Deduped for the log: buildTree reports one entry per sighting, so a key whose
+        // own fetch failed AND which the cap then cut appeared twice, inflating the count
+        // and naming itself twice. The engine's answer is left as it is — the duplication
+        // is meaningful there, just not in a diagnostic listing keys.
+        const dropped = [...new Set(tree.dropped)];
+        this.log(`probeTree ${key}: tree dropped ${dropped.length} (${dropped.join(", ")})`);
         // Leaves empty with omissions recorded means the root's own children could not
         // be read (buildTree keeps an unreadable *child* as a leaf — the work is still
         // real — and exempts only the root). The take degrades to the ordinary one, and
@@ -2521,7 +2534,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // there is that node's SUBTREE, not the node. Counting the raw sum would claim a
     // hidden item that is sitting visibly in the list below — so only the dropped keys
     // that are nowhere in the list count as not shown.
-    const hidden = tree.dropped.filter((k) => !tree.leaves.some((l) => l.key === k)).length;
+    // Deduped against itself first: a key can land in `dropped` twice — its own fetch
+    // failed AND the cap later cut it — which inflated "not shown" by one and named the
+    // same key twice.
+    const hidden = [...new Set(tree.dropped)].filter((k) => !tree.leaves.some((l) => l.key === k)).length;
     const shortfall = hidden
       ? ` (${tree.leaves.length} of ${tree.leaves.length + hidden} — ${hidden} not shown)`
       : "";
@@ -2589,7 +2605,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    *  unexpected worktree count is explicable rather than mysterious. */
   private fanOutRepos(cfg: AgentFlowConfig, detail: TaskDetail, preselected?: string[]): string[] {
     if (preselected?.length) return preselected;
-    const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+    // Git repos only. A fan-out child MUST have a worktree, so a non-git folder under
+    // `reposRoot` can only fail its task — and it fails it loudly: an unsolicited
+    // "Skipping … not a git repo" toast naming folders the user never picked, and, when
+    // a misconfigured `reposRoot` has no git repo at all, `"No git repo among  under
+    // /repos"` with a blank where the names belong.
+    const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist).filter((r) => r.isGit);
     return this.reposForTask(detail, repos).map((r) => r.name);
   }
 

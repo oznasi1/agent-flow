@@ -5395,6 +5395,39 @@ describe("takeTask: a ticket with children", () => {
     });
   });
 
+  it("keeps a non-git folder out of the fan-out's repo set", async () => {
+    // A fan-out child MUST have a worktree, so a non-git folder can only fail its task —
+    // loudly, with a "Skipping notes — not a git repo" toast naming a folder the user
+    // never picked.
+    vi.mocked(discoverRepos).mockReturnValue([
+      ...mkRepos(["account-service"]),
+      ...mkRepos(["notes"], { isGit: false }),
+    ]);
+    answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
+    const { provider } = setup({ authed: true });
+    const takeBatch = vi.spyOn(provider, "takeBatch").mockResolvedValue(undefined);
+    await provider.takeTask("ASM-1", "command");
+    expect(takeBatch).toHaveBeenCalledWith(["ASM-2"], ["account-service"], {
+      key: "ASM-1",
+      branch: PARENT_BRANCH,
+    });
+  });
+
+  it("says there is no git repo at all without a blank where names belong", async () => {
+    // Every discovered folder is non-git, so the filtered fan-out set is empty and
+    // resolveBatchRepos has no names to list.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["notes", "scratch"], { isGit: false }));
+    answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
+    const { provider, posted } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "command");
+    expect(posted()).toContainEqual({
+      type: "toast",
+      level: "error",
+      message: "No git repo under /repos. Each task opens a worktree.",
+    });
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
   it("widens to every discovered repo only when the parent itself infers none", async () => {
     // takeBatch's repo argument is a FILTER, and an empty one means "nothing usable"
     // (resolveBatchRepos) — so the fan-out has to name a set. With no in-card selection
@@ -5639,6 +5672,29 @@ describe("takeTask: a ticket with children", () => {
     // The unexplored subtree is still reported — the overlap changes the arithmetic, not
     // the diagnostic.
     expect(logged).toContain("probeTree ASM-1: tree dropped 1 (ASM-3)");
+  });
+
+  it("counts and names a doubly-dropped key once", async () => {
+    // 25 children, and K-21's own fetch fails: buildTree drops it for the unreadable
+    // subtree AND again when the 20-leaf cap cuts it, because it reports one entry per
+    // sighting. Undeduped, that read as "dropped 6 (K-21, K-20, K-21, …)" in the log and
+    // as one more hidden item than exists in the picker's title.
+    clientStub.childrenOf = vi.fn(async (key: string) => {
+      if (key === "ASM-1") {
+        return Array.from({ length: 25 }, (_, i) => ({
+          key: `K-${i}`, summary: "x", type: "Sub-task", statusCategory: "new",
+        }));
+      }
+      if (key === "K-21") throw new Error("500");
+      return [];
+    });
+    answerPicks(pickFirst);
+    const { provider, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(logged).toContain("probeTree ASM-1: tree dropped 5 (K-21, K-20, K-22, K-23, K-24)");
+    expect(vi.mocked(window.showQuickPick).mock.calls[1][1]).toEqual(
+      expect.objectContaining({ title: "Which of these do you want to take? (20 of 25 — 5 not shown)" }),
+    );
   });
 
   it("still logs the dropped leaves when the user takes just the parent", async () => {
