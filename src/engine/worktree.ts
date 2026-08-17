@@ -36,6 +36,23 @@ export function repoRootOfWorktree(p: string): string | undefined {
   return at > 0 ? p.slice(0, at) : undefined;
 }
 
+/** A worktree's name as a workspace folder: `<repo>-<KEY>`. The repo leads so a row in
+ *  the explorer names the service it belongs to — a bare `<KEY>` says nothing about which
+ *  checkout it came from once several repos are open. The key qualifier is load-bearing
+ *  too: two tasks in one repo would otherwise present as identically-named roots, and the
+ *  folder name is what an `@mention` resolves against. */
+export function folderName(key: string, repo: string): string {
+  return `${repo}-${key}`;
+}
+
+/** What to call `service` as a workspace folder. Only a worktree is key-qualified: a main
+ *  checkout is the repo, and naming it after one task's key would be a lie the next task
+ *  inherits. Callers pass the ServiceRef they are about to write as a root, so the label
+ *  and the path can never disagree about which of the two this is. */
+export function serviceFolderName(key: string, service: ServiceRef): string {
+  return repoRootOfWorktree(service.path) ? folderName(key, service.name) : service.name;
+}
+
 function git(repo: string, args: string[]): void {
   execFileSync("git", ["-C", repo, ...args], { stdio: "pipe" });
 }

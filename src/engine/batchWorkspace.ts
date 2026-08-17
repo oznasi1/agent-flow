@@ -3,6 +3,7 @@ import * as path from "path";
 import { Run, ServiceRef } from "../types";
 import { extractFileHints, resolveFilesInRepo, mention } from "./files";
 import { ensureGitExcluded } from "./gitExclude";
+import { folderName } from "./worktree";
 import { gitState } from "./git";
 import { writeRun, defaultRunsDir } from "./runs";
 import {
@@ -58,13 +59,6 @@ export interface SharedOpenResult {
   seededInPlace?: boolean; // "current": this window was seeded as-is; nothing was opened
 }
 
-/** A task's worktree as a workspace folder. The key qualifier is load-bearing: two
- * tasks in one repo would otherwise present as two identically-named roots, and the
- * folder name is what an `@mention` resolves against. */
-export function folderName(key: string, repo: string): string {
-  return `${key}-${repo}`;
-}
-
 /**
  * Open ONE window holding every task's worktrees, with a Claude session seeded per
  * task. `openWorkspace` can't do this by being called N times — each call would
@@ -101,7 +95,7 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
     }
   }
 
-  // 2 — every worktree as a workspace folder, key-qualified.
+  // 2 — every worktree as a workspace folder, named `<repo>-<KEY>`.
   const folders = tasks.flatMap((t) =>
     t.services.map((s) => ({ name: folderName(t.ticket.key, s.name), path: s.path })),
   );

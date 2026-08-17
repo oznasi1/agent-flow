@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openSharedWorkspace, folderName, type SharedOpenRequest } from "../../../src/engine/batchWorkspace";
+import { openSharedWorkspace, type SharedOpenRequest } from "../../../src/engine/batchWorkspace";
 import { commands } from "../../_mocks/vscode";
 
 vi.mock("fs");
@@ -64,12 +64,12 @@ describe("openSharedWorkspace", () => {
     expect(result.briefs).toHaveLength(2);
   });
 
-  it("names each folder <KEY>-<repo> so two worktrees of one repo stay distinct", async () => {
+  it("names each folder <repo>-<KEY> so two worktrees of one repo stay distinct", async () => {
     await openSharedWorkspace(baseReq());
     const ws = JSON.parse(String(writes((p) => p.endsWith(".code-workspace"))[0][1]));
     expect(ws.folders).toEqual([
-      { name: "ASM-1-api", path: "/repos/api/.claude/worktrees/ASM-1" },
-      { name: "ASM-2-api", path: "/repos/api/.claude/worktrees/ASM-2" },
+      { name: "api-ASM-1", path: "/repos/api/.claude/worktrees/ASM-1" },
+      { name: "api-ASM-2", path: "/repos/api/.claude/worktrees/ASM-2" },
     ]);
   });
 
@@ -113,7 +113,7 @@ describe("openSharedWorkspace", () => {
       }),
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/plans/"))[0][1]));
-    expect(plan.matches[0].prompt).toContain("@ASM-1-api/src/foo.ts");
+    expect(plan.matches[0].prompt).toContain("@api-ASM-1/src/foo.ts");
   });
 
   it("writes no plan file when seeding is off", async () => {
@@ -132,7 +132,7 @@ describe("openSharedWorkspace", () => {
   it("adds no folders to a live folder window and reports them unadded", async () => {
     const result = await openSharedWorkspace(baseReq({ target: { kind: "live-folder", folder: "/repos/web" } }));
     expect(result.workspaceFile).toBeUndefined();
-    expect(result.unaddedFolders).toEqual(["ASM-1-api", "ASM-2-api"]);
+    expect(result.unaddedFolders).toEqual(["api-ASM-1", "api-ASM-2"]);
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
     expect(plans.every((p) => p.matches[0].matchPath === "/repos/web")).toBe(true);
   });
@@ -154,7 +154,7 @@ describe("openSharedWorkspace", () => {
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/plans/"))[0][1]));
     expect(plan.matches[0].prompt).toContain("@src/foo.ts");
-    expect(plan.matches[0].prompt).not.toContain("@ASM-1-api/src/foo.ts");
+    expect(plan.matches[0].prompt).not.toContain("@api-ASM-1/src/foo.ts");
   });
 
   it("bares the mentions when merging into an existing workspace failed", async () => {
@@ -174,7 +174,7 @@ describe("openSharedWorkspace", () => {
       }),
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/plans/"))[0][1]));
-    expect(plan.matches[0].prompt).not.toContain("@ASM-1-api/src/foo.ts");
+    expect(plan.matches[0].prompt).not.toContain("@api-ASM-1/src/foo.ts");
   });
 
   // The plan-dir watcher coalesces events 300ms after the last one, so an N-plan batch
@@ -299,12 +299,12 @@ describe("openSharedWorkspace — existing workspace", () => {
       baseReq({
         target: { kind: "existing", file: "/ws/team.code-workspace" },
         foldersToAdd: [
-          { name: "ASM-1-infra", path: "/repos/infra/.claude/worktrees/ASM-1" },
-          { name: "ASM-2-infra", path: "/repos/infra/.claude/worktrees/ASM-2" },
+          { name: "infra-ASM-1", path: "/repos/infra/.claude/worktrees/ASM-1" },
+          { name: "infra-ASM-2", path: "/repos/infra/.claude/worktrees/ASM-2" },
         ],
       }),
     );
-    expect(result.mergedFolders).toEqual(["ASM-1-infra", "ASM-2-infra"]);
+    expect(result.mergedFolders).toEqual(["infra-ASM-1", "infra-ASM-2"]);
     expect(result.workspaceFile).toBe("/ws/team.code-workspace");
     // No new batch workspace file is written when the destination is an existing one.
     expect(writes((p) => p.endsWith("ASM-1+1.code-workspace"))).toHaveLength(0);
@@ -328,12 +328,5 @@ describe("openSharedWorkspace — existing workspace", () => {
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/.agentflow/plans/"))[0][1]));
     expect(plan.matches[0].prompt).toContain("@api/.claude/worktrees/ASM-1/src/export.py");
-  });
-});
-
-describe("folderName", () => {
-  it("key-qualifies so two tasks in one repo stay distinct roots", () => {
-    expect(folderName("ASM-1", "api")).toBe("ASM-1-api");
-    expect(folderName("ASM-2", "api")).toBe("ASM-2-api");
   });
 });

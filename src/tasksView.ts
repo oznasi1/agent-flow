@@ -27,8 +27,8 @@ import { briefMarkdown } from "./engine/brief";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, PresenceRecord, type CurrentWindow } from "./engine/presence";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
-import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
-import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
+import { createWorktrees, folderName, repoRootOfWorktree, serviceFolderName } from "./engine/worktree";
+import { openSharedWorkspace, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { newNote, newSection, noteStatus, sanitizeNotes, sanitizeSections } from "./notepad";
 import { IMAGE_DIR, deleteImages, imageFileName, imagePath, saveImage, sweepOrphans } from "./notepadImages";
@@ -1850,7 +1850,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const additions = args.existingWorkspaceFile
       ? await this.resolveWorkspaceAdditions(
           args.existingWorkspaceFile,
-          services.map((s) => ({ label: s.name, repoName: s.name, path: s.path })),
+          services.map((s) => ({ label: serviceFolderName(detail.key, s), repoName: s.name, path: s.path })),
         )
       : { foldersToAdd: [], skipped: [], declined: false };
 

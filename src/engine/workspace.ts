@@ -10,6 +10,7 @@ import { renderPrompt } from "./prompt";
 import { writeRun, defaultRunsDir } from "./runs";
 import { gitState } from "./git";
 import { ensureGitExcluded } from "./gitExclude";
+import { serviceFolderName } from "./worktree";
 import { windowIdentity, type CurrentWindow } from "./presence";
 import { providerLabel, readAgentProvider, readAgentSurface, type AgentProvider } from "../config";
 
@@ -386,11 +387,20 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   } else if (mode === "multiroot") {
     fs.mkdirSync(workspaceDir, { recursive: true });
     workspaceFile = path.join(workspaceDir, `${ticket.key}.code-workspace`);
+    // One name per root, computed once: the folder the file declares and the folder an
+    // `@mention` names have to be the same string, or the mention resolves to nothing.
+    const names = new Map(services.map((s) => [s.name, serviceFolderName(ticket.key, s)]));
     fs.writeFileSync(
       workspaceFile,
-      JSON.stringify({ folders: services.map((s) => ({ name: s.name, path: s.path })), settings: {} }, null, 2) + "\n",
+      JSON.stringify(
+        { folders: services.map((s) => ({ name: names.get(s.name)!, path: s.path })), settings: {} },
+        null,
+        2,
+      ) + "\n",
     );
-    const mentions = services.flatMap((s) => (filesByRepo.get(s.name) ?? []).map((f) => mention("multiroot", s.name, f)));
+    const mentions = services.flatMap((s) =>
+      (filesByRepo.get(s.name) ?? []).map((f) => mention("multiroot", names.get(s.name)!, f)),
+    );
     matches.push({ matchPath: workspaceFile, prompt: seedPrompt(mentions) });
   } else {
     for (const s of services) {
@@ -561,8 +571,8 @@ export function workspaceFolderPaths(file: string): string[] {
 
 /** A folder that might be added to an existing workspace. `label` is the folder name
  *  written into the file; `repoName` is the bare repo name dedup compares on — batch
- *  labels are key-qualified (`ASM-1-api`) but must still dedup against a folder the
- *  workspace already calls `api`. */
+ *  a worktree's label is key-qualified (`api-ASM-1`) but must still dedup against a
+ *  folder the workspace already calls `api`. */
 export interface MergeCandidate {
   label: string;
   repoName: string;

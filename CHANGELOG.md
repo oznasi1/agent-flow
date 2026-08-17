@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A worktree's workspace folder now leads with its service.** A root pointing at
+  a per-task worktree is named `<repo>-<KEY>` — `account-service-ASM-6031` — so the
+  explorer says which checkout a row came from instead of showing a bare key beside
+  the repos it belongs to. A folder pointing at a main checkout is still just the
+  repo name. Batch launches carried the same qualifier the other way round
+  (`ASM-6031-account-service`) and now group by service too. File mentions follow
+  the folder name, so they keep resolving to the worktree they name; workspaces
+  already on disk are untouched.
+
 ## [0.24.0] — 2026-08-17
 
 ### Added
