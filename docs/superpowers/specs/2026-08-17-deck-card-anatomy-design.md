@@ -216,10 +216,21 @@ not stalled. Stale becomes `stalled`.
 **`exited` is derived one level up.** Liveness is not visible to a pure
 per-file reducer, so `AgentActivity` gains `midWork: boolean` — true when the
 transcript ends on an unanswered `tool_use` or on a `user` line with no
-assistant reply — and `buildRunStatus` promotes `midWork && agents.length === 0`
-to `exited`. This keeps the pure/impure split intact: the reducer reports what
-the file says, `status.ts` reconciles it against the session registry it
-already reads.
+assistant reply — and `buildRunStatus` promotes
+`midWork && state !== "working" && agents.length === 0` to `exited`. This keeps
+the pure/impure split intact: the reducer reports what the file says, `status.ts`
+reconciles it against the session registry it already reads.
+
+The `state !== "working"` conjunct is load-bearing, and this spec's first draft
+omitted it. `midWork` is true for a transcript written *moments* ago with a
+pending tool call, because that transcript also ends with work owed — so the
+two-term formula promoted a live, actively-working agent to `exited` whenever the
+`agents` list handed in was empty. That is not a corner case: the per-repo
+fallback path passes no agents for a tracked run whose transcript is warm but
+whose session the registry has not recorded. Three pre-existing tests caught it
+during implementation. Only a reading that has already gone stale — `stalled`,
+or an unanswered prompt sitting at `idle` — with no live session behind it has
+actually died.
 
 On the Agents lens a card *is* one live session, so `exited` is unreachable
 there by construction.
