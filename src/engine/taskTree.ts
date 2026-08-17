@@ -24,7 +24,14 @@ export interface TreeResult {
   leaves: TreeLeaf[];
   /** Every omission the walk made: a subtree left unexplored (fetch failed or depth
    *  ran out), a key seen twice, a leaf the cap cut. The caller logs and reports
-   *  this — nothing is ever dropped silently. */
+   *  this — nothing is ever dropped silently.
+   *
+   *  NOT disjoint from `leaves`, and a caller counting "how many did I not see?" must
+   *  account for that: when an unreadable node sits at depth > 0 it is pushed to BOTH,
+   *  because the node is still real work to be taken while its subtree is what went
+   *  unexplored. `leaves.length + dropped.length` is therefore not the size of the tree,
+   *  and treating it as one invents items that are visibly present in `leaves`. Subtract
+   *  the keys that appear in both. */
   dropped: string[];
 }
 

@@ -5380,8 +5380,10 @@ describe("takeTask: a ticket with children", () => {
   });
 
   it("opens no funnel for a take that becomes a fan-out", async () => {
-    // takeBatch owns its own reporting, so takeTask must not emit take_started and
-    // then walk away — that would be a funnel with no terminator.
+    // takeBatch emits no telemetry at all — it is uninstrumented in Phase 1, which is
+    // why "batch" sits reserved-but-unused in TakeSource (telemetry/events.ts). So
+    // takeTask must not emit take_started and then walk away: nothing downstream would
+    // ever terminate that funnel. Fan-out takes are absent from the funnel entirely.
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider } = setup({ authed: true });
     vi.spyOn(provider, "takeBatch").mockResolvedValue(undefined);
@@ -5449,6 +5451,41 @@ describe("takeTask: a ticket with children", () => {
     expect(vi.mocked(window.showQuickPick).mock.calls[1][1]).toEqual(
       expect.objectContaining({ title: "Which of these do you want to take? (20 of 25 — 5 not shown)" }),
     );
+  });
+
+  it("counts nothing as hidden when an offered leaf is the thing that was dropped", async () => {
+    // Three children, one of which cannot be read. buildTree keeps that child as a leaf
+    // — it is still real work — AND records it in `dropped`, because what went
+    // unexplored is its subtree. So `leaves` and `dropped` overlap, all three leaves are
+    // on screen, and nothing is hidden: a title claiming "3 of 4 — 1 not shown" would
+    // invent a fourth item while the third sat visibly in the list.
+    clientStub.childrenOf = vi.fn(async (key: string) => {
+      if (key === "ASM-1") {
+        return [
+          { key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "new" },
+          { key: "ASM-3", summary: "second bit", type: "Sub-task", statusCategory: "new" },
+          { key: "ASM-4", summary: "third bit", type: "Sub-task", statusCategory: "new" },
+        ];
+      }
+      if (key === "ASM-3") throw new Error("500");
+      return [];
+    });
+    answerPicks(pickFirst);
+    const { provider, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const [items, opts] = vi.mocked(window.showQuickPick).mock.calls[1] as [
+      { label: string }[],
+      { title: string },
+    ];
+    expect(items.map((i) => i.label)).toEqual([
+      "ASM-2 — first bit",
+      "ASM-3 — second bit",
+      "ASM-4 — third bit",
+    ]);
+    expect(opts.title).toBe("Which of these do you want to take?");
+    // The unexplored subtree is still reported — the overlap changes the arithmetic, not
+    // the diagnostic.
+    expect(logged).toContain("probeTree ASM-1: tree dropped 1 (ASM-3)");
   });
 
   it("still logs the dropped leaves when the user takes just the parent", async () => {

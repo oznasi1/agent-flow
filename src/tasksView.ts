@@ -2398,13 +2398,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    *
    *  The title carries the omissions, because truncation is a fact about the list on
    *  screen: a toast would arrive after the user had already chosen from a list that
-   *  looked complete. Every `dropped` key is something the walk found and is not
-   *  showing — a leaf the cap cut, a repeat, or a subtree it could not read — so all
-   *  three count the same way here. */
+   *  looked complete. */
   private async chooseLeaves(tree: TreeResult): Promise<TreeLeaf[] | undefined> {
-    const total = tree.leaves.length + tree.dropped.length;
-    const shortfall = tree.dropped.length
-      ? ` (${tree.leaves.length} of ${total} — ${tree.dropped.length} not shown)`
+    // `dropped` and `leaves` are NOT disjoint: buildTree keeps an unreadable node as a
+    // leaf (it is still real work) while also reporting it, because what was dropped
+    // there is that node's SUBTREE, not the node. Counting the raw sum would claim a
+    // hidden item that is sitting visibly in the list below — so only the dropped keys
+    // that are nowhere in the list count as not shown.
+    const hidden = tree.dropped.filter((k) => !tree.leaves.some((l) => l.key === k)).length;
+    const shortfall = hidden
+      ? ` (${tree.leaves.length} of ${tree.leaves.length + hidden} — ${hidden} not shown)`
       : "";
     const picked = await vscode.window.showQuickPick(
       tree.leaves.map((l) => ({
