@@ -147,13 +147,16 @@ export function DeckDetail({ card, sourceLabel, onClose, onForget }: DeckDetailP
            * leaf worktree never opens a Claude Code session, so these never earn
            * a card. This drawer is the only place they surface. Keyed by
            * key+repo, not key alone: the same ticket key can span two repos
-           * (its own row per repo, per the fan-out shape). */}
+           * (its own row per repo, per the fan-out shape) — and the repo has to
+           * be in the accessible name too, or two rows for the same key read to
+           * a screen reader as the exact same button twice, with only the
+           * (non-audible) `title` telling them apart. */}
           {r.run.children!.map((c) => (
             <button
               type="button"
               className="dd-child"
               key={`${c.key}:${c.repo}`}
-              aria-label={`Copy ${c.key} worktree path`}
+              aria-label={`Copy ${c.key} worktree path in ${c.repo}`}
               title={c.path}
               onClick={() => copy(c.path)}
             >

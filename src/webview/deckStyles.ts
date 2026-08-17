@@ -557,21 +557,32 @@ export const DECK_CSS = `
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dd-act .h.id { font-family: var(--vscode-editor-font-family); }
 
-  /* One child worktree, same list-row shape as .dd-act. The drawer already
-     proved (in the .dd-hd .k comment above) that a nowrap flex item's automatic
-     minimum is its own text width — a long branch or key here would reopen that
-     same horizontal-scroll bug unless it can shrink. \`.t\`'s \`flex: 1\` gives it
-     a zero flex-basis, so it absorbs the shrinking before \`.k\`/\`.bn\` ever have
-     to; \`overflow: hidden\` on all three zeroes their automatic minimum too, so
-     even a row where the key and branch alone are wider than the drawer
-     ellipsizes instead of pushing the row (and the drawer) sideways. */
+  /* One child worktree, same list-row shape as .dd-act. Same bug this file's
+     .dd-hd .k comment already names, and the same fix commit (8ebdd43,
+     "stop the detail drawer scrolling sideways") already measured: a
+     \`white-space: nowrap\` flex item's automatic minimum size is its own full
+     text width UNLESS its own overflow is non-visible — and \`flex: none\`
+     (used below on \`.k\`/\`.bn\`, the identifiers) sets flex-shrink to 0, which
+     means that automatic-minimum rule never even gets asked; the item simply
+     renders at its natural content width every time. Left uncapped, a long
+     branch name would claim however much width it wants and \`.t\` — the only
+     item with flex-grow, and the only one meant to give ground — would be
+     the one squeezed, all the way to invisible if \`.k\`+\`.bn\`'s natural widths
+     alone already exceed the row. \`max-width\` on \`.k\` and \`.bn\` is what
+     bounds that: past it they ellipsize on their OWN box instead of
+     continuing to claim space from \`.t\`, so the summary is guaranteed some
+     share and is the thing that visibly shortens first in the ordinary case
+     (it usually has the most text). \`.dd\`'s own \`overflow: hidden auto\`
+     (see above) is the backstop if a row still doesn't fit even capped: it
+     clips rather than taking the close button off-screen, exactly as it
+     already does for every other row in this drawer. */
   .dd-child { display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left;
     background: none; border: 0; padding: 3px 0; color: inherit; cursor: pointer; min-width: 0; }
   .dd-child:hover { background: var(--vscode-list-hoverBackground); }
-  .dd-child .k { flex: none; font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .85;
+  .dd-child .k { flex: none; max-width: 30%; font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .85;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dd-child .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dd-child .bn { flex: none; font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .7;
+  .dd-child .bn { flex: none; max-width: 40%; font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .7;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* At any realistic panel width there is no arrangement in which four columns

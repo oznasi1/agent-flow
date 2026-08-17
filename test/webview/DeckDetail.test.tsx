@@ -264,16 +264,35 @@ describe("child worktrees", () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     render1(withChildren(children));
-    fireEvent.click(screen.getByRole("button", { name: "Copy ASM-2 worktree path" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy ASM-2 worktree path in centaur" }));
     expect(writeText).toHaveBeenCalledWith("/repos/centaur/.claude/worktrees/ASM-2");
   });
 
-  it("renders one row per repo when a child spans two", () => {
+  it("renders one row per repo when a child spans two, each with its own accessible name", () => {
+    // The repo has to be in the accessible name, not just the key: without it,
+    // two rows for the same ticket key are indistinguishable to a screen reader
+    // (and getByRole below would throw on an ambiguous match instead of finding
+    // either one).
     render1(withChildren([
       children[0],
       { ...children[0], repo: "frontend", path: "/repos/frontend/.claude/worktrees/ASM-2" },
     ]));
     expect(screen.getAllByText("ASM-2")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Copy ASM-2 worktree path in centaur" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy ASM-2 worktree path in frontend" })).toBeInTheDocument();
+  });
+
+  // jsdom does no layout, so this cannot prove the branch chip actually shrinks
+  // or ellipsizes on a real screen — only that the element the shrink-safe CSS
+  // (.dd-child .bn, see deckStyles.ts) targets is really the one rendered here.
+  // A future change that renamed the class without updating the CSS (or vice
+  // versa) would silently reopen the drawer's known horizontal-scroll bug with
+  // nothing here to catch it visually; this at least catches the wiring.
+  it("puts the branch on the element the shrink-safe CSS class targets", () => {
+    render1(withChildren(children));
+    const bn = document.querySelector(".dd-child .bn")!;
+    expect(bn).toBeInTheDocument();
+    expect(bn.textContent).toBe("⎇ ASM-2-first-bit");
   });
 });
 
@@ -301,5 +320,19 @@ describe("DeckDetail CSS", () => {
     expect(k).toMatch(/max-width:\s*50%/);
     expect(k).toMatch(/text-overflow:\s*ellipsis/);
     expect(k).not.toMatch(/min-width:\s*0/);
+  });
+
+  // Same bug, same fix, on the child row: .k/.bn are flex:none (no shrink at
+  // all), so without a cap they would render at their full natural width no
+  // matter how long the branch name is — and .t (the summary) would be the one
+  // squeezed, potentially to nothing, exactly like the header key once crushed
+  // the summary beside it. The cap is what keeps a long branch chip from ever
+  // taking more than its own bounded share.
+  it("caps the child row's branch chip too, so a long branch name can't crush the summary beside it", () => {
+    const bn = block(".dd-child .bn");
+    expect(bn).toMatch(/flex:\s*none/);
+    expect(bn).toMatch(/max-width:/);
+    expect(bn).toMatch(/white-space:\s*nowrap/);
+    expect(bn).toMatch(/text-overflow:\s*ellipsis/);
   });
 });
