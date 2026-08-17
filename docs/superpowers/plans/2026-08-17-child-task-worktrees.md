@@ -2079,7 +2079,7 @@ git commit -m "feat(tasks): ship child worktrees behind an off-by-default settin
 - [ ] `npm run typecheck && npm test && npm run test:cov && npm run build` — all four green, coverage thresholds met.
 - [ ] `git diff main --stat` — no file outside the File Structure table above.
 - [ ] `git log main..HEAD --oneline` — one commit per task, nine total.
-- [ ] Confirm inertness by hand: `git stash list` empty, then run the suite with `caps.children` forced absent (temporarily return `undefined` from the guard in `jira/provider.ts`) — every test must still pass. Restore the guard.
+- [ ] ~~Confirm inertness by running the suite with `caps.children` forced absent — every test must still pass.~~ **Stale, replaced.** That check was written when the capability's absence was the only inertness lever (Tasks 3–7). Task 10 makes the *setting* the lever, and ~40 tests from Tasks 8–9 legitimately require the capability present in order to exercise the flow they built — so forcing it away now tests something the codebase no longer promises. The correct check is the one Task 10's tests already make: **capability present, setting off ⇒ the tree flow does not run** (no `childrenOf` call, no picker, one `openWorkspace`).
 - [ ] Manual smoke in a dev host (`code --extensionDevelopmentPath=…`, per the repo's launch note): Take a ticket with subtasks, choose fan-out with two leaves ticked, confirm two worktrees exist on branches whose merge-base is the parent branch:
   `git -C <repo> merge-base --is-ancestor <parent-branch> <child-branch> && echo ok`
 - [ ] Take the same parent again with zero leaves ticked; confirm the parent worktree attaches to the already-existing parent branch rather than erroring.
