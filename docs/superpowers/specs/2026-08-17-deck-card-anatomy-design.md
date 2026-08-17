@@ -174,10 +174,22 @@ activation; `refresh()` reads the last-computed totals out of memory. A card
 whose totals have not been computed yet shows no figure rather than a zero —
 absent and "cost nothing" must not render the same.
 
-**Aggregation.** Per-card totals sum the run's repos' transcripts using the same
-branch join `readAgentActivity` already uses, so a repo checked out directly
-(hosting sessions for several branches) attributes each transcript to the right
-run. The header stat is the **sum of the cards currently on the board**, labelled
+**Aggregation.** Per-card totals sum **every** transcript in the run's repos'
+project dirs, with **no branch join**. This is a deliberate simplification of
+the join `readAgentActivity` performs, and the reason is the fast path: the
+sweep is affordable only because it rejects a line on `includes('"usage"')`
+before parsing it, and a branch join needs `gitBranch`, which lives on
+precisely the lines that test skips. Reinstating the join would mean parsing
+most lines in a 50MB file to attribute the few that carry usage.
+
+The cost is bounded by how Agent Flow actually works: a task launched into a
+worktree gets its own cwd, so its project dir already contains exactly one
+branch's sessions and the figure is exact. Only a run whose repo is checked out
+directly — where several branches' sessions share one dir — reads high, and
+there the figure is the honest total for that directory. The tooltip says which
+it is: *"across every session in this task's directories"*.
+
+The header stat is the **sum of the cards currently on the board**, labelled
 "Tokens on board" — not "today", which would need per-line day bucketing and
 would print a figure that disagrees with the cards beneath it.
 
