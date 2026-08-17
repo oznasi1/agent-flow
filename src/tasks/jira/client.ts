@@ -304,10 +304,12 @@ export class JiraClient {
    *  non-failing); a rejected candidate moves to the next; every candidate answering
    *  empty means "no children", which is the common case and not an error. */
   async childrenOf(key: string): Promise<ChildRef[]> {
+    let answered = false;
     let lastErr: unknown;
     for (const jql of childrenJql(key)) {
       try {
         const data = await this.searchJql(jql, CHILD_FIELDS, 100);
+        answered = true;
         const kids: ChildRef[] = (data?.issues ?? []).map((i: any) => ({
           key: i.key,
           summary: i.fields?.summary ?? "",
@@ -322,7 +324,14 @@ export class JiraClient {
         lastErr = e;
       }
     }
-    if (lastErr) throw lastErr;
+    // An authoritative empty answer is final: a site that answered "no children" via
+    // the modern `parent` spelling has told us what we asked, and a later candidate
+    // failing because its field does not exist there is not a failure to read the tree.
+    // `Epic Link` is a company-managed Jira Software custom field, so on a team-managed
+    // project — the default for new Jira Cloud projects — that candidate 400s for every
+    // ordinary childless ticket. Throwing on it would make the caller announce a failed
+    // read on the single most common path in the product.
+    if (!answered && lastErr) throw lastErr;
     return [];
   }
 

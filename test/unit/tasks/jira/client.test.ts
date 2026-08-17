@@ -910,11 +910,32 @@ describe("childrenOf", () => {
     expect(await client().childrenOf("ASM-1")).toEqual([]);
   });
 
-  it("moves to the next candidate when one is rejected, and throws only if all fail", async () => {
+  it("attempts every candidate and throws when all of them are rejected", async () => {
     const fetchMock = installFetch([textResponse("", 400), textResponse("", 400)]);
     await expect(client().childrenOf("ASM-1")).rejects.toThrow();
     // Both candidates must actually have been attempted — without this the test
     // passes even if the ladder gave up after the first rejection.
+    expect(fetchMock.mock.calls).toHaveLength(2);
+  });
+
+  it("returns [] when a candidate answered empty and a later one is rejected", async () => {
+    // The team-managed-project shape: `parent` authoritatively answers "no children",
+    // then `Epic Link` 400s because the field does not exist on that site. Nothing
+    // failed to be read, so this must not throw.
+    const fetchMock = installFetch([jsonResponse({ issues: [] }), textResponse("", 400)]);
+    expect(await client().childrenOf("ASM-1")).toEqual([]);
+    expect(fetchMock.mock.calls.map((c) => JSON.parse((c[1] as { body: string }).body).jql)).toEqual([
+      'parent = "ASM-1" ORDER BY key ASC',
+      '"Epic Link" = "ASM-1" ORDER BY key ASC',
+    ]);
+  });
+
+  it("returns [] when the first candidate is rejected and a later one answers empty", async () => {
+    // The mirror case, and the reason `answered` is not simply "did any call return":
+    // an empty answer from a LATER candidate is still an answer, so this must NOT throw
+    // — the ladder read the tree, and the tree is empty.
+    const fetchMock = installFetch([textResponse("", 400), jsonResponse({ issues: [] })]);
+    expect(await client().childrenOf("ASM-1")).toEqual([]);
     expect(fetchMock.mock.calls).toHaveLength(2);
   });
 
