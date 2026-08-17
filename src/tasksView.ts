@@ -1859,7 +1859,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       // Refusing costs nothing already on disk: createWorktrees reuses an existing
       // worktree directory, so a retry adopts the child worktrees this take made.
       if (orchestration) {
-        const stuck = services.find((base, i) => made[i]?.path === base.path);
+        // `base.isGit` matters: createWorktrees returns the ref UNCHANGED for a non-git
+        // repo by design ("not a git repo — opening the checkout directly"), which is
+        // shaped exactly like its failure return. Without this, a supported mixed repo
+        // set would be refused for a failure that never happened.
+        const stuck = services.find((base, i) => base.isGit && made[i]?.path === base.path);
         if (stuck) {
           this.toast(
             "error",

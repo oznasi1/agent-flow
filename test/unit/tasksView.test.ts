@@ -5826,6 +5826,37 @@ describe("takeTask: orchestrator mode", () => {
     });
   });
 
+  it("still opens when the parent's set includes a non-git repo", async () => {
+    // createWorktrees returns the ref UNCHANGED for a non-git repo *by design* — the
+    // same shape as its failure return. Mixed sets are supported and resolveKickoff's
+    // picker offers non-git repos, so the guard above must not read "nothing to
+    // isolate here" as "the worktree failed".
+    vi.mocked(discoverRepos).mockReturnValue([
+      { name: "api", path: "/repos/api", isGit: true },
+      { name: "docs", path: "/repos/docs", isGit: false },
+    ]);
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => (r.isGit ? { ...r, path: `${r.path}/.claude/worktrees/${key}` } : r)),
+    );
+    answerOrchestrator();
+    const { provider, posted } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    // Nothing failed, so nothing is refused — asserted first, because the refusal's
+    // toast is the symptom that names what went wrong.
+    expect(posted().filter((m) => m.type === "toast" && m.level === "error")).toEqual([]);
+    expect(vi.mocked(openWorkspace).mock.calls).toHaveLength(1);
+    // The non-git repo is named here on purpose: it is a legitimate root of this
+    // session, so a future filter that silently dropped it fails this assertion.
+    expect(openArg().services.map((s) => [s.name, s.path])).toEqual([
+      ["api", "/repos/api/.claude/worktrees/ASM-1"],
+      ["docs", "/repos/docs"],
+    ]);
+    // Only the git repo can hold the parent branch, and only it yields child rows —
+    // the per-child `usable` filter drops the non-git one, which is already correct.
+    expect(vi.mocked(ensureBranch).mock.calls).toEqual([["/repos/api", PARENT_BRANCH]]);
+    expect(openArg().children).toEqual(CHILD_ROWS);
+  });
+
   it("refuses to open the orchestrator in the main checkout when its own worktree fails", async () => {
     // The parent's `-b` attempt ALWAYS fails on this path — ensureBranch has already
     // made the branch — so createWorktrees always takes its attach path, which fails
