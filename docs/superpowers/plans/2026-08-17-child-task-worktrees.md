@@ -1962,6 +1962,118 @@ git commit -m "feat(deck): list a run's child worktrees in the drawer"
 
 ---
 
+### Task 10: The feature ships inert behind a setting
+
+**Added after Task 7's review**, which found that the feature as designed changes a core flow for every existing Jira user: any Take of a ticket with children interposes two mandatory QuickPicks, and every Take of any ticket pays an extra `getDetail` plus a `childrenOf` before the prompt-mode question. Nothing gated it, and this project's standing rule is that new behavior ships inert because of the install base. The spec never discussed a flag; this task adds one.
+
+**Files:**
+- Modify: `package.json` (the `agentFlow.childWorktrees` contribution), `src/config.ts` (interface + `getConfig`), `src/tasksView.ts` (`probeTree`'s guard), `src/telemetry/settingsSnapshot.ts` (report the flag), `CHANGELOG.md` (the feature's user-facing entry)
+- Test: `test/unit/config.test.ts`, `test/unit/tasksView.test.ts`, `test/unit/telemetry/settingsSnapshot.test.ts` (append to each)
+
+**Interfaces:**
+- Consumes: `probeTree` (Task 7), which is the single choke point for the whole feature — every picker, every git write and every extra round trip is downstream of it.
+- Produces: `AgentFlowConfig.childWorktrees: boolean`, default `false`.
+
+- [ ] **Step 1: Write the failing tests**
+
+In `test/unit/tasksView.test.ts`, append to the tree describe blocks — reuse their existing `CHILDREN` fixture and `getConfig` mock:
+
+```ts
+  it("does not probe for children when the setting is off", async () => {
+    // Default-off is the whole point: an existing user's Take must be byte-identical
+    // until they opt in. Asserted through observable behavior — one detail read, no
+    // tree pickers, one openWorkspace — rather than by spying on probeTree.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, childWorktrees: false });
+    const { view } = setup({ authed: true });
+    await view.takeTask("ASM-1", "card");
+    expect(clientStub.childrenOf).not.toHaveBeenCalled();
+    expect(quickPickTitles()).not.toContain(expect.stringContaining("How do you want to work them"));
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("probes when the setting is on", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, childWorktrees: true });
+    const { view } = setup({ authed: true });
+    answerQuickPick("cancel");
+    await view.takeTask("ASM-1", "card");
+    expect(clientStub.childrenOf).toHaveBeenCalledWith("ASM-1");
+  });
+```
+
+Every existing tree test in that file must now set `childWorktrees: true` in its own config — do this by adding it to the describe-level `beforeEach` those tests already share, NOT by editing each test's assertions.
+
+In `test/unit/config.test.ts`, append a case asserting the default is `false` when the setting is absent, following that file's existing pattern for booleans. In `test/unit/telemetry/settingsSnapshot.test.ts`, append a case asserting `child_worktrees` is reported.
+
+- [ ] **Step 2: Run them and watch them fail**
+
+Run: `npx vitest run test/unit/tasksView.test.ts test/unit/config.test.ts test/unit/telemetry/settingsSnapshot.test.ts`
+Expected: FAIL — `childWorktrees` is not a config field, and the probe runs regardless.
+
+- [ ] **Step 3: Implement**
+
+`src/config.ts` — in `AgentFlowConfig`, beside `worktree`:
+
+```ts
+  /** Offer the child-worktree flow: a Take of a ticket with children asks whether to
+   *  fan out into a worktree per child or run one orchestrator over them. Off by
+   *  default, and the default is load-bearing — with it off, `probeTree` returns before
+   *  reading anything, so an existing user's Take is byte-identical to what it was
+   *  before this feature existed: no extra round trip, no new pickers, no new git. */
+  childWorktrees: boolean;
+```
+
+and in `getConfig`:
+
+```ts
+    childWorktrees: c.get<boolean>("childWorktrees") ?? false,
+```
+
+`package.json`, in the same properties block as `agentFlow.worktree`:
+
+```json
+        "agentFlow.childWorktrees": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "When you take a ticket that has children, offer to work them as a worktree per child (a session each) or as one orchestrator session dispatching a subagent per child. Off by default: with it off, taking a ticket behaves exactly as it did before this setting existed."
+        },
+```
+
+`src/tasksView.ts` — the first line of `probeTree`, before the capability read:
+
+```ts
+    // The whole feature's off switch, and deliberately the FIRST thing here: every
+    // picker, every git write and the extra ticket read are downstream of this method,
+    // so returning here is what makes "off" mean byte-identical, not merely quieter.
+    if (!getConfig().childWorktrees) return null;
+```
+
+`src/telemetry/settingsSnapshot.ts` — beside the other booleans:
+
+```ts
+    child_worktrees: cfg.childWorktrees,
+```
+
+and add the field to `SettingsSnapshot`.
+
+- [ ] **Step 4: Run them and watch them pass**
+
+Run the three files, then the full suite. Any pre-existing test that fails is a signal the guard is in the wrong place — fix the guard, not the test.
+
+- [ ] **Step 5: Mutation-check**
+
+Invert the guard (`if (getConfig().childWorktrees) return null;`) and confirm BOTH new tests fail. Then remove it entirely and confirm the "does not probe" test fails.
+
+- [ ] **Step 6: CHANGELOG + commit**
+
+Add one entry describing the feature and its default, in this file's existing voice. Then:
+
+```bash
+git add -A
+git commit -m "feat(tasks): ship child worktrees behind an off-by-default setting"
+```
+
+---
+
 ## Final verification (after Task 9)
 
 - [ ] `npm run typecheck && npm test && npm run test:cov && npm run build` — all four green, coverage thresholds met.
