@@ -58,6 +58,34 @@ describe("accumulateUsage", () => {
     expect(Number.isNaN(t.cacheWrite)).toBe(false);
   });
 
+  // Transcript lines are written by another program. This guard defends against
+  // non-numeric values that TypeScript would not permit but the filesystem can
+  // produce: NaN, Infinity, or a string. The entire `num` guard would be removed
+  // if this test did not exist.
+  it("guards against non-numeric values in usage fields", () => {
+    const malformed = {
+      type: "assistant",
+      requestId: "r1",
+      message: {
+        usage: {
+          input_tokens: NaN,
+          output_tokens: Infinity,
+          cache_creation_input_tokens: "not a number" as unknown as number,
+          cache_read_input_tokens: 5,
+        },
+      },
+    } as unknown as UsageLine;
+    const t = sum([malformed]);
+    expect(t.input).toBe(0);
+    expect(t.output).toBe(0);
+    expect(t.cacheWrite).toBe(0);
+    expect(t.cacheRead).toBe(5);
+    expect(Number.isFinite(t.input)).toBe(true);
+    expect(Number.isFinite(t.output)).toBe(true);
+    expect(Number.isFinite(t.cacheWrite)).toBe(true);
+    expect(Number.isFinite(t.cacheRead)).toBe(true);
+  });
+
   it("accumulates into the totals and seen set it is given, so a caller can resume", () => {
     const into = zeroUsage();
     const seen = new Set<string>();
@@ -99,5 +127,13 @@ describe("formatEq", () => {
 
   it("rounds up into k at the boundary", () => {
     expect(formatEq(999_500)).toBe("1000k");
+  });
+
+  // Pins the k→M threshold at 1,000,000. The Deck's header total for a busy
+  // board lands in the 1M–10M range; changing the threshold to n < 10_000_000
+  // would render this as "2400k" instead of "2.4M", a user-visible regression.
+  // Without this case, such a threshold mutation survived all tests.
+  it("switches to M format at 1M", () => {
+    expect(formatEq(2_400_000)).toBe("2.4M");
   });
 });
