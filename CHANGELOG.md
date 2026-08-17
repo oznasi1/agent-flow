@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The card drawer no longer scrolls sideways.** Selecting a notepad card put
+  its full ~64-character key in the drawer header, which was wider than the
+  drawer itself: the summary collapsed to nothing, the status pill squashed and
+  the close button left the panel. The header now names an untracked run the way
+  the card's own key chip always has — `notepad`, `local`, `explore`, with the
+  full key on the tooltip and Copy ticket key unchanged — a long ticket key
+  ellipsizes at half the header, and the drawer scrolls on the vertical axis only.
+
 ## [0.23.0] — 2026-08-16
 
 ### Changed

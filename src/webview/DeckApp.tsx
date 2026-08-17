@@ -10,7 +10,7 @@ import { prSignals } from "../engine/bucket";
 import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
 import { LoadingMark } from "./LoadingMark";
-import { timeAgo } from "./helpers";
+import { keyLabel, timeAgo } from "./helpers";
 import { type Tone } from "./deckParts";
 import { DeckDetail } from "./DeckDetail";
 import { cardSignal } from "./deckSignal";
@@ -143,16 +143,6 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
   // A ticketless run has no tracked issue behind it: the key is a local slug, and
   // openExternal("") is a button that does nothing.
   const tracked = isTicketRun(r.run);
-  // The short label is only honest for a real Explore session. isTicketRun keys off
-  // an empty url and never inspects the key, so anything else untracked keeps its
-  // key on the chip rather than being relabelled as something it is not. A Track'd
-  // ticketless place is the one exception with an "explore-"-less key: its record
-  // is kind: "explore" but Track it never renames it off its local- place-hash, so
-  // that prefix reads as "explore" here too — it is exactly what the record now is.
-  const explore = r.run.key.startsWith("explore-") || r.run.key.startsWith("local-");
-  // Exact, not prefix-matched: unlike `explore` above (whose key prefix is the only
-  // signal a Track'd place leaves behind), a notepad run always carries its kind.
-  const notepad = runKind(r.run) === "notepad";
   // A place with an agent open in it that Agent Flow Deck never launched. It has no
   // record on disk, so there is nothing to Forget — closing its agents is what
   // removes it.
@@ -215,7 +205,7 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
             {r.run.key}
           </button>
         ) : (
-          <span className="key untracked" title={r.run.key}>{local ? "local" : explore ? "explore" : notepad ? "notepad" : r.run.key}</span>
+          <span className="key untracked" title={r.run.key}>{keyLabel(r.run)}</span>
         )}
       </div>
       <div className="c-title" title={r.run.summary}>

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, matchesStatus, moveKey, railClass, ticketKind, visibleFilters } from "../../src/webview/helpers";
-import type { Filter, Task } from "../../src/types";
+import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, keyLabel, matchesStatus, moveKey, railClass, ticketKind, visibleFilters } from "../../src/webview/helpers";
+import type { Filter, Run, Task } from "../../src/types";
 import { mkTask } from "../_helpers/factories";
 
 const tasks = (...keys: string[]) => keys.map((k) => mkTask({ key: k }));
@@ -281,5 +281,47 @@ describe("ticketKind", () => {
   it("does not resolve an inherited object property to a kind", () => {
     expect(ticketKind("constructor")).toBe("other");
     expect(ticketKind("toString")).toBe("other");
+  });
+});
+
+describe("keyLabel", () => {
+  const run = (over: Partial<Run> = {}): Run => ({
+    key: "ASM-1", summary: "s", url: "https://jira/ASM-1", createdAt: 1, mode: "per-window",
+    repos: [], briefPaths: [], ...over,
+  });
+
+  it("names a ticket run by its key", () => {
+    expect(keyLabel(run())).toBe("ASM-1");
+  });
+
+  // A notepad key is a slug plus two random segments — 64 characters of nothing a
+  // reader can use. The word is what the card's own key chip has always shown.
+  it("names a notepad run by its kind, not its unusable key", () => {
+    expect(keyLabel(run({ key: "notepad-fix-horizontal-scroll-abc123-def456", url: "", kind: "notepad" })))
+      .toBe("notepad");
+  });
+
+  it("names a local place local", () => {
+    expect(keyLabel(run({ key: "local-9f2c1a", url: "", kind: "local" }))).toBe("local");
+  });
+
+  // Prefix-matched, like the card: a Track'd ticketless place keeps its
+  // "local-"/"explore-" key but its record now reads kind: "explore".
+  it("names an explore session explore, by key prefix", () => {
+    expect(keyLabel(run({ key: "explore-payments", url: "", kind: "explore" }))).toBe("explore");
+    expect(keyLabel(run({ key: "local-9f2c1a", url: "", kind: "explore" }))).toBe("explore");
+  });
+
+  // Untracked but none of the known shapes: the key is all there is to name it by,
+  // and relabelling it as something it is not would be a lie.
+  it("keeps the key of an untracked run it has no short word for", () => {
+    expect(keyLabel(run({ key: "ASM-1", url: "" }))).toBe("ASM-1");
+  });
+
+  // A review run carries a PR url, so isTicketRun says no — but its key is a real
+  // "review-<slug>" identifier, not a random slug, and the card prints it verbatim.
+  it("keeps a review run's key", () => {
+    expect(keyLabel(run({ key: "review-centaur-850", url: "https://gh/pr/850", kind: "review" })))
+      .toBe("review-centaur-850");
   });
 });

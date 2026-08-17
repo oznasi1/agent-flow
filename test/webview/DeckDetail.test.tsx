@@ -6,6 +6,7 @@ import { render, screen, fireEvent, within } from "@testing-library/react";
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
 import { DeckDetail } from "../../src/webview/DeckDetail";
+import { DECK_CSS } from "../../src/webview/deckStyles";
 import { send } from "../../src/webview/vscodeApi";
 import type { DeckCard } from "../../src/webview/deckCards";
 import type { PrEntryMap, PrFacts, RunStatus } from "../../src/types";
@@ -201,5 +202,52 @@ describe("DeckDetail", () => {
     render1(mkCard(), onClose);
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  // A notepad key is ~64 characters of mono at 12px — 462px, wider than the drawer's
+  // 436px content box. As a nowrap flex item it could not shrink, so the header row
+  // pushed the whole drawer into horizontal scroll: the summary collapsed to zero
+  // width, the status pill squashed, and the close button left the viewport
+  // entirely. The card's own key chip has always printed the short word instead.
+  it("names an untracked run by its kind rather than its unusable key", () => {
+    render1(mkCard({ run: { ...mkCard().status.run, key: "notepad-fix-the-drawer-mswzvshg-41dwha", url: "", kind: "notepad" } as never }));
+    const k = document.querySelector(".dd-hd .k")!;
+    expect(k.textContent).toBe("notepad");
+    // The full key stays reachable — the drawer is where you go to copy it.
+    expect(k.getAttribute("title")).toBe("notepad-fix-the-drawer-mswzvshg-41dwha");
+  });
+
+  it("still prints a ticket key in full, with no tooltip fallback needed", () => {
+    render1(mkCard());
+    const k = document.querySelector(".dd-hd .k")!;
+    expect(k.textContent).toBe("ASM-1");
+    expect(k.getAttribute("title")).toBe("ASM-1");
+  });
+});
+
+// Layout guards for the same bug. jsdom does no layout, so these assert the two
+// rules that make the drawer structurally incapable of scrolling sideways —
+// whatever a future header, hint or PR block puts inside it.
+describe("DeckDetail CSS", () => {
+  const block = (selector: string): string => {
+    const at = DECK_CSS.indexOf(`${selector} {`);
+    expect(at).toBeGreaterThan(-1);
+    return DECK_CSS.slice(at, DECK_CSS.indexOf("}", at));
+  };
+
+  it("gives the drawer vertical scroll only", () => {
+    const dd = block(".dd");
+    expect(dd).toMatch(/overflow:\s*hidden auto/);
+    expect(dd).not.toMatch(/overflow:\s*auto\s*;/);
+  });
+
+  // Bounded, not freely shrinkable: a nowrap flex item with no cap cannot shrink at
+  // all (its automatic minimum is its text width), and one that shrinks freely gets
+  // crushed by a long summary beside it — "notepad" rendered as "not…".
+  it("caps the header key rather than letting it shrink freely", () => {
+    const k = block(".dd-hd .k");
+    expect(k).toMatch(/max-width:\s*50%/);
+    expect(k).toMatch(/text-overflow:\s*ellipsis/);
+    expect(k).not.toMatch(/min-width:\s*0/);
   });
 });

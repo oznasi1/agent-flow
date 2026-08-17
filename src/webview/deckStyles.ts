@@ -509,13 +509,26 @@ export const DECK_CSS = `
      the header, anchored right, no scrim — because it is the same kind of object
      and the two are mutually exclusive. 460px is the narrowest width at which a
      .pr-block's label column and value column both fit without wrapping. */
+  /* \`hidden auto\`, not \`auto\`: the drawer is a fixed-width panel of rows that all
+     ellipsize, so sideways scroll here is never a feature — it is always a row that
+     failed to shrink (a long mono key did exactly that), and it takes the close
+     button off-screen with it. Vertical scroll is the only axis it needs. */
   .dd { position: fixed; top: 53px; right: 0; bottom: 0; width: 460px; z-index: 40;
-    display: flex; flex-direction: column; overflow: auto;
+    display: flex; flex-direction: column; overflow: hidden auto;
     background: var(--vscode-editorWidget-background);
     border-left: 1px solid var(--hair); box-shadow: -10px 0 26px rgba(0,0,0,.28); }
   .dd-hd { display: flex; align-items: center; gap: 8px; padding: 9px 12px;
     border-bottom: 1px solid var(--hair); }
-  .dd-hd .k { font-family: var(--vscode-editor-font-family); font-size: 12px; white-space: nowrap; }
+  /* \`max-width\` is load-bearing: a nowrap flex item's automatic minimum size is its
+     full text width, so an unbounded key could not shrink and any key wider than the
+     drawer pushed the row past 460px instead of ellipsizing. Capping it — rather than
+     letting it shrink with \`min-width: 0\` — is what keeps a short key whole: under
+     free shrinking, "notepad" beside a long summary came out as "not…". Half the
+     header is the widest a key can be before it stops being context for the summary
+     and starts replacing it. \`flex: none\` so it is the cap, not the summary, that
+     decides: the summary ellipsizes first, and the key only past 50%. */
+  .dd-hd .k { font-family: var(--vscode-editor-font-family); font-size: 12px; white-space: nowrap;
+    flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
   .dd-hd .t { font-size: var(--t-body); color: var(--dim);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dd-x { margin-left: auto; background: none; border: none; cursor: pointer;

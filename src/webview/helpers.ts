@@ -1,4 +1,4 @@
-import { Filter, Task } from "../types";
+import { Filter, isTicketRun, Run, runKind, Task } from "../types";
 
 /** The tab bar's shipped order — NOT `types.ts`'s declaration order for `Filter`,
  * and not a connector's `supportedFilters` array order either. This has been the
@@ -188,6 +188,30 @@ const TICKET_KINDS: Record<string, TicketKind> = Object.assign(Object.create(nul
  * marker; the raw name is what the tooltip shows. */
 export function ticketKind(typeName: string): TicketKind {
   return TICKET_KINDS[typeName.trim().toLowerCase()] ?? "other";
+}
+
+/** What names a run on screen — the card's key chip and the detail drawer's
+ * header both. A ticket run is named by its key; an untracked one by the short
+ * word for what it is, because its key is a generated slug (a notepad key runs
+ * to ~64 characters of nothing a reader can use) and a surface sized for a
+ * ticket key has no room for one.
+ *
+ * The short label is only honest for a real Explore session. `isTicketRun` keys
+ * off an empty url and never inspects the key, so anything else untracked keeps
+ * its key rather than being relabelled as something it is not — a review run,
+ * whose "review-<slug>" key is a real identifier, included.
+ *
+ * `explore` is prefix-matched, unlike the other two: a Track'd ticketless place
+ * is the one Explore shape with no "explore-" key — its record is kind:
+ * "explore" but Track it never renames it off its "local-" place-hash, so that
+ * prefix reads as "explore" here too, which is exactly what the record now is.
+ * A notepad or local run always carries its kind, so those match exactly. */
+export function keyLabel(run: Run): string {
+  if (isTicketRun(run)) return run.key;
+  if (runKind(run) === "local") return "local";
+  if (run.key.startsWith("explore-") || run.key.startsWith("local-")) return "explore";
+  if (runKind(run) === "notepad") return "notepad";
+  return run.key;
 }
 
 /** "4m ago" from an epoch-ms stamp. `null` and 0 both render "" — a session

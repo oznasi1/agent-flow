@@ -6,7 +6,7 @@ import type { DeckCard } from "./deckCards";
 // is kept free of fs-touching imports, which bucket.test.ts enforces.
 import { prSignals } from "../engine/bucket";
 import { AgentsRow, PrBlock, RepoChip, WorkspaceChip, workspaceLabel } from "./deckParts";
-import { timeAgo } from "./helpers";
+import { keyLabel, timeAgo } from "./helpers";
 
 export interface DeckDetailProps {
   card: DeckCard;
@@ -112,7 +112,13 @@ export function DeckDetail({ card, sourceLabel, onClose, onForget }: DeckDetailP
   return (
     <aside className="dd" aria-label={`Detail for ${key}`}>
       <div className="dd-hd">
-        <span className="k">{key}</span>
+        {/* The label, not the raw key: a notepad key is ~64 mono characters — wider
+         * than the drawer itself, which as a nowrap flex item took the header (and
+         * with it the whole drawer) into horizontal scroll, pushing the summary to
+         * zero width and the close button off-screen. Same rule the card's own key
+         * chip uses, so the two name the same run the same way. The full key stays
+         * on the title, and Copy ticket key still copies it verbatim. */}
+        <span className="k" title={key}>{keyLabel(r.run)}</span>
         <span className="t" title={r.run.summary}>{r.run.summary}</span>
         {/* Moved verbatim off the card's old .c-foot — the design's own list of
          * what relocates here names "the status pill" alongside the branch row,
