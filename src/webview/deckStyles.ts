@@ -592,4 +592,29 @@ export const DECK_CSS = `
   .c-diff .del { color: var(--c-danger); }
 
   .c-foot2 { display: flex; gap: 5px; margin-top: auto; padding-top: 2px; }
+
+  /* The spend figure. A count, so it is mono — the deck's rule is mono for
+     identifiers and counts, prose in the UI font. It sits in the footer's dead
+     right side: on the top row it wraps the ticket key onto a second line
+     whenever the state text is long, and on the signal line it breaks the
+     three-bit cap and truncates the branch further. */
+  .c-foot2 .spend { margin-left: auto; align-self: center; flex: none;
+    font-family: var(--vscode-editor-font-family); font-size: 11px;
+    color: var(--dim); white-space: nowrap; }
+  .c-foot2 .spend .u { font-family: var(--vscode-font-family); opacity: .55; margin-left: 2px; }
+
+  /* One row per PR failure, each with the verb that fixes it. These REPLACE the
+     signal line on a failing card, so a card is never taller than the problems
+     it actually has — and a card with three failures grows past the 152px floor,
+     which is the intended trade: attention should follow size. */
+  .c-rows { display: flex; flex-direction: column; gap: 5px; }
+  .c-row { display: flex; align-items: center; gap: 7px; overflow: hidden;
+    font-size: 11.5px; color: var(--dim); }
+  /* The elastic member: a long list of failing check names takes the ellipsis
+     rather than pushing the button off the card. */
+  .c-row > .lbl { flex: 0 1 auto; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .c-row > .m { flex: none; font-family: var(--vscode-editor-font-family); }
+  .c-row .bad, .c-row .warn { color: var(--c-attn); }
+  .c-row .act { margin-left: auto; flex: none; height: 20px; padding: 0 7px; font-size: 11px; }
 `;

@@ -544,6 +544,10 @@ export type InboundMessage =
   | { type: "deck:forget"; key: string }
   | { type: "deck:track"; key: string }
   | { type: "deck:addressPr"; key: string }
+  // Sent by each per-failure row button (Task 7). `reason` and `detail` let the
+  // host build a prompt about the specific thing wrong rather than a generic
+  // review pass. Handled alongside `deck:addressPr` in Task 8's dispatch.
+  | { type: "deck:seedPrWork"; key: string; reason: PrWorkReason; detail?: string }
   | { type: "deck:setReviewSort"; sort: ReviewSort }
   | { type: "deck:reviewExpand"; id: string }
   | { type: "deck:reviewLaunch"; id: string }

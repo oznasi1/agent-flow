@@ -46,6 +46,22 @@ const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: nu
   activity: { state, lastActivityMs, slug: null },
 });
 
+/** A PR with every problem at once — the card the per-signal actions exist for. */
+const failingPr = (): PrFacts => ({
+  number: 3181, url: "https://gh/pr/3181", title: "t", state: "OPEN", isDraft: false,
+  ci: { passing: 4, pending: 0, failing: [{ name: "integration", url: "" }, { name: "lint", url: "" }] },
+  review: "changes_requested", unresolved: null, mergeable: "conflicting", ciAdvisory: false,
+});
+
+const healthyPr = (): PrFacts => ({
+  number: 2044, url: "https://gh/pr/2044", title: "t", state: "OPEN", isDraft: false,
+  ci: { passing: 8, pending: 0, failing: [] },
+  review: "approved", unresolved: null, mergeable: "clean", ciAdvisory: false,
+});
+
+const withPr = (f: PrFacts, over: Partial<RunStatus> = {}): RunStatus =>
+  mkStatus({ prs: { svc: { facts: f, fetchedAt: 1 } }, ...over } as Partial<RunStatus>);
+
 /** Renders the board with exactly one run and returns its card element, found by
  * the run's own key (rendered as button text regardless of column or agent). Reuses
  * mkStatus/host/runsMsg rather than adding a second render harness. */
@@ -212,6 +228,23 @@ describe("DeckApp", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agent: { state: "idle", lastActivityMs: Date.now(), slug: null } })]));
     expect(screen.getByText(/idle ·/i)).toBeInTheDocument();
+  });
+
+  // Extra pair authorized beyond the brief: nothing pinned a wrong tone or label
+  // on either new agent state before this — both would have passed every test
+  // in the suite.
+  it("labels a stalled agent as stalled, with the attention tone", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "needs", agent: { state: "stalled", lastActivityMs: Date.now(), slug: null } })]));
+    expect(screen.getByText(/stalled ·/i)).toBeInTheDocument();
+    expect(container.querySelector(".status.tone-attn")).not.toBeNull();
+  });
+
+  it("labels an exited agent as exited, with the attention tone", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "needs", agent: { state: "exited", lastActivityMs: Date.now(), slug: null } })]));
+    expect(screen.getByText(/exited ·/i)).toBeInTheDocument();
+    expect(container.querySelector(".status.tone-attn")).not.toBeNull();
   });
 
   it("shows the branch on the card's signal line, and a launched-ago time in its drawer", () => {
@@ -1062,96 +1095,123 @@ describe("DeckApp review writes", () => {
   });
 });
 
-// This whole describe used to be driven by a ticket-status match
-// (`isPrReviewStatus(r.ticketStatus, prReviewStatus)`), reachable from any
-// column. The design replaces that with a lane-driven rule — the button
-// belongs to the card that is waiting on a human, which is what the review
-// column's waiting lane means — so every test here is rewritten around the
-// lane rather than re-pointed at the drawer: the fact itself changed, it did
-// not just move. See "the card at rest" below for the two tests the brief
-// itself specifies (waiting lane shows it, a local card on that lane does not).
-describe("DeckApp — Address PR", () => {
-  // An open PR still needing a decision: prSignals().ready is false (review
-  // isn't "approved"), so deriveLane calls the review column's lane "waiting".
+// This block used to pin a lane-driven gate (`canAddressPr`): one generic
+// "Address PR" button, shown on the review column's waiting lane regardless
+// of whether anything was actually wrong with the PR. The design replaces
+// that with cardActions() naming each real problem with its own row and
+// verb — a failing check, a conflict, or changes requested — so a lane can no
+// longer say "there is something to address" on its own; only a genuine
+// problem can. Every test below is converted, not deleted: the old
+// button-presence assertions become "no action row at all" assertions (most
+// of these fixtures have nothing wrong with their PR, so cardActions
+// correctly returns nothing), and the local-card case is strengthened to
+// prove the guard holds under real pressure. The original lane-gated
+// assertions live in git history at commit daff687.
+describe("DeckApp — per-failure PR actions", () => {
+  // Still waiting on a human, but nothing actually WRONG with it: review
+  // pending, CI clean, nothing conflicting. Under the old lane-driven rule
+  // this alone earned "Address PR"; cardActions earns it nothing.
   const waitingPr = (over: Partial<RunStatus> = {}) => mkStatus({
     column: "review",
     prs: { svc: { facts: prFacts({ review: "review_required" }), fetchedAt: 1 } },
     ...over,
   });
 
-  it("shows the button on the review column's waiting lane", () => {
+  // The sharpest behavioural change in this task: an unapproved PR is not a PR
+  // with a problem. cardActions produces a row only for a failing check, a
+  // conflict, or changes_requested — none of which review_required + clean CI
+  // + clean mergeability has, however long it has been sitting on the lane.
+  it("shows no action row for a waiting PR with nothing actually wrong with it", () => {
     render(<DeckApp />);
     host(runsMsg([waitingPr()]));
-    expect(screen.getByRole("button", { name: "Address PR" })).toBeInTheDocument();
+    expect(document.querySelector(".c-rows")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Fix CI" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resolve conflict" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Address review" })).toBeNull();
   });
 
-  it("hides the button on the review column's ready lane", () => {
+  it("shows no action row on the review column's ready lane either", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({
       column: "review",
       prs: { svc: { facts: prFacts({ review: "approved", mergeable: "clean" }), fetchedAt: 1 } },
     })]));
-    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+    expect(document.querySelector(".c-rows")).toBeNull();
   });
 
-  it("hides the button on a card outside the review column", () => {
+  it("shows no action row on a card outside the review column", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ column: "progress" })]));
-    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+    expect(document.querySelector(".c-rows")).toBeNull();
   });
 
-  // Proves the old path is actually dead, not just superseded in the common
-  // case: a Jira status that exactly matches the configured prReviewStatus
-  // used to be sufficient on its own, from any column. It no longer moves the
-  // needle at all — the button reads the lane, never `ticketStatus`.
-  it("does not show the button from a matching Jira status alone, off the review column", () => {
+  // Proves the old ticket-status path is actually dead, not just superseded
+  // in the common case: a Jira status that exactly matched the configured
+  // prReviewStatus used to be sufficient on its own, from any column.
+  // cardActions never reads `ticketStatus` at all.
+  it("shows no action row from a matching Jira status alone, off the review column", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ ticketStatus: "PR initiated", column: "progress" })], "PR initiated"));
-    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+    expect(document.querySelector(".c-rows")).toBeNull();
   });
 
   // deriveBucket's isReviewStatus (`/review|qa|verif/i`) can land a run in the
-  // review column, and prSignals({}).ready is false, off a Jira status alone —
-  // with no PR entries at all. Without prSignals(r.prs).open in canAddressPr,
-  // this reaches the waiting lane with nothing for the button to seed an agent
-  // against.
-  it("hides the button on the waiting lane with no PR at all (prs: {})", () => {
+  // review column off a Jira status alone, with no PR entries at all —
+  // cardActions' own `!f` guard (leadPr returns null with no PR facts) is
+  // what keeps this card silent, not any lane check.
+  it("shows no action row on the review column with no PR at all (prs: {})", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ column: "review", ticketStatus: "In QA", prs: {} })]));
-    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+    expect(document.querySelector(".c-rows")).toBeNull();
   });
 
-  it("hides the button on a local card, whose ticket key is only inferred, even on the waiting lane", () => {
+  // The most important case in this block. The `local` guard exists because a
+  // local card's ticket is inferred from a branch name that may belong to
+  // somebody else's ticket, and seeding an agent against that inference on
+  // one click is what this must never do. Strengthened from a healthy PR (the
+  // old fixture) to one with every kind of problem at once — failing CI,
+  // changes requested, and a conflict — so this pins the guard against real
+  // pressure, not against a PR that would show nothing anyway.
+  it("shows no action row on a local card even when its PR is failing outright", () => {
     render(<DeckApp />);
-    host(runsMsg([waitingPr({ run: { ...mkStatus().run, key: "local-a", url: "", kind: "local" } as never })]));
-    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+    host(runsMsg([waitingPr({
+      run: { ...mkStatus().run, key: "local-a", url: "", kind: "local" } as never,
+      prs: { svc: { facts: failingPr(), fetchedAt: 1 } },
+    })]));
+    expect(document.querySelector(".c-rows")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Fix CI" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resolve conflict" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Address review" })).toBeNull();
   });
 
-  it("posts deck:addressPr with the run key on click", () => {
+  it("sends deck:seedPrWork with reason review when Address review is clicked", () => {
     render(<DeckApp />);
-    host(runsMsg([waitingPr()]));
-    fireEvent.click(screen.getByRole("button", { name: "Address PR" }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:addressPr", key: "ASM-1" });
+    host(runsMsg([waitingPr({ prs: { svc: { facts: prFacts({ review: "changes_requested" }), fetchedAt: 1 } } })]));
+    fireEvent.click(screen.getByRole("button", { name: "Address review" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:seedPrWork", key: "ASM-1", reason: "review" });
   });
 
-  it("orders the footer Open, Diff, then Address PR", () => {
+  it("moves the named action off the footer into .c-rows, leaving Open and Diff as the only footer buttons", () => {
     render(<DeckApp />);
-    host(runsMsg([waitingPr()]));
-    const labels = Array.from(document.querySelectorAll(".card .c-foot2 .act")).map((b) => b.textContent);
-    expect(labels).toEqual(["Open", "Diff", "Address PR"]);
+    host(runsMsg([waitingPr({ prs: { svc: { facts: prFacts({ review: "changes_requested" }), fetchedAt: 1 } } })]));
+    const footerLabels = Array.from(document.querySelectorAll(".card .c-foot2 .act")).map((b) => b.textContent);
+    expect(footerLabels).toEqual(["Open", "Diff"]);
+    const reviewBtn = screen.getByRole("button", { name: "Address review" });
+    expect(document.querySelector(".c-foot2")!.contains(reviewBtn)).toBe(false);
+    expect(document.querySelector(".c-rows")!.contains(reviewBtn)).toBe(true);
   });
 
   // Open is always the footer's one primary now — the design drops the old
   // swap where Address PR took that weight instead. One card, one primary,
-  // decided the same way whether or not Address PR is also there.
-  it("keeps Open primary even when Address PR is also on the card", () => {
+  // decided the same way whether or not an action row is also there.
+  it("keeps Open primary even when the card also has action rows", () => {
     render(<DeckApp />);
-    host(runsMsg([waitingPr()]));
+    host(runsMsg([waitingPr({ prs: { svc: { facts: prFacts({ review: "changes_requested" }), fetchedAt: 1 } } })]));
     expect(screen.getByRole("button", { name: "Open" })).toHaveClass("primary");
-    expect(screen.getByRole("button", { name: "Address PR" })).not.toHaveClass("primary");
+    expect(screen.getByRole("button", { name: "Address review" })).not.toHaveClass("primary");
   });
 
-  it("leaves Open the primary on a card that has no Address PR", () => {
+  it("leaves Open the primary on a card with no action rows", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ ticketStatus: "In Progress" })]));
     expect(screen.getByRole("button", { name: "Open" })).toHaveClass("primary");
@@ -2265,7 +2325,12 @@ describe("the card at rest", () => {
     expect(document.querySelector(".card .more")).toBeNull();
   });
 
-  it("adds Address PR on the review column's waiting lane", () => {
+  // Converted from a lane-gated "Address PR" assertion (see the git history
+  // at commit daff687): review_required with clean CI and clean mergeability
+  // is a PR still waiting on a human, but nothing about it is actually WRONG,
+  // so cardActions() gives it no row — the signal line stays instead, which
+  // is what "the card at rest" describes.
+  it("shows no action row and keeps the signal line for a waiting PR with nothing wrong", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({
       column: "review",
@@ -2275,15 +2340,14 @@ describe("the card at rest", () => {
         unresolved: 0, mergeable: "clean", ciAdvisory: false,
       }, fetchedAt: 1 } } as never,
     })]));
-    const labels = Array.from(document.querySelectorAll(".card .c-foot2 .act")).map((b) => b.textContent);
-    expect(labels).toContain("Address PR");
+    const card = document.querySelector(".card")!;
+    expect(card.querySelector(".c-rows")).toBeNull();
+    expect(card.querySelector(".c-sig")).not.toBeNull();
+    const footerLabels = Array.from(card.querySelectorAll(".c-foot2 .act")).map((b) => b.textContent);
+    expect(footerLabels).toEqual(["Open", "Diff"]);
   });
 
-  // Mutation-check #2 (Step 6): change `lane === "waiting"` to `lane !== null`
-  // and this must fail — the test above still passes under that mutation (the
-  // waiting lane keeps its button either way), so only the ready lane's absence
-  // catches it.
-  it("keeps Address PR off the review column's ready lane", () => {
+  it("shows no action row on the review column's ready lane", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({
       column: "review",
@@ -2293,22 +2357,21 @@ describe("the card at rest", () => {
         unresolved: 0, mergeable: "clean", ciAdvisory: false,
       }, fetchedAt: 1 } } as never,
     })]));
-    const labels = Array.from(document.querySelectorAll(".card .c-foot2 .act")).map((b) => b.textContent);
-    expect(labels).not.toContain("Address PR");
+    expect(document.querySelector(".card .c-rows")).toBeNull();
   });
 
-  it("keeps Address PR off a local card even on that lane", () => {
+  // Strengthened per the same reasoning as the local-card test above: a PR
+  // with every kind of problem at once (failing CI, changes requested, a
+  // conflict) still produces nothing on a local card. The `local` guard must
+  // hold against real pressure — a local card's ticket is only inferred from
+  // its branch name, which may belong to somebody else's ticket.
+  it("keeps every action row off a local card even when its PR is failing outright", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({
       column: "review", run: { ...mkStatus().run, key: "local-a", url: "", kind: "local" } as never,
-      prs: { svc: { facts: {
-        number: 5, url: "u", title: "t", state: "OPEN", isDraft: false,
-        ci: { passing: 1, pending: 0, failing: [] }, review: "review_required",
-        unresolved: 0, mergeable: "clean", ciAdvisory: false,
-      }, fetchedAt: 1 } } as never,
+      prs: { svc: { facts: failingPr(), fetchedAt: 1 } },
     })]));
-    const labels = Array.from(document.querySelectorAll(".card .c-foot2 .act")).map((b) => b.textContent);
-    expect(labels).not.toContain("Address PR");
+    expect(document.querySelector(".card .c-rows")).toBeNull();
   });
 
   it("renders a diff bit as two distinct elements, each with a color rule of its own in the stylesheet", () => {
@@ -2329,5 +2392,87 @@ describe("the card at rest", () => {
     expect(del.textContent).toBe("−2");
     expect(DECK_CSS).toMatch(/\.c-diff\s+\.add\s*\{\s*color:\s*var\(--c-done\)/);
     expect(DECK_CSS).toMatch(/\.c-diff\s+\.del\s*\{\s*color:\s*var\(--c-danger\)/);
+  });
+});
+
+describe("DeckApp card anatomy", () => {
+  beforeEach(() => sent.mockClear());
+
+  it("shows a named button for each PR failure", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(failingPr(), { column: "needs" })]));
+    expect(screen.getByRole("button", { name: "Fix CI" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Resolve conflict" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Address review" })).toBeTruthy();
+    // The rows REPLACE the signal line rather than joining it — a card showing
+    // both would restate the very facts the rows already name.
+    expect(document.querySelector(".card .c-sig")).toBeNull();
+  });
+
+  it("no longer offers a generic Address PR", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(failingPr(), { column: "review" })]));
+    expect(screen.queryByRole("button", { name: "Address PR" })).toBeNull();
+  });
+
+  it("sends deck:seedPrWork with the reason for the button pressed", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(failingPr(), { column: "needs" })]));
+    fireEvent.click(screen.getByRole("button", { name: "Resolve conflict" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+  });
+
+  it("carries the failing check names as the ci action's detail", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(failingPr(), { column: "needs" })]));
+    fireEvent.click(screen.getByRole("button", { name: "Fix CI" }));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:seedPrWork", key: "ASM-1", reason: "ci", detail: "integration, lint",
+    });
+  });
+
+  it("keeps the ordinary signal line on a healthy card", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr())]));
+    expect(screen.getByText(/✓ ci/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Fix CI" })).toBeNull();
+  });
+
+  it("prints the spend figure in eq, not tok", () => {
+    render(<DeckApp />);
+    // weightedEq({cacheRead: 3_804_000}) = 380,400 → formatEq → "380k". Scoped to
+    // the footer: with only one card on the board, the header's own total (added
+    // below) reduces to the same figure, so an unscoped getByText("380k") would
+    // correctly find two elements and fail for the wrong reason.
+    host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 0, cacheWrite: 0, cacheRead: 3_804_000 } })]));
+    expect(within(document.querySelector(".c-foot2") as HTMLElement).getByText("380k")).toBeTruthy();
+    expect(screen.queryByText(/tok/)).toBeNull();
+  });
+
+  // Absent and zero must not look alike: a run the sweep has not reached has not
+  // been measured, and "0" would assert it cost nothing.
+  it("shows no figure at all when usage has not been swept", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr(), { usage: undefined })]));
+    expect(screen.getByText(/✓ ci/)).toBeTruthy();
+    expect(document.querySelector(".c-foot2 .spend")).toBeNull();
+  });
+
+  it("shows no figure for genuinely zero usage either", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } })]));
+    expect(document.querySelector(".c-foot2 .spend")).toBeNull();
+  });
+
+  it("totals the board's spend in the header", () => {
+    render(<DeckApp />);
+    const a = withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
+    const b = withPr(healthyPr(), {
+      run: { ...mkStatus().run, key: "ASM-2" },
+      usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 },
+    });
+    host(runsMsg([a, b]));
+    // 2 × (20,000 × 5) = 200,000 → "200k"
+    expect(screen.getByText("200k")).toBeTruthy();
   });
 });
