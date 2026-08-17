@@ -107,6 +107,11 @@ export interface OpenRequest {
    * are taken from this request. That silently rewrites the card the user is
    * looking at. */
   recordRun?: boolean;
+  /** Stamped onto the run record verbatim; see `Run.parentKey`. */
+  parentKey?: string;
+  /** Stamped onto the run record verbatim; see `Run.children`. An empty array is
+   *  stored as absent, so "no children" has exactly one representation. */
+  children?: Run["children"];
   /** Never overwrite a brief that is already on disk. Defaults to false, which is what
    * every caller before it relied on: a Take rewrites the brief because the brief IS
    * the task it is starting.
@@ -426,6 +431,8 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
         branch: gitState(s.name, s.path).branch ?? undefined,
       })),
       briefPaths: briefs.map((b) => b.path),
+      ...(req.parentKey ? { parentKey: req.parentKey } : {}),
+      ...(req.children?.length ? { children: req.children } : {}),
     };
     try {
       writeRun(defaultRunsDir(), run);

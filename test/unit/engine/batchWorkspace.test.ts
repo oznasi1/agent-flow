@@ -337,3 +337,44 @@ describe("folderName", () => {
     expect(folderName("ASM-2", "api")).toBe("ASM-2-api");
   });
 });
+
+describe("openSharedWorkspace: parentKey on each run", () => {
+  const lastWrittenRun = () => {
+    const runWrites = writes((p) => p.includes("/runs/"));
+    expect(runWrites.length).toBeGreaterThan(0);
+    return JSON.parse(String(runWrites[runWrites.length - 1][1]));
+  };
+
+  it("stamps the parentKey a batch task carries", async () => {
+    await openSharedWorkspace(
+      baseReq({
+        tasks: [
+          {
+            ticket: { key: "ASM-2", summary: "two", url: "https://jira/ASM-2" },
+            planMd: "## Plan\n\nb",
+            descriptionText: "",
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-2", isGit: true }],
+            parentKey: "ASM-1",
+          },
+        ],
+      }),
+    );
+    expect(lastWrittenRun().parentKey).toBe("ASM-1");
+  });
+
+  it("omits the field for an ordinary batch", async () => {
+    await openSharedWorkspace(
+      baseReq({
+        tasks: [
+          {
+            ticket: { key: "ASM-2", summary: "two", url: "https://jira/ASM-2" },
+            planMd: "## Plan\n\nb",
+            descriptionText: "",
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-2", isGit: true }],
+          },
+        ],
+      }),
+    );
+    expect("parentKey" in lastWrittenRun()).toBe(false);
+  });
+});

@@ -25,6 +25,9 @@ export interface BatchTask {
   descriptionText: string;
   /** Already resolved to per-task worktrees by the caller. */
   services: ServiceRef[];
+  /** The parent ticket this task was fanned out from, when it was. Reaches the run
+   *  record unchanged; see `Run.parentKey`. */
+  parentKey?: string;
 }
 
 export type SharedTarget =
@@ -192,6 +195,7 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
         branch: gitState(s.name, s.path).branch ?? undefined,
       })),
       briefPaths: briefs.filter((b) => b.key === t.ticket.key).map((b) => b.path),
+      ...(t.parentKey ? { parentKey: t.parentKey } : {}),
     };
     try {
       writeRun(defaultRunsDir(), run);

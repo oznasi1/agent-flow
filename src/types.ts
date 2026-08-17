@@ -120,6 +120,15 @@ export interface Run {
   workspaceFile?: string; // multi-root .code-workspace, when mode === "multiroot"
   repos: { name: string; path: string; isGit: boolean; branch?: string }[];
   briefPaths: string[];
+  /** The parent ticket this run was taken under, when it came out of a parent's tree
+   *  rather than on its own. Absent on every run taken by itself, and on every record
+   *  written before child takes existed. */
+  parentKey?: string;
+  /** The child worktrees this run owns — set only for an orchestrator-mode take, where
+   *  one session dispatches a subagent per child. Each row is a real worktree on disk;
+   *  the children are NOT runs of their own, which is why they live here rather than as
+   *  separate records. */
+  children?: { key: string; summary: string; repo: string; path: string; branch: string }[];
   /** When this run was first observed to have landed — every PR merged, or Jira
    * done with no PR open — and no agent left in it. Stamped by the Deck's retire
    * sweep, not by any launch, and cleared again if the run stops satisfying that

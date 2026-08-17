@@ -214,6 +214,39 @@ describe("openWorkspace — run kind", () => {
   });
 });
 
+describe("openWorkspace: parent and children on the run record", () => {
+  const lastWrittenRun = () => {
+    const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
+    expect(runWrite).toBeTruthy();
+    return JSON.parse(String(runWrite![1]));
+  };
+
+  it("omits both fields when the request carries neither", async () => {
+    await openWorkspace(baseReq());
+    const run = lastWrittenRun();
+    expect("parentKey" in run).toBe(false);
+    expect("children" in run).toBe(false);
+  });
+
+  it("stamps parentKey when the take came from a parent's tree", async () => {
+    await openWorkspace(baseReq({ parentKey: "ASM-1" }));
+    expect(lastWrittenRun().parentKey).toBe("ASM-1");
+  });
+
+  it("stores the child worktrees an orchestrator run owns", async () => {
+    const children = [
+      { key: "ASM-2", summary: "first", repo: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-2", branch: "ASM-2-first" },
+    ];
+    await openWorkspace(baseReq({ children }));
+    expect(lastWrittenRun().children).toEqual(children);
+  });
+
+  it("omits an empty children array rather than storing one", async () => {
+    await openWorkspace(baseReq({ children: [] }));
+    expect("children" in lastWrittenRun()).toBe(false);
+  });
+});
+
 describe("openWorkspace — per-window", () => {
   it("opens one window per repo and records each path as a match", async () => {
     const result = await openWorkspace(baseReq({ mode: "per-window" }));
