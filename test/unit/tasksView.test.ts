@@ -5777,6 +5777,19 @@ describe("takeBatch with a parent", () => {
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 
+  it("says repo, singular, when the fan-out is confined to one", async () => {
+    answerLayout();
+    vi.mocked(window.showWarningMessage).mockResolvedValueOnce(undefined as never);
+    const { provider } = setup({ authed: true });
+    // 7 keys × 1 repo is 7 worktrees, over the threshold of 6.
+    await provider.takeBatch(["A-1", "A-2", "A-3", "A-4", "A-5", "A-6", "A-7"], ["api"], PARENT);
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      "Launch 7 tasks in parallel? That's 7 Claude Code sessions and up to 7 git worktrees across 1 repo.",
+      { modal: true },
+      "Launch",
+    );
+  });
+
   it("does not ask for the same key count in one repo", async () => {
     answerLayout();
     // The threshold is about worktrees: 2 keys × 1 repo is 2, well under 6.
