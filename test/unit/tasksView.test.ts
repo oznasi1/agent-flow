@@ -5688,6 +5688,59 @@ describe("takeBatch with a parent", () => {
     vi.mocked(ensureBranch).mockReturnValue(true);
   });
 
+  /** A multi-key batch to a new window asks how to lay the tasks out; these tests are
+   *  about the confirmation ahead of that, so answer it once here. */
+  function answerLayout(): void {
+    vi.mocked(window.showQuickPick).mockResolvedValue({ shared: false } as never);
+  }
+
+  it("asks before a fan-out over few keys but many repos", async () => {
+    answerLayout();
+    // 2 keys × 4 repos is 8 worktrees and 8 `git worktree add` calls. Counting keys, 2
+    // is under the threshold of 6 and nothing was ever asked.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web", "jobs", "edge"]));
+    vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
+    const { provider } = setup({ authed: true });
+    await provider.takeBatch(["ASM-2", "ASM-3"], ["api", "web", "jobs", "edge"], PARENT);
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      "Launch 2 tasks in parallel? That's 2 Claude Code sessions and up to 8 git worktrees across 4 repos.",
+      { modal: true },
+      "Launch",
+    );
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it("launches nothing when that confirmation is declined", async () => {
+    answerLayout();
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web", "jobs", "edge"]));
+    vi.mocked(window.showWarningMessage).mockResolvedValueOnce(undefined as never);
+    const { provider } = setup({ authed: true });
+    await provider.takeBatch(["ASM-2", "ASM-3"], ["api", "web", "jobs", "edge"], PARENT);
+    expect(ensureBranch).not.toHaveBeenCalled();
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("does not ask for the same key count in one repo", async () => {
+    answerLayout();
+    // The threshold is about worktrees: 2 keys × 1 repo is 2, well under 6.
+    const { provider } = setup({ authed: true });
+    await provider.takeBatch(["ASM-2", "ASM-3"], ["api"], PARENT);
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves the unparented batch counting keys, not worktrees", async () => {
+    answerLayout();
+    // Its threshold has meant "tasks" since it shipped, and that set was picked ticket by
+    // ticket — 2 keys × 4 repos must still not prompt an existing user who changed nothing.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web", "jobs", "edge"]));
+    const { provider } = setup({ authed: true });
+    await provider.takeBatch(["ASM-2", "ASM-3"], ["api", "web", "jobs", "edge"]);
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+  });
+
   it("makes the parent branch before the child worktree, then branches off it", async () => {
     const { provider } = setup({ authed: true });
     await provider.takeBatch(["ASM-2"], ["api"], PARENT);

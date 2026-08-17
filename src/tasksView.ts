@@ -2127,9 +2127,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const filterSet = this.resolveBatchRepos(repos, cfg);
     if (!filterSet.length) return;
 
-    if (keys.length > cfg.batchLaunchConfirmThreshold) {
+    // A fan-out authorises WORKTREES, not keys: `reposForTask` widens to the whole filter
+    // set for a child whose ticket infers nothing, so 3 leaves across 12 repos is 36
+    // worktrees and 36 `git worktree add` calls with no confirmation at all under a
+    // key-only comparison. `keys.length * filterSet.length` is the upper bound — a child
+    // that DOES infer repos opens fewer — and an upper bound is the right thing to ask
+    // about before the first one exists.
+    //
+    // Only for the parented case. The unparented batch path is a set of tickets the user
+    // picked one by one, and its threshold has meant "tasks" since it shipped; changing
+    // that would re-prompt existing users who changed nothing.
+    const authorising = parent ? keys.length * filterSet.length : keys.length;
+    if (authorising > cfg.batchLaunchConfirmThreshold) {
       const go = await vscode.window.showWarningMessage(
-        `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${providerLabel(cfg.agentProvider)} sessions.`,
+        parent
+          ? `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${providerLabel(cfg.agentProvider)} sessions and up to ${authorising} git worktrees across ${filterSet.length} repo${filterSet.length === 1 ? "" : "s"}.`
+          : `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${providerLabel(cfg.agentProvider)} sessions.`,
         { modal: true },
         "Launch",
       );
