@@ -79,6 +79,16 @@ vi.mock("../../src/engine/runs", async () => {
   const actual = await vi.importActual<typeof import("../../src/engine/runs")>("../../src/engine/runs");
   return { ...actual, readRuns: vi.fn(() => []), defaultRunsDir: vi.fn(() => "/runs") };
 });
+// Partial, and only `currentBranch`: it shells out to git, and these tests run against
+// fake `/repos` paths where the real one would spawn a process per child worktree to
+// answer null anyway. `null` is the default because that is what an unreadable path
+// really says — the caller then falls back to the computed branch name, which is what
+// every assertion below was written against. `gitState` and the rest stay REAL, so the
+// engine/workspace module running against this file's partial mock is untouched.
+vi.mock("../../src/engine/git", async () => {
+  const actual = await vi.importActual<typeof import("../../src/engine/git")>("../../src/engine/git");
+  return { ...actual, currentBranch: vi.fn(() => null) };
+});
 vi.mock("../../src/engine/sessions", async () => {
   const actual = await vi.importActual<typeof import("../../src/engine/sessions")>("../../src/engine/sessions");
   return { ...actual, readOpenSessions: vi.fn(() => []), defaultSessionsDir: vi.fn(() => "/sessions") };
@@ -113,6 +123,7 @@ import { getConfig } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
 import { openWorkspace, writeBriefInto, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge } from "../../src/engine/workspace";
 import { branchName, createWorktrees, ensureBranch } from "../../src/engine/worktree";
+import { currentBranch } from "../../src/engine/git";
 import { openSharedWorkspace } from "../../src/engine/batchWorkspace";
 import { readLiveWindows, windowIdentity, currentWindow } from "../../src/engine/presence";
 import { readRuns } from "../../src/engine/runs";
@@ -232,6 +243,11 @@ beforeEach(() => {
     opened: ["/repos/account-service"],
     remoteControl: false,
   });
+  // Restored here, not merely cleared: `clearMocks` drops call history and leaves the
+  // implementation in place, so a test that scripts a stale branch would otherwise leak
+  // it into every test after it. null is "git cannot answer", which is the truth for
+  // these fake paths and the answer every pre-existing assertion was written against.
+  vi.mocked(currentBranch).mockImplementation(() => null);
   vi.mocked(readLiveWindows).mockReturnValue([]);
   vi.mocked(windowIdentity).mockReturnValue(undefined);
   vi.mocked(currentWindow).mockReturnValue(undefined);
@@ -5814,6 +5830,48 @@ describe("takeTask: orchestrator mode", () => {
     const { provider } = setup({ authed: true });
     await provider.takeTask("ASM-1", "card");
     expect(openArg().children).toEqual(CHILD_ROWS);
+  });
+
+  it("records the branch a reused worktree is ACTUALLY on, not the one the summary implies", async () => {
+    // createWorktrees returns an existing worktree directory unchanged without checking
+    // which branch it is on (engine/worktree.ts). After a Jira summary edit the computed
+    // name therefore names a branch that does not exist — and that name is what the
+    // drawer chip shows, what Run.children[] stores, and what the brief tells the
+    // orchestrator to merge. Here every worktree sits on a stale slug.
+    vi.mocked(currentBranch).mockImplementation((p: string) =>
+      p.endsWith("/ASM-2") ? "ASM-2-the-old-summary" : p.endsWith("/ASM-3") ? "ASM-3-also-stale" : "ASM-1-stale-parent",
+    );
+    answerOrchestrator();
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(vi.mocked(currentBranch).mock.calls.map((c) => c[0])).toEqual([
+      "/repos/api/.claude/worktrees/ASM-2",
+      "/repos/api/.claude/worktrees/ASM-3",
+      "/repos/api/.claude/worktrees/ASM-1",
+    ]);
+    expect(openArg().children).toEqual([
+      { ...CHILD_ROWS[0], branch: "ASM-2-the-old-summary" },
+      { ...CHILD_ROWS[1], branch: "ASM-3-also-stale" },
+    ]);
+    // The brief's table and its merge instruction name the observed branches too — the
+    // orchestrator is told to merge into the branch its own worktree is on.
+    const { planMd } = openArg();
+    expect(planMd).toContain("| ASM-2 | first bit | `/repos/api/.claude/worktrees/ASM-2` | `ASM-2-the-old-summary` |");
+    expect(planMd).toContain("| ASM-3 | second bit | `/repos/api/.claude/worktrees/ASM-3` | `ASM-3-also-stale` |");
+    expect(planMd).toContain("Merge finished children into `ASM-1-stale-parent`; never into main.");
+    // Not the computed names, anywhere.
+    expect(planMd).not.toContain("ASM-2-first-bit");
+    expect(planMd).not.toContain(PARENT_BRANCH);
+  });
+
+  it("falls back to the computed branch name when git cannot answer", async () => {
+    // The default mock: `currentBranch` answers null for a path git cannot read. The
+    // rows then read exactly as they did before the observation was added.
+    answerOrchestrator();
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card");
+    expect(openArg().children).toEqual(CHILD_ROWS);
+    expect(openArg().planMd).toContain(`Merge finished children into \`${PARENT_BRANCH}\`; never into main.`);
   });
 
   it("writes a brief into each child worktree, built from that child's own detail", async () => {

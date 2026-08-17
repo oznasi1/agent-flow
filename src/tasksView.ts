@@ -28,6 +28,12 @@ import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, Pres
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { branchName, createWorktrees, ensureBranch, repoRootOfWorktree } from "./engine/worktree";
+// `currentBranch`, not `gitState`: the only thing asked here is which branch a worktree
+// is on, and that is one `rev-parse` rather than the four subprocesses gitState spends
+// on dirtiness, ahead-count and a numstat diff nobody reads. A fan-out of 20 children
+// across 3 repos would otherwise pay 240 git spawns for 60 answers. Same observation
+// `engine/workspace.ts` makes for `repos[].branch`, at the price of the question.
+import { currentBranch } from "./engine/git";
 import { buildTree, type TreeLeaf, type TreeResult } from "./engine/taskTree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
@@ -1903,7 +1909,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             children: orchestration.children.map((c) => ({
               key: c.key, summary: c.summary, path: c.path, branch: c.branch,
             })),
-            parentBranch: orchestration.parentBranch,
+            // Observed for the same reason each child row's branch is, and observable
+            // only here: `services` has just been replaced by createWorktrees' answer
+            // (above), which is the first point at which the parent's actual worktree
+            // exists. A reused parent worktree sits on whatever branch it was already
+            // on, so the computed name would tell the orchestrator to merge every
+            // finished child into a branch nothing is on. The first git service answers
+            // — createWorktrees puts every repo on one branch per key — and the computed
+            // name stands in when git cannot say.
+            parentBranch: this.observedParentBranch(services, orchestration.parentBranch),
           }
         : undefined,
     );
@@ -1950,6 +1964,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${skipped}${unadded}${declined}${seeded}${rcNote}`);
     }
     return true;
+  }
+
+  /** The branch the parent's worktree is ACTUALLY on, for the brief's "merge finished
+   *  children into X". The first git service answers for the set: createWorktrees puts
+   *  every repo of one key on one branch, and a non-git repo has no branch to read.
+   *  `computed` — `branchName(key, summary)` — stands in when git cannot answer, which
+   *  is what this line named unconditionally before. */
+  private observedParentBranch(services: ServiceRef[], computed: string): string {
+    const git = services.find((s) => s.isGit);
+    return (git && currentBranch(git.path)) || computed;
   }
 
   /** Resolve the task prompt mode: the configured `taskMode` when it names a known
@@ -2589,7 +2613,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           summary: leaf.summary,
           repo: s.name,
           path: s.path,
-          branch: branchName(leaf.key, leaf.summary),
+          // OBSERVED, not computed. createWorktrees hands back an existing worktree
+          // directory without checking which branch it is on, so after a Jira summary
+          // edit `branchName(leaf.key, leaf.summary)` names a branch that does not
+          // exist — and that name is what the drawer chip shows, what Run.children[]
+          // stores, and what the brief tells the orchestrator to merge. Falling back to
+          // the computed name only when git cannot answer at all keeps a non-git or
+          // unreadable path behaving as it did.
+          branch: currentBranch(s.path) ?? branchName(leaf.key, leaf.summary),
         });
       }
       // Each child worktree gets its own brief, from its own ticket — a subagent reads a
