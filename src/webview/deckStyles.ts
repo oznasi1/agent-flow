@@ -602,10 +602,21 @@ export const DECK_CSS = `
      right side: on the top row it wraps the ticket key onto a second line
      whenever the state text is long, and on the signal line it breaks the
      three-bit cap and truncates the branch further. */
-  .c-foot2 .spend { margin-left: auto; align-self: center; flex: none;
-    font-family: var(--vscode-editor-font-family); font-size: 11px;
-    color: var(--dim); white-space: nowrap; }
-  .c-foot2 .spend .u { font-family: var(--vscode-font-family); opacity: .55; margin-left: 2px; }
+  /* Spend, in the drawer only — never on the card. Counts are mono, the class
+     names beside them are prose in the UI font: the deck's standing rule is mono
+     for identifiers and numbers, UI font for anything that reads as English.
+     Right-aligned values so four rows of very different magnitudes line up on
+     their last digit and can be compared down the column. */
+  .dd-spend { display: flex; flex-direction: column; gap: 3px; }
+  .dd-spend .sp-row { display: flex; align-items: baseline; gap: 8px; font-size: var(--t-body); }
+  .dd-spend .sp-k { color: var(--dim); }
+  .dd-spend .sp-v { margin-left: auto; font-family: var(--vscode-editor-font-family);
+    font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* The weighted total is the one figure that is not a raw token count, so it is
+     separated by a hairline rather than just sitting as a fifth sibling. */
+  .dd-spend .sp-tot { margin-top: 4px; padding-top: 5px; border-top: 1px solid var(--hair); }
+  .dd-spend .sp-tot .sp-k { color: var(--vscode-foreground); cursor: help; }
+  .dd-spend .sp-tot .u { font-family: var(--vscode-font-family); opacity: .55; margin-left: 2px; }
 
   /* One row per PR failure, each with the verb that fixes it. These REPLACE the
      signal line on a failing card, so a card is never taller than the problems

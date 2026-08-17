@@ -223,6 +223,11 @@ const h = vi.hoisted(() => ({
   // before this field existed; a test that cares about the sweep's coverage
   // overrides one call with `.mockReturnValueOnce`.
   usageReadRun: vi.fn((_root: string, _cwds: string[]) => ({ input: 0, output: 0, cacheWrite: 0, cacheRead: 0 })),
+  /** Mirrors `agentFlow.deck.showTokenTotal`. True by default HERE only — the
+   * shipped default is false, and the "sweep stays off" case below sets it false
+   * explicitly. Kept true so the sweep tests written before the setting existed
+   * still exercise the eager path they were built to cover. */
+  showTokenTotal: true,
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -419,6 +424,11 @@ vi.mock("../../src/config", async (importActual) => {
       prReviewPrompt: h.prReviewPrompt, prReviewAutoFix: h.prReviewAutoFix, seedAgent: h.seedAgent,
       agentProvider: h.agentProvider,
       prReviewStatus: "PR initiated",
+      // Steered per test: the board-wide usage sweep is opt-in (the shipped default
+      // is false), so a test that wants the eager sweep has to switch it on the way
+      // a user would. Default here is `true` to keep the sweep tests that predate
+      // the setting reading as they were written; the "off" case sets it false.
+      showTokenTotal: h.showTokenTotal,
       // The named commands a `run` rule's node can point at by `commandId`. Steered
       // per test rather than sourced from the real getConfig(): the real default is
       // now DEFAULT_COMMANDS' single inert example, which would make "the runner got
@@ -579,6 +589,8 @@ beforeEach(() => {
   h.prReviewPrompt = "Assess the PR for {key}.{files}";
   h.prReviewAutoFix = false;
   h.seedAgent = true;
+  h.showTokenTotal = true; // see the field's own comment: eager sweep on unless a test opts out
+  h.usageReadRun.mockClear();
   h.taskDiff.mockClear().mockReturnValue("");
   h.taskDiffBase.mockClear().mockReturnValue("base-sha");
   h.taskChangedFiles.mockClear().mockReturnValue([]);
@@ -7837,6 +7849,58 @@ describe("the poll and the close confirmation", () => {
     await settle();
     const local = lastRunsPost().runs.find((r: RunStatus) => r.run.kind === "local");
     expect(local?.usage).toEqual({ input: 3, output: 7, cacheWrite: 0, cacheRead: 1 });
+  });
+
+  // The board-wide sweep exists only to feed the header total, which ships off. With
+  // it off nothing on screen shows a board-wide figure, so parsing every run's
+  // transcripts every minute would be pure cost — the drawer reads its one run on
+  // demand instead. This is the test that makes "off by default" mean "costs
+  // nothing by default" rather than merely "displays nothing by default".
+  it("never sweeps the board when the token total is switched off", async () => {
+    h.showTokenTotal = false;
+    await openPanel();
+    h.usageReadRun.mockClear();
+    await settle(USAGE_POLL_MS * 2 + 1);
+    expect(h.usageReadRun).not.toHaveBeenCalled();
+  });
+
+  it("still sweeps the board when the token total is switched on", async () => {
+    h.showTokenTotal = true;
+    await openPanel();
+    h.usageReadRun.mockClear();
+    await settle(USAGE_POLL_MS + 1);
+    expect(h.usageReadRun).toHaveBeenCalled();
+  });
+
+  // The drawer's own path, and the only transcript read a default install performs.
+  it("answers deck:usageFor with that run's usage", async () => {
+    const { p } = await openPanel();
+    h.usageReadRun.mockClear().mockReturnValueOnce({ input: 1, output: 2, cacheWrite: 3, cacheRead: 4 });
+    await p._fire({ type: "deck:usageFor", key: mkRun().key });
+    await settle();
+    const post = posts(lastPanel()).filter((m) => m.type === "deck:usage").at(-1);
+    expect(post).toEqual({ type: "deck:usage", key: mkRun().key, usage: { input: 1, output: 2, cacheWrite: 3, cacheRead: 4 } });
+  });
+
+  // null, not a zeroed total: the drawer distinguishes "could not read" from "cost
+  // nothing", and a zero would assert the latter.
+  it("answers deck:usageFor with null when the read throws", async () => {
+    const { p } = await openPanel();
+    h.usageReadRun.mockClear().mockImplementationOnce(() => { throw new Error("EACCES"); });
+    await p._fire({ type: "deck:usageFor", key: mkRun().key });
+    await settle();
+    const post = posts(lastPanel()).filter((m) => m.type === "deck:usage").at(-1);
+    expect(post).toEqual({ type: "deck:usage", key: mkRun().key, usage: null });
+  });
+
+  it("answers deck:usageFor even with the board sweep off — the drawer is its own path", async () => {
+    h.showTokenTotal = false;
+    const { p } = await openPanel();
+    h.usageReadRun.mockClear().mockReturnValueOnce({ input: 0, output: 5, cacheWrite: 0, cacheRead: 0 });
+    await p._fire({ type: "deck:usageFor", key: mkRun().key });
+    await settle();
+    const post = posts(lastPanel()).filter((m) => m.type === "deck:usage").at(-1);
+    expect(post).toMatchObject({ type: "deck:usage", usage: { output: 5 } });
   });
 });
 

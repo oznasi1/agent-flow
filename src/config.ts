@@ -274,6 +274,11 @@ export interface AgentFlowConfig {
   // Named commands an Orchestrator command node can run. No built-ins — an
   // empty list means the user hasn't opted into any.
   commands: FlowCommand[];
+  /** Show the Deck header's "Tokens on board" total. Off by default: the figure
+   * costs a board-wide transcript sweep, and the per-run breakdown in the detail
+   * drawer is read lazily instead, so a default install parses nothing until a
+   * drawer is opened. */
+  showTokenTotal: boolean;
   prReviewStatus: string; // task status that reveals the "Address PR" card action
   prReviewAutoFix: boolean; // after assessing, proceed to implement the PR's requested changes
   prReviewPrompt: string; // seeded prompt for the PR-review kick-off
@@ -520,6 +525,10 @@ export function getConfig(): AgentFlowConfig {
     exploreActions,
     environments: readEnvironments(c),
     commands: readCommands(c),
+    // `?? false` rather than `|| false`: an explicit `false` and an unset value
+    // must both read false, and neither may be silently coerced by a truthiness
+    // check the way the string settings above are.
+    showTokenTotal: c.get<boolean>("deck.showTokenTotal") ?? false,
     prReviewStatus: c.get<string>("prReviewStatus") || "PR initiated",
     prReviewAutoFix: c.get<boolean>("prReviewAutoFix") ?? true,
     prReviewPrompt: c.get<string>("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT,

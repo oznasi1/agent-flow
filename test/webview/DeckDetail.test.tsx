@@ -9,6 +9,7 @@ import { DeckDetail } from "../../src/webview/DeckDetail";
 import { send } from "../../src/webview/vscodeApi";
 import type { DeckCard } from "../../src/webview/deckCards";
 import type { PrEntryMap, PrFacts, RunStatus } from "../../src/types";
+import type { UsageTotals } from "../../src/engine/usage";
 
 const sent = vi.mocked(send);
 beforeEach(() => sent.mockClear());
@@ -36,8 +37,16 @@ const mkCard = (over: Partial<RunStatus> = {}, agent: DeckCard["agent"] = null):
     column: status.column, lane: "waiting" };
 };
 
-const render1 = (card: DeckCard, onClose = vi.fn(), onForget = vi.fn()) =>
-  render(<DeckDetail card={card} sourceLabel="Jira" onClose={onClose} onForget={onForget} />);
+// `usage` is threaded as a 4th positional so every pre-existing call renders with
+// it undefined — the "still reading" state, which is what a drawer genuinely shows
+// before the host answers.
+const render1 = (
+  card: DeckCard,
+  onClose = vi.fn(),
+  onForget = vi.fn(),
+  usage?: UsageTotals | null,
+) =>
+  render(<DeckDetail card={card} sourceLabel="Jira" usage={usage} onClose={onClose} onForget={onForget} />);
 
 describe("DeckDetail", () => {
   it("names the run in its header", () => {
@@ -201,5 +210,73 @@ describe("DeckDetail", () => {
     render1(mkCard(), onClose);
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+// Spend moved here from the card in response to a direct request: the drawer is the
+// only place it appears now. These tests carry over the invariants the card's own
+// spend tests protected — the `eq` unit label, and the rule that "not measured" and
+// "cost nothing" must never render alike — plus the two states the card never had.
+describe("DeckDetail — Spend", () => {
+  const totals = (over: Partial<UsageTotals> = {}): UsageTotals =>
+    ({ input: 0, output: 0, cacheWrite: 0, cacheRead: 0, ...over });
+
+  const spend = () => document.querySelector(".dd-spend") as HTMLElement | null;
+
+  it("reads as still-loading before the host answers", () => {
+    render1(mkCard(), undefined, undefined, undefined);
+    expect(screen.getByText(/Reading transcripts/)).toBeTruthy();
+    expect(spend()).toBeNull();
+  });
+
+  it("says so when the host could not read the transcripts", () => {
+    render1(mkCard(), undefined, undefined, null);
+    expect(screen.getByText(/Couldn't read/)).toBeTruthy();
+    expect(spend()).toBeNull();
+  });
+
+  // The invariant the card's tests existed to protect, relocated: a run that was
+  // measured and genuinely cost nothing must not look like one still being read.
+  it("distinguishes a genuine zero from an unread run", () => {
+    render1(mkCard(), undefined, undefined, totals());
+    expect(screen.getByText("No recorded usage")).toBeTruthy();
+    expect(screen.queryByText(/Reading transcripts/)).toBeNull();
+    expect(spend()).toBeNull();
+  });
+
+  it("breaks the four token classes out, each with its raw count", () => {
+    render1(mkCard(), undefined, undefined,
+      totals({ input: 1_234, output: 5_678, cacheWrite: 90_123, cacheRead: 4_567_890 }));
+    const rows = Array.from(spend()!.querySelectorAll(".sp-row")).map((el) => ({
+      k: el.querySelector(".sp-k")!.textContent,
+      v: el.querySelector(".sp-v")!.textContent,
+    }));
+    expect(rows.map((r) => r.k)).toEqual(["input", "output", "cache write", "cache read", "weighted"]);
+    expect(rows[0].v).toBe("1,234");
+    expect(rows[1].v).toBe("5,678");
+    expect(rows[2].v).toBe("90,123");
+    expect(rows[3].v).toBe("4,567,890");
+  });
+
+  it("labels the weighted total eq, never tok", () => {
+    render1(mkCard(), undefined, undefined, totals({ cacheRead: 3_804_000 }));
+    const tot = spend()!.querySelector(".sp-tot")!;
+    // weightedEq({cacheRead: 3_804_000}) = 380,400 → formatEq → "380k"
+    expect(tot.querySelector(".sp-v")!.textContent).toContain("380k");
+    // Pinned on the unit element itself: asserting merely "no /tok/ anywhere" kept
+    // passing with the unit span deleted outright, since deleting it introduces no
+    // "tok" either. Same rot that was found on the card version of this test.
+    expect(tot.querySelector(".u")!.textContent).toBe("eq");
+    expect(screen.queryByText(/\btok\b/)).toBeNull();
+  });
+
+  // The weighted total is deliberately NOT the sum of the rows above it: cache
+  // reads are ~96.7% of raw tokens at a tenth the rate, so a raw sum would rank
+  // tasks by conversation length rather than by cost.
+  it("does not print the weighted total as the raw sum of its rows", () => {
+    render1(mkCard(), undefined, undefined, totals({ output: 1_000_000, cacheRead: 1_000_000 }));
+    const tot = spend()!.querySelector(".sp-tot .sp-v")!.textContent;
+    // raw sum would be 2,000,000 → "2.0M"; weighted is 1_000_000*5 + 1_000_000*0.1 = 5,100,000
+    expect(tot).toContain("5.1M");
   });
 });

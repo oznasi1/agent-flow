@@ -38,8 +38,16 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   ...over,
 });
 
-const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated", sourceLabel = "Jira"): OutboundMessage =>
-  ({ type: "deck:runs", runs, ghNote: null, prReviewStatus, staleCount: 0, sourceLabel });
+// showTokenTotal defaults to false here, mirroring the shipped setting default, so
+// every pre-existing test renders a board with no header token tile — which is what
+// they were written against. A test that wants the tile passes it explicitly.
+const runsMsg = (
+  runs: RunStatus[],
+  prReviewStatus = "PR initiated",
+  sourceLabel = "Jira",
+  showTokenTotal = false,
+): OutboundMessage =>
+  ({ type: "deck:runs", runs, ghNote: null, prReviewStatus, showTokenTotal, staleCount: 0, sourceLabel });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
@@ -671,7 +679,7 @@ describe("DeckApp PR-facts chrome", () => {
 
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", staleCount: 0, sourceLabel: "Jira" });
+    host({ type: "deck:runs", runs: [mkStatus()], ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", showTokenTotal: false, staleCount: 0, sourceLabel: "Jira" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 
@@ -2438,35 +2446,19 @@ describe("DeckApp card anatomy", () => {
     expect(screen.queryByRole("button", { name: "Fix CI" })).toBeNull();
   });
 
-  it("prints the spend figure in eq, not tok", () => {
+  // Spend was removed from the card by request: it lives only in the detail
+  // drawer now (see test/webview/DeckDetail.test.tsx's "DeckDetail — Spend"
+  // block, which carries over the eq-label and unread-vs-zero invariants these
+  // card tests used to protect). The card must show no figure for ANY usage
+  // value — including a large one, which is the case that would regress if the
+  // footer span were ever reinstated.
+  it("never shows a spend figure on the card, whatever the usage", () => {
     render(<DeckApp />);
-    // weightedEq({cacheRead: 3_804_000}) = 380,400 → formatEq → "380k". Scoped to
-    // the footer: with only one card on the board, the header's own total (added
-    // below) reduces to the same figure, so an unscoped getByText("380k") would
-    // correctly find two elements and fail for the wrong reason.
     host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 0, cacheWrite: 0, cacheRead: 3_804_000 } })]));
-    const spend = document.querySelector(".c-foot2 .spend") as HTMLElement;
-    expect(within(spend).getByText("380k")).toBeTruthy();
-    // I5: pinned directly on the unit element, not just "no /tok/ text anywhere"
-    // — that weaker check kept passing even with the `eq` unit span deleted
-    // outright, since deleting it does not introduce the string "tok" either.
-    expect(spend.querySelector(".u")?.textContent).toBe("eq");
-    expect(screen.queryByText(/tok/)).toBeNull();
-  });
-
-  // Absent and zero must not look alike: a run the sweep has not reached has not
-  // been measured, and "0" would assert it cost nothing.
-  it("shows no figure at all when usage has not been swept", () => {
-    render(<DeckApp />);
-    host(runsMsg([withPr(healthyPr(), { usage: undefined })]));
-    expect(screen.getByText(/✓ ci/)).toBeTruthy();
+    expect(screen.getByText(/✓ ci/)).toBeTruthy(); // the card did render
     expect(document.querySelector(".c-foot2 .spend")).toBeNull();
-  });
-
-  it("shows no figure for genuinely zero usage either", () => {
-    render(<DeckApp />);
-    host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } })]));
-    expect(document.querySelector(".c-foot2 .spend")).toBeNull();
+    expect(screen.queryByText("380k")).toBeNull();
+    expect(screen.queryByText(/\beq\b/)).toBeNull();
   });
 
   it("totals the board's spend in the header", () => {
@@ -2476,7 +2468,9 @@ describe("DeckApp card anatomy", () => {
       run: { ...mkStatus().run, key: "ASM-2" },
       usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 },
     });
-    host(runsMsg([a, b]));
+    // 4th arg turns the setting on: the tile is opt-in and absent by default, so
+    // every other test on this board renders without it.
+    host(runsMsg([a, b], "PR initiated", "Jira", true));
     // 2 × (20,000 × 5) = 200,000 → "200k"
     expect(screen.getByText("200k")).toBeTruthy();
   });
@@ -2486,6 +2480,55 @@ describe("DeckApp card anatomy", () => {
   // "In progress", "Action required", "In review" — reduces over the live
   // cards only. A closed run's card leaves the board, but its tokens used to
   // linger in "Tokens on board" forever.
+  // The setting is off by default, so the tile must be absent on a board whose
+  // runs carry real usage — otherwise "off by default" is only true of the
+  // package.json default and not of the code.
+  it("hides the header total when the setting is off", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } })]));
+    expect(screen.queryByText("Tokens on board")).toBeNull();
+    expect(screen.queryByText("100k")).toBeNull();
+  });
+
+  it("shows the header total once the setting is on", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } })], "PR initiated", "Jira", true));
+    expect(screen.getByText("Tokens on board")).toBeTruthy();
+  });
+
+  // With the board sweep off by default, opening a drawer is the ONLY thing that
+  // makes the host read transcripts. If this request stopped being sent, the
+  // drawer would sit on "Reading transcripts…" forever and nothing else would fail.
+  it("asks the host for the selected run's usage when its drawer opens, and not before", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr())]));
+    expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "deck:usageFor" }));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(sent).toHaveBeenCalledWith({ type: "deck:usageFor", key: "ASM-1" });
+  });
+
+  it("feeds a deck:usage reply into the open drawer", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr())]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(screen.getByText(/Reading transcripts/)).toBeTruthy();
+    host({ type: "deck:usage", key: "ASM-1", usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
+    expect(document.querySelector(".dd-spend")).not.toBeNull();
+    expect(screen.queryByText(/Reading transcripts/)).toBeNull();
+  });
+
+  // A reply can land after the user has moved on. Keying by run rather than
+  // holding one "current" slot is what stops the new drawer showing the old
+  // run's figure.
+  it("ignores a deck:usage reply for a run other than the open one", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr())]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    host({ type: "deck:usage", key: "SOMEONE-ELSE", usage: { input: 0, output: 99_000, cacheWrite: 0, cacheRead: 0 } });
+    expect(screen.getByText(/Reading transcripts/)).toBeTruthy();
+    expect(document.querySelector(".dd-spend")).toBeNull();
+  });
+
   it("excludes a closed run's tokens from the header total", () => {
     render(<DeckApp />);
     const a = withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
@@ -2494,22 +2537,23 @@ describe("DeckApp card anatomy", () => {
       shelf: "closed",
       usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 },
     });
-    host(runsMsg([a, b]));
-    // Only `a`'s spend counts: 20,000 × 5 = 100,000 → "100k", same figure `a`'s
-    // own card footer already shows — scoped to the header so that expected
-    // coincidence doesn't read as "found twice". If the closed run's tokens
-    // were still folded in, the header would read "200k" instead.
+    host(runsMsg([a, b], "PR initiated", "Jira", true));
+    // Only `a`'s spend counts: 20,000 × 5 = 100,000 → "100k". The card no longer
+    // prints a figure of its own, so the header is the only place it can appear;
+    // if the closed run's tokens were still folded in it would read "200k".
     const hd = document.querySelector(".hd") as HTMLElement;
     expect(within(hd).getByText("100k")).toBeTruthy();
     expect(within(hd).queryByText("200k")).toBeNull();
   });
 
-  // I4: the header figure is effort-weighted exactly like the card's, so it
-  // must carry the same `eq` unit and formula tooltip — "Tokens on board" with
-  // no qualifier understates real tokens by ~6.6x and reads as a raw count.
-  it("carries the eq unit and formula tooltip on the header total, same as the card", () => {
+  // I4: the header figure is effort-weighted, so it must carry the `eq` unit and
+  // the formula tooltip — "Tokens on board" with no qualifier understates real
+  // tokens by ~6.6x and reads as a raw count. (This originally said "same as the
+  // card"; the card's own figure has since been removed, so the header and the
+  // drawer's weighted row are now the only two places the unit appears.)
+  it("carries the eq unit and formula tooltip on the header total", () => {
     render(<DeckApp />);
-    host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } })]));
+    host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } })], "PR initiated", "Jira", true));
     const stat = screen.getByText("Tokens on board").closest(".stat") as HTMLElement;
     expect(within(stat).getByText("eq")).toBeTruthy();
     expect(stat.title).toMatch(/input×1.*cache-write×1\.25.*cache-read×0\.1.*output×5/);

@@ -194,10 +194,12 @@ it is: *"across every session in this task's directories"*.
 
 The header stat is the **sum of the cards currently on the board**, labelled
 "Tokens on board" — not "today", which would need per-line day bucketing and
-would print a figure that disagrees with the cards beneath it. Same unit rule
-as the card (see above): the label names what it counts, but the figure itself
-still carries the `eq` unit and a tooltip stating the formula, never bare
-"Tokens" with no qualifier — a reader who never sees the card cannot otherwise
+would print a figure that disagrees with the cards beneath it. It is gated on
+`agentFlow.deck.showTokenTotal`, **off by default**: it is the only consumer of
+the board-wide sweep, so with it off no transcript is parsed until a drawer is
+opened. Turning it on starts the 60s sweep; leaving it off costs nothing. The
+figure carries the `eq` unit and a tooltip stating the formula, never bare
+"Tokens" with no qualifier — a reader cannot otherwise
 tell this number is weighted, not a raw token count.
 
 ### 2. Honest state
@@ -319,11 +321,26 @@ A healthy card is byte-identical to what ships now. `canAddressPr` and its lane
 gate are deleted; every reason to address a PR now has its own named action, so
 a generic verb could only duplicate one of them.
 
-**Layout.** Spend sits on the footer row, right-aligned past the buttons
-(`margin-left: auto`), in space that is dead today. It was placed there rather
-than on the top row, which wraps the ticket key onto a second line whenever the
-state text is long, or on the signal line, which would break the three-bit cap
-and truncate the branch further.
+**Layout — revised after review of the built board.** Spend does **not** appear
+on the card at all. It was first built on the footer row, right-aligned past the
+buttons, having been rejected on the top row (a long state string wraps the
+ticket key) and on the signal line (breaks the three-bit cap and truncates the
+branch). Seeing it on a real board, the figure was cut from the card entirely:
+a per-card number the reader cannot act on competes with the state line and the
+failure rows, which they can.
+
+Spend now lives in **one** place, the detail drawer, as a four-class breakdown —
+input, output, cache write, cache read — under a weighted `eq` total. That is
+the only surface with room for the breakdown, and the breakdown is what makes
+the number honest: it shows the reader that cache reads dominate the raw count
+at a tenth the rate, which a single figure can only assert.
+
+Because the drawer shows one run at a time, the read is **lazy**: opening a
+drawer sends `deck:usageFor { key }` and the host answers `deck:usage { key,
+usage }` after reading only that run's project dirs. `UsageReader`'s per-file
+cache makes a re-open cost a `stat` per transcript rather than a re-parse. The
+drawer renders three distinct states — request in flight, read failed, and a
+genuine zero — because collapsing any two of them would assert something untrue.
 
 A card with three failures grows past the `min-height: 152px` floor. That ends
 the uniform density the two-tier card established, and is accepted: attention
@@ -352,7 +369,10 @@ RunStatus → webview
               ├─ stateView      → status line  (working | ended turn | stalled | exited | idle | parked)
               ├─ cardSignal     → .c-sig       (unchanged, healthy cards)
               ├─ cardActions    → .c-rows      (one row + action per failure)
-              └─ weightedEq     → footer spend figure  ("380k eq")
+              └─ (no spend on the card — see Layout)
+
+drawer opens → deck:usageFor { key } → UsageReader.readRun (that run only)
+                 → deck:usage { key, usage } → four-class breakdown + weightedEq total
 
 card action click → deck:seedPrWork { key, reason, detail }
                       → prReviewTemplate + reason clause → writePlanFile → openInEditor

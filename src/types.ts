@@ -548,6 +548,11 @@ export type InboundMessage =
   // host build a prompt about the specific thing wrong rather than a generic
   // review pass. Handled alongside `deck:addressPr` in Task 8's dispatch.
   | { type: "deck:seedPrWork"; key: string; reason: PrWorkReason; detail?: string }
+  /** Read one run's token usage now. Sent when its detail drawer opens, which is
+   * the only thing that displays a per-run figure — so with the header total off
+   * (the default) a session that never opens a drawer parses no transcripts at
+   * all. The host answers with `deck:usage`. */
+  | { type: "deck:usageFor"; key: string }
   | { type: "deck:setReviewSort"; sort: ReviewSort }
   | { type: "deck:reviewExpand"; id: string }
   | { type: "deck:reviewLaunch"; id: string }
@@ -672,7 +677,17 @@ export type OutboundMessage =
    * board rebuild, so one already in flight when the user flips the lens lands
    * carrying a pre-click value and visibly reverts the control. */
   | { type: "deck:grouping"; grouping: "agents" | "workspaces" }
+  /** One run's token usage, answering a `deck:usageFor`. Its own message rather
+   * than a field on `deck:runs`: the drawer asks for exactly one run and
+   * `deck:runs` costs a full board rebuild, so riding it would make opening a
+   * drawer re-render the board. `usage` is null when nothing was readable. */
+  | { type: "deck:usage"; key: string; usage: UsageTotals | null }
   | { type: "deck:runs"; runs: RunStatus[]; ghNote: string | null; prReviewStatus: string;
+      /** Whether the header's token total is switched on. Rides deck:runs rather
+       * than being read once at mount: it is a plain boolean setting a user can
+       * flip mid-session, and the board re-posts often enough that this is the
+       * whole of keeping it live — the same reasoning as `prReviewStatus`. */
+      showTokenTotal: boolean;
       // How many runs would retire right now if both retirement windows were
       // ignored. Drives the Clear stale button, which is hidden at zero.
       staleCount: number;

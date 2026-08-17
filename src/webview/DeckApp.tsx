@@ -17,7 +17,7 @@ import { cardActions, cardSignal } from "./deckSignal";
 // src/engine/usage.ts imports NOTHING — this is what makes it legal in a
 // browser bundle. npm run build is the only gate that would catch a violation
 // here; neither tsc nor the test suite resolves real module graphs.
-import { formatEq, weightedEq } from "../engine/usage";
+import { formatEq, weightedEq, type UsageTotals } from "../engine/usage";
 
 /** The Orchestrator's mark: one node on the left feeding two on the right
  * through elbow connectors — the drawer's own object, drawn. It replaced a ⚡
@@ -188,10 +188,6 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
   // reads the same lead PR, so the two cannot disagree.
   const firstBit = sigBits[0];
   const leadPrNumber = firstBit?.kind === "text" && firstBit.text.startsWith("#") ? firstBit.text.slice(1) : null;
-  // Absent and zero render identically as "no figure": a run the sweep has not
-  // reached has not been measured, and printing 0 would assert it cost nothing.
-  const eq = r.usage ? weightedEq(r.usage) : 0;
-  const spend = eq > 0 ? formatEq(eq) : null;
 
   return (
     <div
@@ -284,11 +280,6 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
           onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff", ...(agent?.repo ? { repo: agent.repo } : {}) })}>
           Diff
         </button>
-        {spend && (
-          <span className="spend" title="Effort-weighted tokens across every session in this task's directories (input×1, cache-write×1.25, cache-read×0.1, output×5)">
-            {spend}<span className="u">eq</span>
-          </span>
-        )}
       </div>
     </div>
   );
@@ -310,6 +301,15 @@ export function DeckApp(): JSX.Element {
   const [staleCount, setStaleCount] = React.useState(0);
   // See DEFAULT_SOURCE_LABEL's own comment for why "Jira" rather than "".
   const [sourceLabel, setSourceLabel] = React.useState(DEFAULT_SOURCE_LABEL);
+  /** Mirrors `agentFlow.deck.showTokenTotal`. Starts false so the header tile is
+   * absent on the very first paint, before any deck:runs has arrived — the
+   * setting is off by default, and flashing a total that then vanishes would be
+   * worse than never showing it. */
+  const [showTokenTotal, setShowTokenTotal] = React.useState(false);
+  /** run key → usage read on demand for its drawer, or null when unreadable.
+   * A key absent from this map means "not asked yet or still waiting", which the
+   * drawer renders differently from both a zero total and a failed read. */
+  const [lazyUsage, setLazyUsage] = React.useState<Record<string, UsageTotals | null>>({});
   const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean; reviewWrites: boolean; loading: boolean }>(
     { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false, loading: false },
   );
@@ -374,8 +374,14 @@ export function DeckApp(): JSX.Element {
         setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
         setSourceLabel(m.sourceLabel);
+        setShowTokenTotal(m.showTokenTotal);
         setSyncedAt(Date.now());
         setHasLoaded(true);
+      } else if (m.type === "deck:usage") {
+        // Keyed rather than a single "current drawer" slot: a reply can land after
+        // the user has moved to another card, and dropping it would leave the new
+        // drawer showing a figure that belongs to the old one.
+        setLazyUsage((u) => ({ ...u, [m.key]: m.usage }));
       } else if (m.type === "deck:grouping") {
         setGrouping(m.grouping);
       } else if (m.type === "toast") {
@@ -532,6 +538,19 @@ export function DeckApp(): JSX.Element {
   React.useEffect(() => {
     if (selId !== null && selected === null) setSelId(null);
   }, [selId, selected]);
+
+  // Ask for the selected run's usage once per drawer opening. This is the only
+  // thing that triggers a transcript read on a default install, which is the whole
+  // point of it being here rather than on a timer: a session that never opens a
+  // drawer parses nothing. Re-asking on each open is deliberate — the host's
+  // reader is incremental, so a second open costs a stat per file, and a stale
+  // figure on a task that has since burned more tokens would be worse.
+  const selRunKey = selected?.status.run.key ?? null;
+  React.useEffect(() => {
+    if (selRunKey === null) return;
+    send({ type: "deck:usageFor", key: selRunKey });
+  }, [selRunKey]);
+
   const needs = cards.filter((c) => c.column === "needs").length;
   // With arming real, the count that matters on the chip is how many flows are
   // armed — that is the thing quietly spending your attention while the drawer
@@ -568,7 +587,7 @@ export function DeckApp(): JSX.Element {
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "progress").length}</span><span className="l">In progress</span></div>
           <div className={`stat ${needs > 0 ? "attn" : ""}`}><span className="n">{needs}</span><span className="l">Action required</span></div>
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "review").length}</span><span className="l">In review</span></div>
-          {boardEq > 0 && (
+          {showTokenTotal && boardEq > 0 && (
             <div
               className="stat"
               title="Effort-weighted tokens across every session on the board (input×1, cache-write×1.25, cache-read×0.1, output×5)"
@@ -784,6 +803,10 @@ export function DeckApp(): JSX.Element {
         <DeckDetail
           card={selected}
           sourceLabel={sourceLabel}
+          /* Eager total first when the header sweep is on, else the on-demand read.
+             `undefined` means still waiting; `null` means the host tried and
+             failed. The drawer renders three distinct states from that. */
+          usage={selected.status.usage ?? lazyUsage[selected.status.run.key]}
           onClose={() => setSelId(null)}
           onForget={forget}
         />

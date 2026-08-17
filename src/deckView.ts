@@ -1520,10 +1520,18 @@ export class DeckPanel {
     if (this.timer) return;
     void this.refresh();
     this.timer = setInterval(() => void this.refresh(), POLL_MS);
-    // One sweep now, then on its own slow cadence. Not awaited: a blank spend
-    // figure for a few seconds is strictly better than a delayed board.
-    void Promise.resolve().then(() => this.sweepUsage(this.sweepTargets()));
-    this.usageTimer = setInterval(() => this.sweepUsage(this.sweepTargets()), USAGE_POLL_MS);
+    // The board-wide sweep exists ONLY to feed the header's token total, which is
+    // off by default. With it off nothing on screen shows a board-wide figure, so
+    // parsing every run's transcripts every minute would be pure cost — the
+    // drawer reads its one run on demand instead (see `usageFor`). Read fresh
+    // rather than cached in a field so flipping the setting takes effect on the
+    // next visibility change without a reload.
+    if (getConfig().showTokenTotal) {
+      // One sweep now, then on its own slow cadence. Not awaited: a blank spend
+      // figure for a few seconds is strictly better than a delayed board.
+      void Promise.resolve().then(() => this.sweepUsage(this.sweepTargets()));
+      this.usageTimer = setInterval(() => this.sweepUsage(this.sweepTargets()), USAGE_POLL_MS);
+    }
   }
 
   private stopPolling(): void {
@@ -1532,6 +1540,33 @@ export class DeckPanel {
     if (this.usageTimer) clearInterval(this.usageTimer);
     this.usageTimer = undefined;
     this.prQueue.clear();
+  }
+
+  /**
+   * Read one run's usage and post it back. The drawer's own request path, used
+   * when the board-wide sweep is off — which is the default.
+   *
+   * `UsageReader` caches per file, so re-opening the same drawer costs a `stat`
+   * per transcript rather than a re-parse. A run whose usage the eager sweep has
+   * already computed still gets read here: the reader is incremental, so this is
+   * the cheap path either way, and answering unconditionally keeps the drawer's
+   * contract simple.
+   *
+   * Posts `usage: null` on a failed read rather than a zeroed total — the drawer
+   * distinguishes "could not read" from "cost nothing", and zero would assert
+   * the latter.
+   */
+  private usageFor(key: string): void {
+    const run = this.run(key);
+    if (!run) return;
+    let usage: UsageTotals | null;
+    try {
+      usage = this.usage.readRun(claudeProjectsRoot(), run.repos.map((r) => r.path));
+    } catch {
+      usage = null;
+    }
+    if (usage) this.usageByRun.set(key, usage);
+    this.post({ type: "deck:usage", key, usage });
   }
 
   /** Re-read usage for every run currently on the board. Board-scoped on
@@ -2514,6 +2549,9 @@ export class DeckPanel {
         // string setting a user can edit mid-session, and the board re-posts often
         // enough that this is the whole of "keep it live".
         prReviewStatus: getConfig().prReviewStatus,
+        // Same reasoning as prReviewStatus above: a plain setting the user can
+        // flip mid-session, read fresh on every post.
+        showTokenTotal: getConfig().showTokenTotal,
         staleCount: this.staleCount,
         sourceLabel: this.connector.info().label,
       });
@@ -2656,6 +2694,9 @@ export class DeckPanel {
         break;
       case "deck:seedPrWork":
         await this.seedPrWork(m.key, m.reason, m.detail);
+        break;
+      case "deck:usageFor":
+        this.usageFor(m.key);
         break;
       case "flow:create": {
         if (!getConfig().orchestrator) return;

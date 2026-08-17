@@ -1,6 +1,7 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
 import { isTicketRun, runKind, type PrFacts } from "../types";
+import { formatEq, weightedEq, type UsageTotals } from "../engine/usage";
 import type { DeckCard } from "./deckCards";
 // Same import DeckApp.tsx's own Card makes, and safe for the same reason: bucket.ts
 // is kept free of fs-touching imports, which bucket.test.ts enforces.
@@ -11,6 +12,12 @@ import { timeAgo } from "./helpers";
 export interface DeckDetailProps {
   card: DeckCard;
   sourceLabel: string;
+  /** This run's token usage. Three states, all distinct on screen:
+   * `undefined` — not read yet (the request is in flight);
+   * `null` — the host tried and could not read it;
+   * a total — including a genuine all-zero, which is NOT the same as either above.
+   * Printing 0 for an unread run would assert it cost nothing. */
+  usage?: UsageTotals | null;
   onClose: () => void;
   onForget: (key: string) => void;
 }
@@ -39,7 +46,7 @@ function copy(text: string): void {
   void navigator.clipboard?.writeText(text);
 }
 
-export function DeckDetail({ card, sourceLabel, onClose, onForget }: DeckDetailProps): JSX.Element {
+export function DeckDetail({ card, sourceLabel, usage, onClose, onForget }: DeckDetailProps): JSX.Element {
   const r = card.status;
   const key = r.run.key;
   const tracked = isTicketRun(r.run);
@@ -148,6 +155,36 @@ export function DeckDetail({ card, sourceLabel, onClose, onForget }: DeckDetailP
         {card.agents.length > 0
           ? <AgentsRow agents={card.agents} defaultOpen />
           : <div className="dd-none">No agent open — git + {sourceLabel} only</div>}
+      </div>
+
+      {/* Spend lives only here, never on the card: the four classes are what make
+        * the number honest, and only the drawer has room for them. The eq total is
+        * effort-weighted, so it is deliberately NOT the sum of the four rows above
+        * it — cache reads dominate the raw count at a tenth the rate, and a raw sum
+        * would rank tasks by conversation length rather than by cost. The rows are
+        * raw token counts and say so; only the total carries the eq unit. */}
+      <div className="dd-sec">
+        <div className="dd-lbl">Spend</div>
+        {usage === undefined
+          ? <div className="dd-none">Reading transcripts…</div>
+          : usage === null
+            ? <div className="dd-none">Couldn't read this task's transcripts</div>
+            : weightedEq(usage) === 0
+              ? <div className="dd-none">No recorded usage</div>
+              : (
+                <div className="dd-spend">
+                  <div className="sp-row"><span className="sp-k">input</span><span className="sp-v">{usage.input.toLocaleString()}</span></div>
+                  <div className="sp-row"><span className="sp-k">output</span><span className="sp-v">{usage.output.toLocaleString()}</span></div>
+                  <div className="sp-row"><span className="sp-k">cache write</span><span className="sp-v">{usage.cacheWrite.toLocaleString()}</span></div>
+                  <div className="sp-row"><span className="sp-k">cache read</span><span className="sp-v">{usage.cacheRead.toLocaleString()}</span></div>
+                  <div className="sp-row sp-tot">
+                    <span className="sp-k" title="Effort-weighted equivalent: input×1, cache-write×1.25, cache-read×0.1, output×5. Rate ratios, not prices — so it does not go stale and does not claim a dollar amount.">
+                      weighted
+                    </span>
+                    <span className="sp-v">{formatEq(weightedEq(usage))}<span className="u">eq</span></span>
+                  </div>
+                </div>
+              )}
       </div>
 
       <div className="dd-lbl dd-count">{count} actions</div>
