@@ -5842,6 +5842,29 @@ describe("takeTask: orchestrator mode", () => {
     });
   });
 
+  it("honours the in-card repo selection instead of asking for it again", async () => {
+    // The selection made on the card is the only repo intent the user has expressed on
+    // this take, and a fan-out reached from the SAME picker honours it — asking again
+    // here would make one mode ask three questions where the other asks two.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web"]));
+    answerPicks((items: unknown[]) => items[1], (items: unknown[]) => items);
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["web"]);
+    // Two pickers, not three: the tree mode and the leaves.
+    expect(window.showQuickPick).toHaveBeenCalledTimes(2);
+    // By name, in the preselected repo only — `api` is discovered and never touched.
+    expect(vi.mocked(ensureBranch).mock.calls).toEqual([["/repos/web", PARENT_BRANCH]]);
+    expect(worktreeCalls()).toEqual([
+      [["web"], "ASM-2", "first bit", { baseRef: PARENT_BRANCH }],
+      [["web"], "ASM-3", "second bit", { baseRef: PARENT_BRANCH }],
+      [["web"], "ASM-1", "Do the thing", undefined],
+    ]);
+    expect(openArg().children).toEqual([
+      { key: "ASM-2", summary: "first bit", repo: "web", path: "/repos/web/.claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
+      { key: "ASM-3", summary: "second bit", repo: "web", path: "/repos/web/.claude/worktrees/ASM-3", branch: "ASM-3-second-bit" },
+    ]);
+  });
+
   it("takes nothing when the repo picker is cancelled", async () => {
     answerOrchestrator((items) => items, () => undefined);
     const { provider } = setup({ authed: true });

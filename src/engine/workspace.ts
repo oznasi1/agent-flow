@@ -230,7 +230,13 @@ cannot be done within them.
  *  `planMd` arrives already rendered (engine/brief's `briefMarkdown`), the same way
  *  `openWorkspace` receives it, so the two paths cannot drift into producing different
  *  briefs. Best-effort per repo: one unwritable worktree must not cost the others
- *  theirs. Returns the files it wrote. */
+ *  theirs. Returns the files it wrote.
+ *
+ *  Deliberately no `ensureGitExcluded` call: it follows a worktree's `commondir` and
+ *  writes to the repo's SHARED `info/exclude` (see gitExclude.ts), so the one entry
+ *  `openWorkspace` writes for the repo already covers every worktree of it, children
+ *  included. Adding a call here would re-exclude what is excluded and give this helper
+ *  a second responsibility. */
 export function writeBriefInto(
   services: ServiceRef[],
   ticket: TicketRef,

@@ -1992,7 +1992,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             );
             await this.takeBatch(leafKeys, repos, parent);
           } else {
-            await this.takeOrchestrated(probed.detail, picked, parent.branch);
+            // `preselected` rides along for the same reason the fan-out passes it to
+            // fanOutRepos: it is the only repo intent the user has expressed on this
+            // take, and re-asking for it would make this flow ask three questions
+            // where the other mode reached from the same picker asks two.
+            await this.takeOrchestrated(probed.detail, picked, parent.branch, preselected);
           }
           return;
         }
@@ -2487,12 +2491,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     detail: TaskDetail,
     leaves: TreeLeaf[],
     parentBranch: string,
+    preselected?: string[],
   ): Promise<void> {
     const cfg = getConfig();
     // No prompt-mode question: the mode is forced to `orchestrator` below. The
     // destination and repo questions are resolveKickoff's own, and neither the tree-mode
-    // nor the leaf picker asked them, so this is the first time either is put up.
-    const resolved = await this.resolveKickoff(detail.key, undefined);
+    // nor the leaf picker asked them, so this is the first time either is put up — and
+    // an in-card selection skips the repo one entirely, exactly as a fan-out's does.
+    const resolved = await this.resolveKickoff(detail.key, preselected);
     if (!resolved) return;
     const { services: parentRepos, target } = resolved;
 
