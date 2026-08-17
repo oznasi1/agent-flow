@@ -1958,7 +1958,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           }
           const parent = { key, branch: branchName(key, probed.detail.summary) };
           if (mode === "fanout") {
-            await this.takeBatch(picked.map((l) => l.key), this.fanOutRepos(cfg, preselected), parent);
+            const leafKeys = picked.map((l) => l.key);
+            const repos = this.fanOutRepos(cfg, probed.detail, preselected);
+            // Said out loud before any worktree exists: a child whose own ticket infers
+            // no repo lands in every repo of this set, so when the worktree count
+            // surprises someone the set that produced it has to be findable.
+            this.log(
+              `fan-out ${key}: ${leafKeys.length} ${leafKeys.length === 1 ? "leaf" : "leaves"} into ${repos.length} repo(s) — ${repos.join(", ")}`,
+            );
+            await this.takeBatch(leafKeys, repos, parent);
           } else {
             await this.takeOrchestrated(probed.detail, picked, parent.branch);
           }
@@ -2385,14 +2393,24 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    *
    *  `takeBatch`'s `repos` is a filter, not a suggestion: `resolveBatchRepos` reads an
    *  empty list as "nothing usable here", toasts, and launches nothing — so the fan-out
-   *  has to name a set. The in-card selection is used when there is one, because it is
-   *  the only repo intent the user has actually expressed on this take; otherwise it is
-   *  every discovered repo, and each child narrows that by its own inference in
-   *  `reposForTask` (fan-out children resolve their own repos — only orchestrator mode
-   *  confines them to the parent's set). */
-  private fanOutRepos(cfg: AgentFlowConfig, preselected?: string[]): string[] {
+   *  has to name a set.
+   *
+   *  The in-card selection wins when there is one: it is the only repo intent the user
+   *  has actually expressed on this take. Otherwise the set is the PARENT ticket's own
+   *  inferred repos. Not every discovered repo: `reposForTask` widens to the whole
+   *  filter set for a child whose ticket infers nothing, so an unbounded set would let
+   *  one such child open a worktree in every repo on the machine. Scoping to the parent
+   *  bounds that to the work the user chose by taking this ticket, and makes fan-out
+   *  agree with orchestrator mode, which confines children to the parent's set too.
+   *  `detail` is the probe's own read, so this costs no extra round trip.
+   *
+   *  A parent that itself infers nothing still widens to every discovered repo — that is
+   *  `reposForTask`'s documented last resort, and the caller logs the resolved set so an
+   *  unexpected worktree count is explicable rather than mysterious. */
+  private fanOutRepos(cfg: AgentFlowConfig, detail: TaskDetail, preselected?: string[]): string[] {
     if (preselected?.length) return preselected;
-    return discoverRepos(cfg.reposRoot, cfg.repoBlocklist).map((r) => r.name);
+    const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+    return this.reposForTask(detail, repos).map((r) => r.name);
   }
 
   /** Orchestrator-mode take: implemented in the next task. */

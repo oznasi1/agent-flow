@@ -5170,7 +5170,9 @@ describe("takeTask: a ticket with children", () => {
     );
   });
   afterEach(() => {
+    // Neither implementation has a global reset (clearMocks only clears call history).
     vi.mocked(createWorktrees).mockImplementation((s) => s);
+    vi.mocked(ensureBranch).mockReturnValue(true);
   });
 
   it("does not probe at all when the source has no children capability", async () => {
@@ -5285,11 +5287,12 @@ describe("takeTask: a ticket with children", () => {
     });
   });
 
-  it("hands the fan-out every discovered repo when the card named none", async () => {
+  it("widens to every discovered repo only when the parent itself infers none", async () => {
     // takeBatch's repo argument is a FILTER, and an empty one means "nothing usable"
-    // (resolveBatchRepos) — so the fan-out has to name a set. With no in-card
-    // selection that set is every discovered repo, and each child then narrows it by
-    // its own inference in reposForTask.
+    // (resolveBatchRepos) — so the fan-out has to name a set. With no in-card selection
+    // that set is the PARENT's inferred repos (see the test below); this fixture's
+    // parent ("Do the thing", no labels or components) infers nothing, which is
+    // reposForTask's documented last resort — every discovered repo.
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider } = setup({ authed: true });
     const takeBatch = vi.spyOn(provider, "takeBatch").mockResolvedValue(undefined);
@@ -5298,6 +5301,63 @@ describe("takeTask: a ticket with children", () => {
       key: "ASM-1",
       branch: PARENT_BRANCH,
     });
+  });
+
+  /** Four repos where the PARENT infers two of them (one by label, one by component)
+   *  and the child infers none — the exact shape the fan-out's repo scoping is about.
+   *  "nothing recognisable here" is the non-matching summary the takeBatch tests above
+   *  already use. */
+  function parentInfersTwoOfFourRepos(): void {
+    vi.mocked(discoverRepos).mockReturnValue(
+      mkRepos(["aardvark-service", "billing-service", "centaur", "delta-service"]),
+    );
+    clientStub.getDetail.mockImplementation(async (key: string) =>
+      key === "ASM-1"
+        ? {
+            key, summary: "the parent", descriptionText: "",
+            labels: ["billing-service"], components: ["delta-service"],
+            url: `https://jira/browse/${key}`,
+          }
+        : {
+            key, summary: "nothing recognisable here", descriptionText: "",
+            labels: [], components: [], url: `https://jira/browse/${key}`,
+          },
+    );
+  }
+
+  it("bounds a child that infers nothing to the parent's own repos", async () => {
+    parentInfersTwoOfFourRepos();
+    answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "command"); // no in-card selection
+    // The child's ticket names no repo, so reposForTask widens to the whole filter set
+    // it was handed — which is why that set has to be the parent's two repos and not
+    // the four on the machine. By name: a count alone would pass on the wrong two.
+    expect(
+      vi.mocked(createWorktrees).mock.calls.map((c) => (c[0] as { name: string }[]).map((r) => r.name)),
+    ).toEqual([["billing-service", "delta-service"]]);
+    expect(vi.mocked(ensureBranch).mock.calls.map((c) => c[0])).toEqual([
+      "/repos/billing-service",
+      "/repos/delta-service",
+    ]);
+  });
+
+  it("logs the repo set the fan-out resolved", async () => {
+    parentInfersTwoOfFourRepos();
+    answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
+    const { provider, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "command");
+    expect(logged).toContain("fan-out ASM-1: 1 leaf into 2 repo(s) — billing-service, delta-service");
+  });
+
+  it("logs that set before any worktree is made, so a refusal still explains itself", async () => {
+    parentInfersTwoOfFourRepos();
+    vi.mocked(ensureBranch).mockReturnValue(false); // refuses before the first worktree
+    answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
+    const { provider, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "command");
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(logged).toContain("fan-out ASM-1: 1 leaf into 2 repo(s) — billing-service, delta-service");
   });
 
   it("actually branches the child off the parent, end to end", async () => {
