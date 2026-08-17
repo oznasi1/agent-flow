@@ -362,6 +362,12 @@ describe("openSharedWorkspace: parentKey on each run", () => {
     expect(lastWrittenRun().parentKey).toBe("ASM-1");
   });
 
+  // `in` rather than `toBeUndefined()`: a key that exists holding `undefined` would
+  // satisfy the latter. Note the limit of this assertion — `writeRun` serialises with
+  // JSON.stringify, which drops undefined-valued keys, so it cannot distinguish the
+  // conditional spread from an unconditional `parentKey: t.parentKey`. What it DOES
+  // catch is a falsy default (`?? ""`, `|| null`), which is how this realistically
+  // regresses: those land in the JSON and a reader then sees a run whose parent is "".
   it("omits the field for an ordinary batch", async () => {
     await openSharedWorkspace(
       baseReq({

@@ -221,6 +221,12 @@ describe("openWorkspace: parent and children on the run record", () => {
     return JSON.parse(String(runWrite![1]));
   };
 
+  // `in` rather than `toBeUndefined()`: a key that exists holding `undefined` would
+  // satisfy the latter. Note the limit of this assertion — `writeRun` serialises with
+  // JSON.stringify, which drops undefined-valued keys, so it cannot distinguish the
+  // conditional spread from an unconditional `parentKey: req.parentKey`. What it DOES
+  // catch is a falsy default (`?? ""`, `|| null`), which is how this realistically
+  // regresses: those land in the JSON and a reader then sees a run whose parent is "".
   it("omits both fields when the request carries neither", async () => {
     await openWorkspace(baseReq());
     const run = lastWrittenRun();
