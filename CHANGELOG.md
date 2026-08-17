@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-08-17
+
+### Added
+
+- **Each task's token spend, in its detail drawer.** Selecting a card now shows
+  what the task has cost: input, output, cache-write and cache-read counts, under
+  a single effort-weighted total. The weighting matters — cache reads are the
+  overwhelming majority of raw tokens at roughly a tenth the rate, so a plain sum
+  ranks tasks by how long the conversation got rather than by what the work cost.
+  The total is labelled `eq` for that reason, and is deliberately not the sum of
+  the four rows above it. Read on demand when the drawer opens, so a session that
+  never opens one reads no transcripts at all.
+- **An optional "Tokens on board" total in the Deck header**, behind the new
+  `agentFlow.deck.showTokenTotal` setting, off by default. It is the only thing
+  that needs a board-wide transcript sweep, so leaving it off costs nothing.
+- **An action per pull-request problem, beside the problem itself.** A card with a
+  failing check, a conflict and requested changes now offers *Fix CI*, *Resolve
+  conflict* and *Address review* as three separate rows, each seeding an agent
+  with a prompt that names the specific failure. This replaces the single
+  *Address PR* button, which was gated on the review column's waiting lane — so
+  it appeared on cards with nothing to address and was missing from cards with a
+  failing check. An unapproved but otherwise clean PR now correctly offers
+  nothing: it is not a PR with a problem.
+
+### Changed
+
+- **A stuck agent no longer reads as an idle one.** Two new states join the card's
+  status line: `stalled`, when a tool call has been outstanding for more than 45
+  seconds (a permission prompt, or a genuinely long command — the transcript
+  cannot tell, so the label does not claim to), and `exited`, when a transcript
+  stops mid-work and no live session is left behind. Both used to render as
+  `idle`, the calmest tone on the board, on exactly the cards most in need of
+  attention. Both now route to Action required, so expect one or two cards to move
+  there on upgrade.
+
+### Fixed
+
+- **"Agent idle over N minutes" flows fire again on stuck agents.** The condition
+  tested for `idle` exactly, so the two new states above would have silently
+  stopped it firing on precisely the runs it was written to catch.
+- **Token counts include subagent sessions.** Claude Code writes those transcripts
+  one directory below the session's own; reading only the top level reported
+  roughly half of a task's real spend.
+
 ## [0.23.1] — 2026-08-17
 
 ### Fixed
