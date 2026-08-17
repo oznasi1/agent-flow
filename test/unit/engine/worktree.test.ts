@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { branchName, createWorktrees, repoRootOfWorktree } from "../../../src/engine/worktree";
+import { branchName, createWorktrees, ensureBranch, repoRootOfWorktree } from "../../../src/engine/worktree";
 import { ensureGitExcluded } from "../../../src/engine/gitExclude";
 import { mkRepos } from "../../_helpers/factories";
 
@@ -150,5 +150,115 @@ describe("createWorktrees", () => {
     const out = createWorktrees(repos, "ASM-9", "x", log);
     expect(out[0].path).toBe("/repos/a/.claude/worktrees/ASM-9");
     expect(out[1]).toEqual(repos[1]); // non-git passthrough
+  });
+});
+
+describe("createWorktrees with a baseRef", () => {
+  const log = vi.fn();
+
+  beforeEach(() => {
+    existsSync.mockReset().mockReturnValue(false);
+    mkdirSync.mockReset();
+    execFileSync.mockReset();
+    gitExcluded.mockReset().mockReturnValue(true);
+    log.mockReset();
+  });
+
+  it("branches the new worktree off the given ref", () => {
+    const [repo] = mkRepos(["centaur"]);
+    createWorktrees([repo], "ASM-2", "child work", log, { baseRef: "ASM-1-parent" });
+    expect(execFileSync).toHaveBeenCalledWith(
+      "git",
+      ["-C", repo.path, "worktree", "add", "/repos/centaur/.claude/worktrees/ASM-2",
+       "-b", "ASM-2-child-work", "ASM-1-parent"],
+      expect.anything(),
+    );
+  });
+
+  it("produces the pre-baseRef argv when the option is omitted", () => {
+    const [repo] = mkRepos(["centaur"]);
+    createWorktrees([repo], "ASM-2", "child work", log);
+    expect(execFileSync).toHaveBeenCalledWith(
+      "git",
+      ["-C", repo.path, "worktree", "add", "/repos/centaur/.claude/worktrees/ASM-2",
+       "-b", "ASM-2-child-work"],
+      expect.anything(),
+    );
+  });
+
+  it("produces the pre-baseRef argv for an empty options object", () => {
+    const [repo] = mkRepos(["centaur"]);
+    createWorktrees([repo], "ASM-2", "child work", log, {});
+    expect(execFileSync).toHaveBeenLastCalledWith(
+      "git",
+      ["-C", repo.path, "worktree", "add", "/repos/centaur/.claude/worktrees/ASM-2",
+       "-b", "ASM-2-child-work"],
+      expect.anything(),
+    );
+  });
+
+  it("drops the baseRef when attaching to a branch that already exists", () => {
+    // `worktree add <path> <existing-branch>` takes no start point — passing one
+    // would make git read it as a second path argument.
+    execFileSync.mockImplementationOnce(() => {
+      throw new Error("branch already exists");
+    });
+    const [repo] = mkRepos(["centaur"]);
+    createWorktrees([repo], "ASM-2", "child work", log, { baseRef: "ASM-1-parent" });
+    expect(execFileSync).toHaveBeenLastCalledWith(
+      "git",
+      ["-C", repo.path, "worktree", "add", "/repos/centaur/.claude/worktrees/ASM-2", "ASM-2-child-work"],
+      expect.anything(),
+    );
+  });
+});
+
+describe("ensureBranch", () => {
+  beforeEach(() => {
+    execFileSync.mockReset();
+  });
+
+  it("leaves an existing branch exactly where it is", () => {
+    // rev-parse resolves: the branch is there, nothing else runs.
+    execFileSync.mockReturnValueOnce(Buffer.from("abc123\n"));
+    expect(ensureBranch("/repos/centaur", "ASM-1-parent")).toBe(true);
+    expect(execFileSync).toHaveBeenCalledTimes(1);
+    expect(execFileSync).toHaveBeenCalledWith(
+      "git",
+      ["-C", "/repos/centaur", "rev-parse", "--verify", "--quiet", "refs/heads/ASM-1-parent"],
+      expect.anything(),
+    );
+  });
+
+  it("creates the branch when it does not exist", () => {
+    execFileSync.mockImplementationOnce(() => {
+      throw new Error("not a valid ref");
+    });
+    expect(ensureBranch("/repos/centaur", "ASM-1-parent")).toBe(true);
+    expect(execFileSync).toHaveBeenLastCalledWith(
+      "git",
+      ["-C", "/repos/centaur", "branch", "ASM-1-parent"],
+      expect.anything(),
+    );
+  });
+
+  it("creates the branch at an explicit start point", () => {
+    execFileSync.mockImplementationOnce(() => {
+      throw new Error("not a valid ref");
+    });
+    ensureBranch("/repos/centaur", "ASM-1-parent", "origin/main");
+    expect(execFileSync).toHaveBeenLastCalledWith(
+      "git",
+      ["-C", "/repos/centaur", "branch", "ASM-1-parent", "origin/main"],
+      expect.anything(),
+    );
+  });
+
+  it("returns false when the branch cannot be created", () => {
+    const boom = () => {
+      throw new Error("boom");
+    };
+    execFileSync.mockImplementationOnce(boom).mockImplementationOnce(boom);
+    expect(ensureBranch("/repos/centaur", "ASM-1-parent")).toBe(false);
   });
 });

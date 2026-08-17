@@ -40,6 +40,17 @@ function git(repo: string, args: string[]): void {
   execFileSync("git", ["-C", repo, ...args], { stdio: "pipe" });
 }
 
+export interface WorktreeOptions {
+  /** The ref the worktree's new branch starts at. Omitted means git's own default —
+   *  the main checkout's HEAD — which is what every caller before child worktrees
+   *  relied on, so omitting it must keep their argv byte-identical.
+   *
+   *  Ignored by the "branch already exists" fallback below: `worktree add <path>
+   *  <branch>` takes no start point, and an existing branch already has a history
+   *  that a start point could only contradict. */
+  baseRef?: string;
+}
+
 /**
  * Create a per-task git worktree for each service and return ServiceRefs pointing
  * at the worktrees. Layout: <repo>/.claude/worktrees/<KEY> — i.e. inside each repo,
@@ -52,6 +63,7 @@ export function createWorktrees(
   key: string,
   summary: string,
   log: (m: string) => void,
+  opts: WorktreeOptions = {},
 ): ServiceRef[] {
   const branch = branchName(key, summary);
   return services.map((s) => {
@@ -70,16 +82,42 @@ export function createWorktrees(
       }
       fs.mkdirSync(path.dirname(wtPath), { recursive: true });
       try {
-        git(s.path, ["worktree", "add", wtPath, "-b", branch]);
+        git(s.path, ["worktree", "add", wtPath, "-b", branch, ...(opts.baseRef ? [opts.baseRef] : [])]);
       } catch {
         // Branch already exists — attach the worktree to it instead of creating it.
         git(s.path, ["worktree", "add", wtPath, branch]);
       }
-      log(`worktree ${s.name}: created ${wtPath} on ${branch}`);
+      log(`worktree ${s.name}: created ${wtPath} on ${branch}${opts.baseRef ? ` (off ${opts.baseRef})` : ""}`);
       return { name: s.name, path: wtPath, isGit: true };
     } catch (e) {
       log(`worktree ${s.name}: failed (${e}) — falling back to the main checkout`);
       return s;
     }
   });
+}
+
+/**
+ * Make sure `branch` exists in `repo`, creating it at `from` (default: the checkout's
+ * current HEAD) when it does not. Returns false when it could not be created — the
+ * caller must then refuse, because a child worktree that silently branches off the
+ * wrong base looks identical to a correct one until the merge.
+ *
+ * Idempotent, and deliberately so: several children in one repo each call this before
+ * their own worktree, and an existing parent branch must never be moved under work
+ * that is already on it. `--quiet` keeps a missing ref off stderr, so an absent branch
+ * is an ordinary answer rather than noise in the log.
+ */
+export function ensureBranch(repo: string, branch: string, from?: string): boolean {
+  try {
+    git(repo, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]);
+    return true;
+  } catch {
+    /* absent — create it below */
+  }
+  try {
+    git(repo, from ? ["branch", branch, from] : ["branch", branch]);
+    return true;
+  } catch {
+    return false;
+  }
 }
