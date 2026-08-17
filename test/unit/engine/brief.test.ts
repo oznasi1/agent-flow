@@ -26,3 +26,46 @@ describe("briefMarkdown", () => {
     expect(out).toContain("## Ticket description\n\npadded on both sides\n\n## Plan");
   });
 });
+
+describe("briefMarkdown with children", () => {
+  const detail = { key: "ASM-1", summary: "parent work", descriptionText: "do the thing" };
+  const children = [
+    { key: "ASM-2", summary: "first bit", path: ".claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
+    { key: "ASM-3", summary: "second bit", path: ".claude/worktrees/ASM-3", branch: "ASM-3-second-bit" },
+  ];
+
+  it("is byte-identical to the childless brief when no orchestration is passed", () => {
+    expect(briefMarkdown(detail, "Claude Code")).toBe(briefMarkdown(detail, "Claude Code", undefined));
+  });
+
+  it("adds nothing for an empty child list", () => {
+    expect(briefMarkdown(detail, "Claude Code", { children: [], parentBranch: "ASM-1-parent-work" }))
+      .toBe(briefMarkdown(detail, "Claude Code"));
+  });
+
+  it("renders a row per child", () => {
+    const md = briefMarkdown(detail, "Claude Code", { children, parentBranch: "ASM-1-parent-work" });
+    expect(md).toContain("## Children — one subagent each");
+    expect(md).toContain("| Ticket | Summary | Worktree | Branch |");
+    expect(md).toContain("| ASM-2 | first bit | `.claude/worktrees/ASM-2` | `ASM-2-first-bit` |");
+    expect(md).toContain("| ASM-3 | second bit | `.claude/worktrees/ASM-3` | `ASM-3-second-bit` |");
+  });
+
+  it("names the parent branch as the merge target", () => {
+    const md = briefMarkdown(detail, "Claude Code", { children, parentBranch: "ASM-1-parent-work" });
+    expect(md).toContain("Merge finished children into `ASM-1-parent-work`; never into main.");
+  });
+
+  it("escapes a pipe in a summary so the table survives it", () => {
+    const md = briefMarkdown(detail, "Claude Code", {
+      children: [{ key: "ASM-4", summary: "a | b", path: "p", branch: "br" }],
+      parentBranch: "ASM-1-parent-work",
+    });
+    expect(md).toContain("| ASM-4 | a \\| b | `p` | `br` |");
+  });
+
+  it("keeps the ticket description above the children", () => {
+    const md = briefMarkdown(detail, "Claude Code", { children, parentBranch: "ASM-1-parent-work" });
+    expect(md.indexOf("do the thing")).toBeLessThan(md.indexOf("## Children"));
+  });
+});
