@@ -27,7 +27,8 @@ import { briefMarkdown } from "./engine/brief";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, PresenceRecord, type CurrentWindow } from "./engine/presence";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
-import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
+import { branchName, createWorktrees, ensureBranch, repoRootOfWorktree } from "./engine/worktree";
+import { buildTree, type TreeLeaf, type TreeResult } from "./engine/taskTree";
 import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { newNote, newSection, noteStatus, sanitizeNotes, sanitizeSections } from "./notepad";
@@ -1932,6 +1933,40 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // Ahead of take_started deliberately: the take never begins, so the funnel gets
     // neither a start nor a terminator rather than a phantom "cancelled".
     if (this.remoteControlBlocksLaunch(cfg)) return;
+
+    // A ticket with children is a different question from a ticket without them, and it
+    // has to be asked before anything else: fan-out hands the whole take to takeBatch,
+    // which asks its own prompt-mode and destination questions and owns its own
+    // reporting. Ahead of take_started for the same reason the guard above is — a take
+    // that becomes a fan-out never begins here, so the funnel must get neither a start
+    // nor a terminator rather than a start it never closes. Both pickers also resolve
+    // before any git write: cancelling either leaves nothing on disk.
+    const probed = await this.probeTree(key);
+    if (probed?.tree.leaves.length) {
+      const mode = await this.chooseTreeMode(key, probed.tree.leaves.length);
+      if (!mode) return;
+      if (mode !== "parent") {
+        const picked = await this.chooseLeaves(probed.tree.leaves);
+        if (!picked) return;
+        // Ticking nothing is "just the parent" said the long way round — fall through
+        // to the ordinary take rather than launching an empty fan-out.
+        if (picked.length) {
+          if (probed.tree.dropped.length) {
+            this.log(
+              `takeTask ${key}: tree dropped ${probed.tree.dropped.length} (${probed.tree.dropped.join(", ")})`,
+            );
+          }
+          const parent = { key, branch: branchName(key, probed.detail.summary) };
+          if (mode === "fanout") {
+            await this.takeBatch(picked.map((l) => l.key), this.fanOutRepos(cfg, preselected), parent);
+          } else {
+            await this.takeOrchestrated(probed.detail, picked, parent.branch);
+          }
+          return;
+        }
+      }
+    }
+
     const flow = startFlow();
     const taskFp = fingerprint(key);
     let destination: DestinationProp | undefined;
@@ -1983,8 +2018,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** Launch several tasks at once, each in its own git worktree with its own seeded
    * Claude session. The prompt mode, destination and layout are asked once and applied
    * to all; one task's failure never aborts the rest. Each task opens worktrees in the
-   * repos it's inferred to touch, narrowed to the filtered set. */
-  public async takeBatch(keys: string[], repos: string[]): Promise<void> {
+   * repos it's inferred to touch, narrowed to the filtered set.
+   *
+   * `parent` turns the batch into a fan-out under one ticket: every child branches off
+   * the parent's branch instead of the checkout's HEAD, and carries `parentKey` onto
+   * its run record. Omitting it must leave every existing caller's behaviour
+   * byte-identical — no `ensureBranch` call, no `baseRef`, no `parentKey`. */
+  public async takeBatch(
+    keys: string[],
+    repos: string[],
+    parent?: { key: string; branch: string },
+  ): Promise<void> {
     const cfg = getConfig();
     if (!keys.length) return;
 
@@ -2048,7 +2092,27 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       try {
         const detail = await this.provider().detail(key);
         const wanted = this.reposForTask(detail, filterSet);
-        const services = createWorktrees(wanted, detail.key, detail.summary, this.log);
+        // A child branches off its parent's branch, so that branch has to exist first —
+        // in every repo this child is about to open, before any worktree is made there.
+        // ensureBranch is idempotent, so children sharing a repo cost one rev-parse
+        // each. A repo where it cannot be made fails this child rather than letting it
+        // branch off main, which would look identical to a correct worktree until the
+        // merge.
+        if (parent) {
+          const noBranch = wanted.filter((r) => !ensureBranch(r.path, parent.branch));
+          if (noBranch.length) {
+            throw new Error(
+              `couldn't create the parent branch ${parent.branch} in ${noBranch.map((r) => r.name).join(", ")}`,
+            );
+          }
+        }
+        const services = createWorktrees(
+          wanted,
+          detail.key,
+          detail.summary,
+          this.log,
+          parent ? { baseRef: parent.branch } : {},
+        );
         // A worktree is mandatory: two tasks sharing a checkout would clobber each
         // other's brief. createWorktrees returns the original ref when `git worktree
         // add` fails — detect that and fail the task rather than launch into a collision.
@@ -2067,6 +2131,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             planMd: briefMarkdown(detail, providerLabel(cfg.agentProvider)),
             descriptionText: detail.descriptionText,
             services,
+            ...(parent ? { parentKey: parent.key } : {}),
           },
         });
       } catch (e) {
@@ -2162,6 +2227,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             seedAgent: cfg.seedAgent,
             openIn: "new",
             remoteControl: wantRemoteControl,
+            // Spread rather than `parentKey: parent?.key`, so a parentless batch sends
+            // the request it always sent — the run record has one representation of
+            // "no parent", and that is the field's absence (see Run.parentKey).
+            ...(parent ? { parentKey: parent.key } : {}),
           });
           appliedRemoteControl = result.remoteControl;
           launched++;
@@ -2238,6 +2307,101 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     );
     const narrowed = filterSet.filter((r) => inferred.has(r.name));
     return narrowed.length ? narrowed : filterSet;
+  }
+
+  /** The leaves under `key`, with the detail the probe already had to fetch.
+   *
+   *  `null` means "behave exactly as Take did before trees existed": this source has no
+   *  children concept, or the probe failed. Never throws and never blocks the take — a
+   *  tree is an offer, and the ticket must stay takeable when the offer cannot be made.
+   *  The `detail` comes back because the parent's branch name needs its summary; the
+   *  ordinary path fetches its own again, which is one extra read on a path that is
+   *  already several. */
+  private async probeTree(key: string): Promise<{ detail: TaskDetail; tree: TreeResult } | null> {
+    const children = this.provider().caps.children;
+    if (!children) return null;
+    try {
+      const detail = await this.provider().detail(key);
+      const tree = await vscode.window.withProgress(
+        { location: { viewId: TasksViewProvider.viewType }, title: `Looking for work under ${key}…` },
+        () => buildTree(key, (k) => children.of(k)),
+      );
+      return { detail, tree };
+    } catch (e) {
+      this.log(`probeTree ${key}: failed (${e}) — taking the ticket on its own`);
+      return null;
+    }
+  }
+
+  /** How to work the leaves. `undefined` is a cancel; "parent" is today's behaviour,
+   *  and doubles as the integrate-later path once the children have landed. */
+  private async chooseTreeMode(
+    key: string,
+    leafCount: number,
+  ): Promise<"fanout" | "orchestrator" | "parent" | undefined> {
+    const p = await vscode.window.showQuickPick(
+      [
+        {
+          label: "A session per child",
+          detail: `${leafCount} worktree${leafCount === 1 ? "" : "s"}, ${leafCount} session${leafCount === 1 ? "" : "s"}, each on its own branch`,
+          mode: "fanout" as const,
+        },
+        {
+          label: "One orchestrator session, children as subagents",
+          detail: `1 session in ${key}, ${leafCount} child worktree${leafCount === 1 ? "" : "s"} for it to dispatch into`,
+          mode: "orchestrator" as const,
+        },
+        {
+          label: `Just ${key}`,
+          detail: "One worktree for the parent, as before",
+          mode: "parent" as const,
+        },
+      ],
+      {
+        title: `${key} — ${leafCount} ${leafCount === 1 ? "leaf" : "leaves"} under it. How do you want to work them?`,
+        ignoreFocusOut: true,
+      },
+    );
+    return p?.mode;
+  }
+
+  /** Which leaves to take. Nothing is pre-picked: a tree can be large, and every ticked
+   *  row costs a worktree and a session. `undefined` is a cancel; an empty array is a
+   *  deliberate "none of them", which the caller treats as "just the parent". */
+  private async chooseLeaves(leaves: TreeLeaf[]): Promise<TreeLeaf[] | undefined> {
+    const picked = await vscode.window.showQuickPick(
+      leaves.map((l) => ({
+        label: `${l.key} — ${l.summary}`,
+        description: l.statusCategory === "done" ? "done" : undefined,
+        detail: `${l.parentKey} › ${l.key}`,
+        leaf: l,
+      })),
+      { title: "Which of these do you want to take?", canPickMany: true, ignoreFocusOut: true },
+    );
+    return picked?.map((p) => p.leaf);
+  }
+
+  /** The repo names a fan-out hands `takeBatch` as its filter set.
+   *
+   *  `takeBatch`'s `repos` is a filter, not a suggestion: `resolveBatchRepos` reads an
+   *  empty list as "nothing usable here", toasts, and launches nothing — so the fan-out
+   *  has to name a set. The in-card selection is used when there is one, because it is
+   *  the only repo intent the user has actually expressed on this take; otherwise it is
+   *  every discovered repo, and each child narrows that by its own inference in
+   *  `reposForTask` (fan-out children resolve their own repos — only orchestrator mode
+   *  confines them to the parent's set). */
+  private fanOutRepos(cfg: AgentFlowConfig, preselected?: string[]): string[] {
+    if (preselected?.length) return preselected;
+    return discoverRepos(cfg.reposRoot, cfg.repoBlocklist).map((r) => r.name);
+  }
+
+  /** Orchestrator-mode take: implemented in the next task. */
+  private async takeOrchestrated(
+    _detail: TaskDetail,
+    _leaves: TreeLeaf[],
+    _parentBranch: string,
+  ): Promise<void> {
+    throw new Error("orchestrator mode not wired yet");
   }
 
   /** PR-review kick-off: the same open+seed flow as Take, but always in a worktree and

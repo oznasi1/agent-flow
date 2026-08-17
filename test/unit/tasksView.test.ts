@@ -34,7 +34,12 @@ vi.mock("../../src/engine/worktree", async () => {
   const actual = await vi.importActual<typeof import("../../src/engine/worktree")>(
     "../../src/engine/worktree",
   );
-  return { ...actual, createWorktrees: vi.fn((s: unknown) => s) };
+  // ensureBranch shells out to git too, so it is stubbed for the same reason
+  // createWorktrees is. It answers true by default — the parent branch exists — so a
+  // test only has to script the refusal. branchName stays REAL (it comes from
+  // `actual`), which is how the child-worktree tests below compute the parent branch
+  // from the fixture's own summary instead of hardcoding a slug.
+  return { ...actual, createWorktrees: vi.fn((s: unknown) => s), ensureBranch: vi.fn(() => true) };
 });
 // folderName is a pure function (no vscode/fs side effects) — keep the real one so
 // batch's dedup candidates carry genuine key-qualified labels, and only stub the
@@ -103,7 +108,7 @@ import { parseJiraError } from "../../src/tasks/jira/errors";
 import { getConfig } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
 import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge } from "../../src/engine/workspace";
-import { createWorktrees } from "../../src/engine/worktree";
+import { branchName, createWorktrees, ensureBranch } from "../../src/engine/worktree";
 import { openSharedWorkspace } from "../../src/engine/batchWorkspace";
 import { readLiveWindows, windowIdentity, currentWindow } from "../../src/engine/presence";
 import { readRuns } from "../../src/engine/runs";
@@ -5137,5 +5142,304 @@ describe("caps refresh", () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "tasks" }));
+  });
+});
+
+// ── a ticket with children ─────────────────────────────────────────────────
+// The wholesale client mock (makeClient) deliberately has NO `childrenOf`, so the
+// Jira provider declares no `children` capability and every Take test above runs the
+// pre-tree flow untouched. These blocks add the method locally, which is the only
+// thing that turns the probe on.
+describe("takeTask: a ticket with children", () => {
+  /** One direct child of ASM-1, which has no children of its own — so buildTree
+   *  yields exactly one leaf. */
+  const CHILDREN: Record<string, { key: string; summary: string; type: string; statusCategory: string }[]> = {
+    "ASM-1": [{ key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "new" }],
+  };
+  /** The parent's branch, computed from the REAL branchName and the summary
+   *  makeClient's getDetail actually returns ("Do the thing") — never a guessed slug,
+   *  which would fail here as if the routing were wrong. */
+  const PARENT_BRANCH = branchName("ASM-1", "Do the thing");
+
+  beforeEach(() => {
+    clientStub.childrenOf = vi.fn(async (key: string) => CHILDREN[key] ?? []);
+    // A *successful* worktree returns a path different from the main checkout —
+    // takeBatch fails a child whose path came back unchanged (see its own describe).
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+  });
+  afterEach(() => {
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+
+  it("does not probe at all when the source has no children capability", async () => {
+    delete (clientStub as { childrenOf?: unknown }).childrenOf;
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    // The pre-tree flow exactly: one ticket read (resolveKickoff's), no picker at all
+    // (a preselected repo, taskMode "plan" and worktree "never" answer everything).
+    expect(clientStub.getDetail).toHaveBeenCalledTimes(1);
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks how to work the leaves, counting them in the title", async () => {
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]); // cancels at the mode picker
+    expect(vi.mocked(window.showQuickPick).mock.calls[0][1]).toEqual(
+      expect.objectContaining({ title: "ASM-1 — 1 leaf under it. How do you want to work them?" }),
+    );
+  });
+
+  it("offers exactly the three modes, naming the parent on the third", async () => {
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string; detail: string }[];
+    expect(items.map((i) => i.label)).toEqual([
+      "A session per child",
+      "One orchestrator session, children as subagents",
+      "Just ASM-1",
+    ]);
+    expect(items[0].detail).toBe("1 worktree, 1 session, each on its own branch");
+    expect(items[1].detail).toBe("1 session in ASM-1, 1 child worktree for it to dispatch into");
+  });
+
+  it("takes nothing when the mode picker is cancelled", async () => {
+    const { provider, posted } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    // No git write and no window: cancelling the first question must leave nothing
+    // behind, on disk or on screen.
+    expect(ensureBranch).not.toHaveBeenCalled();
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(posted().filter((m) => m.type === "toast")).toEqual([]);
+  });
+
+  it("pre-selects nothing in the leaf picker", async () => {
+    answerPicks(pickFirst); // fan-out, then cancel the leaf picker
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const items = vi.mocked(window.showQuickPick).mock.calls[1][0] as {
+      label: string; description?: string; detail: string; picked?: boolean;
+    }[];
+    expect(items.map((i) => i.label)).toEqual(["ASM-2 — first bit"]);
+    // Every ticked row costs a worktree and a session, so nothing arrives ticked.
+    expect(items.map((i) => i.picked)).toEqual([undefined]);
+    expect(items[0].detail).toBe("ASM-1 › ASM-2");
+    expect(items[0].description).toBe(undefined);
+    expect(vi.mocked(window.showQuickPick).mock.calls[1][1]).toEqual(
+      expect.objectContaining({ title: "Which of these do you want to take?", canPickMany: true }),
+    );
+  });
+
+  it("marks a leaf that is already done", async () => {
+    clientStub.childrenOf = vi.fn(async (key: string) =>
+      key === "ASM-1" ? [{ key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "done" }] : [],
+    );
+    answerPicks(pickFirst);
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const items = vi.mocked(window.showQuickPick).mock.calls[1][0] as { description?: string }[];
+    expect(items.map((i) => i.description)).toEqual(["done"]);
+  });
+
+  it("takes nothing when the leaf picker is cancelled", async () => {
+    answerPicks(pickFirst);
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(ensureBranch).not.toHaveBeenCalled();
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the ordinary single take when no leaf is selected", async () => {
+    answerPicks(pickFirst, () => []); // fan-out, then tick nothing
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(ensureBranch).not.toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ ticket: expect.objectContaining({ key: "ASM-1" }) }),
+    );
+  });
+
+  it("takes just the parent without asking which leaves", async () => {
+    answerPicks((items: unknown[]) => items[2]); // "Just ASM-1"
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1); // no leaf picker
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ ticket: expect.objectContaining({ key: "ASM-1" }) }),
+    );
+  });
+
+  it("routes fan-out into takeBatch with the parent branch as the base", async () => {
+    answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
+    const { provider } = setup({ authed: true });
+    const takeBatch = vi.spyOn(provider, "takeBatch").mockResolvedValue(undefined);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(takeBatch).toHaveBeenCalledWith(["ASM-2"], ["account-service"], {
+      key: "ASM-1",
+      branch: PARENT_BRANCH,
+    });
+  });
+
+  it("hands the fan-out every discovered repo when the card named none", async () => {
+    // takeBatch's repo argument is a FILTER, and an empty one means "nothing usable"
+    // (resolveBatchRepos) — so the fan-out has to name a set. With no in-card
+    // selection that set is every discovered repo, and each child then narrows it by
+    // its own inference in reposForTask.
+    answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
+    const { provider } = setup({ authed: true });
+    const takeBatch = vi.spyOn(provider, "takeBatch").mockResolvedValue(undefined);
+    await provider.takeTask("ASM-1", "command");
+    expect(takeBatch).toHaveBeenCalledWith(["ASM-2"], ["account-service", "centaur"], {
+      key: "ASM-1",
+      branch: PARENT_BRANCH,
+    });
+  });
+
+  it("actually branches the child off the parent, end to end", async () => {
+    // Not a spy: the routing test above would pass just as happily against a repo
+    // filter that makes takeBatch launch nothing at all.
+    answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(ensureBranch).toHaveBeenCalledWith("/repos/account-service", PARENT_BRANCH);
+    expect(createWorktrees).toHaveBeenCalledWith(
+      [expect.objectContaining({ name: "account-service" })],
+      "ASM-2",
+      "Do the thing",
+      expect.any(Function),
+      { baseRef: PARENT_BRANCH },
+    );
+    expect(openWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ ticket: expect.objectContaining({ key: "ASM-2" }), parentKey: "ASM-1" }),
+    );
+  });
+
+  it("opens no funnel for a take that becomes a fan-out", async () => {
+    // takeBatch owns its own reporting, so takeTask must not emit take_started and
+    // then walk away — that would be a funnel with no terminator.
+    answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
+    const { provider } = setup({ authed: true });
+    vi.spyOn(provider, "takeBatch").mockResolvedValue(undefined);
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(trackSpy.mock.calls.map((c) => (c[0] as { name: string }).name)).toEqual([]);
+  });
+
+  it("degrades to the ordinary take when the ticket read behind the probe fails", async () => {
+    clientStub.getDetail.mockRejectedValueOnce(new Error("500")); // the probe's read only
+    const { provider, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(logged).toContain("probeTree ASM-1: failed (Error: 500) — taking the ticket on its own");
+  });
+
+  it("takes the ticket on its own when the children fetch fails", async () => {
+    clientStub.childrenOf = vi.fn(async () => {
+      throw new Error("500");
+    });
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    // buildTree reports the unexplored root and yields no leaves — there is nothing to
+    // offer, so the ordinary take runs and no picker appears.
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs what the tree dropped", async () => {
+    clientStub.childrenOf = vi.fn(async (key: string) =>
+      key === "ASM-1"
+        ? Array.from({ length: 25 }, (_, i) => ({ key: `K-${i}`, summary: "x", type: "Sub-task", statusCategory: "new" }))
+        : [],
+    );
+    answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
+    const { provider, logged } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(vi.mocked(window.showQuickPick).mock.calls[0][1]).toEqual(
+      expect.objectContaining({ title: "ASM-1 — 20 leaves under it. How do you want to work them?" }),
+    );
+    expect(logged).toContain("takeTask ASM-1: tree dropped 5 (K-20, K-21, K-22, K-23, K-24)");
+  });
+});
+
+describe("takeBatch with a parent", () => {
+  const PARENT = { key: "ASM-1", branch: "ASM-1-parent" };
+
+  beforeEach(() => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+  });
+  afterEach(() => {
+    // Neither implementation has a global reset (clearMocks only clears call history),
+    // so both restores are load-bearing for the describes that follow.
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+    vi.mocked(ensureBranch).mockReturnValue(true);
+  });
+
+  it("makes the parent branch before the child worktree, then branches off it", async () => {
+    const { provider } = setup({ authed: true });
+    await provider.takeBatch(["ASM-2"], ["api"], PARENT);
+    expect(ensureBranch).toHaveBeenCalledWith("/repos/api", "ASM-1-parent");
+    expect(createWorktrees).toHaveBeenCalledWith(
+      [expect.objectContaining({ name: "api" })],
+      "ASM-2",
+      "Do the thing",
+      expect.any(Function),
+      { baseRef: "ASM-1-parent" },
+    );
+    // Order matters: a worktree created before its base branch exists would silently
+    // start from main.
+    expect(vi.mocked(ensureBranch).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(createWorktrees).mock.invocationCallOrder[0],
+    );
+  });
+
+  it("fails that child rather than branching off main when the parent branch cannot be made", async () => {
+    vi.mocked(ensureBranch).mockReturnValue(false);
+    const { provider, posted } = setup({ authed: true });
+    await provider.takeBatch(["ASM-2"], ["api"], PARENT);
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+    const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
+    expect(toast.level).toBe("error");
+    expect(toast.message).toBe(
+      "Launched 0 of 1 in parallel. Failed: ASM-2 (couldn't create the parent branch ASM-1-parent in api)",
+    );
+  });
+
+  it("stamps parentKey on each separate window's request", async () => {
+    const { provider } = setup({ authed: true });
+    await provider.takeBatch(["ASM-2"], ["api"], PARENT);
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ parentKey: "ASM-1" }));
+  });
+
+  it("stamps parentKey on every task of a shared window", async () => {
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: true } as never); // the layout pick
+    const { provider } = setup({ authed: true });
+    await provider.takeBatch(["ASM-2", "ASM-3"], ["api"], PARENT);
+    const req = vi.mocked(openSharedWorkspace).mock.calls[0][0];
+    expect(req.tasks.map((t) => t.parentKey)).toEqual(["ASM-1", "ASM-1"]);
+  });
+
+  it("touches no branch and stamps no parent without one", async () => {
+    const { provider } = setup({ authed: true });
+    await provider.takeBatch(["ASM-2"], ["api"]);
+    expect(ensureBranch).not.toHaveBeenCalled();
+    expect(createWorktrees).toHaveBeenCalledWith(
+      [expect.objectContaining({ name: "api" })],
+      "ASM-2",
+      "Do the thing",
+      expect.any(Function),
+      {},
+    );
+    // Absent, not undefined: the run record must look exactly as it did before parents
+    // existed (see Run.parentKey).
+    expect("parentKey" in vi.mocked(openWorkspace).mock.calls[0][0]).toBe(false);
   });
 });
