@@ -140,6 +140,31 @@ export function DeckDetail({ card, sourceLabel, onClose, onForget }: DeckDetailP
             )}
       </div>
 
+      {(r.run.children?.length ?? 0) > 0 && (
+        <div className="dd-sec">
+          <div className="dd-lbl">Children</div>
+          {/* No sessions of their own — the fan-out orchestrator's subagent per
+           * leaf worktree never opens a Claude Code session, so these never earn
+           * a card. This drawer is the only place they surface. Keyed by
+           * key+repo, not key alone: the same ticket key can span two repos
+           * (its own row per repo, per the fan-out shape). */}
+          {r.run.children!.map((c) => (
+            <button
+              type="button"
+              className="dd-child"
+              key={`${c.key}:${c.repo}`}
+              aria-label={`Copy ${c.key} worktree path`}
+              title={c.path}
+              onClick={() => copy(c.path)}
+            >
+              <span className="k">{c.key}</span>
+              <span className="t">{c.summary}</span>
+              <span className="bn">⎇ {c.branch}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="dd-sec">
         <div className="dd-lbl">Pull requests</div>
         {withPr.length > 0

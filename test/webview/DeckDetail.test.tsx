@@ -225,6 +225,58 @@ describe("DeckDetail", () => {
   });
 });
 
+// The parent's drawer is where a run's child worktrees surface — they have no
+// sessions of their own, so they get no card, only a row here.
+describe("child worktrees", () => {
+  const children = [
+    { key: "ASM-2", summary: "first bit", repo: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
+    { key: "ASM-3", summary: "second bit", repo: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-3", branch: "ASM-3-second-bit" },
+  ];
+
+  const withChildren = (over: unknown[]) => mkCard({ run: { ...mkCard().status.run, children: over } as never });
+
+  it("renders nothing for a run with no children field", () => {
+    render1(mkCard());
+    expect(screen.queryByText("Children")).not.toBeInTheDocument();
+  });
+
+  it("renders nothing for a run with an empty children array", () => {
+    // Distinct from the case above, and the one that pins the `.length` guard: a
+    // truthiness check would render an empty Children section here.
+    render1(withChildren([]));
+    expect(screen.queryByText("Children")).not.toBeInTheDocument();
+  });
+
+  it("lists a row per child worktree", () => {
+    render1(withChildren(children));
+    expect(screen.getByText("Children")).toBeInTheDocument();
+    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    expect(screen.getByText("first bit")).toBeInTheDocument();
+    expect(screen.getByTitle("/repos/centaur/.claude/worktrees/ASM-2")).toBeInTheDocument();
+  });
+
+  it("names the branch each child is on", () => {
+    render1(withChildren(children));
+    expect(screen.getByText("⎇ ASM-2-first-bit")).toBeInTheDocument();
+  });
+
+  it("copies a child's worktree path on click", () => {
+    const writeText = vi.fn();
+    Object.assign(navigator, { clipboard: { writeText } });
+    render1(withChildren(children));
+    fireEvent.click(screen.getByRole("button", { name: "Copy ASM-2 worktree path" }));
+    expect(writeText).toHaveBeenCalledWith("/repos/centaur/.claude/worktrees/ASM-2");
+  });
+
+  it("renders one row per repo when a child spans two", () => {
+    render1(withChildren([
+      children[0],
+      { ...children[0], repo: "frontend", path: "/repos/frontend/.claude/worktrees/ASM-2" },
+    ]));
+    expect(screen.getAllByText("ASM-2")).toHaveLength(2);
+  });
+});
+
 // Layout guards for the same bug. jsdom does no layout, so these assert the two
 // rules that make the drawer structurally incapable of scrolling sideways —
 // whatever a future header, hint or PR block puts inside it.

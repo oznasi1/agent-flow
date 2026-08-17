@@ -557,6 +557,23 @@ export const DECK_CSS = `
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dd-act .h.id { font-family: var(--vscode-editor-font-family); }
 
+  /* One child worktree, same list-row shape as .dd-act. The drawer already
+     proved (in the .dd-hd .k comment above) that a nowrap flex item's automatic
+     minimum is its own text width — a long branch or key here would reopen that
+     same horizontal-scroll bug unless it can shrink. \`.t\`'s \`flex: 1\` gives it
+     a zero flex-basis, so it absorbs the shrinking before \`.k\`/\`.bn\` ever have
+     to; \`overflow: hidden\` on all three zeroes their automatic minimum too, so
+     even a row where the key and branch alone are wider than the drawer
+     ellipsizes instead of pushing the row (and the drawer) sideways. */
+  .dd-child { display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left;
+    background: none; border: 0; padding: 3px 0; color: inherit; cursor: pointer; min-width: 0; }
+  .dd-child:hover { background: var(--vscode-list-hoverBackground); }
+  .dd-child .k { flex: none; font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .85;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dd-child .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dd-child .bn { flex: none; font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .7;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
   /* At any realistic panel width there is no arrangement in which four columns
      and a 460px drawer all fit — something is always off-screen. .board is
      already a horizontal scroller, so this does not MOVE the columns: it adds
