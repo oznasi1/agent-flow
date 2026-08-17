@@ -115,4 +115,16 @@ describe("buildTree", () => {
     expect(out.leaves).toHaveLength(20);
     expect(out.dropped).toHaveLength(5);
   });
+
+  it("walks nothing for maxDepth 0, and never returns the root as a leaf", async () => {
+    const fetch = fetchFrom({ A: [{ key: "B", summary: "b" }] });
+    const out = await buildTree("A", fetch, { maxDepth: 0 });
+    expect(out).toEqual({ leaves: [], dropped: [] });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("treats a negative maxDepth the same as zero", async () => {
+    const out = await buildTree("A", fetchFrom({ A: [{ key: "B", summary: "b" }] }), { maxDepth: -1 });
+    expect(out).toEqual({ leaves: [], dropped: [] });
+  });
 });

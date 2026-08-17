@@ -57,6 +57,11 @@ export async function buildTree(
 ): Promise<TreeResult> {
   const maxDepth = limits.maxDepth ?? MAX_TREE_DEPTH;
   const maxLeaves = limits.maxLeaves ?? MAX_TREE_LEAVES;
+  // Zero (or negative) depth means "consider no children", and the root is never a
+  // leaf under any input — so there is nothing to walk and nothing to report. Guarded
+  // here rather than inside the loop because the boundary check below is `>=`, which
+  // the synthetic root node would otherwise satisfy at depth 0.
+  if (maxDepth < 1) return { leaves: [], dropped: [] };
   const seen = new Set<string>([rootKey]);
   const dropped: string[] = [];
   const leaves: TreeLeaf[] = [];
