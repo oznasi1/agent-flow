@@ -7,11 +7,11 @@ import { Filter, Task, Size } from "../types";
 // would drag the editor API into this module, which is specified to load without
 // it. A type-only import is erased at build time, so the chain is never followed
 // at runtime. (`./fields` needs no such care — it imports nothing.)
-import type { TaskDetail } from "./jira/client";
+import type { ChildRef, TaskDetail } from "./jira/client";
 import type { FieldPrompt } from "./fields";
 import type { AuthProbe, ProjectProbe } from "../engine/doctor";
 
-export type { FieldPrompt, Task, TaskDetail };
+export type { ChildRef, FieldPrompt, Task, TaskDetail };
 
 /** Where a task can move to next, and what that move demands. `fields` is already
  * normalized to the generic prompt vocabulary — no source metadata escapes. */
@@ -62,6 +62,12 @@ export interface Capabilities {
     list(): Promise<string[] | null>;
     update(key: string, delta: { add?: string[]; remove?: string[] }): Promise<void>;
   };
+  /** The children of a ticket, ONE level down. The caller recurses (see
+   *  `engine/taskTree.ts`) so that a source answers only the question it can answer
+   *  cheaply. Absent on a source with no parent/child concept — and that absence is
+   *  load-bearing: it is the whole reason Take is unchanged for such a source, so a
+   *  connector must omit this rather than supply a stub that answers `[]`. */
+  children?: { of(key: string): Promise<ChildRef[]> };
 }
 
 /** Capabilities as they cross into the webview. The capability objects cannot be

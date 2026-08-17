@@ -871,6 +871,67 @@ describe("shapeSnapshot", () => {
   });
 });
 
+describe("childrenOf", () => {
+  it("maps issues to child refs", async () => {
+    const issues = [
+      { key: "ASM-2", fields: { summary: "one", issuetype: { name: "Sub-task" }, status: { statusCategory: { key: "new" } } } },
+      { key: "ASM-3", fields: { summary: "two", issuetype: { name: "Sub-task" }, status: { statusCategory: { key: "done" } } } },
+    ];
+    installFetch([jsonResponse({ issues })]);
+    expect(await client().childrenOf("ASM-1")).toEqual([
+      { key: "ASM-2", summary: "one", type: "Sub-task", statusCategory: "new" },
+      { key: "ASM-3", summary: "two", type: "Sub-task", statusCategory: "done" },
+    ]);
+  });
+
+  it("asks only for the three fields a child row needs", async () => {
+    const fetchMock = installFetch([jsonResponse({ issues: [{ key: "ASM-9" }] })]);
+    await client().childrenOf("ASM-1");
+    const body = bodyOf(fetchMock, 0);
+    expect(body.fields).toEqual(["summary", "issuetype", "status"]);
+    expect(body.jql).toBe('parent = "ASM-1" ORDER BY key ASC');
+  });
+
+  it("falls through to the Epic Link candidate when `parent` answers empty", async () => {
+    const fetchMock = installFetch([
+      jsonResponse({ issues: [] }),
+      jsonResponse({ issues: [{ key: "ASM-9" }] }),
+    ]);
+    const out = await client().childrenOf("ASM-1");
+    expect(out.map((c) => c.key)).toEqual(["ASM-9"]);
+    expect(fetchMock.mock.calls.map((c) => JSON.parse((c[1] as { body: string }).body).jql)).toEqual([
+      'parent = "ASM-1" ORDER BY key ASC',
+      '"Epic Link" = "ASM-1" ORDER BY key ASC',
+    ]);
+  });
+
+  it("returns [] when every candidate answers empty", async () => {
+    installFetch([jsonResponse({ issues: [] }), jsonResponse({ issues: [] })]);
+    expect(await client().childrenOf("ASM-1")).toEqual([]);
+  });
+
+  it("moves to the next candidate when one is rejected, and throws only if all fail", async () => {
+    const fetchMock = installFetch([textResponse("", 400), textResponse("", 400)]);
+    await expect(client().childrenOf("ASM-1")).rejects.toThrow();
+    // Both candidates must actually have been attempted — without this the test
+    // passes even if the ladder gave up after the first rejection.
+    expect(fetchMock.mock.calls).toHaveLength(2);
+  });
+
+  it("rethrows an auth failure immediately instead of trying the next candidate", async () => {
+    const fetchMock = installFetch([textResponse("", 401)]);
+    await expect(client().childrenOf("ASM-1")).rejects.toBeInstanceOf(mod.JiraAuthError);
+    expect(fetchMock.mock.calls).toHaveLength(1);
+  });
+
+  it("tolerates an issue with no summary, type or status", async () => {
+    installFetch([jsonResponse({ issues: [{ key: "ASM-4" }] })]);
+    expect(await client().childrenOf("ASM-1")).toEqual([
+      { key: "ASM-4", summary: "", type: "", statusCategory: null },
+    ]);
+  });
+});
+
 describe("getActiveSprintId — board reuse", () => {
   it("reuses an already-probed board instead of listing boards again", async () => {
     const fetchMock = installFetch([

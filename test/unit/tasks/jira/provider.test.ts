@@ -354,6 +354,24 @@ describe("caps — narrowing to the detected project shape", () => {
   });
 });
 
+describe("caps.children", () => {
+  it("is present and delegates to the client when the client can answer", async () => {
+    const childrenOf = vi.fn(async () => [
+      { key: "ASM-2", summary: "child", type: "Sub-task", statusCategory: "new" as const },
+    ]);
+    const provider = new JiraProvider(client({ childrenOf }));
+    expect(await provider.caps.children!.of("ASM-1")).toEqual([
+      { key: "ASM-2", summary: "child", type: "Sub-task", statusCategory: "new" },
+    ]);
+    expect(childrenOf).toHaveBeenCalledWith("ASM-1");
+  });
+
+  it("is absent when the client has no childrenOf — a partial client must not claim the capability", () => {
+    const provider = new JiraProvider(client());
+    expect(provider.caps.children).toBeUndefined();
+  });
+});
+
 describe("refreshCaps", () => {
   it("loads the shape", async () => {
     const loadShape = vi.fn(async () => ({ boardId: 2, hasSprints: true, boardCount: 1 }));

@@ -110,6 +110,14 @@ export class JiraProvider implements TaskProvider {
         list: () => this.client.listComponents(),
         update: (key, delta) => this.client.updateComponents(key, delta),
       },
+      // Guarded on the method existing rather than declared unconditionally: the
+      // wholesale client mock in test/unit/tasksView.test.ts has no `childrenOf`, and
+      // a capability that claims to answer but throws on the first call would turn
+      // every Take there into the degraded path. Same defensive shape as
+      // `this.client.shapeSnapshot?.()` above.
+      ...(typeof this.client.childrenOf === "function"
+        ? { children: { of: (key: string) => this.client.childrenOf(key) } }
+        : {}),
     };
   }
 
