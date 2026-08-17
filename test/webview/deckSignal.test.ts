@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cardSignal } from "../../src/webview/deckSignal";
+import { cardSignal, cardActions } from "../../src/webview/deckSignal";
 import type { CardAgent, PrEntryMap, PrFacts, RepoGit, RunStatus } from "../../src/types";
 
 const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
@@ -155,5 +155,86 @@ describe("cardSignal", () => {
     const bits = cardSignal(status({ prs }), null);
     // Should pick alpha (alphabetically first), not zeta (insertion order first)
     expect(bits[0]).toEqual({ kind: "text", text: "#11", mono: true });
+  });
+});
+
+describe("cardActions", () => {
+  it("returns nothing for a run with no PR", () => {
+    expect(cardActions(status())).toEqual([]);
+  });
+
+  it("returns nothing for a healthy open PR", () => {
+    expect(cardActions(status({ prs: pr(facts({ review: "approved", mergeable: "clean" })) }))).toEqual([]);
+  });
+
+  it("names the failing checks and offers Fix CI", () => {
+    const acts = cardActions(status({
+      prs: pr(facts({ ci: { passing: 1, pending: 0, failing: [{ name: "integration", url: "" }, { name: "lint", url: "" }] } })),
+    }));
+    expect(acts).toHaveLength(1);
+    expect(acts[0].label).toBe("Fix CI");
+    expect(acts[0].reason).toBe("ci");
+    expect(acts[0].text).toContain("integration");
+    expect(acts[0].text).toContain("lint");
+    expect(acts[0].detail).toBe("integration, lint");
+  });
+
+  // Mirrors prSignals' `blocked` rule: an advisory failure does not block a
+  // merge, so it must not put a Fix CI button on the card either.
+  it("ignores an advisory CI failure", () => {
+    const acts = cardActions(status({
+      prs: pr(facts({ ciAdvisory: true, ci: { passing: 0, pending: 0, failing: [{ name: "flaky", url: "" }] } })),
+    }));
+    expect(acts).toEqual([]);
+  });
+
+  it("offers Resolve conflict for a conflicting PR", () => {
+    const acts = cardActions(status({ prs: pr(facts({ mergeable: "conflicting" })) }));
+    expect(acts.map((a) => a.reason)).toEqual(["conflict"]);
+    expect(acts[0].label).toBe("Resolve conflict");
+  });
+
+  it("offers Address review when changes are requested", () => {
+    const acts = cardActions(status({ prs: pr(facts({ review: "changes_requested" })) }));
+    expect(acts.map((a) => a.reason)).toEqual(["review"]);
+    expect(acts[0].label).toBe("Address review");
+  });
+
+  // The card the whole feature exists for: one "Address PR" cannot name which of
+  // three problems it will work on.
+  it("returns all three, worst first, when a PR has every problem at once", () => {
+    const acts = cardActions(status({
+      prs: pr(facts({
+        ci: { passing: 0, pending: 0, failing: [{ name: "integration", url: "" }] },
+        mergeable: "conflicting", review: "changes_requested",
+      })),
+    }));
+    expect(acts.map((a) => a.reason)).toEqual(["ci", "conflict", "review"]);
+  });
+
+  // GitHub stops computing mergeability once a PR closes, so a merged PR's
+  // "conflicting" is stale — and there is nothing to act on regardless.
+  it("returns nothing for a merged PR, whatever its stale fields say", () => {
+    expect(cardActions(status({
+      prs: pr(facts({ state: "MERGED", mergeable: "conflicting", review: "changes_requested" })),
+    }))).toEqual([]);
+  });
+
+  it("returns nothing for a draft PR — it is not asking for anything yet", () => {
+    expect(cardActions(status({
+      prs: pr(facts({ isDraft: true, ci: { passing: 0, pending: 0, failing: [{ name: "lint", url: "" }] } })),
+    }))).toEqual([]);
+  });
+
+  it("reads the same lead PR as cardSignal does", () => {
+    const prs = {
+      zzz: { facts: facts({ number: 1, mergeable: "clean", review: "approved" }), fetchedAt: 1 },
+      aaa: { facts: facts({ number: 2, ci: { passing: 0, pending: 0, failing: [{ name: "e2e", url: "" }] } }), fetchedAt: 1 },
+    } as unknown as PrEntryMap;
+    const acts = cardActions(status({ prs }));
+    const bits = cardSignal(status({ prs }), null);
+    expect(acts[0].reason).toBe("ci");
+    // cardSignal leads with the same PR's number, so the two can never disagree.
+    expect(bits[0]).toMatchObject({ text: "#2" });
   });
 });

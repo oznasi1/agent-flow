@@ -1,4 +1,4 @@
-import { CardAgent, PrFacts, RunStatus } from "../types";
+import { CardAgent, PrFacts, PrWorkReason, RunStatus } from "../types";
 
 /** One element of a card's signal line. `diff` is its own kind rather than a
  * formatted string because the two halves take different colors, and a card
@@ -85,4 +85,50 @@ export function cardSignal(r: RunStatus, agent: CardAgent | null): SignalBit[] {
 
   // Same structural guard as above: slice caps at three bits.
   return bits.slice(0, 3);
+}
+
+/** One thing wrong with this card's PR, and the verb that fixes it. */
+export interface SignalAction {
+  tone: "bad" | "warn";
+  /** What is wrong, in the card's own voice: "✗ integration, lint". */
+  text: string;
+  /** The button. A verb, naming the work — never a generic "Address PR". */
+  label: string;
+  reason: PrWorkReason;
+  /** Specifics for the seeded prompt, e.g. the failing check names. */
+  detail?: string;
+}
+
+/**
+ * Every problem standing between this card's PR and a merge, worst first.
+ *
+ * Replaces the single `Address PR` button, which was gated on the review
+ * column's waiting lane and so appeared on cards with nothing to address while
+ * missing cards with a failing check. Each row here names its own problem and
+ * carries its own verb.
+ *
+ * Reads `leadPr` — the same PR `cardSignal` speaks for — so the rows can never
+ * contradict the bits they replace.
+ */
+export function cardActions(r: RunStatus): SignalAction[] {
+  const f = leadPr(r);
+  // Nothing to act on unless a PR is open and out of draft: GitHub stops
+  // computing mergeability once a PR closes, so a merged PR's `conflicting` is
+  // stale, and a draft is not asking for anything yet.
+  if (!f || f.state !== "OPEN" || f.isDraft) return [];
+
+  const out: SignalAction[] = [];
+  // Same advisory guard as prSignals' `blocked` rule: a failure that does not
+  // block the merge must not put a button on the card.
+  if (f.ci.failing.length > 0 && !f.ciAdvisory) {
+    const names = f.ci.failing.map((c) => c.name).join(", ");
+    out.push({ tone: "bad", text: `✗ ${names}`, label: "Fix CI", reason: "ci", detail: names });
+  }
+  if (f.mergeable === "conflicting") {
+    out.push({ tone: "warn", text: "conflicts with main", label: "Resolve conflict", reason: "conflict" });
+  }
+  if (f.review === "changes_requested") {
+    out.push({ tone: "warn", text: "changes requested", label: "Address review", reason: "review" });
+  }
+  return out;
 }

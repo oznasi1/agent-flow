@@ -277,6 +277,13 @@ export interface PrFacts {
   ciAdvisory: boolean;
 }
 
+/** Why an agent is being seeded against a PR. Shared vocabulary between
+ * `src/webview/deckSignal.ts` (derives it from `PrFacts`) and
+ * `src/engine/prompt.ts` (turns it into the seeded prompt's opening clause) —
+ * declared here, not in the webview module, because an `engine/` import from
+ * `webview/` would invert this codebase's layering. */
+export type PrWorkReason = "ci" | "conflict" | "review";
+
 /** What the store holds per repo. The wrapper — not `PrFacts` — carries the
  * timestamp, so that "this repo has no PR" is itself a cacheable answer. */
 export interface PrEntry {
