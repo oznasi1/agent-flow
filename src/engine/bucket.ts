@@ -17,7 +17,8 @@ function isReviewStatus(name?: string | null): boolean {
 /**
  * Decide which board column a run belongs in. Precedence, most-decisive first:
  *   done (a merged PR, or Jira done) → "waiting on a human" (the agent's needs-you
- *   signal, or a blocked PR) → the live "working" signal → review (an open PR /
+ *   signal, a stalled or exited agent, or a blocked PR) → the live "working"
+ *   signal → review (an open PR /
  *   Jira review status) → else "progress" as the in-flight catch-all.
  *
  * Two rungs are worth spelling out. A **blocked PR outranks a working agent**: an
@@ -33,7 +34,11 @@ function isReviewStatus(name?: string | null): boolean {
  */
 export function deriveBucket(i: BucketInput): DeckColumn {
   if (i.prMerged || i.ticketCategory === "done") return "done";
-  if (i.agentState === "needs-you" || i.prBlocked) return "needs";
+  // stalled and exited join needs-you here: all three mean a human has to do
+  // something, and all three used to arrive as "idle" and land in progress.
+  if (i.agentState === "needs-you" || i.agentState === "stalled" || i.agentState === "exited" || i.prBlocked) {
+    return "needs";
+  }
   if (i.agentState === "working") return "progress";
   if (i.prOpen || isReviewStatus(i.ticketStatus)) return "review";
   return "progress";

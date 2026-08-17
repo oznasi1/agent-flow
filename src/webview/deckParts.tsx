@@ -109,6 +109,8 @@ export function WorkspaceChip({ label, repos, filePath }: { label: string; repos
 const AGENT_STATE: Record<AgentActivity["state"], { text: string; tone: Tone }> = {
   working: { text: "working", tone: "working" },
   "needs-you": { text: "ended turn", tone: "attn" },
+  stalled: { text: "stalled", tone: "attn" },
+  exited: { text: "exited", tone: "attn" },
   idle: { text: "idle", tone: "idle" },
   unknown: { text: "open", tone: "parked" },
 };

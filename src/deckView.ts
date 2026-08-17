@@ -17,6 +17,8 @@ import { promoteToPlace } from "./engine/orchestrator/promote";
 import { LaunchTicketDetail, launchPlanned } from "./engine/orchestrator/launch";
 import { COMMAND_KILLED_EXIT_CODE, CommandRunner, chainSourcePlace, resolveCommand, runCommand, withSavedCommand } from "./engine/orchestrator/command";
 import { buildRunStatus } from "./engine/status";
+import { UsageReader } from "./engine/usageFs";
+import type { UsageTotals } from "./engine/usage";
 import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
@@ -29,7 +31,7 @@ import { FetchResult, GhGap, GhProvider, PrProvider, Runner, execRunner, GH_TIME
 import { resolveBin } from "./engine/pr/which";
 import { RefreshQueue } from "./engine/pr/queue";
 import { discoverRepos } from "./engine/repos";
-import { composeAgentPrompt, hasNote, prReviewTemplate } from "./engine/prompt";
+import { composeAgentPrompt, hasNote, prReviewTemplate, prWorkClause } from "./engine/prompt";
 import { launchReview, resolveReviewMode, reviewRunKey } from "./engine/review/launch";
 import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
@@ -43,10 +45,24 @@ import { landed, shelfFor } from "./engine/visibility";
 // The scope picker the modes-notice hide-write already uses: a settings write must
 // land where the user's value already lives. Saving a command is the same problem.
 import { pickExplicit } from "./modesNotice";
-import { CardAgent, FlowPromptMode, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, ServiceRef, isTicketRun, runKind, ticketKeyFor } from "./types";
+import { CardAgent, FlowPromptMode, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, PrWorkReason, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, ServiceRef, isTicketRun, runKind, ticketKeyFor } from "./types";
 
 export const POLL_MS = 6000;
 const TICKET_TTL_MS = 30_000;
+
+/** The usage sweep's own cadence. Deliberately far slower than POLL_MS: parsing
+ * transcripts is the one read here that scales with corpus size rather than
+ * with board size, and `refresh()` must never block on it. */
+export const USAGE_POLL_MS = 60_000;
+
+/** ~/.claude/projects — where Claude Code keeps one directory of transcripts per
+ * cwd. Hoisted from the inline const the status build used, so the usage sweep
+ * and the activity read cannot drift onto two different roots. A function
+ * rather than a module-level const because `os.homedir()` at import time is a
+ * needless load-order dependency in a module the extension host loads early. */
+function claudeProjectsRoot(): string {
+  return path.join(os.homedir(), ".claude", "projects");
+}
 
 /** The footer note per reason PR facts are off. Naming the actual gap matters:
  * `gh` living somewhere the extension host's PATH cannot see it is by far the
@@ -228,6 +244,13 @@ export class DeckPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly disposables: vscode.Disposable[] = [];
   private timer: ReturnType<typeof setInterval> | undefined;
+  private usageTimer: ReturnType<typeof setInterval> | undefined;
+  /** Held for the view's lifetime — its per-file offsets and dedup sets are what
+   * make each sweep cost only the newly appended bytes. */
+  private readonly usage = new UsageReader();
+  /** run key → last swept totals. Read by the status build; written only by the
+   * sweep, so a refresh never waits on a parse. */
+  private usageByRun = new Map<string, UsageTotals>();
   private readonly ticketCache = new Map<string, { at: number; status: string | null; category: string | null }>();
   /** The last refresh's synthetic runs for places no tracked run claimed — cleared
    * and repopulated on every rebuild. A local card has no record on disk, so this
@@ -1497,12 +1520,81 @@ export class DeckPanel {
     if (this.timer) return;
     void this.refresh();
     this.timer = setInterval(() => void this.refresh(), POLL_MS);
+    // The board-wide sweep exists ONLY to feed the header's token total, which is
+    // off by default. With it off nothing on screen shows a board-wide figure, so
+    // parsing every run's transcripts every minute would be pure cost — the
+    // drawer reads its one run on demand instead (see `usageFor`). Read fresh
+    // rather than cached in a field so flipping the setting takes effect on the
+    // next visibility change without a reload.
+    if (getConfig().showTokenTotal) {
+      // One sweep now, then on its own slow cadence. Not awaited: a blank spend
+      // figure for a few seconds is strictly better than a delayed board.
+      void Promise.resolve().then(() => this.sweepUsage(this.sweepTargets()));
+      this.usageTimer = setInterval(() => this.sweepUsage(this.sweepTargets()), USAGE_POLL_MS);
+    }
   }
 
   private stopPolling(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    if (this.usageTimer) clearInterval(this.usageTimer);
+    this.usageTimer = undefined;
     this.prQueue.clear();
+  }
+
+  /**
+   * Read one run's usage and post it back. The drawer's own request path, used
+   * when the board-wide sweep is off — which is the default.
+   *
+   * `UsageReader` caches per file, so re-opening the same drawer costs a `stat`
+   * per transcript rather than a re-parse. A run whose usage the eager sweep has
+   * already computed still gets read here: the reader is incremental, so this is
+   * the cheap path either way, and answering unconditionally keeps the drawer's
+   * contract simple.
+   *
+   * Posts `usage: null` on a failed read rather than a zeroed total — the drawer
+   * distinguishes "could not read" from "cost nothing", and zero would assert
+   * the latter.
+   */
+  private usageFor(key: string): void {
+    const run = this.run(key);
+    if (!run) return;
+    let usage: UsageTotals | null;
+    try {
+      usage = this.usage.readRun(claudeProjectsRoot(), run.repos.map((r) => r.path));
+    } catch {
+      usage = null;
+    }
+    if (usage) this.usageByRun.set(key, usage);
+    this.post({ type: "deck:usage", key, usage });
+  }
+
+  /** Re-read usage for every run currently on the board. Board-scoped on
+   * purpose: the full corpus is hundreds of files and hundreds of megabytes,
+   * while a board is about ten project dirs. Never throws — a failed read
+   * leaves the previous total in place. */
+  private sweepUsage(runs: Run[]): void {
+    const root = claudeProjectsRoot();
+    const next = new Map<string, UsageTotals>();
+    for (const run of runs) {
+      try {
+        next.set(run.key, this.usage.readRun(root, run.repos.map((r) => r.path)));
+      } catch {
+        const prev = this.usageByRun.get(run.key);
+        if (prev) next.set(run.key, prev);
+      }
+    }
+    this.usageByRun = next;
+  }
+
+  /** The runs the board shows: tracked records on disk plus the in-memory local
+   * cards. Same filter as the status build — a review run has no agent and no
+   * transcripts, so it has no spend to read. */
+  private sweepTargets(): Run[] {
+    return [
+      ...readRuns(defaultRunsDir()).filter((r) => runKind(r) !== "review"),
+      ...this.localRuns.values(),
+    ];
   }
 
   /** Is `gh` usable? Kicks the probe off on first call and returns what we know
@@ -2072,7 +2164,7 @@ export class DeckPanel {
     // Review runs are work in flight, but not *your ticket's* work: they surface
     // on their strip row, not as a fifth kind of card in In progress.
     const tracked = readRuns(defaultRunsDir()).filter((r) => runKind(r) !== "review");
-    const projectsRoot = path.join(os.homedir(), ".claude", "projects");
+    const projectsRoot = claudeProjectsRoot();
     const now = Date.now();
     const authed = await this.connector.isAuthenticated();
     const ghReady = this.ghReady();
@@ -2277,8 +2369,8 @@ export class DeckPanel {
         // A local card exists only because a session is open in it, so it is on
         // the board by construction.
         out.push(run.url
-          ? { ...status, shelf: "board" as const, inferredTicketKey: ticketKeyFor(run, this.connector) }
-          : { ...status, shelf: "board" as const });
+          ? { ...status, shelf: "board" as const, inferredTicketKey: ticketKeyFor(run, this.connector), usage: this.usageByRun.get(run.key) }
+          : { ...status, shelf: "board" as const, usage: this.usageByRun.get(run.key) });
         continue;
       }
       // Which shelf this run sits on. `hasLiveSession` comes from `ownership`
@@ -2294,7 +2386,7 @@ export class DeckPanel {
         ticketActive: isTicketRun(run) && status.ticketCategory !== "done",
         hasWorkToLose: status.repos.some((r) => ownsPath(r.path) && (r.dirty || r.ahead > 0)),
       });
-      const shelved = { ...status, shelf };
+      const shelved = { ...status, shelf, usage: this.usageByRun.get(run.key) };
       if (this.applyVerdict(run, this.verdictFor(shelved, livePlaces, now))) continue;
       // Counted, not cleared: this is exactly what Clear stale would take. The
       // second call is free of side effects — `verdictFor` is pure, and only
@@ -2457,6 +2549,9 @@ export class DeckPanel {
         // string setting a user can edit mid-session, and the board re-posts often
         // enough that this is the whole of "keep it live".
         prReviewStatus: getConfig().prReviewStatus,
+        // Same reasoning as prReviewStatus above: a plain setting the user can
+        // flip mid-session, read fresh on every post.
+        showTokenTotal: getConfig().showTokenTotal,
         staleCount: this.staleCount,
         sourceLabel: this.connector.info().label,
       });
@@ -2594,7 +2689,14 @@ export class DeckPanel {
         await this.track(m.key);
         break;
       case "deck:addressPr":
-        await this.addressPr(m.key);
+        // Retained alias: the review reason is exactly what this message meant.
+        await this.seedPrWork(m.key, "review");
+        break;
+      case "deck:seedPrWork":
+        await this.seedPrWork(m.key, m.reason, m.detail);
+        break;
+      case "deck:usageFor":
+        this.usageFor(m.key);
         break;
       case "flow:create": {
         if (!getConfig().orchestrator) return;
@@ -3130,7 +3232,7 @@ export class DeckPanel {
    * makes a live window seed itself when the plan lands, and openInEditor shells to
    * `open -a`, which focuses an existing window rather than opening a second one.
    */
-  private async addressPr(key: string): Promise<void> {
+  private async seedPrWork(key: string, reason: PrWorkReason, detail?: string): Promise<void> {
     const run = this.run(key);
     if (!run) {
       this.toast("error", `No run record for ${key}.`);
@@ -3147,11 +3249,17 @@ export class DeckPanel {
     // webview, so this one is too — unreachable today, but cheap insurance
     // against a future caller that isn't as careful.
     if (runKind(run) === "local") {
-      this.log(`deck: addressPr ignored for local card ${key}`);
+      this.log(`deck: seedPrWork ignored for local card ${key}`);
       return;
     }
     const cfg = getConfig();
-    const template = prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix);
+    const clause = prWorkClause(reason, detail);
+    // The user's configured review prompt, preceded by what is actually wrong.
+    // An empty clause (reason "review") leaves the template byte-identical to
+    // what Address PR has always sent.
+    const template = clause
+      ? `${clause}\n\n${prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix)}`
+      : prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix);
     // ticketKeyFor, not run.key: track() saves a promoted local card under its
     // place-hash key when the inferred Jira key was already owned by another
     // run, and that ticket then lives only in the run's url. Seeding the prompt

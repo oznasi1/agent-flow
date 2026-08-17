@@ -13,7 +13,11 @@ import { LoadingMark } from "./LoadingMark";
 import { keyLabel, timeAgo } from "./helpers";
 import { type Tone } from "./deckParts";
 import { DeckDetail } from "./DeckDetail";
-import { cardSignal } from "./deckSignal";
+import { cardActions, cardSignal } from "./deckSignal";
+// src/engine/usage.ts imports NOTHING — this is what makes it legal in a
+// browser bundle. npm run build is the only gate that would catch a violation
+// here; neither tsc nor the test suite resolves real module graphs.
+import { formatEq, weightedEq, type UsageTotals } from "../engine/usage";
 
 /** The Orchestrator's mark: one node on the left feeding two on the right
  * through elbow connectors — the drawer's own object, drawn. It replaced a ⚡
@@ -116,6 +120,8 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
     case "needs-you": return { text: `ended turn · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
+    case "stalled": return { text: `stalled · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
+    case "exited": return { text: `exited · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
     case "idle": return { text: `idle · ${timeAgo(r.agent.lastActivityMs)}`, tone: "idle" };
     default: return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
   }
@@ -127,8 +133,9 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
    * line and action target come from the agent rather than the run. */
   agent: CardAgent | null;
   column: DeckColumn;
-  /** The band within `column`, or null where the column means one thing. Address
-   * PR reads this, not the ticket status: see `canAddressPr` below. */
+  /** The band within `column`, or null where the column means one thing. No
+   * longer read by this card — kept for callers (e.g. laneOf) and the
+   * Workspaces lens's own bookkeeping. */
   lane: DeckLane | null;
   sourceLabel: string;
   selected: boolean;
@@ -147,18 +154,14 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
   // record on disk, so there is nothing to Forget — closing its agents is what
   // removes it.
   const local = runKind(r.run) === "local";
-  // The lane, not the ticket status: Address PR belongs to the card that is
-  // waiting on a human, which is exactly what the waiting lane means. The local
-  // guard survives the change — a local card's key is inferred from its branch,
-  // so its status may belong to a ticket somebody else owns. `column === "review"`
-  // is redundant with the lane check — deriveLane only ever answers "waiting"
-  // under the review column — kept as defence against a caller that hands this
-  // component a lane/column pair deriveLane itself never would.
-  // prSignals(r.prs).open guards against a card whose Jira status alone landed it
-  // in the review/waiting slot with no actual open PR (prs: {}) to address —
-  // deriveBucket's isReviewStatus and prSignals().ready are independent checks,
-  // so a card can reach here with nothing to seed an agent against.
-  const canAddressPr = !local && column === "review" && lane === "waiting" && prSignals(r.prs).open;
+  // Every reason to address a PR now has its own row and its own verb, so the
+  // old single gated button could only ever duplicate one of them. The lane gate
+  // goes with it: it put Address PR on cards with nothing to address, and
+  // withheld it from cards with a failing check. The local guard is preserved:
+  // a local card's ticket is inferred from a branch name that may belong to
+  // somebody else's ticket, and seeding an agent against that inference on one
+  // click is what this must never do. The host re-checks it anyway.
+  const acts = local ? [] : cardActions(r);
   // The key came from the branch, not from a launch. Say so: the branch could
   // name a ticket somebody else owns, and the ticket status on this card would
   // then be theirs. Computed host-side (the webview has no connector to parse
@@ -171,6 +174,10 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
   const dragRepo = agent?.repo ?? (r.repos.length === 1 ? r.repos[0].name : undefined);
   const cardDragKey = dragRepo ? `${r.run.key}${DRAG_SEP}${dragRepo}` : null;
   const sigBits = cardSignal(r, agent);
+  // sigBits[0] is the lead PR's number whenever this card has a PR; cardActions
+  // reads the same lead PR, so the two cannot disagree.
+  const firstBit = sigBits[0];
+  const leadPrNumber = firstBit?.kind === "text" && firstBit.text.startsWith("#") ? firstBit.text.slice(1) : null;
 
   return (
     <div
@@ -213,7 +220,29 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
         {r.run.summary}
       </div>
 
-      {sigBits.length > 0 && (
+      {acts.length > 0 ? (
+        /* The failure rows REPLACE the signal line rather than joining it: the
+           bits it would show (#pr, ✗ check, conflicts) name the very facts these
+           rows name, and restating them above the actions is noise. A failing
+           card therefore stops showing its branch and diff totals — the correct
+           trade, since "how big" already loses to "what is wrong" in
+           cardSignal's own cap, and both remain in the detail drawer. */
+        <div className="c-rows" onClick={(e) => e.stopPropagation()}>
+          {acts.map((a, i) => (
+            <div className="c-row" key={a.reason}>
+              {i === 0 && leadPrNumber !== null && <span className="m">#{leadPrNumber}</span>}
+              <span className={`lbl ${a.tone}`}>{a.text}</span>
+              <button
+                className="act"
+                title={`${a.label} — open this task's workspace and work through it`}
+                onClick={() => send({ type: "deck:seedPrWork", key: r.run.key, reason: a.reason, ...(a.detail ? { detail: a.detail } : {}) })}
+              >
+                {a.label}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : sigBits.length > 0 ? (
         <div className="c-sig">
           {sigBits.map((b, i) => (
             <React.Fragment key={i}>
@@ -227,7 +256,7 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
             </React.Fragment>
           ))}
         </div>
-      )}
+      ) : null}
 
       <div className="c-foot2" onClick={(e) => e.stopPropagation()}>
         <button
@@ -241,12 +270,6 @@ function Card({ r, agent, column, lane, sourceLabel, selected, onSelect }: {
           onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff", ...(agent?.repo ? { repo: agent.repo } : {}) })}>
           Diff
         </button>
-        {canAddressPr && (
-          <button className="act" title={`Address the PR for ${r.run.key} — open its workspace and work through the review feedback`}
-            onClick={() => send({ type: "deck:addressPr", key: r.run.key })}>
-            Address PR
-          </button>
-        )}
       </div>
     </div>
   );
@@ -268,6 +291,15 @@ export function DeckApp(): JSX.Element {
   const [staleCount, setStaleCount] = React.useState(0);
   // See DEFAULT_SOURCE_LABEL's own comment for why "Jira" rather than "".
   const [sourceLabel, setSourceLabel] = React.useState(DEFAULT_SOURCE_LABEL);
+  /** Mirrors `agentFlow.deck.showTokenTotal`. Starts false so the header tile is
+   * absent on the very first paint, before any deck:runs has arrived — the
+   * setting is off by default, and flashing a total that then vanishes would be
+   * worse than never showing it. */
+  const [showTokenTotal, setShowTokenTotal] = React.useState(false);
+  /** run key → usage read on demand for its drawer, or null when unreadable.
+   * A key absent from this map means "not asked yet or still waiting", which the
+   * drawer renders differently from both a zero total and a failed read. */
+  const [lazyUsage, setLazyUsage] = React.useState<Record<string, UsageTotals | null>>({});
   const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean; reviewWrites: boolean; loading: boolean }>(
     { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false, loading: false },
   );
@@ -332,8 +364,14 @@ export function DeckApp(): JSX.Element {
         setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
         setSourceLabel(m.sourceLabel);
+        setShowTokenTotal(m.showTokenTotal);
         setSyncedAt(Date.now());
         setHasLoaded(true);
+      } else if (m.type === "deck:usage") {
+        // Keyed rather than a single "current drawer" slot: a reply can land after
+        // the user has moved to another card, and dropping it would leave the new
+        // drawer showing a figure that belongs to the old one.
+        setLazyUsage((u) => ({ ...u, [m.key]: m.usage }));
       } else if (m.type === "deck:grouping") {
         setGrouping(m.grouping);
       } else if (m.type === "toast") {
@@ -490,11 +528,27 @@ export function DeckApp(): JSX.Element {
   React.useEffect(() => {
     if (selId !== null && selected === null) setSelId(null);
   }, [selId, selected]);
+
+  // Ask for the selected run's usage once per drawer opening. This is the only
+  // thing that triggers a transcript read on a default install, which is the whole
+  // point of it being here rather than on a timer: a session that never opens a
+  // drawer parses nothing. Re-asking on each open is deliberate — the host's
+  // reader is incremental, so a second open costs a stat per file, and a stale
+  // figure on a task that has since burned more tokens would be worse.
+  const selRunKey = selected?.status.run.key ?? null;
+  React.useEffect(() => {
+    if (selRunKey === null) return;
+    send({ type: "deck:usageFor", key: selRunKey });
+  }, [selRunKey]);
+
   const needs = cards.filter((c) => c.column === "needs").length;
   // With arming real, the count that matters on the chip is how many flows are
   // armed — that is the thing quietly spending your attention while the drawer
   // is closed, not how many flows merely exist.
   const armedCount = flows.filter((f) => f.armed).length;
+  // The board's own total, not "today": a day figure would need per-line
+  // timestamps and would print a number that disagrees with the cards under it.
+  const boardEq = live.reduce((s, x) => s + (x.usage ? weightedEq(x.usage) : 0), 0);
 
   const forget = React.useCallback((key: string) => {
     // Optimistic: the card leaves now rather than after a full refresh (a connector
@@ -523,6 +577,15 @@ export function DeckApp(): JSX.Element {
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "progress").length}</span><span className="l">In progress</span></div>
           <div className={`stat ${needs > 0 ? "attn" : ""}`}><span className="n">{needs}</span><span className="l">Action required</span></div>
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "review").length}</span><span className="l">In review</span></div>
+          {showTokenTotal && boardEq > 0 && (
+            <div
+              className="stat"
+              title="Effort-weighted tokens across every session on the board (input×1, cache-write×1.25, cache-read×0.1, output×5)"
+            >
+              <span className="n">{formatEq(boardEq)}<span className="u">eq</span></span>
+              <span className="l">Tokens on board</span>
+            </div>
+          )}
         </div>
         <div className="sp" />
         {orchEnabled && (
@@ -730,6 +793,10 @@ export function DeckApp(): JSX.Element {
         <DeckDetail
           card={selected}
           sourceLabel={sourceLabel}
+          /* Eager total first when the header sweep is on, else the on-demand read.
+             `undefined` means still waiting; `null` means the host tried and
+             failed. The drawer renders three distinct states from that. */
+          usage={selected.status.usage ?? lazyUsage[selected.status.run.key]}
           onClose={() => setSelId(null)}
           onForget={forget}
         />

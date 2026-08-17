@@ -9,7 +9,7 @@
 // in the Deck's bundle graph and the build stops resolving. `../activity` is a leaf
 // that imports types only. test/webview/webviewGraph.test.ts pins this.
 import { AgentActivity, PrFacts, RepoGit, RunStatus } from "../../types";
-import { mostActive, UNKNOWN_ACTIVITY } from "../activity";
+import { isIdleLike, mostActive, UNKNOWN_ACTIVITY } from "../activity";
 import { BranchCiStatus, branchCiKey } from "./branchCi";
 import { Condition } from "./model";
 
@@ -104,7 +104,13 @@ export function evalCond(cond: Condition, c: CondContext): boolean {
       return placeActivity(c).state === "needs-you";
     case "agent-idle-over": {
       const a = placeActivity(c);
-      if (a.state !== "idle" || a.lastActivityMs === null) return false;
+      // `isIdleLike`, not `=== "idle"`: `stalled` (a tool stuck open) and `exited`
+      // (a transcript that stopped mid-work with no live session behind it) are
+      // both idle-like readings this rule must fire on too — they were both
+      // folded into plain `idle` before `AgentState` widened to name them, and a
+      // bare `"idle"` comparison here would silently stop firing on exactly the
+      // stuck runs this condition exists for. See `IDLE_LIKE`'s doc comment.
+      if (!isIdleLike(a.state) || a.lastActivityMs === null) return false;
       return c.nowMs - a.lastActivityMs > cond.minutes * 60_000;
     }
     case "no-agent-left":
@@ -233,7 +239,11 @@ export function describeCond(cond: Condition, c: CondContext): string {
       const a = placeActivity(c);
       if (a.state === "unknown") return "agent state unknown";
       if (a.lastActivityMs === null) return "last activity unknown";
-      if (a.state !== "idle") return a.state === "needs-you" ? "ended turn" : a.state;
+      // Same `isIdleLike` test as `evalCond`'s arm above, and for the same
+      // reason: `stalled` and `exited` are readings this rule fires on, so the
+      // drawer must show their progress toward the threshold too, not just the
+      // bare state name a plain `!== "idle"` would have left them with.
+      if (!isIdleLike(a.state)) return a.state === "needs-you" ? "ended turn" : a.state;
       return `idle ${Math.floor((c.nowMs - a.lastActivityMs) / 60_000)}m of ${cond.minutes}m`;
     }
     case "no-agent-left": {

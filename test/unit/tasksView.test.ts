@@ -148,6 +148,7 @@ const CFG = {
   environments: ["dev", "staging", "production"],
   commands: [] as { id: string; label: string; run: string; detail?: string }[],
   prReviewStatus: "PR initiated",
+  showTokenTotal: false, // matches the shipped default; the Deck header total is opt-in
   prReviewAutoFix: true,
   prReviewPrompt: "PR {key}{files}",
   worktree: "never" as const,

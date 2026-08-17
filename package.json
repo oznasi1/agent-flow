@@ -525,6 +525,11 @@
           "default": true,
           "description": "After the PR-review agent assesses the PR, let it proceed to implement the requested changes on the PR's branch. Turn off to have it only assess and report back."
         },
+        "agentFlow.deck.showTokenTotal": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show a \"Tokens on board\" total in the Deck header. Off by default: the total needs a transcript sweep across every run on the board, while each task's own token breakdown is read on demand when you open its detail drawer. The figure is effort-weighted (input×1, cache-write×1.25, cache-read×0.1, output×5) and labelled \"eq\" — cache reads are the overwhelming majority of raw tokens at a tenth the rate, so a raw sum would rank tasks by conversation length rather than by cost."
+        },
         "agentFlow.prReviewPrompt": {
           "type": "string",
           "editPresentation": "multilineText",

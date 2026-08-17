@@ -51,6 +51,27 @@ describe("mostActive", () => {
     ]);
     expect(picked.state).toBe("needs-you");
   });
+
+  it("prefers a stalled agent over a working one — the stuck one needs a human", () => {
+    expect(mostActive([
+      { state: "working", lastActivityMs: 200, slug: null },
+      { state: "stalled", lastActivityMs: 100, slug: null },
+    ]).state).toBe("stalled");
+  });
+
+  it("still prefers needs-you over stalled", () => {
+    expect(mostActive([
+      { state: "stalled", lastActivityMs: 200, slug: null },
+      { state: "needs-you", lastActivityMs: 100, slug: null },
+    ]).state).toBe("needs-you");
+  });
+
+  it("carries midWork through the reduction on the reading that won", () => {
+    expect(mostActive([
+      { state: "idle", lastActivityMs: 200, slug: null, midWork: false },
+      { state: "stalled", lastActivityMs: 100, slug: null, midWork: true },
+    ]).midWork).toBe(true);
+  });
 });
 
 describe("buildRunStatus", () => {
@@ -273,6 +294,53 @@ describe("buildRunStatus", () => {
       fs.rmSync(own, { recursive: true, force: true });
       fs.rmSync(sibling, { recursive: true, force: true });
       fs.rmSync(activityProjRoot, { recursive: true, force: true });
+    });
+  });
+
+  const LATER = NOW + 10 * 60_000; // the shared tool_use transcript is now stale
+
+  it("promotes a stale mid-work transcript with no live session to exited", () => {
+    const s = buildRunStatus({ run, ticket: null, projectsRoot: projRoot, nowMs: LATER });
+    expect(s.agent.state).toBe("exited");
+  });
+
+  it("leaves a stale mid-work transcript as stalled while a session is still live", () => {
+    // stalled (4) outranks working (2), so the reduction keeps the per-repo
+    // reading — and its midWork is not promoted, because an agent is open.
+    const s = buildRunStatus({
+      run, ticket: null, projectsRoot: projRoot, nowMs: LATER,
+      agents: [agent("working", LATER)],
+    });
+    expect(s.agent.state).toBe("stalled");
+  });
+
+  describe("buildRunStatus and a finished turn", () => {
+    let endRoot: string;
+    let endProj: string;
+    let endRun: Run;
+
+    beforeAll(() => {
+      endRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-status-end-"));
+      const repo = path.join(endRoot, "repo");
+      fs.mkdirSync(repo, { recursive: true });
+      endProj = path.join(endRoot, "projects");
+      const tdir = path.join(endProj, encodeProjectDir(repo));
+      fs.mkdirSync(tdir, { recursive: true });
+      const tfile = path.join(tdir, "s.jsonl");
+      fs.writeFileSync(tfile, JSON.stringify({ type: "assistant", slug: "done", message: { stop_reason: "end_turn" } }) + "\n");
+      fs.utimesSync(tfile, NOW / 1000, NOW / 1000);
+      endRun = {
+        key: "ASM-10", summary: "finished", url: "https://x/ASM-10", createdAt: 1, mode: "per-window",
+        repos: [{ name: "repo", path: repo, isGit: true, branch: "main" }], briefPaths: [],
+      };
+    });
+
+    afterAll(() => fs.rmSync(endRoot, { recursive: true, force: true }));
+
+    // An agent that handed control back and closed is not "exited" — it finished.
+    it("does not promote a finished turn to exited, however old", () => {
+      const s = buildRunStatus({ run: endRun, ticket: null, projectsRoot: endProj, nowMs: NOW + 6 * 60 * 60_000 });
+      expect(s.agent.state).toBe("needs-you");
     });
   });
 });
