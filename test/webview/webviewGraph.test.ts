@@ -123,10 +123,29 @@ describe("the webview bundles are Node-free", () => {
     const original = fs.readFileSync(path.join(REPO, rel), "utf8");
     expect(original).toContain('from "../activity"'); // the fixed state
     expect(original).not.toContain('from "../status"');
-    const broken = original.replace(
-      'import { mostActive, UNKNOWN_ACTIVITY } from "../activity";',
-      'import { mostActive } from "../status";\nimport { UNKNOWN_ACTIVITY } from "../activity";',
-    );
+
+    // Synthesize the broken variant by matching the import's module specifier
+    // rather than a hardcoded list of its bound names — a binding list goes stale
+    // the moment someone adds another name to this import (as this branch's own
+    // fix did), and a stale literal makes the `.replace` below a silent no-op.
+    // Pull `mostActive` out into its own import from "../status" — the exact
+    // regression this guard exists to catch — leaving every other binding this
+    // import happens to have imported from "../activity" as before. Built by
+    // slicing rather than `String.replace(str, repoText)`, since `repoText` in
+    // replacement-string position would have `$&`/`$1`/`$'` interpreted.
+    const importRe = /import\s*\{([^}]*)\}\s*from\s*"\.\.\/activity";/;
+    const match = importRe.exec(original);
+    expect(match).not.toBeNull();
+    const bindings = match![1].split(",").map((b) => b.trim()).filter(Boolean);
+    expect(bindings).toContain("mostActive");
+    const rest = bindings.filter((b) => b !== "mostActive");
+    const replacement =
+      `import { mostActive } from "../status";` +
+      (rest.length > 0 ? `\nimport { ${rest.join(", ")} } from "../activity";` : "");
+    const broken =
+      original.slice(0, match!.index) +
+      replacement +
+      original.slice(match!.index + match![0].length);
     expect(broken).not.toBe(original); // the replacement actually matched
     const hit = findBuiltin("src/webview/deck.tsx", { [rel]: broken });
     expect(hit).not.toBeNull();
