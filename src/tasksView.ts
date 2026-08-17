@@ -2512,10 +2512,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const shortfall = hidden
       ? ` (${tree.leaves.length} of ${tree.leaves.length + hidden} — ${hidden} not shown)`
       : "";
+    const taken = this.alreadyTakenKeys();
     const picked = await vscode.window.showQuickPick(
       tree.leaves.map((l) => ({
         label: `${l.key} — ${l.summary}`,
-        description: l.statusCategory === "done" ? "done" : undefined,
+        // Both facts when both hold: "done" is the ticket's status, "already taken" is
+        // this machine's. Neither blocks the row — re-taking a child is legitimate, and
+        // the point is only that a take which will overwrite a live session's brief and
+        // discard that child's run timestamps says so before the tick, not after.
+        description: [l.statusCategory === "done" ? "done" : "", taken.has(l.key) ? "already taken" : ""]
+          .filter(Boolean)
+          .join(" · ") || undefined,
         detail: `${l.parentKey} › ${l.key}`,
         leaf: l,
       })),
@@ -2526,6 +2533,27 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       },
     );
     return picked?.map((p) => p.leaf);
+  }
+
+  /** Ticket keys this machine has already taken: one with a run record, or one whose own
+   *  per-task worktree currently holds a live session.
+   *
+   *  Why it matters at the leaf picker: taking a leaf writes `.pick-task/TASK.md` into a
+   *  worktree a live session may be reading from, and in fan-out mode `writeRun`
+   *  overwrites that child's run record, discarding its createdAt/finishedAt/closedAt —
+   *  for a ticket the user never named individually. This only labels; the decision
+   *  stays the user's.
+   *
+   *  A finished run counts: what would be discarded is precisely its timestamps. The
+   *  live half needs no run record at all — a session's place is a git worktree root, so
+   *  a path with the worktree marker in it is named after the key it belongs to
+   *  (`repoRootOfWorktree` is the same convention `createWorktrees` writes). */
+  private alreadyTakenKeys(): Set<string> {
+    const keys = new Set(readRuns(defaultRunsDir()).map((r) => r.key));
+    for (const place of groupByPlace(readOpenSessions(defaultSessionsDir())).keys()) {
+      if (repoRootOfWorktree(place)) keys.add(path.basename(place));
+    }
+    return keys;
   }
 
   /** The repo names a fan-out hands `takeBatch` as its filter set.

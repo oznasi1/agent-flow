@@ -5289,6 +5289,71 @@ describe("takeTask: a ticket with children", () => {
     expect(items.map((i) => i.description)).toEqual(["done"]);
   });
 
+  it("marks a leaf whose key already has a run, and leaves an untaken one unmarked", async () => {
+    // Taking this leaf overwrites the brief in a worktree a live session may be reading,
+    // and in fan-out mode discards that child's run timestamps — for a ticket the user
+    // never named individually. Labelled, never blocked: re-taking is legitimate.
+    clientStub.childrenOf = vi.fn(async (key: string) =>
+      key === "ASM-1"
+        ? [
+            { key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "new" },
+            { key: "ASM-9", summary: "untouched", type: "Sub-task", statusCategory: "new" },
+          ]
+        : [],
+    );
+    vi.mocked(readRuns).mockReturnValue([
+      { key: "ASM-2", summary: "first bit", url: "", createdAt: 1, repos: [] },
+    ] as unknown as ReturnType<typeof readRuns>);
+    answerPicks(pickFirst);
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const items = vi.mocked(window.showQuickPick).mock.calls[1][0] as { label: string; description?: string }[];
+    expect(items.map((i) => [i.label, i.description])).toEqual([
+      ["ASM-2 — first bit", "already taken"],
+      ["ASM-9 — untouched", undefined],
+    ]);
+  });
+
+  it("marks a leaf whose own worktree holds a live session, with no run record at all", async () => {
+    vi.mocked(readRuns).mockReturnValue([]);
+    vi.mocked(readOpenSessions).mockReturnValue([
+      { pid: 1, sessionId: "s1", cwd: "/repos/account-service/.claude/worktrees/ASM-2", startedAt: 1, name: null },
+    ]);
+    answerPicks(pickFirst);
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const items = vi.mocked(window.showQuickPick).mock.calls[1][0] as { description?: string }[];
+    expect(items.map((i) => i.description)).toEqual(["already taken"]);
+  });
+
+  it("does not mark a leaf for a live session sitting in an ordinary checkout", async () => {
+    // A session in `/repos/ASM-2` is not a per-task worktree, so its directory name says
+    // nothing about which ticket is being worked — marking on it would label leaves at
+    // random.
+    vi.mocked(readOpenSessions).mockReturnValue([
+      { pid: 1, sessionId: "s1", cwd: "/repos/ASM-2", startedAt: 1, name: null },
+    ]);
+    answerPicks(pickFirst);
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const items = vi.mocked(window.showQuickPick).mock.calls[1][0] as { description?: string }[];
+    expect(items.map((i) => i.description)).toEqual([undefined]);
+  });
+
+  it("says both when a leaf is done AND already taken", async () => {
+    clientStub.childrenOf = vi.fn(async (key: string) =>
+      key === "ASM-1" ? [{ key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "done" }] : [],
+    );
+    vi.mocked(readRuns).mockReturnValue([
+      { key: "ASM-2", summary: "first bit", url: "", createdAt: 1, repos: [] },
+    ] as unknown as ReturnType<typeof readRuns>);
+    answerPicks(pickFirst);
+    const { provider } = setup({ authed: true });
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const items = vi.mocked(window.showQuickPick).mock.calls[1][0] as { description?: string }[];
+    expect(items.map((i) => i.description)).toEqual(["done · already taken"]);
+  });
+
   it("takes nothing when the leaf picker is cancelled", async () => {
     answerPicks(pickFirst);
     const { provider } = setup({ authed: true });
