@@ -81,22 +81,22 @@ describe("projectCards", () => {
 });
 
 describe("projectCards and the merge column", () => {
-  it("lands an idle agent on an approved, green PR in Ready to merge", () => {
+  it("lands an idle agent on an approved, green PR in the merge column's ready lane", () => {
     const cards = projectCards([mkStatus({
       agents: [mkAgent("s1", "idle")],
       prs: prs(facts({ review: "approved" })),
     })]);
-    expect(cards.map((c) => c.column)).toEqual(["merge"]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["merge", "ready"]]);
   });
 
-  it("keeps a PR nobody has approved in In review", () => {
+  it("keeps a PR nobody has approved in In review, unlaned", () => {
     const cards = projectCards([mkStatus({ agents: [mkAgent("s1", "idle")], prs: prs(facts()) })]);
-    expect(cards.map((c) => c.column)).toEqual(["review"]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["review", null]]);
   });
 
   it("takes an agent still working on an approved PR to the merge too", () => {
-    // The one bucketing this migration deliberately changed: ready outranks the
-    // live agent signal now that the merge has a column to be seen in.
+    // The one bucketing this migration deliberately changed: the merge outranks
+    // the live agent signal now that it has a column to be seen in.
     const cards = projectCards([mkStatus({
       agents: [mkAgent("s1", "working"), mkAgent("s2", "needs-you")],
       prs: prs(facts({ review: "approved" })),
@@ -104,18 +104,22 @@ describe("projectCards and the merge column", () => {
     expect(cards.map((c) => c.column).sort()).toEqual(["merge", "needs"]);
   });
 
-  it("buckets a merged run on its live signals — no card claims a finished column", () => {
-    const merged = projectCards([mkStatus({ agents: [mkAgent("s1", "idle")], prs: prs(facts({ state: "MERGED" })) })]);
-    const ticketDone = projectCards([mkStatus({ agents: [mkAgent("s2", "idle")], ticketCategory: "done" })]);
-    // Both would have been "done" before. They only render at all while the host
-    // still shelves them on the board (an agent is open in each); once it does
-    // not, `shelfFor` sends them to the Recently closed strip instead.
-    expect(merged.map((c) => c.column)).toEqual(["progress"]);
-    expect(ticketDone.map((c) => c.column)).toEqual(["progress"]);
+  it("puts a merged run in the merged lane, wrap-up agent and all", () => {
+    const cards = projectCards([mkStatus({
+      agents: [mkAgent("s1", "working")], prs: prs(facts({ state: "MERGED" })),
+    })]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["merge", "merged"]]);
   });
 
-  it("takes a parked card's column from the host, untouched", () => {
-    const cards = projectCards([mkStatus({ agents: [], column: "merge", prs: prs(facts({ review: "approved" })) })]);
-    expect(cards.map((c) => [c.id, c.column])).toEqual([["p:ASM-1", "merge"]]);
+  it("gives a done ticket that never merged no merge column at all", () => {
+    // Nothing landed, so there is no wrap-up: this run is on the board only while
+    // an agent is open in it, and `shelfFor` closes it the moment that stops.
+    const cards = projectCards([mkStatus({ agents: [mkAgent("s2", "idle")], ticketCategory: "done" })]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["progress", null]]);
+  });
+
+  it("lanes a parked card from the host's column and the run's own PRs", () => {
+    const cards = projectCards([mkStatus({ agents: [], column: "merge", prs: prs(facts({ state: "MERGED" })) })]);
+    expect(cards.map((c) => [c.id, c.column, c.lane])).toEqual([["p:ASM-1", "merge", "merged"]]);
   });
 });

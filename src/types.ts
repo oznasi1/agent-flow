@@ -96,11 +96,22 @@ export type AgentState = "working" | "needs-you" | "stalled" | "exited" | "idle"
  * right and ends at the merge: something is running, something wants you,
  * something is parked on other people, something is one click from done.
  *
- * There is deliberately no `done`. Finished work is not a stage of work — a
- * merged run and a ticket somebody marked done both leave the board for the
- * Recently closed strip (see `shelfFor`), which already offers the only two
- * things you can still do with them: reopen and forget. */
+ * `merge` spans the merge itself, both sides of it: a pull request one press from
+ * landing, and one that already has. The far side is deliberately still on the
+ * board — a merge is where the wrap-up starts (move the ticket, delete the
+ * branch, watch the deploy), not where the work ends, and a column you cannot
+ * see cannot hold you to any of it. `DeckLane` splits the two.
+ *
+ * There is deliberately no `done`. A ticket somebody marked done that never
+ * merged produced nothing to wrap up, and leaves for the Recently closed strip
+ * (see `shelfFor`) with the only two things left to do with it: reopen, forget. */
 export type DeckColumn = "progress" | "needs" | "review" | "merge";
+
+/** A band inside a column, for the one column that holds two tenses of the same
+ * event: a PR still to press, and one already landed with its aftermath to
+ * settle. `null` on the columns that mean one thing. Derived, never posted by
+ * the host. */
+export type DeckLane = "ready" | "merged";
 
 /** Where a run sits on the In-flight view: a board column, or the Recently
  * closed strip. Membership only — `DeckColumn` still says which column. */

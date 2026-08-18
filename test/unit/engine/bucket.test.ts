@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { deriveBucket, prSignals } from "../../../src/engine/bucket";
+import { deriveBucket, deriveLane, prSignals } from "../../../src/engine/bucket";
 import { PrEntryMap, PrFacts } from "../../../src/types";
 
 const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
@@ -87,6 +87,14 @@ describe("deriveBucket with PR signals", () => {
     expect(deriveBucket({ agentState: "idle", prOpen: true, prReady: true })).toBe("merge");
   });
 
+  it("keeps a merged run in the merge column, where its wrap-up is", () => {
+    expect(deriveBucket({ agentState: "idle", prMerged: true })).toBe("merge");
+  });
+
+  it("keeps a post-merge agent beside its merge rather than back in In progress", () => {
+    expect(deriveBucket({ agentState: "working", prMerged: true })).toBe("merge");
+  });
+
   it("promotes ready to merge over a working agent, mirroring the blocked rung", () => {
     // `ready` and `blocked` are the two sides of the same PR read, and both
     // outrank the live agent signal for the same reason: the agent cannot know.
@@ -100,18 +108,21 @@ describe("deriveBucket with PR signals", () => {
     expect(deriveBucket({ prOpen: true, prReady: true, prBlocked: true })).toBe("needs");
   });
 
-  it("keeps a needs-you agent above the merge, even on a ready PR", () => {
+  it("keeps a needs-you agent above the merge, on either side of it", () => {
+    // A wrap-up agent that ended its turn is exactly what Action required is for,
+    // and a merge that already happened is not urgent enough to bury it.
     expect(deriveBucket({ agentState: "needs-you", prOpen: true, prReady: true })).toBe("needs");
+    expect(deriveBucket({ agentState: "needs-you", prMerged: true })).toBe("needs");
   });
 });
 
 describe("prSignals", () => {
   it("is all false for no entries", () => {
-    expect(prSignals({})).toEqual({ open: false, blocked: false, ready: false });
+    expect(prSignals({})).toEqual({ open: false, blocked: false, ready: false, merged: false });
   });
 
   it("is all false when every entry resolved to no PR", () => {
-    expect(prSignals(entries(null, null))).toEqual({ open: false, blocked: false, ready: false });
+    expect(prSignals(entries(null, null))).toEqual({ open: false, blocked: false, ready: false, merged: false });
   });
 
   it("reports open for an open non-draft PR", () => {
@@ -150,12 +161,13 @@ describe("prSignals", () => {
     expect(prSignals(entries(prFacts(), prFacts({ mergeable: "conflicting" }))).blocked).toBe(true);
   });
 
-  it("reports nothing at all for a run whose every PR merged — no open, no ready, no block", () => {
-    // Landing is `landed()` in visibility.ts, not a signal here. What this must
-    // guarantee is that a merged run trips none of the three rungs that would
-    // otherwise hold it on the board.
-    expect(prSignals(entries(prFacts({ state: "MERGED" }), prFacts({ state: "MERGED" }))))
-      .toEqual({ open: false, blocked: false, ready: false });
+  it("reports merged only when every PR-bearing repo has merged", () => {
+    expect(prSignals(entries(prFacts({ state: "MERGED" }))).merged).toBe(true);
+    expect(prSignals(entries(prFacts({ state: "MERGED" }), prFacts({ state: "OPEN" }))).merged).toBe(false);
+  });
+
+  it("ignores PR-less repos when deciding merged", () => {
+    expect(prSignals(entries(prFacts({ state: "MERGED" }), null)).merged).toBe(true);
   });
 });
 
@@ -215,13 +227,43 @@ describe("prSignals.ready", () => {
   });
 });
 
-describe("the merged run takes no column", () => {
-  // The migration's load-bearing case, run through the two functions that decide
-  // it. `shelfFor` sends this run to the Recently closed strip (visibility.test.ts
-  // owns that half); what matters here is that nothing in the ladder would have
-  // claimed it either — the fourth column is gone, not renamed.
-  it("buckets a multi-repo run whose every PR landed nowhere special", () => {
+describe("deriveLane", () => {
+  const signals = (over: Partial<ReturnType<typeof prSignals>> = {}) => ({
+    open: false, blocked: false, merged: false, ready: false, ...over,
+  });
+
+  it("splits the merge column into the press and its aftermath", () => {
+    expect(deriveLane("merge", signals({ open: true, ready: true }))).toBe("ready");
+    expect(deriveLane("merge", signals({ merged: true }))).toBe("merged");
+  });
+
+  it("tests merged first — a landed PR is never `ready`, so asking that first would mislane it", () => {
+    // prSignals.ready is false once the PR merges (there is nothing left to
+    // merge), so a `ready ? "ready" : "merged"` ordering would still work here —
+    // what it would NOT survive is a multi-repo run with one landed and one
+    // approved-and-open PR, where both flags are set at once.
+    expect(deriveLane("merge", signals({ merged: true, ready: true, open: true }))).toBe("merged");
+  });
+
+  it("leaves the single-lane columns unlaned", () => {
+    expect(deriveLane("progress", signals({ ready: true }))).toBeNull();
+    expect(deriveLane("needs", signals({ merged: true }))).toBeNull();
+    expect(deriveLane("review", signals({ open: true }))).toBeNull();
+  });
+});
+
+describe("a multi-repo merged run", () => {
+  it("takes the merge column and its merged lane, not a column of its own", () => {
     const merged = prSignals(entries(prFacts({ state: "MERGED" }), prFacts({ state: "MERGED" })));
-    expect(deriveBucket({ prOpen: merged.open, prReady: merged.ready, prBlocked: merged.blocked })).toBe("progress");
+    expect(merged.merged).toBe(true);
+    const column = deriveBucket({ prOpen: merged.open, prReady: merged.ready, prMerged: merged.merged });
+    expect(column).toBe("merge");
+    expect(deriveLane(column, merged)).toBe("merged");
+  });
+
+  it("is not merged when one repo landed and another is still open", () => {
+    const half = prSignals(entries(prFacts({ state: "MERGED" }), prFacts({ state: "OPEN" })));
+    expect(half.merged).toBe(false);
+    expect(deriveBucket({ agentState: "idle", prOpen: half.open, prMerged: half.merged })).toBe("review");
   });
 });

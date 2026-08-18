@@ -47,10 +47,8 @@ export const DECK_CSS = `
      block on their own, and a header that only folded around them (via .hd's
      own flex-wrap) would still lose its right edge below ~400px. */
   .stats { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
-  /* Sentence case, matching the column headers: these three tiles name three of
-     the board's four columns — Done has no tile, since a done card needs
-     nothing counted for you — and name the ones they share the same way, which
-     used to differ in case. */
+  /* Sentence case, matching the column headers: one tile per board column, named
+     exactly as the column names itself. The two used to differ in case. */
   .stat { display: flex; flex-direction: column; gap: 2px; padding: 4px 11px 5px; border-radius: 8px;
     border: 1px solid var(--edge); background: var(--vscode-editorWidget-background, transparent); }
   .stat .n { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.05;
@@ -65,7 +63,7 @@ export const DECK_CSS = `
   .stat.attn .l { color: color-mix(in srgb, var(--c-attn) 70%, var(--dim)); }
   /* The good-news tile, lit on exactly the same terms as .attn and in the merge
      column's own green. Two lit tiles in a row is the point: one says something
-     is wrong, the other says something is finished, and they are the only two
+     is wrong, the other says something is at the merge, and they are the only two
      numbers on this header you can act on without opening anything. */
   .stat.up { border-color: color-mix(in srgb, var(--c-done) 55%, var(--hair)); }
   .stat.up .n { color: var(--c-done); }
@@ -131,16 +129,31 @@ export const DECK_CSS = `
   .col-hd .ct { font-size: var(--t-micro); font-variant-numeric: tabular-nums; color: var(--dim);
     border: 1px solid var(--hair); border-radius: 20px; padding: 1px 7px; line-height: 1.3; }
   .col-hd .rule { flex: 1; height: 1px; background: color-mix(in srgb, var(--zone) 22%, var(--hair)); }
-  /* The zone tint: the hue pooling at the top of the column and falling away over
-     the first card's height. Faint on purpose — it says "this is a place" without
-     fighting the cards, which carry their own accent rail and their own state
-     colour — but not so faint it reads as a rendering artefact. It sits on
-     .col-body rather than .col so it starts under the sticky header instead of
-     scrolling out from behind it, and the padding widens to give the gradient an
-     edge that is visibly inside the column rather than flush with the cards. */
-  .col-body { display: flex; flex-direction: column; gap: 10px; padding: 8px 7px 3px;
+  /* The zone tint: a flat field of the column's own hue behind its cards. Faint on
+     purpose — it says "this is a place" without fighting the cards, which carry
+     their own accent rail and their own state colour.
+     Flat rather than a gradient fading out down the column: a fade has to stop
+     somewhere, and wherever it stops draws a horizontal edge across the column
+     that reads as a panel boundary or a selection highlight rather than as tint.
+     Ending at the field's own bottom is the one edge that means something.
+     It sits on .col-body rather than .col so it starts under the sticky header
+     instead of scrolling out from behind it, and the padding is what keeps the
+     field visibly wider than the cards standing in it. */
+  .col-body { display: flex; flex-direction: column; gap: 10px; padding: 8px 7px 8px;
     border-radius: var(--r-card);
-    background: linear-gradient(color-mix(in srgb, var(--zone) 9%, transparent), transparent 260px); }
+    background: color-mix(in srgb, var(--zone) 5%, transparent); }
+  /* A band inside a column. Deliberately quieter than .col-hd — no dot, no sticky,
+     lowercase from the markup — so the column header still reads as the heading and
+     this reads as a divider under it. The first lane sits tight to the column
+     header; later ones open a gap so the break between bands is visible without a
+     heavier rule. It takes no zone colour of its own: the column body is already
+     tinted, and a second green inside a green column adds nothing. */
+  .lane-hd { display: flex; align-items: center; gap: 7px; flex: none;
+    padding: 2px 2px 0; color: var(--dim); font-size: var(--t-micro); }
+  .lane-hd:not(:first-child) { margin-top: 6px; }
+  .lane-hd .nm { letter-spacing: .01em; white-space: nowrap; }
+  .lane-hd .ct { font-variant-numeric: tabular-nums; }
+  .lane-hd .rule { flex: 1; height: 1px; background: var(--hair); }
 
   /* \`flex: none\` is load-bearing: .card sets overflow:hidden to clip the accent rail, which
      zeroes its automatic minimum size — without it the flex column squeezes every card and

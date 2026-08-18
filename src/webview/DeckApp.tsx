@@ -1,9 +1,9 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { BranchCiStatus, CardAgent, DeckColumn, FlowCommand, FlowPromptMode, OutboundMessage, PendingResume, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind } from "../types";
+import { BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromptMode, OutboundMessage, PendingResume, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind } from "../types";
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
-import { DeckCard, projectCards } from "./deckCards";
+import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
 import { prSignals } from "../engine/bucket";
@@ -55,14 +55,16 @@ let toastSeq = 0;
 // moment later. Same reasoning, same default, as App.tsx's DEFAULT_SOURCE_LABEL.
 const DEFAULT_SOURCE_LABEL = "Jira";
 
-// `needs` and `merge` stay the column ids — they are the engine's vocabulary
-// (DeckColumn, deriveBucket) and never reach a user. "Action required" and "Ready
-// to merge" are what the board says, in the summary tile, the column header and
-// the legend alike: one name for one thing.
+// `needs` stays the column id — it is the engine's vocabulary (DeckColumn,
+// deriveBucket) and never reaches a user. "Action required" is what the board
+// says, in the summary tile, the column header and the legend alike: one name for
+// one thing. `merge` needs no translation: Merge is the label too.
 //
 // Board order is the attention ramp: something is running, something wants you,
-// something is parked on other people, something is one click from done. There is
-// no finished column — a merged run leaves for the Recently closed strip.
+// something is parked on other people, something is at the merge. Merge is a
+// stage, not a finish line — it holds the press and its aftermath, split into
+// lanes below. There is no Done column: a ticket closed with nothing merged left
+// no wrap-up, and leaves for the Recently closed strip.
 //
 // `glow` marks a zone where the dot means something is alive right now, and only
 // those zones get the halo. In review deliberately does not: a card sits there
@@ -72,8 +74,22 @@ const COLUMNS: { id: DeckColumn; label: string; varName: string; glow: boolean }
   { id: "progress", label: "In progress", varName: "--c-progress", glow: true },
   { id: "needs", label: "Action required", varName: "--c-attn", glow: true },
   { id: "review", label: "In review", varName: "--c-review", glow: false },
-  { id: "merge", label: "Ready to merge", varName: "--c-done", glow: true },
+  { id: "merge", label: "Merge", varName: "--c-done", glow: true },
 ];
+
+// The two tenses of the same event, most actionable first. Lowercase, because a
+// lane is a sub-header under a column and should not compete with it.
+//
+// Neither is marked as good news in its own colour: the column already carries
+// the green, and a lit lane header inside a lit column says nothing the column
+// did not. A column with a lane list renders no unlaned cards — deriveLane
+// answers for every card `merge` can hold, and deckCards.test.ts holds it to that.
+const LANES: Partial<Record<DeckColumn, { id: DeckLane; label: string }[]>> = {
+  merge: [
+    { id: "ready", label: "ready to merge" },
+    { id: "merged", label: "merged · wrap up" },
+  ],
+};
 
 /** A copy of `r` with `key` removed. Used to clear a per-row flag or body
  * without leaving a stale `false`/`""` entry sitting in the map forever. */
@@ -88,7 +104,7 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
      Reading the agent first told that card "nothing is happening" in the parked
      grey, on the one column that means act now — and a board with no agents open
      anywhere is *all* such cards, which is how a column of real work came to look
-     uniformly disabled. So the column leads here, exactly as `done` leads above:
+     uniformly disabled. So the column leads here, exactly as `merge` does below:
      where the column knows more than the agent read, it says so.
 
      The line names the reason rather than restating the specifics — the PR block
@@ -99,10 +115,12 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
   if (r.column === "needs" && r.agent.state === "unknown" && prSignals(r.prs).blocked) {
     return { text: "pr blocked", tone: "attn" };
   }
-  /* Same reasoning one column to the right: a Ready to merge card with nobody
-     home is not "parked", it is waiting on a press. The column is the only thing
-     that knows that — the agent read says nothing at all. */
-  if (r.column === "merge" && r.agent.state === "unknown") return { text: "ready to merge", tone: "merged" };
+  /* Same reasoning one column to the right: a Merge card with nobody home is not
+     "parked", it is waiting on a press or on its wrap-up. The column and the PRs
+     are the only things that know which — the agent read says nothing at all. */
+  if (r.column === "merge" && r.agent.state === "unknown") {
+    return { text: prSignals(r.prs).merged ? "merged" : "ready to merge", tone: "merged" };
+  }
   if (r.agent.state === "unknown") return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
@@ -491,7 +509,10 @@ export function DeckApp(): JSX.Element {
   const closed = runs.filter((r) => r.shelf === "closed");
   const cards: DeckCard[] = grouping === "agents"
     ? projectCards(live)
-    : live.map((r) => ({ id: `w:${r.run.key}`, status: r, agent: null, agents: r.agents, column: r.column }));
+    : live.map((r) => ({
+        id: `w:${r.run.key}`, status: r, agent: null, agents: r.agents,
+        column: r.column, lane: laneOf(r, r.column),
+      }));
   // The label mirrors the card's own key chip, so the strip and the board name
   // the same run the same way.
   const closedRows: ClosedRow[] = closed.map((r) => ({
@@ -539,6 +560,8 @@ export function DeckApp(): JSX.Element {
     send({ type: "deck:forget", key });
   }, []);
 
+  // One card, wherever it lands — a lane renders exactly what an unlaned column
+  // does, so a lane can never quietly grow its own kind of card.
   const card = (c: DeckCard): JSX.Element => (
     <Card key={c.id} r={c.status} agent={c.agent} column={c.column} sourceLabel={sourceLabel}
       selected={c.id === selId}
@@ -552,13 +575,14 @@ export function DeckApp(): JSX.Element {
         {/* The board columns and nothing else. "To review" lived here too, six
             pixels above the review strip that renders its own count; "Total" was
             the sum of the rest, over a board showing every card it counted.
-            Ready to merge earns a tile for the same reason it earned a column:
-            it is the one number here you can drive to zero this minute. */}
+            Merge earns a tile for the same reason it earned a column: between
+            the press and the wrap-up, it is the number here you can drive to
+            zero today. */}
         <div className="stats">
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "progress").length}</span><span className="l">In progress</span></div>
           <div className={`stat ${needs > 0 ? "attn" : ""}`}><span className="n">{needs}</span><span className="l">Action required</span></div>
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "review").length}</span><span className="l">In review</span></div>
-          <div className={`stat ${mergeable > 0 ? "up" : ""}`}><span className="n">{mergeable}</span><span className="l">Ready to merge</span></div>
+          <div className={`stat ${mergeable > 0 ? "up" : ""}`}><span className="n">{mergeable}</span><span className="l">Merge</span></div>
           {showTokenTotal && boardEq > 0 && (
             <div
               className="stat"
@@ -694,7 +718,22 @@ export function DeckApp(): JSX.Element {
                   <span className="rule" />
                   <span className="ct">{list.length}</span>
                 </div>
-                <div className="col-body">{list.map(card)}</div>
+                <div className="col-body">
+                  {LANES[col.id]
+                    ? LANES[col.id]!.flatMap((lane) => {
+                        const inLane = list.filter((c) => c.lane === lane.id);
+                        if (inLane.length === 0) return [];
+                        return [
+                          <div className="lane-hd" key={`h:${lane.id}`}>
+                            <span className="nm">{lane.label}</span>
+                            <span className="ct">{inLane.length}</span>
+                            <span className="rule" />
+                          </div>,
+                          ...inLane.map(card),
+                        ];
+                      })
+                    : list.map(card)}
+                </div>
               </section>
             );
           })}

@@ -34,7 +34,8 @@ const mkCard = (over: Partial<RunStatus> = {}, agent: DeckCard["agent"] = null):
     agent: { state: "unknown", lastActivityMs: null, slug: null },
     windowOpen: false, prs: {} as PrEntryMap, agents: [], shelf: "board", ...over,
   };
-  return { id: `p:${status.run.key}`, status, agent, agents: status.agents, column: status.column };
+  return { id: `p:${status.run.key}`, status, agent, agents: status.agents,
+    column: status.column, lane: null };
 };
 
 // `usage` is threaded as a 4th positional so every pre-existing call renders with
@@ -104,7 +105,7 @@ describe("DeckDetail", () => {
     expect(within(container).getByRole("button", { name: /address pr/i })).toBeTruthy();
   });
 
-  it("offers no Address PR in Ready to merge — there is nothing left to address", () => {
+  it("offers no Address PR in Merge — there is nothing left to address", () => {
     const { container } = render1(mkCard({
       column: "merge", prs: { svc: { facts: facts({ review: "approved" }), fetchedAt: 1 } } as PrEntryMap,
     }));

@@ -95,6 +95,7 @@ export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
     prOpen: pr.open,
     prBlocked: pr.blocked,
     prReady: pr.ready,
+    prMerged: pr.merged,
   });
   const target = runTarget(run);
   const windowOpen = target ? (i.openIdentities ?? new Set<string>()).has(canon(target)) : false;

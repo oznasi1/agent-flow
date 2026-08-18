@@ -119,11 +119,13 @@ can't run the Web Speech API.
 
 Once you've taken tasks, the **Deck** (open it with **"Open the Deck (in-flight)"**)
 is the board of everything you've launched, in a classic pipeline —
-**In progress · Action required · In review · Ready to merge**. Attention rises left to
-right and ends at the merge; nothing finished takes up board space, because a merged run
-(or a ticket somebody marked done) drops into **Recently closed** underneath.
+**In progress · Action required · In review · Merge**. Attention rises left to right and
+ends at the merge, which spans both sides of it — `ready to merge` for a pull request one
+click from landing, `merged · wrap up` for one that already has and still owes you a ticket
+transition or a branch to delete. A ticket closed with nothing merged left no wrap-up, and
+drops into **Recently closed** underneath.
 
-<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Ready to merge). Its header carries the title, four tiles counting In progress, Action required, In review and Ready to merge, an Agents / Workspaces lens and a refresh reading 'synced 4s ago'. Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a live agent status (working, idle, ended turn, parked, or ready to merge), the PR and CI state, the Jira status, and Open / Diff actions. A note started from the Notepad tab sits among the tickets marked 'notepad'. Each column carries its own hue in its dot, header rule and a faint tint down the top of the column, and a collapsed 'Recently closed' strip sits under the board. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button." />
+<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Merge). Its header carries the title, four tiles counting In progress, Action required, In review and Merge, an Agents / Workspaces lens and a refresh reading 'synced 4s ago'. Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a live agent status (working, idle, ended turn, parked, ready to merge, or merged), the PR and CI state, the Jira status, and Open / Diff actions. A note started from the Notepad tab sits among the tickets marked 'notepad'. Each column carries its own hue in its dot, header rule and a faint tint down the top of the column; the Merge column is split into 'ready to merge' and 'merged · wrap up' lanes, and a collapsed 'Recently closed' strip sits under the board. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button." />
 
 The columns are a neutral git + Jira backbone; each **card** carries the true live state.
 A best-effort **Live signal** (read from your local Claude Code transcripts) tells `working ·

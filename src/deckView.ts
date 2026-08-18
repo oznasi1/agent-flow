@@ -42,6 +42,7 @@ import { readSessionActivity } from "./engine/transcript";
 import { canon } from "./engine/paths";
 import { OwnedRun, resolveOwnership } from "./engine/ownership";
 import { shelfFor } from "./engine/visibility";
+import { prSignals } from "./engine/bucket";
 // The scope picker the modes-notice hide-write already uses: a settings write must
 // land where the user's value already lives. Saving a command is the same problem.
 import { pickExplicit } from "./modesNotice";
@@ -2382,6 +2383,7 @@ export class DeckPanel {
       const shelf = getConfig().inflightShowAll ? "board" : shelfFor({
         hasLiveSession: ownership.runsWithSession.has(run.key),
         prOpen: Object.values(status.prs).some((e) => e.facts?.state === "OPEN"),
+        merged: prSignals(status.prs).merged,
         ticketActive: isTicketRun(run) && status.ticketCategory !== "done",
         hasWorkToLose: status.repos.some((r) => ownsPath(r.path) && (r.dirty || r.ahead > 0)),
       });

@@ -173,16 +173,16 @@ describe("DeckApp", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ column: "progress" }), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" }, column: "needs" })]));
     const labels = screen.getAllByText(/./, { selector: ".stat .l" }).map((n) => n.textContent);
-    expect(labels).toEqual(["In progress", "Action required", "In review", "Ready to merge"]);
+    expect(labels).toEqual(["In progress", "Action required", "In review", "Merge"]);
   });
 
-  it("lights the Ready to merge tile only when something is actually ready", () => {
+  it("lights the Merge tile only when something is at the merge", () => {
     const lit = () => (document.querySelector(".stat.up") as HTMLElement | null)?.querySelector(".l")?.textContent ?? null;
     render(<DeckApp />);
     host(runsMsg([mkStatus({ column: "progress" })]));
     expect(lit()).toBeNull();
     host(runsMsg([mkStatus({ column: "merge" })]));
-    expect(lit()).toBe("Ready to merge");
+    expect(lit()).toBe("Merge");
   });
 
   it("drops the To review and Total tiles", () => {
@@ -651,23 +651,45 @@ describe("DeckApp PR block", () => {
 });
 
 describe("DeckApp PR-facts chrome", () => {
-  it("says ready to merge on a merge card with nobody home", () => {
-    // The column is the only thing that knows: the agent read on a parked card
-    // says "unknown", which would otherwise render the grey parked line on the
-    // one column that means press this now.
+  it("says ready to merge, or merged, on a merge card with nobody home", () => {
+    // The column and the PRs are the only things that know: the agent read on a
+    // parked card says "unknown", which would otherwise render the grey parked
+    // line on the one column that means press this, or wrap this up.
+    const parkedMerge = (over: Partial<PrFacts>) => mkStatus({
+      column: "merge", agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null },
+      prs: { svc: { facts: prFacts(over), fetchedAt: 1 } },
+    });
+    const { container } = render(<DeckApp />);
+    host(runsMsg([parkedMerge({ review: "approved" })]));
+    const status = () => container.querySelector(".status") as HTMLElement;
+    expect(within(status()).getByText("ready to merge")).toBeTruthy();
+    expect(status().className).toContain("tone-merged");
+    host(runsMsg([parkedMerge({ state: "MERGED" })]));
+    expect(within(status()).getByText("merged")).toBeTruthy();
+  });
+
+  it("says merged only when every PR-bearing repo actually merged", () => {
+    // A two-repo run whose backend landed and whose frontend is still open has
+    // not merged, and its parked line must not claim it did. Scoped to the state
+    // line: the signal line's own lead-PR bit can legitimately say "merged" about
+    // the one repo that did, which is a different claim.
     const { container } = render(<DeckApp />);
     host(runsMsg([mkStatus({
       column: "merge", agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null },
-      prs: { svc: { facts: prFacts({ review: "approved" }), fetchedAt: 1 } },
+      prs: {
+        svc: { facts: prFacts({ state: "MERGED" }), fetchedAt: 1 },
+        web: { facts: prFacts({ number: 99, url: "https://github.com/acme/web/pull/99", state: "OPEN" }), fetchedAt: 1 },
+      },
     })]));
-    const status = container.querySelector(".status") as HTMLElement;
-    expect(within(status).getByText("ready to merge")).toBeTruthy();
-    expect(status.className).toContain("tone-merged");
+    const status = within(container.querySelector(".status") as HTMLElement);
+    expect(status.getByText("ready to merge")).toBeTruthy();
+    expect(status.queryByText("merged")).toBeNull();
   });
 
   it("still lets a live agent's own state speak on a merge card", () => {
     // Only the parked case is overridden. An agent working in a run whose PR is
-    // already green is doing something, and the line must say so.
+    // already green — or already landed, running the wrap-up — is doing
+    // something, and the line must say so.
     const { container } = render(<DeckApp />);
     host(runsMsg([mkStatus({
       column: "merge", agent: { state: "working", lastActivityMs: Date.now(), slug: null },
@@ -2136,9 +2158,11 @@ describe("board zones", () => {
   const keys = (label: string) =>
     [...column(label).querySelectorAll(".card .key")].map((n) => n.textContent);
 
+  /** A parked, PR-bearing run, on whichever column its PR facts earn it — the
+   * host would have derived exactly this via deriveBucket. */
   const inReview = (key: string, over: Partial<PrFacts>): RunStatus => mkStatus({
     run: { ...mkStatus().run, key },
-    column: over.review === "approved" ? "merge" : "review",
+    column: over.review === "approved" || over.state === "MERGED" ? "merge" : "review",
     agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null },
     prs: { svc: { facts: prFacts(over), fetchedAt: 1 } },
   });
@@ -2147,15 +2171,15 @@ describe("board zones", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     expect([...document.querySelectorAll(".col-hd .nm")].map((n) => n.textContent))
-      .toEqual(["In progress", "Action required", "In review", "Ready to merge"]);
+      .toEqual(["In progress", "Action required", "In review", "Merge"]);
   });
 
-  it("gives a ready-to-merge run its own column, apart from the ones still waiting", () => {
+  it("gives a ready-to-merge run the merge column, apart from the ones still waiting", () => {
     render(<DeckApp />);
     host(runsMsg([inReview("ASM-2", { review: "none" }), inReview("ASM-1", { review: "approved" })]));
-    expect(keys("Ready to merge")).toEqual(["ASM-1"]);
+    expect(keys("Merge")).toEqual(["ASM-1"]);
     expect(keys("In review")).toEqual(["ASM-2"]);
-    expect(column("Ready to merge").querySelector(".col-hd .ct")?.textContent).toBe("1");
+    expect(column("Merge").querySelector(".col-hd .ct")?.textContent).toBe("1");
   });
 
   it("has no Done column at all — a merged run is not a stage of work", () => {
@@ -2171,13 +2195,13 @@ describe("board zones", () => {
     const glowing = [...document.querySelectorAll<HTMLElement>(".col")]
       .filter((c) => c.querySelector(".col-hd .dot.glow"))
       .map((c) => c.querySelector(".col-hd .nm")?.textContent);
-    expect(glowing).toEqual(["In progress", "Action required", "Ready to merge"]);
+    expect(glowing).toEqual(["In progress", "Action required", "Merge"]);
   });
 
   it("hands each zone its own hue through one custom property", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    expect(column("Ready to merge").style.getPropertyValue("--zone")).toBe("var(--c-done)");
+    expect(column("Merge").style.getPropertyValue("--zone")).toBe("var(--c-done)");
     expect(column("In review").style.getPropertyValue("--zone")).toBe("var(--c-review)");
   });
 
@@ -2186,6 +2210,44 @@ describe("board zones", () => {
     host(runsMsg([mkStatus()]));
     expect([...column("In progress").querySelectorAll(".col-hd > *")].map((n) => n.className))
       .toEqual(["dot glow", "nm", "rule", "ct"]);
+  });
+
+  /** Every lane header and card key in the column, in render order — the one
+   * assertion that catches a lane header sitting above the wrong cards. */
+  const flow = (label: string) =>
+    [...column(label).querySelectorAll(".lane-hd .nm, .card .key")].map((n) => n.textContent);
+
+  const lanes = (label: string) =>
+    [...column(label).querySelectorAll(".lane-hd")].map((h) => [
+      h.querySelector(".nm")?.textContent,
+      h.querySelector(".ct")?.textContent,
+    ]);
+
+  it("splits the merge column into the press and its aftermath, press first", () => {
+    render(<DeckApp />);
+    host(runsMsg([inReview("ASM-9", { state: "MERGED" }), inReview("ASM-1", { review: "approved" })]));
+    expect(lanes("Merge")).toEqual([["ready to merge", "1"], ["merged · wrap up", "1"]]);
+    expect(flow("Merge")).toEqual(["ready to merge", "ASM-1", "merged · wrap up", "ASM-9"]);
+  });
+
+  it("still names the lane when every card in the column is on one side", () => {
+    render(<DeckApp />);
+    host(runsMsg([inReview("ASM-9", { state: "MERGED" })]));
+    expect(lanes("Merge")).toEqual([["merged · wrap up", "1"]]);
+  });
+
+  it("keeps the column header counting both lanes", () => {
+    render(<DeckApp />);
+    host(runsMsg([inReview("ASM-9", { state: "MERGED" }), inReview("ASM-1", { review: "approved" })]));
+    expect(column("Merge").querySelector(".col-hd .ct")?.textContent).toBe("2");
+  });
+
+  it("leaves the three columns that mean one thing without sub-headers", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus(), inReview("ASM-2", { review: "none" })]));
+    expect(lanes("In progress")).toEqual([]);
+    expect(lanes("Action required")).toEqual([]);
+    expect(lanes("In review")).toEqual([]);
   });
 });
 

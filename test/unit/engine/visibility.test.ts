@@ -13,7 +13,7 @@ const prs = (...f: (PrFacts | null)[]): PrEntryMap =>
   Object.fromEntries(f.map((x, i) => [`repo${i}`, { facts: x, fetchedAt: 0 }]));
 
 const input = (over: Partial<VisibilityInput> = {}): VisibilityInput => ({
-  hasLiveSession: false, prOpen: false, ticketActive: false, hasWorkToLose: false, ...over,
+  hasLiveSession: false, prOpen: false, merged: false, ticketActive: false, hasWorkToLose: false, ...over,
 });
 
 describe("visibility.ts is webview-safe", () => {
@@ -37,18 +37,19 @@ describe("shelfFor", () => {
     expect(shelfFor(input({ prOpen: true }))).toBe("board");
   });
 
-  it("closes a run whose every PR merged — there is no Done column left to hold it", () => {
-    // The whole point of retiring the fourth column: landing is not a board
-    // state. A multi-repo run that landed everywhere has no live signal at all.
-    expect(shelfFor(input())).toBe("closed");
-    expect(landed(prs(facts({ state: "MERGED" }), facts({ state: "MERGED" })), "indeterminate")).toBe(true);
+  it("keeps a merged run on the board, so its wrap-up is somewhere you can see it", () => {
+    expect(shelfFor(input({ merged: true }))).toBe("board");
   });
 
-  it("still keeps a merged run on the board while its ticket is open or an agent is in it", () => {
-    // Landing does not close a run by itself — these two do the deciding, and a
-    // merge that nobody has moved the ticket for is still work somebody owes.
+  it("closes a done ticket that never merged — nothing landed, so nothing to wrap up", () => {
+    // The one case where `merged` and `landed()` disagree, and the whole reason
+    // the shelf reads the narrower of the two.
+    expect(landed(prs(facts({ state: "CLOSED" })), "done")).toBe(true);
+    expect(shelfFor(input({ merged: false }))).toBe("closed");
+  });
+
+  it("keeps an active ticket on the board with nothing merged", () => {
     expect(shelfFor(input({ ticketActive: true }))).toBe("board");
-    expect(shelfFor(input({ hasLiveSession: true }))).toBe("board");
   });
 
   it("keeps an active ticket on the board with nothing else going on", () => {

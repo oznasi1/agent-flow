@@ -9,21 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The In-flight board is four zones, ending at the merge.** **Ready to
-  merge** is a column of its own rather than a band inside In review, so the
-  state you can clear in five seconds no longer sits below a fold — and it
-  now outranks a still-working agent, the same way a blocked PR already did.
-  In review means one thing: a pull request somebody still has to look at.
-- **The Done column is gone.** A merged run, and a ticket somebody marked
-  done, go straight to **Recently closed**, which already offers the only two
-  things left to do with them — reopen and forget — and still retires them on
-  `agentFlow.retireFinishedAfterHours`. The board holds live work only.
+- **The In-flight board is four zones, ending at the merge.** The fourth
+  column is **Merge**, and it spans both sides of the press: a `ready to
+  merge` lane for a PR one click from landing, and a `merged · wrap up` lane
+  for one that already has. A merge is where the wrap-up starts — move the
+  ticket, delete the branch, watch the deploy — not where the work ends, so
+  it stays somewhere you can see it until the retire sweep's finished window
+  elapses. The merge outranks a still-working agent, the same way a blocked
+  PR already did.
+- **In review means one thing:** a pull request somebody still has to look
+  at. Its `ready to merge` band moved out to the Merge column.
+- **The Done column is gone.** A ticket somebody marked done that never had a
+  PR merge produced no wrap-up, and goes straight to **Recently closed**,
+  which already offers the only two things left to do with it — reopen and
+  forget.
 - **Column chrome.** Each zone carries its own hue through the header dot, its
   rule and a faint tint down the top of the column. The dot is haloed on the
   zones where something is genuinely alive — In review is a queue, so it is
   not. Zone names set in mono uppercase and counts align down the board's
-  right edge. The header gains a Ready to merge tile, lit in green when there
-  is anything in it.
+  right edge. The header gains a Merge tile, lit in green when there is
+  anything in it.
 
 ## [0.26.0] — 2026-08-17
 

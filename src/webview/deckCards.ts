@@ -1,5 +1,5 @@
-import { CardAgent, DeckColumn, RunStatus } from "../types";
-import { deriveBucket, prSignals } from "../engine/bucket";
+import { CardAgent, DeckColumn, DeckLane, RunStatus } from "../types";
+import { deriveBucket, deriveLane, prSignals } from "../engine/bucket";
 
 /** One card on the Agents board. A run's agents are bucketed by column (see
  * below) and each distinct column its agents land in produces one of these; a
@@ -21,6 +21,15 @@ export interface DeckCard {
    * on a parked card. What `AgentsRow` lists. */
   agents: CardAgent[];
   column: DeckColumn;
+  /** The band within `column`, or null where the column means one thing. */
+  lane: DeckLane | null;
+}
+
+/** The lane a whole run sits in, for the two card shapes that take the run's own
+ * column rather than an agent's: a parked card here, and every card the
+ * Workspaces lens builds. */
+export function laneOf(status: RunStatus, column: DeckColumn): DeckLane | null {
+  return deriveLane(column, prSignals(status.prs));
 }
 
 /**
@@ -44,7 +53,10 @@ export function projectCards(runs: RunStatus[]): DeckCard[] {
   const cards: DeckCard[] = [];
   for (const status of runs) {
     if (status.agents.length === 0) {
-      cards.push({ id: `p:${status.run.key}`, status, agent: null, agents: [], column: status.column });
+      cards.push({
+        id: `p:${status.run.key}`, status, agent: null, agents: [],
+        column: status.column, lane: laneOf(status, status.column),
+      });
       continue;
     }
     const pr = prSignals(status.prs);
@@ -56,15 +68,17 @@ export function projectCards(runs: RunStatus[]): DeckCard[] {
         prOpen: pr.open,
         prBlocked: pr.blocked,
         prReady: pr.ready,
+        prMerged: pr.merged,
       });
       const group = byColumn.get(column);
       if (group) group.push(agent); else byColumn.set(column, [agent]);
     }
     for (const [column, group] of byColumn) {
+      const lane = deriveLane(column, pr);
       cards.push(
         group.length === 1
-          ? { id: `a:${group[0].session.sessionId}`, status, agent: group[0], agents: group, column }
-          : { id: `g:${status.run.key}:${column}`, status, agent: null, agents: group, column },
+          ? { id: `a:${group[0].session.sessionId}`, status, agent: group[0], agents: group, column, lane }
+          : { id: `g:${status.run.key}:${column}`, status, agent: null, agents: group, column, lane },
       );
     }
   }

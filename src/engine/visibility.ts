@@ -23,6 +23,9 @@ export interface VisibilityInput {
   hasLiveSession: boolean;
   /** Any PR still OPEN, draft included: a draft is unmerged work in flight. */
   prOpen: boolean;
+  /** `prSignals().merged` — every PR-bearing repo landed. Narrower than
+   * `landed()` above on purpose: see `shelfFor`. */
+  merged: boolean;
   /** A ticket run whose category is not "done". */
   ticketActive: boolean;
   /** dirty || ahead > 0, counted on OWNED paths only. Without the ownership
@@ -36,19 +39,17 @@ export interface VisibilityInput {
  * *membership* only. `deriveBucket` still decides which of the four columns a
  * board card lands in.
  *
- * `landed()` above is deliberately NOT one of these signals. The board has no
- * finished column to hold landed work in: a merged run, and a ticket someone
- * marked done, go straight to the Recently closed strip, which offers the only
- * two things left to do with them (reopen, forget). The strip is where they wait
- * out the retire sweep's grace window.
- *
- * Landing still does not *always* close a run, and that is the point of listing
- * the signals separately: a merged PR whose ticket nobody has moved yet keeps
- * `ticketActive`, and an agent still open in the worktree keeps `hasLiveSession`.
- * Both are live work that happens to sit behind a merge.
+ * `merged` is a board signal and `landed()` above is deliberately not. The two
+ * differ on exactly one case — a ticket somebody marked done that never had a PR
+ * merge — and that case is the whole distinction: a merge leaves a wrap-up
+ * behind (move the ticket, delete the branch, watch the deploy), so it stays on
+ * the board in the merge column's `merged` lane until the retire sweep's finished
+ * window elapses. A ticket closed with nothing merged left no wrap-up, so it goes
+ * straight to the Recently closed strip, which offers the only two things still
+ * worth doing with it: reopen, forget.
  *
  * Keep this file free of `fs`-touching imports — visibility.test.ts enforces it.
  */
 export function shelfFor(i: VisibilityInput): Shelf {
-  return i.hasLiveSession || i.prOpen || i.ticketActive || i.hasWorkToLose ? "board" : "closed";
+  return i.hasLiveSession || i.prOpen || i.merged || i.ticketActive || i.hasWorkToLose ? "board" : "closed";
 }

@@ -173,12 +173,12 @@ describe("buildRunStatus", () => {
     expect(s.column).toBe("merge");
   });
 
-  it("claims no column for a merged PR — the run leaves the board instead", () => {
+  it("puts a run whose PR merged in the Merge column, even when Jira says in progress", () => {
     const s = buildRunStatus({
       run, ticket: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW,
       openIdentities: new Set(), prs: entries(prFacts({ state: "MERGED" })),
     });
-    expect(s.column).toBe("progress");
+    expect(s.column).toBe("merge");
   });
 
   describe("buildRunStatus with open sessions", () => {
