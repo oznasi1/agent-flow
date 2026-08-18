@@ -59,9 +59,9 @@ function isReviewStatus(name?: string | null): boolean {
  * enforces it.
  */
 export function deriveBucket(i: BucketInput): DeckColumn {
+  if (i.prMerged) return "merge";
   // stalled and exited join needs-you here: all three mean a human has to do
   // something, and all three used to arrive as "idle" and land in progress.
-  if (i.prMerged) return "merge";
   if (i.agentState === "needs-you" || i.agentState === "stalled" || i.agentState === "exited" || i.prBlocked) {
     return "needs";
   }
