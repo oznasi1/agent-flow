@@ -220,80 +220,93 @@ git commit -m "feat(deck): add a glyph per card kind"
 
 - [ ] **Step 1: Write the failing tests**
 
-Add to `test/webview/DeckApp.test.tsx`, inside the existing top-level `describe` and following the file's own conventions for building runs and rendering the board (reuse the helpers already defined at the top of that file — do not invent new ones):
+Add to `test/webview/DeckApp.test.tsx`, at the end of the existing top-level
+`describe("DeckApp", …)`. It reuses that file's own `mkStatus`, `host` and
+`runsMsg` helpers (defined at the top of the file) — do not add a second render
+harness:
 
 ```tsx
-describe("card avatar and state row", () => {
-  it("leads the card with its kind, and keeps the ticket key whole beside the title", async () => {
-    // A tracked run: the kind is "task", so the avatar is the ticket tag and the
-    // key stays a link to the tracker.
-    const { container } = await renderBoard([
-      run({ key: "DEMO-142", summary: "Export times out on large workspaces" }),
-    ]);
-    const card = container.querySelector(".card")!;
-    const hd = card.querySelector(".c-hd")!;
-    // The avatar is the header's FIRST child: the whole point is that every card
-    // starts at the same x with the same kind of mark.
-    expect(hd.firstElementChild!.className).toBe("av k-task");
-    expect(hd.querySelector(".hd-t .c-title")!.textContent).toBe("Export times out on large workspaces");
-    // Not ellipsized away into a wrapper that shrinks: the key is the one string
-    // on this card that cannot be reconstructed from anything else.
-    expect(hd.querySelector(".hd-k .key")!.textContent).toBe("DEMO-142");
-  });
+  describe("card avatar and state row", () => {
+    /** The board with exactly one run, and that run's card. */
+    const oneCard = (over: Partial<RunStatus> = {}): HTMLElement => {
+      const { container } = render(<DeckApp />);
+      host(runsMsg([mkStatus(over)]));
+      return container.querySelector(".card") as HTMLElement;
+    };
 
-  it("gives a notepad card the notepad mark, not the ticket one", async () => {
-    const { container } = await renderBoard([
-      run({ key: "note-abc", summary: "Rip the retry loop out of the fan-out", kind: "notepad" }),
-    ]);
-    expect(container.querySelector(".c-hd .av")!.className).toBe("av k-notepad");
-  });
+    it("leads the card with its kind, and keeps the ticket key whole beside the title", () => {
+      const card = oneCard();
+      const hd = card.querySelector(".c-hd")!;
+      // The avatar is the header's FIRST child: the whole point is that every card
+      // starts at the same x with the same kind of mark.
+      expect(hd.firstElementChild!.className).toBe("av k-task");
+      expect(hd.querySelector(".hd-t .c-title")!.textContent).toContain("Export fails on large accounts");
+      // Its own slot, not sharing a row with the branch and the diff: a truncated
+      // ticket key is the one identifier on this card nobody can reconstruct.
+      expect(hd.querySelector(".hd-k .key")!.textContent).toBe("ASM-1");
+    });
 
-  it("puts the state on its own row under a hairline, with spend and age in mono", async () => {
-    const { container } = await renderBoard([
-      run({
-        key: "DEMO-142",
-        summary: "Export times out on large workspaces",
-        agent: { state: "working", lastActivityMs: Date.now() - 24_000, slug: null },
+    it("gives a notepad card the notepad mark, not the ticket one", () => {
+      const card = oneCard({ run: { ...mkStatus().run, kind: "notepad" } });
+      expect(card.querySelector(".c-hd .av")!.className).toBe("av k-notepad");
+    });
+
+    it("gives an explore card the explore mark", () => {
+      const card = oneCard({ run: { ...mkStatus().run, kind: "explore" } });
+      expect(card.querySelector(".c-hd .av")!.className).toBe("av k-explore");
+    });
+
+    it("selects the card when the title is clicked, as it did before the header existed", () => {
+      const card = oneCard();
+      fireEvent.click(card.querySelector(".c-hd .c-title")!);
+      // The header must NOT stop propagation as a whole — only its key slot does.
+      // Clicking the summary has always selected the card.
+      expect(card.className).toContain("sel");
+    });
+
+    it("does not select the card when its key is clicked", () => {
+      const card = oneCard();
+      fireEvent.click(card.querySelector(".hd-k .key")!);
+      expect(card.className).not.toContain("sel");
+      expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+    });
+
+    it("puts the state on its own row under a hairline, with spend and age in mono", () => {
+      const card = oneCard({
+        run: { ...mkStatus().run, createdAt: Date.now() - 2 * 3_600_000 },
         usage: { input: 2_000, output: 40_000, cacheWrite: 100_000, cacheRead: 4_000_000 },
-      }),
-    ]);
-    const card = container.querySelector(".card")!;
-    // The hairline sits between the facts and the live state, and there is exactly
-    // one of it: a second rule would stop it meaning anything.
-    expect(card.querySelectorAll(".c-hr").length).toBe(1);
-    const st = card.querySelector(".c-st")!;
-    expect(st.querySelector(".sdot")!.className).toContain("tone-working");
-    expect(st.querySelector(".status")!.textContent).toContain("working");
-    const meta = st.querySelector(".c-meta")!;
-    expect(meta.textContent).toContain("eq");
-    // The age is the run's own, and says so — the state text beside it ends in a
-    // duration too (last activity), and the two are different clocks.
-    expect(meta.querySelector(".age")!.getAttribute("title")).toMatch(/^launched /);
-  });
+      });
+      // One hairline, and only one: a second rule would stop it meaning anything.
+      expect(card.querySelectorAll(".c-hr").length).toBe(1);
+      const st = card.querySelector(".c-st")!;
+      expect(st.querySelector(".sdot")!.className).toContain("tone-working");
+      expect(st.querySelector(".status")!.textContent).toContain("working");
+      const meta = st.querySelector(".c-meta")!;
+      expect(meta.textContent).toContain("eq");
+      expect(meta.querySelector(".age")!.textContent).toBe("2h ago");
+      // The age carries its own title in words: the state text beside it also ends
+      // in a duration (the last activity), and the two are different clocks.
+      expect(meta.querySelector(".age")!.getAttribute("title")).toBe("launched 2h ago");
+    });
 
-  it("shows no figure at all for a run whose usage has not been read", async () => {
-    const { container } = await renderBoard([run({ key: "DEMO-142", summary: "Not measured yet" })]);
-    const meta = container.querySelector(".card .c-meta")!;
-    // Absent is not zero. Printing 0 here would assert the run cost nothing.
-    expect(meta.textContent).not.toContain("eq");
-    expect(meta.querySelector(".age")).not.toBeNull();
-  });
+    it("shows no figure at all for a run whose usage has not been read", () => {
+      const meta = oneCard().querySelector(".c-meta")!;
+      // Absent is not zero. Printing 0 here would assert the run cost nothing.
+      expect(meta.textContent).not.toContain("eq");
+      expect(meta.querySelector(".age")).not.toBeNull();
+    });
 
-  it("shows 0eq for a run measured at zero", async () => {
-    const { container } = await renderBoard([
-      run({ key: "DEMO-142", summary: "Measured, and it cost nothing", usage: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } }),
-    ]);
-    expect(container.querySelector(".card .c-meta")!.textContent).toContain("0eq");
+    it("shows 0eq for a run measured at zero", () => {
+      const card = oneCard({ usage: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } });
+      expect(card.querySelector(".c-meta")!.textContent).toContain("0eq");
+    });
   });
-});
 ```
-
-Adapt `renderBoard(...)` / `run({...})` to whatever the surrounding file already calls its board-render and run-builder helpers — the names above are placeholders for that file's existing ones, and the assertions are what matter. If the file has no run-builder helper, build the `RunStatus` literals the same way its neighbouring tests do.
 
 - [ ] **Step 2: Run the tests and watch them fail**
 
 Run: `npx vitest run test/webview/DeckApp.test.tsx -t "card avatar and state row"`
-Expected: FAIL — `.c-hd` is null, because the card still renders `.c-top`.
+Expected: FAIL, 8 tests — `.c-hd` is null, because the card still renders `.c-top`.
 
 - [ ] **Step 3: Re-arrange the card**
 
@@ -323,7 +336,10 @@ arrangement) with the header below. **The key branch is moved verbatim** — the
           scans from one left edge. The title is the anchor; the key trails it on
           the same line, flex: none, because a truncated ticket key is the one
           identifier on this card nobody can reconstruct. */}
-      <div className="c-hd" onClick={(e) => e.stopPropagation()}>
+      {/* No stopPropagation on the header itself: clicking the summary has always
+          selected the card, and the title now lives in here. Only the key slot
+          swallows the click, because the key is the interactive part. */}
+      <div className="c-hd">
         <CardKindIcon kind={kind} />
         <div className="hd-t">
           <div className="c-title" title={r.run.summary}>
@@ -331,7 +347,7 @@ arrangement) with the header below. **The key branch is moved verbatim** — the
             {r.run.summary}
           </div>
         </div>
-        <span className="hd-k">
+        <span className="hd-k" onClick={(e) => e.stopPropagation()}>
           {inferredKey ? (
             <span className="key-wrap">
               <span className="chip" title="Read from the branch name — Agent Flow Deck did not launch this">~inferred</span>
@@ -463,7 +479,7 @@ Add, immediately before the `.c-foot2` rule:
 npx vitest run test/webview/DeckApp.test.tsx
 ```
 
-Expected: PASS — the five new cases **and** every pre-existing case in the file,
+Expected: PASS — the eight new cases **and** every pre-existing case in the file,
 untouched. If a pre-existing case fails, the class contract was broken: find
 which name moved and put it back.
 
