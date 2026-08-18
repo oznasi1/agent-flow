@@ -179,7 +179,38 @@ export const DECK_CSS = `
   /* Wraps for the agent name only: state and ticket always share line one, and
      the name drops beneath the ticket when the column is too narrow for three —
      which beats ellipsizing an identifier, and costs no height when it fits. */
-  .c-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; row-gap: 2px; min-width: 0; }
+  /* The card's header: the kind avatar leads from the same x on every card, the
+     title is the anchor, the key trails it. \`align-items: flex-start\` so a two-line
+     title grows downward and leaves the avatar and the key on line one. */
+  .c-hd { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+  .c-hd .hd-t { flex: 1; min-width: 0; }
+  .c-hd .hd-t .c-title { margin-top: -1px; }
+  /* \`flex: none\` and \`max-width: none\` together: the key must not shrink, and the
+     .key rule below caps every key at 46% of its row — a cap meant for a row the key
+     shared with the state text, and far too tight for its own slot. The title wraps
+     instead; it is already built to. */
+  .c-hd .hd-k { flex: none; padding-top: 1px; }
+  .c-hd .hd-k .key, .c-hd .hd-k .key-wrap { margin-left: 0; max-width: none; }
+
+  /* The kind avatar. A neutral tile with a hued glyph: the ground stays neutral
+     because a column of cards must not become a column of colours — the board's
+     colour vocabulary belongs to the columns and to .attn, and a kind is not a
+     status. */
+  .av { position: relative; flex: none; width: 22px; height: 22px; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--hair); color: var(--dim);
+    background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent); }
+  .av svg { display: block; }
+  /* A ticket is the ordinary case and appears in every column, so it stays
+     neutral: any accent hue here would be read as a status the card does not have
+     — a purple tag on an In-progress card says "in review". The other four kinds
+     are the exceptions, and each borrows the hue of the column it naturally lives
+     in, which reinforces rather than contradicts. */
+  .av.k-task    { color: color-mix(in srgb, var(--vscode-foreground) 62%, transparent); }
+  .av.k-notepad { color: color-mix(in srgb, var(--vscode-charts-yellow) 78%, var(--vscode-foreground)); }
+  .av.k-explore { color: color-mix(in srgb, var(--c-progress) 78%, var(--vscode-foreground)); }
+  .av.k-review  { color: color-mix(in srgb, var(--c-review) 78%, var(--vscode-foreground)); }
+  .av.k-local   { color: var(--dim); }
   .status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto;
     font-size: var(--t-body); color: var(--dim); font-variant-numeric: tabular-nums;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -215,7 +246,7 @@ export const DECK_CSS = `
   /* Clamped so long summaries can't stretch one card out of the column's rhythm; the full
      text stays available on hover. */
   .c-title { margin-top: 5px; font-size: var(--t-title); font-weight: 550; line-height: 1.42; letter-spacing: -.008em;
-    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 
   .c-branch { margin-top: 7px; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
   .c-branch .bn { font-family: var(--mono); font-size: var(--t-data); color: var(--dim);
@@ -563,6 +594,9 @@ export const DECK_CSS = `
      decides: the summary ellipsizes first, and the key only past 50%. */
   .dd-hd .k { font-family: var(--vscode-editor-font-family); font-size: 12px; white-space: nowrap;
     flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
+  /* The drawer opens with the card's own mark, at the card's own size — a smaller
+     one here would read as a different object. */
+  .dd-hd .av { flex: none; }
   .dd-hd .t { font-size: var(--t-body); color: var(--dim);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dd-x { margin-left: auto; background: none; border: none; cursor: pointer;
@@ -654,8 +688,11 @@ export const DECK_CSS = `
   /* One line, always. The three-bit cap in cardSignal is not enough on its own —
      a long branch name still pushes the third bit onto a second row — so the line
      never wraps and the one elastic bit (the mono branch) takes the ellipsis. */
+  /* Under the title as a caption rather than a third band of body text: same bits,
+     same order, same cap of three — only the typography changes. Mono because every
+     bit it carries is an identifier or a count. */
   .c-sig { display: flex; align-items: center; gap: 7px; flex-wrap: nowrap; overflow: hidden;
-    font-size: 11.5px; color: var(--dim); }
+    margin-top: 4px; font-family: var(--mono); font-size: var(--t-data); color: var(--dim); }
   .c-sig > * { flex: none; white-space: nowrap; }
   .c-sig .m { font-family: var(--vscode-editor-font-family);
     flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -665,6 +702,19 @@ export const DECK_CSS = `
   .c-diff { display: inline-flex; gap: 5px; font-family: var(--vscode-editor-font-family); }
   .c-diff .add { color: var(--c-done); }
   .c-diff .del { color: var(--c-danger); }
+
+  /* The card's only rule. Identity and facts above it, live state below. */
+  .c-hr { border: 0; height: 1px; margin: 9px 0 7px;
+    background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
+
+  /* State left, the run's age right. The age is mono and tabular so a column of
+     cards lines its numbers up; the state text is not, because it is English.
+     The dot is .status's sibling here rather than its child, so the gap is this
+     row's to set. */
+  .c-st { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .c-st .status { flex: 0 1 auto; }
+  .c-meta { margin-left: auto; flex: none; display: inline-flex; align-items: baseline; gap: 6px;
+    font-family: var(--mono); font-size: var(--t-data); color: var(--dim); font-variant-numeric: tabular-nums; }
 
   .c-foot2 { display: flex; gap: 5px; margin-top: auto; padding-top: 2px; }
 

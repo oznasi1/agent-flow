@@ -2617,4 +2617,80 @@ describe("DeckApp card anatomy", () => {
     expect(within(stat).getByText("eq")).toBeTruthy();
     expect(stat.title).toMatch(/input×1.*cache-write×1\.25.*cache-read×0\.1.*output×5/);
   });
+
+  describe("card avatar and state row", () => {
+    /** The board with exactly one run, and that run's card. */
+    const oneCard = (over: Partial<RunStatus> = {}): HTMLElement => {
+      const { container } = render(<DeckApp />);
+      host(runsMsg([mkStatus(over)]));
+      return container.querySelector(".card") as HTMLElement;
+    };
+
+    it("leads the card with its kind, and keeps the ticket key whole beside the title", () => {
+      const card = oneCard();
+      const hd = card.querySelector(".c-hd")!;
+      // The avatar is the header's FIRST child: the whole point is that every card
+      // starts at the same x with the same kind of mark.
+      expect(hd.firstElementChild!.className).toBe("av k-task");
+      expect(hd.querySelector(".hd-t .c-title")!.textContent).toContain("Export fails on large accounts");
+      // Its own slot, not sharing a row with the branch and the diff: a truncated
+      // ticket key is the one identifier on this card nobody can reconstruct.
+      expect(hd.querySelector(".hd-k .key")!.textContent).toBe("ASM-1");
+    });
+
+    it("gives a notepad card the notepad mark, not the ticket one", () => {
+      const card = oneCard({ run: { ...mkStatus().run, kind: "notepad" } });
+      expect(card.querySelector(".c-hd .av")!.className).toBe("av k-notepad");
+    });
+
+    it("gives an explore card the explore mark", () => {
+      const card = oneCard({ run: { ...mkStatus().run, kind: "explore" } });
+      expect(card.querySelector(".c-hd .av")!.className).toBe("av k-explore");
+    });
+
+    it("selects the card when the title is clicked, as it did before the header existed", () => {
+      const card = oneCard();
+      fireEvent.click(card.querySelector(".c-hd .c-title")!);
+      // The header must NOT stop propagation as a whole — only its key slot does.
+      // Clicking the summary has always selected the card.
+      expect(card.className).toContain("sel");
+    });
+
+    it("does not select the card when its key is clicked", () => {
+      const card = oneCard();
+      fireEvent.click(card.querySelector(".hd-k .key")!);
+      expect(card.className).not.toContain("sel");
+      expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+    });
+
+    it("puts the state on its own row under a hairline, with the age in mono", () => {
+      const card = oneCard({
+        run: { ...mkStatus().run, createdAt: Date.now() - 2 * 3_600_000 },
+        usage: { input: 2_000, output: 40_000, cacheWrite: 100_000, cacheRead: 4_000_000 },
+      });
+      // One hairline, and only one: a second rule would stop it meaning anything.
+      expect(card.querySelectorAll(".c-hr").length).toBe(1);
+      const st = card.querySelector(".c-st")!;
+      expect(st.querySelector(".sdot")!.className).toContain("tone-working");
+      expect(st.querySelector(".status")!.textContent).toContain("working");
+      const meta = st.querySelector(".c-meta")!;
+      // The age, and only the age — even for a run whose usage the host HAS read.
+      // a66c543 took spend off the card on purpose; the drawer owns it.
+      expect(meta.textContent).toBe("2h ago");
+      expect(meta.querySelector(".age")!.textContent).toBe("2h ago");
+      // The age carries its own title in words: the state text beside it also ends
+      // in a duration (the last activity), and the two are different clocks.
+      expect(meta.querySelector(".age")!.getAttribute("title")).toBe("launched 2h ago");
+    });
+
+    it("keeps the new state row clear of any spend figure, measured or not", () => {
+      // Both directions of the invariant a66c543 established: an unread run and a
+      // read one look the same on the card, because the card never carries spend.
+      for (const over of [{}, { usage: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } }]) {
+        const card = oneCard(over);
+        expect(card.querySelector(".c-meta")!.textContent).not.toContain("eq");
+        expect(card.querySelector(".c-meta .age")).not.toBeNull();
+      }
+    });
+  });
 });

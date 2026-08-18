@@ -57,6 +57,15 @@ describe("DeckDetail", () => {
     expect(hd.textContent).toContain("Export fails");
   });
 
+  it("opens with the same mark the card does, so the two read as one object", () => {
+    render1(mkCard({ run: { ...mkCard().status.run, key: "explore-tenant-config", kind: "explore" } }));
+    const hd = document.querySelector(".dd-hd")!;
+    // First child, same class as the card's own avatar: a selected card and its
+    // drawer must not look like two different objects.
+    expect(hd.firstElementChild!.className).toBe("av k-explore");
+    expect(hd.querySelector(".av")!.getAttribute("aria-label")).toBe("Explore place");
+  });
+
   it("relocates the branch, launched time and repo chips", () => {
     render1(mkCard());
     expect(document.querySelector(".dd .c-branch .bn")!.textContent).toContain("feat/x");

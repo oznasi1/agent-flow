@@ -10,6 +10,7 @@ import { prSignals } from "../engine/bucket";
 import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
 import { LoadingMark } from "./LoadingMark";
+import { CardKindIcon } from "./icons";
 import { keyLabel, timeAgo } from "./helpers";
 import { type Tone } from "./deckParts";
 import { DeckDetail } from "./DeckDetail";
@@ -174,6 +175,10 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
   // repo's git or PR it means.
   const dragRepo = agent?.repo ?? (r.repos.length === 1 ? r.repos[0].name : undefined);
   const cardDragKey = dragRepo ? `${r.run.key}${DRAG_SEP}${dragRepo}` : null;
+  // What this card IS, as its own mark. The run's kind, never the agent's: on the
+  // Agents board the state comes from the session, but the object the card belongs
+  // to is still the run.
+  const kind = runKind(r.run);
   const sigBits = cardSignal(r, agent);
   // sigBits[0] is the lead PR's number whenever this card has a PR; cardActions
   // reads the same lead PR, so the two cannot disagree.
@@ -190,35 +195,41 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
         if (cardDragKey) e.dataTransfer.setData("text/plain", cardDragKey);
       }}
     >
-      {/* State leads, identity trails: the dot sits at the same x on every card, so a column
-          scans top-to-bottom as one strip of "who needs me". */}
-      <div className="c-top" onClick={(e) => e.stopPropagation()}>
-        <span className={`status tone-${sv.tone}`}>
-          <span className={`sdot tone-${sv.tone} ${sv.tone === "working" ? "pulse" : ""}`} />
-          {sv.text}
-        </span>
-        {inferredKey ? (
-          <span className="key-wrap">
-            <span className="chip" title="Read from the branch name — Agent Flow Deck did not launch this">~inferred</span>
-            <button
-              className="key"
-              title={`Open ${inferredKey} in ${sourceLabel}`}
-              onClick={() => send({ type: "openExternal", url: r.run.url })}
-            >
-              {inferredKey}
+      {/* The avatar leads, on the x the tone dot used to hold, so a column still
+          scans from one left edge. The title is the anchor; the key trails it on the
+          same line, flex: none, because a truncated ticket key is the one identifier
+          on this card nobody can reconstruct.
+          No stopPropagation on the header itself: clicking the summary has always
+          selected the card, and the title now lives in here. Only the key slot
+          swallows the click, because the key is the interactive part. */}
+      <div className="c-hd">
+        <CardKindIcon kind={kind} />
+        <div className="hd-t">
+          <div className="c-title" title={r.run.summary}>
+            {local && inferredKey && <span className="chip">local</span>}
+            {r.run.summary}
+          </div>
+        </div>
+        <span className="hd-k" onClick={(e) => e.stopPropagation()}>
+          {inferredKey ? (
+            <span className="key-wrap">
+              <span className="chip" title="Read from the branch name — Agent Flow Deck did not launch this">~inferred</span>
+              <button
+                className="key"
+                title={`Open ${inferredKey} in ${sourceLabel}`}
+                onClick={() => send({ type: "openExternal", url: r.run.url })}
+              >
+                {inferredKey}
+              </button>
+            </span>
+          ) : tracked ? (
+            <button className="key" title={`Open ${r.run.key} in ${sourceLabel}`} onClick={() => send({ type: "openExternal", url: r.run.url })}>
+              {r.run.key}
             </button>
-          </span>
-        ) : tracked ? (
-          <button className="key" title={`Open ${r.run.key} in ${sourceLabel}`} onClick={() => send({ type: "openExternal", url: r.run.url })}>
-            {r.run.key}
-          </button>
-        ) : (
-          <span className="key untracked" title={r.run.key}>{keyLabel(r.run)}</span>
-        )}
-      </div>
-      <div className="c-title" title={r.run.summary}>
-        {local && inferredKey && <span className="chip">local</span>}
-        {r.run.summary}
+          ) : (
+            <span className="key untracked" title={r.run.key}>{keyLabel(r.run)}</span>
+          )}
+        </span>
       </div>
 
       {acts.length > 0 ? (
@@ -258,6 +269,23 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
           ))}
         </div>
       ) : null}
+
+      {/* One hairline, so it means one thing: identity and facts above it, live
+          state below. */}
+      <hr className="c-hr" />
+      <div className="c-st">
+        <span className={`sdot tone-${sv.tone} ${sv.tone === "working" ? "pulse" : ""}`} />
+        <span className={`status tone-${sv.tone}`}>{sv.text}</span>
+        {/* The age, and deliberately nothing else. Spend does NOT come back here:
+            a66c543 took the card's figure away because a per-card number the reader
+            cannot act on competed with the state line and the failure rows, which
+            they can, and two tests in the suite pin that. The drawer owns spend.
+            Its own title, in words, because the state text to the left also ends in
+            a duration (the last activity) and these are different clocks. */}
+        <span className="c-meta">
+          <span className="age" title={`launched ${timeAgo(r.run.createdAt)}`}>{timeAgo(r.run.createdAt)}</span>
+        </span>
+      </div>
 
       <div className="c-foot2" onClick={(e) => e.stopPropagation()}>
         <button
