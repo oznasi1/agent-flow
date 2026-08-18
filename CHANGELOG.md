@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Action required now means an agent is asking you.** A pull request with red
+  CI, requested changes or a conflict used to be filed under Action required
+  alongside agents that had ended their turn, so one column mixed "Claude wants
+  you" with "GitHub wants you". Those PRs move to **In review**, which is split
+  into `fixes needed` and `waiting on review`. Action required keeps only the
+  agent signals: ended turn, stalled, exited. Nothing about precedence changed —
+  a blocked PR still outranks the merge you have yet to press and the live agent
+  read, so the same card leads the same board, one column to the right.
+- **In progress is split into `working` and `parked`.** The column always held
+  both a live agent and the in-flight catch-all — a run whose agent went quiet,
+  or one with no agent at all. It now says which is which instead of stacking
+  them together.
+- A card sitting in `fixes needed` with nobody home reads **pr blocked** in the
+  attention tone rather than the parked grey, the way it did in Action required.
+
 ## [0.30.1] — 2026-08-18
 
 No functional change. Re-released so the packaged build can be installed over an

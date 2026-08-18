@@ -61,16 +61,19 @@ const DEFAULT_SOURCE_LABEL = "Jira";
 // says, in the summary tile, the column header and the legend alike: one name for
 // one thing. `merge` needs no translation: Merge is the label too.
 //
-// Board order is the attention ramp: something is running, something wants you,
-// something is parked on other people, something is at the merge. Merge is a
-// stage, not a finish line — it holds the press and its aftermath, split into
-// lanes below. There is no Done column: a ticket closed with nothing merged left
-// no wrap-up, and leaves for the Recently closed strip.
+// Board order is the attention ramp: something is running, an agent wants you,
+// a pull request wants somebody, something is at the merge. Three of the four are
+// stages rather than states and split into lanes below; Action required is the
+// exception, and means exactly one thing. There is no Done column: a ticket
+// closed with nothing merged left no wrap-up, and leaves for the Recently closed
+// strip.
 //
 // `glow` marks a zone where the dot means something is alive right now, and only
-// those zones get the halo. In review deliberately does not: a card sits there
-// precisely because nothing is happening in it, and a pulsing dot over a queue
-// you cannot drain would be the board's loudest lie.
+// those zones get the halo. In review deliberately does not. A live agent *can*
+// land there — a blocked PR outranks the working signal, so an agent fixing red
+// CI sits in `fixes needed` — but the column as a whole is a queue you cannot
+// drain by watching it, and a pulsing dot over that would be the board's loudest
+// lie.
 const COLUMNS: { id: DeckColumn; label: string; varName: string; glow: boolean }[] = [
   { id: "progress", label: "In progress", varName: "--c-progress", glow: true },
   { id: "needs", label: "Action required", varName: "--c-attn", glow: true },
@@ -78,14 +81,27 @@ const COLUMNS: { id: DeckColumn; label: string; varName: string; glow: boolean }
   { id: "merge", label: "Merge", varName: "--c-done", glow: true },
 ];
 
-// The two tenses of the same event, most actionable first. Lowercase, because a
-// lane is a sub-header under a column and should not compete with it.
+// Each laned column, most actionable band first. Lowercase, because a lane is a
+// sub-header under a column and should not compete with it.
 //
-// Neither is marked as good news in its own colour: the column already carries
-// the green, and a lit lane header inside a lit column says nothing the column
-// did not. A column with a lane list renders no unlaned cards — deriveLane
-// answers for every card `merge` can hold, and deckCards.test.ts holds it to that.
+// No lane is marked as good news or bad news in its own colour: the column
+// already carries the hue, and a lit lane header inside a lit column says nothing
+// the column did not. A column with a lane list renders no unlaned cards —
+// deriveLane answers for every route into all three, and deckCards.test.ts holds
+// it to that.
+//
+// `needs` has no entry on purpose. It is the only column left that means exactly
+// one thing — an agent stopped and wants you — so a sub-header under it could
+// only restate the header above it.
 const LANES: Partial<Record<DeckColumn, { id: DeckLane; label: string }[]>> = {
+  progress: [
+    { id: "working", label: "working" },
+    { id: "parked", label: "parked" },
+  ],
+  review: [
+    { id: "fixes", label: "fixes needed" },
+    { id: "waiting", label: "waiting on review" },
+  ],
   merge: [
     { id: "ready", label: "ready to merge" },
     { id: "merged", label: "merged · wrap up" },
@@ -100,20 +116,22 @@ function drop<T>(r: Record<string, T>, key: string): Record<string, T> {
 }
 
 function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Tone } {
-  /* An Action required card with no agent open is there because a PR is blocked:
-     deriveBucket has no other route into `needs` without an agent state to read.
-     Reading the agent first told that card "nothing is happening" in the parked
-     grey, on the one column that means act now — and a board with no agents open
-     anywhere is *all* such cards, which is how a column of real work came to look
-     uniformly disabled. So the column leads here, exactly as `merge` does below:
-     where the column knows more than the agent read, it says so.
+  /* An In-review card with no agent open and a blocked PR is the fixes-needed
+     lane's normal inhabitant: the PR wants something and there is nobody in the
+     run to ask. Reading the agent first told that card "nothing is happening" in
+     the parked grey — on the one lane that exists to say something is wrong — and
+     a board with no agents open anywhere is *all* such cards, which is how a lane
+     of real work came to look uniformly disabled. So the column leads here,
+     exactly as `merge` does below: where the column knows more than the agent
+     read, it says so.
 
      The line names the reason rather than restating the specifics — the PR block
      directly beneath already enumerates the failing check, the review and the
-     conflict. `blocked` is still required, not assumed from the column: `needs`
-     with no agent and nothing blocking is a state the ladder should not produce,
-     and announcing a block that no fact supports would be a lie on the card. */
-  if (r.column === "needs" && r.agent.state === "unknown" && prSignals(r.prs).blocked) {
+     conflict. `blocked` is required rather than assumed from the column, because
+     unlike `needs` this column has plenty of other routes in: an unblocked PR
+     waiting on somebody, or a ticket sitting in a review status with no PR at
+     all. Announcing a block that no fact supports would be a lie on the card. */
+  if (r.column === "review" && r.agent.state === "unknown" && prSignals(r.prs).blocked) {
     return { text: "pr blocked", tone: "attn" };
   }
   /* Same reasoning one column to the right: a Merge card with nobody home is not
