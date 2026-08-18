@@ -106,7 +106,11 @@ This is deliberate: re-homing the row must not change what the card *says*. A ca
 - Left: the existing `.sdot` (with `.pulse` on `working`) and the existing `.status` span, class names unchanged, carrying `stateView`'s text and tone. `tone-attn` keeps its weight-600 treatment.
 - Right: `.c-meta`, mono and `tabular-nums`, holding the spend figure and the age, joined by a dimmed `·`.
 
-**Spend.** `formatEq(weightedEq(r.usage))` with the `eq` unit in the body face at 70% opacity — the same treatment the header total and the drawer already use. Absent `usage` renders **no figure at all**; a run not yet measured must never read as one that cost nothing. Zero renders `0` because zero is a measurement.
+**Spend.** `formatEq(weightedEq(r.usage))` with the `eq` unit in the body face at 70% opacity — the same treatment the header total and the drawer already use. Absent `usage` renders **no figure at all**; a run not yet measured must never read as one that cost nothing. Zero renders `0eq` because zero is a measurement.
+
+This is narrower than the brief's "usage + age right-aligned in mono", and deliberately so. `a66c543` (17 Aug) removed the card's own spend figure — "a per-card number the reader cannot act on competed with the state line and the failure rows, which they can" — and made the read lazy: `RunStatus.usage` is now populated only when `agentFlow.deck.showTokenTotal` is on, which is **off by default**, and the gate is on the transcript sweep itself, not just on the display. Re-adding an unconditional card figure would reverse both halves of that decision and make every user pay a 60s sweep again.
+
+So the age is unconditional and the spend figure is not: a default install's state row reads `working · 24s` on the left and `2h` on the right, exactly as much information as the card carries today. A user who has turned the board total on has already opted into the board-wide read, and their cards then show `380k eq · 2h`. No new setting, no new sweep, and `absent ≠ zero` still holds.
 
 **Age.** `timeAgo(r.run.createdAt)` — how long ago this run was launched. Its `title` says so in words ("launched 2h ago"), because the state text beside it also ends in a duration (`working · 24s`, the last activity) and the two must not be read as the same clock.
 

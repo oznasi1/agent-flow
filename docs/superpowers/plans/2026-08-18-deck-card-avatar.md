@@ -20,6 +20,7 @@
 - **This extension has thousands of installs.** This task changes only how the card is arranged. No behaviour, no message, no action, no gate on any button may change.
 - **Token unit is `eq`, never `tok`.** The figure is an effort-weighted equivalent, not a token count.
 - **Absent usage and zero usage must render differently.** A run not yet measured shows no figure at all; a measured all-zero run shows `0eq`. It must never show `0` for the unmeasured case.
+- **The spend figure is conditional, the age is not.** `a66c543` gated the board-wide usage sweep behind `agentFlow.deck.showTokenTotal` (off by default), so `r.usage` is absent on a default install. Nothing in this task may re-enable that sweep, add a setting, or print a figure for an absent total. The card shows `eq` only for a user who already turned the board total on.
 - **No image assets and no `asWebviewUri`.** Glyphs are inline SVG in `currentColor`, following `TypeIcon`. Anything else widens the webview CSP.
 - **Mono is for identifiers and counts, never for prose.** The branch, the key, the PR number, the diff totals and the spend/age figures are mono; state text and kind names are not.
 - **Work in the worktree** `/Users/oznasi/dev/agent-flow/.claude/worktrees/d8-card-visual` on branch `feat/deck-card-avatar`. Use absolute paths in shell commands — parallel sessions share the root checkout and switch its branch.
