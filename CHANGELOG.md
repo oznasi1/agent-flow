@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-08-18
+
+### Changed
+
+- **The Deck card leads with what it is.** A 22px tile at the card's leading edge
+  carries a glyph per kind — ticket, Notepad note, Explore place, PR review, or an
+  untracked local place — so the kind no longer has to be inferred from the shape
+  of the key. A ticket's glyph stays neutral because it appears in every column and
+  an accent hue there reads as a status the card does not have; the four exception
+  kinds each take the hue of the column they naturally live in. The detail drawer's
+  header opens with the same mark, so a selected card and its detail read as one
+  object.
+- **The card's top row no longer holds three competing labels.** The title is the
+  anchor (clamped to two lines instead of three) with the ticket key beside it, at
+  full width — it can no longer be truncated to `DEMO…`. The signal line drops to a
+  mono caption beneath the title, carrying exactly the bits it carried before, and
+  the live state moves below a single hairline onto its own row with the tone dot,
+  the state text, and how long ago the run was launched. Failure rows, footer
+  actions, drag, selection and every signal bit are unchanged.
+
 ## [0.28.0] — 2026-08-18
 
 ### Fixed
