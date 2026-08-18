@@ -539,7 +539,7 @@ export function getConfig(): AgentFlowConfig {
     prReviewAutoFix: c.get<boolean>("prReviewAutoFix") ?? true,
     prReviewPrompt: c.get<string>("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT,
     worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
-    childWorktrees: c.get<boolean>("childWorktrees") ?? false,
+    childWorktrees: c.get<boolean>("childWorktrees") ?? true,
     remoteControl: (() => {
       const v = c.get<string>("remoteControl");
       return v === "on" || v === "ask" ? v : "off";

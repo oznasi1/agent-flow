@@ -28,7 +28,7 @@ describe("settingsSnapshot", () => {
     expect(s.open_agents).toBe(true);
     expect(s.review_writes).toBe(false);
     expect(s.orchestrator).toBe(false);
-    expect(s.child_worktrees).toBe(false);
+    expect(s.child_worktrees).toBe(true);
     expect(s.repo_blocklist_count).toBe(0);
     // One, not zero: DEFAULT_COMMANDS now ships a single inert example, and an
     // untouched setting resolves to it.
@@ -380,9 +380,9 @@ describe("settingsSnapshot — orchestrator", () => {
 
 describe("settingsSnapshot — childWorktrees", () => {
   it("carries the childWorktrees setting", () => {
-    expect(settingsSnapshot(getConfig()).child_worktrees).toBe(false);
-    setConfig({ childWorktrees: true });
     expect(settingsSnapshot(getConfig()).child_worktrees).toBe(true);
+    setConfig({ childWorktrees: false });
+    expect(settingsSnapshot(getConfig()).child_worktrees).toBe(false);
   });
 });
 

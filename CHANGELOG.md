@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A ticket with children offers to work them, without a setting to turn on
+  first.** `agentFlow.childWorktrees` now defaults to on, so taking a story that
+  has subtasks asks how you want to work them — a worktree and session per child,
+  one orchestrator session dispatching a subagent per child, or just the parent on
+  its own — instead of silently taking the parent. Taking a ticket with no children
+  is unchanged, and setting `agentFlow.childWorktrees` to `false` restores the old
+  behaviour for every ticket.
+
 ## [0.29.0] — 2026-08-18
 
 ### Changed

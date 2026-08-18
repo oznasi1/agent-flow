@@ -692,13 +692,13 @@ describe("review-request settings", () => {
     expect(getConfig().orchestrator).toBe(true);
   });
 
-  it("defaults childWorktrees to off — an existing user's Take must stay untouched", () => {
-    expect(getConfig().childWorktrees).toBe(false);
+  it("defaults childWorktrees to on — a ticket with children offers to work them", () => {
+    expect(getConfig().childWorktrees).toBe(true);
   });
 
-  it("reads childWorktrees when turned on", () => {
-    setConfig({ childWorktrees: true });
-    expect(getConfig().childWorktrees).toBe(true);
+  it("reads childWorktrees when turned off", () => {
+    setConfig({ childWorktrees: false });
+    expect(getConfig().childWorktrees).toBe(false);
   });
 
   it("floors the TTL at 60 seconds", () => {
@@ -941,8 +941,8 @@ describe("package.json ⇄ config constants", () => {
     expect(props["agentFlow.orchestrator"].default).toBe(false);
   });
 
-  it("declares childWorktrees defaulting to false — an existing user's Take must stay untouched", () => {
-    expect(props["agentFlow.childWorktrees"].default).toBe(false);
+  it("declares childWorktrees defaulting to true — a ticket with children offers to work them", () => {
+    expect(props["agentFlow.childWorktrees"].default).toBe(true);
   });
 
   it("declares deckGrouping defaulting to agents, and both retirement windows", () => {

@@ -553,8 +553,8 @@
         },
         "agentFlow.childWorktrees": {
           "type": "boolean",
-          "default": false,
-          "markdownDescription": "When you take a ticket that has children, offer to work them as a worktree per child (a session each) or as one orchestrator session dispatching a subagent per child. Off by default: with it off, taking a ticket behaves exactly as it did before this setting existed."
+          "default": true,
+          "markdownDescription": "When you take a ticket that has children, offer to work them as a worktree per child (a session each) or as one orchestrator session dispatching a subagent per child. Turn it off to take such a ticket on its own, with no question asked."
         },
         "agentFlow.remoteControl": {
           "type": "string",
