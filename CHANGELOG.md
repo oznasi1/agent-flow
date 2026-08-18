@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A merged run leaves Action required.** A card whose PRs have all landed
+  now sits in **Merge**, in the `merged · wrap up` lane, whatever its agent
+  last said. Before, an agent that ended its turn before the merge pinned the
+  card in Action required indefinitely: the merge is a fact read from GitHub,
+  but the agent state is a reading of a transcript that nothing invalidates
+  once the work lands, so the question sat there unanswered for the life of
+  the card. The merge is the answer. A merge you have yet to press still
+  ranks below Action required — approved and green is not landed, so an agent
+  waiting on you is the more urgent of the two.
+
 ## [0.27.0] — 2026-08-18
 
 ### Changed

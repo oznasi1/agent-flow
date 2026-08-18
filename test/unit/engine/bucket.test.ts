@@ -108,11 +108,28 @@ describe("deriveBucket with PR signals", () => {
     expect(deriveBucket({ prOpen: true, prReady: true, prBlocked: true })).toBe("needs");
   });
 
-  it("keeps a needs-you agent above the merge, on either side of it", () => {
-    // A wrap-up agent that ended its turn is exactly what Action required is for,
-    // and a merge that already happened is not urgent enough to bury it.
+  it("keeps a needs-you agent above a merge that has not happened yet", () => {
+    // Approved and green is not landed. Work is still in flight, so an agent
+    // that ended its turn asking something is still the more urgent signal.
     expect(deriveBucket({ agentState: "needs-you", prOpen: true, prReady: true })).toBe("needs");
-    expect(deriveBucket({ agentState: "needs-you", prMerged: true })).toBe("needs");
+    expect(deriveBucket({ agentState: "stalled", prOpen: true, prReady: true })).toBe("needs");
+    expect(deriveBucket({ agentState: "exited", prOpen: true, prReady: true })).toBe("needs");
+  });
+
+  it("lets a landed merge outrank every needs-you signal", () => {
+    // The merge is a fact read from GitHub; the agent state is a transcript
+    // reading that nothing invalidates once the work lands. A question asked
+    // before the merge is answered by the merge.
+    expect(deriveBucket({ agentState: "needs-you", prMerged: true })).toBe("merge");
+    expect(deriveBucket({ agentState: "stalled", prMerged: true })).toBe("merge");
+    expect(deriveBucket({ agentState: "exited", prMerged: true })).toBe("merge");
+  });
+
+  it("puts a landed run in the merged lane, not the ready one", () => {
+    // The column is only half the answer: a run that reaches merge off
+    // `prMerged` must not read as "ready to press merge".
+    const s = { open: false, blocked: false, ready: false, merged: true };
+    expect(deriveLane(deriveBucket({ agentState: "needs-you", prMerged: true }), s)).toBe("merged");
   });
 });
 

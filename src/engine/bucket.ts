@@ -16,31 +16,42 @@ function isReviewStatus(name?: string | null): boolean {
 
 /**
  * Decide which board column a run belongs in. Precedence, most-decisive first:
- *   "waiting on a human" (the agent's needs-you signal, a stalled or exited
- *   agent, or a blocked PR) → the merge, either side of it → the live "working"
- *   signal → review (an open PR / Jira review status) → else "progress" as the
- *   in-flight catch-all.
+ *   the landed merge → "waiting on a human" (the agent's needs-you signal, a
+ *   stalled or exited agent, or a blocked PR) → the merge you have yet to press
+ *   → the live "working" signal → review (an open PR / Jira review status) → else
+ *   "progress" as the in-flight catch-all.
  *
  * `ticketCategory` is not read here at all. A done ticket that never merged has
  * left the board before this function sees it (`shelfFor`), and one still on the
  * board — an agent open in it, a PR yet to land — deserves the column its live
  * signals say rather than a column named after somebody closing a tab.
  *
- * Three rungs are worth spelling out. A **blocked PR outranks a working agent**:
- * an agent cannot know CI failed until something tells it, so the card belongs
- * where you will see it, green dot and all. **The merge outranks a working
- * agent** for the mirror-image reason — `ready` and `blocked` are the two sides
- * of the same PR read, and the merge is the one action on this board you can
- * finish in five seconds. It must not hide behind an agent doing follow-up work
- * in a run whose PR is already approved and green. `prMerged` rides the same
- * rung: an agent running post-merge cleanup belongs beside the merge it is
- * cleaning up after, not back in In progress. A working agent still outranks the
- * *review stage*, so an agent addressing feedback reads as In progress rather
- * than parked in Review.
+ * Three rungs are worth spelling out. A **landed merge outranks everything**,
+ * `needs` included. `prMerged` is a fact read from GitHub; every agent state is a
+ * reading of a transcript that nothing invalidates once the work lands, so a
+ * question asked before the merge sits there unanswered forever — pinning a
+ * shipped run in Action required for as long as the card lives. The merge is the
+ * answer. A landed run keeps its card, in the merge column's `merged` lane,
+ * until the retire sweep takes it: there is still a wrap-up to do (move the
+ * ticket, delete the branch, watch the deploy).
  *
- * What the merge does NOT outrank is `needs`. A wrap-up agent that ended its
- * turn is exactly the case Action required exists for, and a merge that already
- * happened is not urgent enough to bury it.
+ * A **blocked PR outranks a working agent**: an agent cannot know CI failed
+ * until something tells it, so the card belongs where you will see it, green dot
+ * and all. **The merge you have yet to press outranks a working agent** for the
+ * mirror-image reason — `ready` and `blocked` are the two sides of the same PR
+ * read, and the merge is the one action on this board you can finish in five
+ * seconds. It must not hide behind an agent doing follow-up work in a run whose
+ * PR is already approved and green. A working agent still outranks the *review
+ * stage*, so an agent addressing feedback reads as In progress rather than
+ * parked in Review.
+ *
+ * What `ready` does NOT outrank is `needs`. Approved and green is not landed:
+ * the work is still in flight, so an agent that ended its turn asking something
+ * is the more urgent of the two. Only the merge itself settles that.
+ *
+ * `prMerged` sitting above `prBlocked` is inert rather than a policy: `blocked`
+ * requires an OPEN PR and `merged` requires every PR merged, so neither input
+ * can be true alongside the other.
  *
  * Lives here rather than in status.ts so `src/webview/deckCards.ts` can import it:
  * status.ts reaches for git, the transcript and paths, none of which exist in a
@@ -50,10 +61,11 @@ function isReviewStatus(name?: string | null): boolean {
 export function deriveBucket(i: BucketInput): DeckColumn {
   // stalled and exited join needs-you here: all three mean a human has to do
   // something, and all three used to arrive as "idle" and land in progress.
+  if (i.prMerged) return "merge";
   if (i.agentState === "needs-you" || i.agentState === "stalled" || i.agentState === "exited" || i.prBlocked) {
     return "needs";
   }
-  if (i.prReady || i.prMerged) return "merge";
+  if (i.prReady) return "merge";
   if (i.agentState === "working") return "progress";
   if (i.prOpen || isReviewStatus(i.ticketStatus)) return "review";
   return "progress";
