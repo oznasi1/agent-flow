@@ -7,6 +7,7 @@ import type { DeckCard } from "./deckCards";
 // is kept free of fs-touching imports, which bucket.test.ts enforces.
 import { prSignals } from "../engine/bucket";
 import { AgentsRow, PrBlock, RepoChip, WorkspaceChip, workspaceLabel } from "./deckParts";
+import { CardKindIcon } from "./icons";
 import { keyLabel, timeAgo } from "./helpers";
 
 export interface DeckDetailProps {
@@ -121,6 +122,9 @@ export function DeckDetail({ card, sourceLabel, usage, onClose, onForget }: Deck
   return (
     <aside className="dd" aria-label={`Detail for ${key}`}>
       <div className="dd-hd">
+        {/* The card's own mark, at the card's own size: a selected card and its
+          * drawer are one object, and a smaller mark here would read as two. */}
+        <CardKindIcon kind={runKind(r.run)} />
         {/* The label, not the raw key: a notepad key is ~64 mono characters — wider
          * than the drawer itself, which as a nowrap flex item took the header (and
          * with it the whole drawer) into horizontal scroll, pushing the summary to
@@ -194,7 +198,9 @@ export function DeckDetail({ card, sourceLabel, usage, onClose, onForget }: Deck
       </div>
 
       {/* Spend lives only here, never on the card: the four classes are what make
-        * the number honest, and only the drawer has room for them. The eq total is
+        * the number honest, only the drawer has room for them, and a per-card figure
+        * competed with the state line and the failure rows the reader can act on.
+        * The eq total is
         * effort-weighted, so it is deliberately NOT the sum of the four rows above
         * it — cache reads dominate the raw count at a tenth the rate, and a raw sum
         * would rank tasks by conversation length rather than by cost. The rows are
