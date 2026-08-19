@@ -2796,19 +2796,32 @@ export class DeckPanel {
           // future toggle would want it back — but its "needs Live signal" branch is
           // unreachable from here today. See the note in the ledger: collapsing that
           // branch is a deliberate follow-up, not something to fold into a merge.
+          // No `forge` passed: this view has no forge fact to hand in yet, so
+          // `armability` assumes a fully capable one and its "forge-unsupported"
+          // branch is unreachable from here today too — counted below anyway, for
+          // the same reason the live-signal count is: the day a forge fact IS
+          // threaded through, this toast must already read right.
           const dead = unfirableRules(flow, { liveSignal: true, prFacts: this.prFacts });
           if (dead.length > 0) {
             const live = dead.filter((d) => d.needs === "live-signal").length;
             const pr = dead.filter((d) => d.needs === "pr-facts").length;
-            const parts: string[] = [];
-            if (pr > 0) parts.push(`${pr} need${pr === 1 ? "s" : ""} PR facts`);
-            if (live > 0) parts.push(`${live} need${live === 1 ? "s" : ""} the Live signal`);
+            const forge = dead.filter((d) => d.needs === "forge-unsupported").length;
+            const offParts: string[] = [];
+            if (pr > 0) offParts.push(`${pr} need${pr === 1 ? "s" : ""} PR facts`);
+            if (live > 0) offParts.push(`${live} need${live === 1 ? "s" : ""} the Live signal`);
+            const reasons: string[] = [];
+            if (offParts.length > 0) {
+              reasons.push(`${offParts.join(" and ")}, which ${offParts.length > 1 ? "are" : "is"} off`);
+            }
+            // Its own label is not this module's to name — that lives behind the
+            // forge boundary — so this names the capability instead.
+            if (forge > 0) reasons.push(`${forge} need${forge === 1 ? "s" : ""} — your forge cannot report this`);
             this.post({
               type: "toast",
               level: "info",
-              message: `${flow.name} armed — but ${parts.join(" and ")}, which ${
-                parts.length > 1 ? "are" : "is"
-              } off, so ${dead.length === 1 ? "that rule" : "those rules"} can never fire.`,
+              message: `${flow.name} armed — but ${reasons.join("; ")}, so ${
+                dead.length === 1 ? "that rule" : "those rules"
+              } can never fire.`,
             });
           }
         } else {
