@@ -1744,6 +1744,21 @@ describe("takeTask", () => {
     );
   });
 
+  it("names Claude Code in the pre-seeded toast under `ask`", async () => {
+    // The toast reads "<summary>. <agent> pre-seeded — press Enter to start.", so a
+    // phrase here lands lowercase at a sentence start: "…window. your coding agent
+    // pre-seeded". It has to be a product name.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(posted()).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Claude Code pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
   it("names Copilot in the pre-seeded toast", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot" });
     const { provider, posted } = setup();
@@ -4375,6 +4390,140 @@ describe("remote control × the Cursor provider", () => {
     vi.mocked(createWorktrees).mockImplementation((s) => s);
   });
 });
+
+// ── Remote Control × the `ask` provider ─────────────────────────────────────
+// REGRESSION BLOCK. `ask` is not an agent — it means "pick one per launch" — and while
+// it is inert seedProvider degrades it to Claude Code. Three sites used to compare
+// `cfg.agentProvider` to "claude-code" directly, so `ask` fell through all three and
+// was treated as a non-Claude agent: remoteControlBlocksLaunch HARD-BLOCKED the launch
+// with RC_NEEDS_CLAUDE, and resolveRemoteControl both withheld the "ask" toggle and
+// refused an "on" batch — refusing a session that would in fact have been Claude Code.
+// All three now compare resolvedProvider(cfg.agentProvider).
+//
+// Each case is written as "ask behaves exactly like claude-code", because that is the
+// inertness contract this task ships under, and asserts the launch actually PROCEEDS —
+// a test that only checked for the absence of a toast would still pass if the launch
+// were silently dropped.
+describe("remote control × the `ask` provider", () => {
+  const lastOpen = () =>
+    vi.mocked(openWorkspace).mock.calls[vi.mocked(openWorkspace).mock.calls.length - 1][0];
+  const errorToast = (posted: () => OutboundMessage[]) =>
+    posted().find((m) => m.type === "toast" && m.level === "error") as { message: string } | undefined;
+  const ask = (over: Partial<ReturnType<typeof getConfig>> = {}) =>
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" as const, ...over });
+
+  // ── site 1: remoteControlBlocksLaunch ──
+  it("does NOT block a Take with remoteControl on — the session would be Claude Code", async () => {
+    // The Critical defect: this launch was refused outright, with RC_NEEDS_CLAUDE, for
+    // an agent that seedProvider resolves to Claude Code.
+    ask({ remoteControl: "on" });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1); // the launch really happens
+    expect(lastOpen().remoteControl).toBe(true); // …with Remote Control on, as asked
+  });
+
+  it("blocks a Take with remoteControl on exactly as claude-code does — i.e. not at all", async () => {
+    // The equivalence stated directly: same inputs, same outcome, only the setting
+    // differs. If ask ever diverges from claude-code here, this fails.
+    const run = async (agentProvider: "ask" | "claude-code") => {
+      // Both arms run inside one test, so the shared openWorkspace spy has to be
+      // cleared between them — otherwise the second arm counts the first arm's call
+      // and the comparison fails on the harness, not on the behaviour.
+      vi.mocked(openWorkspace).mockClear();
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider, remoteControl: "on" });
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      return { toast: errorToast(posted)?.message, opens: vi.mocked(openWorkspace).mock.calls.length, rc: lastOpen().remoteControl };
+    };
+    expect(await run("ask")).toEqual(await run("claude-code"));
+  });
+
+  // ── site 2: resolveRemoteControl's "ask" short-circuit ──
+  it("still OFFERS the remoteControl picker — it is not a toggle we could only refuse", async () => {
+    // The silent half of the defect: no toast, no error, the toggle simply never
+    // appeared, so an ask user could never turn Remote Control on for a launch.
+    ask({ remoteControl: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
+    const { provider, logged } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1); // the picker appears
+    expect(lastOpen().remoteControl).toBe(true); // and the answer is honoured
+    expect(logged.join("\n")).not.toContain("Remote Control not offered");
+  });
+
+  // ── site 3: resolveRemoteControl's post-resolution refusal ──
+  it("does NOT refuse a one-key batch with remoteControl on", async () => {
+    // takeBatch is the one entry point with no pre-flight predicate, so it reaches the
+    // `on && provider !== "claude-code"` refusal directly.
+    ask({ remoteControl: "on" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+
+  // ── the guard rail: copilot and cursor must STILL be refused ──
+  it("still refuses copilot and cursor — the fix must not widen into a free pass", async () => {
+    for (const agentProvider of ["copilot", "cursor"] as const) {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider, remoteControl: "on" });
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+      expect(openWorkspace).not.toHaveBeenCalled();
+    }
+  });
+});
+
+// ── Copy that names an agent, under `ask` ───────────────────────────────────
+// Every one of these templates uses the label as a PRODUCT NAME — "a X agent",
+// "N X sessions", "The X prompt" — so a label that is a phrase rather than a name
+// ("your coding agent") renders as "a your coding agent agent". An earlier revision of
+// this task shipped exactly that, in all six rendered sites, past four green gates,
+// because nothing pinned the copy under `ask`. These are those pins.
+describe("agent-naming copy under the `ask` provider", () => {
+  const ask = (over: Partial<ReturnType<typeof getConfig>> = {}) =>
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" as const, ...over });
+
+  it("names Claude Code in the posted state's agentLabel", async () => {
+    // Feeds two webview templates: "Explore repos with a {agentLabel} agent" and
+    // "…its own {agentLabel} session". Both need a bare product name.
+    ask();
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", agentLabel: "Claude Code" }));
+  });
+
+  it("names Claude Code sessions in the batch launch confirmation", async () => {
+    ask({ batchLaunchConfirmThreshold: 1 });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      "Launch 2 tasks in parallel? That's 2 Claude Code sessions.",
+      { modal: true },
+      "Launch",
+    );
+  });
+
+  it("names Claude Code in the brief handed to the agent", async () => {
+    // briefMarkdown renders "_The {agentName} prompt for this task says…_".
+    ask();
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const planMd = vi.mocked(openWorkspace).mock.calls[0][0].planMd;
+    expect(planMd).toContain("_The Claude Code prompt for this task says");
+    expect(planMd).not.toMatch(/The (your|a|an|the) /i);
+  });
+});
+
 
 // ── capability gating ───────────────────────────────────────────────────────
 // Everything above drives the shipped Jira connector, which declares every optional

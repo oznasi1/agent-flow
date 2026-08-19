@@ -206,18 +206,20 @@ export function providerLabel(p: AgentProvider): string {
 
 /** The agent a launch actually starts when nothing has resolved `ask` into a concrete
  * choice — Claude Code, the one agent every host can run. The single place that
- * degradation is spelled out, so seeding, Doctor's rows and a review's provenance
- * stamp cannot drift apart on it. */
+ * degradation is spelled out, so seeding, Doctor's rows, the Remote Control
+ * pre-flight and every copy site cannot drift apart on it.
+ *
+ * Every caller that names an agent in copy goes through this rather than through some
+ * agent-neutral wording, and deliberately: while `ask` is inert it resolves to Claude
+ * Code at seed time, so "Claude Code" is the literal truth at each of those sites, and
+ * a neutral phrase composes in none of them — the surrounding templates all use the
+ * label as a product name ("a X agent", "3 X sessions", "The X prompt").
+ *
+ * TASK 5: once the picker is real, the agent for a launch comes from the launch, not
+ * from here. Sites that render BEFORE the picker runs cannot use this and need copy
+ * designed against their own templates. */
 export const resolvedProvider = (s: AgentProviderSetting): AgentProvider =>
   s === "ask" ? "claude-code" : s;
-
-/** Agent name for copy written BEFORE the launch resolves — the batch confirmation
- * and the brief. Under `ask` there is no agent yet, so it stays neutral. Post-launch
- * copy uses the launch's own resolved provider instead and always names the real
- * agent. For every concrete setting this is exactly `providerLabel`, so the copy a
- * claude-code, copilot or cursor user sees is unchanged. */
-export const plannedAgentLabel = (s: AgentProviderSetting): string =>
-  s === "ask" ? "your coding agent" : providerLabel(s);
 
 /** One Explore action as seen by the flow: id + picker label + resolved prompt + Slack toggle. */
 export interface ExploreAction {

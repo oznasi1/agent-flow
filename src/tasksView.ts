@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { getConfig, plannedAgentLabel, providerLabel, AgentFlowConfig, AgentProvider, AgentProviderSetting, ExploreAction } from "./config";
+import { getConfig, providerLabel, resolvedProvider, AgentFlowConfig, AgentProvider, ExploreAction } from "./config";
 import {
   isTaskNetworkError,
   serializeCaps,
@@ -242,7 +242,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
     this.post({ type: "state", authed, configured, project: info.scopeValue, me,
       prReviewStatus: cfg.prReviewStatus, filters: cfg.filters,
-      sourceLabel: info.label, agentLabel: plannedAgentLabel(cfg.agentProvider), caps: serializeCaps(this.provider().caps),
+      sourceLabel: info.label, agentLabel: providerLabel(resolvedProvider(cfg.agentProvider)), caps: serializeCaps(this.provider().caps),
       liveCount: cfg.trackOpenWindows ? this.liveWindows().length : undefined });
   }
 
@@ -1317,7 +1317,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     });
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, cfg.agentProvider, result.seededInPlace);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, resolvedProvider(cfg.agentProvider), result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     const what = env
       ? `to verify on ${env}`
@@ -1423,7 +1423,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, lastRunKey: key } : n)));
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, cfg.agentProvider, result.seededInPlace);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, resolvedProvider(cfg.agentProvider), result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
   }
@@ -1680,7 +1680,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * than the resolver it stands in front of, and a non-Claude user with seeding off —
    * who never opted into any of this — would be locked out of every launch. */
   private remoteControlBlocksLaunch(cfg: AgentFlowConfig): boolean {
-    if (cfg.agentProvider === "claude-code" || cfg.remoteControl !== "on" || !cfg.seedAgent) {
+    // `resolvedProvider`, not a bare `=== "claude-code"`: `ask` is not an agent, and
+    // while it is inert seedProvider degrades it to Claude Code — so refusing an `ask`
+    // launch here would block a session that WOULD have been Claude Code, and this
+    // predicate would contradict the seeding path it stands in front of.
+    // TASK 5: once the picker is real the launch resolves its own agent before this
+    // runs, and this must test THAT answer rather than degrading the setting.
+    if (resolvedProvider(cfg.agentProvider) === "claude-code" || cfg.remoteControl !== "on" || !cfg.seedAgent) {
       return false;
     }
     this.toast("error", RC_NEEDS_CLAUDE);
@@ -1697,15 +1703,20 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * refused the pair, so the null is also the backstop that keeps a future entry point
    * added without a pre-flight call from seeding a broken session. */
   private async resolveRemoteControl(cfg: AgentFlowConfig): Promise<boolean | null> {
+    // Both tests resolve the setting for the same reason remoteControlBlocksLaunch
+    // does: an `ask` agentProvider seeds Claude Code while `ask` is inert, so it must
+    // be OFFERED the toggle here, not silently denied one. See that predicate's
+    // comment, including its TASK 5 note — this pair moves with it.
+    const provider = resolvedProvider(cfg.agentProvider);
     // "ask" under a non-Claude agent: putting up a toggle we could only refuse is a
     // broken offer, so the picker never appears and the launch simply proceeds
     // without it.
-    if (cfg.agentProvider !== "claude-code" && cfg.remoteControl === "ask") {
+    if (provider !== "claude-code" && cfg.remoteControl === "ask") {
       this.log("Remote Control not offered — it needs Claude Code; launching without it");
       return false;
     }
     const on = await this.resolveRemoteControlSetting(cfg);
-    if (on && cfg.agentProvider !== "claude-code") {
+    if (on && provider !== "claude-code") {
       this.toast("error", RC_NEEDS_CLAUDE);
       return null;
     }
@@ -1777,10 +1788,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   private seededNote(
     seedAgent: boolean,
     remoteControl: boolean,
-    // The setting, not a resolved agent: under `ask` nothing here knows which agent
-    // the launch picked yet, so the copy stays neutral. Task 6 hands this the
-    // launch's own resolved provider instead.
-    provider: AgentProviderSetting,
+    provider: AgentProvider,
     seededInPlace = false,
   ): string {
     // Seeding into this window with seeding off is the one destination that ends with
@@ -1791,7 +1799,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ? " This window is untouched — agentFlow.seedAgent is off, so no session was seeded."
         : "";
     }
-    const agent = plannedAgentLabel(provider);
+    const agent = providerLabel(provider);
     return remoteControl
       ? ` ${agent} pre-seeded with /remote-control — Enter to connect, then paste.`
       : ` ${agent} pre-seeded — press Enter to start.`;
@@ -1908,7 +1916,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // there would land in whatever the path resolves to instead.
     const planMd = briefMarkdown(
       detail,
-      plannedAgentLabel(cfg.agentProvider),
+      providerLabel(resolvedProvider(cfg.agentProvider)),
       orchestration?.children.length
         ? {
             children: orchestration.children.map((c) => ({
@@ -1947,7 +1955,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     });
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, cfg.agentProvider, result.seededInPlace);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, resolvedProvider(cfg.agentProvider), result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     if (result.mergeFailed) {
       this.toast(
@@ -2146,8 +2154,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (authorising > cfg.batchLaunchConfirmThreshold) {
       const go = await vscode.window.showWarningMessage(
         parent
-          ? `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${plannedAgentLabel(cfg.agentProvider)} sessions and up to ${authorising} git worktrees across ${filterSet.length} repo${filterSet.length === 1 ? "" : "s"}.`
-          : `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${plannedAgentLabel(cfg.agentProvider)} sessions.`,
+          ? `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${providerLabel(resolvedProvider(cfg.agentProvider))} sessions and up to ${authorising} git worktrees across ${filterSet.length} repo${filterSet.length === 1 ? "" : "s"}.`
+          : `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${providerLabel(resolvedProvider(cfg.agentProvider))} sessions.`,
         { modal: true },
         "Launch",
       );
@@ -2233,7 +2241,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           key,
           task: {
             ticket: { key: detail.key, summary: detail.summary, url: detail.url },
-            planMd: briefMarkdown(detail, plannedAgentLabel(cfg.agentProvider)),
+            planMd: briefMarkdown(detail, providerLabel(resolvedProvider(cfg.agentProvider))),
             descriptionText: detail.descriptionText,
             services,
             ...(parent ? { parentKey: parent.key } : {}),
@@ -2700,7 +2708,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         { key: leaf.key, summary: leaf.summary, url: childDetail?.url ?? "" },
         briefMarkdown(
           childDetail ?? { key: leaf.key, summary: leaf.summary, descriptionText: "" },
-          plannedAgentLabel(cfg.agentProvider),
+          providerLabel(resolvedProvider(cfg.agentProvider)),
         ),
         this.log,
       );

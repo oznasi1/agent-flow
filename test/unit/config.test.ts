@@ -6,7 +6,6 @@ import {
   getConfig,
   hostProviders,
   isCursorHost,
-  plannedAgentLabel,
   providerLabel,
   resolvedProvider,
   DEFAULT_PROMPT_MODES,
@@ -720,7 +719,7 @@ describe("isCursorHost / providerLabel", () => {
   });
 });
 
-describe("resolvedProvider / plannedAgentLabel", () => {
+describe("resolvedProvider", () => {
   it("resolves ask to claude-code and leaves every real agent alone", () => {
     expect(resolvedProvider("ask")).toBe("claude-code");
     expect(resolvedProvider("claude-code")).toBe("claude-code");
@@ -728,18 +727,20 @@ describe("resolvedProvider / plannedAgentLabel", () => {
     expect(resolvedProvider("cursor")).toBe("cursor");
   });
 
-  // Pinned to the byte, in both directions: the three real settings must keep the
-  // exact copy that shipped — a drift here silently rewrites the batch confirmation
-  // and every brief for users who never chose `ask` — and `ask`'s own wording is the
-  // only agent-neutral string in that copy.
-  it("names the real agent for every concrete setting, exactly as providerLabel does", () => {
-    expect(plannedAgentLabel("claude-code")).toBe("Claude Code");
-    expect(plannedAgentLabel("copilot")).toBe("Copilot");
-    expect(plannedAgentLabel("cursor")).toBe("Cursor");
+  // Every copy site that names an agent composes providerLabel over resolvedProvider,
+  // so this pair is what keeps that copy grammatical: the surrounding templates use
+  // the label as a product name ("a X agent", "3 X sessions", "The X prompt"), and a
+  // label that is not one breaks all of them. Pinned so nobody reintroduces a phrase.
+  it("always yields a bare product name, never a phrase, for every setting", () => {
+    for (const setting of ["claude-code", "copilot", "cursor", "ask"] as const) {
+      const label = providerLabel(resolvedProvider(setting));
+      expect(["Claude Code", "Copilot", "Cursor"]).toContain(label);
+      expect(label).not.toMatch(/^(your|the|a|an) /i);
+    }
   });
 
-  it("stays neutral under ask, where no agent has been chosen yet", () => {
-    expect(plannedAgentLabel("ask")).toBe("your coding agent");
+  it("names Claude Code under ask, which is the agent an inert ask actually seeds", () => {
+    expect(providerLabel(resolvedProvider("ask"))).toBe("Claude Code");
   });
 });
 

@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { exec } from "child_process";
-import { DEFAULT_COMMANDS, getConfig, plannedAgentLabel, providerLabel, resolvedProvider, type AgentProvider } from "./config";
+import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
@@ -1209,7 +1209,7 @@ export class DeckPanel {
         workspaceMode: node.repos.length === 1 || cfg.workspaceMode === "per-window" ? "per-window" : "multiroot",
         // The brief names the agent that will read it, so a Copilot user's
         // flow-launched run must not be handed a brief that says Claude Code.
-        agentName: plannedAgentLabel(cfg.agentProvider),
+        agentName: providerLabel(resolvedProvider(cfg.agentProvider)),
       },
       { createWorktrees, openWorkspace, log: this.log },
     );
@@ -2007,7 +2007,7 @@ export class DeckPanel {
     }
     this.toast(
       "success",
-      `Reviewing ${req.repoName}#${req.number} in a worktree.${cfg.seedAgent ? ` ${plannedAgentLabel(cfg.agentProvider)} pre-seeded — press Enter to start.` : ""}`,
+      `Reviewing ${req.repoName}#${req.number} in a worktree.${cfg.seedAgent ? ` ${providerLabel(resolvedProvider(cfg.agentProvider))} pre-seeded — press Enter to start.` : ""}`,
     );
     await this.refreshBusy(); // picks up the new run so the row shows "reviewing"
   }

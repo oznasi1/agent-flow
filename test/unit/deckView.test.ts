@@ -10,7 +10,7 @@ import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
 import type { CommandNode, Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
 import { BRANCH_CI_ARGS, branchCiKey } from "../../src/engine/orchestrator/branchCi";
 import { GH_TIMEOUT_MS } from "../../src/engine/pr/provider";
-import type { AgentProvider } from "../../src/config";
+import type { AgentProviderSetting } from "../../src/config";
 import type { FlowCommand } from "../../src/types";
 
 /** The shape `child_process.exec`'s callback is invoked with, narrowed to the four
@@ -78,7 +78,7 @@ const h = vi.hoisted(() => ({
   reviewWrites: false as boolean,
   stampLabelOnWrite: true as boolean,
   seedAgent: true as boolean,
-  agentProvider: "claude-code" as AgentProvider,
+  agentProvider: "claude-code" as AgentProviderSetting,
   reviewSubmit: vi.fn(async (_repo: string, _number: number, _verb: ReviewVerb, _body: string): Promise<{ ok: true } | { ok: false; message: string }> => ({ ok: true })),
   repos: [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }] as ServiceRef[],
   reviewRequests: true as boolean,
@@ -2971,6 +2971,20 @@ describe("DeckPanel review launch", () => {
   });
 
   it("still names Claude Code pre-seeded in the launch toast by default", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Claude Code pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
+  it("names Claude Code in the launch toast under `ask`", async () => {
+    // Same sentence-start problem as the Tasks-panel toast: this one reads
+    // "Reviewing acme#8491 in a worktree. <agent> pre-seeded — …".
+    h.agentProvider = "ask";
     const p = await showAndWarm();
     await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
     expect(posts(p)).toContainEqual(
