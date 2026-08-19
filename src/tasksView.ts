@@ -2302,6 +2302,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     let launched = 0;
     let extra = "";
     let seededInPlace = false;
+    // Set by the per-window loop below from the one place the truth lives — see the
+    // assignment's own comment. `undefined` until a launch reports one, at which point
+    // the summary copy falls back to `namedProvider()`.
+    let seededProvider: AgentProvider | undefined;
     // The user dismissed `openWorkspace`'s own agent picker. Only the one-key,
     // own-window shape can get here — every other shape resolved the agent up front and
     // pinned it, which is exactly what stops that picker from ever being raised — but
@@ -2412,6 +2416,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             break;
           }
           appliedRemoteControl = result.remoteControl;
+          // The agent `openWorkspace` actually seeded. Only load-bearing for a ONE-key
+          // batch under `ask`, which has no up-front answer — `openWorkspace` raised
+          // the picker inside this call, so its result is the only record of that
+          // choice. The shared branch above needs no equivalent: both routes into it
+          // resolve `batchProvider` before the first worktree.
+          seededProvider = result.provider;
           launched++;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -2449,12 +2459,25 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       // shared window is really a single-task launch — runSeedPass sees just its own
       // plan there too. All three still get a live session per task; only a real
       // multi-task batch sharing a window on the extension surface actually can't.
+      //
+      // The else-arm is deliberately keyed on `cursor`/`ask` rather than on "not
+      // claude-code": those two values are new on this branch, and everything else —
+      // `claude-code` and any unrecognized value that degrades to it — must keep the
+      // exact string it has always had.
+      //
+      // `batchProvider` first: when the launch resolved an answer up front it was
+      // pinned onto every task, so that IS what every window seeded. Only a one-key
+      // batch to its own window leaves it unset, and there `seededProvider` — the
+      // answer `openWorkspace` reached inside the loop — is the only record of the
+      // choice. `resolvedProvider` is the floor for a launch that reported neither.
       const perTaskNote =
         cfg.agentProvider === "copilot"
           ? isBatch && shared && cfg.agentSurface !== "terminal"
             ? `A worktree + brief per task — ${providerLabel(cfg.agentProvider)} isn't seeded for a batch; open each brief to start it.`
             : `A worktree + ${providerLabel(cfg.agentProvider)} session per task.`
-          : "A worktree + Claude session per task.";
+          : cfg.agentProvider === "cursor" || cfg.agentProvider === "ask"
+            ? `A worktree + ${providerLabel(batchProvider ?? seededProvider ?? resolvedProvider(cfg.agentProvider))} session per task.`
+            : "A worktree + Claude session per task.";
       this.toast("success", `${summary} ${perTaskNote}${extra}${rcNote}`);
     }
   }

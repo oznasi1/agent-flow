@@ -3859,6 +3859,56 @@ describe("takeBatch", () => {
     expect(toast.message).toBe("Launched 1 of 1 in one shared window. A worktree + Copilot session per task.");
     expect(toast.message).not.toContain("isn't seeded");
   });
+
+  // ── The per-task note must name the agent that actually ran ─────────────────
+  // Its else-arm was a pre-branch TWO-value discriminator — "copilot, or else Claude"
+  // — so widening the enum to four left a Cursor batch announced as a Claude one. The
+  // two tests above pin claude-code and copilot byte-identical; these pin cursor and
+  // ask, the two values this branch adds.
+  it("names Cursor in the per-task note across separate windows", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "cursor", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in parallel. A worktree + Cursor session per task.");
+  });
+
+  it("names Cursor in the per-task note for a shared window", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "cursor", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: true } as never);
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in one shared window. A worktree + Cursor session per task.");
+  });
+
+  it("names the agent the batch's ask picker chose, not Claude", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    pickCursorAgent();
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in parallel. A worktree + Cursor session per task.");
+  });
+
+  it("names the agent a one-key ask batch resolved inside openWorkspace", async () => {
+    // A one-key batch has no up-front answer to read — `openWorkspace` raises the
+    // picker inside the loop — so the note has to take the answer back off the
+    // result, which is the one place that choice exists.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/repos/api"],
+      remoteControl: false, provider: "cursor",
+    });
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 1 of 1 in parallel. A worktree + Cursor session per task.");
+  });
 });
 
 describe("live-window open targets", () => {
