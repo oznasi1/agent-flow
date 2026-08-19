@@ -84,7 +84,7 @@ directory. Treat it as no safer to import from webview code than `github.ts` or
 | Has a reviewer requested changes? | `reviewDecision` | not exposed | `review` never reads `changes_requested`; arming names the `changes-requested` rule as unfirable |
 | Is a review thread outdated? | `isOutdated` | not exposed | the unresolved count is slightly more inclusive |
 | Submit "request changes" | one verb | no stable verb | posts a note and withdraws any standing approval, disclosed in the confirmation dialog |
-| Diff size in the review queue | in the search | not in the list | filled on row expansion; `additions`/`deletions` stay 0 because GitLab's REST API exposes no aggregate, so only the file count is real |
+| Diff size in the review queue | in the search | not in the list | filled on row expansion; `additions`/`deletions` stay 0 because GitLab's REST API exposes no aggregate, so only the file count is real — and GitLab caps `changes_count` at `"20+"`, which `readSize` reads as its FLOOR, so an 80-file MR renders as `20 files` with nothing marking it as approximate |
 | How many reviews are waiting in total? | `issueCount` | no total in the body | the count is however many rows came back, so a queue longer than 50 reads as complete rather than truncated |
 | Is a skipped required check green? | folded toward `SUCCESS` | `skipped` → `unknown` | GitLab is stricter; a skipped pipeline does not open a deploy gate |
 

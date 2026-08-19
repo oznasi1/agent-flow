@@ -41,4 +41,17 @@ describe("connector docs", () => {
     const doc = read("docs/FORGES.md");
     for (const id of FORGE_IDS) expect(doc).toContain(`\`${id}\``);
   });
+
+  // Same property, and same deliberately-unsliced read, as the taskSource
+  // assertion above — see its comment for why no slice may be reinstated. That
+  // precedent exists precisely to stop a whole new user-facing seam shipping with
+  // an empty Unreleased section, which is exactly what happened here.
+  it("records the forge setting in the changelog", () => {
+    expect(read("CHANGELOG.md")).toContain("agentFlow.forge");
+  });
+
+  it("is linked from both CONTRIBUTING and the README, as docs/CONNECTORS.md is", () => {
+    expect(read("CONTRIBUTING.md")).toContain("docs/FORGES.md");
+    expect(read("README.md")).toContain("docs/FORGES.md");
+  });
 });

@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **GitLab, wherever the Deck used to mean GitHub.** Set `agentFlow.forge` to
+  `gitlab` and the Deck reads merge requests through the `glab` CLI instead:
+  MR state, pipeline status and mergeability on the cards, the review-requests
+  strip filled from `reviews_for_me`, branch-CI verdicts for an Orchestrator
+  `branch-ci-passed` rule, and — with `agentFlow.reviewWrites` on — approve,
+  comment and request-changes from the expanded row. **Address PR** and **Review
+  with agent** seed a GitLab-flavoured prompt (`glab mr checkout`, "merge
+  request") unless you have written your own, which is always kept. Doctor
+  reports on whichever forge is configured, and names its CLI in every message.
+  Two GitLab facts the Deck cannot invent: there is no "changes requested"
+  state to read back, so arming a flow says that rule can't fire, and
+  `request-changes` posts your message and withdraws any approval you had —
+  disclosed in the confirmation dialog before anything is sent. See
+  [docs/FORGES.md](docs/FORGES.md) for the full list of what differs.
+
+  `agentFlow.forge` ships as `github`, and an existing install is unaffected
+  until you change it.
+
 ## [0.30.1] — 2026-08-18
 
 No functional change. Re-released so the packaged build can be installed over an
