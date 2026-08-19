@@ -4,6 +4,8 @@ import * as path from "path";
 import {
   expandHome,
   getConfig,
+  isCursorHost,
+  providerLabel,
   DEFAULT_PROMPT_MODES,
   DEFAULT_EXPLORE_PROMPT,
   DEFAULT_EXPLORE_JIRA_TICKET_PROMPT,
@@ -635,6 +637,51 @@ describe("getConfig — agentProvider", () => {
     env.uriScheme = "vscode";
     setConfig({ agentProvider: "codex" });
     expect(getConfig().agentProvider).toBe("claude-code");
+  });
+
+  it("keeps cursor in a Cursor host", () => {
+    env.uriScheme = "cursor";
+    setConfig({ agentProvider: "cursor" });
+    expect(getConfig().agentProvider).toBe("cursor");
+  });
+
+  it("degrades cursor to claude-code in VS Code", () => {
+    env.uriScheme = "vscode";
+    setConfig({ agentProvider: "cursor" });
+    expect(getConfig().agentProvider).toBe("claude-code");
+  });
+
+  it("degrades cursor to claude-code in an unrelated host", () => {
+    env.uriScheme = "windsurf";
+    setConfig({ agentProvider: "cursor" });
+    expect(getConfig().agentProvider).toBe("claude-code");
+  });
+
+  it("still degrades copilot to claude-code in Cursor", () => {
+    env.uriScheme = "cursor";
+    setConfig({ agentProvider: "copilot" });
+    expect(getConfig().agentProvider).toBe("claude-code");
+  });
+});
+
+describe("isCursorHost / providerLabel", () => {
+  afterEach(() => {
+    env.uriScheme = "cursor";
+  });
+
+  it("is true only for the cursor scheme", () => {
+    env.uriScheme = "cursor";
+    expect(isCursorHost()).toBe(true);
+    env.uriScheme = "vscode";
+    expect(isCursorHost()).toBe(false);
+    env.uriScheme = "windsurf";
+    expect(isCursorHost()).toBe(false);
+  });
+
+  it("labels every provider", () => {
+    expect(providerLabel("claude-code")).toBe("Claude Code");
+    expect(providerLabel("copilot")).toBe("Copilot");
+    expect(providerLabel("cursor")).toBe("Cursor");
   });
 });
 

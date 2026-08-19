@@ -226,15 +226,17 @@
           "type": "string",
           "enum": [
             "claude-code",
-            "copilot"
+            "copilot",
+            "cursor"
           ],
           "enumDescriptions": [
             "Claude Code",
-            "GitHub Copilot — VS Code only"
+            "GitHub Copilot — VS Code only",
+            "Cursor's composer — Cursor only"
           ],
           "default": "claude-code",
           "when": "agentFlow.host.vscode",
-          "markdownDescription": "Which agent Agent Flow starts a session with. `copilot` works only in VS Code — in Cursor and other forks it falls back to Claude Code. Note that Copilot sessions do **not** appear as live agents on the Deck, which reads Claude Code's session files."
+          "markdownDescription": "Which agent Agent Flow starts a session with. `copilot` works only in VS Code and `cursor` only in Cursor — each falls back to Claude Code in the other editor. Note that neither Copilot nor Cursor sessions appear as live agents on the Deck, which reads Claude Code's session files."
         },
         "agentFlow.agentSurface": {
           "type": "string",

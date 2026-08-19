@@ -33,6 +33,10 @@ const SEED_STAGGER_MS = 400;
 const CLI: Record<AgentProvider, { cmd: string; label: string; bootMs: number }> = {
   "claude-code": { cmd: "claude", label: "Claude", bootMs: 1500 },
   copilot: { cmd: "copilot", label: "Copilot", bootMs: 2000 }, // UNVERIFIED — measure in the dev host before release
+  // Inert placeholder — Task 1 only widens the type; Task 2 gives cursor its own
+  // entry. Until then it runs the claude-code row rather than crashing on a
+  // missing key, matching the "cursor behaves like claude-code at seed time" rule.
+  cursor: { cmd: "claude", label: "Claude", bootMs: 1500 },
 };
 
 /** Wrap text so the terminal delivers it as a *paste*. renderPrompt appends the
@@ -1000,7 +1004,10 @@ async function seedAgentSession(opts: {
     }
     // Terminal seeding failed — skip the panel attempts (this user does not use the
     // panel) and land on the clipboard fallback at the end.
-  } else if (provider === "claude-code") {
+  } else if (provider === "claude-code" || provider === "cursor") {
+    // Inert placeholder for "cursor" — Task 1 only widens the type; Task 2 gives it
+    // its own path. Until then it runs the claude-code branch below rather than
+    // falling into the copilot-panel attempt in the final `else if`.
     // 1 — verified command claude-vscode.primaryEditor.open(session, prompt);
     //     poll because our extension and Claude Code both activate onStartupFinished.
     const preferred = multi ? [CLAUDE_NEW_TAB_CMD, CLAUDE_OPEN_CMD] : [CLAUDE_OPEN_CMD];

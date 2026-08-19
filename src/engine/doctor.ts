@@ -75,8 +75,11 @@ export interface DoctorInputs {
   runs: number;
   /** Which agent seeds sessions — decides whether the Claude Code rows or the
    *  Copilot row appear. Already host-guarded by readAgentProvider, so this is
-   *  never "copilot" in Cursor. */
-  agentProvider: "claude-code" | "copilot";
+   *  never "copilot" outside VS Code, and "cursor" takes the same rows as
+   *  "claude-code" below until Task 2 gives it its own checks. Inlined rather
+   *  than imported from src/config.ts's `AgentProvider` — this module has zero
+   *  imports by design, staying free of `vscode` and testable as a plain table. */
+  agentProvider: "claude-code" | "copilot" | "cursor";
   /** Probed by command registration, not extension id: chat is built into VS Code
    *  and Copilot ships bundled in some builds, so an id check would false-negative. */
   copilotChat: { available: boolean };

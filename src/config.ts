@@ -147,7 +147,7 @@ export function readAgentSurface(
 }
 
 /** Which agent Agent Flow starts a session with. */
-export type AgentProvider = "claude-code" | "copilot";
+export type AgentProvider = "claude-code" | "copilot" | "cursor";
 
 /** The VS Code family, by uri scheme: `vscode`, `vscode-insiders`, and any other
  * `vscode*` build. Cursor is `cursor`, Windsurf is `windsurf`. Preferred over
@@ -157,22 +157,33 @@ export function isVSCodeHost(): boolean {
   return (vscode.env.uriScheme ?? "").startsWith("vscode");
 }
 
+/** Cursor, by the same signal. Exact match, not a prefix: unlike the VS Code family
+ * there are no `cursor-*` sibling builds, and a prefix test would claim any future
+ * scheme that merely starts with those six letters. */
+export function isCursorHost(): boolean {
+  return (vscode.env.uriScheme ?? "") === "cursor";
+}
+
 /** Read the agent. Anything unrecognized — including undefined — means Claude Code,
- * so a typo in settings.json degrades rather than breaking seeding. `copilot`
- * additionally requires a VS Code host: settings sync carries values between
- * editors and Cursor has no Copilot, so the value degrades there instead of failing
- * at seed time. This runtime guard — not the manifest `when` clause — is what makes
- * the behavior correct. Called with no argument from the seeding path, which reads
- * at seed time rather than capturing at activation. */
+ * so a typo in settings.json degrades rather than breaking seeding. `copilot` and
+ * `cursor` each additionally require their own host: settings sync carries values
+ * between editors, so each value degrades in the wrong editor instead of failing at
+ * seed time. This runtime guard — not the manifest — is what makes the behavior
+ * correct, and it is now the reason the manifest needs no `when` clause at all.
+ * Called with no argument from the seeding path, which reads at seed time rather
+ * than capturing at activation. */
 export function readAgentProvider(
   c: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration("agentFlow"),
 ): AgentProvider {
-  return c.get<string>("agentProvider") === "copilot" && isVSCodeHost() ? "copilot" : "claude-code";
+  const raw = c.get<string>("agentProvider");
+  if (raw === "copilot" && isVSCodeHost()) return "copilot";
+  if (raw === "cursor" && isCursorHost()) return "cursor";
+  return "claude-code";
 }
 
 /** The agent's name, for copy that tells the user what was just seeded. */
 export function providerLabel(p: AgentProvider): string {
-  return p === "copilot" ? "Copilot" : "Claude Code";
+  return p === "copilot" ? "Copilot" : p === "cursor" ? "Cursor" : "Claude Code";
 }
 
 /** One Explore action as seen by the flow: id + picker label + resolved prompt + Slack toggle. */
@@ -257,8 +268,9 @@ export interface AgentFlowConfig {
   repoBlocklist: string[];
   defaultFilter: string;
   seedAgent: boolean;
-  // Which agent a seeded session starts: Claude Code, or GitHub Copilot. `copilot`
-  // is VS Code only and degrades to claude-code elsewhere — see readAgentProvider.
+  // Which agent a seeded session starts: Claude Code, GitHub Copilot, or Cursor.
+  // `copilot` is VS Code only and `cursor` is Cursor only; each degrades to
+  // claude-code in the other host — see readAgentProvider.
   agentProvider: AgentProvider;
   // Where a seeded session opens: the Claude Code extension panel, or the `claude`
   // CLI in an integrated terminal.

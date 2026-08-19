@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { getConfig } from "./config";
+import { getConfig, type AgentProvider } from "./config";
 import type { TaskConnector } from "./tasks/provider";
 import { discoverRepos } from "./engine/repos";
 import { probeGh } from "./engine/pr/provider";
@@ -35,7 +35,7 @@ export interface DoctorConfig {
   workspaceDir: string;
   repoBlocklist: string[];
   prFacts: boolean;
-  agentProvider: "claude-code" | "copilot";
+  agentProvider: AgentProvider;
 }
 
 /** Every outside-world touch Doctor makes, injected. `collectInputs` is then pure

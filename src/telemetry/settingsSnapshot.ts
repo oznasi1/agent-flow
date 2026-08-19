@@ -42,7 +42,7 @@ export const EXPLORE_MODES = ["ask", "jiraTicket", "knowledge", "debug", "genera
 export const WORKTREE_MODES = ["ask", "always", "never"] as const;
 export const REMOTE_CONTROL_MODES = ["off", "on", "ask"] as const;
 export const AGENT_SURFACES = ["extension", "terminal"] as const;
-export const AGENT_PROVIDERS = ["claude-code", "copilot"] as const;
+export const AGENT_PROVIDERS = ["claude-code", "copilot", "cursor"] as const;
 export const DEFAULT_FILTER_VALUES = ["unassigned", "mysprint", "mine", "sprint", "backlog"] as const;
 
 const DEFAULT_ENVIRONMENT_LIST = DEFAULT_ENVIRONMENTS.join(",");
