@@ -14,7 +14,7 @@
 
 - **Default `agentFlow.forge` is `"github"`.** Every existing install must be byte-identically unaffected until a user opts in.
 - **`npm run typecheck` must be clean** after every task.
-- **`npm test` must pass after every task.** Existing test files pass **unmodified** except for the three additive/rename edits explicitly sanctioned in Tasks 7 and 8. Any other edit to an existing test is a defect in your change, not in the test.
+- **`npm test` must pass after every task.** The verified baseline is **117 test files, 4151 tests, 0 failures** — every one of them passes **unmodified** except for the additive/rename edits explicitly sanctioned in Tasks 7, 8 and 12. Any other edit to an existing test is a defect in your change, not in the test.
 - **`npm run test:cov` thresholds are enforced.** New modules need real coverage.
 - **`npm run build` must succeed.** This is the **only** gate that catches a webview module reaching `child_process`. `tsc` and the full suite pass regardless of a violation.
 - **`src/engine/forge/*`, `src/engine/pr/glab/*`, and `src/engine/review/glab/*` import `child_process`.** They must never be imported — even transitively — by `src/webview/*`, `src/engine/orchestrator/conditions.ts`, `src/engine/orchestrator/branchCi.ts`, or `src/engine/orchestrator/armability.ts`.
