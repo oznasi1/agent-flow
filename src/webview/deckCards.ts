@@ -29,7 +29,7 @@ export interface DeckCard {
  * column rather than an agent's: a parked card here, and every card the
  * Workspaces lens builds. */
 export function laneOf(status: RunStatus, column: DeckColumn): DeckLane | null {
-  return deriveLane(column, prSignals(status.prs));
+  return deriveLane(column, prSignals(status.prs), status.agent.state);
 }
 
 /**
@@ -74,7 +74,12 @@ export function projectCards(runs: RunStatus[]): DeckCard[] {
       if (group) group.push(agent); else byColumn.set(column, [agent]);
     }
     for (const [column, group] of byColumn) {
-      const lane = deriveLane(column, pr);
+      // A progress card can hold a working agent and an idle one at once — they
+      // share the column, so they share the card. One live agent makes the whole
+      // card live: reading `group[0]` instead would file it under whichever agent
+      // the host happened to list first.
+      const live = group.some((a) => a.activity.state === "working");
+      const lane = deriveLane(column, pr, live ? "working" : group[0].activity.state);
       cards.push(
         group.length === 1
           ? { id: `a:${group[0].session.sessionId}`, status, agent: group[0], agents: group, column, lane }

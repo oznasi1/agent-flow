@@ -75,8 +75,11 @@ describe("deriveBucket", () => {
 });
 
 describe("deriveBucket with PR signals", () => {
-  it("promotes a blocked PR into Needs you even while the agent is working", () => {
-    expect(deriveBucket({ agentState: "working", prBlocked: true })).toBe("needs");
+  it("promotes a blocked PR into In review even while the agent is working", () => {
+    // Action required is agent-driven now: a PR that needs a human is the review
+    // column's business. The rung keeps its place in the ladder — only the column
+    // it returns changed — so a blocked PR still outranks the live agent signal.
+    expect(deriveBucket({ agentState: "working", prBlocked: true })).toBe("review");
   });
 
   it("still treats an idle agent with an open, unblocked PR as In review", () => {
@@ -99,13 +102,13 @@ describe("deriveBucket with PR signals", () => {
     // `ready` and `blocked` are the two sides of the same PR read, and both
     // outrank the live agent signal for the same reason: the agent cannot know.
     expect(deriveBucket({ agentState: "working", prOpen: true, prReady: true })).toBe("merge");
-    expect(deriveBucket({ agentState: "working", prOpen: true, prBlocked: true })).toBe("needs");
+    expect(deriveBucket({ agentState: "working", prOpen: true, prBlocked: true })).toBe("review");
   });
 
-  it("lets a blocked PR outrank a ready one — a run with one of each needs you first", () => {
+  it("lets a blocked PR outrank a ready one — a run with one of each needs the fix first", () => {
     // prSignals can report both across repos: one PR approved and green, another
     // conflicting. The board must ask for the fix, not offer the merge.
-    expect(deriveBucket({ prOpen: true, prReady: true, prBlocked: true })).toBe("needs");
+    expect(deriveBucket({ prOpen: true, prReady: true, prBlocked: true })).toBe("review");
   });
 
   it("keeps a needs-you agent above a merge that has not happened yet", () => {
@@ -132,6 +135,86 @@ describe("deriveBucket with PR signals", () => {
     expect(deriveLane(deriveBucket({ agentState: "needs-you", prMerged: true }), s)).toBe("merged");
   });
 });
+
+describe("Action required is agent-driven", () => {
+  it("keeps every agent signal there — the column means an agent wants you", () => {
+    expect(deriveBucket({ agentState: "needs-you" })).toBe("needs");
+    expect(deriveBucket({ agentState: "stalled" })).toBe("needs");
+    expect(deriveBucket({ agentState: "exited" })).toBe("needs");
+  });
+
+  it("no longer sends a PR-only problem there — nobody asked you anything", () => {
+    // The one signal that left: a red PR under an idle agent used to read as
+    // "an agent needs you", which it never was. It is the review column's
+    // fixes-needed lane now.
+    expect(deriveBucket({ agentState: "idle", prOpen: true, prBlocked: true })).toBe("review");
+    expect(deriveBucket({ agentState: "unknown", prOpen: true, prBlocked: true })).toBe("review");
+  });
+
+  it("still lets an agent that ended its turn outrank its own blocked PR", () => {
+    // Both are true at once all the time — the agent stopped *because* CI went
+    // red. The agent asking is the more answerable of the two.
+    expect(deriveBucket({ agentState: "needs-you", prOpen: true, prBlocked: true })).toBe("needs");
+  });
+
+  it("routes a blocked draft PR to In review, which prOpen alone would not", () => {
+    // prSignals.blocked counts drafts; prSignals.open does not. Without its own
+    // rung a red draft would fall past review into the parked lane of progress.
+    expect(deriveBucket({ agentState: "idle", prOpen: false, prBlocked: true })).toBe("review");
+  });
+});
+
+describe("deriveLane on In progress", () => {
+  const none = { open: false, blocked: false, ready: false, merged: false };
+
+  it("puts a live agent in the working lane", () => {
+    expect(deriveLane("progress", none, "working")).toBe("working");
+  });
+
+  it("puts every other state in the parked lane — nobody is home", () => {
+    expect(deriveLane("progress", none, "idle")).toBe("parked");
+    expect(deriveLane("progress", none, "unknown")).toBe("parked");
+  });
+
+  it("parks a card with no agent state at all rather than leaving it laneless", () => {
+    // An agentless run reaches progress through laneOf, which has only the run's
+    // own reduction to offer. A null lane would render it outside every lane
+    // header, in a column that promises it renders none.
+    expect(deriveLane("progress", none, undefined)).toBe("parked");
+  });
+});
+
+describe("deriveLane on In review", () => {
+  const open = { open: true, blocked: false, ready: false, merged: false };
+
+  it("puts a blocked PR in the fixes-needed lane", () => {
+    expect(deriveLane("review", { ...open, blocked: true }, "idle")).toBe("fixes");
+  });
+
+  it("puts an unblocked PR in the waiting lane — it is somebody else's turn", () => {
+    expect(deriveLane("review", open, "idle")).toBe("waiting");
+  });
+
+  it("waits rather than claiming fixes for a card that reached review off its ticket status", () => {
+    // No PR at all: `prOpen || isReviewStatus` is how a Jira-review ticket gets
+    // here, and there is nothing to fix.
+    expect(deriveLane("review", { open: false, blocked: false, ready: false, merged: false }, "idle")).toBe("waiting");
+  });
+});
+
+describe("deriveLane leaves the columns that mean one thing alone", () => {
+  const none = { open: false, blocked: false, ready: false, merged: false };
+
+  it("returns null for Action required", () => {
+    expect(deriveLane("needs", none, "needs-you")).toBe(null);
+  });
+
+  it("still splits merge on the merge signals, ignoring the agent", () => {
+    expect(deriveLane("merge", { ...none, merged: true }, "working")).toBe("merged");
+    expect(deriveLane("merge", { ...none, ready: true }, "working")).toBe("ready");
+  });
+});
+
 
 describe("prSignals", () => {
   it("is all false for no entries", () => {
@@ -262,10 +345,15 @@ describe("deriveLane", () => {
     expect(deriveLane("merge", signals({ merged: true, ready: true, open: true }))).toBe("merged");
   });
 
-  it("leaves the single-lane columns unlaned", () => {
-    expect(deriveLane("progress", signals({ ready: true }))).toBeNull();
+  it("leaves Action required unlaned — it is the one column that means one thing", () => {
     expect(deriveLane("needs", signals({ merged: true }))).toBeNull();
-    expect(deriveLane("review", signals({ open: true }))).toBeNull();
+  });
+
+  it("lanes progress and review off their own signals, not the merge ones", () => {
+    // Both columns are laned now, and neither reads the merge flags: a stray
+    // `ready` cannot pull a progress card into a lane it has no business in.
+    expect(deriveLane("progress", signals({ ready: true }))).toBe("parked");
+    expect(deriveLane("review", signals({ open: true }))).toBe("waiting");
   });
 });
 

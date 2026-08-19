@@ -1367,8 +1367,30 @@ describe("shelf", () => {
     mkRun({ key, kind: "notepad", url: "", createdAt, summary: key,
       repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }] });
 
-  it("keeps an active ticket run on the board with no agent and no PR", async () => {
-    h.runs = [mkRun()]; // mkRun's url is a real Jira url, so isTicketRun is true
+  it("keeps a just-launched run on the board with no agent and no PR", async () => {
+    // mkRun's createdAt is now, and the launch grace is what holds this one: the
+    // window is still opening and Claude Code has not written a transcript for
+    // the new worktree yet, so every other signal is false.
+    h.runs = [mkRun()];
+    show();
+    await settled();
+    expect(shelfOf("ASM-1")).toBe("board");
+  });
+
+  it("closes an aged ticket run whose open ticket is the only thing left", async () => {
+    // The signal that stopped counting. An open Jira ticket is somebody else's
+    // status field, not work in flight: no agent, no PR, nothing uncommitted or
+    // unpushed means there is nothing on this card to act on.
+    h.runs = [mkRun({ createdAt: NOW - 90 * MIN })];
+    h.openSessions = [];
+    show();
+    await settled();
+    expect(shelfOf("ASM-1")).toBe("closed");
+  });
+
+  it("keeps an aged ticket run with a live agent on the board", async () => {
+    h.runs = [mkRun({ createdAt: NOW - 90 * MIN })];
+    h.openSessions = [sess({ sessionId: "s1", cwd: "/r/svc", startedAt: NOW - 10 * MIN })];
     show();
     await settled();
     expect(shelfOf("ASM-1")).toBe("board");
@@ -3703,6 +3725,15 @@ describe("DeckPanel — Address PR", () => {
 
   it("leaves the run record untouched — the card keeps its launched-at", async () => {
     h.runs = [mkRun({ createdAt: 1_700_000_000_000 })];
+    // Unpushed work is what keeps this one on the board. A run this old with
+    // nothing open and nothing on disk reaches the closed shelf, and the retire
+    // sweep stamps `closedAt` there — a write of its own that would mask the one
+    // this test is watching for. It goes through buildRunStatus rather than
+    // h.gitState because this file mocks buildRunStatus wholesale.
+    h.buildRunStatus.mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "b", dirty: true, ahead: 1, added: 1, removed: 0, files: 1 }],
+    }));
     show();
     await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
     // A positive assertion that the handler actually ran: without it, deleting

@@ -730,9 +730,11 @@ describe("DeckApp PR-facts chrome", () => {
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByRole("button", { name: /2 agents/ })).toBeTruthy();
     expect(screen.getByText("svc-fa")).toBeTruthy();
-    // Each row carries its OWN state — the whole point of listing them.
-    expect(screen.getByText("working")).toBeTruthy();
-    expect(screen.getByText("idle")).toBeTruthy();
+    // Each row carries its OWN state — the whole point of listing them. Scoped to
+    // .ag-state because "working" is also the name of an In-progress lane header
+    // now, and an unscoped match would pick up the sub-header instead of the row.
+    expect(screen.getByText("working", { selector: ".ag-state" })).toBeTruthy();
+    expect(screen.getByText("idle", { selector: ".ag-state" })).toBeTruthy();
   });
 
   it("gives the collapsed label mono only when it is a name, not a count", () => {
@@ -1247,14 +1249,14 @@ describe("DeckApp — per-failure PR actions", () => {
   });
 });
 
-// An Action required card with no agent open got there because a PR is blocked —
-// deriveBucket has no other route into `needs` without an agent. Its state line used
-// to read the parked grey, which says "nothing is happening" on the one column that
-// means act now, and with no agents anywhere that made the whole column read as
-// disabled.
-describe("DeckApp — an agentless Action required card", () => {
+// An In-review card with no agent open and a blocked PR is the fixes-needed lane's
+// normal inhabitant — the PR wants something and there is nobody in the run to ask.
+// Its state line used to read the parked grey, which says "nothing is happening" on
+// a card that is the whole reason the lane exists, and with no agents anywhere that
+// made the lane read as uniformly disabled.
+describe("DeckApp — an agentless In review card with a blocked PR", () => {
   const blocked = (over: Partial<PrFacts> = {}) => mkStatus({
-    column: "needs",
+    column: "review",
     agent: { state: "unknown", lastActivityMs: null, slug: null },
     agents: [],
     prs: { svc: { facts: prFacts({ review: "changes_requested", ...over }), fetchedAt: 1 } },
@@ -1291,9 +1293,11 @@ describe("DeckApp — an agentless Action required card", () => {
   });
 
   it("leaves an agentless card in another column parked", () => {
+    // The line is scoped to the column that owns PR trouble. In progress does not:
+    // a card there is described by its agent read, whatever a stale PR fact says.
     render(<DeckApp />);
     host(runsMsg([mkStatus({
-      column: "review",
+      column: "progress",
       agent: { state: "unknown", lastActivityMs: null, slug: null },
       agents: [],
       prs: { svc: { facts: prFacts({ review: "changes_requested" }), fetchedAt: 1 } },
@@ -2242,12 +2246,39 @@ describe("board zones", () => {
     expect(column("Merge").querySelector(".col-hd .ct")?.textContent).toBe("2");
   });
 
-  it("leaves the three columns that mean one thing without sub-headers", () => {
+  /** A parked run in the In-progress column: no agents, and a run-level read
+   * that says nobody is home. */
+  const quiet = (key: string): RunStatus => mkStatus({
+    run: { ...mkStatus().run, key },
+    column: "progress", agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null },
+  });
+
+  it("splits In progress into the live agents and the parked ones, live first", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus(), inReview("ASM-2", { review: "none" })]));
-    expect(lanes("In progress")).toEqual([]);
+    host(runsMsg([quiet("ASM-2"), mkStatus()]));
+    expect(lanes("In progress")).toEqual([["working", "1"], ["parked", "1"]]);
+    expect(flow("In progress")).toEqual(["working", "ASM-1", "parked", "ASM-2"]);
+  });
+
+  it("splits In review into the PRs that want you and the ones that want somebody else", () => {
+    render(<DeckApp />);
+    host(runsMsg([inReview("ASM-2", { review: "none" }), inReview("ASM-3", { mergeable: "conflicting" })]));
+    expect(lanes("In review")).toEqual([["fixes needed", "1"], ["waiting on review", "1"]]);
+    expect(flow("In review")).toEqual(["fixes needed", "ASM-3", "waiting on review", "ASM-2"]);
+  });
+
+  it("leaves Action required without sub-headers — it is the one column that means one thing", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "needs", agents: [], agent: { state: "needs-you", lastActivityMs: 1_000, slug: null },
+    })]));
     expect(lanes("Action required")).toEqual([]);
-    expect(lanes("In review")).toEqual([]);
+  });
+
+  it("keeps the In-progress header counting both of its lanes", () => {
+    render(<DeckApp />);
+    host(runsMsg([quiet("ASM-2"), mkStatus()]));
+    expect(column("In progress").querySelector(".col-hd .ct")?.textContent).toBe("2");
   });
 });
 

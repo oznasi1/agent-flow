@@ -107,11 +107,17 @@ export type AgentState = "working" | "needs-you" | "stalled" | "exited" | "idle"
  * (see `shelfFor`) with the only two things left to do with it: reopen, forget. */
 export type DeckColumn = "progress" | "needs" | "review" | "merge";
 
-/** A band inside a column, for the one column that holds two tenses of the same
- * event: a PR still to press, and one already landed with its aftermath to
- * settle. `null` on the columns that mean one thing. Derived, never posted by
- * the host. */
-export type DeckLane = "ready" | "merged";
+/** A band inside a column, for the three columns that hold more than one thing.
+ * `null` on `needs`, the one column that means exactly what its name says.
+ * Derived, never posted by the host.
+ *
+ * `progress` splits on whether anybody is home: `working` is a live agent,
+ * `parked` is the in-flight catch-all — a run whose agent went quiet, or one
+ * with no agent at all. `review` splits on who owes the next move: `fixes` is a
+ * PR asking you for something (red CI, changes requested, a conflict), `waiting`
+ * is a PR asking somebody else. `merge` splits the two tenses of the same event:
+ * a PR still to press, and one already landed with its aftermath to settle. */
+export type DeckLane = "working" | "parked" | "fixes" | "waiting" | "ready" | "merged";
 
 /** Where a run sits on the In-flight view: a board column, or the Recently
  * closed strip. Membership only — `DeckColumn` still says which column. */
@@ -154,7 +160,8 @@ export interface Run {
    * written before this field existed, and on every run still in flight. */
   finishedAt?: number;
   /** When this run was first observed to have no live work left — no agent of its
-   * own open, no PR, no active ticket, nothing uncommitted or unpushed. Stamped by
+   * own open, no PR, nothing uncommitted or unpushed, and past its launch grace.
+   * Stamped by
    * the Deck's retire sweep and cleared again the moment any of that comes back, so
    * the Recently-closed window survives a panel reload. Absent on every record
    * written before this field existed, and on every run still on the board. */
