@@ -12,7 +12,7 @@ that ticket touches, with a coding agent already briefed — Claude Code, or Git
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![VS Code ^1.90.0](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC?logo=visualstudiocode&logoColor=white)
 
-<img src="media/screenshot.png" alt="The Agent Flow Deck panel in the VS Code sidebar. Its first row is a Tasks / Notepad tab bar with the open-window gauge and an Explore button trailing it; the project key and your name sit in VS Code's own view title bar above. Under Tasks: segmented task, size and status lenses, a repo multiselect and a fuzzy title search, then task cards with per-card Take and Address PR actions." width="420" />
+<img src="media/screenshot.png" alt="The Agent Flow Deck panel in the VS Code sidebar: a Tasks / Notepad tab bar, segmented task, size and status lenses, a repo multiselect and a title search, then task cards with per-card Take and Address PR actions." width="420" />
 
 </div>
 
@@ -21,558 +21,125 @@ that ticket touches, with a coding agent already briefed — Claude Code, or Git
 Agent Flow Deck turns *"what should I work on?"* into a workspace with an agent already primed.
 
 Pick a Jira task → it infers which repos the task touches → opens them as a workspace →
-seeds a task brief and pre-fills your agent with the plan. You land ready to
-orchestrate, not ready to set up.
+seeds a task brief and pre-fills your agent with the plan. You land ready to orchestrate,
+not ready to set up.
 
-**Which agent** is your choice: Claude Code by default, or **GitHub Copilot** with
-`agentFlow.agentProvider: copilot` (VS Code only — see
-[Where the session opens](#where-the-session-opens)). Everything below that says
-"the agent" means whichever one you've configured; the few places that are genuinely
-Claude-only say so.
+Which agent is your choice: **Claude Code** by default, or **GitHub Copilot** with
+`agentFlow.agentProvider: copilot` (VS Code only). "The agent" below means whichever
+you configured.
 
 ## What it does
 
-- **Sidebar panel** with two tabs — **Tasks**, the pool of tickets, and
-  **[Notepad](#the-notepad--work-that-isnt-a-ticket)**, for work that never had one. The
-  project key and your name live in VS Code's own view title bar, and the open-window
-  gauge and **Explore** sit at the end of the tab row.
-- **Task pool** with filter tabs (My sprint · Unassigned · Mine ·
-  Sprint · Backlog) and a size lens (S/M/L by original estimate). The size lens, status
-  lens, and repo search can each be hidden if you don't use them (`agentFlow.filters.size` /
-  `.status` / `.repo`, all on by default).
-- **Jira fetch** over the REST API. Reads are the default; the only writes are optional
-  status changes from a card — which also stamp a provenance label (default `claude-code`,
-  configurable via `agentFlow.provenanceLabel`, toggle with `agentFlow.stampLabelOnWrite`).
-- **Service inference** — reads the ticket's components/labels/text and matches your
-  local repo checkouts (backend *and* frontend).
-- **Open + seed** — writes `.pick-task/TASK.md` into each repo (git-excluded), generates a
-  `<KEY>.code-workspace` (or one window per repo, or a per-task git worktree), and pre-fills
-  your agent — the Claude Code panel, Copilot Chat, or either one's CLI in a terminal —
-  with your chosen prompt mode (you press Enter to start).
-- **Address PR** — an **Address PR** button appears once a task has an open PR waiting on you.
-  On the sidebar's Tasks card that means reaching your PR-review status (default `PR initiated`);
-  on a Deck card it means the review column's waiting lane, with an actual open PR behind it —
-  the two surfaces gate on different things. From the sidebar's task card the button kicks off
-  an agent **in a fresh worktree**; from a Deck card it re-seeds the workspace that run already
-  has instead, asking nothing, since the run was launched with one. Either way the agent finds
-  the task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
-  for your fixes — then, by default, starts implementing the requested changes (toggle with
-  `agentFlow.prReviewAutoFix`).
-- **Review queue** — a strip on the Deck lists every open PR that asks for *your* review,
-  sortable by oldest or smallest, with per-row size, CI and age. **Review with agent** checks
-  one out into a worktree and seeds an agent to review it; submitting the review itself from
-  the Deck is opt-in and ships **off** (`agentFlow.reviewWrites`).
-- **Launch in parallel** — filter the repo lens to one repo **or several** and a checkbox
-  appears on each task. Tick a few, then **Launch in parallel**: each task gets its own git
-  worktree (its own branch) in whichever of the filtered repos it's inferred to touch — or
-  in all of them, when the ticket names none, so no task launches with no repo. You're
-  asked once where the batch goes (the same destinations a single **Take** offers), and for
-  a new window, how to lay it out: **separate windows**, one per task, or **one shared
-  window** holding every task's worktrees with a Claude Code session seeded per task,
-  stacked as tabs in one Claude group in the order you picked them. Every other destination
-  *is* a single window, so it goes straight to the shared layout. Batches larger than
-  `agentFlow.batchLaunchConfirmThreshold` (default 6) ask first. (Under Copilot, a batch
-  writes every brief but seeds no chat panel — Copilot Chat is single-instance. See
-  [Where the session opens](#where-the-session-opens).)
+### Tasks — the pool
 
-### The Notepad — work that isn't a ticket
+Your Jira project as a filterable pool: **My sprint · Unassigned · Mine · Sprint ·
+Backlog**, with a size lens and a fuzzy title search. Click a card and the repos the
+ticket touches are already selected — read from its components, labels and text, matched
+against your local checkouts. Press **▶ Take** and Agent Flow writes a
+`.pick-task/TASK.md` brief into each repo, generates a workspace, and pre-fills your
+agent with the prompt; you press Enter.
 
-Not everything worth an agent has a Jira key. The panel's second tab, **Notepad**, is a
-plain list of things you want to do: a title, optional detail, a checkbox.
+Tick several cards and **Launch in parallel** gives every task its own git worktree and
+branch, either in separate windows or stacked as tabs in one.
+
+### Notepad — work that never had a ticket
 
 <p align="center">
-<img src="media/notepad.png" alt="The Notepad tab of the Agent Flow Deck sidebar panel: an add-note form (title field, detail textarea, Add note button), an All / Active / Done segmented filter with a Clear completed button under it, and three notes. Each note leads with a drag grip and a done checkbox, then its title and detail, and — in its top right corner — a filled Start button above quiet edit and delete icon buttons that together span Start's width; one note carries a blue rail and a Running badge, another a green rail and a Finished badge." width="420" />
+<img src="media/notepad.png" alt="The Notepad tab: an add-note form, an All / Active / Done filter with Clear completed, and three notes — each with a drag grip, a done checkbox, its title and detail, and a Start button with quiet edit and delete icons beneath it. One note carries a blue rail and a Running badge, another a green rail and Finished." width="420" />
 </p>
 
-- **Notes are yours, not the workspace's.** They're stored in the editor's global state,
-  not per-workspace, so the same list is there whichever repo or workspace the panel
-  happens to be open against.
-- **Start** kicks off an agent from a note the same way **Explore** does: it asks where to
-  open and which repos to use, writes a `## Notepad:` brief from the note's title and
-  detail (with Explore's topic-agnostic prompt), and seeds your agent. The note stays in
-  the list afterwards — running it isn't the same as finishing it.
-- **The run lands on the Deck** like any other, and the note grows a badge tracking it:
-  **Running** while an agent is attached, **Stale** once nothing is, **Finished** when the
-  Deck records it as landed. Re-running a note replaces that note's previous run rather
-  than piling up a second record.
-- **A screenshot is a detail too.** Paste an image straight into the detail field — the
-  field says so — drop an image file onto a note, or pick one with **Attach image**,
-  which sits beside **Add note** and in a note's edit form. Thumbnails sit under the
-  note's text and open full size in an editor tab. **Start** copies them into
-  `.pick-task/images/` beside the brief and names them in both the brief and the seeded
-  prompt, so the agent reads what you saw instead of your description of it. PNG, JPEG,
-  GIF and WebP, up to 10 MB each; the files live beside your notes in the editor's global
-  storage and go when the note or the image does.
-- **Order is yours.** Each note has a grip — drag it to put the list in whatever order you
-  want. That order persists across reloads and holds under every filter; **Reset order**
-  (it appears once you've dragged something) puts the list back to newest-first.
-- **Filter and clear.** The list opens on **Active**; **All** and **Done** are a click
-  away, and **Clear completed** removes every checked note in one action (it only appears
-  when there's something to clear).
+A plain list of things you want to do — title, detail, checkbox — stored per editor rather
+than per workspace, so it follows you between repos. **Start** launches an agent from a
+note exactly like a ticket would, and the note grows a badge tracking that run. Paste or
+drop a screenshot into a note's detail and **Start** copies it beside the brief, so the
+agent reads what you saw instead of your description of it.
 
-The fields are ordinary text inputs, so your operating system's own dictation — double-tap
-Control on macOS, `Win`+`H` on Windows — types straight into them. Agent Flow ships no
-microphone button of its own: a VS Code webview can't reach the microphone, and Electron
-can't run the Web Speech API.
+### Deck — the in-flight board
 
-### The Deck — your in-flight board
+<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Merge) with counts in the header, an Agents / Workspaces lens and a refresh. Each card shows its branch, per-repo diff stats, a live agent status, PR and CI state, Jira status, and Open / Diff actions." />
 
-Once you've taken tasks, the **Deck** (open it with **"Open the Deck (in-flight)"**)
-is the board of everything you've launched, in a classic pipeline —
-**In progress · Action required · In review · Merge**. Attention rises left to right and
-ends at the merge, which spans both sides of it — `ready to merge` for a pull request one
-click from landing, `merged · wrap up` for one that already has and still owes you a ticket
-transition or a branch to delete. A ticket closed with nothing merged left no wrap-up, and
-drops into **Recently closed** underneath.
+Everything you've launched, in a pipeline — **In progress · Action required · In review ·
+Merge**, attention rising left to right. Each card carries the live state: what its agent
+is doing right now (read from Claude Code's own transcripts), the diff, the PR with its CI
+and review decision, and the Jira status. The two kinds of "you're needed" stay apart:
+**Action required** means an agent stopped and is asking you, while a PR with red CI,
+requested changes or a conflict lands in **In review**'s `fixes needed` lane. **Open**
+focuses that window if it's already open; **Diff** shows the working tree.
 
-<img src="media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Merge). Its header carries the title, four tiles counting In progress, Action required, In review and Merge, an Agents / Workspaces lens and a refresh reading 'synced 4s ago'. Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a live agent status (working, idle, ended turn, parked, ready to merge, or merged), the PR and CI state, the Jira status, and Open / Diff actions. A note started from the Notepad tab sits among the tickets marked 'notepad'. Each column carries its own hue in its dot, header rule and a faint tint down the top of the column; the Merge column is split into 'ready to merge' and 'merged · wrap up' lanes, and a collapsed 'Recently closed' strip sits under the board. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button." />
+Above the columns sits your **review queue**: every open PR waiting on your review, sorted
+by oldest or smallest, with **Review with agent** to check one out and have the diff read
+for you.
 
-The columns are a neutral git + Jira backbone; each **card** carries the true live state.
-A best-effort **Live signal** (read from your local Claude Code transcripts) tells `working ·
-Ns ago` from `idle`, `ended turn` (needs you), or `parked` — a card only reads `parked` when
-its transcript can't be read, or doesn't exist yet, which is the one route back to the git +
-Jira backbone. The live signal is **Claude Code only** — it reads Claude Code's own
-transcripts, and Copilot writes nothing equivalent, so a task launched under
-`agentFlow.agentProvider: copilot` still gets a card, with the git + Jira + PR
-backbone but no agent on it. **Open** focuses the window if it's already open (never a duplicate) and
-opens it fresh otherwise; **Diff** shows the working diff; **⋯** offers *Open in Jira* and
-*Forget*.
+### Marketplace — everything Claude Code can do here
 
-The board opens with **one card per Claude Code agent** — its live state and
-session name lead, and the repo, branch, Jira key and pull request it belongs to
-sit underneath, so two agents in one worktree read as two different pieces of
-work, in whichever columns their own states put them. **Open** and **Diff** on
-such a card act on that agent's own directory. Switch the header control to
-**Workspaces** for one card per launched task with its agents nested instead;
-whichever you pick sticks.
+<img src="media/marketplace.png" alt="The Agent Flow Deck Marketplace: a search box over type pills with live counts, scope pills and a Plugins picker, a grouped browse list, and a detail pane rendering the selected skill's SKILL.md." />
 
-Run records retire themselves once a task is provably over: its directories are
-gone, it landed a day ago with no agent left in it, or it is an old session with
-no ticket, no PR and nothing uncommitted. Uncommitted or unpushed work always
-stops a record being retired, and retirement only ever deletes Agent Flow's own
-pointer — never a worktree, a branch, or a commit. **Clear stale** appears in the
-header when records are only waiting out their window, and takes them on the spot.
+A searchable, read-only browser over your `~/.claude` — the marketplaces you've added, the
+plugins you've installed, and the skills, slash commands, agents and hooks inside them,
+plus whatever you wrote yourself. Search is fuzzy (`revw` finds `/review`), and selecting a
+row renders its file so you can read what something does without opening it.
 
-The Deck also shows **every Claude Code session open on this machine**, not only
-the ones it launched — read from `~/.claude/sessions`, the registry Claude Code
-keeps of its running sessions. Sessions attach to the card that owns their
-directory, so a worktree with two agents in it lists both, in the order you
-opened them; a place with no tracked run of its own gets a card of its own,
-marked `local`. A local card reads its branch for a ticket key
-(`ASM-5641-team-table` → `ASM-5641`, marked `~inferred` since a branch can name
-a ticket somebody else owns) and for its pull request, so a worktree Claude Code
-made on its own lands on the board as complete as one you took. It disappears
-the moment you close its last agent — **⋯** → **Track it** pins it to the runs
-store first, and from there it behaves exactly like a task you took, **Forget**
-included. Turn it off with `agentFlow.openAgents`, which the board picks up
-immediately — no need to close and reopen the panel.
-
-Each card also carries the **PR state** of every repo it touches, read from GitHub
-with the `gh` CLI: the PR number, CI (failing check names link to their runs, or a
-passing count), the review decision with any unresolved-thread count, and
-mergeability. A PR that needs a human decision — failing required checks,
-requested changes, or a conflict — pulls its card into **Action required**, even while
-the agent is still working, because an agent can't know CI broke until you tell
-it. A merged PR moves the card to **Done** and is the only thing that makes a card
-say *merged*. Turn it off with `agentFlow.prFacts`, applied the moment you save
-the setting, and cards fall back to the git + Jira backbone.
-
-An **Orchestrator** drawer (off by default, `agentFlow.orchestrator`) lets you wire the
-agents already on the board into a *flow*: drag a card in, connect two nodes, and put a
-condition on the connection — a merged PR, failing CI, an agent that ended its turn, a
-clean tree, a Jira status, **the command succeeded**, or CI passing on a named branch of a
-named repo. That last one has no picker yet: you get it only by hand-editing the flow file,
-not through the drawer or the list. The drawer resizes by dragging its edge or pressing
-**Expand**, and switching to **List** gives the same flow a keyboard path — build, wire,
-edit and arm it without a pointer.
-
-What a connection *does* comes from the node it points at, not from a choice you make on the
-rule — there is no action picker anywhere in the drawer or the list. Point a rule at
-unstarted work and it **launches** that agent in a fresh worktree; point it at a place that
-already exists and it **seeds** a second agent there; point it at a **notify** node and it
-does exactly what that node says: **"Notify me in VS Code"** — a notification popped in your
-own window, nothing more. It messages nobody; if you were hoping for a Slack DM or an email,
-that's not what this does. Point it at
-a **command** node and it runs a shell command, configured under `agentFlow.commands` (an
-`id`, a `label` for the picker, the `run` string, and an optional `detail` line) or typed as
-free text straight onto the node. A `run` template can contain `{note}`, replaced with the
-rule's own note. A **launch** or **seed** rule can also carry a note of its own, folded into
-whichever prompt mode it uses: put anything reusable in the prompt mode, and save the note
-for what is specific to just this one rule.
-
-**A command's `{note}` substitution is spliced in unquoted, exactly as typed.** A template
-`deploy.sh --env={note}` fed a note of `prod; rm -rf ~` runs both commands — quoting the
-template yourself (`--env="{note}"`) does not close that off either, since a `"` inside the
-note still breaks out. That's inherent to letting a rule's free text reach a shell command at
-all, not a bug waiting on a fix: quoting is the template author's job. A command is killed
-120 seconds after it starts, but only the shell process it started — anything that process
-goes on to spawn can outlive the kill. Its captured output is capped at 1 MiB; a chattier
-command is killed the same way and its rule latched as a failure. A failed command (like a
-failed launch or seed) latches and is never retried automatically until you click **Reset** —
-deliberately, so a broken deploy doesn't run again every six seconds. The CI-passing-on-a-branch
-condition reads GitHub's aggregate status rollup, which folds skipped and neutral checks
-toward success — so a branch whose required build was merely *skipped* can read as passed
-here. A commit with no checks at all correctly reads as unknown rather than passed, and
-anything the check can't read (a failed call, a repo not checked out anywhere, an unparseable
-response) reads as not-met, never as green.
-
-The drawer says what each condition is waiting on right now. **Arm** a flow and it is checked
-on every Deck refresh; a rule that is met fires exactly once and tells you, rather than firing
-again on every later pass. It keeps advancing while the Deck is hidden — an armed flow that
-only ran while you were looking at the board would not be armed — and closing the Deck
-genuinely does stop it, since the panel owns the poll; closing with something armed says so.
-Reopening the Deck, including after a restart, shows you what is already ready and waits for a
-**Go** before acting on it, so an armed flow can never spend anything the moment you come
-back. Before it ever launches or seeds for the first time, a flow asks once — naming the
-ticket, the repos, and the prompt mode it would use — and only then runs unattended. Running
-its first command asks again, separately: approving a flow's launches only approves opening
-agent sessions, never running a shell command on your machine, so a flow you already
-confirmed for a launch still asks the first time one of its rules would run a command — and
-then, like a launch, runs unattended after that. At most three of these — launches, seeds and
-commands together — happen in a single pass, with the rest picked up on the next one. A
-launch, seed or command that fails stamps its rule as errored and stops it there until you
-**Reset** it; a pre-flight read that fails instead — Jira unreachable, say — is retried on the
-next pass rather than latched as a failure. Two VS Code windows with the Deck open cannot fire
-the same rule twice.
-
-Above the columns sits your **review queue** — every open PR that asks for your
-review, found with one `gh` search. PRs in archived repositories are left out:
-an archived repo is read-only, so GitHub refuses a review on one, and those
-requests otherwise sit in the queue forever. Every row is visible in a height-capped,
-independently scrollable list rather than being collapsed away, so a nine-request
-queue is still a scroll, not a count. Each row carries the repo, PR number, title,
-author, age, and its size both as `+409 −50 · 8 files` and as an S/M/L bucket;
-sort by **oldest** (what you owe most) or **smallest** (what you can clear before
-standup). Expanding a row fetches which checks failed and how many review threads
-are still open, alongside the review decision and mergeability. **Review with agent**
-checks the PR out into a worktree and seeds
-your agent to review the diff and write its findings to
-`.pick-task/REVIEW-<number>.md`, which the row can then load into the review box.
-Turn the strip off with `agentFlow.reviewRequests`; it also goes dark whenever
-`agentFlow.prFacts` is off, since both lean on the same `gh` dependency.
-
-With `agentFlow.reviewWrites` on (**off by default**), the expanded row also
-submits: **Approve**, **Comment**, or **Request changes** — each disabled while a
-submit for that row is already in flight, and each behind a confirmation dialog
-that names the verb, the repo and the PR number before anything is sent. A body
-loaded from the agent's draft is marked as agent-drafted when it goes out, unless
-you turn `agentFlow.stampLabelOnWrite` off.
-
-### The Marketplace — browse your skills, commands & agents
-
-The **Marketplace** (open it with the puzzle-piece (`$(extensions)`) button beside the
-Deck's button in the sidebar title bar, or **"Open the Marketplace"**) is a
-searchable browser of everything Claude Code can do on this machine — the one panel that is
-Claude-specific whatever `agentFlow.agentProvider` says, since it browses Claude Code's own
-plugin ecosystem. It reads your local
-`~/.claude` — the marketplaces you've added, the plugins you've installed, and the skills,
-slash commands, agents and hooks inside them — plus any skills or commands you wrote
-yourself in `~/.claude` or in the open workspace's `.claude/`.
-
-<img src="media/marketplace.png" alt="The Agent Flow Deck Marketplace: a search box over type pills (All, Skills, Commands, Agents, Hooks, Plugins) with live counts, scope pills (Everywhere, Installed only, Enabled only) and a Plugins picker, and a row of clickable marketplace tags. The browse list is grouped into category sections — Yours first, then Development — each row showing its type glyph, name, plugin, marketplace and blurb, with disabled ones struck through. The detail pane on the right shows the selected skill's tags, description, where it came from, a Copy snippet, Open file / Reveal in Finder actions, and its SKILL.md rendered underneath." />
-
-Search is fuzzy and ranked — `revw` finds `/review`, `mkpl` finds `marketplace` — with the
-best match selected as you type and the type tallies following the query. From the search
-box, **↑/↓** move the selection and **Enter** opens its file. When you aren't searching,
-the list groups into **category sections** read from each plugin's own manifest —
-Development, Monitoring, Deployment, and so on — with everything you wrote yourself under
-**Yours** first, the rest ordered by descending size, and anything whose manifest omits
-the field under **Uncategorized** last. Click a section header to focus that category.
-
-Narrow further by type, by what's installed or enabled, by **several plugins at once**
-(the searchable `Plugins ▾` picker, or click a plugin name in any row), or by marketplace
-(click its tag). Query, type, scope, category, plugins and marketplace all AND together,
-and active selections show up as removable chips with a **Clear** action — the chip row
-disappears when nothing is selected.
-
-<img src="media/marketplace-filters.png" alt="The same panel with the Plugins picker open: a filter box above a checkbox list of plugins, each with its marketplace and the number of rows it would reveal, two of them ticked, and a Clear 2 button. The ticked plugins appear as removable chips beside a Clear action, the type counts have dropped to match, and the list behind now shows only those plugins' assets." />
-
-It also shows which plugins are disabled, and lists the plugins your marketplaces
-catalogue but haven't downloaded yet, with the `/plugin install` command to get them.
-
-Selecting a row **renders its file** in the pane on the right, under the metadata — a
-skill's `SKILL.md`, a hook's `hooks.json` as a fenced JSON block, a plugin's README — so
-you can read what something actually does without opening it; **Open file** still opens it
-in an editor tab, **Reveal in Finder** shows it on disk, and **Copy** grabs the command
-you'd type to use it. Files over 262,144 characters are truncated, with the same **Open
-file** button covering the rest in the editor. The renderer builds elements from a parsed
-tree instead of injecting HTML, so a hostile file from a third-party marketplace can't run
-anything; only `http`/`https` links become clickable.
-
-The panel is **read-only and offline** — it never writes to `~/.claude`, never runs
-`/plugin install`, and makes no network calls to populate itself (opening it is a
-tracked command like any other — see [Telemetry](#telemetry)). **⟳ Rescan** re-reads the disk (so does
-coming back to the panel after a pause), and **+ Add a marketplace** copies the
-`/plugin marketplace add owner/repo` command for you to run in Claude Code itself — new
-marketplaces show up here on the next scan.
+**More:** the [full guide](docs/GUIDE.md) covers the Deck's Orchestrator drawer, run
+retirement, tracking Claude Code sessions Agent Flow didn't launch, per-task worktrees,
+prompt modes, and Remote Control.
 
 ## Quick start
 
-> Agent Flow Deck ships with **no organization-specific defaults** — everything you need is
+> Agent Flow Deck ships with **no organization-specific defaults** — everything it needs is
 > collected in a short first-run wizard.
 
-1. **Install the extension.**
-   - Build or grab the packaged `.vsix` (see [Develop / run](#develop--run) or
-     [CONTRIBUTING.md](CONTRIBUTING.md)), then:
-     ```bash
-     code --install-extension oznasi1-agent-flow-<version>.vsix
-     ```
-     …or in the Extensions view use **⋯ → Install from VSIX…**.
-   - _(Once published, you'll also be able to install it from the VS Code Marketplace.)_
-2. **Install a coding agent.** By default that's the
-   [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code)
-   (`anthropic.claude-code`), whose panel Agent Flow Deck seeds. If you'd rather use
-   **GitHub Copilot**, install it and set `agentFlow.agentProvider` to `copilot` (VS Code
-   only). With neither, the task brief is still written and used as a fallback.
-3. **Open the Agent Flow Deck icon** in the activity bar. On first activation it offers a guided
-   setup — enter your Jira site, project key, and repos directory, then sign in with an
+1. **Install the extension** — build or grab the packaged `.vsix`, then
+   `code --install-extension oznasi1-agent-flow-<version>.vsix` (or **⋯ → Install from
+   VSIX…** in the Extensions view).
+2. **Install a coding agent** — the
+   [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code),
+   or GitHub Copilot with `agentFlow.agentProvider: copilot`. With neither, the task brief
+   is still written as a fallback.
+3. **Open the Agent Flow Deck icon** in the activity bar and complete the setup — your Jira
+   site, project key, and repos directory, then an
    [Atlassian API token](https://id.atlassian.com/manage-profile/security/api-tokens).
    (Re-run it anytime with **"Run Setup…"**.)
-4. **Pick a task** from the pool. Click a card to expand it — the inferred repos are
-   pre-selected; adjust them, then press **▶ Take**.
-5. **Land in a primed workspace.** Agent Flow Deck opens the task's repos, drops a
-   `.pick-task/TASK.md` brief into each, and pre-fills your agent's panel with your
-   prompt — press **Enter** to start.
+4. **Pick a task**, check the inferred repos, and press **▶ Take**.
+5. **Land in a primed workspace** — brief on disk, prompt pre-filled. Press **Enter**.
 
 ## Requirements
 
 - **VS Code** (or Cursor) `^1.90.0`.
-- A coding agent for the seed (optional; the task brief is the guaranteed fallback) —
-  the **Claude Code** extension (`anthropic.claude-code`), or **GitHub Copilot** with
-  `agentFlow.agentProvider: copilot` in VS Code. With
-  `agentFlow.agentSurface: terminal` it's that agent's CLI (`claude` or `copilot`)
-  on your `PATH` instead of its extension.
+- A **coding agent** for the seed — the Claude Code extension, or Copilot in VS Code.
+  Optional: the brief is the guaranteed fallback.
 - An **Atlassian API token** for your Jira Cloud account
   ([create one](https://id.atlassian.com/manage-profile/security/api-tokens)).
-- The **`gh` CLI**, signed in (`gh auth login`) — for the Deck's PR/CI state
-  (optional; without it the Deck falls back to git + Jira) and its
-  review-requests strip (optional; without it the strip simply has no data and
-  doesn't render — there's no git or Jira equivalent for "who's asking for my
-  review"). Found on your `PATH`
-  or in the usual install dirs (`/opt/homebrew/bin`, `/usr/local/bin`,
-  `/opt/local/bin`, `~/.local/bin`, `~/bin`) — the editor does not always hand
-  extensions your shell's `PATH`. If the Deck still says gh is missing, the
-  **Agent Flow Deck** output channel logs the binary it tried and what it said.
-
-## Data & privacy
-
-Agent Flow Deck talks to **your** Jira Cloud site, reads your **local** repo checkouts,
-and — when `agentFlow.prFacts` is on — reads your **own** GitHub through your
-existing `gh` login. The review-requests strip shares that same gate rather than
-adding a new one: `agentFlow.reviewRequests` only produces a GitHub read while
-`agentFlow.prFacts` is also on, so turning PR facts off silences the strip too,
-regardless of its own setting. Nothing about your tickets, code or repos is sent
-to any service that isn't already yours, and Agent Flow Deck stores no GitHub
-credentials of its own: every GitHub call goes through `gh`, so it inherits
-whatever host, SSO and token your CLI already
-has. When `agentFlow.openAgents` is on, the Deck also reads `~/.claude/sessions` —
-Claude Code's own local registry of what's running — to find sessions it didn't
-launch; nothing in that registry leaves your machine either, but when `agentFlow.prFacts`
-is also on, a session sitting on a feature branch gets the same `gh pr list` (and,
-when needed, `gh api graphql`) read run *in that directory* too — even one you never
-pointed Agent Flow Deck at, like an OSS clone, a client checkout, or another team's repo.
-Separately, Agent Flow Deck
-also sends anonymous *usage* telemetry (not any of the above) — see
-[Telemetry](#telemetry) below.
-
-GitHub access is **read-only by default** — Agent Flow Deck never merges or pushes.
-The one exception is opt-in: with `agentFlow.reviewWrites` on (it ships **off**),
-the Deck's review strip can submit a review — approve, comment, or request
-changes — on a PR that asked for yours. Every submit shows a modal confirmation
-naming the verb, the repo and the PR number before anything reaches GitHub, and
-every submit attempt — success or failure — is logged to the **Agent Flow Deck**
-output channel. A review body loaded from the agent's draft is marked as
-agent-drafted when it goes out (a fixed line, not the configurable
-`agentFlow.provenanceLabel`), unless `agentFlow.stampLabelOnWrite` is off.
-Nothing else about the feature writes anywhere: the review agent itself is told,
-in its seeded prompt, not to post anything to GitHub — the human submits the
-review.
-
-The **Doctor** command probes rather than only reading config: it makes two
-authenticated GETs to your own Jira site and runs `gh auth status`, which is what
-catches a revoked token instead of reporting it as a network problem. It writes
-nothing anywhere except your clipboard, and only when you ask it to copy the
-report. Your Jira credentials are stored in VS Code **SecretStorage** (encrypted),
-never in `settings.json`. Reads are the default; the only Jira **writes** are the
-optional status changes you trigger from a card (which stamp the provenance
-label). Task briefs are written to a git-excluded `.pick-task/` directory in each
-repo, so they never get committed.
+- The **`gh` CLI**, signed in — optional, for the Deck's PR/CI state and review queue.
+  Without it the Deck falls back to git + Jira.
 
 ## Settings
+
+The six that matter to start. The rest are in the Settings UI under `agentFlow`, and
+documented in [docs/SETTINGS.md](docs/SETTINGS.md).
 
 | Setting | Default | Notes |
 |---------|---------|-------|
 | `agentFlow.jira.baseUrl` | `""` | Your Jira Cloud site, e.g. `https://your-org.atlassian.net`. |
 | `agentFlow.jira.project` | `""` | Jira project key, e.g. `ABC`. |
 | `agentFlow.reposRoot` | `~/projects` | Where your repo checkouts live. |
-| `agentFlow.workspaceDir` | `~/projects` | Where generated `.code-workspace` files go. |
-| `agentFlow.repoBlocklist` | `[]` | Directory names under `reposRoot` to exclude from discovery. |
-| `agentFlow.githubOrg` | `""` | Reserved (clone support not yet implemented). |
-| `agentFlow.provenanceLabel` | `claude-code` | Label stamped on Jira writes when enabled. |
-| `agentFlow.stampLabelOnWrite` | `true` | Whether to stamp the provenance label on a Jira write, and whether a review body submitted from the Deck is marked as agent-drafted (a fixed line, distinct from `agentFlow.provenanceLabel`). |
-| `agentFlow.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
-| `agentFlow.seedAgent` | `true` | Pre-fill the agent's panel after opening. |
-| `agentFlow.agentProvider` | `claude-code` | Which agent starts a session. `copilot` uses GitHub Copilot and works **only in VS Code** — in Cursor and other forks a stored `copilot` value falls back to Claude Code. Copilot sessions do not appear as live agents on the Deck (which reads Claude Code's session files), and **Doctor** reports on whichever provider is configured. |
-| `agentFlow.agentSurface` | `extension` | Where a session starts: the agent's chat panel, or `terminal` to run its CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter. |
-| `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
-| `agentFlow.prFacts` | `true` | Read each in-flight task's PR state from GitHub via the `gh` CLI and show it on the Deck's cards. |
-| `agentFlow.openAgents` | `true` | Show every Claude Code session open on this machine on the Deck: as agents on the card that owns their directory, and as a `local` card of its own for a place Agent Flow Deck never launched. Read from `~/.claude/sessions`. |
-| `agentFlow.prFactsTtlSeconds` | `120` | How stale a cached PR fact may be before the Deck re-fetches it (minimum 30). Only fetched while the Deck is open. |
-| `agentFlow.deckGrouping` | `agents` | One card per agent, or per launched task (`workspaces`). |
-| `agentFlow.retireFinishedAfterHours` | `24` | How long landed work stays on the board after its last agent closes. `0` retires on sight. |
-| `agentFlow.retireClosedAfterHours` | `24` | How long a closed run stays in the board's **Recently closed** strip before its record is deleted. `0` retires on sight. |
-| `agentFlow.inflightShowAll` | `false` | Show every run record on the board, the way it worked before the Recently closed strip. |
-| `agentFlow.retireAbandonedAfterDays` | `7` | How long a ticketless, PR-less, clean run may sit before its record is deleted. `0` disables it. |
-| `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on the sidebar's Tasks card. The Deck gates its own Address PR button on the review column's waiting lane instead — this setting does not affect it. |
-| `agentFlow.prReviewAutoFix` | `true` | After the PR-review agent assesses the PR, let it implement the requested changes (off = assess only). |
-| `agentFlow.reviewRequests` | `true` | Show the Deck's review-requests strip: open GitHub PRs that ask for your review. |
-| `agentFlow.reviewRequestsTtlSeconds` | `300` | How stale the cached review queue may be before a refetch (minimum 60). |
-| `agentFlow.reviewWrites` | `false` | Allow submitting approve / comment / request changes to GitHub from the Deck. |
-| `agentFlow.reviewRequestModes` | *(one built-in mode)* | Seed modes offered by **Review with agent**, layered over the built-in one. Add your own — e.g. separate backend and frontend review modes — and clicking asks which to use. |
-| `agentFlow.reviewRequestMode` | `ask` | Pin one review mode by `id` to skip the question. |
-| `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow Deck opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
-| `agentFlow.environments` | `["dev", "staging", "production"]` | Environments offered by the **Verify on an environment** Explore action. The picker also offers **Custom…** for a one-off. |
-| `agentFlow.orchestrator` | `false` | Show the Deck's Orchestrator drawer, where you wire in-flight agents into a flow with a condition on each connection. |
+| `agentFlow.agentProvider` | `claude-code` | Which agent starts a session. `copilot` works in VS Code only. |
+| `agentFlow.agentSurface` | `extension` | The agent's chat panel, or `terminal` for its CLI. |
+| `agentFlow.openIn` | `ask` | Where a task opens: a new window, this one, or an existing workspace. |
 
-Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
-`agentFlow.exploreMode`, `agentFlow.explorePrompts.*`, `agentFlow.prReviewPrompt`, and
-`agentFlow.worktree` — see the Settings UI. Taking a task asks how the agent should
-start: **Plan first**, **Implementation**, **Test-driven**, **Investigate &
-root-cause**, **Orchestrator**, or **Refine the ticket**. Edit those prompts, or add your own mode, under
-`agentFlow.promptModes`; pin one with `agentFlow.taskMode` to skip the question.
-Your entries layer over the built-in modes rather than replacing them — reuse a
-built-in `id` to override just the fields you set, and add `"hidden": true` to an
-entry to drop that built-in — so modes added in a later release still reach you. **Explore** asks what kind of session to start: **Open a Jira ticket**, **Enhance
-knowledge / flow**, **Debug**, **General**, **Supervise running tasks**, or **Verify on an environment**. Verify also
-asks which environment to check the repos you picked against — from
-`agentFlow.environments`, or a one-off you type — and seeds a read-only prompt that
-inspects their logs, error rates, metrics and traces, and deployed version there. Edit any Explore prompt
-under `agentFlow.explorePrompts.*`, or pin one action with `agentFlow.exploreMode`.
-**Review with agent** works the same way on its own list: one **Full review** mode ships,
-and once you add one of your own — a backend-services reviewer, say — clicking asks which to
-seed, since your entry joins **Full review** rather than replacing it. Pin one with
-`agentFlow.reviewRequestMode`. The sidebar's **Address PR**
-kick-off always runs in a fresh worktree; a Deck card's re-seeds that run's existing workspace
-in place instead — whatever `agentFlow.worktree` gave it when it was
-launched. Per-task worktrees are created inside each repo at
-`.claude/worktrees/<KEY>` (and git-excluded automatically).
+## Privacy
 
-**Remote Control.** With `agentFlow.remoteControl` set to `on` or `ask`, the Claude Code
-panel is pre-filled with `/remote-control <KEY>` instead of the task prompt, and the task
-prompt goes to your clipboard: press Enter to connect the session, then paste and press
-Enter to start the task. The Jira key names the remote session, so several are tellable
-apart on claude.ai. It takes two steps because Claude Code can't run a slash command and a
-prompt in one submission. It applies only where a single clipboard can carry the prompt: a
-per-window Take across several repos keeps the normal single-Enter seeding, since one
-clipboard can't hold a different prompt for each window — and so does any launch into a
-**shared window**, batch or single task, because each session there is seeded from its own
-plan file with no clipboard paste to attach to. Either way the toast says Remote Control
-was skipped, so you're never left waiting for a `/remote-control` prompt.
+Agent Flow Deck talks to **your** Jira site, reads your **local** checkouts, and reads
+GitHub through your **existing** `gh` login — nothing about your tickets, code or repos
+goes anywhere that isn't already yours. Jira credentials live in VS Code
+**SecretStorage**, never in `settings.json`. Both are **read-only by default** — the only
+writes are ones you trigger yourself: a Jira status change from a card, or, with
+`agentFlow.reviewWrites` on (it ships off), a review submitted from the Deck behind a
+confirmation dialog. Briefs go in a git-excluded `.pick-task/`, so they never get committed.
 
-Remote Control needs Claude Code — Copilot has no equivalent slash command. Under
-`agentFlow.agentProvider: copilot`, setting `agentFlow.remoteControl` to `on` refuses
-the launch outright, with an error toast and before anything (a worktree, a window) is
-created. Set to `ask`, the picker simply isn't offered and the launch proceeds without
-Remote Control — a Copilot user is never blocked over a toggle it can't honor.
+Full disclosure: [docs/PRIVACY.md](docs/PRIVACY.md). Anonymous usage telemetry is separate
+and described below.
 
-### Where a task opens
-
-`agentFlow.openIn` controls where a task you take gets opened: `ask` (ask each time),
-`new-window`, `this-window` (start a session in the window you're already in), or
-`pick-existing` — pick an existing `.code-workspace` file to open the task into. Repos
-the workspace already has a folder for (matched by name) are skipped automatically and
-named in the toast — a worktree keeps its repo's bare name, so adding it anyway would
-grow a second root by that name. Anything genuinely new is added only after you approve
-it in a prompt; declining leaves the file byte-identical. Either way the workspace's
-existing folders, settings, and formatting are preserved and it opens as a multi-root
-workspace.
-
-`this-window` never replaces what's open. The window keeps its folders, its editors and
-any session already running in it, and the task's agent starts alongside them. A window
-Agent Flow can't name — an empty one, or several folders with no saved
-`.code-workspace` — can't hold a seeded session, so **This window** isn't offered there
-and `this-window` opens a new window instead.
-
-When taking a task (or starting an Explore session) with `agentFlow.openIn` set to
-`ask`, Agent Flow Deck also lists the windows you already have open — a repo folder or a
-saved workspace — so you can drop the task straight into one of them. Choosing an open
-**workspace** window offers to add any genuinely new repos to it (the same skip-and-approve
-behavior above); choosing an open **folder** window focuses it and seeds the agent there
-(a folder window can't gain root folders, so any other repos the task touches keep their
-briefs but aren't added as roots). Set `agentFlow.trackOpenWindows` to `false` to turn
-this off.
-
-### Where the session opens
-
-Three settings answer three different questions. `agentFlow.openIn` decides **which
-window** a task lands in. `agentFlow.agentProvider` decides **which agent** starts the
-session — Claude Code, or Copilot in VS Code. `agentFlow.agentSurface` decides **what
-starts the session** once it's there:
-
-- `extension` (default) — the agent's chat panel, prompt pre-filled: the Claude Code
-  panel, or Copilot Chat in agent mode when `agentFlow.agentProvider` is `copilot`.
-- `terminal` — an integrated terminal named `Claude · <KEY>` (or `Copilot · <KEY>`)
-  running the agent's CLI (`claude`, or `copilot`), prompt pre-typed.
-
-Either way you press Enter to start, and both work for every launch path: taking a
-task, batch launches, Explore, Notepad, and **Address PR** — with one exception. A
-**batch** launch under Copilot's `extension` surface does not seed the chat panel at
-all: Copilot Chat is single-instance, so a second task's prompt would silently
-overwrite the first. Instead the batch writes every task's brief as usual and shows a
-notification pointing at them; there is no per-task Copilot chat tab. Terminal mode
-needs `claude` (or `copilot`) on your `PATH`; if it isn't, the terminal says
-`command not found` and the prompt is still sitting there to reuse.
-
-## Architecture
-
-```
-src/
-├── extension.ts        # activation, commands, first-run + seed-on-activation hooks
-├── setup.ts            # guided first-run configuration wizard
-├── tasksView.ts        # sidebar webview provider + the pick→confirm→open flow
-├── notepad.ts          # the Notepad's globalState store + run-status derivation
-├── deckView.ts         # the Deck panel: in-flight runs, live signal, open/diff
-├── marketplaceView.ts  # the Marketplace panel: scan, file reads, open/reveal/copy
-├── doctorView.ts       # the Doctor report: Jira + gh + agent-provider probes
-├── config.ts           # settings accessor
-├── types.ts            # shared host ↔ webview message types
-├── tasks/              # the task source, behind one connector interface
-│   ├── provider.ts     # TaskProvider + capabilities (what a source can do)
-│   ├── registry.ts     # which connector is active
-│   └── jira/           # the Jira connector: auth (SecretStorage), REST client, JQL
-├── engine/             # the logic, kept out of the views so it can be tested directly
-│   ├── repos.ts        # discover local repo checkouts
-│   ├── infer.ts        # component/label/text → service matching
-│   ├── worktree.ts     # per-task git worktrees + branch naming
-│   ├── workspace.ts    # briefs, .code-workspace, plan.json, open windows, agent seed
-│   ├── runs.ts         # what you've launched, for the Deck
-│   ├── transcript.ts   # best-effort live agent state from ~/.claude/projects
-│   ├── sessions.ts     # Claude Code's own registry of running sessions
-│   ├── pr/             # PR facts + the review queue, over the `gh` CLI
-│   ├── review/         # "Review with agent": search, sort, launch, store
-│   ├── claudeAssets.ts # scan ~/.claude: marketplaces, plugins, skills, commands, hooks
-│   ├── sections.ts     # the Marketplace's category order (Yours → size → Uncategorized)
-│   ├── fuzzy.ts        # the ranked fuzzy match behind the Marketplace's search
-│   └── markdown.ts     # the parse-to-tree markdown renderer behind the file preview
-├── telemetry/          # anonymous usage events (see docs/TELEMETRY.md)
-└── webview/            # React UIs — task pool + Notepad, Deck, Marketplace
-                        # (three esbuild bundles)
-```
-
-The task source sits behind the `TaskProvider` interface with a capability record, so a
-connector that has no sprints or no size estimates hides those lenses instead of faking
-them — see [docs/CONNECTORS.md](docs/CONNECTORS.md). Jira auth is behind `JiraAuth`: v1
-ships the API-token provider; the OAuth web-flow provider (a
-`vscode.AuthenticationProvider` that opens the browser) drops in later with no changes to
-the client or UI.
-
-The agent seed is one chokepoint in `engine/workspace.ts` that every launch path — take,
-batch, Explore, Notepad, Deck relaunch, Address PR, Review with agent — goes through. It
-resolves `agentFlow.agentProvider` × `agentFlow.agentSurface` **at seed time in the target
-window**, never from the plan file, so flipping either setting also changes plans already
-on disk.
-
-## Develop / run
+## Develop
 
 ```bash
 npm install
@@ -581,44 +148,22 @@ npm test             # vitest
 npm run typecheck    # tsc --noEmit
 ```
 
-Press **F5** (Run Agent Flow Deck) to launch an Extension Development Host with the extension
-loaded. Open the **Agent Flow Deck** icon in the activity bar and complete the first-run setup.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full command list and conventions.
-
-## Status
-
-v1 — task pool, filters, size lens, service inference, worktrees, open + seed, and status
-changes from a card, plus the **Notepad** (ticketless work), the **Deck** (the in-flight
-board) and the **Marketplace** (the read-only browser over `~/.claude`). Every launch path
-funnels through one seed chokepoint, which dispatches on `agentFlow.agentProvider` ×
-`agentFlow.agentSurface`: the Claude Code extension command
-(`claude-vscode.primaryEditor.open`) with a URI-handler and clipboard fallback, Copilot
-Chat's `workbench.action.chat.open`, or the matching CLI in an integrated terminal. The
-seeded brief is the guaranteed fallback under all four. Deferred: OAuth web sign-in,
-cloning not-yet-checked-out repos, multi-project.
-
-See [CHANGELOG.md](CHANGELOG.md) for the release history.
-
-## Publishing
-
-Before publishing to the VS Code Marketplace, confirm the `publisher` in `package.json`
-matches your registered Marketplace publisher id and that a 128×128 PNG `icon` is set. See
-[CONTRIBUTING.md](CONTRIBUTING.md#publishing-maintainers).
-
-## Contributing
-
-Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Press **F5** to launch an Extension Development Host with the extension loaded. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the architecture, conventions, and the full command
+list — contributions welcome.
 
 ## Telemetry
 
-Agent Flow Deck sends anonymous usage and error events (which features are used, where
-a flow gets abandoned, what fails) to a personal PostHog project, to help decide
-what to build next — never repo names, ticket keys, file paths, prompt text or
-error messages. Turn it off with `agentFlow.telemetry.enabled`, and VS Code's own
-`telemetry.telemetryLevel` is always honoured too (`"error"` sends only failures,
-`"off"` sends nothing). See [docs/TELEMETRY.md](docs/TELEMETRY.md) for the
-complete, itemized disclosure.
+Agent Flow Deck sends anonymous usage and error events (which features are used, where a
+flow gets abandoned, what fails) to a personal PostHog project — never repo names, ticket
+keys, file paths, prompt text or error messages. Turn it off with
+`agentFlow.telemetry.enabled`; VS Code's own `telemetry.telemetryLevel` is always honoured.
+See [docs/TELEMETRY.md](docs/TELEMETRY.md) for the itemized disclosure.
+
+## Status
+
+v1. See [CHANGELOG.md](CHANGELOG.md) for the release history. Deferred: OAuth web sign-in,
+cloning not-yet-checked-out repos, multi-project.
 
 ## License
 

@@ -29,6 +29,55 @@ Press **F5** in VS Code (the "Run Agent Flow Deck" launch config) to open an Ext
 Host with a `build` pre-launch task. Open the **Agent Flow Deck** icon in the activity bar and
 complete the first-run setup wizard.
 
+## Architecture
+
+```
+src/
+├── extension.ts        # activation, commands, first-run + seed-on-activation hooks
+├── setup.ts            # guided first-run configuration wizard
+├── tasksView.ts        # sidebar webview provider + the pick→confirm→open flow
+├── notepad.ts          # the Notepad's globalState store + run-status derivation
+├── deckView.ts         # the Deck panel: in-flight runs, live signal, open/diff
+├── marketplaceView.ts  # the Marketplace panel: scan, file reads, open/reveal/copy
+├── doctorView.ts       # the Doctor report: Jira + gh + agent-provider probes
+├── config.ts           # settings accessor
+├── types.ts            # shared host ↔ webview message types
+├── tasks/              # the task source, behind one connector interface
+│   ├── provider.ts     # TaskProvider + capabilities (what a source can do)
+│   ├── registry.ts     # which connector is active
+│   └── jira/           # the Jira connector: auth (SecretStorage), REST client, JQL
+├── engine/             # the logic, kept out of the views so it can be tested directly
+│   ├── repos.ts        # discover local repo checkouts
+│   ├── infer.ts        # component/label/text → service matching
+│   ├── worktree.ts     # per-task git worktrees + branch naming
+│   ├── workspace.ts    # briefs, .code-workspace, plan.json, open windows, agent seed
+│   ├── runs.ts         # what you've launched, for the Deck
+│   ├── transcript.ts   # best-effort live agent state from ~/.claude/projects
+│   ├── sessions.ts     # Claude Code's own registry of running sessions
+│   ├── pr/             # PR facts + the review queue, over the `gh` CLI
+│   ├── review/         # "Review with agent": search, sort, launch, store
+│   ├── claudeAssets.ts # scan ~/.claude: marketplaces, plugins, skills, commands, hooks
+│   ├── sections.ts     # the Marketplace's category order (Yours → size → Uncategorized)
+│   ├── fuzzy.ts        # the ranked fuzzy match behind the Marketplace's search
+│   └── markdown.ts     # the parse-to-tree markdown renderer behind the file preview
+├── telemetry/          # anonymous usage events (see docs/TELEMETRY.md)
+└── webview/            # React UIs — task pool + Notepad, Deck, Marketplace
+                        # (three esbuild bundles)
+```
+
+The task source sits behind the `TaskProvider` interface with a capability record, so a
+connector that has no sprints or no size estimates hides those lenses instead of faking
+them — see [docs/CONNECTORS.md](docs/CONNECTORS.md). Jira auth is behind `JiraAuth`: v1
+ships the API-token provider; the OAuth web-flow provider (a
+`vscode.AuthenticationProvider` that opens the browser) drops in later with no changes to
+the client or UI.
+
+The agent seed is one chokepoint in `engine/workspace.ts` that every launch path — take,
+batch, Explore, Notepad, Deck relaunch, Address PR, Review with agent — goes through. It
+resolves `agentFlow.agentProvider` × `agentFlow.agentSurface` **at seed time in the target
+window**, never from the plan file, so flipping either setting also changes plans already
+on disk.
+
 ## Conventions
 
 - **No hardcoded organization values.** Anything organization-specific (Jira site, project

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A README you can finish.** It had grown to 625 lines and answered every question at
+  once — a feature tour, a 30-row settings reference and an edge-case manual, each
+  paragraph carrying caveats that only matter once you are already a user. It is now a
+  landing page: the pitch, the four panels, quick start, requirements, six settings and a
+  privacy summary. Nothing was dropped — the full behaviour of every panel moved to
+  [docs/GUIDE.md](docs/GUIDE.md), every setting to [docs/SETTINGS.md](docs/SETTINGS.md),
+  the data disclosure to [docs/PRIVACY.md](docs/PRIVACY.md), and the `src/` architecture
+  to [CONTRIBUTING.md](CONTRIBUTING.md) beside the conventions it explains.
+
+### Fixed
+
+- **The docs said a red PR lands in Action required.** It has not since 0.31.0, which made
+  that column agent-signals-only and moved a blocked PR to In review's `fixes needed`
+  lane; the README was never updated to match. Corrected in the README and the new guide.
+
 ## [0.31.0] — 2026-08-19
 
 ### Changed
