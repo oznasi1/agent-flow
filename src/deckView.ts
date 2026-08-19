@@ -1315,6 +1315,15 @@ export class DeckPanel {
         // `descriptionText` both empty, rewriting would replace a real brief with an
         // empty one, unattended, with nothing to undo it from.
         keepExistingBrief: true,
+        // Unattended, exactly like `launchPlanned` one file over: a seed rule fires
+        // from the poll loop with nobody watching, so it must never reach the `ask`
+        // picker. That picker is `ignoreFocusOut: true`, so reaching it here would not
+        // time out — it would hold this refresh open until someone came back to answer
+        // it. Claude Code is the one agent every host can run.
+        //
+        // Read ONLY under `ask` (see OpenRequest.provider), so this suppresses a prompt
+        // and never overrides a preference: a `cursor` user's seed still starts Cursor.
+        provider: "claude-code",
       });
     } catch (e) {
       // Tried and may have spent something (a window may already be open, a brief
@@ -2002,12 +2011,18 @@ export class DeckPanel {
       { createWorktrees, openWorkspace, log: this.log },
     );
     if (!res.ok) {
+      // A dismissed agent picker is the user's own decision, not a failure — the same
+      // silence the mode picker above returns with, for the same reason. Nothing was
+      // opened, written or seeded, so there is nothing to report either way.
+      if ("cancelled" in res) return;
       this.toast("error", res.message);
       return;
     }
+    // `res.provider`, not the setting: under `ask` the setting names nobody, and the
+    // launch is the only thing that knows which agent the user picked for it.
     this.toast(
       "success",
-      `Reviewing ${req.repoName}#${req.number} in a worktree.${cfg.seedAgent ? ` ${providerLabel(resolvedProvider(cfg.agentProvider))} pre-seeded — press Enter to start.` : ""}`,
+      `Reviewing ${req.repoName}#${req.number} in a worktree.${cfg.seedAgent ? ` ${providerLabel(res.provider)} pre-seeded — press Enter to start.` : ""}`,
     );
     await this.refreshBusy(); // picks up the new run so the row shows "reviewing"
   }

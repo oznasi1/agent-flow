@@ -10,7 +10,7 @@ import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
 import type { CommandNode, Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
 import { BRANCH_CI_ARGS, branchCiKey } from "../../src/engine/orchestrator/branchCi";
 import { GH_TIMEOUT_MS } from "../../src/engine/pr/provider";
-import type { AgentProviderSetting } from "../../src/config";
+import type { AgentProvider, AgentProviderSetting } from "../../src/config";
 import type { FlowCommand } from "../../src/types";
 
 /** The shape `child_process.exec`'s callback is invoked with, narrowed to the four
@@ -104,9 +104,17 @@ const h = vi.hoisted(() => ({
   // `{ ok: false, message }` as well as the success shape without a type error.
   // Rest-params rather than the real (req, deps) signature: the mock never
   // inspects its arguments, only the launch/launch.ts wrapper below forwards them.
-  launchReview: vi.fn(async (..._args: unknown[]): Promise<{ ok: true; runKey: string } | { ok: false; message: string }> => ({
+  // `provider` is the field Task 6 added to the success arm — the agent openWorkspace
+  // actually seeded, which the launch toast names. `{ ok: false, cancelled }` is its
+  // third arm: a dismissed picker, which is neither a success nor a failure.
+  launchReview: vi.fn(async (..._args: unknown[]): Promise<
+    | { ok: true; runKey: string; provider: AgentProvider }
+    | { ok: false; cancelled: true }
+    | { ok: false; message: string }
+  > => ({
     ok: true,
     runKey: "review-aws-ops-8491",
+    provider: "claude-code",
   })),
   // True by default, unlike every other stub here: the retire sweep asks
   // existsSync whether a run's repo directories are still on disk, and a blanket
@@ -624,7 +632,14 @@ beforeEach(() => {
   h.openSessions = [];
   h.liveWindows = [];
   h.sessionActivity.mockClear().mockReturnValue({ state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" });
-  h.launchReview.mockClear().mockResolvedValue({ ok: true, runKey: "review-aws-ops-8491" });
+  // An implementation, not a resolved value: the real launchReview reports the agent
+  // it seeded, which follows whatever `h.agentProvider` is when the launch RUNS — and
+  // tests set that after this reset. A value captured here would be stale.
+  h.launchReview.mockClear().mockImplementation(async () => ({
+    ok: true,
+    runKey: "review-aws-ops-8491",
+    provider: h.agentProvider === "ask" ? "claude-code" : h.agentProvider,
+  }));
   h.existsSync.mockClear().mockReturnValue(true);
   h.readFileSync.mockClear().mockReturnValue("");
   h.gitState.mockClear().mockImplementation((name: string, path: string) => ({
@@ -3005,6 +3020,35 @@ describe("DeckPanel review launch", () => {
         message: expect.stringContaining("Copilot pre-seeded — press Enter to start."),
       }),
     );
+  });
+
+  // ── Task 6: the review path under `ask` ───────────────────────────────────
+  it("names the agent the launch actually seeded, not the one the setting names", async () => {
+    // Under `ask` the setting names nobody: the answer exists only on what
+    // launchReview returned. Reading the setting here says "Claude Code" while a
+    // Cursor session is what is starting in the worktree the toast is about.
+    h.agentProvider = "ask";
+    h.launchReview.mockResolvedValueOnce({ ok: true, runKey: "review-aws-ops-8491", provider: "cursor" });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Cursor pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
+  it("says nothing at all when the agent picker is dismissed", async () => {
+    // A dismissal is the user's own decision, not a failure: an error toast here
+    // would report their Escape key as something going wrong. The mode-picker
+    // cancellation above is silent for the same reason.
+    h.agentProvider = "ask";
+    h.launchReview.mockResolvedValueOnce({ ok: false, cancelled: true });
+    const p = await showAndWarm();
+    const before = posts(p).length;
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p).slice(before).some((m) => m.type === "toast")).toBe(false);
   });
 
   it("refreshes after a successful launch, so the row picks up its new run", async () => {
@@ -5877,6 +5921,18 @@ describe("a met seed rule acts", () => {
     await send({ type: "deck:refresh" });
     const req = h.openWorkspace.mock.calls.at(-1)![0] as any;
     expect(req.promptTemplate).toBe(implMode.prompt);
+  });
+
+  it("pins claude-code, so an unattended seed can never reach the `ask` picker", async () => {
+    // A seed rule fires from the poll loop with nobody watching, exactly like a
+    // launch rule. openWorkspace's picker is `ignoreFocusOut: true`, so reaching it
+    // here would not time out — it would hold the refresh open until someone came
+    // back and answered. Read ONLY under `ask`: a user whose setting says `cursor`
+    // still gets Cursor, because openWorkspace ignores a pin under a fixed setting.
+    const { send } = await warmed([seedFlow()]);
+    await send({ type: "deck:refresh" });
+    const req = h.openWorkspace.mock.calls.at(-1)![0] as any;
+    expect(req.provider).toBe("claude-code");
   });
 
   it("latches when the place's run is no longer on the board, naming the run", async () => {

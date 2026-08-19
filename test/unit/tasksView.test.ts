@@ -119,7 +119,7 @@ vi.mock("../../src/tasks/jira/client", async () => {
 });
 
 import { parseJiraError } from "../../src/tasks/jira/errors";
-import { getConfig } from "../../src/config";
+import { getConfig, resolvedProvider } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
 import { openWorkspace, writeBriefInto, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge } from "../../src/engine/workspace";
 import { branchName, createWorktrees, ensureBranch } from "../../src/engine/worktree";
@@ -237,14 +237,18 @@ beforeEach(() => {
   vi.mocked(getConfig).mockReturnValue({ ...CFG });
   vi.mocked(discoverRepos).mockReturnValue(mkRepos(["account-service", "centaur"]));
   vi.mocked(JiraClient).mockImplementation(() => clientStub as unknown as JiraClient);
-  vi.mocked(openWorkspace).mockResolvedValue({
+  // An implementation, not a resolved value: `provider` is what the REAL openWorkspace
+  // resolved and seeded, which follows the setting each test installs — and tests set
+  // that after this reset, so a value captured here would be stale and every toast
+  // would name Claude Code whatever the user configured.
+  vi.mocked(openWorkspace).mockImplementation(async () => ({
     mode: "per-window",
     workspaceFile: undefined,
     briefs: [],
     opened: ["/repos/account-service"],
     remoteControl: false,
-    provider: "claude-code",
-  });
+    provider: resolvedProvider(getConfig().agentProvider),
+  }));
   // Restored here, not merely cleared: `clearMocks` drops call history and leaves the
   // implementation in place, so a test that scripts a stale branch would otherwise leak
   // it into every test after it. null is "git cannot answer", which is the truth for
@@ -3077,6 +3081,105 @@ describe("takeBatch", () => {
     );
   });
 
+  // ── Task 6: one question for the whole batch ──────────────────────────────
+  // The loop is non-interactive by design, so `ask` has to be resolved once, up
+  // front, for all N tasks — N pickers for one click would be unusable, and the
+  // stagger between opens means they would not even queue up together.
+  /** Answer the provider picker with Cursor and every other picker with the layout
+   *  default, by TITLE rather than by call order — the order of this path's pickers
+   *  is not what these tests are about. */
+  const pickCursorAgent = () =>
+    vi.mocked(window.showQuickPick).mockImplementation(
+      async (_items: unknown, opts?: unknown) =>
+        ((opts as { title?: string } | undefined)?.title === "Which agent?"
+          ? { label: "Cursor", provider: "cursor" }
+          : { shared: false }) as never,
+    );
+  const agentPicks = () =>
+    vi.mocked(window.showQuickPick).mock.calls.filter(
+      (c) => (c[1] as { title?: string } | undefined)?.title === "Which agent?",
+    );
+
+  it("asks which agent once for the whole batch, and pins the answer onto every task", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    pickCursorAgent();
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(agentPicks()).toHaveLength(1);
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+    for (const call of vi.mocked(openWorkspace).mock.calls) expect(call[0].provider).toBe("cursor");
+  });
+
+  it("uses the same picker title as a single launch, so the two read identically", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    pickCursorAgent();
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(agentPicks()[0][0]).toEqual([
+      { label: "Claude Code", provider: "claude-code" },
+      { label: "Cursor", provider: "cursor" },
+    ]);
+  });
+
+  it("launches nothing when the batch's agent picker is dismissed", async () => {
+    // A launch-wide question, dismissed, can only mean the launch — every task in it.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockImplementation(
+      async (_items: unknown, opts?: unknown) =>
+        ((opts as { title?: string } | undefined)?.title === "Which agent?" ? undefined : { shared: false }) as never,
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(posted().filter((m) => m.type === "toast")).toEqual([]);
+  });
+
+  it("names the picked agent in each task's brief", async () => {
+    // briefMarkdown renders "_The {agentName} prompt for this task says…_", and the
+    // batch resolves its agent BEFORE the briefs are built — so unlike the pre-launch
+    // copy on the single-take path, this one can be right.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    pickCursorAgent();
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    for (const call of vi.mocked(openWorkspace).mock.calls) {
+      expect(call[0].planMd).toContain("_The Cursor prompt for this task says");
+    }
+  });
+
+  it("carries the picked agent into a shared window's plan files too", async () => {
+    // The shared path never calls openWorkspace, so it cannot inherit the answer from
+    // there: without the pin its plan files carry no provider and the target window
+    // re-reads the setting, which under `ask` degrades to Claude Code — seeding an
+    // agent the user did not pick, minutes after they picked one.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockImplementation(
+      async (_items: unknown, opts?: unknown) =>
+        ((opts as { title?: string } | undefined)?.title === "Which agent?"
+          ? { label: "Cursor", provider: "cursor" }
+          : { shared: true }) as never,
+    );
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(openSharedWorkspace).toHaveBeenCalledWith(expect.objectContaining({ provider: "cursor" }));
+  });
+
+  it("sends no provider at all under a fixed setting, on either batch path", async () => {
+    // Inertness: a pin is read ONLY under `ask` (see OpenRequest.provider), so sending
+    // one under a fixed setting could only invite the request and the setting to
+    // disagree. The request has to stay exactly what it always was.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(agentPicks()).toHaveLength(0);
+    for (const call of vi.mocked(openWorkspace).mock.calls) expect("provider" in call[0]).toBe(false);
+  });
+
   it("skips a task whose worktree creation falls back to the main checkout and reports it failed", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(createWorktrees).mockImplementation((s) => s); // fallback: path stays === repoRef.path
@@ -4534,6 +4637,92 @@ describe("agent-naming copy under the `ask` provider", () => {
   });
 });
 
+// ── Task 6: the picker's answer, at the call sites ──────────────────────────
+// Task 5 made `openWorkspace` resolve `ask` before anything is created and report the
+// answer on its result. Until these, nothing read that answer: every caller still
+// asked the SETTING what agent it had, which under `ask` says "Claude Code" no matter
+// what the user picked, and a dismissed picker still ran the whole success path.
+describe("the `ask` picker's answer, at the call sites", () => {
+  const ask = (over: Partial<ReturnType<typeof getConfig>> = {}) =>
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" as const, ...over });
+  const toasts = (posted: () => OutboundMessage[]) => posted().filter((m) => m.type === "toast");
+  /** What `openWorkspace` returns when its picker was dismissed: nothing opened,
+   *  nothing written, nothing seeded. */
+  const cancelled = {
+    mode: "per-window" as const, briefs: [], opened: [], remoteControl: false,
+    provider: "claude-code" as const, cancelled: true as const,
+  };
+
+  it("Take reports nothing when the picker is dismissed", async () => {
+    ask();
+    vi.mocked(openWorkspace).mockResolvedValue(cancelled);
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    // Not "no success toast" — no toast at all. Dismissing a picker is not a failure
+    // either, so an error toast would be just as wrong.
+    expect(toasts(posted)).toEqual([]);
+  });
+
+  it("Take records a dismissed picker as cancelled, not as a completed launch", async () => {
+    // The funnel's own reading of the same fact: `false` from launch() is what
+    // take_completed maps to "cancelled", and a launch that reported "launched" here
+    // would claim a session that does not exist.
+    ask();
+    vi.mocked(openWorkspace).mockResolvedValue(cancelled);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(trackSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "take_completed", outcome: "cancelled" }),
+    );
+  });
+
+  it("Take's toast names the agent that actually started, not the setting's default", async () => {
+    ask();
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", briefs: [], opened: ["/repos/account-service"], remoteControl: false, provider: "cursor",
+    });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(posted()).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Cursor pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
+  it("Explore reports nothing when the picker is dismissed", async () => {
+    ask({ exploreMode: "knowledge" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    vi.mocked(openWorkspace).mockResolvedValue(cancelled);
+    const { send, posted } = setup();
+    await send({ type: "explore" });
+    expect(toasts(posted)).toEqual([]);
+  });
+
+  it("Explore's toast names the agent that actually started", async () => {
+    ask({ exploreMode: "knowledge" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", briefs: [], opened: ["/repos/account-service"], remoteControl: false, provider: "cursor",
+    });
+    const { send, posted } = setup();
+    await send({ type: "explore" });
+    expect(posted()).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Cursor pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+});
+
 
 // ── capability gating ───────────────────────────────────────────────────────
 // Everything above drives the shipped Jira connector, which declares every optional
@@ -5013,6 +5202,43 @@ describe("notepad", () => {
     expect(call.ticket.url).toBe("");
     expect(call.planMd).toContain("it double-fires");
     expect((notesIn(store)![0] as { lastRunKey?: string }).lastRunKey).toBe(`notepad-fix-the-retry-banner-${id}`);
+  });
+
+  it("leaves no lastRunKey on the note when the agent picker is dismissed", async () => {
+    // The pointer is written after the launch precisely so a cancelled one leaves
+    // nothing pointing at a run that was never created — which only holds if the
+    // cancellation is noticed BEFORE the note is saved.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", briefs: [], opened: [], remoteControl: false, provider: "claude-code", cancelled: true,
+    });
+    const { store, posted, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "it double-fires" });
+    await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+    expect((notesIn(store)![0] as { lastRunKey?: string }).lastRunKey).toBeUndefined();
+    expect((posted as { type: string }[]).filter((m) => m.type === "toast")).toEqual([]);
+  });
+
+  it("names the agent the launch actually seeded in the note's toast", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", briefs: [], opened: ["/repos/account-service"], remoteControl: false, provider: "cursor",
+    });
+    const { store, posted, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
+    await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+    expect(posted as { type: string; message?: string }[]).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Cursor pre-seeded — press Enter to start."),
+      }),
+    );
   });
 
   it("carries the note's detail into the seeded prompt, not only into the brief", async () => {

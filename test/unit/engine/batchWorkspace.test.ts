@@ -91,6 +91,26 @@ describe("openSharedWorkspace", () => {
     expect(runs.every((r) => r.mode === "multiroot")).toBe(true);
   });
 
+  // ── Task 6: the batch's resolved agent ────────────────────────────────────
+  it("stamps the caller's resolved agent onto every plan file", async () => {
+    // The shared path never calls openWorkspace, so nothing else can carry the answer
+    // to the target window: without this the plan files say nothing, that window falls
+    // back to reading `agentProvider` live, and under `ask` it degrades the whole
+    // batch to Claude Code — an agent the user did not pick, minutes after picking one.
+    await openSharedWorkspace(baseReq({ provider: "cursor" }));
+    const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
+    expect(plans.map((p) => p.provider)).toEqual(["cursor", "cursor"]);
+  });
+
+  it("writes no provider at all when the caller sends none", async () => {
+    // Inertness: under a fixed setting the caller sends nothing, and the plan file has
+    // to stay byte-identical — absent is how "read the setting live at seed time" is
+    // spelled, and it is what every plan file said before `ask` existed.
+    await openSharedWorkspace(baseReq());
+    const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
+    expect(plans.every((p) => !("provider" in p))).toBe(true);
+  });
+
   it("seeds each prompt with that task's absolute brief path", async () => {
     await openSharedWorkspace(baseReq());
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));

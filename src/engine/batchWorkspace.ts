@@ -9,6 +9,7 @@ import { writeRun, defaultRunsDir } from "./runs";
 import {
   BRIEF_DIR,
   BRIEF_FILE,
+  PlanFile,
   TicketRef,
   agentPrompt,
   briefMarkdown,
@@ -49,6 +50,14 @@ export interface SharedOpenRequest {
   /** Folders the user approved adding to an `existing` target — the ONLY thing merged.
    *  Absent or empty leaves that workspace file byte-identical. */
   foldersToAdd?: { name: string; path: string }[];
+  /** The agent the caller resolved for this batch, stamped onto every plan file. Set
+   *  ONLY under `agentFlow.agentProvider: "ask"`, where the target window has no
+   *  preference left to read and would otherwise degrade the whole batch to Claude
+   *  Code — seeding an agent the user did not pick, minutes after they picked one.
+   *  Absent under a fixed setting, so the plan files stay byte-identical and the target
+   *  window keeps reading the setting live at seed time. Exactly the split
+   *  `openWorkspace` makes with its own `planProvider`. */
+  provider?: PlanFile["provider"];
 }
 
 export interface SharedOpenResult {
@@ -170,7 +179,14 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
       // `.pick-task/TASK.md`, so a relative reference names no file in particular.
       const prompt = agentPrompt(t.ticket, mentions, promptTemplate, briefPathFor.get(t.ticket.key));
       // Remote Control is never offered here — one clipboard can't serve N sessions.
-      writePlanFile({ key: t.ticket.key, createdAt, seedAgent: true, seq: i, matches: [{ matchPath, prompt }] });
+      // The pin is spread rather than written as `provider: req.provider`, so a batch
+      // under a fixed setting produces the plan file it always produced: absent is how
+      // "read the setting live" is spelled, and `undefined` would serialize as a
+      // missing key anyway only by accident of JSON.stringify.
+      writePlanFile({
+        key: t.ticket.key, createdAt, seedAgent: true, seq: i, matches: [{ matchPath, prompt }],
+        ...(req.provider ? { provider: req.provider } : {}),
+      });
     });
   }
 

@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { getConfig, providerLabel, resolvedProvider, AgentFlowConfig, AgentProvider, ExploreAction } from "./config";
+import { getConfig, hostProviders, providerLabel, resolvedProvider, AgentFlowConfig, AgentProvider, ExploreAction } from "./config";
 import {
   isTaskNetworkError,
   serializeCaps,
@@ -1315,9 +1315,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       remoteControl: wantRemoteControl,
       kind: "explore",
     });
+    // The agent picker was dismissed, which dismisses the launch: nothing was opened,
+    // written or seeded, so there is nothing to report. Not an error toast either — a
+    // cancellation is the user's own decision, and every other picker on this path
+    // returns just as quietly.
+    if (result.cancelled) return;
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, resolvedProvider(cfg.agentProvider), result.seededInPlace);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     const what = env
       ? `to verify on ${env}`
@@ -1416,6 +1421,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       remoteControl: wantRemoteControl,
       kind: "notepad",
     });
+    // Dismissed at the agent picker: no window, no brief, no plan, no run. Returning
+    // HERE — before saveNotes below — is what makes that comment true.
+    if (result.cancelled) return;
 
     // Point the note at its run so the badge has something to derive from. Written
     // after the launch, not before: a cancelled picker must leave no pointer to a
@@ -1423,7 +1431,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, lastRunKey: key } : n)));
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, resolvedProvider(cfg.agentProvider), result.seededInPlace);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
   }
@@ -1953,9 +1961,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       // no children has to look exactly as it did before children existed.
       ...(orchestration?.children.length ? { children: orchestration.children } : {}),
     });
+    // Dismissed at the agent picker — one of this function's own pickers, as far as the
+    // caller is concerned, so it gets this function's own "the user backed out" answer:
+    // `takeTask` records take_completed as cancelled rather than launched, and nothing
+    // is toasted. Nothing was opened, written or seeded either.
+    if (result.cancelled) return false;
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, resolvedProvider(cfg.agentProvider), result.seededInPlace);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
     if (result.mergeFailed) {
       this.toast(
@@ -2199,6 +2212,27 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // effect to leave behind.
     if (wantRemoteControl === null) return;
 
+    // A one-key batch opening its own window IS a single launch: the loop below runs
+    // exactly once, and `openWorkspace` resolves `ask` for itself there, exactly as a
+    // Take does. So that shape asks nothing extra here, and behaves as it always has.
+    //
+    // Every other shape has to resolve up front. A real batch's loop is non-interactive
+    // by design (see the `workspaceMode` note inside it), so leaving `ask` to
+    // `openWorkspace` would raise N pickers for one click, staggered seconds apart. And
+    // the shared path never calls `openWorkspace` at all — it seeds N plan files — so
+    // `ask` there would degrade the whole launch to Claude Code with nobody asked.
+    //
+    // Resolved with the other launch-wide answers and before the first worktree, so a
+    // dismissal costs nothing: dismissing a launch-wide question abandons the whole
+    // batch, which is the only thing it can mean.
+    const askUpFront = isBatch || shared;
+    const batchProvider = askUpFront ? await this.resolveBatchProvider(cfg) : undefined;
+    if (askUpFront && !batchProvider) return;
+    // The agent for the copy written BEFORE the launch: the resolved answer when there
+    // is one, and otherwise the setting's own — the single-launch shape resolves inside
+    // `openWorkspace`, after this brief has already been built.
+    const briefProvider = batchProvider ?? resolvedProvider(cfg.agentProvider);
+
     const resolved: { task: BatchTask; key: string }[] = [];
     const failed: string[] = [];
     for (const key of keys) {
@@ -2241,7 +2275,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           key,
           task: {
             ticket: { key: detail.key, summary: detail.summary, url: detail.url },
-            planMd: briefMarkdown(detail, providerLabel(resolvedProvider(cfg.agentProvider))),
+            // `briefProvider`, not a bare read of the setting: when the batch has
+            // resolved its own answer, this is one pre-launch copy site that can name
+            // the agent that will actually read the brief.
+            planMd: briefMarkdown(detail, providerLabel(briefProvider)),
             descriptionText: detail.descriptionText,
             services,
             ...(parent ? { parentKey: parent.key } : {}),
@@ -2293,6 +2330,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           // The shared-window batch needs the same "here" the single take does.
           currentWindow: here,
           foldersToAdd: additions.foldersToAdd,
+          ...(batchProvider ? this.providerPin(cfg, batchProvider) : {}),
         });
         launched = resolved.length;
         seededInPlace = !!result.seededInPlace;
@@ -2344,6 +2382,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             // the request it always sent — the run record has one representation of
             // "no parent", and that is the field's absence (see Run.parentKey).
             ...(parent ? { parentKey: parent.key } : {}),
+            ...(batchProvider ? this.providerPin(cfg, batchProvider) : {}),
           });
           appliedRemoteControl = result.remoteControl;
           launched++;
@@ -2385,6 +2424,42 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           : "A worktree + Claude session per task.";
       this.toast("success", `${summary} ${perTaskNote}${extra}${rcNote}`);
     }
+  }
+
+  /** The agent for a whole batch, resolved before the loop that cannot ask. Under the
+   *  three fixed settings this is a plain read and NO picker appears — the setting is
+   *  the answer, and it is the same answer `openWorkspace` would have reached on its
+   *  own. Under `ask` it puts up the same picker `openWorkspace` would have, once, and
+   *  the caller pins the answer onto every task so no task asks again.
+   *
+   *  With seeding off there is no agent to start, so there is nothing to ask about and
+   *  `ask` degrades exactly as `resolvedProvider` says it does — the same condition
+   *  `openWorkspace` guards its own picker with.
+   *
+   *  `undefined` means dismissed, at which point the batch must launch nothing. */
+  private async resolveBatchProvider(cfg: AgentFlowConfig): Promise<AgentProvider | undefined> {
+    if (cfg.agentProvider !== "ask" || !cfg.seedAgent) return resolvedProvider(cfg.agentProvider);
+    const choice = await vscode.window.showQuickPick(
+      hostProviders().map((p) => ({ label: providerLabel(p), provider: p })),
+      {
+        // The SAME title as the picker in `openWorkspace` — one launch-time question,
+        // asked in one voice, whichever path raises it. Only the placeholder says what
+        // is different about this one: it answers for every task, not just one.
+        title: "Which agent?",
+        placeHolder: "Pick the agent for every task in this batch",
+        ignoreFocusOut: true,
+      },
+    );
+    return choice?.provider;
+  }
+
+  /** A caller's agent pin, for spreading into an open request. Sent ONLY under `ask`,
+   *  where it replaces a prompt that has already been answered. Under a fixed setting
+   *  a pin is ignored (see `OpenRequest.provider`) and the user's preference wins, so
+   *  sending one there could only invite the request and the setting to look like they
+   *  disagree — and it would change a request that must stay exactly what it was. */
+  private providerPin(cfg: AgentFlowConfig, provider: AgentProvider): { provider?: AgentProvider } {
+    return cfg.agentProvider === "ask" ? { provider } : {};
   }
 
   /** The filtered repo names as git ServiceRefs. Names that don't resolve, and repos
