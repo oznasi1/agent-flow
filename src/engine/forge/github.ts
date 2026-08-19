@@ -2,7 +2,7 @@
 // unchanged: this file adds a description and a branch-CI spawn, nothing else.
 // That is deliberate — it is what makes "GitHub still works" structural rather
 // than a promise backed by tests.
-import { BRANCH_CI_ARGS, BranchCiStatus, mapBranchStatus } from "../orchestrator/branchCi";
+import { BRANCH_CI_ARGS, mapBranchStatus } from "../orchestrator/branchCi";
 import { execRunner, GH_TIMEOUT_MS, GhProvider, probeGh } from "../pr/provider";
 import type { Runner } from "../pr/provider";
 import { resolveBin } from "../pr/which";
@@ -28,7 +28,7 @@ export function makeGithubForge(run: Runner = execRunner): Forge {
       } catch {
         // A non-zero exit, a timeout, a rate limit, unparseable output: all the
         // same answer, and it is not green.
-        return "unknown" as BranchCiStatus;
+        return "unknown";
       }
     },
   };

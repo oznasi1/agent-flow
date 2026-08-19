@@ -1,5 +1,5 @@
 // GitLab as a Forge.
-import { BranchCiStatus, GLAB_BRANCH_CI_ARGS, mapGlabBranchStatus } from "../orchestrator/branchCi";
+import { GLAB_BRANCH_CI_ARGS, mapGlabBranchStatus } from "../orchestrator/branchCi";
 import { GLAB_TIMEOUT_MS, GlabProvider, probeGlab } from "../pr/glab/provider";
 import { execRunner } from "../pr/provider";
 import type { Runner } from "../pr/provider";
@@ -27,7 +27,7 @@ export function makeGitlabForge(run: Runner = execRunner): Forge {
         });
         return mapGlabBranchStatus(JSON.parse(out) as unknown);
       } catch {
-        return "unknown" as BranchCiStatus;
+        return "unknown";
       }
     },
   };
