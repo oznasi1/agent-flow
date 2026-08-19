@@ -16,7 +16,9 @@ import {
   DEFAULT_EXPLORE_SUPERVISE_PROMPT,
   DEFAULT_EXPLORE_VERIFY_PROMPT,
   DEFAULT_PR_REVIEW_PROMPT,
+  GITLAB_PR_REVIEW_PROMPT,
   DEFAULT_REVIEW_REQUEST_PROMPT,
+  GITLAB_REVIEW_REQUEST_PROMPT,
   DEFAULT_REVIEW_REQUEST_MODES,
   DEFAULT_ENVIRONMENTS,
   DEFAULT_COMMANDS,
@@ -1118,4 +1120,118 @@ describe("package.json ⇄ config constants", () => {
       expect(md).toContain('"hidden": true');
     },
   );
+});
+
+describe("forge", () => {
+  it("defaults to github", () => {
+    expect(getConfig().forge).toBe("github");
+  });
+
+  it("reads an explicit gitlab", () => {
+    setConfig({ forge: "gitlab" });
+    expect(getConfig().forge).toBe("gitlab");
+  });
+
+  // Validation belongs to resolveForge, which falls back and logs. getConfig's job
+  // is only to report what the user actually wrote.
+  it("passes an unknown value through untouched", () => {
+    setConfig({ forge: "bitbucket" });
+    expect(getConfig().forge).toBe("bitbucket");
+  });
+
+  it("treats an empty string as the default", () => {
+    setConfig({ forge: "" });
+    expect(getConfig().forge).toBe("github");
+  });
+
+  // This is the actual compatibility guarantee: nothing in getConfig() reads
+  // package.json, so a manifest default of "gitlab" would ship silently unless
+  // something pins it. An existing install with no explicit `agentFlow.forge`
+  // gets whatever VS Code's settings UI serves from this manifest default.
+  it("ships a manifest default of github, so an existing install is unaffected", () => {
+    const props = pkg.contributes.configuration.properties as Record<string, { default?: unknown }>;
+    expect(props["agentFlow.forge"].default).toBe("github");
+  });
+});
+
+describe("forge-flavoured prompts", () => {
+  // The placeholders a template actually offers, read off the template itself
+  // rather than hand-typed here — a hand-typed list can quietly assert a
+  // placeholder the template doesn't really contain (DEFAULT_PR_REVIEW_PROMPT's
+  // own doc comment claims {brief} among its placeholders, but the literal
+  // string never uses it; only {key} {summary} {url} {files} actually appear).
+  const placeholdersOf = (s: string): string[] => s.match(/\{[a-zA-Z]+\}/g) ?? [];
+
+  it("keeps the GitHub prompt verbatim on github", () => {
+    expect(getConfig().prReviewPrompt).toBe(DEFAULT_PR_REVIEW_PROMPT);
+    expect(getConfig().prReviewPrompt).toContain("gh pr checkout");
+  });
+
+  it("seeds the GitLab wording on gitlab", () => {
+    setConfig({ forge: "gitlab" });
+    const p = getConfig().prReviewPrompt;
+    expect(p).toBe(GITLAB_PR_REVIEW_PROMPT);
+    expect(p).toContain("glab mr checkout");
+    expect(p).not.toContain("gh pr checkout");
+    expect(p).toContain("merge request");
+  });
+
+  // A user who wrote their own prompt keeps it on either forge: we do not know
+  // better than they do what their prompt should say.
+  it("never clobbers a customized prompt", () => {
+    setConfig({ forge: "gitlab", prReviewPrompt: "my own words" });
+    expect(getConfig().prReviewPrompt).toBe("my own words");
+  });
+
+  // An EXPLICITLY BLANK setting is what clearing this multilineText field in the
+  // VS Code settings UI writes, and it must fall back to the forge's shipped
+  // wording — never seed an empty prompt. `explicitConfigValue` returns `""`
+  // verbatim, so this only holds while the fallback is `||`; with `??` (which
+  // short-circuits on nullish alone) the agent would be launched with no
+  // instructions at all, and nothing downstream would catch it —
+  // `prReviewTemplate` returns its argument unchanged. On github this is the
+  // pre-seam behaviour (`c.get("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT`),
+  // which this branch promises not to change.
+  it.each([
+    ["github", DEFAULT_PR_REVIEW_PROMPT],
+    ["gitlab", GITLAB_PR_REVIEW_PROMPT],
+  ])("falls back to the %s default when the setting is explicitly blank", (forge, expected) => {
+    setConfig({ forge, prReviewPrompt: "" });
+    expect(getConfig().prReviewPrompt).toBe(expected);
+  });
+
+  // Whitespace is not blank: someone who typed spaces wrote something, and the
+  // `||` fallback deliberately does not trim (unlike `nonBlank`, which the mode
+  // resolver uses for picker chrome). Pinned so a later "tidy-up" that adds a
+  // `.trim()` has to argue with a test rather than change behaviour silently.
+  it("keeps a whitespace-only prompt, since the user did write it", () => {
+    setConfig({ prReviewPrompt: "   " });
+    expect(getConfig().prReviewPrompt).toBe("   ");
+  });
+
+  it("preserves every placeholder the GitHub prompt actually offers", () => {
+    setConfig({ forge: "gitlab" });
+    const p = getConfig().prReviewPrompt;
+    for (const ph of placeholdersOf(DEFAULT_PR_REVIEW_PROMPT)) {
+      expect(p).toContain(ph);
+    }
+  });
+
+  it("swaps the first review mode's prompt too, and keeps its placeholders", () => {
+    setConfig({ forge: "gitlab" });
+    const first = getConfig().reviewRequestModes[0].prompt;
+    expect(first).toBe(GITLAB_REVIEW_REQUEST_PROMPT);
+    expect(first).toContain("glab mr checkout");
+    for (const ph of placeholdersOf(DEFAULT_REVIEW_REQUEST_PROMPT)) {
+      expect(first).toContain(ph);
+    }
+  });
+
+  // The legacy reviewRequestPrompt migration path is untouched by forge: a user
+  // who customized it keeps their exact words on gitlab too, same as the
+  // never-clobbers-a-customized-prompt guarantee above for prReviewPrompt.
+  it("keeps a legacy customized reviewRequestPrompt verbatim on gitlab too", () => {
+    setConfig({ forge: "gitlab", reviewRequestPrompt: "my legacy words" });
+    expect(getConfig().reviewRequestModes[0].prompt).toBe("my legacy words");
+  });
 });

@@ -147,6 +147,19 @@
           "default": "jira",
           "description": "Where Agent Flow reads tasks from. Each source has its own settings under agentFlow.<source>.*. Requires a window reload."
         },
+        "agentFlow.forge": {
+          "type": "string",
+          "enum": [
+            "github",
+            "gitlab"
+          ],
+          "enumDescriptions": [
+            "GitHub, through the `gh` CLI.",
+            "GitLab, through the `glab` CLI."
+          ],
+          "default": "github",
+          "description": "Which forge Agent Flow reads pull/merge requests, CI, and review requests from. Each forge needs its own CLI installed and signed in — run Doctor to check. Requires a window reload."
+        },
         "agentFlow.jira.baseUrl": {
           "type": "string",
           "default": "",
@@ -538,7 +551,7 @@
         "agentFlow.prReviewPrompt": {
           "type": "string",
           "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **Address PR** kick-off. The agent locates the task's GitHub PR by its Jira key and assesses readiness; when `#agentFlow.prReviewAutoFix#` is on, a fixing instruction is appended automatically. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`.",
+          "markdownDescription": "Prompt seeded for the **Address PR** kick-off. The agent locates the task's GitHub PR by its Jira key and assesses readiness; when `#agentFlow.prReviewAutoFix#` is on, a fixing instruction is appended automatically. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`. Under `#agentFlow.forge#: gitlab` an equivalent GitLab-flavoured default is used instead, unless you have customized this setting.",
           "default": "Jira {key} ({url}): \"{summary}\". This task has an open GitHub PR — all our PRs carry the Jira key in their title and branch. Using `gh` (or the GitHub tools available to you): find the PR for {key}, run `gh pr checkout` to bring its branch into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}"
         },
         "agentFlow.worktree": {
@@ -662,7 +675,7 @@
         },
         "agentFlow.reviewRequestModes": {
           "type": "array",
-          "markdownDescription": "Seed modes offered by **Review with agent** on the Deck's review strip. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`. Add your own — e.g. separate backend and frontend review modes — and clicking **Review with agent** asks which to use, since your entry joins the built-in **Full review** rather than replacing it. Pin one with `#agentFlow.reviewRequestMode#` to skip the question. Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"full\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you.",
+          "markdownDescription": "Seed modes offered by **Review with agent** on the Deck's review strip. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`. Add your own — e.g. separate backend and frontend review modes — and clicking **Review with agent** asks which to use, since your entry joins the built-in **Full review** rather than replacing it. Pin one with `#agentFlow.reviewRequestMode#` to skip the question. Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"full\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you. Under `#agentFlow.forge#: gitlab` the built-in **Full review** mode carries an equivalent GitLab-flavoured prompt, unless you have overridden that mode's `prompt` yourself.",
           "items": {
             "type": "object",
             "required": [

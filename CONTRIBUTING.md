@@ -45,6 +45,12 @@ complete the first-run setup wizard.
   reaches for each connector's factory, and `provider.ts` type-imports `TaskDetail`
   from the Jira client that still declares it.
   To add a source, see [docs/CONNECTORS.md](docs/CONNECTORS.md).
+- **Forges are pluggable too.** GitHub is the default forge, not a hardwired dependency.
+  Anything reading pull/merge requests, branch CI or review requests goes through the
+  `Forge` seam in `src/engine/forge/types.ts`, selected by `agentFlow.forge` — never
+  `src/engine/pr/glab/` or the `gh`-only providers directly. `src/engine/forge/*` imports
+  `child_process` and must never be reachable from webview code. To add a forge, see
+  [docs/FORGES.md](docs/FORGES.md).
 - **Tests.** Add or update tests for any behavior change; coverage thresholds are enforced by
   `npm run test:cov`. The `vscode` module is mocked in `test/_mocks/vscode.ts`.
 - **Type safety.** Keep `npm run typecheck` clean.

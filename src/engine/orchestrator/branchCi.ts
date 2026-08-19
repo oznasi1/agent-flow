@@ -28,6 +28,14 @@
 // see, whereas the case that would actually be dangerous is already correct — a
 // commit with genuinely NO checks has `statusCheckRollup: null`, which is `"unknown"`,
 // which is not green.
+//
+// GitLab is graded from a different fact and lands in a different place, worth
+// knowing before trusting either: `mapGlabBranchStatus` reads the newest PIPELINE
+// for the ref, which is a whole-pipeline verdict rather than an aggregate over
+// checks. That makes it STRICTER than the GitHub arm above — a `skipped` pipeline
+// reads `"unknown"` here, where GitHub's rollup would have folded a skipped check
+// toward `SUCCESS`. Deliberate: the dangerous direction is a gate that opens on a
+// pipeline nobody ran, and `"unknown"` is not green.
 
 /** What we can say about a branch's CI. `unknown` is the honest answer for every
  * unreadable fact — a failed call, a timed-out call, a rate limit, a response shape
@@ -138,3 +146,46 @@ export function mapBranchStatus(json: unknown): BranchCiStatus {
  * a flow that waits on `main` and a flow that waits on `release` in the same repo
  * are asking different questions. */
 export const branchCiKey = (repo: string, branch: string): string => `${repo}#${branch}`;
+
+/** The newest pipeline for one ref. `per_page=1` because only the head matters,
+ * and the ref is url-encoded: a branch name may contain `/`, `&` or `=`, any of
+ * which would otherwise rewrite the query string. Module-private — `GLAB_BRANCH_CI_ARGS`
+ * below is the whole public surface, and it is what the tests and the forge read. */
+const GLAB_BRANCH_CI_PATH = (branch: string): string =>
+  `projects/:fullpath/pipelines?ref=${encodeURIComponent(branch)}&per_page=1`;
+
+/** The argv for that call. Takes the branch alone, for the same reason
+ * `BRANCH_CI_ARGS` does: the repo half of a `repo#branch` key selects the working
+ * DIRECTORY the call is made in, and `:fullpath` resolves the project from that
+ * directory's git remote. */
+export const GLAB_BRANCH_CI_ARGS = (branch: string): string[] => ["api", GLAB_BRANCH_CI_PATH(branch)];
+
+/** Pipeline statuses that mean "still ahead of us". Uppercase, normalized at the
+ * comparison, so the verdict never depends on how a given instance spells its
+ * statuses.
+ *
+ * The same six strings live in `pr/glab/mr.ts` (`PENDING_JOB`) and
+ * `review/glab/search.ts` (`CI_PENDING`), and this copy is doubly deliberate: the
+ * three grade three different GitLab responses that merely share an enum today,
+ * AND this module is bundled into the webview (see the header above), so it must
+ * not import a forge-specific module to reach a shared constant. */
+const GLAB_PENDING = new Set(["CREATED", "WAITING_FOR_RESOURCE", "PREPARING", "PENDING", "RUNNING", "SCHEDULED"]);
+
+/** Grade one `glab api pipelines?ref=…` response.
+ *
+ * `success` is the ONLY status that becomes `"passed"`. Everything else is graded
+ * for the drawer's benefit, and anything at all that is not a status we recognise —
+ * a non-array payload, an empty list (a ref with no pipeline), `canceled`,
+ * `skipped`, `manual`, a status this build has never heard of — is `"unknown"`,
+ * which is not green. Case-insensitive, so the verdict does not depend on how a
+ * given instance spells its statuses. */
+export function mapGlabBranchStatus(json: unknown): BranchCiStatus {
+  if (!Array.isArray(json)) return "unknown";
+  const status = (json[0] as { status?: unknown } | undefined)?.status;
+  if (typeof status !== "string") return "unknown";
+  const s = status.toUpperCase();
+  if (s === "SUCCESS") return "passed";
+  if (s === "FAILED") return "failed";
+  if (GLAB_PENDING.has(s)) return "pending";
+  return "unknown";
+}

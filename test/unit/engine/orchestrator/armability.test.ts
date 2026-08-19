@@ -134,3 +134,41 @@ describe("unfirableRules", () => {
     }
   });
 });
+
+describe("forge capability", () => {
+  it("names changes-requested as unfirable on a forge that cannot report it", () => {
+    const flow = flowOf(edge("e1", { kind: "changes-requested" }));
+    expect(unfirableRules(flow, { ...ALL_ON, forge: { changesRequested: false } })).toEqual([
+      { edgeId: "e1", needs: "forge-unsupported", label: "changes requested" },
+    ]);
+  });
+
+  it("says nothing when the forge can report it", () => {
+    const flow = flowOf(edge("e1", { kind: "changes-requested" }));
+    expect(unfirableRules(flow, { ...ALL_ON, forge: { changesRequested: true } })).toEqual([]);
+  });
+
+  // Absent means GitHub, which is the default and can report it. This keeps every
+  // pre-existing caller and test valid without modification.
+  it("assumes a capable forge when none is supplied", () => {
+    const flow = flowOf(edge("e1", { kind: "changes-requested" }));
+    expect(unfirableRules(flow, ALL_ON)).toEqual([]);
+  });
+
+  // PR facts being off is the bigger, more actionable fact, and reporting both for
+  // one edge would put the same rule in the warning twice.
+  it("prefers the PR-facts reason when both apply", () => {
+    const flow = flowOf(edge("e1", { kind: "changes-requested" }));
+    const out = unfirableRules(flow, { liveSignal: true, prFacts: false, forge: { changesRequested: false } });
+    expect(out).toEqual([{ edgeId: "e1", needs: "pr-facts", label: "changes requested" }]);
+  });
+
+  it("leaves every other condition kind alone on an incapable forge", () => {
+    const flow = flowOf(
+      edge("e1", { kind: "pr-merged" }),
+      edge("e2", { kind: "ci-passed" }),
+      edge("e3", { kind: "tree-clean" }),
+    );
+    expect(unfirableRules(flow, { ...ALL_ON, forge: { changesRequested: false } })).toEqual([]);
+  });
+});

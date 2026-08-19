@@ -24,7 +24,8 @@ const deps = (over: Partial<DoctorDeps> = {}): DoctorDeps => ({
     scope: { ok: true, name: "Assembly" },
   }),
   which: (bin) => `/usr/bin/${bin}`,
-  gh: async () => null,
+  forge: () => ({ label: "GitHub", cli: "gh", installUrl: "https://cli.github.com" }),
+  forgeProbe: async () => null,
   statDir: () => ({ exists: true, writable: true }),
   repos: () => ({ repos: 3, gitRepos: 3 }),
   claudeExtension: () => ({ installed: true, version: "2.1.220" }),
@@ -76,15 +77,21 @@ describe("collectInputs — local and tooling probes", () => {
 
   it("names where gh was found — the bare-PATH case", async () => {
     const i = await collectInputs(deps({ which: (b) => (b === "gh" ? "/opt/homebrew/bin/gh" : "/usr/bin/git") }));
-    expect(i.gh).toEqual({ gap: null, foundAt: "/opt/homebrew/bin/gh" });
+    expect(i.forge).toEqual({
+      label: "GitHub",
+      cli: "gh",
+      installUrl: "https://cli.github.com",
+      gap: null,
+      foundAt: "/opt/homebrew/bin/gh",
+    });
   });
 
   it("does not run the gh probe when PR facts are off", async () => {
-    const gh = vi.fn();
+    const forgeProbe = vi.fn();
     const cfg = deps().config;
-    const i = await collectInputs(deps({ config: () => ({ ...cfg(), prFacts: false }), gh }));
-    expect(gh).not.toHaveBeenCalled();
-    expect(i.gh).toBeUndefined();
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), prFacts: false }), forgeProbe }));
+    expect(forgeProbe).not.toHaveBeenCalled();
+    expect(i.forge.gap).toBeNull();
     expect(i.prFacts).toBe(false);
   });
 
@@ -202,7 +209,7 @@ describe("showDoctor — the QuickPick", () => {
 
   it("opens the install page externally for a gh gap", async () => {
     window.showQuickPick.mockImplementation(async (items: any) => items[0]);
-    await showDoctor(deps({ gh: async () => ({ kind: "missing", detail: "spawn ENOENT" }) }));
+    await showDoctor(deps({ forgeProbe: async () => ({ kind: "missing", detail: "spawn ENOENT" }) }));
     expect(Uri.parse).toHaveBeenCalledWith("https://cli.github.com");
     expect(env.openExternal).toHaveBeenCalled();
   });

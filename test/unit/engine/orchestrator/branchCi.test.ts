@@ -4,6 +4,8 @@ import {
   BRANCH_CI_QUERY,
   branchCiKey,
   mapBranchStatus,
+  GLAB_BRANCH_CI_ARGS,
+  mapGlabBranchStatus,
 } from "../../../../src/engine/orchestrator/branchCi";
 
 /** The shape `BRANCH_CI_ARGS`'s own query actually returns, built around a state. */
@@ -93,5 +95,59 @@ describe("branchCiKey", () => {
     expect(branchCiKey("bite-me", "main")).toBe("bite-me#main");
     expect(branchCiKey("bite-me", "main")).not.toBe(branchCiKey("bite-me", "release"));
     expect(branchCiKey("bite-me", "main")).not.toBe(branchCiKey("api", "main"));
+  });
+});
+
+describe("GLAB_BRANCH_CI_ARGS", () => {
+  it("asks for the newest pipeline on that ref, in one call", () => {
+    const args = GLAB_BRANCH_CI_ARGS("feat/ASM-1");
+    expect(args[0]).toBe("api");
+    expect(args[1]).toContain("projects/:fullpath/pipelines");
+    expect(args[1]).toContain("ref=feat%2FASM-1");
+    expect(args[1]).toContain("per_page=1");
+  });
+
+  it("url-encodes a ref that would otherwise break the query string", () => {
+    expect(GLAB_BRANCH_CI_ARGS("fix/a&b=c")[1]).toContain("ref=fix%2Fa%26b%3Dc");
+  });
+});
+
+describe("mapGlabBranchStatus", () => {
+  const pipelines = (status: unknown) => [{ id: 1, status }];
+
+  it("reads success as passed — the only state that is green", () => {
+    expect(mapGlabBranchStatus(pipelines("success"))).toBe("passed");
+  });
+
+  it("reads failed as failed", () => {
+    expect(mapGlabBranchStatus(pipelines("failed"))).toBe("failed");
+  });
+
+  it.each(["created", "waiting_for_resource", "preparing", "pending", "running", "scheduled"])(
+    "reads %s as pending", (s) => expect(mapGlabBranchStatus(pipelines(s))).toBe("pending"));
+
+  // Stricter than the GitHub arm on purpose: GitHub's aggregate rollup folds
+  // SKIPPED toward SUCCESS, GitLab's per-ref pipeline status does not, and a
+  // skipped pipeline must not open a deploy gate.
+  it.each(["canceled", "skipped", "manual", "unheard_of", null, undefined, 42])(
+    "reads %s as unknown, which is not green", (s) => expect(mapGlabBranchStatus(pipelines(s))).toBe("unknown"));
+
+  it("reads a branch with no pipeline at all as unknown", () => {
+    expect(mapGlabBranchStatus([])).toBe("unknown");
+  });
+
+  it.each([null, undefined, {}, '{"message":"404"}', "text", 0])(
+    "reads the non-array payload %s as unknown", (json) => expect(mapGlabBranchStatus(json)).toBe("unknown"));
+
+  it("is case-insensitive, so an instance that shouts is still graded", () => {
+    expect(mapGlabBranchStatus(pipelines("SUCCESS"))).toBe("passed");
+  });
+
+  // A non-string status must not be coerced into one: String(["SUCCESS"]) is
+  // "SUCCESS", so a naive `String(status).toUpperCase()` would grade this array
+  // as passed. The status has to already BE the string "success" — coercion is
+  // not reading, and unknown is never green.
+  it("rejects a non-string status even when it would coerce to a recognised one", () => {
+    expect(mapGlabBranchStatus(pipelines(["SUCCESS"]))).toBe("unknown");
   });
 });

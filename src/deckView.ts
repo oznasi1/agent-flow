@@ -25,15 +25,21 @@ import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { currentBranch, gitState, prEligible, repoRoot, taskDiff } from "./engine/git";
 import { diffTitle, openTaskDiff, workspaceLabel } from "./engine/diffView";
 import { RetireVerdict, retireVerdict } from "./engine/retire";
-import { BRANCH_CI_ARGS, BranchCiStatus, branchCiKey, mapBranchStatus } from "./engine/orchestrator/branchCi";
+import { BranchCiStatus, branchCiKey } from "./engine/orchestrator/branchCi";
 import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntry } from "./engine/pr/store";
-import { FetchResult, GhGap, GhProvider, PrProvider, Runner, execRunner, GH_TIMEOUT_MS, probeGh } from "./engine/pr/provider";
-import { resolveBin } from "./engine/pr/which";
+import { FetchResult } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
 import { discoverRepos } from "./engine/repos";
 import { composeAgentPrompt, hasNote, prReviewTemplate, prWorkClause } from "./engine/prompt";
 import { launchReview, resolveReviewMode, reviewRunKey } from "./engine/review/launch";
-import { GhReviewProvider, ReviewProvider } from "./engine/review/provider";
+// The one seam: every PR fetch, review call, and branch-CI probe on this panel
+// goes through the `Forge` `resolveForge` returns, in place of the GitHub-only
+// providers this file used to construct directly. `Forge`/`ForgeGap` are
+// `import type` — erased at build time — for the reason forge/types.ts itself
+// documents: this module must add no runtime edge to the forge directory beyond
+// the registry call below.
+import { resolveForge } from "./engine/forge/registry";
+import type { Forge, ForgeGap } from "./engine/forge/types";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
 import { groupPlacesByWindow, inferTicket, localRunFor } from "./engine/localRuns";
@@ -65,12 +71,14 @@ function claudeProjectsRoot(): string {
   return path.join(os.homedir(), ".claude", "projects");
 }
 
-/** The footer note per reason PR facts are off. Naming the actual gap matters:
- * `gh` living somewhere the extension host's PATH cannot see it is by far the
- * likeliest cause, and reads to a signed-in user as the Deck being broken. */
-const GH_NOTES: Record<GhGap["kind"], string> = {
-  missing: "gh CLI not found — PR facts off. Run Doctor",
-  "signed-out": "gh is not signed in — PR facts off. Run Doctor",
+/** The footer note per reason PR facts are off, named with the configured
+ * forge's own CLI (a function rather than a constant, now that the CLI is no
+ * longer always `gh`). Naming the actual gap matters: the CLI living somewhere
+ * the extension host's PATH cannot see it is by far the likeliest cause, and
+ * reads to a signed-in user as the Deck being broken. */
+const FORGE_NOTES: Record<ForgeGap["kind"], (cli: string) => string> = {
+  missing: (cli) => `${cli} CLI not found — PR facts off. Run Doctor`,
+  "signed-out": (cli) => `${cli} is not signed in — PR facts off. Run Doctor`,
 };
 
 /** Appended to a review body the agent drafted, when provenance stamping is on.
@@ -276,14 +284,18 @@ export class DeckPanel {
   private openAgents: boolean; // seeded from config in the constructor; re-seeded only by onConfigChanged
   private reviewQueue: boolean; // seeded from config in the constructor; re-seeded only by onConfigChanged
   private readonly prQueue = new RefreshQueue();
-  private readonly pr: PrProvider = new GhProvider();
-  /** Spawning for the branch-CI fetch. The same injected `Runner` seam every PR
-   * fetch goes through (`execRunner`, `pr/provider.ts`) rather than a second way to
-   * call `gh`, so no test forks a process and the timeout is the one number this
-   * codebase already agreed on. It is not on `PrProvider` because it is not a PR
-   * fetch: `GhProvider.fetch` answers "which PR is this branch's", and this asks
-   * "is this branch green", with no PR in the question at all. */
-  private readonly ghRun: Runner = execRunner;
+  /** The configured forge. One object, resolved once per panel: `agentFlow.forge`
+   * is documented as needing a window reload, and a panel that swapped providers
+   * mid-session would leave a half-GitHub, half-GitLab cache behind.
+   *
+   * Declared here but assigned in the constructor body, not as this field's own
+   * initializer: `resolveForge` can call the `log` callback synchronously (an
+   * unrecognised forge id falls back to GitHub and says so), and a class-field
+   * initializer runs before the constructor's own parameter properties — `log`
+   * among them — are assigned. The same hazard `lockIo`'s own comment names
+   * below; assigning `forge` as the constructor's first statement instead
+   * guarantees `this.log` already exists by the time it might be called. */
+  private readonly forge: Forge;
   /** Branch-CI verdicts, keyed `repo#branch` by `branchCiKey`, with the moment each
    * was fetched.
    *
@@ -296,14 +308,13 @@ export class DeckPanel {
    * inherited.
    *
    * The TTL is `prFactsTtlSeconds`, the same setting the PR fetches age out on: it
-   * is the same `gh`, the same rate limit, and the same "how fresh does a CI fact
+   * is the same forge, the same rate limit, and the same "how fresh does a CI fact
    * need to be" question. The whole point of the cache is cost: ten rules naming
-   * `main` share ONE entry and therefore one `gh` call per TTL, not ten per poll. */
+   * `main` share ONE entry and therefore one forge call per TTL, not ten per poll. */
   private readonly branchCi = new Map<string, { status: BranchCiStatus; fetchedAt: number }>();
   /** Repo names already reported as ambiguous, so `checkoutFor` says it once per
    * session rather than once per six-second poll. */
   private readonly branchCiAmbiguous = new Set<string>();
-  private readonly reviewProvider: ReviewProvider = new GhReviewProvider();
   private reviewSort: ReviewSort = "oldest";
   /** Last successful search. Held in memory as well as on disk so a failed fetch
    * can keep rendering it with a stale marker instead of emptying the strip. */
@@ -313,20 +324,21 @@ export class DeckPanel {
    * `reviewCache.fetchedAt`, which is when one last *succeeded*. A failed search
    * deliberately leaves `fetchedAt` alone (the strip's staleness display depends
    * on it), which on its own would make `isReviewCacheStale` re-arm every poll
-   * tick forever once `gh` starts failing. This is in-memory only, on purpose: a
+   * tick forever once the forge CLI starts failing. This is in-memory only, on purpose: a
    * failed attempt should not survive a window reload and force one more wait. */
   private reviewLastAttemptAt: number | null = null;
   /** Ids with a `submitReview` in flight. `onMessage` dispatches fire-and-forget,
    * and the row is only evicted from `reviewCache` *after* a successful submit —
    * so without this, a second `deck:reviewSubmit` for the same id (a double
    * click; VS Code queues modals rather than dropping one) would clear every
-   * gate during the up-to-10s `gh` call and could post the same review twice.
-   * GitHub does not deduplicate reviews. */
+   * gate during the up-to-10s forge call and could post the same review twice.
+   * Neither shipped forge deduplicates one: GitHub keeps both reviews, and
+   * GitLab's own path posts a second note. */
   private readonly reviewSubmitsInFlight = new Set<string>();
-  private ghProbe: Promise<GhGap | null> | null = null;
-  /** undefined until the probe resolves; null means gh is usable, and a gap
-   * disables PR facts with a footer note. */
-  private ghGap: GhGap | null | undefined;
+  private forgeProbe: Promise<ForgeGap | null> | null = null;
+  /** undefined until the probe resolves; null means the forge is usable, and a
+   * gap disables PR facts with a footer note. */
+  private forgeGap: ForgeGap | null | undefined;
   /** Bumped when a run is forgotten, so a fetch still in flight for the old
    * incarnation cannot recreate the cache file we just deleted. */
   private readonly prEpoch = new Map<string, number>();
@@ -394,6 +406,9 @@ export class DeckPanel {
     private readonly log: (m: string) => void,
   ) {
     this.panel = panel;
+    // Resolved once, here, rather than as this field's own initializer — see
+    // the `forge` field's own comment for why that ordering matters.
+    this.forge = resolveForge(getConfig().forge, (m) => this.log(m));
     // Seed from the persisted setting once; a later refresh must not stomp
     // these by re-reading config on every tick — only onConfigChanged does that,
     // and only for the key that actually changed.
@@ -490,16 +505,17 @@ export class DeckPanel {
     // rule reads "not checked yet" forever — even while this panel knows the
     // branch is PENDING or FAILED, which is a rule whose state is invisible.
     //
-    // Gated on `ghReady()` exactly as `branchCiFor` is, and for its reason: a
+    // Gated on `forgeReady()` exactly as `branchCiFor` is, and for its reason: a
     // verdict this panel would not ACT on must not be shown either, or the drawer
     // claims a branch is green while the engine reads it as unknown. Honest about
     // what the gate is worth: `onConfigChanged` already CLEARS the cache when PR
-    // facts change, and `branchCiFor` never enqueues while gh is unready, so no
-    // test can distinguish this condition today — it is a mirror of the serve-side
-    // rule kept beside it rather than a guard with its own reachable case. Emptied
-    // with `flows` when the orchestrator is off, for the reason `pendingResume` is.
+    // facts change, and `branchCiFor` never enqueues while the forge is unready,
+    // so no test can distinguish this condition today — it is a mirror of the
+    // serve-side rule kept beside it rather than a guard with its own reachable
+    // case. Emptied with `flows` when the orchestrator is off, for the reason
+    // `pendingResume` is.
     const branchCi: Record<string, BranchCiStatus> = {};
-    if (enabled && this.ghReady()) {
+    if (enabled && this.forgeReady()) {
       for (const [key, entry] of this.branchCi) branchCi[key] = entry.status;
     }
     // Same reasoning as `promptModes`: configuration the drawer needs to build a
@@ -604,7 +620,7 @@ export class DeckPanel {
     const flows = readFlows(this.flowIo, this.flowsDir);
     // Read ONCE for the whole pass, before any flow is evaluated: two flows waiting
     // on the same branch must be answered by the same verdict, and a fetch per node
-    // would be a `gh` call per rule.
+    // would be a forge call per rule.
     const branchCi = this.branchCiFor(flows, runs, nowMs);
     for (const flow of flows) {
       // Stop the whole pass, not just the flow that lost the lock — and this line is
@@ -1622,32 +1638,33 @@ export class DeckPanel {
     ];
   }
 
-  /** Is `gh` usable? Kicks the probe off on first call and returns what we know
-   * so far — never awaited, because a 10s `gh auth status` must not sit in front
-   * of a paint. An unresolved probe reads as "not yet": queue nothing this tick. */
-  private ghReady(): boolean {
+  /** Is the configured forge usable? Kicks the probe off on first call and
+   * returns what we know so far — never awaited, because a 10s auth-status round
+   * trip must not sit in front of a paint. An unresolved probe reads as "not
+   * yet": queue nothing this tick. */
+  private forgeReady(): boolean {
     if (!this.prFacts) return false;
-    if (this.ghProbe === null) {
-      const p = (this.ghProbe = probeGh());
+    if (this.forgeProbe === null) {
+      const p = (this.forgeProbe = this.forge.probe());
       void p.then((gap) => {
-        // A probe orphaned by a settings change (onConfigChanged resets ghProbe
-        // and starts a fresh one when prFacts turns back on) must not win if it
-        // resolves after the fresh probe already has — that would let a stale
-        // gap clobber a fresh pass right after the user ran `gh auth login`,
+        // A probe orphaned by a settings change (onConfigChanged resets
+        // forgeProbe and starts a fresh one when prFacts turns back on) must not
+        // win if it resolves after the fresh probe already has — that would let
+        // a stale gap clobber a fresh pass right after the user re-authenticated,
         // defeating the whole point of re-probing.
-        if (this.ghProbe !== p) return;
-        this.ghGap = gap;
-        // The note names the kind; only the log can say which gh we tried and
+        if (this.forgeProbe !== p) return;
+        this.forgeGap = gap;
+        // The note names the kind; only the log can say which CLI we tried and
         // what it said, which is the difference between a diagnosable report and
         // "PR facts just don't work here".
-        if (gap) this.log(`deck: gh unusable (${gap.kind}): ${gap.detail}`);
+        if (gap) this.log(`deck: ${this.forge.cli.name} unusable (${gap.kind}): ${gap.detail}`);
       });
     }
-    return this.ghGap === null;
+    return this.forgeGap === null;
   }
 
   /** Queue a stale repo's refresh. Deliberately not awaited by the caller: a
-   * hanging `gh` must never stall the git and transcript reads. The epoch is
+   * hanging forge call must never stall the git and transcript reads. The epoch is
    * captured at enqueue time so a fetch still in flight when the run is
    * forgotten can detect that and skip its write, rather than recreating the
    * cache file `deck:forget` just deleted.
@@ -1664,7 +1681,7 @@ export class DeckPanel {
     this.prQueue.push(repo.path, async () => {
       let res: FetchResult;
       try {
-        res = await this.pr.fetch(repo.path, branch, searchKey);
+        res = await this.forge.prs.fetch(repo.path, branch, searchKey);
       } catch {
         // A provider must never throw, but a thrown error here must still not
         // leave this entry unstamped — an unstamped entry reads as stale on
@@ -1684,13 +1701,14 @@ export class DeckPanel {
   /** Every distinct branch these flows are waiting on, and the checkout to ask from.
    *
    * Keyed by `repo#branch`, so several rules — in one flow or across flows — naming
-   * the same branch collapse to ONE entry and therefore one `gh` call. A disarmed
+   * the same branch collapse to ONE entry and therefore one forge call. A disarmed
    * flow and a settled edge are skipped: neither is waiting on anything, and paying
    * a round trip for them would be pure cost.
    *
-   * `cwd` is any board checkout of that repo, because gh resolves owner/name from
-   * its remote (see `BRANCH_CI_QUERY`) and every checkout of a repo — worktrees
-   * included — shares that remote. A repo NO run on the board has is skipped
+   * `cwd` is any board checkout of that repo, because the forge CLI resolves the
+   * project from that directory's git remote — gh's `{owner}`/`{repo}` (see
+   * `BRANCH_CI_QUERY`), glab's `:fullpath` — and every checkout of a repo —
+   * worktrees included — shares that remote. A repo NO run on the board has is skipped
    * entirely: there is no directory to ask from, so its verdict stays absent, which
    * reads as `"unknown"`, which is not met. */
   private branchCiWanted(
@@ -1709,8 +1727,8 @@ export class DeckPanel {
       for (const e of Array.isArray(flow.edges) ? flow.edges : []) {
         if (!e || e.cond?.kind !== "branch-ci-passed" || isSettled(e)) continue;
         const { repo, branch } = e.cond;
-        // A hand-edited flow file can carry either half empty. `gh` would answer
-        // for the wrong thing (or error), so refuse before spending the call.
+        // A hand-edited flow file can carry either half empty. The forge would
+        // answer for the wrong thing (or error), so refuse before spending the call.
         if (!repo || !branch) continue;
         const key = branchCiKey(repo, branch);
         if (out.has(key)) continue;
@@ -1722,17 +1740,17 @@ export class DeckPanel {
     return out;
   }
 
-  /** The one checkout to ask `gh` about `repo`, or null when the board cannot say
+  /** The one checkout to ask the forge about `repo`, or null when the board cannot say
    * which repository that name even means.
    *
    * SEVERAL paths for one name is the norm here, not an ambiguity: every task
    * worktree Agent Flow creates is a separate checkout of the same repo
    * (`<repo>/.claude/worktrees/<KEY>`, see `createWorktrees`), carrying the repo's
    * name with the worktree's path, so a board with three tasks on `aws-ops` has
-   * three `aws-ops` entries. All three share one remote, and gh reads owner/name off
-   * that remote (see `BRANCH_CI_QUERY`), so any of them answers the same question
-   * correctly. Refusing on "more than one path" would have made this condition
-   * unusable in exactly the setup this product creates constantly.
+   * three `aws-ops` entries. All three share one remote, and the forge CLI reads
+   * the project off that remote (see `BRANCH_CI_QUERY`), so any of them answers
+   * the same question correctly. Refusing on "more than one path" would have made
+   * this condition unusable in exactly the setup this product creates constantly.
    *
    * What IS ambiguous is two DIFFERENT repositories presenting the same name. A
    * local card's repo name is `path.basename` of whatever folder a session was found
@@ -1777,23 +1795,24 @@ export class DeckPanel {
    * read.
    *
    * Synchronous on purpose — it returns what the cache already holds and only
-   * ENQUEUES what has aged out, exactly as `enqueuePr` does. Awaiting a `gh` call
+   * ENQUEUES what has aged out, exactly as `enqueuePr` does. Awaiting a forge call
    * here would hold the flows-directory lock across the network for every window on
-   * the machine, and a hung `gh` would stall the pass; the cost of not awaiting is
+   * the machine, and a hung CLI would stall the pass; the cost of not awaiting is
    * that a brand-new rule reads `"unknown"` for one poll (six seconds) before its
    * first verdict lands. That trade only works because `"unknown"` is not green: the
    * cold-start answer delays a deploy, it never triggers one.
    *
-   * `ghReady()` gates BOTH the fetch and the read. Serving a cached verdict after PR
-   * facts were switched off would leave a stamp from before the switch gating a
-   * deploy with nothing left to ever refresh it — and it would make `armability.ts`'s
-   * warning ("these rules need PR facts") a lie. Off means no verdicts at all. */
+   * `forgeReady()` gates BOTH the fetch and the read. Serving a cached verdict
+   * after PR facts were switched off would leave a stamp from before the switch
+   * gating a deploy with nothing left to ever refresh it — and it would make
+   * `armability.ts`'s warning ("these rules need PR facts") a lie. Off means no
+   * verdicts at all. */
   private branchCiFor(flows: Flow[], runs: RunStatus[], nowMs: number): Record<string, BranchCiStatus> {
     const wanted = this.branchCiWanted(flows, runs);
     // Nothing waiting on a branch: no config read, no queue traffic, and — for
     // every flow that has no such rule, which today is all of them — no cost.
     if (wanted.size === 0) return {};
-    if (!this.ghReady()) return {};
+    if (!this.forgeReady()) return {};
     const ttlMs = getConfig().prFactsTtlSeconds * 1000;
     const out: Record<string, BranchCiStatus> = {};
     for (const [key, want] of wanted) {
@@ -1806,29 +1825,32 @@ export class DeckPanel {
     return out;
   }
 
-  /** Fetch one branch's rollup, out of band. Through `prQueue` like every other `gh`
-   * call on this panel, so one in flight is never re-issued by the next tick and a
-   * dozen branches cannot fork a dozen processes at once.
+  /** Fetch one branch's rollup, out of band. Through `prQueue` like every other
+   * forge call on this panel, so one in flight is never re-issued by the next
+   * tick and a dozen branches cannot fork a dozen processes at once.
    *
-   * Always stamps, even on failure, and stamps `"unknown"` when it cannot read an
-   * answer. Both halves matter: an unstamped entry reads as stale forever and
-   * re-enqueues the same `gh` call every tick (the same trap `enqueuePr`'s own catch
-   * exists for), and `"unknown"` — rather than keeping the previous verdict, which is
-   * what the PR cache does with `previous?.facts` — is what stops a branch that was
-   * green an hour ago from opening a deploy gate on the strength of a call that
-   * failed since. */
+   * Always stamps, even on failure: an unstamped entry reads as stale forever
+   * and re-enqueues the same call every tick (the same trap `enqueuePr`'s own
+   * catch exists for). `"unknown"`, rather than keeping the previous verdict
+   * (which is what the PR cache does with `previous?.facts`), is what stops a
+   * branch that was green an hour ago from opening a deploy gate on the strength
+   * of a call that failed since.
+   *
+   * The `catch` is defense-in-depth for a THIRD-PARTY forge, not a claim about the
+   * shipped two: both already normalize every failure (a non-zero exit, a timeout,
+   * a rate limit, unparseable output) to `"unknown"` rather than throwing, exactly
+   * as docs/FORGES.md requires. But `Forge` is a documented seam, the contract's
+   * strength is identical to the one `enqueuePr` keeps its own catch under, and the
+   * unguarded failure mode is strictly worse than a wrong verdict: the refresh
+   * queue swallows the rejection, the entry stays unstamped, `isStale(undefined, …)`
+   * is always true, and the panel re-enqueues the same spawn every tick forever
+   * with nothing in the log. */
   private enqueueBranchCi(key: string, want: { repo: string; branch: string; cwd: string }): void {
     this.prQueue.push(`branch-ci:${key}`, async () => {
-      let status: BranchCiStatus = "unknown";
+      let status: BranchCiStatus;
       try {
-        const out = await this.ghRun(resolveBin("gh") ?? "gh", BRANCH_CI_ARGS(want.branch), {
-          cwd: want.cwd,
-          timeoutMs: GH_TIMEOUT_MS,
-        });
-        status = mapBranchStatus(JSON.parse(out) as unknown);
+        status = await this.forge.branchCi(want.cwd, want.branch);
       } catch {
-        // A non-zero exit, a timeout, a rate limit, unparseable output: all the
-        // same answer, and it is not green.
         status = "unknown";
       }
       // Logged, because "unknown" is invisible in the UI by design (a rule that
@@ -1842,15 +1864,15 @@ export class DeckPanel {
   /** Is the review strip live? Two gates, not three: the session's own Review
    * queue flag (seeded from the persistent `reviewRequests` setting, then held
    * until `onConfigChanged` re-seeds it — re-reading config here would stomp
-   * the flag on every poll tick), and `ghReady()` — which already folds the
-   * session PR-facts flag and a usable gh together, so there is no condition
+   * the flag on every poll tick), and `forgeReady()` — which already folds the
+   * session PR-facts flag and a usable forge together, so there is no condition
    * here that varies independently of PR facts. */
   private reviewsEnabled(): boolean {
-    return this.reviewQueue && this.ghReady();
+    return this.reviewQueue && this.forgeReady();
   }
 
-  /** Queue a search when the cache has aged out. Never awaited — a hanging `gh`
-   * must not stall the board's git and transcript reads. The post that reflects
+  /** Queue a search when the cache has aged out. Never awaited — a hanging forge
+   * call must not stall the board's git and transcript reads. The post that reflects
    * the outcome is fired from here rather than unconditionally from `refresh()`:
    * with a search in flight, an immediate post would either find `reviewCache`
    * still null (nothing to show yet) or show the old entry with `stale` not yet
@@ -1868,8 +1890,8 @@ export class DeckPanel {
       return;
     }
     // Gate on the data clock (above) *and* the attempt clock: a failing search
-    // never advances `fetchedAt`, so the data clock alone would re-queue `gh api
-    // graphql` on every 6s poll tick forever once `gh` starts failing — rate
+    // never advances `fetchedAt`, so the data clock alone would re-queue the
+    // review search on every 6s poll tick forever once the CLI starts failing — rate
     // limited, network down, SSO expired. This clock tracks "how recently did we
     // try", independently of "how old is the data we are showing".
     if (this.reviewLastAttemptAt !== null && nowMs - this.reviewLastAttemptAt < ttlMs) return;
@@ -1877,7 +1899,7 @@ export class DeckPanel {
       this.reviewLastAttemptAt = Date.now();
       let res: { issueCount: number; requests: ReviewRequest[] } | null;
       try {
-        res = await this.reviewProvider.search();
+        res = await this.forge.reviews.search();
       } catch {
         // A provider must never throw, but if one does, this must still not
         // leave it unhandled: RefreshQueue swallows a rejected job (the queue
@@ -1941,7 +1963,7 @@ export class DeckPanel {
 
   private postReviews(): void {
     if (!this.reviewsEnabled()) {
-      // The strip just went off (reviewRequests, PR facts, or gh going
+      // The strip just went off (reviewRequests, PR facts, or the forge CLI going
       // unusable) — actively say so, rather than merely staying silent. Silence
       // here used to leave the webview's last posted rows on screen exactly as
       // they were: frozen, but with their write buttons still live, so a click
@@ -1991,11 +2013,33 @@ export class DeckPanel {
   private async reviewDetail(id: string): Promise<void> {
     const req = this.reviewCache?.requests.find((r) => r.id === id);
     if (!req) return;
-    const detail = await this.reviewProvider.detail(req.repo, req.number);
+    const detail = await this.forge.reviews.detail(req.repo, req.number);
     if (!detail) {
       this.log(`deck: review detail ${id} failed`);
       this.post({ type: "deck:reviewDetail", id, detail: null });
       return;
+    }
+    // A forge whose queue call carries no diff stats — or no pipeline status; GitLab's
+    // MR list carries neither — fills them here instead. Merged into the cached request
+    // rather than posted separately, so the strip's existing size and CI chips render
+    // them with no webview change at all.
+    //
+    // Re-found rather than reusing `req`, and NOT redundant: the `await` above is a
+    // detail call on `prQueue`, which runs up to four jobs at once under distinct
+    // keys — so a `"reviews"` search can complete mid-flight and replace
+    // `this.reviewCache` wholesale. `req` would then belong to the discarded array
+    // and these would be written where nothing reads them. Both facts are still valid
+    // for the fresh row: same repo, same number.
+    if (detail.size || detail.ci !== undefined) {
+      const cached = this.reviewCache?.requests.find((r) => r.id === id);
+      if (cached) {
+        if (detail.size) Object.assign(cached, detail.size);
+        // `!== undefined`, not truthiness: `"none"` is a real verdict here — the MR
+        // has no pipeline — and a forge that says so must be able to say it. Absent
+        // entirely on a forge whose queue call already filled the chip, which is why
+        // the merge never clobbers GitHub's own search-supplied value.
+        if (detail.ci !== undefined) cached.ci = detail.ci;
+      }
     }
     this.post({ type: "deck:reviewDetail", id, detail });
   }
@@ -2074,7 +2118,7 @@ export class DeckPanel {
       return;
     }
     // The strip itself can go dark (PR facts toggled off, reviewRequests
-    // flipped, gh going unusable) without the row's own message queue draining
+    // flipped, the forge CLI going unusable) without the row's own message queue draining
     // instantly — `reviewById` below still resolves from `reviewCache`, which
     // `postReviews`'s "cleared" post never touches. Without this, a submit that
     // was already in the webview's outbox before the toggle could still reach
@@ -2113,9 +2157,16 @@ export class DeckPanel {
     this.reviewSubmitsInFlight.add(id);
     try {
       const label = VERB_LABEL[verb];
+      // GitLab has no stable "request changes" verb, so ours is a note plus a
+      // withdrawal of any standing approval. That is materially different from
+      // GitHub's, and the person clicking deserves to know before they click.
+      const detail =
+        verb === "request-changes" && !this.forge.caps.changesRequested
+          ? `${this.forge.label} has no "request changes" review, so this posts your message as a comment and withdraws your approval if you had one.`
+          : undefined;
       const answer = await vscode.window.showWarningMessage(
         `${label} on ${req.repo}#${req.number}?`,
-        { modal: true },
+        { modal: true, detail },
         label,
       );
       if (answer !== label) {
@@ -2128,7 +2179,7 @@ export class DeckPanel {
         ? `${body.trim()}\n\n${reviewProvenance(resolvedProvider(cfg.agentProvider))}`
         : body;
       this.log(`deck: submitting ${verb} on ${req.repo}#${req.number}`);
-      const res = await this.reviewProvider.submit(req.repo, req.number, verb, text);
+      const res = await this.forge.reviews.submit(req.repo, req.number, verb, text);
       if (!res.ok) {
         this.log(`deck: review submit failed: ${res.message}`);
         // Neutral prefix, on purpose: neither "GitHub refused:" nor "Review not
@@ -2198,7 +2249,7 @@ export class DeckPanel {
     const projectsRoot = claudeProjectsRoot();
     const now = Date.now();
     const authed = await this.connector.isAuthenticated();
-    const ghReady = this.ghReady();
+    const forgeReady = this.forgeReady();
     const liveWindows = readLiveWindows(defaultWindowsDir());
     const openIdentities = new Set(liveWindows.map((w) => w.identity));
 
@@ -2376,7 +2427,7 @@ export class DeckPanel {
       const prs: PrEntryMap = Object.fromEntries(
         prRepos.filter((r) => stored[r.name] && prEligible(r)).map((r) => [r.name, stored[r.name]]),
       );
-      if (ghReady && !prLess) {
+      if (forgeReady && !prLess) {
         const ttlMs = getConfig().prFactsTtlSeconds * 1000;
         for (const repo of prRepos) {
           if (prEligible(repo) && isStale(prs[repo.name], ttlMs, now)) {
@@ -2575,7 +2626,10 @@ export class DeckPanel {
       this.post({
         type: "deck:runs",
         runs,
-        ghNote: this.prFacts && this.ghGap ? GH_NOTES[this.ghGap.kind] : null,
+        // Wire field name kept as `ghNote` even though the text is now forge-aware:
+        // it is a webview message key, and renaming it would need a matching
+        // webview change for no user-visible gain.
+        ghNote: this.prFacts && this.forgeGap ? FORGE_NOTES[this.forgeGap.kind](this.forge.cli.name) : null,
         // Read fresh on every post rather than cached in a field: it is a plain
         // string setting a user can edit mid-session, and the board re-posts often
         // enough that this is the whole of "keep it live".
@@ -2626,14 +2680,14 @@ export class DeckPanel {
       // Dropped either way. Off: the verdicts must not outlive the source they came
       // from — `branchCiFor` already refuses to serve them, and forgetting them means
       // switching back on cannot re-serve a stamp from before the switch either. On:
-      // a fresh start is the point, same as re-probing gh below.
+      // a fresh start is the point, same as re-probing the forge below.
       this.branchCi.clear();
       this.branchCiAmbiguous.clear();
-      // The user may have run `gh auth login` since the last probe; a stale gap
-      // would otherwise keep PR facts dark for the rest of the session.
+      // The user may have (re-)authenticated the forge's CLI since the last probe;
+      // a stale gap would otherwise keep PR facts dark for the rest of the session.
       if (cfg.prFacts) {
-        this.ghGap = undefined;
-        this.ghProbe = null;
+        this.forgeGap = undefined;
+        this.forgeProbe = null;
       }
       touched = true;
     }
@@ -2693,9 +2747,9 @@ export class DeckPanel {
         this.postReviews();
         break;
       case "deck:reviewExpand":
-        // Routed through the same queue every other `gh` call uses (concurrency
+        // Routed through the same queue every other forge call uses (concurrency
         // capped at 4, deduped by key) — awaited directly here, expanding rows in
-        // quick succession could fork an unbounded number of `gh` processes, one
+        // quick succession could fork an unbounded number of CLI processes, one
         // per row, with nothing capping how many run at once.
         this.prQueue.push(`detail:${m.id}`, () => this.reviewDetail(m.id));
         break;
@@ -2826,19 +2880,34 @@ export class DeckPanel {
           // future toggle would want it back — but its "needs Live signal" branch is
           // unreachable from here today. See the note in the ledger: collapsing that
           // branch is a deliberate follow-up, not something to fold into a merge.
-          const dead = unfirableRules(flow, { liveSignal: true, prFacts: this.prFacts });
+          // `forge: this.forge.caps` is what makes the "forge-unsupported" branch
+          // reachable at all: with no `forge` passed, `armability` assumes a fully
+          // capable one (GitHub, the default), so a `changes-requested` rule only
+          // ever reads as unfirable here once the panel actually knows its forge
+          // cannot report that.
+          const dead = unfirableRules(flow, { liveSignal: true, prFacts: this.prFacts, forge: this.forge.caps });
           if (dead.length > 0) {
             const live = dead.filter((d) => d.needs === "live-signal").length;
             const pr = dead.filter((d) => d.needs === "pr-facts").length;
-            const parts: string[] = [];
-            if (pr > 0) parts.push(`${pr} need${pr === 1 ? "s" : ""} PR facts`);
-            if (live > 0) parts.push(`${live} need${live === 1 ? "s" : ""} the Live signal`);
+            const forge = dead.filter((d) => d.needs === "forge-unsupported").length;
+            const offParts: string[] = [];
+            if (pr > 0) offParts.push(`${pr} need${pr === 1 ? "s" : ""} PR facts`);
+            if (live > 0) offParts.push(`${live} need${live === 1 ? "s" : ""} the Live signal`);
+            const reasons: string[] = [];
+            if (offParts.length > 0) {
+              reasons.push(`${offParts.join(" and ")}, which ${offParts.length > 1 ? "are" : "is"} off`);
+            }
+            // Its own label is not this module's to name — that lives behind the
+            // forge boundary — so this names the capability instead. Worded to read
+            // naturally alongside the "needs PR facts"/"needs the Live signal"
+            // siblings above, rather than as an em-dash aside.
+            if (forge > 0) reasons.push(`${forge} rule${forge === 1 ? "'s" : "s'"} forge cannot report this`);
             this.post({
               type: "toast",
               level: "info",
-              message: `${flow.name} armed — but ${parts.join(" and ")}, which ${
-                parts.length > 1 ? "are" : "is"
-              } off, so ${dead.length === 1 ? "that rule" : "those rules"} can never fire.`,
+              message: `${flow.name} armed — but ${reasons.join("; ")}, so ${
+                dead.length === 1 ? "that rule" : "those rules"
+              } can never fire.`,
             });
           }
         } else {

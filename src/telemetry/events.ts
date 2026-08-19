@@ -132,6 +132,9 @@ export interface SettingsSnapshot {
   /** A registered connector id, or "invalid". Validated against the registry, so
    * a contributor's connector is never silently reported as invalid. */
   task_source: string;
+  /** A registered forge id, or "invalid". Validated against the registry, so
+   * a contributor's forge is never silently reported as invalid. */
+  forge: string;
   worktree: "ask" | "always" | "never" | "invalid";
   remote_control: "off" | "on" | "ask" | "invalid";
   default_filter: "unassigned" | "mysprint" | "mine" | "sprint" | "backlog" | "invalid";
