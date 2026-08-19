@@ -16,7 +16,7 @@ const healthy = (): DoctorInputs => ({
   reposRoot: { path: "/home/j/projects", exists: true, repos: 12, gitRepos: 11 },
   workspaceDir: { path: "/home/j/projects", exists: true, writable: true },
   prFacts: true,
-  gh: { gap: null, foundAt: "/opt/homebrew/bin/gh" },
+  forge: { label: "GitHub", cli: "gh", installUrl: "https://cli.github.com", gap: null, foundAt: "/opt/homebrew/bin/gh" },
   claudeCode: { installed: true, version: "2.1.220" },
   claudeProjectsReadable: true,
   runs: 7,
@@ -167,7 +167,19 @@ describe("runChecks — local environment", () => {
 
 describe("runChecks — gh", () => {
   it("fails a missing gh with a link to install it", () => {
-    const c = find({ ...healthy(), gh: { gap: { kind: "missing", detail: "spawn ENOENT" }, foundAt: null } }, "gh");
+    const c = find(
+      {
+        ...healthy(),
+        forge: {
+          label: "GitHub",
+          cli: "gh",
+          installUrl: "https://cli.github.com",
+          gap: { kind: "missing", detail: "spawn ENOENT" },
+          foundAt: null,
+        },
+      },
+      "gh",
+    );
     expect(c.status).toBe("fail");
     expect(c.detail).toContain("not installed");
     expect(c.action).toEqual({ kind: "external", url: "https://cli.github.com", label: "Install gh" });
@@ -175,7 +187,16 @@ describe("runChecks — gh", () => {
 
   it("distinguishes a gh that is installed but signed out", () => {
     const c = find(
-      { ...healthy(), gh: { gap: { kind: "signed-out", detail: "auth status: exit 1" }, foundAt: "/usr/bin/gh" } },
+      {
+        ...healthy(),
+        forge: {
+          label: "GitHub",
+          cli: "gh",
+          installUrl: "https://cli.github.com",
+          gap: { kind: "signed-out", detail: "auth status: exit 1" },
+          foundAt: "/usr/bin/gh",
+        },
+      },
       "gh",
     );
     expect(c.status).toBe("fail");
@@ -184,7 +205,7 @@ describe("runChecks — gh", () => {
   });
 
   it("skips gh entirely when PR facts are switched off", () => {
-    const c = find({ ...healthy(), prFacts: false, gh: undefined }, "gh");
+    const c = find({ ...healthy(), prFacts: false }, "gh");
     expect(c.status).toBe("skip");
     expect(c.detail).toContain("prFacts");
   });
@@ -287,7 +308,6 @@ describe("ordering", () => {
       gitOnPath: false,
       claudeCode: { installed: true, version: "2.0.4" },
       prFacts: false,
-      gh: undefined,
     });
     const rank = checks.map((c) => c.status);
     const order = ["fail", "warn", "skip", "ok"];
@@ -367,5 +387,41 @@ describe("runChecks — source-agnostic rows", () => {
     const c = find({ ...healthy(), endpoint: "" }, "Site configured");
     expect(c.status).toBe("fail");
     expect(c.detail).toBe("agentFlow.jira.baseUrl is empty");
+  });
+});
+
+describe("runChecks — a GitLab forge", () => {
+  const gitlab = {
+    label: "GitLab", cli: "glab", installUrl: "https://gitlab.com/gitlab-org/cli",
+    gap: null, foundAt: "/opt/homebrew/bin/glab",
+  };
+
+  it("groups the row under GitLab and labels it with glab, naming where it was found", () => {
+    const c = find({ ...healthy(), forge: gitlab }, "glab");
+    expect(c.group).toBe("GitLab");
+    expect(c.status).toBe("ok");
+    // Naming WHERE the binary was found is the most valuable line in the report: a
+    // Homebrew CLI invisible to the extension host's bare launchd PATH reads, to a
+    // signed-in user, as the Deck simply being broken.
+    expect(c.detail).toContain("/opt/homebrew/bin/glab");
+  });
+
+  it("offers GitLab's own install link when glab is missing", () => {
+    const c = find({ ...healthy(), forge: { ...gitlab, gap: { kind: "missing" as const, detail: "spawn ENOENT" }, foundAt: null } }, "glab");
+    expect(c.status).toBe("fail");
+    expect(c.action).toEqual({ kind: "external", url: "https://gitlab.com/gitlab-org/cli", label: "Install glab" });
+  });
+
+  it("skips under the forge's own group and label when PR facts are off", () => {
+    const c = find({ ...healthy(), prFacts: false, forge: gitlab }, "glab");
+    expect(c.group).toBe("GitLab");
+    expect(c.status).toBe("skip");
+    expect(c.detail).toContain("prFacts");
+  });
+
+  it("replaces the GitHub group entirely — a GitLab user sees no GitHub row", () => {
+    const groups = new Set(runChecks({ ...healthy(), forge: gitlab }).map((c) => c.group));
+    expect(groups.has("GitLab")).toBe(true);
+    expect(groups.has("GitHub")).toBe(false);
   });
 });

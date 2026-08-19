@@ -5,7 +5,7 @@ import * as path from "path";
 import { getConfig } from "./config";
 import type { TaskConnector } from "./tasks/provider";
 import { discoverRepos } from "./engine/repos";
-import { probeGh } from "./engine/pr/provider";
+import { resolveForge } from "./engine/forge/registry";
 import { resolveBin } from "./engine/pr/which";
 import { defaultRunsDir, readRuns } from "./engine/runs";
 import {
@@ -48,7 +48,11 @@ export interface DoctorDeps {
   hasCredentials: () => Promise<boolean>;
   probe: () => Promise<{ auth?: AuthProbe; scope?: ProjectProbe }>;
   which: (bin: string) => string | null;
-  gh: () => Promise<{ kind: "missing" | "signed-out"; detail: string } | null>;
+  /** Describing the forge is cheap — a config read plus a registry lookup — so it
+   *  is always resolved. Probing it is not, so `forgeProbe` is its own member and
+   *  `collectInputs` gates the call on `prFacts`. */
+  forge: () => { label: string; cli: string; installUrl: string };
+  forgeProbe: () => Promise<{ kind: "missing" | "signed-out"; detail: string } | null>;
   statDir: (p: string) => { exists: boolean; writable: boolean };
   repos: () => { repos: number; gitRepos: number };
   claudeExtension: () => { installed: boolean; version: string | null };
@@ -75,6 +79,11 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
   const { auth: authProbe, scope: projectProbe } = hasCredentials ? await d.probe() : {};
 
   const repos = d.repos();
+  // Resolved unconditionally — describing the forge is cheap — while the probe
+  // itself stays gated on `prFacts` so a Deck with PR facts off does not pay for
+  // an `auth status` call.
+  const f = d.forge();
+  const forge = { ...f, gap: cfg.prFacts ? await d.forgeProbe() : null, foundAt: d.which(f.cli) };
   return {
     sourceLabel: cfg.sourceLabel,
     scopeNoun: cfg.scopeNoun,
@@ -90,7 +99,7 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
     reposRoot: { path: cfg.reposRoot, exists: d.statDir(cfg.reposRoot).exists, ...repos },
     workspaceDir: { path: cfg.workspaceDir, ...d.statDir(cfg.workspaceDir) },
     prFacts: cfg.prFacts,
-    gh: cfg.prFacts ? { gap: await d.gh(), foundAt: d.which("gh") } : undefined,
+    forge,
     claudeCode: d.claudeExtension(),
     claudeProjectsReadable: d.claudeProjectsReadable(),
     runs: d.runs(),
@@ -224,7 +233,14 @@ export function defaultDeps(connector: TaskConnector, log: (message: string) => 
     hasCredentials: () => connector.isAuthenticated(),
     probe: () => connector.probe(),
     which: (bin) => resolveBin(bin),
-    gh: () => probeGh(),
+    // `() => {}` for the logger: this file has none in scope, and a fallback-to-
+    // github line for an unknown `agentFlow.forge` value is already reported by
+    // the Deck panel's own `resolveForge` call.
+    forge: () => {
+      const { label, cli } = resolveForge(getConfig().forge, () => {});
+      return { label, cli: cli.name, installUrl: cli.installUrl };
+    },
+    forgeProbe: () => resolveForge(getConfig().forge, () => {}).probe(),
     statDir,
     repos: () => {
       const c = cfg();
