@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { exec } from "child_process";
-import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentProvider } from "./config";
+import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentFlowConfig, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
@@ -79,6 +79,21 @@ const GH_NOTES: Record<GhGap["kind"], string> = {
  * drafted it. */
 export const reviewProvenance = (p: AgentProvider): string =>
   `_Drafted with ${providerLabel(p)} via Agent Flow Deck._`;
+
+/** The agent an UNATTENDED Deck path actually seeds, for its receipt.
+ *
+ *  Both such paths pin `claude-code` — nothing there can answer a picker — so `ask`
+ *  really is Claude Code, and so is `claude-code` itself. But a pin is read only under
+ *  `ask` (see `OpenRequest.provider`): a fixed preference still wins, so a `cursor`
+ *  user's rule genuinely starts Cursor and the receipt has to say so.
+ *
+ *  `copilot` is deliberately NOT resolved here. Its receipt has said "Claude Code"
+ *  since long before Cursor existed as a value, and thousands of Copilot users read
+ *  that string today; correcting it is a separate change from adding a new value that
+ *  would otherwise ship wrong on day one. */
+function unattendedAgentLabel(cfg: { agentProvider: AgentFlowConfig["agentProvider"] }): string {
+  return cfg.agentProvider === "cursor" ? providerLabel("cursor") : providerLabel("claude-code");
+}
 
 const VERB_LABEL: Record<ReviewVerb, string> = {
   approve: "Approve",
@@ -1230,7 +1245,7 @@ export class DeckPanel {
       receipt: {
         level: "success",
         message: `${flow.name}: launched ${node.ticketKey} in ${res.repo}.${
-          cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : ""
+          cfg.seedAgent ? ` ${unattendedAgentLabel(cfg)} pre-seeded — press Enter to start.` : ""
         }`,
       },
     };
@@ -1342,7 +1357,7 @@ export class DeckPanel {
       receipt: {
         level: "success",
         message: `${flow.name}: seeded another agent in ${node.repo}.${
-          cfg.seedAgent ? " Claude Code pre-seeded — press Enter to start." : ""
+          cfg.seedAgent ? ` ${unattendedAgentLabel(cfg)} pre-seeded — press Enter to start.` : ""
         }`,
       },
     };

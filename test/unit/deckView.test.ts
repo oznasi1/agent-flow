@@ -4795,6 +4795,31 @@ describe("a met launch rule acts", () => {
     expect(w.edges[0].firedNote).toContain("ASM-12");
   });
 
+  // ── the receipt's agent name ────────────────────────────────────────────────
+  // An Orchestrator launch resolves the agent from the SETTING (`agentName` on the
+  // request says so), so `cursor` really does start Cursor and the hardcoded copy
+  // became wrong when this branch added that value.
+  it("names Cursor in the launch receipt when Cursor is configured", async () => {
+    h.agentProvider = "cursor";
+    const { p, send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toContain("Cursor pre-seeded — press Enter to start.");
+  });
+
+  it.each([["claude-code"], ["ask"], ["copilot"]])(
+    "keeps the launch receipt saying Claude Code under %s",
+    async (agentProvider) => {
+      // `claude-code` and `ask` are right — an unattended launch pins Claude Code.
+      // `copilot` is wrong and stays wrong: that string predates this branch.
+      h.agentProvider = agentProvider as typeof h.agentProvider;
+      const { p, send } = await warmed([launchFlow()]);
+      await send({ type: "deck:refresh" });
+      const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
+      expect(toast.message).toContain("Claude Code pre-seeded — press Enter to start.");
+    },
+  );
+
   it("does nothing at all when another window holds the flows lock", async () => {
     const { p, send } = await warmed([launchFlow()]);
     h.acquire.mockReturnValue(false);
@@ -5896,6 +5921,32 @@ describe("a met seed rule acts", () => {
     expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "ASM-1", repo: "bite-me" });
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success" && /bite-me/.test(m.message ?? ""))).toBe(true);
   });
+
+  // ── the receipt's agent name ────────────────────────────────────────────────
+  // `provider: "claude-code"` here is a PIN, read only under `ask` — so a `cursor`
+  // user's unattended seed really does start Cursor, and the hardcoded "Claude Code"
+  // in the receipt became wrong the moment this branch added that value.
+  it("names Cursor in the seed receipt when Cursor is configured", async () => {
+    h.agentProvider = "cursor";
+    const { p, send } = await warmed([seedFlow()]);
+    await send({ type: "deck:refresh" });
+    const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toContain("Cursor pre-seeded — press Enter to start.");
+  });
+
+  it.each([["claude-code"], ["ask"], ["copilot"]])(
+    "keeps the seed receipt saying Claude Code under %s",
+    async (agentProvider) => {
+      // `claude-code` and `ask` are simply right — the pin resolves to Claude Code on
+      // both. `copilot` is wrong and stays wrong: that string predates this branch,
+      // and thousands of Copilot users already read it.
+      h.agentProvider = agentProvider as typeof h.agentProvider;
+      const { p, send } = await warmed([seedFlow()]);
+      await send({ type: "deck:refresh" });
+      const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
+      expect(toast.message).toContain("Claude Code pre-seeded — press Enter to start.");
+    },
+  );
 
   it("composes the edge's note into the prompt template handed to openWorkspace", async () => {
     const note = "This place already has context — just wire up the retry logic.";
