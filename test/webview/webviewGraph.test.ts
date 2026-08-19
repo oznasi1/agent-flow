@@ -156,6 +156,53 @@ describe("the webview bundles are Node-free", () => {
     expect(NODE_BUILTINS).toContain(hit!.builtin);
   });
 
+  // The forge modules spawn processes, and `armability.ts` needs a forge FACT
+  // while declaring (in its own header comment on `SourceState.forge`) that it
+  // must stay clean of `../forge/` — which is why that fact is passed in as
+  // plain data rather than an import. This proves the guard would catch it if
+  // someone "simplified" that into an import instead.
+  //
+  // The walk below starts AT `armability.ts` rather than at `src/webview/deck.tsx`
+  // (the way the sibling case above does): as of this task, nothing under
+  // `src/webview/` actually imports `armability.ts` yet — it is called only from
+  // the host-side `deckView.ts`, which reduces its output to a plain toast string
+  // before it ever reaches the webview. So `armability.ts` is not on any of the
+  // three `BROWSER_ENTRIES`' real graphs today, and starting from `deck.tsx` would
+  // never visit the override at all (proven: it returns `null`, not a false pass —
+  // this was caught by actually running this case, not assumed). Its own comment's
+  // promise is still a real constraint worth pinning, though — it explicitly
+  // anticipates being reachable from the webview, and a later task very plausibly
+  // wires `unfirableRules` into `OrchestratorDrawer.tsx` directly for client-side
+  // rendering. Starting the walk at the file itself tests exactly the property
+  // that comment claims: that armability.ts, if compiled for a browser target,
+  // stays clean.
+  //
+  // `src/engine/forge/types.ts` is deliberately not the file this synthesizes the
+  // bad import into. It holds only interfaces, and today it adds no edge at all —
+  // all three of its imports are written `import type`, which esbuild erases, so
+  // the walker (like the real bundler) stops right there. But that safety belongs
+  // to the `type` keyword, not to "it's just interfaces": drop that keyword as a
+  // seemingly harmless tidy-up — it looks redundant on a file with no runtime code
+  // — and types.ts reaches `child_process` through `../pr/provider` exactly like
+  // every other file in this directory. It is no safer to import than the rest of
+  // `src/engine/forge/`; a later reader must not "fix" the `import type` on those
+  // three lines into a plain `import` and must not read this file's clean walk as
+  // license to import it as a value from webview-reachable code.
+  it("would catch armability.ts importing the forge registry", () => {
+    const rel = "src/engine/orchestrator/armability.ts";
+    const original = fs.readFileSync(path.join(REPO, rel), "utf8");
+    // Not a raw `.not.toContain("../forge/")`: this file's own doc comment on
+    // `SourceState.forge` names that literal path ("must not import `../forge/`"),
+    // so a substring check would fail on the comment before the guard is even
+    // exercised. Check the real edges instead, the same way the walker does.
+    expect(specifiersIn(original).some((s) => s.startsWith("../forge/"))).toBe(false); // the correct state
+    const broken = `import { resolveForge } from "../forge/registry";\n${original}`;
+    const hit = findBuiltin(rel, { [rel]: broken });
+    expect(hit).not.toBeNull();
+    expect(hit!.chain.some((f) => f.startsWith("src/engine/forge/"))).toBe(true);
+    expect(NODE_BUILTINS).toContain(hit!.builtin);
+  });
+
   // And that it does not simply flag every relative import: `import type` is erased
   // by esbuild, so types.ts's type-only reach into the host side is not an edge.
   it("does not follow an import type edge", () => {

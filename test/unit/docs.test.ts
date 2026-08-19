@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { CONNECTOR_IDS } from "../../src/tasks/registry";
+import { FORGE_IDS } from "../../src/engine/forge/registry";
 
 const read = (p: string) => fs.readFileSync(path.join(__dirname, "../..", p), "utf8");
 
@@ -34,5 +35,10 @@ describe("connector docs", () => {
     // is worse — it hard-fails inside the release commit itself, plausibly the very
     // commit that ships this work. Do not reinstate either one.
     expect(read("CHANGELOG.md")).toContain("agentFlow.taskSource");
+  });
+
+  it("documents every registered forge in docs/FORGES.md", () => {
+    const doc = read("docs/FORGES.md");
+    for (const id of FORGE_IDS) expect(doc).toContain(`\`${id}\``);
   });
 });
