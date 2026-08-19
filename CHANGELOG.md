@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`agentFlow.agentProvider` accepts `cursor`.** Seed a task straight into
+  Cursor's chat, or run `cursor-agent` in a terminal. Cursor only — a stored
+  `cursor` value falls back to Claude Code in every other editor, the same way
+  `copilot` already falls back outside VS Code. **Doctor** gains a Cursor group
+  alongside Copilot's.
+- **`agentFlow.agentProvider` accepts `ask`.** Pick the agent per launch instead
+  of fixing one setting. A batch asks once and uses that answer for every task
+  in it; Orchestrator rules and the Deck's unattended seed run with no picker to
+  show, so they always use Claude Code. Under `ask`, **Doctor** shows every
+  agent this host can run rather than guessing at one.
+
 ## [0.30.1] — 2026-08-18
 
 No functional change. Re-released so the packaged build can be installed over an

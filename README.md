@@ -412,7 +412,7 @@ repo, so they never get committed.
 | `agentFlow.stampLabelOnWrite` | `true` | Whether to stamp the provenance label on a Jira write, and whether a review body submitted from the Deck is marked as agent-drafted (a fixed line, distinct from `agentFlow.provenanceLabel`). |
 | `agentFlow.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
 | `agentFlow.seedAgent` | `true` | Pre-fill the agent's panel after opening. |
-| `agentFlow.agentProvider` | `claude-code` | Which agent starts a session. `copilot` uses GitHub Copilot and works **only in VS Code** — in Cursor and other forks a stored `copilot` value falls back to Claude Code. Copilot sessions do not appear as live agents on the Deck (which reads Claude Code's session files), and **Doctor** reports on whichever provider is configured. |
+| `agentFlow.agentProvider` | `claude-code` | Which agent starts a session: `claude-code`, `copilot`, `cursor`, or `ask`. `copilot` uses GitHub Copilot and works **only in VS Code**; `cursor` uses Cursor's built-in agent and works **only in Cursor** — each falls back to Claude Code in the other editor. `ask` prompts you to pick per launch; a **batch** launch asks once and uses that answer for every task in it. Orchestrator rules and the Deck's unattended seed (a stale plan reopened with no picker to show) always use Claude Code, since nothing there can answer a prompt. Neither Copilot nor Cursor sessions appear as live agents on the Deck, which reads Claude Code's session files — and **Doctor** reports rows for whichever provider(s) are actually in play (every host agent, under `ask`). One more gap under `ask`: the brief file handed to the agent (and an Orchestrator child task's brief) names Claude Code even when a different agent was actually picked — only the batch confirmation and the post-launch toasts name the real one. |
 | `agentFlow.agentSurface` | `extension` | Where a session starts: the agent's chat panel, or `terminal` to run its CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter. |
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
 | `agentFlow.prFacts` | `true` | Read each in-flight task's PR state from GitHub via the `gh` CLI and show it on the Deck's cards. |
@@ -506,13 +506,15 @@ this off.
 
 Three settings answer three different questions. `agentFlow.openIn` decides **which
 window** a task lands in. `agentFlow.agentProvider` decides **which agent** starts the
-session — Claude Code, or Copilot in VS Code. `agentFlow.agentSurface` decides **what
-starts the session** once it's there:
+session — Claude Code, Copilot in VS Code, Cursor in Cursor, or `ask` to pick per
+launch. `agentFlow.agentSurface` decides **what starts the session** once it's there:
 
 - `extension` (default) — the agent's chat panel, prompt pre-filled: the Claude Code
-  panel, or Copilot Chat in agent mode when `agentFlow.agentProvider` is `copilot`.
-- `terminal` — an integrated terminal named `Claude · <KEY>` (or `Copilot · <KEY>`)
-  running the agent's CLI (`claude`, or `copilot`), prompt pre-typed.
+  panel, Copilot Chat in agent mode when `agentFlow.agentProvider` resolves to
+  `copilot`, or Cursor's chat when it resolves to `cursor`.
+- `terminal` — an integrated terminal named `Claude · <KEY>` (or `Copilot · <KEY>` /
+  `Cursor · <KEY>`) running the agent's CLI (`claude`, `copilot`, or `cursor-agent`),
+  prompt pre-typed.
 
 Either way you press Enter to start, and both work for every launch path: taking a
 task, batch launches, Explore, Notepad, and **Address PR** — with one exception. A

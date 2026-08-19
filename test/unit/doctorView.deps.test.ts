@@ -73,6 +73,12 @@ describe("defaultDeps — the config slice", () => {
       ...CFG,
     });
   });
+
+  it("passes agentProvider through unresolved — collectInputs' hostProviders is what lets Doctor show every host agent under ask, not a guess made here", () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" } as never);
+    const connector = fakeConnector();
+    expect(defaultDeps(connector, () => undefined).config().agentProvider).toBe("ask");
+  });
 });
 
 describe("defaultDeps — delegation", () => {

@@ -1,7 +1,7 @@
 {
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
-  "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a coding agent already briefed — Claude Code, or GitHub Copilot.",
+  "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a coding agent already briefed — Claude Code, GitHub Copilot, or Cursor.",
   "version": "0.30.1",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",
@@ -33,6 +33,8 @@
     "ai",
     "copilot",
     "github copilot",
+    "cursor",
+    "cursor agent",
     "agent orchestration",
     "git worktree",
     "worktree",

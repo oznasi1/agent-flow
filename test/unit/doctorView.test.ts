@@ -122,6 +122,31 @@ describe("collectInputs — the agent provider", () => {
     expect(chatCommand).toHaveBeenCalled();
     expect(i.chatCommand).toEqual({ available: true });
   });
+
+  it("forwards ask unresolved — runChecks decides what that means, not collectInputs", async () => {
+    const cfg = deps().config;
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "ask" }) }));
+    expect(i.agentProvider).toBe("ask");
+  });
+
+  it("also probes the chat command under ask — any host agent could be the one that runs", async () => {
+    const chatCommand = vi.fn(async () => ({ available: true }));
+    const cfg = deps().config;
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "ask" }), chatCommand }));
+    expect(chatCommand).toHaveBeenCalled();
+    expect(i.chatCommand).toEqual({ available: true });
+  });
+
+  it("supplies the host's agent providers so runChecks can show ask's full set", async () => {
+    env.uriScheme = "vscode";
+    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "copilot"]);
+
+    env.uriScheme = "cursor";
+    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "cursor"]);
+
+    env.uriScheme = "windsurf";
+    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code"]);
+  });
 });
 
 describe("showDoctor — the QuickPick", () => {

@@ -35,6 +35,11 @@ export interface Check {
   action?: DoctorAction;
 }
 
+/** Inlined rather than importing `AgentProvider` from src/config.ts — this module
+ *  has zero imports by design, staying free of `vscode` and testable as a plain
+ *  table. */
+type Provider = "claude-code" | "copilot" | "cursor";
+
 /** A live `GET /myself`. Distinguishing these three is the whole reason Doctor
  *  cannot reuse `getMyself()`, which collapses every failure to `null`. */
 export type AuthProbe =
@@ -75,11 +80,17 @@ export interface DoctorInputs {
   runs: number;
   /** Which agent seeds sessions — decides whether the Claude Code rows or a
    *  chat-agent row (Copilot or Cursor) appear. Already host-guarded by
-   *  readAgentProvider, so this is never "copilot" outside VS Code. Inlined
-   *  rather than imported from src/config.ts's `AgentProvider` — this module
-   *  has zero imports by design, staying free of `vscode` and testable as a
-   *  plain table. */
-  agentProvider: "claude-code" | "copilot" | "cursor";
+   *  readAgentProviderSetting, so `"copilot"`/`"cursor"` are never present
+   *  outside their host. `"ask"` means the choice isn't made until launch, so
+   *  every agent this host can run gets its rows — see `hostProviders` below.
+   *  Inlined rather than imported from src/config.ts's `AgentProviderSetting` —
+   *  this module has zero imports by design, staying free of `vscode` and
+   *  testable as a plain table. */
+  agentProvider: Provider | "ask";
+  /** The agents this host can actually start, in picker order — src/config.ts's
+   *  `hostProviders()`, supplied by the caller since this module cannot call it
+   *  itself. Only consulted when `agentProvider` is `"ask"`. */
+  hostProviders: Provider[];
   /** Probed by command registration, not extension id: chat is built into VS Code
    *  and Copilot ships bundled in some builds, so an id check would false-negative.
    *  Cursor registers the same command, which is why one field and one probe serve
@@ -247,15 +258,20 @@ function ghChecks(i: DoctorInputs): Check[] {
 }
 
 /** Picks the Claude Code rows, or a chat-agent row plus the Claude session-files
- *  row, by which agent is configured. The session-files row runs for either
+ *  row, by which agent is configured. The session-files row runs for any
  *  non-Claude provider — it's about the Deck's live signal, which reads
  *  `~/.claude/projects` regardless of which agent seeds sessions, and Cursor's
  *  composer sessions don't show up there, so the row still has to explain
- *  itself under Cursor too. */
+ *  itself under Cursor too.
+ *
+ *  Under `ask` the answer is not known until launch time, so every agent this
+ *  host can run gets its rows — a user about to be asked needs all of the
+ *  answers, not one of them. */
 function agentChecks(i: DoctorInputs): Check[] {
-  return i.agentProvider === "claude-code"
-    ? claudeChecks(i)
-    : [...chatChecks(i, i.agentProvider), ...claudeSessionChecks(i)];
+  if (i.agentProvider === "claude-code") return claudeChecks(i);
+  if (i.agentProvider !== "ask") return [...chatChecks(i, i.agentProvider), ...claudeSessionChecks(i)];
+  const others = i.hostProviders.filter((p): p is Exclude<Provider, "claude-code"> => p !== "claude-code");
+  return [...claudeChecks(i), ...others.flatMap((p) => chatChecks(i, p)), ...claudeSessionChecks(i)];
 }
 
 /** The chat-panel row for whichever non-Claude agent is configured. Both Copilot
@@ -265,7 +281,7 @@ function agentChecks(i: DoctorInputs): Check[] {
  *  text is unchanged from before this row was shared (pinned by doctor.test.ts's
  *  "agent checks by provider" suite); Cursor's agent ships built into the editor,
  *  so its row carries no action to point at. */
-function chatChecks(i: DoctorInputs, provider: "copilot" | "cursor"): Check[] {
+function chatChecks(i: DoctorInputs, provider: Exclude<Provider, "claude-code">): Check[] {
   const ok = i.chatCommand.available;
   if (provider === "copilot") {
     return [

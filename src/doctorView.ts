@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { getConfig, type AgentProvider } from "./config";
+import { getConfig, hostProviders, type AgentProviderSetting } from "./config";
 import type { TaskConnector } from "./tasks/provider";
 import { discoverRepos } from "./engine/repos";
 import { probeGh } from "./engine/pr/provider";
@@ -35,7 +35,7 @@ export interface DoctorConfig {
   workspaceDir: string;
   repoBlocklist: string[];
   prFacts: boolean;
-  agentProvider: AgentProvider;
+  agentProvider: AgentProviderSetting;
 }
 
 /** Every outside-world touch Doctor makes, injected. `collectInputs` is then pure
@@ -95,7 +95,9 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
     claudeProjectsReadable: d.claudeProjectsReadable(),
     runs: d.runs(),
     agentProvider: cfg.agentProvider,
-    // Only probed when it can matter — the Claude Code path must not pay for it.
+    hostProviders: hostProviders(),
+    // Probed whenever a chat-panel agent could be the one that runs — which under
+    // `ask` is any host that offers one.
     chatCommand: cfg.agentProvider !== "claude-code" ? await d.chatCommand() : { available: false },
   };
 }
@@ -217,13 +219,11 @@ export function defaultDeps(connector: TaskConnector, log: (message: string) => 
       workspaceDir: c.workspaceDir,
       repoBlocklist: c.repoBlocklist,
       prFacts: c.prFacts,
-      // Doctor reports the agent a launch would actually start, so `ask` shows the
-      // Claude Code rows — which is what an unresolved `ask` seeds. DoctorInputs stays
-      // a concrete AgentProvider; src/engine/doctor.ts keeps its zero imports.
-      // Spelled out here rather than calling config.ts's `resolvedProvider`: this
-      // module's deps test mocks "./config" down to `getConfig` alone, so every extra
-      // value import from it breaks that mock.
-      agentProvider: c.agentProvider === "ask" ? "claude-code" : c.agentProvider,
+      // Passed through unresolved: under `ask` the answer isn't known until launch,
+      // so `collectInputs` hands `runChecks` every host agent's rows rather than
+      // guessing at one. `resolvedProvider` is not used here — that helper is for
+      // copy that must name one concrete agent before a launch has picked.
+      agentProvider: c.agentProvider,
     };
   };
   return {

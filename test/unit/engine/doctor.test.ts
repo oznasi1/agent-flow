@@ -21,6 +21,7 @@ const healthy = (): DoctorInputs => ({
   claudeProjectsReadable: true,
   runs: 7,
   agentProvider: "claude-code",
+  hostProviders: ["claude-code"],
   chatCommand: { available: false },
 });
 
@@ -287,6 +288,52 @@ describe("agent checks by provider", () => {
     const row = checks.find((c) => c.group === "Cursor");
     expect(row?.status).toBe("fail");
     expect(row?.action).toBeUndefined();
+  });
+});
+
+describe("agent checks under ask", () => {
+  it("under ask, shows the rows for every agent this host can run", () => {
+    const checks = runChecks({
+      ...healthy(),
+      agentProvider: "ask",
+      hostProviders: ["claude-code", "cursor"],
+      chatCommand: { available: true },
+    });
+    const groups = checks.map((c) => c.group);
+    expect(groups).toContain("Claude Code");
+    expect(groups).toContain("Cursor");
+    expect(groups).not.toContain("Copilot");
+  });
+
+  it("under ask in VS Code, shows Copilot's rows and not Cursor's", () => {
+    const checks = runChecks({
+      ...healthy(),
+      agentProvider: "ask",
+      hostProviders: ["claude-code", "copilot"],
+      chatCommand: { available: true },
+    });
+    const groups = checks.map((c) => c.group);
+    expect(groups).toContain("Copilot");
+    expect(groups).not.toContain("Cursor");
+  });
+
+  it("under ask, still shows the Claude Code rows themselves, not just the other agents'", () => {
+    const checks = runChecks({
+      ...healthy(),
+      agentProvider: "ask",
+      hostProviders: ["claude-code", "cursor"],
+      chatCommand: { available: true },
+    });
+    expect(checks.find((c) => c.label === "Claude Code installed")).toBeDefined();
+    expect(checks.find((c) => c.label === "Claude session files")).toBeDefined();
+  });
+
+  it("under ask with only Claude Code on this host, shows no chat-agent rows at all", () => {
+    const checks = runChecks({ ...healthy(), agentProvider: "ask", hostProviders: ["claude-code"] });
+    const groups = checks.map((c) => c.group);
+    expect(groups).not.toContain("Copilot");
+    expect(groups).not.toContain("Cursor");
+    expect(checks.find((c) => c.label === "Claude Code installed")).toBeDefined();
   });
 });
 
