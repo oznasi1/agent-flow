@@ -7,16 +7,31 @@ import type { Runner } from "../../../../../src/engine/pr/provider";
 const GLAB = "/opt/homebrew/bin/glab";
 const provider = (run: Runner) => new GlabProvider(run, () => GLAB);
 
+/** One row of a `merge_requests?…` LIST response, as gitlab.com actually sends it:
+ * **no `head_pipeline`, and no pipeline field of any kind.** Verified against the
+ * live API. Do not add one back "for completeness" — a list fixture that carries a
+ * pipeline is what let the provider ship reading CI from a field that is never
+ * there, with every GitLab card silently showing no CI. The pipeline belongs in
+ * `shown()` below, which is the only response that has one. */
 const MR = {
   iid: 12, web_url: "https://gitlab.com/group/sub/proj/-/merge_requests/12",
   title: "Fix export", state: "opened", draft: false, source_branch: "feat/ASM-1",
   has_conflicts: false, detailed_merge_status: "mergeable",
-  blocking_discussions_resolved: true, head_pipeline: null,
+  blocking_discussions_resolved: true,
 };
+
+/** The same MR as the SINGLE-MR endpoint sends it: everything the list row has,
+ * plus the `head_pipeline` only this route carries. */
+const shown = (over: Record<string, unknown> = {}): string => JSON.stringify({ ...MR, ...over });
 
 /** A Runner that replies by matching the request path, so a test states what each
  * endpoint returns instead of depending on call order. An unmatched path throws,
- * which is what the real `glab` does for a bad route. */
+ * which is what the real `glab` does for a bad route.
+ *
+ * Lookup is by insertion order, not specificity: the approvals and discussions
+ * paths ("…/merge_requests/12/approvals") also contain "merge_requests/12", so a
+ * test routing the single-MR read must list those more specific fragments BEFORE
+ * the bare "merge_requests/12" key or they will match the wrong route. */
 function routed(routes: Record<string, string | Error>): { run: Runner; calls: { args: string[]; cwd: string }[] } {
   const calls: { args: string[]; cwd: string }[] = [];
   const run: Runner = async (file, args, opts) => {
@@ -32,7 +47,9 @@ function routed(routes: Record<string, string | Error>): { run: Runner; calls: {
 
 describe("GlabProvider.fetch — argv", () => {
   it("asks for the source branch first, in the repo directory", async () => {
-    const { run, calls } = routed({ source_branch: JSON.stringify([MR]), approvals: "{}" });
+    const { run, calls } = routed({
+      source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": shown(),
+    });
     await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
 
     expect(calls[0].cwd).toBe("/r/api");
@@ -43,7 +60,9 @@ describe("GlabProvider.fetch — argv", () => {
   });
 
   it("falls back to a key title search when the branch has no MR", async () => {
-    const { run, calls } = routed({ source_branch: "[]", search: JSON.stringify([MR]), approvals: "{}" });
+    const { run, calls } = routed({
+      source_branch: "[]", search: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": shown(),
+    });
     const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
 
     expect(calls[1].args[1]).toContain("search=ASM-1");
@@ -52,10 +71,23 @@ describe("GlabProvider.fetch — argv", () => {
   });
 
   it("searches by key alone when there is no branch", async () => {
-    const { run, calls } = routed({ search: JSON.stringify([MR]), approvals: "{}" });
+    const { run, calls } = routed({ search: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": shown() });
     await provider(run).fetch("/r/api", null, "ASM-1");
-    expect(calls).toHaveLength(2); // the search, then approvals — no branch call
+    // The search, the single-MR read, then approvals — and no branch call.
+    expect(calls).toHaveLength(3);
     expect(calls[0].args[1]).toContain("search=ASM-1");
+  });
+
+  // The list row is not enough: GitLab sends `head_pipeline` on the single-MR route
+  // and nowhere else, so this call is the only reason a card can show CI at all.
+  it("reads the found MR individually, by iid, with no query of its own", async () => {
+    const { run, calls } = routed({
+      source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": shown(),
+    });
+    await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+
+    expect(calls[1].cwd).toBe("/r/api");
+    expect(calls[1].args).toEqual(["api", "projects/:fullpath/merge_requests/12"]);
   });
 
   it("url-encodes a branch containing a slash and a key containing a space", async () => {
@@ -87,7 +119,9 @@ describe("GlabProvider.fetch — assembly", () => {
   });
 
   it("skips the discussions call when blocking discussions are resolved, and reports 0", async () => {
-    const { run, calls } = routed({ source_branch: JSON.stringify([MR]), approvals: "{}" });
+    const { run, calls } = routed({
+      source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": shown(),
+    });
     const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
 
     expect(calls.some((c) => c.args[1].includes("discussions"))).toBe(false);
@@ -100,23 +134,30 @@ describe("GlabProvider.fetch — assembly", () => {
       source_branch: JSON.stringify([mr]),
       approvals: "{}",
       discussions: JSON.stringify([{ notes: [{ resolvable: true, resolved: false }] }]),
+      "merge_requests/12": JSON.stringify(mr),
     });
     const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ unresolved: 1 }) });
   });
 
-  it("fetches the pipeline's jobs by head_pipeline id, and maps them", async () => {
-    const mr = { ...MR, head_pipeline: { id: 777, status: "failed" } };
+  // THE regression test for the bug this file's fixtures hid: the list row carries no
+  // pipeline of any kind, so a provider that reads `head_pipeline` off it tallies
+  // zeros forever and every GitLab card shows no CI. The pipeline reaches us only
+  // through the single-MR read, and the proof is a real tally from a list row that
+  // never mentioned a pipeline. Delete the `show` call and this goes red.
+  it("still tallies CI from a list row with no head_pipeline, because the single-MR read supplies the pipeline", async () => {
     const { run, calls } = routed({
-      source_branch: JSON.stringify([mr]),
+      source_branch: JSON.stringify([MR]),
       approvals: "{}",
       jobs: JSON.stringify([
         { name: "build", status: "success" },
         { name: "lint", status: "failed", web_url: "https://gl/j/lint", allow_failure: false },
       ]),
+      "merge_requests/12": shown({ head_pipeline: { id: 777, status: "failed" } }),
     });
     const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
 
+    expect(MR).not.toHaveProperty("head_pipeline"); // the premise, pinned
     expect(calls.some((c) => c.args[1].includes("pipelines/777/jobs"))).toBe(true);
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({
       ci: { passing: 1, pending: 0, failing: [{ name: "lint", url: "https://gl/j/lint" }] },
@@ -125,7 +166,9 @@ describe("GlabProvider.fetch — assembly", () => {
   });
 
   it("skips the jobs call entirely when the MR has no pipeline", async () => {
-    const { run, calls } = routed({ source_branch: JSON.stringify([MR]), approvals: "{}" });
+    const { run, calls } = routed({
+      source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": shown({ head_pipeline: null }),
+    });
     await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
     expect(calls.some((c) => c.args[1].includes("jobs"))).toBe(false);
   });
@@ -134,6 +177,7 @@ describe("GlabProvider.fetch — assembly", () => {
     const { run } = routed({
       source_branch: JSON.stringify([MR]),
       approvals: JSON.stringify({ approved: true, approvals_required: 1 }),
+      "merge_requests/12": shown(),
     });
     const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ review: "approved" }) });
@@ -161,14 +205,20 @@ describe("GlabProvider.fetch — degradation", () => {
   // throw leaves the caller's cache entry unstamped, which re-arms this repo's
   // fetch on every tick, forever.
   it("still returns facts when the approvals call fails, with review none", async () => {
-    const { run } = routed({ source_branch: JSON.stringify([MR]), approvals: new Error("403") });
+    const { run } = routed({
+      source_branch: JSON.stringify([MR]), approvals: new Error("403"), "merge_requests/12": shown(),
+    });
     const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ number: 12, review: "none" }) });
   });
 
   it("still returns facts when the jobs call fails, with an empty ci tally", async () => {
-    const mr = { ...MR, head_pipeline: { id: 777 } };
-    const { run } = routed({ source_branch: JSON.stringify([mr]), approvals: "{}", jobs: new Error("500") });
+    const { run } = routed({
+      source_branch: JSON.stringify([MR]),
+      approvals: "{}",
+      jobs: new Error("500"),
+      "merge_requests/12": shown({ head_pipeline: { id: 777 } }),
+    });
     const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({
       ci: { passing: 0, pending: 0, failing: [] }, ciAdvisory: false,
@@ -177,9 +227,53 @@ describe("GlabProvider.fetch — degradation", () => {
 
   it("still returns facts when the discussions call fails, with unresolved null", async () => {
     const mr = { ...MR, blocking_discussions_resolved: false };
-    const { run } = routed({ source_branch: JSON.stringify([mr]), approvals: "{}", discussions: new Error("500") });
+    const { run } = routed({
+      source_branch: JSON.stringify([mr]),
+      approvals: "{}",
+      discussions: new Error("500"),
+      "merge_requests/12": JSON.stringify(mr),
+    });
     const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ unresolved: null }) });
+  });
+
+  // The single-MR read is a detail like any other: it exists to add the pipeline, so
+  // losing it must cost the CI tally and nothing else. Drop the `?? found` fallback
+  // and this returns `{ ok: false }` instead — the MR the user has open vanishes from
+  // the card because one optional round trip failed. Asserted whole, not with
+  // objectContaining, so the fallback is pinned to preserve every fact the list row
+  // already had right.
+  it("still returns the list row's facts when the single-MR read fails, with an empty ci tally", async () => {
+    const { run } = routed({
+      source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": new Error("500"),
+    });
+    expect(await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1")).toEqual({ ok: true, facts: {
+      number: 12,
+      url: "https://gitlab.com/group/sub/proj/-/merge_requests/12",
+      title: "Fix export",
+      state: "OPEN",
+      isDraft: false,
+      ci: { passing: 0, pending: 0, failing: [] },
+      review: "none",
+      unresolved: 0,
+      mergeable: "clean",
+      ciAdvisory: false,
+    } });
+  });
+
+  // An error body parses fine and is not an MR. Handing one to `toMrFacts` would
+  // yield `facts: null` — "there is genuinely no merge request" — for an MR the list
+  // just found, so anything without an identity falls back to the list row instead.
+  it.each([
+    ["an error object", '{"message":"404 Not Found"}'],
+    ["a null body", "null"],
+    ["an array", "[]"],
+    ["a record with no identity", '{"title":"Fix export"}'],
+  ])("falls back to the list row when the single-MR read answers with %s", async (_what, body) => {
+    const { run } = routed({ source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": body });
+    expect(await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1")).toEqual({ ok: true, facts: expect.objectContaining({
+      number: 12, title: "Fix export", ci: { passing: 0, pending: 0, failing: [] },
+    }) });
   });
 });
 

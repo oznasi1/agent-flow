@@ -28,7 +28,10 @@ const CI_PENDING = new Set(["CREATED", "PREPARING", "PENDING", "RUNNING", "WAITI
 /** A pipeline's status in the strip's vocabulary. Anything unrecognised reads as
  * "no CI" rather than as a failure — inventing a red row from a state we don't
  * know would send the user to an MR that is fine. Case-insensitive on every arm,
- * for the reason `CI_PENDING` above gives. */
+ * for the reason `CI_PENDING` above gives.
+ *
+ * Exported for `GlabReviewProvider.detail`, which is the only place a GitLab row's
+ * CI verdict can come from: the queue call below carries no pipeline status to map. */
 export function mapPipelineStatus(status?: string | null): ReviewRequest["ci"] {
   if (!status) return "none";
   const s = status.toUpperCase();
@@ -57,11 +60,11 @@ interface RawMr {
   references?: { full?: unknown } | null;
   has_conflicts?: unknown;
   detailed_merge_status?: unknown;
-  /** The status alone: a row's CI chip is one whole-pipeline verdict, and this call
-   *  answers 50 rows at once. Which jobs failed costs the `id`, and that comes from
-   *  the per-MR fetch `GlabReviewProvider.detail` makes on row expansion — one row,
-   *  on demand, never fifty. */
-  head_pipeline?: { status?: unknown } | null;
+  // No `head_pipeline` here, deliberately: GitLab's MR LIST endpoint sends no
+  // pipeline field of any kind (verified against gitlab.com), so typing one would
+  // claim a contract the API does not honour — and a fixture that then invented it
+  // would test the mapper against a response that can never arrive. That is exactly
+  // how this strip shipped with a CI chip stuck on "none". See `toRequest`.
 }
 
 /** Epoch ms, or 0 for anything unparsable — NaN would poison every comparator. */
@@ -103,7 +106,13 @@ function toRequest(raw: RawMr): ReviewRequest | null {
     additions: 0,
     deletions: 0,
     changedFiles: 0,
-    ci: mapPipelineStatus(typeof raw.head_pipeline?.status === "string" ? raw.head_pipeline.status : null),
+    // GitLab's list carries no pipeline data at all — not a status, not an id, no
+    // pipeline field whatsoever — so there is nothing here to grade. `"none"` is an
+    // absence, and `GlabReviewProvider.detail` replaces it with the real verdict on
+    // row expansion, from the single-MR GET that does carry `head_pipeline`. Same
+    // trade as the diff size above: one call per row the user opens, never 50 per
+    // refresh.
+    ci: "none",
     // GitLab's MR list carries no approval state, and the strip's own row does not
     // need one to be useful. "none" rather than a per-row approvals round trip.
     review: "none",

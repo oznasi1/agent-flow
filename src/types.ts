@@ -358,6 +358,12 @@ export interface ReviewDetail {
    * aggregate, so its `additions` and `deletions` are 0 and only `changedFiles`
    * is real — see docs/FORGES.md. */
   size?: { additions: number; deletions: number; changedFiles: number } | null;
+  /** CI verdict, for a forge whose queue call cannot carry one. Absent on GitHub,
+   * whose search already filled `ReviewRequest.ci`; on GitLab the MR list sends no
+   * pipeline field at all, so the chip starts as `"none"` and this — read off the
+   * single-MR GET `detail` already makes — is the only thing that can correct it.
+   * Optional, so no other forge's `ReviewDetail` has to invent a value. */
+  ci?: ReviewRequest["ci"];
 }
 
 // ── The Marketplace: local asset browser ────────────────────────────────────

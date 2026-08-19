@@ -11,7 +11,7 @@ import { resolveBin } from "../../pr/which";
 // a non-spreading factory returning only `GhReviewProvider`, so a VALUE import of
 // `ReviewProvider` from here would resolve to `undefined` under that mock.
 import type { ReviewProvider } from "../provider";
-import { parseMrSearch, REVIEW_MR_PATH } from "./search";
+import { mapPipelineStatus, parseMrSearch, REVIEW_MR_PATH } from "./search";
 
 const locateGlab: Locate = () => resolveBin("glab");
 
@@ -53,13 +53,21 @@ export class GlabReviewProvider implements ReviewProvider {
     }
   }
 
-  /** The three things the queue call cannot return: which jobs failed, how many
-   * discussions are still open, and the diff size. A failure in either of the
-   * last two degrades to `null` rather than discarding what we did get. */
+  /** The four things the queue call cannot return: which jobs failed, the pipeline
+   * verdict itself, how many discussions are still open, and the diff size. A
+   * failure in either of the last two degrades to `null` rather than discarding
+   * what we did get.
+   *
+   * The verdict is filled here rather than in `search` because `head_pipeline`
+   * exists ONLY on this single-MR route — GitLab's MR list carries no pipeline field
+   * at all — and making this GET per queue row would be 50 extra calls per refresh.
+   * So the chip reads "none" until the row is expanded, exactly as the size chip
+   * does. `status` is `unknown` for the same reason `changes_count` is: only
+   * `mapPipelineStatus` decides what a status string means. */
   async detail(repo: string, number: number): Promise<ReviewDetail | null> {
     // `changes_count` is `unknown` because only `readSize` knows what to make of
     // it: GitLab sends a STRING there, and caps it ("20+") past twenty.
-    let mr: { head_pipeline?: { id?: number } | null; changes_count?: unknown };
+    let mr: { head_pipeline?: { id?: number; status?: unknown } | null; changes_count?: unknown };
     try {
       mr = JSON.parse(await this.get(`projects/${enc(repo)}/merge_requests/${number}`)) as typeof mr;
     } catch {
@@ -85,7 +93,12 @@ export class GlabReviewProvider implements ReviewProvider {
       unresolved = null;
     }
 
-    return { failing, unresolved, size: readSize(mr.changes_count) };
+    return {
+      failing,
+      unresolved,
+      size: readSize(mr.changes_count),
+      ci: mapPipelineStatus(typeof mr.head_pipeline?.status === "string" ? mr.head_pipeline.status : null),
+    };
   }
 
   /** The only command here that writes to GitLab. The caller confirms first; this

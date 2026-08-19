@@ -2864,13 +2864,15 @@ describe("DeckPanel review detail", () => {
   });
 
   // Task 10: GitLab's REST API carries no diff-stats aggregate in the queue call
-  // the way GitHub's search does, so a forge that needs one fills it in here
-  // instead — merged into the cached request rather than posted separately, so
-  // the strip's existing size chip renders it with no webview change at all.
-  it("merges a detail-supplied size into the cached request", async () => {
+  // the way GitHub's search does — and no pipeline field either, verified against
+  // gitlab.com — so a forge that needs them fills them in here instead, merged into
+  // the cached request rather than posted separately, so the strip's existing size
+  // and CI chips render them with no webview change at all.
+  it("merges a detail-supplied size and ci verdict into the cached request", async () => {
     h.reviewDetail.mockResolvedValueOnce({
       failing: [], unresolved: null,
       size: { additions: 12, deletions: 3, changedFiles: 4 },
+      ci: "failing",
     });
     const p = await showAndWarm();
     await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
@@ -2883,7 +2885,26 @@ describe("DeckPanel review detail", () => {
     const row = (posts(p).filter((m) => m.type === "deck:reviews").at(-1) as {
       requests: ReviewRequest[];
     }).requests.find((r) => r.id === "CyberJackGit/aws-ops#8491");
-    expect(row).toMatchObject({ additions: 12, deletions: 3, changedFiles: 4 });
+    expect(row).toMatchObject({ additions: 12, deletions: 3, changedFiles: 4, ci: "failing" });
+  });
+
+  // `ci` is OPTIONAL on ReviewDetail: GitHub's search already filled the chip, so its
+  // detail sends none, and an unguarded `cached.ci = detail.ci` would overwrite a real
+  // verdict with `undefined` — a row whose CI chip renders as nothing at all.
+  it("leaves the row's own ci alone when the detail carries none", async () => {
+    h.reviewSearch.mockResolvedValue({ issueCount: 1, requests: [{ ...reviewFixture(), ci: "passing" }] });
+    h.reviewDetail.mockResolvedValueOnce({
+      failing: [], unresolved: null, size: { additions: 1, deletions: 0, changedFiles: 1 },
+    });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    await settled();
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    const row = (posts(p).filter((m) => m.type === "deck:reviews").at(-1) as {
+      requests: ReviewRequest[];
+    }).requests.find((r) => r.id === "CyberJackGit/aws-ops#8491");
+    expect(row).toMatchObject({ ci: "passing", changedFiles: 1 });
   });
 
   it("ignores an id that is not in the queue", async () => {

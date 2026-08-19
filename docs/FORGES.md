@@ -85,8 +85,36 @@ directory. Treat it as no safer to import from webview code than `github.ts` or
 | Is a review thread outdated? | `isOutdated` | not exposed | the unresolved count is slightly more inclusive |
 | Submit "request changes" | one verb | no stable verb | posts a note and withdraws any standing approval, disclosed in the confirmation dialog |
 | Diff size in the review queue | in the search | not in the list | filled on row expansion; `additions`/`deletions` stay 0 because GitLab's REST API exposes no aggregate, so only the file count is real — and GitLab caps `changes_count` at `"20+"`, which `readSize` reads as its FLOOR, so an 80-file MR renders as `20 files` with nothing marking it as approximate |
+| CI status in the review queue | in the search | not in the list | the chip reads `none` until the row is expanded, where the single-MR read supplies the verdict — the same trade as the diff size, for the same reason: one call per row the user opens, never 50 per refresh |
+| CI status on a card | in the PR query | not in the MR list | `prs.fetch` follows its list call with a single-MR read, because that is the only response carrying `head_pipeline` |
 | How many reviews are waiting in total? | `issueCount` | no total in the body | the count is however many rows came back, so a queue longer than 50 reads as complete rather than truncated |
 | Is a skipped required check green? | folded toward `SUCCESS` | `skipped` → `unknown` | GitLab is stricter; a skipped pipeline does not open a deploy gate |
+
+### The MR list carries no pipeline data — verified, not assumed
+
+`GET /projects/:id/merge_requests` returns **no pipeline field of any kind**: not
+`head_pipeline`, not a substitute. `head_pipeline` appears only on
+`GET /projects/:id/merge_requests/:iid`. Checked against gitlab.com's live API,
+because the documented list-response shape reads as though it were there — which is
+exactly how Agent Flow first shipped GitLab support reading CI off a list row, with
+every card silently showing no CI and every test agreeing, since the fixtures were
+written from the docs.
+
+Two consequences, both deliberate:
+
+- `GlabProvider.fetch` makes **one extra single-MR read** per card that has an MR.
+  That is what makes a GitLab card's CI status possible at all, so it is not a round
+  trip to optimise away; `prFactsTtlSeconds` governs how often it happens. If the
+  read fails, the provider falls back to the list row — the MR's identity, state,
+  title, draft flag and mergeability are all correct there, so a failure costs the CI
+  tally and nothing else.
+- The review strip's CI chip is filled **on row expansion**, from the single-MR read
+  `reviews.detail` already makes, and rides back on the optional `ReviewDetail.ci`.
+  Doing that GET per queue row would be 50 calls per refresh — the same cost the diff
+  size chip already declined.
+
+If you are writing forge #3: check a real response before typing a wire shape, and
+write fixtures from what came back, not from what the docs list.
 
 ## 4. Conventions a new forge must keep
 

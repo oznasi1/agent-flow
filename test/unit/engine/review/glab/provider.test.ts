@@ -25,10 +25,13 @@ function routed(routes: Record<string, string | Error>): { run: Runner; calls: {
   return { run, calls };
 }
 
+/** One row of the queue response, and — as gitlab.com actually sends it — **with no
+ * `head_pipeline`**: that field lives on the single-MR endpoint alone, which is why
+ * `detail` is the only place a row's CI verdict can come from. */
 const MR = {
   iid: 12, title: "T", web_url: "https://gitlab.com/group/sub/proj/-/merge_requests/12",
   draft: false, author: { username: "dana" }, references: { full: "group/sub/proj!12" },
-  head_pipeline: { status: "success" }, detailed_merge_status: "mergeable",
+  detailed_merge_status: "mergeable",
 };
 
 describe("GlabReviewProvider.search", () => {
@@ -61,20 +64,24 @@ describe("GlabReviewProvider.search", () => {
 });
 
 describe("GlabReviewProvider.detail", () => {
-  it("returns failing jobs, unresolved discussions, and the changed-file count", async () => {
+  // `ci` is here and not in `search` for one reason: `head_pipeline` exists only on
+  // this single-MR route, so the queue's chip reads "none" until a row is expanded.
+  // Without this the strip shows no CI on a merge request with failing pipelines.
+  it("returns failing jobs, the pipeline verdict, unresolved discussions, and the changed-file count", async () => {
     const { run, calls } = routed({
       "pipelines/5/jobs": JSON.stringify([
         { name: "build", status: "success" },
         { name: "lint", status: "failed", web_url: "https://gl/j/lint" },
       ]),
       discussions: JSON.stringify([{ notes: [{ resolvable: true, resolved: false }] }]),
-      "merge_requests/12": JSON.stringify({ head_pipeline: { id: 5 }, changes_count: "3" }),
+      "merge_requests/12": JSON.stringify({ head_pipeline: { id: 5, status: "failed" }, changes_count: "3" }),
     });
 
     expect(await provider(run).detail(REPO, 12)).toEqual({
       failing: [{ name: "lint", url: "https://gl/j/lint" }],
       unresolved: 1,
       size: { additions: 0, deletions: 0, changedFiles: 3 },
+      ci: "failing",
     });
     expect(calls.every((c) => !c.args[1].includes("/-/"))).toBe(true);
     expect(calls[0].args[1]).toContain(`projects/${ENC}/merge_requests/12`);
@@ -97,12 +104,13 @@ describe("GlabReviewProvider.detail", () => {
     const { run } = routed({
       "pipelines/5/jobs": JSON.stringify([{ name: "lint", status: "failed", web_url: "u" }]),
       discussions: new Error("500"),
-      "merge_requests/12": JSON.stringify({ head_pipeline: { id: 5 }, changes_count: "1" }),
+      "merge_requests/12": JSON.stringify({ head_pipeline: { id: 5, status: "failed" }, changes_count: "1" }),
     });
     expect(await provider(run).detail(REPO, 12)).toEqual({
       failing: [{ name: "lint", url: "u" }],
       unresolved: null,
       size: { additions: 0, deletions: 0, changedFiles: 1 },
+      ci: "failing",
     });
   });
 
@@ -113,18 +121,33 @@ describe("GlabReviewProvider.detail", () => {
     const { run } = routed({
       "pipelines/5/jobs": new Error("500"),
       discussions: "[]",
-      "merge_requests/12": JSON.stringify({ head_pipeline: { id: 5 }, changes_count: "1" }),
+      "merge_requests/12": JSON.stringify({ head_pipeline: { id: 5, status: "running" }, changes_count: "1" }),
     });
     expect(await provider(run).detail(REPO, 12)).toEqual({
       failing: [],
       unresolved: 0,
       size: { additions: 0, deletions: 0, changedFiles: 1 },
+      // The MR's own head-pipeline status survives a failed jobs call: which jobs
+      // failed came from the jobs route, the verdict came from the MR itself.
+      ci: "pending",
     });
   });
 
   it("reports no failing jobs when the MR has no pipeline", async () => {
     const { run } = routed({ discussions: "[]", "merge_requests/12": JSON.stringify({ changes_count: "2" }) });
     expect((await provider(run).detail(REPO, 12))?.failing).toEqual([]);
+  });
+
+  // An MR with no pipeline at all: "none" is an absence, and the strip renders it as
+  // one — never as a red row invented from a status we never saw.
+  it("reports ci none when the MR has no pipeline", async () => {
+    const { run } = routed({ discussions: "[]", "merge_requests/12": JSON.stringify({ changes_count: "2" }) });
+    expect((await provider(run).detail(REPO, 12))?.ci).toBe("none");
+  });
+
+  it("maps the head-pipeline status through the same mapper the strip's chip uses", async () => {
+    const { run } = routed({ discussions: "[]", "merge_requests/12": JSON.stringify({ head_pipeline: { status: "SUCCESS" } }) });
+    expect((await provider(run).detail(REPO, 12))?.ci).toBe("passing");
   });
 
   it("reports a null size when changes_count is missing or unparsable", async () => {

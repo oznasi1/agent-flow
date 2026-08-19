@@ -1995,19 +1995,27 @@ export class DeckPanel {
       this.post({ type: "deck:reviewDetail", id, detail: null });
       return;
     }
-    // A forge whose queue call carries no diff stats fills them here instead. Merged
-    // into the cached request rather than posted separately, so the strip's existing
-    // size chip renders it with no webview change at all.
+    // A forge whose queue call carries no diff stats — or no pipeline status; GitLab's
+    // MR list carries neither — fills them here instead. Merged into the cached request
+    // rather than posted separately, so the strip's existing size and CI chips render
+    // them with no webview change at all.
     //
     // Re-found rather than reusing `req`, and NOT redundant: the `await` above is a
     // detail call on `prQueue`, which runs up to four jobs at once under distinct
     // keys — so a `"reviews"` search can complete mid-flight and replace
     // `this.reviewCache` wholesale. `req` would then belong to the discarded array
-    // and the size would be written where nothing reads it. The size is still valid
+    // and these would be written where nothing reads them. Both facts are still valid
     // for the fresh row: same repo, same number.
-    if (detail.size) {
+    if (detail.size || detail.ci !== undefined) {
       const cached = this.reviewCache?.requests.find((r) => r.id === id);
-      if (cached) Object.assign(cached, detail.size);
+      if (cached) {
+        if (detail.size) Object.assign(cached, detail.size);
+        // `!== undefined`, not truthiness: `"none"` is a real verdict here — the MR
+        // has no pipeline — and a forge that says so must be able to say it. Absent
+        // entirely on a forge whose queue call already filled the chip, which is why
+        // the merge never clobbers GitHub's own search-supplied value.
+        if (detail.ci !== undefined) cached.ci = detail.ci;
+      }
     }
     this.post({ type: "deck:reviewDetail", id, detail });
   }

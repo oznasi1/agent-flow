@@ -1,12 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { mapPipelineStatus, parseMrSearch, REVIEW_MR_PATH, REVIEW_MR_LIMIT } from "../../../../../src/engine/review/glab/search";
 
+/** One row of the queue response as gitlab.com actually sends it: **no
+ * `head_pipeline`, and no pipeline field of any kind.** Verified against the live
+ * API — the field exists only on the single-MR endpoint. Do not add one back: a
+ * fixture that invented it here is why this strip shipped with a CI chip that read
+ * "none" for a merge request with failing pipelines, and every test agreed. */
 const node = (over: Record<string, unknown> = {}) => ({
   iid: 12, title: "Fix export", web_url: "https://gitlab.com/group/sub/proj/-/merge_requests/12",
   draft: false, created_at: "2026-08-01T10:00:00Z", updated_at: "2026-08-02T10:00:00Z",
   author: { username: "dana" }, references: { full: "group/sub/proj!12" },
-  has_conflicts: false, detailed_merge_status: "mergeable",
-  head_pipeline: { status: "success" }, ...over,
+  has_conflicts: false, detailed_merge_status: "mergeable", ...over,
 });
 
 describe("REVIEW_MR_PATH", () => {
@@ -55,10 +59,20 @@ describe("parseMrSearch", () => {
       url: "https://gitlab.com/group/sub/proj/-/merge_requests/12",
       author: "dana",
       isDraft: false,
-      ci: "passing",
+      // "none" because the LIST endpoint carries no pipeline data at all, not
+      // because this MR is green: `GlabReviewProvider.detail` fills the real verdict
+      // on row expansion, from the single-MR GET that does carry `head_pipeline`.
+      ci: "none",
       mergeable: "clean",
       review: "none",
     });
+  });
+
+  // The premise the "none" above rests on, pinned so a future fixture cannot quietly
+  // reintroduce a pipeline field the API never sends and make the chip look solved.
+  it("has no pipeline field to read on any list row", () => {
+    expect(node()).not.toHaveProperty("head_pipeline");
+    expect(Object.keys(node()).filter((k) => k.includes("pipeline"))).toEqual([]);
   });
 
   it("parses timestamps to epoch ms and leaves diff size at zero", () => {

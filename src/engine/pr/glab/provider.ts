@@ -40,12 +40,17 @@ export const GLAB_FIELD_FLAG = "-f";
 
 const locateGlab: Locate = () => resolveBin("glab");
 
-// The four routes this provider asks for. Module-private: nothing outside reads
+// The five routes this provider asks for. Module-private: nothing outside reads
 // them, and the tests assert on the argv that actually reached the `Runner`, which
 // is the honest thing to pin — an exported path helper only lets a test agree with
 // itself about a string neither the CLI nor GitLab ever saw.
 const mrListPath = (selector: string): string =>
   `projects/:fullpath/merge_requests?${selector}&state=all&per_page=10`;
+/** One MR, in full. Not a nicety: the LIST rows this provider searches carry no
+ * pipeline data at all, so `head_pipeline` — and with it every card's CI status —
+ * exists only on this route. See `GlabMr.head_pipeline`. */
+const mrShowPath = (iid: number): string =>
+  `projects/:fullpath/merge_requests/${iid}`;
 const jobsPath = (pipelineId: number): string =>
   `projects/:fullpath/pipelines/${pipelineId}/jobs?per_page=100`;
 const approvalsPath = (iid: number): string =>
@@ -78,28 +83,37 @@ export class GlabProvider implements PrProvider {
 
   async fetch(repoPath: string, branch: string | null, key: string): Promise<FetchResult> {
     try {
-      let chosen: GlabMr | undefined;
+      let found: GlabMr | undefined;
       // The live branch is exact. The key search only covers an MR opened from a
       // branch Agent Flow didn't name.
-      if (branch) chosen = pickMr(await this.list(repoPath, `source_branch=${encodeURIComponent(branch)}`));
-      if (!chosen) chosen = pickMr(await this.list(repoPath, `search=${encodeURIComponent(key)}&in=title`));
-      if (!chosen) return { ok: true, facts: null };
+      if (branch) found = pickMr(await this.list(repoPath, `source_branch=${encodeURIComponent(branch)}`));
+      if (!found) found = pickMr(await this.list(repoPath, `search=${encodeURIComponent(key)}&in=title`));
+      if (!found) return { ok: true, facts: null };
+
+      // The list row is not the whole MR: GitLab's list endpoint carries no
+      // pipeline data, so `head_pipeline` — the only route to a card's CI status —
+      // arrives solely from this per-MR read. `as number` rather than a guard, and
+      // provably not a lie: `pickMr` delegates to `pickByState`, which only ever
+      // returns a row that passed `typeof iid === "number"`. A defensive re-check
+      // here would be dead code.
+      //
+      // `?? found` is what keeps a failed read a DEGRADATION rather than a loss:
+      // identity, state, title, draft flag and mergeability are all already correct
+      // in the list row, so falling back to it costs the CI tally and nothing else.
+      const mr = (await this.show(repoPath, found.iid as number)) ?? found;
 
       // Each sub-call degrades on its own: losing a detail must not discard the MR
       // we found, and nothing here may throw out of `fetch` — an uncaught throw
       // leaves the caller's cache entry unstamped, which re-arms this repo's fetch
       // on every tick, forever.
-      const jobs = await this.jobs(repoPath, chosen);
+      const jobs = await this.jobs(repoPath, mr);
       return {
         ok: true,
-        facts: toMrFacts(chosen, {
+        facts: toMrFacts(mr, {
           ci: mapJobs(jobs),
           ciAdvisory: mapJobsAdvisory(jobs),
-          // `as number` rather than a guard, and provably not a lie: `pickMr`
-          // delegates to `pickByState`, which only ever returns a row that passed
-          // `typeof iid === "number"`. A defensive re-check here would be dead code.
-          review: mapApprovals(await this.approvals(repoPath, chosen.iid as number)),
-          unresolved: await this.unresolved(repoPath, chosen),
+          review: mapApprovals(await this.approvals(repoPath, found.iid as number)),
+          unresolved: await this.unresolved(repoPath, mr),
         }),
       };
     } catch {
@@ -117,6 +131,25 @@ export class GlabProvider implements PrProvider {
     // must fail the fetch rather than read as an empty list.
     if (!Array.isArray(parsed)) throw new Error("glab merge_requests: expected an array");
     return parsed as GlabMr[];
+  }
+
+  /** One MR in full, or null when we cannot get one. The list row this follows up
+   * on is missing exactly one thing the Deck needs — `head_pipeline`, which GitLab
+   * sends on this route and on no other (see `GlabMr.head_pipeline`) — so this call
+   * is what makes a GitLab card's CI status possible at all.
+   *
+   * Null on anything that is not recognisably an MR, error objects included
+   * (`{"message":"404 Not Found"}` parses fine and would otherwise reach
+   * `toMrFacts` as a record with no identity, turning a found MR into "no MR").
+   * The caller reads null as "keep the list row", never as a failed fetch. */
+  private async show(repoPath: string, iid: number): Promise<GlabMr | null> {
+    try {
+      const parsed = JSON.parse(await this.api(repoPath, mrShowPath(iid))) as GlabMr | null;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+      return typeof parsed.iid === "number" && typeof parsed.web_url === "string" ? parsed : null;
+    } catch {
+      return null;
+    }
   }
 
   /** The head pipeline's jobs, or null when there is no pipeline or we cannot read

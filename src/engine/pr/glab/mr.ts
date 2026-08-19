@@ -30,8 +30,21 @@ export interface GlabMr {
   /** When true, there is nothing unresolved — which lets the caller skip the
    *  discussions round trip entirely. */
   blocking_discussions_resolved?: boolean;
-  /** The id alone: the jobs call is what grades this pipeline, so its `status` is
-   *  never read on this path (the review strip's `RawMr` does read one). */
+  /** **Only ever present on the SINGLE-MR endpoint — never on the MR list.**
+   *  Verified against gitlab.com: a `merge_requests?…` row carries no pipeline
+   *  field of any kind, not `head_pipeline` and not a substitute. That absence is
+   *  exactly why `GlabProvider.fetch` follows its list call with a `show` call
+   *  (`mrShowPath`) and reads the pipeline off THAT record.
+   *
+   *  Do NOT "optimize away" that extra round trip. Reading this field off a list
+   *  row yields `undefined`, the jobs call is then skipped, and every GitLab card
+   *  silently reports no CI — no error, no failing test, just a Deck that can never
+   *  show a red pipeline. That is the bug this comment exists to prevent recurring;
+   *  it shipped once already because a fixture invented this field on a list row.
+   *
+   *  The id alone: the jobs call is what grades this pipeline, so its `status` is
+   *  never read on this path (the review strip reads a status instead — see
+   *  `GlabReviewProvider.detail`). */
   head_pipeline?: { id?: number } | null;
 }
 
