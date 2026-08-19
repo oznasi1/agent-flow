@@ -1323,7 +1323,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
     const where = this.openedWhere(result, cfg.seedAgent);
     const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
-    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl, result.provider);
     const what = env
       ? `to verify on ${env}`
       : action.id === "supervise"
@@ -1432,7 +1432,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
     const where = this.openedWhere(result, cfg.seedAgent);
     const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
-    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl, result.provider);
     this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
   }
 
@@ -1784,10 +1784,19 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Toast fragment for a launch that asked for Remote Control and didn't get it —
-   * `openWorkspace` withholds it when the launch opens more than one window. Without
-   * this the user waits for a `/remote-control` prompt that never arrives. */
-  private remoteControlNote(wanted: boolean, applied: boolean): string {
-    return wanted && !applied ? " Remote Control skipped — it needs a single window." : "";
+   * `openWorkspace` withholds it when the launch opens more than one window, and, under
+   * `ask`, when the agent picked isn't Claude Code. Without this the user waits for a
+   * `/remote-control` prompt that never arrives.
+   *
+   * `seeded` names the agent that actually ran, so the note can give the reason that
+   * applies. Reachable with a non-Claude agent under `ask` alone: a fixed `copilot` or
+   * `cursor` setting never gets `wanted` past `resolveRemoteControl`, so the
+   * single-window sentence is byte-identical to what those users have always seen. */
+  private remoteControlNote(wanted: boolean, applied: boolean, seeded: AgentProvider = "claude-code"): string {
+    if (!wanted || applied) return "";
+    return seeded === "claude-code"
+      ? " Remote Control skipped — it needs a single window."
+      : ` Remote Control skipped — it needs Claude Code, and ${providerLabel(seeded)} was picked.`;
   }
 
   /** Toast fragment announcing the pre-seed, shared by `launch()` and `explore()`. With
@@ -1969,7 +1978,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
     const where = this.openedWhere(result, cfg.seedAgent);
     const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
-    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl, result.provider);
     if (result.mergeFailed) {
       this.toast(
         "info",
@@ -2430,7 +2439,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
         if (i < resolved.length - 1) await delay(BATCH_STAGGER_MS);
       }
-      if (!isBatch) extra += this.remoteControlNote(wantRemoteControl, appliedRemoteControl);
+      if (!isBatch) extra += this.remoteControlNote(wantRemoteControl, appliedRemoteControl, seededProvider);
     }
 
     // Dismissed before anything opened: report exactly as a cancelled single launch

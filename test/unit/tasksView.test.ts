@@ -4688,6 +4688,37 @@ describe("remote control × the `ask` provider", () => {
     vi.mocked(createWorktrees).mockImplementation((s) => s);
   });
 
+  // ── site 4: the toast that explains why it didn't happen ──
+  it("blames the agent, not the window count, when the pick drops Remote Control", async () => {
+    // One window WAS opened. `openWorkspace` withheld Remote Control because the user
+    // picked Cursor, so the single-window reason is simply false here.
+    ask({ remoteControl: "on" });
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/repos/account-service"],
+      remoteControl: false, provider: "cursor",
+    });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toContain(" Remote Control skipped — it needs Claude Code, and Cursor was picked.");
+    expect(toast.message).not.toContain("single window");
+  });
+
+  it("keeps the single-window reason byte-identical for the case it really describes", async () => {
+    // Claude Code was seeded and Remote Control still didn't apply: the launch opened
+    // more than one window, which is the ONLY thing that message has ever meant.
+    ask({ remoteControl: "on" });
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", workspaceFile: undefined, briefs: [],
+      opened: ["/repos/account-service", "/repos/centaur"],
+      remoteControl: false, provider: "claude-code",
+    });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toContain(" Remote Control skipped — it needs a single window.");
+  });
+
   // ── the guard rail: copilot and cursor must STILL be refused ──
   it("still refuses copilot and cursor — the fix must not widen into a free pass", async () => {
     for (const agentProvider of ["copilot", "cursor"] as const) {
