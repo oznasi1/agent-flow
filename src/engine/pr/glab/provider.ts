@@ -146,7 +146,14 @@ export class GlabProvider implements PrProvider {
     try {
       const parsed = JSON.parse(await this.api(repoPath, mrShowPath(iid))) as GlabMr | null;
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-      return typeof parsed.iid === "number" && typeof parsed.web_url === "string" ? parsed : null;
+      // A NON-EMPTY `web_url`, not merely a string one: `toMrFacts` rejects on
+      // `!mr.web_url`, so anything this lets through that it then rejects yields
+      // `facts: null` — "there is genuinely no merge request" — which is the exact
+      // outcome this guard exists to prevent. Stricter than that falsy test rather
+      // than equal to it, since a non-string url would reach `PrFacts.url` otherwise.
+      return typeof parsed.iid === "number" && typeof parsed.web_url === "string" && parsed.web_url !== ""
+        ? parsed
+        : null;
     } catch {
       return null;
     }

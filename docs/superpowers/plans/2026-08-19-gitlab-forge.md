@@ -2,6 +2,29 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> ### ⚠️ SUPERSEDED: every GitLab fixture in this plan that puts `head_pipeline` on a list response is WRONG
+>
+> Verified against gitlab.com's live API **after** this plan was executed:
+> `head_pipeline` is **absent from the merge-request LIST endpoint**
+> (`GET /projects/:id/merge_requests`), which sends no pipeline field of any kind. It
+> exists **only** on the single-MR endpoint (`GET /projects/:id/merge_requests/:iid`).
+>
+> This plan's fixtures were written from the API documentation and put `head_pipeline`
+> on list rows — see the `MR` fixture and the pipeline tests in Tasks 1–2, the queue
+> `node()` fixture in Tasks 9–10, and the `RawMr.head_pipeline` typing. Those blocks are
+> left as written for the historical record, but **do not copy them.** They are exactly
+> why the shipped code read CI off a field that is never there: GitLab cards could show
+> no CI at all, and the review strip's chip read `none` even for a merge request with
+> failing pipelines. Every test agreed, because the fixtures agreed with the bug.
+>
+> **Authoritative instead:** [`docs/FORGES.md`](../../FORGES.md) §3 ("The MR list carries
+> no pipeline data") and the current tests under `test/unit/engine/pr/glab/` and
+> `test/unit/engine/review/glab/`. The shipped design makes one extra single-MR read per
+> card, and fills the review strip's CI chip on row expansion.
+>
+> **If you are writing forge #3:** check a real API response before you type a wire
+> shape, and write fixtures from what came back — not from what the docs list.
+
 **Goal:** Let a GitLab user get the same Agent Flow Deck a GitHub user gets — MR facts on cards, a review-requests strip, review submission, the orchestrator's branch-CI gate, and Doctor — selected by one global setting that defaults to GitHub so no existing install changes behavior.
 
 **Architecture:** A `Forge` interface in `src/engine/forge/` selected by a registry that mirrors `src/tasks/registry.ts`. GitHub's existing `GhProvider` / `GhReviewProvider` are wrapped unchanged; GitLab gets sibling `GlabProvider` / `GlabReviewProvider` that talk to `glab api <rest-path>` through the same injected `Runner`. `PrProvider` and `ReviewProvider` do not change. All GitLab wire-shape knowledge lives in pure mapper modules that produce the existing host-neutral `PrFacts` / `ReviewRequest` types.

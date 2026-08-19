@@ -269,6 +269,9 @@ describe("GlabProvider.fetch — degradation", () => {
     ["a null body", "null"],
     ["an array", "[]"],
     ["a record with no identity", '{"title":"Fix export"}'],
+    // An empty url is no url: `toMrFacts` rejects on `!mr.web_url`, so a guard that
+    // accepted any string here would hand it a record it then turns into `facts: null`.
+    ["a record whose web_url is empty", '{"iid":12,"web_url":""}'],
   ])("falls back to the list row when the single-MR read answers with %s", async (_what, body) => {
     const { run } = routed({ source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": body });
     expect(await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1")).toEqual({ ok: true, facts: expect.objectContaining({
