@@ -155,13 +155,13 @@ describe("buildRunStatus", () => {
     expect(s.prs).toBe(prs);
   });
 
-  it("promotes a run with a conflicting PR into Needs you despite a working agent", () => {
+  it("promotes a run with a conflicting PR into In review despite a working agent", () => {
     const s = buildRunStatus({
       run, ticket: { status: "In Progress", category: "indeterminate" }, projectsRoot: projRoot, nowMs: NOW,
       openIdentities: new Set(), prs: entries(prFacts({ mergeable: "conflicting" })),
     });
     expect(s.agent.state).toBe("working");
-    expect(s.column).toBe("needs");
+    expect(s.column).toBe("review");
   });
 
   it("gives a run whose PR is approved and green the Ready-to-merge column, over its working agent", () => {
