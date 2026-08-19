@@ -2048,6 +2048,31 @@ describe("openWorkspace — ask", () => {
     expect(planOf().provider).toBeUndefined();
   });
 
+  // A picker with one item is not a question — it is a modal, held open by
+  // `ignoreFocusOut`, that can only be answered one way. On a host that is neither VS
+  // Code nor Cursor, `hostProviders()` is exactly `["claude-code"]`, so `ask` there
+  // used to raise that dialog on every single launch.
+  it("does not prompt on a host with only one possible agent", async () => {
+    setConfig({ agentProvider: "ask" });
+    env.uriScheme = "windsurf";
+    const result = await openWorkspace(baseReq({ seedAgent: true }));
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(result.provider).toBe("claude-code");
+    // Still a resolved `ask`, so the answer is pinned into the plan exactly as a
+    // picked or caller-pinned one is.
+    expect(planOf().provider).toBe("claude-code");
+  });
+
+  it("still prompts on a host with two possible agents", async () => {
+    // The other half of the short-circuit: it must key on the LIST's length, not on
+    // "ask is inert unless Cursor", or the picker would vanish in VS Code too.
+    setConfig({ agentProvider: "ask" });
+    env.uriScheme = "vscode";
+    window.showQuickPick.mockResolvedValueOnce({ label: "Copilot", provider: "copilot" });
+    await openWorkspace(baseReq({ seedAgent: true }));
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+  });
+
   it("does not prompt when seeding is off", async () => {
     setConfig({ agentProvider: "ask" });
     const result = await openWorkspace(baseReq({ seedAgent: false }));

@@ -3123,6 +3123,71 @@ describe("takeBatch", () => {
     ]);
   });
 
+  it("asks a one-key batch about THIS session, not about every task in the batch", async () => {
+    // A one-key "batch" to a shared destination is a single launch. It reaches
+    // `resolveBatchProvider` only because a shared window seeds from plan files and
+    // cannot ask later — the batch placeholder would promise an answer for tasks that
+    // do not exist. Word-for-word the single-launch placeholder `openWorkspace` uses.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask", openIn: "this-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(currentWindow).mockReturnValue({
+      identity: "/repos/api", kind: "folder", roots: [{ name: "api", path: "/repos/api" }],
+    });
+    pickCursorAgent();
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(agentPicks()).toHaveLength(1);
+    expect(agentPicks()[0][1]).toEqual({
+      title: "Which agent?",
+      placeHolder: "Pick the agent to start this session with",
+      ignoreFocusOut: true,
+    });
+  });
+
+  it("keeps the batch placeholder for a real multi-task batch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    pickCursorAgent();
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(agentPicks()[0][1]).toEqual({
+      title: "Which agent?",
+      placeHolder: "Pick the agent for every task in this batch",
+      ignoreFocusOut: true,
+    });
+  });
+
+  // The stale-brief limitation the README documents, pinned so the doc and the code
+  // cannot drift: a one-key batch to its OWN window resolves inside `openWorkspace`,
+  // after `briefMarkdown` has already been called, so the brief names the setting's
+  // default while the session that reads it is the one the user picked.
+  it("writes a one-key own-window batch's brief with the default, not the pick", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/repos/api"],
+      remoteControl: false, provider: "cursor",
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(agentPicks()).toHaveLength(0); // nothing asked up front — openWorkspace asks
+    expect(vi.mocked(openWorkspace).mock.calls[0][0].planMd).toContain("Claude Code");
+  });
+
+  it("raises no batch agent picker on a host with only one possible agent", async () => {
+    // `hostProviders()` is exactly ["claude-code"] outside VS Code and Cursor, so the
+    // picker there could only be answered one way — and `ignoreFocusOut` would hold
+    // that one-item modal open on every launch.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    env.uriScheme = "windsurf";
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(agentPicks()).toHaveLength(0);
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+    for (const call of vi.mocked(openWorkspace).mock.calls) expect(call[0].provider).toBe("claude-code");
+  });
+
   it("launches nothing when the batch's agent picker is dismissed", async () => {
     // A launch-wide question, dismissed, can only mean the launch — every task in it.
     vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });

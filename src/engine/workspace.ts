@@ -356,16 +356,28 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   // the target window will actually seed, on every path.
   let pinned: AgentProvider | undefined = setting === "ask" ? req.provider : undefined;
   if (seedAgent && !pinned && setting === "ask") {
-    const choice = await vscode.window.showQuickPick(
-      hostProviders().map((p) => ({ label: providerLabel(p), provider: p })),
-      { title: "Which agent?", placeHolder: "Pick the agent to start this session with", ignoreFocusOut: true },
-    );
-    // Dismissed: the user cancelled the launch itself. Nothing has been created yet,
-    // so returning here leaves no window, no worktree, no brief and no plan behind.
-    if (!choice) {
-      return { mode, briefs: [], opened: [], remoteControl: false, provider: "claude-code", cancelled: true };
+    // A one-item picker is not a question. On a host that is neither VS Code nor
+    // Cursor, `hostProviders()` is exactly `["claude-code"]`, and a modal held open by
+    // `ignoreFocusOut` that can be answered only one way is pure friction on every
+    // launch. Short-circuited HERE rather than in `hostProviders`, which is read as a
+    // capability LIST elsewhere — Doctor feeds it straight into `DoctorInputs` to
+    // decide which agents' rows to show under `ask` — and must keep answering "what
+    // can this host run", not "should we prompt".
+    const choices = hostProviders();
+    if (choices.length === 1) {
+      pinned = choices[0];
+    } else {
+      const choice = await vscode.window.showQuickPick(
+        choices.map((p) => ({ label: providerLabel(p), provider: p })),
+        { title: "Which agent?", placeHolder: "Pick the agent to start this session with", ignoreFocusOut: true },
+      );
+      // Dismissed: the user cancelled the launch itself. Nothing has been created yet,
+      // so returning here leaves no window, no worktree, no brief and no plan behind.
+      if (!choice) {
+        return { mode, briefs: [], opened: [], remoteControl: false, provider: "claude-code", cancelled: true };
+      }
+      pinned = choice.provider;
     }
-    pinned = choice.provider;
   }
   const provider: AgentProvider = pinned ?? resolvedProvider(setting);
   // Written into the plan only when `ask` produced it — see the comment above.

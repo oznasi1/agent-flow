@@ -2185,7 +2185,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // and the loop honours the answer — with one exception picked up once the
     // destination is known (see the `shared` re-resolution below).
     const isBatch = keys.length > 1;
-    let batchProvider = isBatch ? await this.resolveBatchProvider(cfg) : undefined;
+    let batchProvider = isBatch ? await this.resolveBatchProvider(cfg, true) : undefined;
     if (isBatch && !batchProvider) return;
     // The agent for copy written BEFORE the launch: the resolved answer when there is
     // one, and otherwise the setting's own — a single launch resolves inside
@@ -2246,7 +2246,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // already resolved above, before its confirmation. Still before the first worktree,
     // so a dismissal here costs nothing either.
     if (shared && !batchProvider) {
-      batchProvider = await this.resolveBatchProvider(cfg);
+      batchProvider = await this.resolveBatchProvider(cfg, isBatch);
       if (!batchProvider) return;
     }
 
@@ -2502,16 +2502,25 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    *  `openWorkspace` guards its own picker with.
    *
    *  `undefined` means dismissed, at which point the batch must launch nothing. */
-  private async resolveBatchProvider(cfg: AgentFlowConfig): Promise<AgentProvider | undefined> {
+  private async resolveBatchProvider(cfg: AgentFlowConfig, isBatch: boolean): Promise<AgentProvider | undefined> {
     if (cfg.agentProvider !== "ask" || !cfg.seedAgent) return resolvedProvider(cfg.agentProvider);
+    // One possible agent is not a question — same short-circuit, and same reasoning, as
+    // the picker in `openWorkspace`.
+    const choices = hostProviders();
+    if (choices.length === 1) return choices[0];
     const choice = await vscode.window.showQuickPick(
-      hostProviders().map((p) => ({ label: providerLabel(p), provider: p })),
+      choices.map((p) => ({ label: providerLabel(p), provider: p })),
       {
         // The SAME title as the picker in `openWorkspace` — one launch-time question,
         // asked in one voice, whichever path raises it. Only the placeholder says what
         // is different about this one: it answers for every task, not just one.
+        //
+        // …which is only true of a REAL batch. A one-key batch reaches here solely
+        // because a shared window seeds from plan files and cannot ask later; it is a
+        // single launch, so it gets the single-launch placeholder, word for word the
+        // one `openWorkspace` would have shown it.
         title: "Which agent?",
-        placeHolder: "Pick the agent for every task in this batch",
+        placeHolder: isBatch ? "Pick the agent for every task in this batch" : "Pick the agent to start this session with",
         ignoreFocusOut: true,
       },
     );
