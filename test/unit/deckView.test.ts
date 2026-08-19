@@ -439,6 +439,11 @@ vi.mock("../../src/config", async (importActual) => {
       // reviewRequestModes / reviewRequestMode }) actually reaches launchReviewFor.
       reviewRequestModes: actual.getConfig().reviewRequestModes,
       reviewRequestMode: actual.getConfig().reviewRequestMode,
+      // Same reason: a test steers which forge the panel resolves through
+      // setConfig({ forge }) — the real getConfig() applies the same "" → default
+      // fallback the shipped setting does, so a test that never sets it keeps
+      // exercising the GitHub path every other fixture in this file assumes.
+      forge: actual.getConfig().forge,
       // Same reason: the retire sweep reads both windows, and the grouping is a
       // persisted setting — a test steers all three through setConfig, so they
       // must come from the real getConfig() rather than being frozen here.
@@ -2510,6 +2515,45 @@ describe("DeckPanel PR facts", () => {
   });
 });
 
+// Task 10: deckView reads everything through one `Forge`, resolved once from
+// `agentFlow.forge`. `GhProvider` is replaced wholesale by the module mock
+// above (`fetch = h.prFetch`), but `GlabProvider` is not — it is the REAL class,
+// spawning through the same `execRunner` seam that mock's `execRunner` member
+// replaces with `h.ghRun`. So with `forge: "gitlab"` the real GitLab provider
+// runs against the existing spawn stub with no new mock at all, and `h.ghRun`'s
+// recorded argv is the proof of which forge is actually live.
+describe("forge selection", () => {
+  it("reads PR facts through glab, not gh, when the forge is gitlab", async () => {
+    setConfig({ forge: "gitlab" });
+    h.ghRun.mockResolvedValue("[]"); // an empty MR list — the argv is the assertion
+    await showAndWarm();
+    // `GhProvider` never ran at all — the GitHub path's own mock proves it.
+    expect(h.prFetch).not.toHaveBeenCalled();
+    const calls = h.ghRun.mock.calls.map((call) => call[1].join(" "));
+    expect(calls.some((a) => a.includes("api") && a.includes("merge_requests"))).toBe(true);
+    expect(calls.some((a) => a.includes("pr list"))).toBe(false);
+  });
+
+  it("still reads PR facts through gh when the forge is left at its default", async () => {
+    // No setConfig({ forge }) at all — the shipped default, and the path every
+    // other fixture in this file already exercises.
+    await showAndWarm();
+    expect(h.prFetch).toHaveBeenCalled();
+  });
+
+  it("names the configured forge's CLI in the footer note", async () => {
+    setConfig({ forge: "gitlab" });
+    // `resolveBin("glab")` returns null on a machine with no `glab` installed
+    // (this one, in CI), so the spawned file is the bare name "glab" — the same
+    // shape a real ENOENT would produce.
+    h.ghRun.mockRejectedValue(Object.assign(new Error("spawn glab ENOENT"), { code: "ENOENT" }));
+    const p = await showAndWarm();
+    const note = posts(p).filter((m) => m.type === "deck:runs").at(-1)?.ghNote;
+    expect(note).toContain("glab");
+    expect(note).not.toContain("gh CLI");
+  });
+});
+
 describe("DeckPanel review strip", () => {
   it("posts the review queue after a search", async () => {
     const p = await showAndWarm();
@@ -2816,6 +2860,29 @@ describe("DeckPanel review detail", () => {
       id: "CyberJackGit/aws-ops#8491",
       detail: { failing: [], unresolved: null },
     });
+  });
+
+  // Task 10: GitLab's REST API carries no diff-stats aggregate in the queue call
+  // the way GitHub's search does, so a forge that needs one fills it in here
+  // instead — merged into the cached request rather than posted separately, so
+  // the strip's existing size chip renders it with no webview change at all.
+  it("merges a detail-supplied size into the cached request", async () => {
+    h.reviewDetail.mockResolvedValueOnce({
+      failing: [], unresolved: null,
+      size: { additions: 12, deletions: 3, changedFiles: 4 },
+    });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    await settled();
+    // reviewDetail() itself only posts deck:reviewDetail — force a re-post of
+    // deck:reviews (the cache is fresh, so this re-serves it rather than
+    // re-searching) to observe the merge landed on the cached row itself.
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    const row = (posts(p).filter((m) => m.type === "deck:reviews").at(-1) as {
+      requests: ReviewRequest[];
+    }).requests.find((r) => r.id === "CyberJackGit/aws-ops#8491");
+    expect(row).toMatchObject({ additions: 12, deletions: 3, changedFiles: 4 });
   });
 
   it("ignores an id that is not in the queue", async () => {
@@ -3149,6 +3216,27 @@ describe("DeckPanel review submit", () => {
     expect(window.showWarningMessage).toHaveBeenCalledWith(
       "Request changes on CyberJackGit/aws-ops#8491?",
       { modal: true },
+      "Request changes",
+    );
+  });
+
+  // Task 10: GitLab has no stable "request changes" verb, so ours degrades to a
+  // comment plus withdrawing any standing approval — gated on
+  // `this.forge.caps.changesRequested`, the one capability that differs by
+  // forge. The person clicking deserves to know before they click, not after.
+  it("discloses GitLab's request-changes semantics in the confirmation modal", async () => {
+    setConfig({ forge: "gitlab" });
+    h.reviewWrites = true;
+    // Fresh on disk, so `reviewsEnabled()`'s cache-first path never has to reach
+    // the real (unmocked) `GlabReviewProvider.search()` for this test to see the
+    // queued row — see "posts the cached queue on deck:ready…" above for the
+    // same reasoning.
+    h.reviewCache = { fetchedAt: Date.now(), issueCount: 1, requests: [reviewFixture()] };
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "request-changes" }));
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      "Request changes on CyberJackGit/aws-ops#8491?",
+      { modal: true, detail: expect.stringContaining('GitLab has no "request changes" review') },
       "Request changes",
     );
   });
@@ -7333,6 +7421,27 @@ describe("arm, disarm and reset", () => {
     expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).armed).toBe(true);
     const toast = posts(p).find((m) => m.type === "toast" && /PR facts/i.test(m.message ?? ""));
     expect(toast).toBeTruthy();
+  });
+
+  // Task 10 threads `forge: this.forge.caps` through this call site — until now,
+  // `unfirableRules` was always called with no `forge` at all, so the
+  // "forge-unsupported" branch (Task 9, armability.ts) was dead code from here.
+  // `caps` is static data on the `Forge` object, resolved synchronously at
+  // construction, so this needs no probe-warming tick the way a PR-facts or
+  // footer-note test does.
+  it("flow:arm names a changes-requested rule as forge-unsupported on gitlab", async () => {
+    setConfig({ orchestrator: true, forge: "gitlab" });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "changes-requested" }, action: "notify" }],
+    }];
+    const { p, send } = await openPanel();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    const toast = posts(p).find((m) => m.type === "toast" && /can never fire/i.test(m.message ?? ""));
+    // Reworded (Task 10) from the em-dash aside "1 needs — your forge cannot
+    // report this" to read naturally alongside its siblings "1 needs PR facts"
+    // and "1 needs the Live signal".
+    expect(toast?.message).toContain("1 rule's forge cannot report this");
   });
 
   it("flow:arm with armed:false disarms", async () => {
