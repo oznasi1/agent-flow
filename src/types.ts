@@ -160,7 +160,8 @@ export interface Run {
    * written before this field existed, and on every run still in flight. */
   finishedAt?: number;
   /** When this run was first observed to have no live work left — no agent of its
-   * own open, no PR, no active ticket, nothing uncommitted or unpushed. Stamped by
+   * own open, no PR, nothing uncommitted or unpushed, and past its launch grace.
+   * Stamped by
    * the Deck's retire sweep and cleared again the moment any of that comes back, so
    * the Recently-closed window survives a panel reload. Absent on every record
    * written before this field existed, and on every run still on the board. */

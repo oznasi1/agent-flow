@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them together.
 - A card sitting in `fixes needed` with nobody home reads **pr blocked** in the
   attention tone rather than the parked grey, the way it did in Action required.
+- **A parked card with nothing behind it leaves the board.** An open ticket on
+  its own no longer holds a run in flight: with no session open, no PR, and
+  nothing uncommitted or unpushed, the card moves to Recently closed, which
+  offers reopen and forget. Work still holds a card — a live session, an open PR,
+  a merge to wrap up, or anything on disk you could lose, all unchanged. A run
+  launched in the last ten minutes also stays put, so a task you just took cannot
+  flash into Recently closed while its window is still opening.
 
 ## [0.30.1] — 2026-08-18
 
