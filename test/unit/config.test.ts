@@ -1013,3 +1013,35 @@ describe("package.json ⇄ config constants", () => {
     },
   );
 });
+
+describe("forge", () => {
+  it("defaults to github", () => {
+    expect(getConfig().forge).toBe("github");
+  });
+
+  it("reads an explicit gitlab", () => {
+    setConfig({ forge: "gitlab" });
+    expect(getConfig().forge).toBe("gitlab");
+  });
+
+  // Validation belongs to resolveForge, which falls back and logs. getConfig's job
+  // is only to report what the user actually wrote.
+  it("passes an unknown value through untouched", () => {
+    setConfig({ forge: "bitbucket" });
+    expect(getConfig().forge).toBe("bitbucket");
+  });
+
+  it("treats an empty string as the default", () => {
+    setConfig({ forge: "" });
+    expect(getConfig().forge).toBe("github");
+  });
+
+  // This is the actual compatibility guarantee: nothing in getConfig() reads
+  // package.json, so a manifest default of "gitlab" would ship silently unless
+  // something pins it. An existing install with no explicit `agentFlow.forge`
+  // gets whatever VS Code's settings UI serves from this manifest default.
+  it("ships a manifest default of github, so an existing install is unaffected", () => {
+    const props = pkg.contributes.configuration.properties as Record<string, { default?: unknown }>;
+    expect(props["agentFlow.forge"].default).toBe("github");
+  });
+});

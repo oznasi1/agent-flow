@@ -6,6 +6,7 @@ import {
 } from "../../../src/telemetry/settingsSnapshot";
 import { STOCK_REVIEW_MODES } from "../../../src/telemetry/events";
 import { CONNECTOR_IDS } from "../../../src/tasks/registry";
+import { FORGE_IDS } from "../../../src/engine/forge/registry";
 import { setConfig } from "../../_mocks/vscode";
 import pkg from "../../../package.json";
 
@@ -38,6 +39,7 @@ describe("settingsSnapshot", () => {
     expect(s.review_modes_overridden).toBe(0);
     expect(s.review_modes_custom).toBe(0);
     expect(s.review_modes_hidden).toBe(0);
+    expect(s.forge).toBe("github");
   });
 
   it("collapses a user-authored taskMode id to 'custom'", () => {
@@ -205,6 +207,14 @@ describe("settingsSnapshot", () => {
     expect(settingsSnapshot({ ...getConfig(), taskSource: "acme" }).task_source).toBe("invalid");
   });
 
+  it("reports a registered forge as itself", () => {
+    expect(settingsSnapshot({ ...getConfig(), forge: "gitlab" }).forge).toBe("gitlab");
+  });
+
+  it("reports an unregistered forge as invalid rather than transmitting it", () => {
+    expect(settingsSnapshot({ ...getConfig(), forge: "our-internal-thing" }).forge).toBe("invalid");
+  });
+
   it("reports the agent surface, collapsing an unknown value to invalid", () => {
     expect(settingsSnapshot({ ...getConfig(), agentSurface: "terminal" }).agent_surface).toBe("terminal");
     expect(
@@ -296,6 +306,16 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
   it("keeps agentFlow.taskSource's enum and enumDescriptions the same length", () => {
     expect(props["agentFlow.taskSource"].enumDescriptions?.length).toBe(
       props["agentFlow.taskSource"].enum?.length,
+    );
+  });
+
+  it("keeps FORGE_IDS equal to agentFlow.forge's manifest enum", () => {
+    expect([...FORGE_IDS]).toEqual(props["agentFlow.forge"].enum);
+  });
+
+  it("keeps agentFlow.forge's enum and enumDescriptions the same length", () => {
+    expect(props["agentFlow.forge"].enumDescriptions?.length).toBe(
+      props["agentFlow.forge"].enum?.length,
     );
   });
 });
@@ -399,13 +419,13 @@ describe("settingsSnapshot — field-count guard", () => {
   // field is enum-ish, the "invalid" sentinel paragraph and its own field
   // list) — update the doc, don't just bump the number here.
 
-  it("emits exactly 39 fields — a count also stated in docs/TELEMETRY.md's " +
+  it("emits exactly 40 fields — a count also stated in docs/TELEMETRY.md's " +
     "'Settings snapshot' section; a mismatch means that doc is now wrong too", () => {
     const s = settingsSnapshot(getConfig());
-    expect(Object.keys(s)).toHaveLength(39);
+    expect(Object.keys(s)).toHaveLength(40);
   });
 
-  it("reports the \"invalid\" sentinel on exactly 9 fields when every enum-ish " +
+  it("reports the \"invalid\" sentinel on exactly 10 fields when every enum-ish " +
     "setting holds an unrecognized value — docs/TELEMETRY.md's sentinel " +
     "paragraph states this same count and must move with it", () => {
     // Every config property whose SettingsSnapshot field is built with
@@ -425,6 +445,7 @@ describe("settingsSnapshot — field-count guard", () => {
       remoteControl: secret as unknown as AgentFlowConfig["remoteControl"],
       defaultFilter: secret as unknown as AgentFlowConfig["defaultFilter"],
       taskSource: secret as unknown as AgentFlowConfig["taskSource"],
+      forge: secret as unknown as AgentFlowConfig["forge"],
     };
     const s = settingsSnapshot(cfg);
     // Booleans and numbers can never equal the string "invalid", and
@@ -432,7 +453,7 @@ describe("settingsSnapshot — field-count guard", () => {
     // a genuine enumOrInvalid field, not a coincidence.
     const invalidFields = Object.entries(s).filter(([, v]) => v === "invalid").map(([k]) => k);
     expect(invalidFields.sort()).toEqual([
-      "agent_provider", "agent_surface", "default_filter", "explore_mode",
+      "agent_provider", "agent_surface", "default_filter", "explore_mode", "forge",
       "open_in", "remote_control", "task_source", "workspace_mode", "worktree",
     ]);
   });

@@ -142,6 +142,7 @@ import { SLACK_DM_SENTENCE, PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/pr
 
 const CFG = {
   taskSource: "jira",
+  forge: "github",
   baseUrl: "https://jira",
   project: "ASM",
   reposRoot: "/repos",

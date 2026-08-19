@@ -249,6 +249,10 @@ export interface AgentFlowConfig {
   // Which task source to read from — an id in src/tasks/registry.ts. An
   // unregistered value resolves to Jira with a log line, never an empty board.
   taskSource: string;
+  // Which forge holds our pull/merge requests: "github" (via `gh`) or "gitlab"
+  // (via `glab`). Validated by `resolveForge`, not here — an unknown value falls
+  // back to github with a log line rather than being silently rewritten.
+  forge: string;
   baseUrl: string;
   project: string;
   reposRoot: string;
@@ -510,6 +514,7 @@ export function getConfig(): AgentFlowConfig {
   }));
   return {
     taskSource: c.get<string>("taskSource") || "jira",
+    forge: c.get<string>("forge") || "github",
     baseUrl: (c.get<string>("jira.baseUrl") || "").replace(/\/+$/, ""),
     project: c.get<string>("jira.project") || "",
     reposRoot: expandHome(c.get<string>("reposRoot") || "~/projects"),

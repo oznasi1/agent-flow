@@ -4,6 +4,7 @@ import {
 } from "../config";
 import { PromptMode } from "../types";
 import { CONNECTOR_IDS } from "../tasks/registry";
+import { FORGE_IDS } from "../engine/forge/registry";
 import { SettingsSnapshot, STOCK_PROMPT_MODES, STOCK_REVIEW_MODES, TaskModeProp } from "./events";
 
 /** Collapse an "ask, or a mode id" setting to a shape-only value. A custom id is
@@ -95,6 +96,7 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     agent_surface: enumOrInvalid(cfg.agentSurface, AGENT_SURFACES),
     explore_mode: enumOrInvalid(cfg.exploreMode, EXPLORE_MODES),
     task_source: enumOrInvalid(cfg.taskSource, CONNECTOR_IDS),
+    forge: enumOrInvalid(cfg.forge, FORGE_IDS),
     worktree: enumOrInvalid(cfg.worktree, WORKTREE_MODES),
     remote_control: enumOrInvalid(cfg.remoteControl, REMOTE_CONTROL_MODES),
     default_filter: enumOrInvalid(cfg.defaultFilter, DEFAULT_FILTER_VALUES),

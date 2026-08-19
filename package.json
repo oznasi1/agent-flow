@@ -145,6 +145,19 @@
           "default": "jira",
           "description": "Where Agent Flow reads tasks from. Each source has its own settings under agentFlow.<source>.*. Requires a window reload."
         },
+        "agentFlow.forge": {
+          "type": "string",
+          "enum": [
+            "github",
+            "gitlab"
+          ],
+          "enumDescriptions": [
+            "GitHub, through the `gh` CLI.",
+            "GitLab, through the `glab` CLI."
+          ],
+          "default": "github",
+          "description": "Which forge Agent Flow reads pull/merge requests, CI, and review requests from. Each forge needs its own CLI installed and signed in — run Doctor to check. Requires a window reload."
+        },
         "agentFlow.jira.baseUrl": {
           "type": "string",
           "default": "",
