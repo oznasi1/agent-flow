@@ -243,6 +243,7 @@ beforeEach(() => {
     briefs: [],
     opened: ["/repos/account-service"],
     remoteControl: false,
+    provider: "claude-code",
   });
   // Restored here, not merely cleared: `clearMocks` drops call history and leaves the
   // implementation in place, so a test that scripts a stale branch would otherwise leak
@@ -1899,6 +1900,7 @@ describe("takeTask", () => {
       briefs: [],
       opened: ["/ws/ASM-1.code-workspace"],
       remoteControl: false,
+      provider: "claude-code",
     });
     const { provider, posted } = setup();
     await provider.takeTask("ASM-1", "card", ["account-service", "centaur"]);
@@ -2157,6 +2159,7 @@ describe("takeTask", () => {
         opened: ["/ws/team.code-workspace"],
         mergeFailed: true,
         remoteControl: false,
+        provider: "claude-code",
       });
 
       const { provider, posted } = setup();
@@ -2180,6 +2183,7 @@ describe("takeTask", () => {
         opened: ["/ws/team.code-workspace"],
         mergedRepos: ["account-service"],
         remoteControl: false,
+        provider: "claude-code",
       });
 
       const { provider, posted } = setup();
@@ -2298,6 +2302,7 @@ describe("takeTask", () => {
         briefs: [],
         opened: ["/ws/team.code-workspace"],
         remoteControl: false,
+        provider: "claude-code",
       });
 
       const { provider, posted } = setup();
@@ -2325,6 +2330,7 @@ describe("takeTask", () => {
         briefs: [],
         opened: ["/ws/team.code-workspace"],
         remoteControl: false,
+        provider: "claude-code",
       });
 
       const { provider, posted } = setup();
@@ -2383,6 +2389,7 @@ describe("takeTask", () => {
         briefs: [],
         opened: ["/ws/team.code-workspace"],
         remoteControl: false,
+        provider: "claude-code",
       });
 
       const { provider, posted } = setup();
@@ -2455,6 +2462,7 @@ describe("takeTask", () => {
         briefs: [],
         opened: ["/ws/team.code-workspace"],
         remoteControl: false,
+        provider: "claude-code",
       });
 
       const { provider, posted } = setup();
@@ -3176,7 +3184,7 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(openWorkspace)
       .mockRejectedValueOnce(new Error("disk full"))
-      .mockResolvedValueOnce({ mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/x"], remoteControl: false });
+      .mockResolvedValueOnce({ mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/x"], remoteControl: false, provider: "claude-code" });
     const { provider, posted } = setup();
     await provider.takeBatch(twoKeys, ["api"]);
     expect(openWorkspace).toHaveBeenCalledTimes(2);
@@ -4083,6 +4091,7 @@ describe("remote control", () => {
       briefs: [],
       opened: ["/a", "/b"],
       remoteControl: false, // withheld by the single-window guard
+      provider: "claude-code",
     });
     const { provider, posted } = setup();
     await provider.takeTask("ASM-1", "card", ["account-service", "centaur"]);
@@ -4129,6 +4138,7 @@ describe("remote control", () => {
       briefs: [],
       opened: ["/x"],
       remoteControl: true,
+      provider: "claude-code",
     });
     const { provider, posted } = setup();
     await provider.takeBatch(["ASM-1"], ["api"]);

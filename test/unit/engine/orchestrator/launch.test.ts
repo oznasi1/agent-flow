@@ -35,7 +35,7 @@ const makeDeps = (over: Partial<LaunchDeps> = {}): LaunchDeps => ({
     services.map((s) => ({ ...s, path: `${s.path}/.claude/worktrees/ASM-12` })),
   ),
   openWorkspace: vi.fn(async (_req: OpenRequest): Promise<OpenResult> => ({
-    mode: "per-window", briefs: [], opened: ["/w"], remoteControl: false,
+    mode: "per-window", briefs: [], opened: ["/w"], remoteControl: false, provider: "claude-code",
   })),
   log: vi.fn(),
   ...over,

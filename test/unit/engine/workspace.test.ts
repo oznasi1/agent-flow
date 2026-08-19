@@ -1952,6 +1952,113 @@ describe("openWorkspace — remote control", () => {
     expect(writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"))).toBeUndefined();
   });
 });
+describe("openWorkspace — ask", () => {
+  const planOf = () => {
+    const w = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
+    return JSON.parse(String(w![1]));
+  };
+
+  // All three fixed settings, not just one: the picker is new behaviour that must stay
+  // invisible to every user who never chose `ask`, and each value reaches the resolver
+  // by its own branch.
+  it.each([
+    ["claude-code", "cursor"],
+    ["copilot", "vscode"],
+    ["cursor", "cursor"],
+  ])("does not prompt under %s, and writes no provider to the plan", async (setting, scheme) => {
+    setConfig({ agentProvider: setting });
+    env.uriScheme = scheme;
+    const result = await openWorkspace(baseReq({ seedAgent: true }));
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(result.provider).toBe(setting);
+    // Absent, not the setting's value. The target window re-reads the preference live
+    // at seed time, so flipping the setting still moves plans already sitting on disk —
+    // only `ask` has no preference left to read and must pin its answer.
+    expect(planOf().provider).toBeUndefined();
+  });
+
+  it("prompts under ask and writes the choice into the plan", async () => {
+    setConfig({ agentProvider: "ask" });
+    env.uriScheme = "cursor";
+    window.showQuickPick.mockResolvedValueOnce({ label: "Cursor", provider: "cursor" });
+    const result = await openWorkspace(baseReq({ seedAgent: true }));
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    expect(result.provider).toBe("cursor");
+    expect(planOf().provider).toBe("cursor");
+  });
+
+  it("offers only the agents this host can run, under their product names", async () => {
+    setConfig({ agentProvider: "ask" });
+    env.uriScheme = "cursor";
+    window.showQuickPick.mockResolvedValueOnce({ label: "Cursor", provider: "cursor" });
+    await openWorkspace(baseReq({ seedAgent: true }));
+    const items = window.showQuickPick.mock.calls[0][0] as { label: string; provider: string }[];
+    expect(items.map((i) => i.provider)).toEqual(["claude-code", "cursor"]);
+    expect(items.map((i) => i.label)).toEqual(["Claude Code", "Cursor"]);
+  });
+
+  it("offers Copilot instead of Cursor on a VS Code host", async () => {
+    setConfig({ agentProvider: "ask" });
+    env.uriScheme = "vscode";
+    window.showQuickPick.mockResolvedValueOnce({ label: "Copilot", provider: "copilot" });
+    const result = await openWorkspace(baseReq({ seedAgent: true }));
+    const items = window.showQuickPick.mock.calls[0][0] as { provider: string }[];
+    expect(items.map((i) => i.provider)).toEqual(["claude-code", "copilot"]);
+    expect(result.provider).toBe("copilot");
+    expect(planOf().provider).toBe("copilot");
+  });
+
+  it("does not prompt when a caller pins a provider", async () => {
+    setConfig({ agentProvider: "ask" });
+    const result = await openWorkspace(baseReq({ seedAgent: true, provider: "claude-code" }));
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(result.provider).toBe("claude-code");
+    // A pin is still a resolved `ask`, so it is pinned into the plan too — the
+    // target window has no preference left to read either way.
+    expect(planOf().provider).toBe("claude-code");
+  });
+
+  it("does not prompt when seeding is off", async () => {
+    setConfig({ agentProvider: "ask" });
+    const result = await openWorkspace(baseReq({ seedAgent: false }));
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(result.provider).toBe("claude-code");
+  });
+
+  it("opens nothing when the picker is dismissed", async () => {
+    setConfig({ agentProvider: "ask" });
+    window.showQuickPick.mockResolvedValueOnce(undefined);
+    const result = await openWorkspace(baseReq({ seedAgent: true }));
+    expect(result.cancelled).toBe(true);
+    expect(result.opened).toEqual([]);
+    expect(mkdirSync).not.toHaveBeenCalled();     // no brief dir, no workspace dir, no plan dir
+    expect(writeFileSync).not.toHaveBeenCalled(); // no brief, no .code-workspace, no plan, no run
+    expect(appendFileSync).not.toHaveBeenCalled(); // no git-exclude entry
+    expect(exec).not.toHaveBeenCalled();          // no `open -a`
+    expect(commands.executeCommand).not.toHaveBeenCalledWith(
+      "vscode.openFolder",
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("drops Remote Control when ask resolves to a non-Claude agent", async () => {
+    setConfig({ agentProvider: "ask" });
+    env.uriScheme = "cursor";
+    window.showQuickPick.mockResolvedValueOnce({ label: "Cursor", provider: "cursor" });
+    const result = await openWorkspace(baseReq({ seedAgent: true, remoteControl: true }));
+    expect(result.remoteControl).toBe(false);
+    expect(planOf().remoteControl).toBe(false);
+  });
+
+  it("keeps Remote Control when ask resolves to Claude Code", async () => {
+    setConfig({ agentProvider: "ask" });
+    window.showQuickPick.mockResolvedValueOnce({ label: "Claude Code", provider: "claude-code" });
+    const result = await openWorkspace(baseReq({ seedAgent: true, remoteControl: true }));
+    expect(result.remoteControl).toBe(true);
+    expect(planOf().remoteControl).toBe(true);
+  });
+});
 
 describe("openWorkspace — this window", () => {
   const folderWindow = { identity: "/repos/account-service", kind: "folder" as const, roots: [{ name: "account-service", path: "/repos/account-service" }] };

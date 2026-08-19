@@ -12,7 +12,7 @@ import { gitState } from "./git";
 import { ensureGitExcluded } from "./gitExclude";
 import { serviceFolderName } from "./worktree";
 import { windowIdentity, type CurrentWindow } from "./presence";
-import { providerLabel, readAgentProviderSetting, readAgentSurface, resolvedProvider, type AgentProvider } from "../config";
+import { hostProviders, providerLabel, readAgentProviderSetting, readAgentSurface, resolvedProvider, type AgentProvider } from "../config";
 
 export const BRIEF_DIR = ".pick-task";
 export const BRIEF_FILE = "TASK.md";
@@ -119,6 +119,11 @@ export interface OpenRequest {
   /** Stamped onto the run record verbatim; see `Run.children`. An empty array is
    *  stored as absent, so "no children" has exactly one representation. */
   children?: Run["children"];
+  /** Pin the agent and suppress the `ask` picker. Set by the callers that must never
+   *  prompt: a batch, which resolves once for the whole batch before its loop, and an
+   *  Orchestrator rule, which runs unattended with nobody there to answer. Absent under
+   *  a fixed setting changes nothing — there is no picker to suppress. */
+  provider?: AgentProvider;
   /** Never overwrite a brief that is already on disk. Defaults to false, which is what
    * every caller before it relied on: a Take rewrites the brief because the brief IS
    * the task it is starting.
@@ -143,6 +148,12 @@ export interface OpenResult {
   unaddedRepos?: string[]; // repos that couldn't be added as roots to a folder window
   remoteControl: boolean; // whether Remote Control actually applies (see the single-window guard)
   seededInPlace?: boolean; // "current": this window was seeded as-is; nothing was opened
+  /** The agent that was actually seeded. Post-launch copy reads this rather than the
+   *  setting, so it names the real agent even under `ask`. */
+  provider: AgentProvider;
+  /** The `ask` picker was dismissed. Nothing was opened, written, or seeded — every
+   *  other field is empty and the caller must return without reporting success. */
+  cancelled?: true;
 }
 
 export interface PlanFile {
@@ -324,6 +335,28 @@ export function openInEditor(target: string): Promise<boolean> {
 // ── Public: open + seed ────────────────────────────────────────────────────────
 export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   const { ticket, planMd, descriptionText, services, mode, promptTemplate, workspaceDir, seedAgent } = req;
+  // Resolve the agent before anything is created. Under the three fixed settings this
+  // is a plain read and the plan file carries no provider, so the target window keeps
+  // reading the preference live at seed time — flipping the setting still affects
+  // plans already on disk. Only `ask` pins a choice into the plan, because by then
+  // there is no preference left for the target window to read.
+  const setting = readAgentProviderSetting();
+  let pinned: AgentProvider | undefined = req.provider;
+  if (seedAgent && !pinned && setting === "ask") {
+    const choice = await vscode.window.showQuickPick(
+      hostProviders().map((p) => ({ label: providerLabel(p), provider: p })),
+      { title: "Which agent?", placeHolder: "Pick the agent to start this session with", ignoreFocusOut: true },
+    );
+    // Dismissed: the user cancelled the launch itself. Nothing has been created yet,
+    // so returning here leaves no window, no worktree, no brief and no plan behind.
+    if (!choice) {
+      return { mode, briefs: [], opened: [], remoteControl: false, provider: "claude-code", cancelled: true };
+    }
+    pinned = choice.provider;
+  }
+  const provider: AgentProvider = pinned ?? resolvedProvider(setting);
+  // Written into the plan only when `ask` produced it — see the comment above.
+  const planProvider = setting === "ask" ? provider : undefined;
   // "This window" only means anything if this window can be named by a plan match.
   // Without an identity there is nothing to seed, so the request degrades to the
   // normal open path rather than silently doing nothing.
@@ -468,13 +501,17 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   // One clipboard, one window. A launch that opens several windows would leave every
   // window but the last pasting another task's brief, so withhold it entirely. Also
   // withhold it when seedAgent is off: nothing seeds without a plan file (below), so
-  // "applies" must never be true when no plan file will carry it.
-  const remoteControl = !!req.remoteControl && seedAgent && matches.length === 1;
+  // "applies" must never be true when no plan file will carry it. And it is Claude
+  // Code's feature alone, so a non-Claude agent withholds it too — under `ask` this is
+  // where a Copilot or Cursor pick drops it. Dropping is right where refusing would be
+  // wrong: the user made that choice interactively moments ago, and `remoteControl`
+  // already feeds `seededNote`, so the toast corrects itself with no new message.
+  const remoteControl = !!req.remoteControl && seedAgent && matches.length === 1 && provider === "claude-code";
 
   // 3 — durable writes BEFORE opening: a window that opens (or is focused) and seeds
   //     can otherwise race these to disk, so nothing may be opened before this lands.
   if (seedAgent) {
-    writePlanFile({ key: ticket.key, createdAt: Date.now(), seedAgent: true, remoteControl, matches });
+    writePlanFile({ key: ticket.key, createdAt: Date.now(), seedAgent: true, remoteControl, provider: planProvider, matches });
   }
   if (req.recordRun !== false) {
     const run: Run = {
@@ -516,7 +553,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     }
   }
 
-  return { mode: effMode, workspaceFile, briefs, opened, mergedRepos, mergeFailed, unaddedRepos, remoteControl, seededInPlace: !!here };
+  return { mode: effMode, workspaceFile, briefs, opened, mergedRepos, mergeFailed, unaddedRepos, remoteControl, seededInPlace: !!here, provider };
 }
 
 /** Additively merge `repos` into an existing `.code-workspace` file, preserving
