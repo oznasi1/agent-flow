@@ -9,8 +9,14 @@
 that ticket touches, with a coding agent already briefed — Claude Code, or GitHub Copilot.</p>
 
 [![CI](https://github.com/oznasi1/agent-flow/actions/workflows/ci.yml/badge.svg)](https://github.com/oznasi1/agent-flow/actions/workflows/ci.yml)
+[![VS Marketplace version](https://vsmarketplacebadges.dev/version-short/Oznasi1.oznasi1-agent-flow.svg)](https://marketplace.visualstudio.com/items?itemName=Oznasi1.oznasi1-agent-flow)
+[![Open VSX downloads](https://img.shields.io/open-vsx/dt/Oznasi1/oznasi1-agent-flow?label=downloads&color=blue)](https://open-vsx.org/extension/Oznasi1/oznasi1-agent-flow)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![VS Code ^1.90.0](https://img.shields.io/badge/VS%20Code-%5E1.90.0-007ACC?logo=visualstudiocode&logoColor=white)
+
+[![Install in VS Code](https://img.shields.io/badge/Install-VS%20Code-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect?url=vscode:extension/Oznasi1.oznasi1-agent-flow)
+[![Install in Cursor](https://img.shields.io/badge/Install-Cursor-0b0b0b?style=for-the-badge&logo=cursor&logoColor=white)](https://open-vsx.org/extension/Oznasi1/oznasi1-agent-flow)
+
+[Quick start](#quick-start) · [Full guide](docs/GUIDE.md) · [Settings](docs/SETTINGS.md) · [Privacy](docs/PRIVACY.md) · [Changelog](CHANGELOG.md)
 
 <img src="media/screenshot.png" alt="The Agent Flow Deck panel in the VS Code sidebar: a Tasks / Notepad tab bar, segmented task, size and status lenses, a repo multiselect and a title search, then task cards with per-card Take and Address PR actions." width="420" />
 
@@ -88,9 +94,9 @@ prompt modes, and Remote Control.
 > Agent Flow Deck ships with **no organization-specific defaults** — everything it needs is
 > collected in a short first-run wizard.
 
-1. **Install the extension** — build or grab the packaged `.vsix`, then
-   `code --install-extension oznasi1-agent-flow-<version>.vsix` (or **⋯ → Install from
-   VSIX…** in the Extensions view).
+1. **Install the extension** — press **Install in VS Code** or **Install in Cursor** above.
+   For a local build instead: `code --install-extension oznasi1-agent-flow-<version>.vsix`,
+   or **⋯ → Install from VSIX…** in the Extensions view.
 2. **Install a coding agent** — the
    [Claude Code extension](https://marketplace.visualstudio.com/items?itemName=anthropic.claude-code),
    or GitHub Copilot with `agentFlow.agentProvider: copilot`. With neither, the task brief

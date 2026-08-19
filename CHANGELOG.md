@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **One-click install, and a header that acts.** The README's badge row was three static
+  badges and no way to actually install anything — a reader who wanted the extension had to
+  find "Quick start" and build a `.vsix`. It now carries **Install in VS Code** (a
+  `vscode.dev/redirect` deep link) and **Install in Cursor** (Open VSX), a live version and
+  download-count badge, and a one-line nav to the guide, settings, privacy and changelog.
+  Static `VS Code ^1.90.0` is gone — the engine requirement is still under Requirements.
+  Badge sources are limited to vsce's trusted-SVG allowlist so packaging stays clean.
+
 ### Changed
 
 - **A README you can finish.** It had grown to 625 lines and answered every question at
