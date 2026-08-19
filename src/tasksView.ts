@@ -1654,11 +1654,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return p?.yes === true;
   }
 
-  /** Remote Control seeds `/remote-control <key>`, a Claude Code slash command Copilot
-   * has no equivalent for — Copilot would take it as literal prompt text and start a
-   * session that silently does the wrong thing. `remoteControl: "on"` under Copilot is
-   * therefore refused, rather than silently dropping one of the two things the user
-   * turned on.
+  /** Remote Control seeds `/remote-control <key>`, a Claude Code slash command neither
+   * Copilot nor Cursor has an equivalent for — either would take it as literal prompt
+   * text and start a session that silently does the wrong thing. `remoteControl: "on"`
+   * under any non-Claude agent is therefore refused, rather than silently dropping one
+   * of the two things the user turned on.
    *
    * Refused HERE, at the very top of a launch entry point: this is a settings-only
    * synchronous check, so it lands ahead of every picker, every worktree and every
@@ -1667,19 +1667,20 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    *
    * Only `"on"` is refused. `"ask"` is handled in resolveRemoteControl, which declines
    * to offer a toggle it could not honour and proceeds without Remote Control — a
-   * Copilot user is never blocked from taking a task by an "ask" setting. `"off"` and
-   * every Claude Code configuration return false here before anything else is read,
-   * so those paths are untouched. `cfg.agentProvider` is host-guarded by
-   * readAgentProvider, so none of this can fire in Cursor.
+   * non-Claude user is never blocked from taking a task by an "ask" setting. `"off"`
+   * and every Claude Code configuration return false here before anything else is
+   * read, so those paths are untouched. This predicate runs on every host, Cursor
+   * included: `cfg.agentProvider` reads back `"cursor"` there once it's selected, so
+   * this is exactly what fires under it.
    *
    * The `seedAgent` clause mirrors resolveRemoteControlSetting's own precondition
    * above, and has to: with seeding off, no plan file ever carries the decision, so
-   * `/remote-control` could never reach Copilot in the first place and there is
-   * nothing to refuse. Without the clause this predicate would be stricter than the
-   * resolver it stands in front of, and a Copilot user with seeding off — who never
-   * opted into any of this — would be locked out of every launch. */
+   * `/remote-control` could never reach a non-Claude agent in the first place and
+   * there is nothing to refuse. Without the clause this predicate would be stricter
+   * than the resolver it stands in front of, and a non-Claude user with seeding off —
+   * who never opted into any of this — would be locked out of every launch. */
   private remoteControlBlocksLaunch(cfg: AgentFlowConfig): boolean {
-    if (cfg.agentProvider !== "copilot" || cfg.remoteControl !== "on" || !cfg.seedAgent) {
+    if (cfg.agentProvider === "claude-code" || cfg.remoteControl !== "on" || !cfg.seedAgent) {
       return false;
     }
     this.toast("error", RC_NEEDS_CLAUDE);
@@ -1696,14 +1697,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * refused the pair, so the null is also the backstop that keeps a future entry point
    * added without a pre-flight call from seeding a broken session. */
   private async resolveRemoteControl(cfg: AgentFlowConfig): Promise<boolean | null> {
-    // "ask" under Copilot: putting up a toggle we could only refuse is a broken offer,
-    // so the picker never appears and the launch simply proceeds without it.
-    if (cfg.agentProvider === "copilot" && cfg.remoteControl === "ask") {
+    // "ask" under a non-Claude agent: putting up a toggle we could only refuse is a
+    // broken offer, so the picker never appears and the launch simply proceeds
+    // without it.
+    if (cfg.agentProvider !== "claude-code" && cfg.remoteControl === "ask") {
       this.log("Remote Control not offered — it needs Claude Code; launching without it");
       return false;
     }
     const on = await this.resolveRemoteControlSetting(cfg);
-    if (on && cfg.agentProvider === "copilot") {
+    if (on && cfg.agentProvider !== "claude-code") {
       this.toast("error", RC_NEEDS_CLAUDE);
       return null;
     }

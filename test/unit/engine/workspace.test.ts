@@ -1235,6 +1235,96 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
   });
 });
 
+describe("Cursor seeding (via maybeSeedAgent)", () => {
+  const CHAT_CMD = "workbench.action.chat.open";
+
+  const planJson = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      key: "ASM-1",
+      createdAt: Date.now(),
+      seedAgent: true,
+      matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "do it" }],
+      ...over,
+    });
+
+  const withWorkspaceFile = () => {
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+  };
+
+  beforeEach(() => {
+    setConfig({ agentProvider: "cursor" });
+    env.uriScheme = "cursor";
+  });
+
+  it("opens a Cursor composer with the prompt pre-filled and unsubmitted", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readFileSync.mockReturnValue(planJson());
+    commands.getCommands.mockResolvedValue([CHAT_CMD]);
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CHAT_CMD, {
+      query: "do it",
+      isPartialQuery: true,
+      mode: "agent",
+    });
+  });
+
+  it("seeds every task of a batch, unlike Copilot", async () => {
+    // Cursor's handler calls createComposer({ openInNewTab: true }), so N calls give
+    // N tabs. Copilot's panel is single-instance and bails to the briefs instead.
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-1-2.json"] as never);
+    readFileSync
+      .mockReturnValueOnce(planJson({ seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] }))
+      .mockReturnValueOnce(planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }));
+    commands.getCommands.mockResolvedValue([CHAT_CMD]);
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    const queries = commands.executeCommand.mock.calls
+      .filter((c: unknown[]) => c[0] === CHAT_CMD)
+      .map((c: unknown[]) => (c[1] as { query: string }).query);
+    expect(queries).toEqual(["first", "second"]);
+  });
+
+  it("runs cursor-agent on the terminal surface", async () => {
+    setConfig({ agentProvider: "cursor", agentSurface: "terminal" });
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readFileSync.mockReturnValue(planJson({ matches: [{ matchPath: "/repo", prompt: "do it" }] }));
+    workspace.workspaceFile = undefined;
+    workspace.workspaceFolders = [{ uri: { fsPath: "/repo" } }];
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(window.createTerminal).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "Cursor · ASM-1" }),
+    );
+    const terminal = window.createTerminal.mock.results[0].value;
+    expect(terminal.sendText).toHaveBeenCalledWith("cursor-agent", true);
+  });
+
+  it("refuses Remote Control under cursor, as it does under copilot", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readFileSync.mockReturnValue(planJson({ remoteControl: true }));
+    commands.getCommands.mockResolvedValue([CHAT_CMD]);
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(window.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining("Remote Control needs Claude Code"),
+    );
+    expect(commands.executeCommand).not.toHaveBeenCalledWith(CHAT_CMD, expect.anything());
+  });
+});
+
 describe("seedClaudeCode — remote control", () => {
   const seedPlan = (over: Record<string, unknown> = {}) => {
     workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };

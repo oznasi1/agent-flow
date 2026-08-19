@@ -33,10 +33,10 @@ const SEED_STAGGER_MS = 400;
 const CLI: Record<AgentProvider, { cmd: string; label: string; bootMs: number }> = {
   "claude-code": { cmd: "claude", label: "Claude", bootMs: 1500 },
   copilot: { cmd: "copilot", label: "Copilot", bootMs: 2000 }, // UNVERIFIED — measure in the dev host before release
-  // Inert placeholder — Task 1 only widens the type; Task 2 gives cursor its own
-  // entry. Until then it runs the claude-code row rather than crashing on a
-  // missing key, matching the "cursor behaves like claude-code at seed time" rule.
-  cursor: { cmd: "claude", label: "Claude", bootMs: 1500 },
+  // UNVERIFIED — and note `cursor-agent` is NOT installed alongside Cursor itself;
+  // it is a separate install, so the `command not found` fallback is reached more
+  // often here than for the other two.
+  cursor: { cmd: "cursor-agent", label: "Cursor", bootMs: 2000 },
 };
 
 /** Wrap text so the terminal delivers it as a *paste*. renderPrompt appends the
@@ -54,11 +54,13 @@ const CLAUDE_OPEN_CMD = "claude-vscode.primaryEditor.open";
 // Claude tab group, so a batch's sessions stack in one column instead of one per launch.
 const CLAUDE_NEW_TAB_CMD = "claude-vscode.editor.open";
 
-// VS Code's built-in chat command, which GitHub Copilot Chat serves.
+// VS Code's built-in chat command, served by both GitHub Copilot Chat and Cursor.
 // `isPartialQuery: true` fills the input without submitting, so Copilot honors the
-// same "we pre-fill, you press Enter" contract as the Claude Code panel.
-// Documented shape, not yet confirmed in a dev host — that verification pass is
-// still outstanding.
+// same "we pre-fill, you press Enter" contract as the Claude Code panel. Cursor
+// ignores both `isPartialQuery` and `mode` — prefill-without-submit is already its
+// default — and its handler was read from the shipped workbench bundle but not yet
+// run. Copilot's shape is documented; neither has been confirmed in a dev host —
+// that verification pass is still outstanding.
 const CHAT_OPEN_CMD = "workbench.action.chat.open";
 
 export interface TicketRef {
@@ -883,38 +885,42 @@ async function seedViaTerminal(
   }
 }
 
-/** Open Copilot Chat with the prompt pre-filled and unsubmitted. Polls for the
- * command the same way the Claude Code path does: Agent Flow and the chat extension
- * both activate on `onStartupFinished`, so the same activation race applies.
+/** Open a chat panel with the prompt pre-filled and unsubmitted. Serves both Copilot
+ * and Cursor: they register the same command id, `workbench.action.chat.open`. Polls
+ * for it because Agent Flow and the chat extension both activate on
+ * `onStartupFinished`, so the same activation race applies to either host.
  *
- * There is no URI-handler rung here — Copilot publishes no documented
- * open-with-prompt URI — so a false return means the caller should fall back to the
- * clipboard.
+ * There is no URI-handler rung here — neither publishes a documented
+ * open-with-prompt URI we are willing to use. Cursor does register
+ * `deeplink.prompt.prefill`, but it raises a "Create chat with prompt" confirmation
+ * modal before doing anything, which is worse than the clipboard fallback below. So a
+ * false return means the caller should fall back to the clipboard.
  *
- * `multi`: Copilot's chat panel is single-instance, so a batch of N tasks calling
- * this command would each overwrite the previous prompt — the user would silently
- * end up with only the last task seeded. There is no verified editor-tab command to
- * open one Copilot chat per task instead (that dev-host spike hasn't been run), so
- * for now a batch skips the panel entirely and returns false immediately, which
- * sends the caller (seedAgentSession) down its existing `multi` fallback: the
- * "briefs are in .pick-task/" notification, clipboard withheld. Revisit once a
- * verified per-task command exists. */
-async function seedCopilotPanel(
+ * `multi` forks by provider, because their handlers differ:
+ *   - Copilot's chat panel is single-instance, so a batch of N tasks would each
+ *     overwrite the previous prompt and the user would silently end up with only the
+ *     last one seeded. It bails immediately, sending the caller down its existing
+ *     `multi` fallback: the "briefs are in .pick-task/" notification.
+ *   - Cursor's handler calls `createComposer({ openInNewTab: true })`, so each call
+ *     gets its own composer tab and a batch seeds correctly. It proceeds. */
+async function seedChatPanel(
+  provider: AgentProvider,
   seedText: string,
   key: string,
   log: (m: string) => void,
   multi = false,
 ): Promise<boolean> {
-  if (multi) {
+  if (multi && provider === "copilot") {
     log(`seed ${key}: per-task Copilot chat tabs are not wired up yet — batch falls back to the briefs`);
     return false;
   }
+  const label = providerLabel(provider);
   for (let attempt = 1; attempt <= 7; attempt++) {
     let cmds: string[];
     try {
       cmds = await vscode.commands.getCommands(true);
     } catch (e) {
-      log(`seed ${key}: copilot command attempt ${attempt} threw: ${e}`);
+      log(`seed ${key}: ${provider} command attempt ${attempt} threw: ${e}`);
       await delay(700);
       continue;
     }
@@ -923,17 +929,16 @@ async function seedCopilotPanel(
       continue;
     }
     // The command is registered, so any throw from here on is a real failure on its
-    // merits (e.g. the still-unverified argument shape) rather than the activation
-    // race this loop exists to ride out. Retrying it would stall ~4.9s and could
-    // reopen the chat panel on every attempt, so try exactly once and fall through
-    // to the clipboard fallback below.
+    // merits rather than the activation race this loop exists to ride out. Retrying
+    // would stall ~4.9s and could reopen the panel on every attempt, so try exactly
+    // once and fall through to the clipboard fallback below.
     try {
       await vscode.commands.executeCommand(CHAT_OPEN_CMD, {
         query: seedText,
         isPartialQuery: true,
         mode: "agent",
       });
-      log(`seed ${key}: opened Copilot Chat via ${CHAT_OPEN_CMD} (attempt ${attempt})`);
+      log(`seed ${key}: opened ${label} via ${CHAT_OPEN_CMD} (attempt ${attempt})`);
       return true;
     } catch (e) {
       log(`seed ${key}: ${CHAT_OPEN_CMD} is registered but threw — not retrying: ${e}`);
@@ -961,18 +966,19 @@ async function seedAgentSession(opts: {
 }): Promise<void> {
   const { prompt, key, matchPath, log, remoteControl = false, multi = false } = opts;
 
-  // `/remote-control` is a Claude Code slash command; Copilot would seed it as literal
-  // prompt text. tasksView already refuses the combination pre-flight, but a plan file
-  // written under Claude Code can outlive a flip to Copilot — the plan does not carry
-  // the provider, it is re-read here — so the block is repeated at the last moment
-  // before anything is seeded. Refuse rather than silently drop one of the two.
-  // Only this exact pair is refused: an ordinary Copilot seed falls straight through.
-  // The advice has to name re-taking the task, not just the settings change: the
-  // caller sets this plan's `seeded:` guard BEFORE calling us (see runSeedPass), and
-  // nothing clears it short of PLAN_TTL_MS — so fixing the setting and reloading would
-  // find the plan already consumed and seed nothing. Telling the user to reload would
-  // be telling them to do something that cannot work.
-  if (remoteControl && readAgentProvider() === "copilot") {
+  // `/remote-control` is a Claude Code slash command; every other agent would seed it
+  // as literal prompt text. tasksView already refuses the combination pre-flight, but
+  // a plan file written under Claude Code can outlive a flip to Copilot or Cursor —
+  // the plan does not carry the provider, it is re-read here — so the block is
+  // repeated at the last moment before anything is seeded. Refuse rather than
+  // silently drop one of the two. Only this exact pair is refused: an ordinary
+  // non-Claude seed falls straight through. The advice has to name re-taking the
+  // task, not just the settings change: the caller sets this plan's `seeded:` guard
+  // BEFORE calling us (see runSeedPass), and nothing clears it short of PLAN_TTL_MS —
+  // so fixing the setting and reloading would find the plan already consumed and seed
+  // nothing. Telling the user to reload would be telling them to do something that
+  // cannot work.
+  if (remoteControl && readAgentProvider() !== "claude-code") {
     log(`seed ${key}: refused — Remote Control needs Claude Code`);
     vscode.window.showErrorMessage(
       `Agent Flow Deck: ${key} not seeded — Remote Control needs Claude Code. Set agentFlow.agentProvider to claude-code (or turn agentFlow.remoteControl off), then take ${key} again — reloading this window won't re-seed it.`,
@@ -1004,10 +1010,7 @@ async function seedAgentSession(opts: {
     }
     // Terminal seeding failed — skip the panel attempts (this user does not use the
     // panel) and land on the clipboard fallback at the end.
-  } else if (provider === "claude-code" || provider === "cursor") {
-    // Inert placeholder for "cursor" — Task 1 only widens the type; Task 2 gives it
-    // its own path. Until then it runs the claude-code branch below rather than
-    // falling into the copilot-panel attempt in the final `else if`.
+  } else if (provider === "claude-code") {
     // 1 — verified command claude-vscode.primaryEditor.open(session, prompt);
     //     poll because our extension and Claude Code both activate onStartupFinished.
     const preferred = multi ? [CLAUDE_NEW_TAB_CMD, CLAUDE_OPEN_CMD] : [CLAUDE_OPEN_CMD];
@@ -1039,7 +1042,7 @@ async function seedAgentSession(opts: {
     } catch (e) {
       log(`seed ${key}: URI failed: ${e}`);
     }
-  } else if (await seedCopilotPanel(seedText, key, log, multi)) {
+  } else if (await seedChatPanel(provider, seedText, key, log, multi)) {
     announceRemoteControl();
     return;
   }
