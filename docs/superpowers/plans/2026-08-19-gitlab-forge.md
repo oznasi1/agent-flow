@@ -541,18 +541,20 @@ git commit -m "feat(forge): map GitLab merge requests onto PrFacts"
   - `mrListPath(selector: string): string`, `jobsPath(pipelineId: number): string`, `approvalsPath(iid: number): string`, `discussionsPath(iid: number): string`
   - `class GlabProvider implements PrProvider` with `constructor(run?: Runner, locate?: Locate)`
 
-- [ ] **Step 1: Verify `glab api`'s field flags and pin the choice**
+- [ ] **Step 1: Take the verified field flag as given**
 
-`glab` is not installed in the dev environment by default. Install it and read its help — do not guess, because the wrong flag lets a review body be type-coerced or read as a filename:
+**Already resolved against GitLab's published `glab api` documentation — do not install `glab`, and do not re-derive this.** The answer, and the trap in it:
 
-```bash
-brew install glab   # or: see https://gitlab.com/gitlab-org/cli
-glab api --help
-```
+| CLI | `-f` | `-F` |
+|---|---|---|
+| `gh` | `--field` — string | `--field` typed |
+| `glab` | **`--raw-field` — string, no JSON parsing** | `--field` — coerces `true`/`false`/`null`/integers, parses `[`/`{` as JSON, **reads `@filename` and `-` for stdin** |
 
-Record which of `-f/--field`, `-F`, and `--raw-field` exist. Set `GLAB_FIELD_FLAG` to the flag documented as sending the value **as an uninterpreted string** (no type coercion, no `@file` reading). If `glab api --help` shows **no** such flag, stop and escalate: the review body must not go into argv unsafely, and the fallback is to add a stdin path to `Runner`, which is a change to a shared seam and needs its own review.
+So `GLAB_FIELD_FLAG = "-f"` is correct, and `-F` would be actively dangerous for a review body: it is the flag that reads a leading `@` as a file and `-` as stdin.
 
-Every test below asserts on `GLAB_FIELD_FLAG` rather than a literal, so either outcome keeps them valid.
+The trap is that the two CLIs give the *same letter* a *different long name* — `-f` is `--field` on `gh` and `--raw-field` on `glab`. Write the comment on the constant so nobody later "fixes" `-f` to `-F` by analogy with the GitHub provider sitting next to it.
+
+Every test asserts on the `GLAB_FIELD_FLAG` constant rather than a literal, so the flag is pinned in exactly one place.
 
 - [ ] **Step 2: Write the failing test file**
 
@@ -794,10 +796,17 @@ import { PrFacts } from "../../../types";
 
 export const GLAB_TIMEOUT_MS = 10_000;
 
-/** The `glab api` flag that sends a field value as an uninterpreted string — no
- * type coercion, and no reading a leading `@` as a filename. Pinned in one place
- * and verified against the installed `glab` (see the plan's Task 2 Step 1);
- * every caller and every test reads it from here rather than hardcoding a flag. */
+/** The `glab api` flag that sends a field value as an uninterpreted string.
+ *
+ * `-f` here is `--raw-field`: no JSON parsing, no type coercion, and — the part
+ * that matters for a review body — no reading a leading `@` as a filename or `-`
+ * as stdin. Those belong to `-F`/`--field`, which is why `-F` must never carry
+ * one.
+ *
+ * Do NOT "fix" this to `-F` by analogy with the `gh` provider next door. The two
+ * CLIs give the same letter a different long name: `-f` is `--field` on `gh` and
+ * `--raw-field` on `glab`. Both happen to be the raw-string one, so the letter is
+ * right for both and the reasoning is not transferable. */
 export const GLAB_FIELD_FLAG = "-f";
 
 const locateGlab: Locate = () => resolveBin("glab");
