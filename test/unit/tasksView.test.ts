@@ -3169,6 +3169,62 @@ describe("takeBatch", () => {
     expect(openSharedWorkspace).toHaveBeenCalledWith(expect.objectContaining({ provider: "cursor" }));
   });
 
+  // ── Fix round 1: the loop must not claim a launch that was cancelled ──────
+  it("reports nothing when a one-key batch is dismissed at openWorkspace's own picker", async () => {
+    // A one-key batch to its own window is a single launch: it does NOT resolve the
+    // agent up front, so `openWorkspace` raises the picker itself and can come back
+    // cancelled. Before the guard, the loop counted it and toasted "Launched 1 of 1 …
+    // A worktree + Claude session per task." over a worktree with no window and no
+    // session in it — the worst kind of wrong, because the user is told to go look for
+    // something that is not there.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", briefs: [], opened: [], remoteControl: false,
+      provider: "claude-code", cancelled: true,
+    });
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    // It really did reach the launch — otherwise this would pass for a batch that
+    // bailed out somewhere earlier and never exercised the guard at all.
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(posted().filter((m) => m.type === "toast")).toEqual([]);
+  });
+
+  it("never raises its own agent picker for a one-key batch to a new window", async () => {
+    // Why the guard above is the fix rather than "pin it up front like a real batch":
+    // one task is one launch, and it asks at exactly the moment a Take does — inside
+    // openWorkspace, after the destination and prompt are settled. Nothing extra here.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(agentPicks()).toHaveLength(0);
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect("provider" in vi.mocked(openWorkspace).mock.calls[0][0]).toBe(false);
+  });
+
+  it("resolves the agent for a one-key batch to a shared destination, which cannot ask later", async () => {
+    // The exception to "one key asks for itself": a shared destination seeds from plan
+    // files and never calls openWorkspace, so there is nothing left downstream to raise
+    // the picker. Without this it would seed Claude Code with nobody asked.
+    // `openIn: "this-window"` fixes the destination without a picker — the same setup
+    // the this-window batch test above uses — so the ONLY picker in this launch is the
+    // agent one, and counting it counts exactly the thing under test.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask", openIn: "this-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(currentWindow).mockReturnValue({
+      identity: "/repos/api",
+      kind: "folder",
+      roots: [{ name: "api", path: "/repos/api" }],
+    });
+    pickCursorAgent();
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(agentPicks()).toHaveLength(1);
+    expect(openSharedWorkspace).toHaveBeenCalledWith(expect.objectContaining({ provider: "cursor" }));
+  });
+
   it("sends no provider at all under a fixed setting, on either batch path", async () => {
     // Inertness: a pin is read ONLY under `ask` (see OpenRequest.provider), so sending
     // one under a fixed setting could only invite the request and the setting to
@@ -4613,17 +4669,69 @@ describe("agent-naming copy under the `ask` provider", () => {
     expect(posted()).toContainEqual(expect.objectContaining({ type: "state", agentLabel: "Claude Code" }));
   });
 
-  it("names Claude Code sessions in the batch launch confirmation", async () => {
+  // Task 6 supersedes this one's original form. It used to pin "2 Claude Code
+  // sessions" under `ask`, which was the honest reading while `ask` was inert: nothing
+  // had been picked by the time the confirmation ran, so it named the degraded default.
+  // Now the batch resolves its agent BEFORE confirming, so the confirmation can — and
+  // must — name the agent the user actually picked. The assertion is stronger than the
+  // one it replaces: it proves the picked answer reaches the copy, which the old
+  // "Claude Code" string would have passed with the answer thrown away.
+  it("names the agent the user picked in the batch launch confirmation", async () => {
     ask({ batchLaunchConfirmThreshold: 1 });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockImplementation(
+      async (_items: unknown, opts?: unknown) =>
+        ((opts as { title?: string } | undefined)?.title === "Which agent?"
+          ? { label: "Cursor", provider: "cursor" }
+          : { shared: false }) as never,
+    );
     vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
     const { provider } = setup();
     await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
     expect(window.showWarningMessage).toHaveBeenCalledWith(
-      "Launch 2 tasks in parallel? That's 2 Claude Code sessions.",
+      "Launch 2 tasks in parallel? That's 2 Cursor sessions.",
       { modal: true },
       "Launch",
     );
+  });
+
+  it("asks which agent BEFORE confirming, not after", async () => {
+    // The ordering is the whole mechanism: a confirmation raised first could only name
+    // the setting's default, and this is the one path where an agent-naming line runs
+    // ahead of the launch it describes. Asserted on the real call order rather than on
+    // the string alone, so a confirmation that happened to read correctly for some
+    // other reason would not stand in for it.
+    ask({ batchLaunchConfirmThreshold: 1 });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const order: string[] = [];
+    vi.mocked(window.showQuickPick).mockImplementation(async (_items: unknown, opts?: unknown) => {
+      const title = (opts as { title?: string } | undefined)?.title;
+      if (title === "Which agent?") {
+        order.push("agent");
+        return { label: "Cursor", provider: "cursor" } as never;
+      }
+      return { shared: false } as never;
+    });
+    vi.mocked(window.showWarningMessage).mockImplementation(async () => {
+      order.push("confirm");
+      return "Launch" as never;
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    expect(order).toEqual(["agent", "confirm"]);
+  });
+
+  it("confirms nothing when the agent picker is dismissed", async () => {
+    // The other half of asking first: a dismissal now lands before the confirmation,
+    // so the user is never asked to authorise a launch that has already been called off.
+    ask({ batchLaunchConfirmThreshold: 1 });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValue(undefined as never);
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(posted().filter((m) => m.type === "toast")).toEqual([]);
   });
 
   it("names Claude Code in the brief handed to the agent", async () => {

@@ -2163,12 +2163,32 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // Only for the parented case. The unparented batch path is a set of tickets the user
     // picked one by one, and its threshold has meant "tasks" since it shipped; changing
     // that would re-prompt existing users who changed nothing.
+    // A real batch resolves its agent HERE — before the confirmation below, which
+    // counts the sessions it is about to start and therefore has to name them ("That's
+    // 3 Cursor sessions"). Under the three fixed settings this is a plain read and no
+    // picker appears; under `ask` it is one question, asked once, whose answer is then
+    // pinned onto every task so the loop never asks again. Nothing has been created at
+    // this point, so a dismissal costs nothing: dismissing a launch-wide question
+    // abandons the whole batch, which is the only thing it can mean.
+    //
+    // A ONE-key batch deliberately does not resolve here. It is a single launch —
+    // `openWorkspace` asks for it inside the loop at exactly the moment a Take does,
+    // and the loop honours the answer — with one exception picked up once the
+    // destination is known (see the `shared` re-resolution below).
+    const isBatch = keys.length > 1;
+    let batchProvider = isBatch ? await this.resolveBatchProvider(cfg) : undefined;
+    if (isBatch && !batchProvider) return;
+    // The agent for copy written BEFORE the launch: the resolved answer when there is
+    // one, and otherwise the setting's own — a single launch resolves inside
+    // `openWorkspace`, after this copy has already been written.
+    const namedProvider = () => providerLabel(batchProvider ?? resolvedProvider(cfg.agentProvider));
+
     const authorising = parent ? keys.length * filterSet.length : keys.length;
     if (authorising > cfg.batchLaunchConfirmThreshold) {
       const go = await vscode.window.showWarningMessage(
         parent
-          ? `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${providerLabel(resolvedProvider(cfg.agentProvider))} sessions and up to ${authorising} git worktrees across ${filterSet.length} repo${filterSet.length === 1 ? "" : "s"}.`
-          : `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${providerLabel(resolvedProvider(cfg.agentProvider))} sessions.`,
+          ? `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${namedProvider()} sessions and up to ${authorising} git worktrees across ${filterSet.length} repo${filterSet.length === 1 ? "" : "s"}.`
+          : `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${namedProvider()} sessions.`,
         { modal: true },
         "Launch",
       );
@@ -2200,7 +2220,6 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // launch, so it resolves Remote Control exactly like Take does. A shared window
     // seeds every session straight from its own plan file rather than a clipboard
     // paste, so it can't carry the answer either — don't even ask when shared.
-    const isBatch = keys.length > 1;
     const rcSkipped = isBatch && cfg.remoteControl !== "off";
     if (rcSkipped) this.log("takeBatch: Remote Control skipped — one clipboard, several sessions");
     const wantRemoteControl = isBatch || shared ? false : await this.resolveRemoteControl(cfg);
@@ -2212,26 +2231,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // effect to leave behind.
     if (wantRemoteControl === null) return;
 
-    // A one-key batch opening its own window IS a single launch: the loop below runs
-    // exactly once, and `openWorkspace` resolves `ask` for itself there, exactly as a
-    // Take does. So that shape asks nothing extra here, and behaves as it always has.
-    //
-    // Every other shape has to resolve up front. A real batch's loop is non-interactive
-    // by design (see the `workspaceMode` note inside it), so leaving `ask` to
-    // `openWorkspace` would raise N pickers for one click, staggered seconds apart. And
-    // the shared path never calls `openWorkspace` at all — it seeds N plan files — so
-    // `ask` there would degrade the whole launch to Claude Code with nobody asked.
-    //
-    // Resolved with the other launch-wide answers and before the first worktree, so a
-    // dismissal costs nothing: dismissing a launch-wide question abandons the whole
-    // batch, which is the only thing it can mean.
-    const askUpFront = isBatch || shared;
-    const batchProvider = askUpFront ? await this.resolveBatchProvider(cfg) : undefined;
-    if (askUpFront && !batchProvider) return;
-    // The agent for the copy written BEFORE the launch: the resolved answer when there
-    // is one, and otherwise the setting's own — the single-launch shape resolves inside
-    // `openWorkspace`, after this brief has already been built.
-    const briefProvider = batchProvider ?? resolvedProvider(cfg.agentProvider);
+    // The shared path seeds every session from a plan file and never calls
+    // `openWorkspace` at all, so nothing downstream of here can ask: a one-key batch
+    // that lands there has to resolve now, or seed an agent nobody picked. A real batch
+    // already resolved above, before its confirmation. Still before the first worktree,
+    // so a dismissal here costs nothing either.
+    if (shared && !batchProvider) {
+      batchProvider = await this.resolveBatchProvider(cfg);
+      if (!batchProvider) return;
+    }
 
     const resolved: { task: BatchTask; key: string }[] = [];
     const failed: string[] = [];
@@ -2275,10 +2283,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           key,
           task: {
             ticket: { key: detail.key, summary: detail.summary, url: detail.url },
-            // `briefProvider`, not a bare read of the setting: when the batch has
+            // `namedProvider()`, not a bare read of the setting: when the batch has
             // resolved its own answer, this is one pre-launch copy site that can name
             // the agent that will actually read the brief.
-            planMd: briefMarkdown(detail, providerLabel(briefProvider)),
+            planMd: briefMarkdown(detail, namedProvider()),
             descriptionText: detail.descriptionText,
             services,
             ...(parent ? { parentKey: parent.key } : {}),
@@ -2294,6 +2302,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     let launched = 0;
     let extra = "";
     let seededInPlace = false;
+    // The user dismissed `openWorkspace`'s own agent picker. Only the one-key,
+    // own-window shape can get here — every other shape resolved the agent up front and
+    // pinned it, which is exactly what stops that picker from ever being raised — but
+    // this loop does not get to assume that, because it is the thing that counts the
+    // launches it claims in the summary toast.
+    let dismissed = false;
     if (shared && resolved.length) {
       try {
         // This window can lose its identity between the destination pick and here: the
@@ -2384,6 +2398,19 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             ...(parent ? { parentKey: parent.key } : {}),
             ...(batchProvider ? this.providerPin(cfg, batchProvider) : {}),
           });
+          // Cancelled: nothing was opened, written or seeded for this task, so it is
+          // neither launched nor failed — a dismissal is the user's own decision, not
+          // something that went wrong, and counting it would put a window in the
+          // summary toast that does not exist.
+          //
+          // It abandons the REST of the batch rather than skipping one task: the agent
+          // is a launch-wide question, and re-asking it for task i+1 is precisely the
+          // N-pickers-for-one-click this path resolves up front to avoid. Same answer
+          // the up-front resolution gives to the same gesture.
+          if (result.cancelled) {
+            dismissed = true;
+            break;
+          }
           appliedRemoteControl = result.remoteControl;
           launched++;
         } catch (e) {
@@ -2395,6 +2422,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       }
       if (!isBatch) extra += this.remoteControlNote(wantRemoteControl, appliedRemoteControl);
     }
+
+    // Dismissed before anything opened: report exactly as a cancelled single launch
+    // does — silently. `launched > 0` means earlier tasks really did open, and those
+    // are still worth reporting, so the summary below runs and its "N of M" count tells
+    // the truth about the ones that were abandoned.
+    if (dismissed && launched === 0) return;
 
     // A batch seeded into this window opened nothing — "in one shared window" would
     // imply one appeared.
