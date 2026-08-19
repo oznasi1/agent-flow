@@ -1790,7 +1790,6 @@ Create `test/unit/engine/forge/registry.test.ts`:
 import { describe, it, expect, vi } from "vitest";
 import { FORGE_IDS, resolveForge } from "../../../../src/engine/forge/registry";
 import type { Runner } from "../../../../src/engine/pr/provider";
-import pkg from "../../../../package.json";
 
 const never: Runner = async () => { throw new Error("no call expected"); };
 
@@ -1798,15 +1797,14 @@ describe("FORGE_IDS", () => {
   it("lists both shipped forges, github first", () => {
     expect(FORGE_IDS).toEqual(["github", "gitlab"]);
   });
-
-  // The same guard `test/unit/tasks/registry.test.ts` keeps over taskSource: the
-  // manifest enum and the registry must not drift, or a contributor's forge reads
-  // as "invalid" forever in telemetry while working fine at runtime.
-  it("stays equal to agentFlow.forge's manifest enum", () => {
-    const prop = (pkg.contributes.configuration.properties as Record<string, { enum?: string[] }>)["agentFlow.forge"];
-    expect([...(prop.enum ?? [])].sort()).toEqual([...FORGE_IDS].sort());
-  });
 });
+```
+
+The manifest-enum parity test that would naturally live here belongs to **Task 7**
+instead: this task does not add the `agentFlow.forge` manifest entry, so asserting
+against it here would read `undefined` and throw. Do not add it in this task.
+
+```ts
 
 describe("resolveForge", () => {
   it("returns the GitHub forge, which describes itself with gh's own name and install url", () => {
@@ -2155,13 +2153,15 @@ import { FORGE_IDS } from "../engine/forge/registry";
 
 **Sanctioned edit:** `test/unit/telemetry/settingsSnapshot.test.ts` asserts the whole snapshot object with `toEqual`, so add `forge: "github"` to its expected object(s). This is additive — change no existing key or value.
 
-While in that file, add the sibling of its existing `CONNECTOR_IDS` parity case (which asserts `CONNECTOR_IDS` equals `agentFlow.taskSource`'s manifest enum):
+While in that file, add the sibling of its existing `CONNECTOR_IDS` parity case (which asserts `CONNECTOR_IDS` equals `agentFlow.taskSource`'s manifest enum). **This assertion lives here, not in Task 6** — Task 6 does not add the manifest entry, so it had nothing to assert against:
 
 ```ts
 it("keeps FORGE_IDS equal to agentFlow.forge's manifest enum", () => {
   expect([...FORGE_IDS]).toEqual(props["agentFlow.forge"].enum);
 });
 ```
+
+Import `FORGE_IDS` from `../../../src/engine/forge/registry` alongside that file's existing `CONNECTOR_IDS` import.
 
 and one case proving an unknown forge is reported as shape, never as the user's own text:
 
@@ -2801,10 +2801,14 @@ One interface, `Forge`, declared in `src/engine/forge/types.ts`: an id, a label,
 CLI to locate and probe, a capability record, and three providers — `prs`
 (`PrProvider`), `reviews` (`ReviewProvider`), and `branchCi`.
 
-`agentFlow.forge` selects the active forge by id. **`github` is the shipped
-default.** `src/engine/forge/registry.ts`'s `FORGES` map is the full list;
-`FORGE_IDS` is exported so the manifest, the telemetry allowlist and the registry
-test all derive from it instead of a second hand-written list that can drift.
+`agentFlow.forge` selects the active forge by id. Two are registered: `github`,
+which is the shipped default, and `gitlab`. `src/engine/forge/registry.ts`'s
+`FORGES` map is the full list; `FORGE_IDS` is exported so the manifest, the
+telemetry allowlist and the registry test all derive from it instead of a second
+hand-written list that can drift.
+
+**Every registered id must appear in this file wrapped in backticks** —
+`test/unit/docs.test.ts` asserts it, so a new forge cannot ship undocumented.
 
 ## The one hard constraint
 
