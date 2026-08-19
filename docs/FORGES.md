@@ -8,11 +8,27 @@ report.
 
 This guide is meant to be true, not encouraging.
 
-## What a forge is
+## 1. What a forge is
 
-One interface, `Forge`, declared in `src/engine/forge/types.ts`: an id, a label, a
-CLI to locate and probe, a capability record, and three providers — `prs`
-(`PrProvider`), `reviews` (`ReviewProvider`), and `branchCi`.
+```ts
+export interface Forge {
+  readonly id: string;
+  readonly label: string;
+  readonly cli: { name: string; installUrl: string };
+  readonly caps: ForgeCaps;
+  probe(): Promise<ForgeGap | null>;
+  readonly prs: PrProvider;
+  readonly reviews: ReviewProvider;
+  branchCi(repoPath: string, branch: string): Promise<BranchCiStatus>;
+}
+```
+
+Declared in `src/engine/forge/types.ts`, alongside `ForgeCaps` (what a forge can
+answer — today, just `changesRequested`) and `ForgeGap` (why `probe()` came back
+unhappy: `missing` or `signed-out`). `prs` is a `PrProvider`, `reviews` a
+`ReviewProvider` — both declared in `src/engine/pr/provider.ts` and
+`src/engine/review/provider.ts`, and shared with the pre-seam `gh`-only code
+they replaced.
 
 `agentFlow.forge` selects the active forge by id. Two are registered: `github`,
 which is the shipped default, and `gitlab`. `src/engine/forge/registry.ts`'s
@@ -23,16 +39,35 @@ hand-written list that can drift.
 **Every registered id must appear in this file wrapped in backticks** —
 `test/unit/docs.test.ts` asserts it, so a new forge cannot ship undocumented.
 
-## The one hard constraint
+## 2. The one hard constraint
 
-`src/engine/forge/*` imports `child_process`. It must never be imported — even
-transitively — by `src/webview/*`, `conditions.ts`, `branchCi.ts`, or
-`armability.ts`, all of which are bundled into the webview. A violation is caught
-**only** by `npm run build`: `npm run typecheck` and the full Vitest suite pass
-regardless. `test/webview/webviewGraph.test.ts` pins the boundary.
+`src/engine/forge/*` imports `child_process` and must never be imported — even
+transitively — by anything the webview bundles.
 
-This is why a forge's capabilities reach `armability.ts` as a plain
-`{ changesRequested: boolean }` rather than as an imported `Forge`.
+Two files this reaches through are on that graph **today**: `conditions.ts` and
+`branchCi.ts`. `OrchestratorDrawer.tsx` imports `conditions.ts` directly, and
+`conditions.ts` imports `branchCi.ts` — both already compile into `dist/deck.js`,
+so a `../forge/` import in either one breaks the real build right now. A
+violation there is caught **only** by `npm run build`: `npm run typecheck` and
+the full Vitest suite pass regardless, because Vitest runs in Node, where every
+Node builtin resolves fine. `test/webview/webviewGraph.test.ts` pins this by
+walking the real import graph from every browser entry point.
+
+`armability.ts` is different, and the difference matters: as of this writing it
+is **not** reachable from any of the three browser bundles. Its only importer
+anywhere is the host-side `src/deckView.ts`, which reduces its result to a
+plain toast string before anything reaches the webview — so a `../forge/`
+import there would **not** break `npm run build` today, and the paragraph above
+does not yet apply to it. It is nonetheless written as a pure module that takes
+the forge fact as plain data (`{ changesRequested: boolean }`) rather than an
+imported `Forge`, because a later task very plausibly wires `unfirableRules`
+directly into `OrchestratorDrawer.tsx` for client-side rendering. The negative
+control in `test/webview/webviewGraph.test.ts` pins that promise **ahead of**
+the wiring — it walks from `armability.ts` itself rather than from `deck.tsx` —
+so today it is future-proofing, not an active net `npm run build` already
+provides for this one file. The day something under `src/webview/` imports
+`armability.ts`, this paragraph's warning becomes as forceful as the one above
+for `conditions.ts` and `branchCi.ts`, and should be rewritten to say so.
 
 `src/engine/forge/types.ts` looks like the safe exception — it holds only
 interfaces, no runtime code — but its safety is entirely owed to writing every
@@ -42,7 +77,7 @@ keyword as a "cleanup" on a file that's "just types" and it reaches
 directory. Treat it as no safer to import from webview code than `github.ts` or
 `gitlab.ts`.
 
-## What GitLab cannot answer
+## 3. What GitLab cannot answer
 
 | Question | GitHub | GitLab | What the Deck does |
 |---|---|---|---|
@@ -53,7 +88,7 @@ directory. Treat it as no safer to import from webview code than `github.ts` or
 | How many reviews are waiting in total? | `issueCount` | no total in the body | the count is however many rows came back, so a queue longer than 50 reads as complete rather than truncated |
 | Is a skipped required check green? | folded toward `SUCCESS` | `skipped` → `unknown` | GitLab is stricter; a skipped pipeline does not open a deploy gate |
 
-## Conventions a new forge must keep
+## 4. Conventions a new forge must keep
 
 - **`null` from `reviews.search()` means the attempt failed**, never "you owe
   nobody a review". An empty array is a success meaning the queue is empty.
