@@ -1997,6 +1997,22 @@ describe("openWorkspace — ask", () => {
     expect(items.map((i) => i.label)).toEqual(["Claude Code", "Cursor"]);
   });
 
+  it("titles the picker exactly, and holds it open until it is answered", async () => {
+    // The only new user-visible strings this feature adds, asserted whole so a renamed,
+    // reworded or dropped key goes red. `title` is shared verbatim with the second
+    // picker Task 6 adds, and `ignoreFocusOut` is what makes a pin load-bearing for an
+    // unattended launch: without it a click elsewhere would dismiss this and cancel the
+    // launch; with it an unattended `ask` launch waits rather than silently cancelling.
+    setConfig({ agentProvider: "ask" });
+    window.showQuickPick.mockResolvedValueOnce({ label: "Claude Code", provider: "claude-code" });
+    await openWorkspace(baseReq({ seedAgent: true }));
+    expect(window.showQuickPick.mock.calls[0][1]).toEqual({
+      title: "Which agent?",
+      placeHolder: "Pick the agent to start this session with",
+      ignoreFocusOut: true,
+    });
+  });
+
   it("offers Copilot instead of Cursor on a VS Code host", async () => {
     setConfig({ agentProvider: "ask" });
     env.uriScheme = "vscode";
@@ -2008,14 +2024,28 @@ describe("openWorkspace — ask", () => {
     expect(planOf().provider).toBe("copilot");
   });
 
-  it("does not prompt when a caller pins a provider", async () => {
+  it("honours a caller's pin under ask instead of prompting, and writes it into the plan", async () => {
     setConfig({ agentProvider: "ask" });
     const result = await openWorkspace(baseReq({ seedAgent: true, provider: "claude-code" }));
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(result.provider).toBe("claude-code");
-    // A pin is still a resolved `ask`, so it is pinned into the plan too — the
-    // target window has no preference left to read either way.
+    // A pin is a resolved `ask`, so it is pinned into the plan too — the target window
+    // has no preference left to read either way.
     expect(planOf().provider).toBe("claude-code");
+  });
+
+  it("ignores a caller's pin under a fixed setting — the preference wins", async () => {
+    // A pin replaces the PROMPT, not the preference. An Orchestrator rule pins Claude
+    // Code only to avoid a dialog, and must still seed Cursor for a user whose setting
+    // says `cursor`. Honouring it here would also make `OpenResult.provider` lie: the
+    // plan carries no provider under a fixed setting, so the target window would read
+    // the setting and seed Cursor while the toast named Claude Code.
+    setConfig({ agentProvider: "cursor" });
+    env.uriScheme = "cursor";
+    const result = await openWorkspace(baseReq({ seedAgent: true, provider: "claude-code" }));
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(result.provider).toBe("cursor");
+    expect(planOf().provider).toBeUndefined();
   });
 
   it("does not prompt when seeding is off", async () => {

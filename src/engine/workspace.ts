@@ -121,8 +121,11 @@ export interface OpenRequest {
   children?: Run["children"];
   /** Pin the agent and suppress the `ask` picker. Set by the callers that must never
    *  prompt: a batch, which resolves once for the whole batch before its loop, and an
-   *  Orchestrator rule, which runs unattended with nobody there to answer. Absent under
-   *  a fixed setting changes nothing — there is no picker to suppress. */
+   *  Orchestrator rule, which runs unattended with nobody there to answer.
+   *
+   *  Read ONLY under `ask` — it replaces the prompt, it does not override a preference.
+   *  A pin set under `claude-code`/`copilot`/`cursor` is ignored, and `OpenResult.provider`
+   *  reports the setting. See the resolution at the top of `openWorkspace`. */
   provider?: AgentProvider;
   /** Never overwrite a brief that is already on disk. Defaults to false, which is what
    * every caller before it relied on: a Take rewrites the brief because the brief IS
@@ -341,7 +344,17 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   // plans already on disk. Only `ask` pins a choice into the plan, because by then
   // there is no preference left for the target window to read.
   const setting = readAgentProviderSetting();
-  let pinned: AgentProvider | undefined = req.provider;
+  // A caller's pin (`OpenRequest.provider`) means "resolve to this INSTEAD OF
+  // PROMPTING", so it applies under `ask` and nowhere else. Under a fixed setting
+  // there is no prompt to suppress and the user's explicit preference wins: an
+  // Orchestrator rule that pins Claude Code purely to avoid a dialog must still seed
+  // Cursor for a user whose setting says `cursor`. Honouring it there would also split
+  // the answer in two — a fixed setting writes no provider into the plan, so the target
+  // window would seed the setting while `OpenResult.provider` named the pin, and the
+  // toast would contradict the session the user is looking at. The invariant this
+  // upholds, and the one every caller may rely on: `OpenResult.provider` is always what
+  // the target window will actually seed, on every path.
+  let pinned: AgentProvider | undefined = setting === "ask" ? req.provider : undefined;
   if (seedAgent && !pinned && setting === "ask") {
     const choice = await vscode.window.showQuickPick(
       hostProviders().map((p) => ({ label: providerLabel(p), provider: p })),
