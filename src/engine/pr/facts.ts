@@ -103,16 +103,25 @@ export function toPrFacts(pr: GhPr, unresolved: number | null): PrFacts | null {
 
 const STATE_RANK: Record<string, number> = { OPEN: 3, MERGED: 2, CLOSED: 1 };
 
+/** Pick the most relevant item by state rank, then by descending number. Shared by
+ * both forges so the precedence policy lives once: `pickPr` reads gh's `number`
+ * and SHOUTED state, `pickMr` reads GitLab's `iid` and normalized state, and both
+ * mean the same thing by "most relevant". Never mutates its input. */
+export function pickByState<T>(items: T[], read: (t: T) => { number?: number; state?: string }): T | undefined {
+  return [...items]
+    .map((t) => ({ t, r: read(t) }))
+    .filter((x) => typeof x.r.number === "number")
+    .sort(
+      (a, b) =>
+        (STATE_RANK[b.r.state ?? ""] ?? 0) - (STATE_RANK[a.r.state ?? ""] ?? 0) ||
+        (b.r.number as number) - (a.r.number as number),
+    )[0]?.t;
+}
+
 /** One branch can carry several PRs across its history. Prefer the live one, then
  * the one that landed, then the abandoned one; newest wins within a state. */
 export function pickPr(prs: GhPr[]): GhPr | undefined {
-  return [...prs]
-    .filter((p) => typeof p.number === "number")
-    .sort(
-      (a, b) =>
-        (STATE_RANK[b.state ?? ""] ?? 0) - (STATE_RANK[a.state ?? ""] ?? 0) ||
-        (b.number as number) - (a.number as number),
-    )[0];
+  return pickByState(prs, (p) => ({ number: p.number, state: p.state }));
 }
 
 /** Owner and repo from a PR url, so the GraphQL call needs no extra lookup.
