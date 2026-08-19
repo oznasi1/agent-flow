@@ -218,6 +218,19 @@ export const DEFAULT_PR_REVIEW_PROMPT =
   "into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested " +
   "changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}";
 
+/** The GitLab wording of DEFAULT_PR_REVIEW_PROMPT, seeded instead when
+ * `agentFlow.forge` is "gitlab" and the user hasn't customized `prReviewPrompt`
+ * (see the selection in getConfig). Differs only in the mechanics it scripts —
+ * `glab mr checkout` for `gh pr checkout`, "merge request" for "pull request",
+ * "GitLab" for "GitHub" — every instruction and placeholder ({key} {summary}
+ * {url} {files}) is otherwise identical, so the two stay legible as variants of
+ * one prompt rather than drifting apart over time. */
+export const GITLAB_PR_REVIEW_PROMPT =
+  'Jira {key} ({url}): "{summary}". This task has an open GitLab merge request — all our MRs carry the Jira key in their title and branch. ' +
+  "Using `glab` (or the GitLab tools available to you): find the MR for {key}, run `glab mr checkout` to bring its branch " +
+  "into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested " +
+  "changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}";
+
 /** Seed for reviewing a teammate's PR from the Deck's review strip. Distinct from
  * DEFAULT_PR_REVIEW_PROMPT, which addresses feedback on *your own* PR. The agent
  * writes its findings to a file; the human submits the review. Placeholders:
@@ -229,6 +242,19 @@ export const DEFAULT_REVIEW_REQUEST_PROMPT =
   "Assess correctness, edge cases, tests, and anything that would break in production. " +
   "Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, " +
   "each with the file and line it refers to. Do not post anything to GitHub; the human submits the review.{files}";
+
+/** The GitLab wording of DEFAULT_REVIEW_REQUEST_PROMPT, substituted into the
+ * first stock review mode when `agentFlow.forge` is "gitlab" (see the
+ * `reviewRequestModes` selection in getConfig). Same substitution-only
+ * relationship as GITLAB_PR_REVIEW_PROMPT above: everything the agent is asked
+ * to assess, where it writes findings, the instruction not to post anything
+ * itself, and every placeholder are identical to the GitHub wording. */
+export const GITLAB_REVIEW_REQUEST_PROMPT =
+  'Review merge request {url} — {repo}#{number}, "{summary}", by {author}. ' +
+  "Check it out with `glab mr checkout {number} --repo {repo}`, then read the full diff against its base branch. " +
+  "Assess correctness, edge cases, tests, and anything that would break in production. " +
+  "Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, " +
+  "each with the file and line it refers to. Do not post anything to GitLab; the human submits the review.{files}";
 
 /** The stock review modes offered by **Review with agent**, in picker order.
  * One entry by default: a single mode short-circuits the picker, so a fresh
@@ -512,9 +538,14 @@ export function getConfig(): AgentFlowConfig {
     slackDm: slackRaw[def.id] === true,
     needsEnv: def.needsEnv === true,
   }));
+  // Hoisted so both the `forge:` property below and the prompt selections that
+  // follow (prReviewPrompt, reviewRequestModes) read the same value — a second,
+  // independent `c.get("forge")` couldn't disagree with this one, but it would
+  // be untidy, and untidy invites drift the next time either read changes.
+  const forge = c.get<string>("forge") || "github";
   return {
     taskSource: c.get<string>("taskSource") || "jira",
-    forge: c.get<string>("forge") || "github",
+    forge,
     baseUrl: (c.get<string>("jira.baseUrl") || "").replace(/\/+$/, ""),
     project: c.get<string>("jira.project") || "",
     reposRoot: expandHome(c.get<string>("reposRoot") || "~/projects"),
@@ -542,7 +573,13 @@ export function getConfig(): AgentFlowConfig {
     showTokenTotal: c.get<boolean>("deck.showTokenTotal") ?? false,
     prReviewStatus: c.get<string>("prReviewStatus") || "PR initiated",
     prReviewAutoFix: c.get<boolean>("prReviewAutoFix") ?? true,
-    prReviewPrompt: c.get<string>("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT,
+    // A user who customized their prompt keeps it on either forge; only the
+    // untouched default is forge-flavoured. `explicitConfigValue` is the same
+    // "did the user actually write this?" test the reviewRequestModes migration
+    // below already uses.
+    prReviewPrompt:
+      explicitConfigValue<string>(c, "prReviewPrompt") ??
+      (forge === "gitlab" ? GITLAB_PR_REVIEW_PROMPT : DEFAULT_PR_REVIEW_PROMPT),
     worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
     childWorktrees: c.get<boolean>("childWorktrees") ?? true,
     remoteControl: (() => {
@@ -573,15 +610,21 @@ export function getConfig(): AgentFlowConfig {
       if (explicitConfigValue<unknown>(c, "reviewRequestModes") !== undefined) {
         return resolveModes(c, "reviewRequestModes", DEFAULT_REVIEW_REQUEST_MODES);
       }
+      // The untouched-default built-ins for this forge: only the first stock
+      // mode's prompt is forge-flavoured (same "don't clobber a customization"
+      // scoping as prReviewPrompt above — a legacy custom prompt below still
+      // wins over this regardless of forge, since it overwrites `.prompt`).
+      const stock =
+        forge === "gitlab"
+          ? DEFAULT_REVIEW_REQUEST_MODES.map((m, i) => (i === 0 ? { ...m, prompt: GITLAB_REVIEW_REQUEST_PROMPT } : m))
+          : DEFAULT_REVIEW_REQUEST_MODES;
       // Migrate a customized legacy reviewRequestPrompt into the first built-in,
-      // carrying the rest of DEFAULT_REVIEW_REQUEST_MODES along with `slice(1)`
-      // rather than hand-building a one-element array — so if a second stock
-      // review mode ever ships, legacy-prompt users still receive it instead of
-      // freezing at just the one mode this migration patches.
+      // carrying the rest of `stock` along with `slice(1)` rather than
+      // hand-building a one-element array — so if a second stock review mode
+      // ever ships, legacy-prompt users still receive it instead of freezing at
+      // just the one mode this migration patches.
       const legacy = explicitConfigValue<string>(c, "reviewRequestPrompt");
-      return legacy
-        ? [{ ...DEFAULT_REVIEW_REQUEST_MODES[0], prompt: legacy }, ...DEFAULT_REVIEW_REQUEST_MODES.slice(1)]
-        : DEFAULT_REVIEW_REQUEST_MODES;
+      return legacy ? [{ ...stock[0], prompt: legacy }, ...stock.slice(1)] : stock;
     })(),
     reviewRequestMode: c.get<string>("reviewRequestMode") || "ask",
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,
