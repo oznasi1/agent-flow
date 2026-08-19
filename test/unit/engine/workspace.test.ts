@@ -1034,6 +1034,23 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       expect(arg.query).toContain("do it");
     });
 
+    it('logs "opened Copilot Chat via" on success, byte-identical to the pre-Cursor wording', async () => {
+      // Regression guard for a real drift: seedChatPanel's success log used to be a
+      // hardcoded "opened Copilot Chat via ...". Generalizing it for Cursor via
+      // providerLabel(provider) silently changed the Copilot text to "opened Copilot
+      // via ..." — "Copilot Chat" is the chat panel's own product name and is NOT
+      // what providerLabel("copilot") returns ("Copilot"). No test caught that until
+      // this one, so it has to pin the exact string, not just check it mentions
+      // Copilot.
+      setupMatchingPlan();
+      const { context } = fakeContext();
+      const logs: string[] = [];
+
+      await maybeSeedAgent(context, (m) => logs.push(m));
+
+      expect(logs).toContain(`seed ASM-1: opened Copilot Chat via ${CHAT_OPEN_CMD} (attempt 1)`);
+    });
+
     it("never calls Claude Code's open command", async () => {
       // Asserted on the command id alone, independent of argument shape: Claude's
       // real call is executeCommand(cmd, undefined, seedText), and expect.anything()

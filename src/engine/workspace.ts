@@ -914,7 +914,11 @@ async function seedChatPanel(
     log(`seed ${key}: per-task Copilot chat tabs are not wired up yet — batch falls back to the briefs`);
     return false;
   }
-  const label = providerLabel(provider);
+  // Copilot's product name for the chat panel itself is "Copilot Chat", distinct
+  // from providerLabel's generic "Copilot" used everywhere else (toasts, session
+  // names) — this line predates providerLabel and keeps its original wording so the
+  // emitted log stays byte-identical to what shipped before Cursor existed.
+  const label = provider === "copilot" ? "Copilot Chat" : providerLabel(provider);
   for (let attempt = 1; attempt <= 7; attempt++) {
     let cmds: string[];
     try {
