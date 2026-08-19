@@ -57,8 +57,10 @@ interface RawMr {
   references?: { full?: unknown } | null;
   has_conflicts?: unknown;
   detailed_merge_status?: unknown;
-  /** The status alone: the strip's chip is a whole-pipeline verdict, and it never
-   *  fetches jobs (the PR-facts path reads this pipeline's `id` instead). */
+  /** The status alone: a row's CI chip is one whole-pipeline verdict, and this call
+   *  answers 50 rows at once. Which jobs failed costs the `id`, and that comes from
+   *  the per-MR fetch `GlabReviewProvider.detail` makes on row expansion — one row,
+   *  on demand, never fifty. */
   head_pipeline?: { status?: unknown } | null;
 }
 

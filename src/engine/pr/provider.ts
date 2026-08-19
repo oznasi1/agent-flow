@@ -3,8 +3,8 @@ import { PrFacts } from "../../types";
 import { countUnresolved, GhPr, parseRepoFromUrl, pickPr, toPrFacts } from "./facts";
 import { resolveBin } from "./which";
 // `import type`, and it must stay that way: `../forge/types` type-imports
-// `PrProvider` from THIS file, so a value import either way round would make a
-// runtime cycle out of what is currently two erased edges.
+// `PrProvider` back from this file, so keeping BOTH directions erased is what
+// stops these two modules from becoming a runtime cycle.
 import type { ForgeGap } from "../forge/types";
 
 /** Every field we need, in one call. Verified against gh 2.89.0 — `pr list --json`

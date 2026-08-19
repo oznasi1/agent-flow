@@ -13,8 +13,10 @@ import {
 } from "./mr";
 import { execRunner } from "../provider";
 import type { FetchResult, Locate, PrProvider, Runner } from "../provider";
-// `import type`: `../../forge/types` holds interfaces only, and reaching it as a
-// value would pull `child_process` in through its own imports.
+// `import type`, matching `../../forge/types`'s own discipline: it is an
+// interfaces-only module whose safety rests on every import of and from it being
+// erased at build time (see its header), and a value import would add a runtime
+// edge to reach something that does not exist at runtime.
 import type { ForgeGap } from "../../forge/types";
 import { resolveBin } from "../which";
 import { PrFacts } from "../../../types";

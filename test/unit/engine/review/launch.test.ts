@@ -65,7 +65,6 @@ describe("launchReview", () => {
     const d = deps();
     const out = await launchReview({ req: { ...req, localPath: null }, template: "t", workspaceDir: "/ws", seedAgent: true }, d);
     expect(out).toEqual({ ok: false, message: "aws-ops isn't checked out under your repos root — open it in your browser instead." });
-    expect((out as { message: string }).message).not.toContain("GitHub");
     expect(d.createWorktrees).not.toHaveBeenCalled();
   });
 

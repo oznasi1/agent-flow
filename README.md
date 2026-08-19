@@ -416,7 +416,7 @@ repo, so they never get committed.
 | `agentFlow.agentProvider` | `claude-code` | Which agent starts a session. `copilot` uses GitHub Copilot and works **only in VS Code** — in Cursor and other forks a stored `copilot` value falls back to Claude Code. Copilot sessions do not appear as live agents on the Deck (which reads Claude Code's session files), and **Doctor** reports on whichever provider is configured. |
 | `agentFlow.agentSurface` | `extension` | Where a session starts: the agent's chat panel, or `terminal` to run its CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter. |
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
-| `agentFlow.forge` | `github` | Which forge holds your pull/merge requests: `github` (via the `gh` CLI) or `gitlab` (via `glab`). Everything below that reads a PR — the cards' PR state, the review strip, review writes, the Orchestrator's branch-CI rule — goes through the one you pick, and **Address PR** / **Review with agent** seed a prompt worded for it. See [docs/FORGES.md](docs/FORGES.md) for what GitLab cannot answer. |
+| `agentFlow.forge` | `github` | Which forge holds your pull/merge requests: `github` (via the `gh` CLI) or `gitlab` (via `glab`). Everything that reads a pull request — the cards' PR state, the review strip, review writes, the Orchestrator's branch-CI rule — goes through the one you pick, and **Address PR** / **Review with agent** seed a prompt worded for it. See [docs/FORGES.md](docs/FORGES.md) for what GitLab cannot answer. |
 | `agentFlow.prFacts` | `true` | Read each in-flight task's PR (or merge request) state from your configured forge via its CLI and show it on the Deck's cards. |
 | `agentFlow.openAgents` | `true` | Show every Claude Code session open on this machine on the Deck: as agents on the card that owns their directory, and as a `local` card of its own for a place Agent Flow Deck never launched. Read from `~/.claude/sessions`. |
 | `agentFlow.prFactsTtlSeconds` | `120` | How stale a cached PR fact may be before the Deck re-fetches it (minimum 30). Only fetched while the Deck is open. |
@@ -551,8 +551,8 @@ src/
 │   ├── transcript.ts   # best-effort live agent state from ~/.claude/projects
 │   ├── sessions.ts     # Claude Code's own registry of running sessions
 │   ├── forge/          # which forge is active, behind one interface (docs/FORGES.md)
-│   ├── pr/             # PR facts, over `gh` — and `pr/glab/` over `glab`
-│   ├── review/         # "Review with agent": search, sort, launch, store
+│   ├── pr/             # PR/MR facts per repo, over `gh` — and `pr/glab/` over `glab`
+│   ├── review/         # the review queue + "Review with agent": search, sort, launch, store
 │   ├── claudeAssets.ts # scan ~/.claude: marketplaces, plugins, skills, commands, hooks
 │   ├── sections.ts     # the Marketplace's category order (Yours → size → Uncategorized)
 │   ├── fuzzy.ts        # the ranked fuzzy match behind the Marketplace's search
@@ -564,12 +564,16 @@ src/
 
 The task source sits behind the `TaskProvider` interface with a capability record, so a
 connector that has no sprints or no size estimates hides those lenses instead of faking
-them — see [docs/CONNECTORS.md](docs/CONNECTORS.md). The forge sits behind the same kind of
-seam, selected by `agentFlow.forge`; [docs/FORGES.md](docs/FORGES.md) covers what it
-requires and what degrades when a forge can't answer something. Jira auth is behind `JiraAuth`: v1
+them — see [docs/CONNECTORS.md](docs/CONNECTORS.md). Jira auth is behind `JiraAuth`: v1
 ships the API-token provider; the OAuth web-flow provider (a
 `vscode.AuthenticationProvider` that opens the browser) drops in later with no changes to
 the client or UI.
+
+The forge sits behind a seam of the same kind — `Forge` in `engine/forge/types.ts`,
+selected by `agentFlow.forge` — so nothing outside `engine/forge/` and its two provider
+directories knows whether a pull request came from `gh` or `glab`. A forge that can't
+answer something degrades in a stated way rather than faking an answer;
+[docs/FORGES.md](docs/FORGES.md) lists what those are.
 
 The agent seed is one chokepoint in `engine/workspace.ts` that every launch path — take,
 batch, Explore, Notepad, Deck relaunch, Address PR, Review with agent — goes through. It

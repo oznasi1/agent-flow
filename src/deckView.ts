@@ -1723,10 +1723,10 @@ export class DeckPanel {
    * worktree Agent Flow creates is a separate checkout of the same repo
    * (`<repo>/.claude/worktrees/<KEY>`, see `createWorktrees`), carrying the repo's
    * name with the worktree's path, so a board with three tasks on `aws-ops` has
-   * three `aws-ops` entries. All three share one remote, and the forge CLI reads the
-   * project off that remote (see `BRANCH_CI_QUERY`), so any of them answers the same question
-   * correctly. Refusing on "more than one path" would have made this condition
-   * unusable in exactly the setup this product creates constantly.
+   * three `aws-ops` entries. All three share one remote, and the forge CLI reads
+   * the project off that remote (see `BRANCH_CI_QUERY`), so any of them answers
+   * the same question correctly. Refusing on "more than one path" would have made
+   * this condition unusable in exactly the setup this product creates constantly.
    *
    * What IS ambiguous is two DIFFERENT repositories presenting the same name. A
    * local card's repo name is `path.basename` of whatever folder a session was found
