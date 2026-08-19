@@ -16,10 +16,15 @@ function isReviewStatus(name?: string | null): boolean {
 
 /**
  * Decide which board column a run belongs in. Precedence, most-decisive first:
- *   the landed merge → "waiting on a human" (the agent's needs-you signal, a
- *   stalled or exited agent, or a blocked PR) → the merge you have yet to press
- *   → the live "working" signal → review (an open PR / Jira review status) → else
- *   "progress" as the in-flight catch-all.
+ *   the landed merge → an agent waiting on you (needs-you, stalled, exited) → a
+ *   blocked PR → the merge you have yet to press → the live "working" signal →
+ *   review (an open PR / Jira review status) → else "progress" as the in-flight
+ *   catch-all.
+ *
+ * `needs` is agent-driven and nothing else: the column means a session stopped
+ * and wants you. A PR that needs a human is the review column's business, in its
+ * `fixes` lane — the two used to share a column, which put "Claude is asking you
+ * something" and "GitHub is asking you something" under one header.
  *
  * `ticketCategory` is not read here at all. A done ticket that never merged has
  * left the board before this function sees it (`shelfFor`), and one still on the
@@ -37,7 +42,11 @@ function isReviewStatus(name?: string | null): boolean {
  *
  * A **blocked PR outranks a working agent**: an agent cannot know CI failed
  * until something tells it, so the card belongs where you will see it, green dot
- * and all. **The merge you have yet to press outranks a working agent** for the
+ * and all — which is why In review can hold a live agent, and why its rung sits
+ * where it does rather than below `working`. Its own rung is also what catches a
+ * blocked *draft*: `prSignals.blocked` counts drafts and `prSignals.open` does
+ * not, so the `prOpen` rung below would let a red draft fall through to progress.
+ * **The merge you have yet to press outranks a working agent** for the
  * mirror-image reason — `ready` and `blocked` are the two sides of the same PR
  * read, and the merge is the one action on this board you can finish in five
  * seconds. It must not hide behind an agent doing follow-up work in a run whose
@@ -62,9 +71,14 @@ export function deriveBucket(i: BucketInput): DeckColumn {
   if (i.prMerged) return "merge";
   // stalled and exited join needs-you here: all three mean a human has to do
   // something, and all three used to arrive as "idle" and land in progress.
-  if (i.agentState === "needs-you" || i.agentState === "stalled" || i.agentState === "exited" || i.prBlocked) {
+  if (i.agentState === "needs-you" || i.agentState === "stalled" || i.agentState === "exited") {
     return "needs";
   }
+  // Same rung a blocked PR always held — above the merge you have yet to press,
+  // above the live agent — pointed at the column that owns PR trouble. `prOpen`
+  // below would miss a red *draft*: prSignals.blocked counts drafts, .open does
+  // not, so without this the draft falls all the way to progress's parked lane.
+  if (i.prBlocked) return "review";
   if (i.prReady) return "merge";
   if (i.agentState === "working") return "progress";
   if (i.prOpen || isReviewStatus(i.ticketStatus)) return "review";
@@ -117,16 +131,28 @@ export function prSignals(prs: PrEntryMap): PrSignals {
 }
 
 /**
- * Which band inside `column` a run belongs to, or null on a column that means one
- * thing. Reads the same signals the column itself was derived from, so a lane can
- * never contradict the column above it.
+ * Which band inside `column` a run belongs to, or null on `needs`, the column
+ * that means one thing. Reads the same signals the column itself was derived
+ * from, so a lane can never contradict the column above it.
+ *
+ * Every laned column must answer for every route into it: DeckApp renders a
+ * laned column entirely out of its lanes, so a null here would drop the card off
+ * the board rather than merely mis-file it. Hence the fallbacks below are
+ * fallbacks and not `null` — `agentState` is optional because an agentless run
+ * reaches this through `laneOf` with nothing but the run's own reduction, and
+ * that run is parked by definition.
  *
  * `merged` is tested rather than `ready`, and the fallback is `ready`: the merge
  * column is reachable on either signal, and `prSignals.ready` is false once a PR
  * has merged — asking "is it ready" first would send every landed run to the
  * wrong lane.
  */
-export function deriveLane(column: DeckColumn, s: PrSignals): DeckLane | null {
-  if (column !== "merge") return null;
-  return s.merged ? "merged" : "ready";
+export function deriveLane(column: DeckColumn, s: PrSignals, agentState?: AgentState): DeckLane | null {
+  if (column === "progress") return agentState === "working" ? "working" : "parked";
+  // Not `s.open && s.blocked`: `blocked` already requires an open PR of its own,
+  // and a card can reach review off a Jira status with no PR at all — that one
+  // has nothing to fix and waits.
+  if (column === "review") return s.blocked ? "fixes" : "waiting";
+  if (column === "merge") return s.merged ? "merged" : "ready";
+  return null;
 }
