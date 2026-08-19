@@ -217,7 +217,13 @@ export function defaultDeps(connector: TaskConnector, log: (message: string) => 
       workspaceDir: c.workspaceDir,
       repoBlocklist: c.repoBlocklist,
       prFacts: c.prFacts,
-      agentProvider: c.agentProvider,
+      // Doctor reports the agent a launch would actually start, so `ask` shows the
+      // Claude Code rows — which is what an unresolved `ask` seeds. DoctorInputs stays
+      // a concrete AgentProvider; src/engine/doctor.ts keeps its zero imports.
+      // Spelled out here rather than calling config.ts's `resolvedProvider`: this
+      // module's deps test mocks "./config" down to `getConfig` alone, so every extra
+      // value import from it breaks that mock.
+      agentProvider: c.agentProvider === "ask" ? "claude-code" : c.agentProvider,
     };
   };
   return {

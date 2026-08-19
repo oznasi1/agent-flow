@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { getConfig, providerLabel, AgentFlowConfig, AgentProvider, ExploreAction } from "./config";
+import { getConfig, plannedAgentLabel, providerLabel, AgentFlowConfig, AgentProvider, AgentProviderSetting, ExploreAction } from "./config";
 import {
   isTaskNetworkError,
   serializeCaps,
@@ -242,7 +242,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
     this.post({ type: "state", authed, configured, project: info.scopeValue, me,
       prReviewStatus: cfg.prReviewStatus, filters: cfg.filters,
-      sourceLabel: info.label, agentLabel: providerLabel(cfg.agentProvider), caps: serializeCaps(this.provider().caps),
+      sourceLabel: info.label, agentLabel: plannedAgentLabel(cfg.agentProvider), caps: serializeCaps(this.provider().caps),
       liveCount: cfg.trackOpenWindows ? this.liveWindows().length : undefined });
   }
 
@@ -1777,7 +1777,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   private seededNote(
     seedAgent: boolean,
     remoteControl: boolean,
-    provider: AgentProvider,
+    // The setting, not a resolved agent: under `ask` nothing here knows which agent
+    // the launch picked yet, so the copy stays neutral. Task 6 hands this the
+    // launch's own resolved provider instead.
+    provider: AgentProviderSetting,
     seededInPlace = false,
   ): string {
     // Seeding into this window with seeding off is the one destination that ends with
@@ -1788,7 +1791,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ? " This window is untouched — agentFlow.seedAgent is off, so no session was seeded."
         : "";
     }
-    const agent = providerLabel(provider);
+    const agent = plannedAgentLabel(provider);
     return remoteControl
       ? ` ${agent} pre-seeded with /remote-control — Enter to connect, then paste.`
       : ` ${agent} pre-seeded — press Enter to start.`;
@@ -1905,7 +1908,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // there would land in whatever the path resolves to instead.
     const planMd = briefMarkdown(
       detail,
-      providerLabel(cfg.agentProvider),
+      plannedAgentLabel(cfg.agentProvider),
       orchestration?.children.length
         ? {
             children: orchestration.children.map((c) => ({
@@ -2143,8 +2146,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (authorising > cfg.batchLaunchConfirmThreshold) {
       const go = await vscode.window.showWarningMessage(
         parent
-          ? `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${providerLabel(cfg.agentProvider)} sessions and up to ${authorising} git worktrees across ${filterSet.length} repo${filterSet.length === 1 ? "" : "s"}.`
-          : `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${providerLabel(cfg.agentProvider)} sessions.`,
+          ? `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${plannedAgentLabel(cfg.agentProvider)} sessions and up to ${authorising} git worktrees across ${filterSet.length} repo${filterSet.length === 1 ? "" : "s"}.`
+          : `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${plannedAgentLabel(cfg.agentProvider)} sessions.`,
         { modal: true },
         "Launch",
       );
@@ -2230,7 +2233,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           key,
           task: {
             ticket: { key: detail.key, summary: detail.summary, url: detail.url },
-            planMd: briefMarkdown(detail, providerLabel(cfg.agentProvider)),
+            planMd: briefMarkdown(detail, plannedAgentLabel(cfg.agentProvider)),
             descriptionText: detail.descriptionText,
             services,
             ...(parent ? { parentKey: parent.key } : {}),
@@ -2697,7 +2700,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         { key: leaf.key, summary: leaf.summary, url: childDetail?.url ?? "" },
         briefMarkdown(
           childDetail ?? { key: leaf.key, summary: leaf.summary, descriptionText: "" },
-          providerLabel(cfg.agentProvider),
+          plannedAgentLabel(cfg.agentProvider),
         ),
         this.log,
       );

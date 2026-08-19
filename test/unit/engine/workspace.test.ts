@@ -442,6 +442,49 @@ describe("maybeSeedAgent", () => {
   const guardKey = (createdAt: number, key = "ASM-1", identity = "/ws/ASM-1.code-workspace") =>
     `seeded:${key}:${createdAt}:${identity}`;
 
+  describe("seedProvider", () => {
+    // Both cases resolve the agent at seed time, in the target window — the two halves
+    // of that resolution: the plan's own `provider` when it has one, and the live
+    // setting when it does not.
+    afterEach(() => {
+      setConfig({ agentProvider: undefined });
+    });
+
+    it("a plan's own provider beats a conflicting live setting", async () => {
+      setConfig({ agentProvider: "claude-code" });
+      withWorkspaceFile();
+      readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+      readFileSync.mockReturnValue(planJson({ provider: "cursor" }));
+      commands.getCommands.mockResolvedValue(["workbench.action.chat.open", CLAUDE_OPEN_CMD]);
+      const { context } = fakeContext();
+
+      await maybeSeedAgent(context, () => {});
+
+      expect(commands.executeCommand).toHaveBeenCalledWith(
+        "workbench.action.chat.open",
+        expect.objectContaining({ query: "do it" }),
+      );
+      expect(commands.executeCommand).not.toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+    });
+
+    it("degrades a bare ask setting to Claude Code at seed time", async () => {
+      // Reachable, not theoretical: a plan written under claude-code can sit on disk for
+      // up to PLAN_TTL_MS while the user flips the setting to ask, and the plan is
+      // re-read here. Degrading beats prompting in a window nobody expected a dialog in.
+      setConfig({ agentProvider: "ask" });
+      withWorkspaceFile();
+      readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+      readFileSync.mockReturnValue(planJson()); // no `provider` field
+      commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+      const { context } = fakeContext();
+
+      await maybeSeedAgent(context, () => {});
+
+      expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+      expect(window.showQuickPick).not.toHaveBeenCalled();
+    });
+  });
+
   it("returns early with no single-workspace identity", async () => {
     workspace.workspaceFile = undefined;
     workspace.workspaceFolders = undefined;

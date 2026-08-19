@@ -52,9 +52,13 @@ export function activate(context: vscode.ExtensionContext): void {
   const provider = new TasksViewProvider(context, connector, log);
   log("Agent Flow Deck activated");
 
-  // Gates the `when` clause on agentFlow.agentProvider so the Copilot choice does not
-  // render in Cursor's settings UI. Cosmetic only — readAgentProvider enforces the
-  // same rule at seed time. Guarded on both a synchronous throw AND an async
+  // Published for `when` clauses in package.json. Nothing references it right now:
+  // agentFlow.agentProvider's `when: agentFlow.host.vscode` gate was dropped when
+  // Cursor and `ask` became real choices, since readAgentProviderSetting enforces the
+  // host rules at seed time anyway. Kept published rather than deleted because
+  // test/unit/extension.test.ts pins this call and its failure handling, and that file
+  // is out of scope for the task that dropped the gate — see the task-4 report.
+  // Guarded on both a synchronous throw AND an async
   // rejection: executeCommand returns a Thenable in the real host, so a rejection
   // would otherwise escape as an unhandled rejection rather than being logged. A
   // failure here must never escape activate(), because an uncaught throw disposes

@@ -227,16 +227,17 @@
           "enum": [
             "claude-code",
             "copilot",
-            "cursor"
+            "cursor",
+            "ask"
           ],
           "enumDescriptions": [
             "Claude Code",
             "GitHub Copilot — VS Code only",
-            "Cursor's composer — Cursor only"
+            "Cursor's composer — Cursor only",
+            "Ask every launch — pick from the agents this editor can run"
           ],
           "default": "claude-code",
-          "when": "agentFlow.host.vscode",
-          "markdownDescription": "Which agent Agent Flow starts a session with. `copilot` works only in VS Code and `cursor` only in Cursor — each falls back to Claude Code in the other editor. Note that neither Copilot nor Cursor sessions appear as live agents on the Deck, which reads Claude Code's session files."
+          "markdownDescription": "Which agent Agent Flow starts a session with. `copilot` works only in VS Code and `cursor` only in Cursor — each falls back to Claude Code in the other editor. Note that neither Copilot nor Cursor sessions appear as live agents on the Deck, which reads Claude Code's session files.\n\nSet to `ask` to choose per launch. Batch launches ask once for the whole batch, and Orchestrator rules — which run unattended — always use Claude Code, because there is nobody there to answer a picker."
         },
         "agentFlow.agentSurface": {
           "type": "string",

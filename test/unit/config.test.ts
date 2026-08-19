@@ -4,8 +4,11 @@ import * as path from "path";
 import {
   expandHome,
   getConfig,
+  hostProviders,
   isCursorHost,
+  plannedAgentLabel,
   providerLabel,
+  resolvedProvider,
   DEFAULT_PROMPT_MODES,
   DEFAULT_EXPLORE_PROMPT,
   DEFAULT_EXPLORE_JIRA_TICKET_PROMPT,
@@ -662,6 +665,38 @@ describe("getConfig — agentProvider", () => {
     setConfig({ agentProvider: "copilot" });
     expect(getConfig().agentProvider).toBe("claude-code");
   });
+
+  // `ask` is the one value that is not an agent, so unlike copilot and cursor it has
+  // no host to be wrong in — it must survive every host untouched, or the picker
+  // Task 5 adds would silently never appear for some users.
+  it("passes ask through in every host", () => {
+    for (const scheme of ["cursor", "vscode", "windsurf"]) {
+      env.uriScheme = scheme;
+      setConfig({ agentProvider: "ask" });
+      expect(getConfig().agentProvider).toBe("ask");
+    }
+  });
+});
+
+describe("hostProviders", () => {
+  afterEach(() => {
+    env.uriScheme = "cursor";
+  });
+
+  it("offers Claude Code and Copilot in VS Code", () => {
+    env.uriScheme = "vscode";
+    expect(hostProviders()).toEqual(["claude-code", "copilot"]);
+  });
+
+  it("offers Claude Code and Cursor in Cursor", () => {
+    env.uriScheme = "cursor";
+    expect(hostProviders()).toEqual(["claude-code", "cursor"]);
+  });
+
+  it("offers only Claude Code in an unrelated host", () => {
+    env.uriScheme = "windsurf";
+    expect(hostProviders()).toEqual(["claude-code"]);
+  });
 });
 
 describe("isCursorHost / providerLabel", () => {
@@ -682,6 +717,29 @@ describe("isCursorHost / providerLabel", () => {
     expect(providerLabel("claude-code")).toBe("Claude Code");
     expect(providerLabel("copilot")).toBe("Copilot");
     expect(providerLabel("cursor")).toBe("Cursor");
+  });
+});
+
+describe("resolvedProvider / plannedAgentLabel", () => {
+  it("resolves ask to claude-code and leaves every real agent alone", () => {
+    expect(resolvedProvider("ask")).toBe("claude-code");
+    expect(resolvedProvider("claude-code")).toBe("claude-code");
+    expect(resolvedProvider("copilot")).toBe("copilot");
+    expect(resolvedProvider("cursor")).toBe("cursor");
+  });
+
+  // Pinned to the byte, in both directions: the three real settings must keep the
+  // exact copy that shipped — a drift here silently rewrites the batch confirmation
+  // and every brief for users who never chose `ask` — and `ask`'s own wording is the
+  // only agent-neutral string in that copy.
+  it("names the real agent for every concrete setting, exactly as providerLabel does", () => {
+    expect(plannedAgentLabel("claude-code")).toBe("Claude Code");
+    expect(plannedAgentLabel("copilot")).toBe("Copilot");
+    expect(plannedAgentLabel("cursor")).toBe("Cursor");
+  });
+
+  it("stays neutral under ask, where no agent has been chosen yet", () => {
+    expect(plannedAgentLabel("ask")).toBe("your coding agent");
   });
 });
 

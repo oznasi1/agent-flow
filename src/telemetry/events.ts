@@ -126,7 +126,7 @@ export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as c
 export interface SettingsSnapshot {
   workspace_mode: "auto" | "multiroot" | "per-window" | "ask" | "invalid";
   open_in: "ask" | "new-window" | "this-window" | "pick-existing" | "invalid";
-  agent_provider: "claude-code" | "copilot" | "cursor" | "invalid";
+  agent_provider: "claude-code" | "copilot" | "cursor" | "ask" | "invalid";
   agent_surface: "extension" | "terminal" | "invalid";
   explore_mode: "ask" | "jiraTicket" | "knowledge" | "debug" | "general" | "supervise" | "verify" | "invalid";
   /** A registered connector id, or "invalid". Validated against the registry, so

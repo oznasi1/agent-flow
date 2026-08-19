@@ -12,7 +12,7 @@ import { gitState } from "./git";
 import { ensureGitExcluded } from "./gitExclude";
 import { serviceFolderName } from "./worktree";
 import { windowIdentity, type CurrentWindow } from "./presence";
-import { providerLabel, readAgentProvider, readAgentSurface, type AgentProvider } from "../config";
+import { providerLabel, readAgentProviderSetting, readAgentSurface, resolvedProvider, type AgentProvider } from "../config";
 
 export const BRIEF_DIR = ".pick-task";
 export const BRIEF_FILE = "TASK.md";
@@ -153,6 +153,9 @@ export interface PlanFile {
   /** Position in a batch. Several plans written in one loop can share a
    * createdAt millisecond; this keeps the seeded tabs in selection order. */
   seq?: number;
+  /** Present only when `ask` resolved it in the source window; absent means read the
+   * setting live. */
+  provider?: AgentProvider;
   matches: { matchPath: string; prompt: string }[];
 }
 
@@ -761,6 +764,17 @@ export function maybeSeedAgent(context: vscode.ExtensionContext, log: (m: string
   return thisPass;
 }
 
+/** The agent to seed with, resolved in the target window at seed time. A plan carries
+ *  `provider` only when `ask` resolved it in the source window; otherwise the setting
+ *  is read live, which is what makes flipping the preference affect plans already on
+ *  disk. A bare `ask` reaching here means the plan predates its own resolution — a
+ *  settings flip inside the 15-minute PLAN_TTL_MS window — so it degrades to the one
+ *  agent every host can run rather than putting a dialog in a window the user was not
+ *  expecting one in. */
+function seedProvider(plan: PlanFile): AgentProvider {
+  return plan.provider ?? resolvedProvider(readAgentProviderSetting());
+}
+
 async function runSeedPass(context: vscode.ExtensionContext, log: (m: string) => void): Promise<void> {
   const identity = windowIdentity()?.identity;
   log(`activation: window identity = ${identity ?? "(no single workspace)"}`);
@@ -816,6 +830,7 @@ async function runSeedPass(context: vscode.ExtensionContext, log: (m: string) =>
       log,
       remoteControl: plan.remoteControl === true,
       multi,
+      provider: seedProvider(plan),
     });
     // Claude Code picks a session's column by scanning the tab groups for an existing
     // Claude group, and that model doesn't update synchronously — without this pause
@@ -967,8 +982,11 @@ async function seedAgentSession(opts: {
   log: (m: string) => void;
   remoteControl?: boolean;
   multi?: boolean;
+  /** Already resolved by seedProvider, in this window, at seed time — the plan's own
+   *  choice if it carried one, otherwise the live setting. */
+  provider: AgentProvider;
 }): Promise<void> {
-  const { prompt, key, matchPath, log, remoteControl = false, multi = false } = opts;
+  const { prompt, key, matchPath, log, remoteControl = false, multi = false, provider } = opts;
 
   // `/remote-control` is a Claude Code slash command; every other agent would seed it
   // as literal prompt text. tasksView already refuses the combination pre-flight, but
@@ -982,7 +1000,7 @@ async function seedAgentSession(opts: {
   // so fixing the setting and reloading would find the plan already consumed and seed
   // nothing. Telling the user to reload would be telling them to do something that
   // cannot work.
-  if (remoteControl && readAgentProvider() !== "claude-code") {
+  if (remoteControl && provider !== "claude-code") {
     log(`seed ${key}: refused — Remote Control needs Claude Code`);
     vscode.window.showErrorMessage(
       `Agent Flow Deck: ${key} not seeded — Remote Control needs Claude Code. Set agentFlow.agentProvider to claude-code (or turn agentFlow.remoteControl off), then take ${key} again — reloading this window won't re-seed it.`,
@@ -1002,11 +1020,10 @@ async function seedAgentSession(opts: {
     );
   };
 
-  // Both settings are read here, in the target window, at seed time — never carried
-  // in the plan file. Flipping either therefore also affects plans already on disk,
-  // which is what a preference should do.
-  const provider = readAgentProvider();
-
+  // The surface is read here, in the target window, at seed time — never carried in
+  // the plan file. Flipping it therefore also affects plans already on disk, which is
+  // what a preference should do. The provider is resolved the same way, one level up
+  // in seedProvider, which also gets to honor a plan's own recorded choice.
   if (readAgentSurface() === "terminal") {
     if (await seedViaTerminal(provider, seedText, key, matchPath, log)) {
       announceRemoteControl();
