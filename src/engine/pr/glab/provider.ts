@@ -1,0 +1,145 @@
+// MR facts for one repo's one branch, through `glab api`. The GitLab counterpart
+// of `../provider.ts`, spawning through the same injected `Runner` so no test
+// forks a process.
+//
+// `projects/:fullpath` is glab's own placeholder, resolved from the git remote of
+// the directory the call runs in — never from Agent Flow's name for a CHECKOUT.
+// Those two routinely differ: this product's own worktrees are directories like
+// `bite-me-3a`. Same discipline `orchestrator/branchCi.ts` documents for gh's
+// `{owner}`/`{repo}`.
+import {
+  countUnresolvedDiscussions, GlabApprovals, GlabJob, GlabMr,
+  mapApprovals, mapJobs, mapJobsAdvisory, pickMr, toMrFacts,
+} from "./mr";
+import { execRunner } from "../provider";
+import type { FetchResult, Locate, PrProvider, Runner } from "../provider";
+import { resolveBin } from "../which";
+import { PrFacts } from "../../../types";
+
+export const GLAB_TIMEOUT_MS = 10_000;
+
+/** The `glab api` flag that sends a field value as an uninterpreted string.
+ *
+ * `-f` here is `--raw-field`: no JSON parsing, no type coercion, and — the part
+ * that matters for a review body — no reading a leading `@` as a filename or `-`
+ * as stdin. Those belong to `-F`/`--field`, which is why `-F` must never carry
+ * one.
+ *
+ * Do NOT "fix" this to `-F` by analogy with the `gh` provider next door. The two
+ * CLIs give the same letter a different long name: `-f` is `--field` on `gh` and
+ * `--raw-field` on `glab`. Both happen to be the raw-string one, so the letter is
+ * right for both and the reasoning is not transferable. */
+export const GLAB_FIELD_FLAG = "-f";
+
+const locateGlab: Locate = () => resolveBin("glab");
+
+/** Why forge reads are off. Structurally identical to `GhGap`, and unified into
+ * one `ForgeGap` in the forge registry. */
+export type GlabGap = { kind: "missing" | "signed-out"; detail: string };
+
+export const mrListPath = (selector: string): string =>
+  `projects/:fullpath/merge_requests?${selector}&state=all&per_page=10`;
+export const jobsPath = (pipelineId: number): string =>
+  `projects/:fullpath/pipelines/${pipelineId}/jobs?per_page=100`;
+export const approvalsPath = (iid: number): string =>
+  `projects/:fullpath/merge_requests/${iid}/approvals`;
+export const discussionsPath = (iid: number): string =>
+  `projects/:fullpath/merge_requests/${iid}/discussions?per_page=100`;
+
+/** Is `glab` installed and logged in? Probed once per Deck session; a gap turns
+ * forge reads off with a footer note rather than an error. */
+export async function probeGlab(run: Runner = execRunner, locate: Locate = locateGlab): Promise<GlabGap | null> {
+  const glab = locate() ?? "glab";
+  try {
+    await run(glab, ["auth", "status"], { cwd: process.cwd(), timeoutMs: GLAB_TIMEOUT_MS });
+    return null;
+  } catch (e) {
+    // ENOENT is the only answer that means "not installed" — anything else came
+    // from a glab that ran, so blaming the install would send the user hunting
+    // for a binary they already have.
+    const kind = (e as { code?: unknown }).code === "ENOENT" ? "missing" : "signed-out";
+    return { kind, detail: `${glab} auth status: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+export class GlabProvider implements PrProvider {
+  constructor(
+    private readonly run: Runner = execRunner,
+    private readonly locate: Locate = locateGlab,
+  ) {}
+
+  async fetch(repoPath: string, branch: string | null, key: string): Promise<FetchResult> {
+    try {
+      let chosen: GlabMr | undefined;
+      // The live branch is exact. The key search only covers an MR opened from a
+      // branch Agent Flow didn't name.
+      if (branch) chosen = pickMr(await this.list(repoPath, `source_branch=${encodeURIComponent(branch)}`));
+      if (!chosen) chosen = pickMr(await this.list(repoPath, `search=${encodeURIComponent(key)}&in=title`));
+      if (!chosen) return { ok: true, facts: null };
+
+      // Each sub-call degrades on its own: losing a detail must not discard the MR
+      // we found, and nothing here may throw out of `fetch` — an uncaught throw
+      // leaves the caller's cache entry unstamped, which re-arms this repo's fetch
+      // on every tick, forever.
+      const jobs = await this.jobs(repoPath, chosen);
+      return {
+        ok: true,
+        facts: toMrFacts(chosen, {
+          ci: mapJobs(jobs),
+          ciAdvisory: mapJobsAdvisory(jobs),
+          review: mapApprovals(await this.approvals(repoPath, chosen.iid as number)),
+          unresolved: await this.unresolved(repoPath, chosen),
+        }),
+      };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  private api(repoPath: string, path: string): Promise<string> {
+    return this.run(this.locate() ?? "glab", ["api", path], { cwd: repoPath, timeoutMs: GLAB_TIMEOUT_MS });
+  }
+
+  private async list(repoPath: string, selector: string): Promise<GlabMr[]> {
+    const parsed = JSON.parse(await this.api(repoPath, mrListPath(selector))) as unknown;
+    // GitLab answers an error with an object (`{"message":"404 Not Found"}`), which
+    // must fail the fetch rather than read as an empty list.
+    if (!Array.isArray(parsed)) throw new Error("glab merge_requests: expected an array");
+    return parsed as GlabMr[];
+  }
+
+  /** The head pipeline's jobs, or null when there is no pipeline or we cannot read
+   * one. Null and an empty list both tally to zeros — the same answer GitHub's
+   * path gives for a null rollup. */
+  private async jobs(repoPath: string, mr: GlabMr): Promise<GlabJob[] | null> {
+    const id = mr.head_pipeline?.id;
+    if (typeof id !== "number") return null;
+    try {
+      const parsed = JSON.parse(await this.api(repoPath, jobsPath(id))) as unknown;
+      return Array.isArray(parsed) ? (parsed as GlabJob[]) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async approvals(repoPath: string, iid: number): Promise<GlabApprovals | null> {
+    try {
+      return JSON.parse(await this.api(repoPath, approvalsPath(iid))) as GlabApprovals;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Unresolved discussion count, or null when we cannot get one. The MR's own
+   * `blocking_discussions_resolved` answers the common case for free, which saves
+   * a round trip on every card whose threads are all settled. */
+  private async unresolved(repoPath: string, mr: GlabMr): Promise<PrFacts["unresolved"]> {
+    if (mr.blocking_discussions_resolved === true) return 0;
+    if (typeof mr.iid !== "number") return null;
+    try {
+      return countUnresolvedDiscussions(JSON.parse(await this.api(repoPath, discussionsPath(mr.iid))));
+    } catch {
+      return null;
+    }
+  }
+}
