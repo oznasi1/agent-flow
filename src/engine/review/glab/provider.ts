@@ -15,18 +15,6 @@ import { parseMrSearch, REVIEW_MR_PATH } from "./search";
 
 const locateGlab: Locate = () => resolveBin("glab");
 
-/** Node's execFile error `.message` is always `Command failed: <file> <full argv
- * joined>`, optionally followed by a `\n` and stderr's own text — for a review
- * submission, that first line embeds the entire body verbatim. Used only when a
- * rejection carries no `stderr` of its own, it keeps whatever follows the first
- * newline and falls back to a fixed, argv-free string when there is nothing
- * there — never the reconstructed command. */
-function stripCommandLine(message: string): string {
-  const nl = message.indexOf("\n");
-  const rest = nl === -1 ? "" : message.slice(nl + 1).trim();
-  return rest || "glab failed without further detail — check the merge request directly.";
-}
-
 /** A project path as one url path segment. GitLab's project-scoped routes take the
  * full nested path url-encoded, so `group/sub/proj` becomes `group%2Fsub%2Fproj`. */
 const enc = (repo: string): string => encodeURIComponent(repo);
@@ -71,7 +59,7 @@ export class GlabReviewProvider implements ReviewProvider {
   async detail(repo: string, number: number): Promise<ReviewDetail | null> {
     let mr: { head_pipeline?: { id?: number } | null; changes_count?: unknown };
     try {
-      mr = JSON.parse(await this.get(`projects/${enc(repo)}/merge_requests/${number}?`)) as typeof mr;
+      mr = JSON.parse(await this.get(`projects/${enc(repo)}/merge_requests/${number}`)) as typeof mr;
     } catch {
       return null;
     }
@@ -105,7 +93,10 @@ export class GlabReviewProvider implements ReviewProvider {
    * `verb` is not to be trusted just because the type says `ReviewVerb`:
    * `Object.hasOwn` — not a truthiness check, which a prototype key like
    * `"constructor"` would sail through — fails closed before a single argv is
-   * built. `body` likewise arrives from a webview message, untyped at runtime.
+   * built. `body` likewise arrives from a webview message, untyped at runtime:
+   * a plain `typeof` guard, not `String(body ?? "")`, because `String({})` is
+   * `"[object Object]"` — a truthy, postable string that would land on someone
+   * else's MR instead of being refused as empty.
    *
    * `request-changes` is the one verb whose meaning differs by forge: GitLab has
    * no stable REST equivalent, so it becomes a note plus a withdrawal of any
@@ -115,24 +106,36 @@ export class GlabReviewProvider implements ReviewProvider {
   ): Promise<{ ok: true } | { ok: false; message: string }> {
     const VERBS: Record<ReviewVerb, true> = { approve: true, comment: true, "request-changes": true };
     if (!Object.hasOwn(VERBS, verb)) return { ok: false, message: `Unknown review verb: ${String(verb)}` };
-    const text = String(body ?? "").trim();
+    const text = typeof body === "string" ? body.trim() : "";
     if (verb !== "approve" && !text) {
       return { ok: false, message: "GitLab requires a message for this kind of review." };
     }
 
     const base = `projects/${enc(repo)}/merge_requests/${number}`;
+    // Tracked so a later failure can say the words already made it out, rather
+    // than reading as "nothing happened" and inviting a retry that posts the
+    // same note twice.
+    let noteLanded = false;
     try {
       // The note goes first for every verb that has words: if the state change
       // then fails, the reviewer's text is already on the MR rather than lost.
-      if (text) await this.post(`${base}/notes`, `body=${text}`);
+      if (text) {
+        await this.post(`${base}/notes`, `body=${text}`);
+        noteLanded = true;
+      }
       if (verb === "approve") await this.post(`${base}/approve`);
       if (verb === "request-changes") {
-        // There may be no approval to withdraw, which GitLab answers with an
-        // error. That is not a failed review.
         try {
           await this.post(`${base}/unapprove`);
-        } catch {
-          /* nothing to withdraw */
+        } catch (e) {
+          // There may be no approval to withdraw, which GitLab answers with an
+          // error — that is not a failed review. A killed-by-timeout rejection
+          // is different: `glab` may have reached GitLab anyway, so it must
+          // surface rather than be read as "nothing to withdraw" — swallowing
+          // it would tell the user "changes requested" while their approval
+          // silently stands.
+          const err = e as { killed?: boolean; code?: unknown };
+          if (err.killed || err.code === "ETIMEDOUT") throw e;
         }
       }
       return { ok: true };
@@ -142,17 +145,22 @@ export class GlabReviewProvider implements ReviewProvider {
       // failure but means something different: `glab` may well have reached GitLab
       // before the clock ran out, so "GitLab refused" would be a flat lie about a
       // write that could have succeeded server-side.
-      if (err.killed || err.code === "ETIMEDOUT") {
-        return {
-          ok: false,
-          message: `Timed out after ${GLAB_TIMEOUT_MS / 1000}s — the review may already have gone through. Open the merge request to check.`,
-        };
-      }
-      // `stderr` is GitLab's actual wording, with none of the reconstructed argv
-      // `.message` carries. This catch must never return the body, stderr present
-      // or not.
-      const msg = err.stderr?.trim() || (e instanceof Error ? stripCommandLine(e.message) : String(e));
-      return { ok: false, message: msg };
+      const reason = err.killed || err.code === "ETIMEDOUT"
+        ? `Timed out after ${GLAB_TIMEOUT_MS / 1000}s — the review may already have gone through. Open the merge request to check.`
+        // `stderr` is GitLab's actual wording. Never `.message`: execFile's own
+        // message is `Command failed: <file> <full argv joined>`, and for a
+        // submit that argv carries `-f body=<the whole review text>` — including
+        // every line after the body's OWN first newline, because Node appends
+        // stderr's text after the message's first newline too, so a real
+        // multi-paragraph body (these come from `.pick-task/REVIEW-<n>.md`
+        // drafts) leaves everything past its first line looking exactly like
+        // "the rest of stderr". There is no safe substring of `.message` to
+        // salvage — a missing or blank `stderr` (a killed process typically has
+        // none) falls back to a fixed, argv-free string rather than ever
+        // touching `.message`.
+        : err.stderr?.trim() || "glab failed without further detail — check the merge request directly.";
+      if (noteLanded) return { ok: false, message: `Your note was posted, but the review update failed: ${reason}` };
+      return { ok: false, message: reason };
     }
   }
 }
