@@ -57,6 +57,8 @@ export class GlabReviewProvider implements ReviewProvider {
    * discussions are still open, and the diff size. A failure in either of the
    * last two degrades to `null` rather than discarding what we did get. */
   async detail(repo: string, number: number): Promise<ReviewDetail | null> {
+    // `changes_count` is `unknown` because only `readSize` knows what to make of
+    // it: GitLab sends a STRING there, and caps it ("20+") past twenty.
     let mr: { head_pipeline?: { id?: number } | null; changes_count?: unknown };
     try {
       mr = JSON.parse(await this.get(`projects/${enc(repo)}/merge_requests/${number}`)) as typeof mr;
@@ -134,6 +136,16 @@ export class GlabReviewProvider implements ReviewProvider {
           // surface rather than be read as "nothing to withdraw" — swallowing
           // it would tell the user "changes requested" while their approval
           // silently stands.
+          //
+          // Admittedly BROADER than that stated reason: this swallows every
+          // non-timeout error, so a 403 (no permission to unapprove on this
+          // project) is reported to the user as a review that succeeded, with
+          // their note posted and no approval withdrawn. Not narrowed because
+          // there is nothing reliable to narrow ON — GitLab's wording for
+          // "nothing to withdraw" varies by instance version and locale, and
+          // matching it by substring would fail closed on the common case the
+          // moment an instance rephrased it. The note, which is the substance of
+          // the review, has landed either way.
           const err = e as { killed?: boolean; code?: unknown };
           if (err.killed || err.code === "ETIMEDOUT") throw e;
         }
@@ -168,7 +180,13 @@ export class GlabReviewProvider implements ReviewProvider {
 /** `changes_count` is a string, and GitLab caps it ("20+"). Null when there is no
  * number in it at all: a zero would read as "no files changed", which is a claim,
  * where `null` is an absence. GitLab's REST API exposes no additions/deletions
- * aggregate, so those stay 0. */
+ * aggregate, so those stay 0.
+ *
+ * A capped count reads as its FLOOR: "20+" becomes 20, and the strip then renders
+ * it like any exact count, so an 80-file MR shows as 20 files. Deliberate — the
+ * bucket it lands in is still the largest one, and the alternative (a `null` size
+ * for every big MR) would hide the size chip on exactly the rows where it matters
+ * most. Documented in docs/FORGES.md. */
 function readSize(raw: unknown): ReviewDetail["size"] {
   if (typeof raw !== "string") return null;
   const n = parseInt(raw, 10);

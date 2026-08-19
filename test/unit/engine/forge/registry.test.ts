@@ -35,8 +35,16 @@ describe("resolveForge", () => {
 
   // `agentFlow.forge` comes from settings.json and can be any string. A bare index
   // would resolve a prototype key to a truthy non-factory and then call it.
-  it.each(["constructor", "__proto__", "toString", ""])("falls back to github for the prototype key %s", (id) => {
+  it.each(["constructor", "__proto__", "toString"])("falls back to github for the prototype key %s", (id) => {
     expect(resolveForge(id, () => {}, never).id).toBe("github");
+  });
+
+  // Not a prototype key, and it never reaches here in practice: `getConfig`
+  // normalizes a blank `agentFlow.forge` to "github" before `resolveForge` is
+  // called. Pinned anyway, and separately, because `resolveForge` is exported and
+  // a caller that skips getConfig must still get a forge rather than a crash.
+  it("falls back to github for an empty id", () => {
+    expect(resolveForge("", () => {}, never).id).toBe("github");
   });
 });
 

@@ -248,10 +248,14 @@ export const DEFAULT_REVIEW_REQUEST_PROMPT =
  * `shippedReviewRequestModes`). Same substitution-only
  * relationship as GITLAB_PR_REVIEW_PROMPT above: everything the agent is asked
  * to assess, where it writes findings, the instruction not to post anything
- * itself, and every placeholder are identical to the GitHub wording. */
+ * itself, and every placeholder are identical to the GitHub wording. "target
+ * branch" for "base branch" is the fourth substitution (see the spec's §4.1
+ * list): it is GitLab's own UI name for the same thing, and every other
+ * forge-specific noun in this prompt was translated — leaving one behind is what
+ * makes a prompt read as machine-generated to the user whose forge it names. */
 export const GITLAB_REVIEW_REQUEST_PROMPT =
   'Review merge request {url} — {repo}#{number}, "{summary}", by {author}. ' +
-  "Check it out with `glab mr checkout {number} --repo {repo}`, then read the full diff against its base branch. " +
+  "Check it out with `glab mr checkout {number} --repo {repo}`, then read the full diff against its target branch. " +
   "Assess correctness, edge cases, tests, and anything that would break in production. " +
   "Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, " +
   "each with the file and line it refers to. Do not post anything to GitLab; the human submits the review.{files}";

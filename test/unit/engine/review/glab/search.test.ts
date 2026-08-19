@@ -30,6 +30,17 @@ describe("mapPipelineStatus", () => {
   // that is fine.
   it.each(["canceled", "skipped", "manual", "unheard_of", null, undefined])(
     "maps %s to none", (s) => expect(mapPipelineStatus(s)).toBe("none"));
+
+  // The same posture `mapGlabBranchStatus` already took, now shared by all three
+  // GitLab status mappers: the chip must not depend on how a given instance spells
+  // its statuses. Every arm, so a shouted SUCCESS never reads as "no CI".
+  it.each([
+    ["SUCCESS", "passing"],
+    ["FAILED", "failing"],
+    ["RUNNING", "pending"],
+  ] as const)("maps a shouted %s the same as the lowercase spelling", (status, expected) => {
+    expect(mapPipelineStatus(status)).toBe(expected);
+  });
 });
 
 describe("parseMrSearch", () => {

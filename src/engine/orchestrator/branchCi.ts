@@ -149,8 +149,9 @@ export const branchCiKey = (repo: string, branch: string): string => `${repo}#${
 
 /** The newest pipeline for one ref. `per_page=1` because only the head matters,
  * and the ref is url-encoded: a branch name may contain `/`, `&` or `=`, any of
- * which would otherwise rewrite the query string. */
-export const GLAB_BRANCH_CI_PATH = (branch: string): string =>
+ * which would otherwise rewrite the query string. Module-private — `GLAB_BRANCH_CI_ARGS`
+ * below is the whole public surface, and it is what the tests and the forge read. */
+const GLAB_BRANCH_CI_PATH = (branch: string): string =>
   `projects/:fullpath/pipelines?ref=${encodeURIComponent(branch)}&per_page=1`;
 
 /** The argv for that call. Takes the branch alone, for the same reason
@@ -159,6 +160,15 @@ export const GLAB_BRANCH_CI_PATH = (branch: string): string =>
  * directory's git remote. */
 export const GLAB_BRANCH_CI_ARGS = (branch: string): string[] => ["api", GLAB_BRANCH_CI_PATH(branch)];
 
+/** Pipeline statuses that mean "still ahead of us". Uppercase, normalized at the
+ * comparison, so the verdict never depends on how a given instance spells its
+ * statuses.
+ *
+ * The same six strings live in `pr/glab/mr.ts` (`PENDING_JOB`) and
+ * `review/glab/search.ts` (`CI_PENDING`), and this copy is doubly deliberate: the
+ * three grade three different GitLab responses that merely share an enum today,
+ * AND this module is bundled into the webview (see the header above), so it must
+ * not import a forge-specific module to reach a shared constant. */
 const GLAB_PENDING = new Set(["CREATED", "WAITING_FOR_RESOURCE", "PREPARING", "PENDING", "RUNNING", "SCHEDULED"]);
 
 /** Grade one `glab api pipelines?ref=…` response.

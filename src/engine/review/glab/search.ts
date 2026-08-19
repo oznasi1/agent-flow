@@ -14,19 +14,36 @@ export const REVIEW_MR_LIMIT = 50;
  * rather than as truncated. Documented in docs/FORGES.md. */
 export const REVIEW_MR_PATH = `merge_requests?scope=reviews_for_me&state=opened&per_page=${REVIEW_MR_LIMIT}`;
 
-const CI_PENDING = new Set(["created", "preparing", "pending", "running", "waiting_for_resource", "scheduled"]);
+/** Head-pipeline statuses that mean "still ahead of us". Uppercase, normalized at
+ * every comparison, so the row's chip never depends on how a given instance spells
+ * its statuses.
+ *
+ * Deliberately its own copy of the six strings that `pr/glab/mr.ts`'s
+ * `PENDING_JOB` and `orchestrator/branchCi.ts`'s `GLAB_PENDING` also hold — see
+ * `PENDING_JOB`'s comment for why three separate sets beat one shared constant:
+ * they grade three different GitLab responses that share an enum today, and
+ * `branchCi.ts` must not import a forge-specific module at all. */
+const CI_PENDING = new Set(["CREATED", "PREPARING", "PENDING", "RUNNING", "WAITING_FOR_RESOURCE", "SCHEDULED"]);
 
 /** A pipeline's status in the strip's vocabulary. Anything unrecognised reads as
  * "no CI" rather than as a failure — inventing a red row from a state we don't
- * know would send the user to an MR that is fine. */
+ * know would send the user to an MR that is fine. Case-insensitive on every arm,
+ * for the reason `CI_PENDING` above gives. */
 export function mapPipelineStatus(status?: string | null): ReviewRequest["ci"] {
   if (!status) return "none";
-  if (status === "success") return "passing";
-  if (status === "failed") return "failing";
-  if (CI_PENDING.has(status)) return "pending";
+  const s = status.toUpperCase();
+  if (s === "SUCCESS") return "passing";
+  if (s === "FAILED") return "failing";
+  if (CI_PENDING.has(s)) return "pending";
   return "none";
 }
 
+/** One row of the search response exactly as it arrives: every field `unknown`,
+ * because nothing has validated it yet and `toRequest` below checks each one it
+ * uses. Deliberately not `GlabMr` from `../../pr/glab/mr.ts`, which types an
+ * overlapping subset concretely — that shape is read after `pickMr` has filtered,
+ * and borrowing it here would turn honest runtime checks into unchecked
+ * assertions. */
 interface RawMr {
   iid?: unknown;
   title?: unknown;
@@ -35,9 +52,13 @@ interface RawMr {
   created_at?: unknown;
   updated_at?: unknown;
   author?: { username?: unknown } | null;
+  /** e.g. "group/sub/proj!12" — carries the nested project path, so identifying
+   *  the project needs no extra call. See `projectOf`. */
   references?: { full?: unknown } | null;
   has_conflicts?: unknown;
   detailed_merge_status?: unknown;
+  /** The status alone: the strip's chip is a whole-pipeline verdict, and it never
+   *  fetches jobs (the PR-facts path reads this pipeline's `id` instead). */
   head_pipeline?: { status?: unknown } | null;
 }
 

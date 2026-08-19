@@ -21,9 +21,22 @@ export type ForgeGap = { kind: "missing" | "signed-out"; detail: string };
  * as data rather than probed, because the consumers are pure modules that must
  * not import this directory. */
 export interface ForgeCaps {
-  /** Can a reviewer's "changes requested" state be read back? GitHub reports it
-   *  in `reviewDecision`; GitLab exposes no equivalent, which makes the
-   *  `changes-requested` orchestrator condition unfirable there. */
+  /** Does this forge have a first-class "changes requested" review state — one it
+   *  can be TOLD and later ASKED? Deliberately one flag covering both directions,
+   *  and both consumers use it accordingly: `armability.ts` reads it as "can the
+   *  state be read back" (GitHub reports it in `reviewDecision`; GitLab exposes no
+   *  equivalent, so the `changes-requested` condition is unfirable there), and
+   *  `deckView.ts` reads it as "does `submit("request-changes")` do the real
+   *  thing" (on GitLab it degrades to a note plus withdrawing any approval, which
+   *  the confirmation dialog discloses).
+   *
+   *  They are one flag rather than two because they are one fact about the forge's
+   *  review model, not a coincidence: a forge with no such state can neither be
+   *  told nor asked, and one that has it does both. Splitting them would invite a
+   *  third forge to claim it can be told but not asked — which would leave
+   *  `armability` promising a rule that the write path can set and the read path
+   *  can never see fire. If such a forge ever appears, split this deliberately and
+   *  give each half its own consumer, rather than letting the two drift apart. */
   changesRequested: boolean;
 }
 

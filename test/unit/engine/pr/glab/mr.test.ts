@@ -11,7 +11,7 @@ const job = (over: Partial<GlabJob> = {}): GlabJob => ({
 
 const mr = (over: Partial<GlabMr> = {}): GlabMr => ({
   iid: 12, web_url: "https://gitlab.com/group/sub/proj/-/merge_requests/12",
-  title: "Fix export", state: "opened", draft: false, source_branch: "feat/ASM-1",
+  title: "Fix export", state: "opened", draft: false,
   has_conflicts: false, detailed_merge_status: "mergeable",
   blocking_discussions_resolved: true, ...over,
 });
@@ -62,6 +62,18 @@ describe("mapJobs", () => {
     expect(mapJobs([job({ status: "failed", name: undefined, web_url: undefined })]).failing)
       .toEqual([{ name: "job", url: "" }]);
   });
+
+  // The same posture `mapGlabBranchStatus` already took, now held by all three
+  // GitLab status mappers: the tally must not depend on how a given instance
+  // spells its statuses. Every arm, not just the pending one — a half-normalized
+  // comparison would count `SUCCESS` as neither passing nor pending.
+  it("grades a shouting instance the same as a whispering one", () => {
+    expect(mapJobs([
+      job({ status: "SUCCESS" }),
+      job({ status: "FAILED", name: "lint", web_url: "https://gl/j/lint" }),
+      job({ status: "RUNNING" }),
+    ])).toEqual({ passing: 1, pending: 1, failing: [{ name: "lint", url: "https://gl/j/lint" }] });
+  });
 });
 
 describe("mapJobsAdvisory", () => {
@@ -80,6 +92,13 @@ describe("mapJobsAdvisory", () => {
       job({ status: "failed", allow_failure: true }),
       job({ status: "failed", allow_failure: false }),
     ])).toBe(false);
+  });
+
+  // Reads `failed` exactly as mapJobs does. These two grade the same job list, so
+  // a spelling one of them recognised and the other did not would produce "CI is
+  // failing" alongside "and it's only advisory" — or the reverse.
+  it("reads a shouted FAILED the same way mapJobs does", () => {
+    expect(mapJobsAdvisory([job({ status: "FAILED", allow_failure: true })])).toBe(true);
   });
 });
 

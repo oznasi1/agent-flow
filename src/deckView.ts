@@ -309,15 +309,16 @@ export class DeckPanel {
    * `reviewCache.fetchedAt`, which is when one last *succeeded*. A failed search
    * deliberately leaves `fetchedAt` alone (the strip's staleness display depends
    * on it), which on its own would make `isReviewCacheStale` re-arm every poll
-   * tick forever once `gh` starts failing. This is in-memory only, on purpose: a
+   * tick forever once the forge CLI starts failing. This is in-memory only, on purpose: a
    * failed attempt should not survive a window reload and force one more wait. */
   private reviewLastAttemptAt: number | null = null;
   /** Ids with a `submitReview` in flight. `onMessage` dispatches fire-and-forget,
    * and the row is only evicted from `reviewCache` *after* a successful submit —
    * so without this, a second `deck:reviewSubmit` for the same id (a double
    * click; VS Code queues modals rather than dropping one) would clear every
-   * gate during the up-to-10s `gh` call and could post the same review twice.
-   * GitHub does not deduplicate reviews. */
+   * gate during the up-to-10s forge call and could post the same review twice.
+   * Neither shipped forge deduplicates one: GitHub keeps both reviews, and
+   * GitLab's own path posts a second note. */
   private readonly reviewSubmitsInFlight = new Set<string>();
   private forgeProbe: Promise<ForgeGap | null> | null = null;
   /** undefined until the probe resolves; null means the forge is usable, and a
@@ -604,7 +605,7 @@ export class DeckPanel {
     const flows = readFlows(this.flowIo, this.flowsDir);
     // Read ONCE for the whole pass, before any flow is evaluated: two flows waiting
     // on the same branch must be answered by the same verdict, and a fetch per node
-    // would be a `gh` call per rule.
+    // would be a forge call per rule.
     const branchCi = this.branchCiFor(flows, runs, nowMs);
     for (const flow of flows) {
       // Stop the whole pass, not just the flow that lost the lock — and this line is
@@ -1639,7 +1640,7 @@ export class DeckPanel {
   }
 
   /** Queue a stale repo's refresh. Deliberately not awaited by the caller: a
-   * hanging `gh` must never stall the git and transcript reads. The epoch is
+   * hanging forge call must never stall the git and transcript reads. The epoch is
    * captured at enqueue time so a fetch still in flight when the run is
    * forgotten can detect that and skip its write, rather than recreating the
    * cache file `deck:forget` just deleted.
@@ -1676,13 +1677,14 @@ export class DeckPanel {
   /** Every distinct branch these flows are waiting on, and the checkout to ask from.
    *
    * Keyed by `repo#branch`, so several rules — in one flow or across flows — naming
-   * the same branch collapse to ONE entry and therefore one `gh` call. A disarmed
+   * the same branch collapse to ONE entry and therefore one forge call. A disarmed
    * flow and a settled edge are skipped: neither is waiting on anything, and paying
    * a round trip for them would be pure cost.
    *
-   * `cwd` is any board checkout of that repo, because gh resolves owner/name from
-   * its remote (see `BRANCH_CI_QUERY`) and every checkout of a repo — worktrees
-   * included — shares that remote. A repo NO run on the board has is skipped
+   * `cwd` is any board checkout of that repo, because the forge CLI resolves the
+   * project from that directory's git remote — gh's `{owner}`/`{repo}` (see
+   * `BRANCH_CI_QUERY`), glab's `:fullpath` — and every checkout of a repo —
+   * worktrees included — shares that remote. A repo NO run on the board has is skipped
    * entirely: there is no directory to ask from, so its verdict stays absent, which
    * reads as `"unknown"`, which is not met. */
   private branchCiWanted(
@@ -1701,8 +1703,8 @@ export class DeckPanel {
       for (const e of Array.isArray(flow.edges) ? flow.edges : []) {
         if (!e || e.cond?.kind !== "branch-ci-passed" || isSettled(e)) continue;
         const { repo, branch } = e.cond;
-        // A hand-edited flow file can carry either half empty. `gh` would answer
-        // for the wrong thing (or error), so refuse before spending the call.
+        // A hand-edited flow file can carry either half empty. The forge would
+        // answer for the wrong thing (or error), so refuse before spending the call.
         if (!repo || !branch) continue;
         const key = branchCiKey(repo, branch);
         if (out.has(key)) continue;
@@ -1714,15 +1716,15 @@ export class DeckPanel {
     return out;
   }
 
-  /** The one checkout to ask `gh` about `repo`, or null when the board cannot say
+  /** The one checkout to ask the forge about `repo`, or null when the board cannot say
    * which repository that name even means.
    *
    * SEVERAL paths for one name is the norm here, not an ambiguity: every task
    * worktree Agent Flow creates is a separate checkout of the same repo
    * (`<repo>/.claude/worktrees/<KEY>`, see `createWorktrees`), carrying the repo's
    * name with the worktree's path, so a board with three tasks on `aws-ops` has
-   * three `aws-ops` entries. All three share one remote, and gh reads owner/name off
-   * that remote (see `BRANCH_CI_QUERY`), so any of them answers the same question
+   * three `aws-ops` entries. All three share one remote, and the forge CLI reads the
+   * project off that remote (see `BRANCH_CI_QUERY`), so any of them answers the same question
    * correctly. Refusing on "more than one path" would have made this condition
    * unusable in exactly the setup this product creates constantly.
    *
@@ -1769,9 +1771,9 @@ export class DeckPanel {
    * read.
    *
    * Synchronous on purpose — it returns what the cache already holds and only
-   * ENQUEUES what has aged out, exactly as `enqueuePr` does. Awaiting a `gh` call
+   * ENQUEUES what has aged out, exactly as `enqueuePr` does. Awaiting a forge call
    * here would hold the flows-directory lock across the network for every window on
-   * the machine, and a hung `gh` would stall the pass; the cost of not awaiting is
+   * the machine, and a hung CLI would stall the pass; the cost of not awaiting is
    * that a brand-new rule reads `"unknown"` for one poll (six seconds) before its
    * first verdict lands. That trade only works because `"unknown"` is not green: the
    * cold-start answer delays a deploy, it never triggers one.
@@ -1845,8 +1847,8 @@ export class DeckPanel {
     return this.reviewQueue && this.forgeReady();
   }
 
-  /** Queue a search when the cache has aged out. Never awaited — a hanging `gh`
-   * must not stall the board's git and transcript reads. The post that reflects
+  /** Queue a search when the cache has aged out. Never awaited — a hanging forge
+   * call must not stall the board's git and transcript reads. The post that reflects
    * the outcome is fired from here rather than unconditionally from `refresh()`:
    * with a search in flight, an immediate post would either find `reviewCache`
    * still null (nothing to show yet) or show the old entry with `stale` not yet
@@ -1864,8 +1866,8 @@ export class DeckPanel {
       return;
     }
     // Gate on the data clock (above) *and* the attempt clock: a failing search
-    // never advances `fetchedAt`, so the data clock alone would re-queue `gh api
-    // graphql` on every 6s poll tick forever once `gh` starts failing — rate
+    // never advances `fetchedAt`, so the data clock alone would re-queue the
+    // review search on every 6s poll tick forever once the CLI starts failing — rate
     // limited, network down, SSO expired. This clock tracks "how recently did we
     // try", independently of "how old is the data we are showing".
     if (this.reviewLastAttemptAt !== null && nowMs - this.reviewLastAttemptAt < ttlMs) return;
@@ -1937,7 +1939,7 @@ export class DeckPanel {
 
   private postReviews(): void {
     if (!this.reviewsEnabled()) {
-      // The strip just went off (reviewRequests, PR facts, or gh going
+      // The strip just went off (reviewRequests, PR facts, or the forge CLI going
       // unusable) — actively say so, rather than merely staying silent. Silence
       // here used to leave the webview's last posted rows on screen exactly as
       // they were: frozen, but with their write buttons still live, so a click
@@ -1996,6 +1998,13 @@ export class DeckPanel {
     // A forge whose queue call carries no diff stats fills them here instead. Merged
     // into the cached request rather than posted separately, so the strip's existing
     // size chip renders it with no webview change at all.
+    //
+    // Re-found rather than reusing `req`, and NOT redundant: the `await` above is a
+    // detail call on `prQueue`, which runs up to four jobs at once under distinct
+    // keys — so a `"reviews"` search can complete mid-flight and replace
+    // `this.reviewCache` wholesale. `req` would then belong to the discarded array
+    // and the size would be written where nothing reads it. The size is still valid
+    // for the fresh row: same repo, same number.
     if (detail.size) {
       const cached = this.reviewCache?.requests.find((r) => r.id === id);
       if (cached) Object.assign(cached, detail.size);
@@ -2071,7 +2080,7 @@ export class DeckPanel {
       return;
     }
     // The strip itself can go dark (PR facts toggled off, reviewRequests
-    // flipped, gh going unusable) without the row's own message queue draining
+    // flipped, the forge CLI going unusable) without the row's own message queue draining
     // instantly — `reviewById` below still resolves from `reviewCache`, which
     // `postReviews`'s "cleared" post never touches. Without this, a submit that
     // was already in the webview's outbox before the toggle could still reach
@@ -2700,9 +2709,9 @@ export class DeckPanel {
         this.postReviews();
         break;
       case "deck:reviewExpand":
-        // Routed through the same queue every other `gh` call uses (concurrency
+        // Routed through the same queue every other forge call uses (concurrency
         // capped at 4, deduped by key) — awaited directly here, expanding rows in
-        // quick succession could fork an unbounded number of `gh` processes, one
+        // quick succession could fork an unbounded number of CLI processes, one
         // per row, with nothing capping how many run at once.
         this.prQueue.push(`detail:${m.id}`, () => this.reviewDetail(m.id));
         break;

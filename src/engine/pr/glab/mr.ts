@@ -9,6 +9,14 @@
 import { PrCheck, PrFacts } from "../../../types";
 import { pickByState } from "../facts";
 
+/** The fields of a `merge_requests` row that THIS module's mappers read, and only
+ * those. GitLab sends far more; typing a field here that nothing reads would claim
+ * a contract with the API that no test can break. The review strip's own
+ * `RawMr` (`../../review/glab/search.ts`) types a different, overlapping subset —
+ * every field `unknown`, because it validates each one at runtime — and the two are
+ * deliberately not merged: this shape is read POST-validation (`pickMr` has already
+ * filtered on `typeof iid === "number"`), so concrete-but-optional is honest here
+ * and would be an unchecked assertion there. */
 export interface GlabMr {
   /** Project-scoped. THIS is the number — `id` is global and must never be used
    *  for a link or a project-scoped call. */
@@ -17,20 +25,14 @@ export interface GlabMr {
   title?: string;
   state?: string; // opened | closed | merged | locked
   draft?: boolean;
-  source_branch?: string;
   has_conflicts?: boolean;
   detailed_merge_status?: string;
   /** When true, there is nothing unresolved — which lets the caller skip the
    *  discussions round trip entirely. */
   blocking_discussions_resolved?: boolean;
-  head_pipeline?: { id?: number; status?: string } | null;
-  /** e.g. "group/sub/proj!12" — carries the nested project path, so identifying
-   *  the project needs no extra call. */
-  references?: { full?: string } | null;
-  author?: { username?: string } | null;
-  created_at?: string;
-  updated_at?: string;
-  changes_count?: string; // "3", or "20+" when GitLab caps it
+  /** The id alone: the jobs call is what grades this pipeline, so its `status` is
+   *  never read on this path (the review strip's `RawMr` does read one). */
+  head_pipeline?: { id?: number } | null;
 }
 
 export interface GlabJob {
@@ -49,7 +51,21 @@ export interface GlabDiscussion {
   notes?: { resolvable?: boolean; resolved?: boolean }[];
 }
 
-const PENDING_JOB = new Set(["created", "preparing", "pending", "running", "waiting_for_resource", "scheduled"]);
+/** Job statuses that mean "still ahead of us". Uppercase, and every comparison
+ * against it normalizes first, so a verdict never depends on how a given instance
+ * spells its statuses — the same posture `mapGlabBranchStatus` takes.
+ *
+ * The same six strings appear in `review/glab/search.ts` (`CI_PENDING`) and
+ * `orchestrator/branchCi.ts` (`GLAB_PENDING`), and the duplication is deliberate:
+ * these are three DIFFERENT GitLab responses — a job's status, an MR's
+ * head-pipeline status, and a ref's newest-pipeline status — that happen to share
+ * an enum today. One shared constant would turn a future divergence in any one of
+ * them into a cross-module change, and `branchCi.ts` additionally must not import
+ * a forge-specific module at all (it is bundled into the webview; see its header). */
+const PENDING_JOB = new Set(["CREATED", "PREPARING", "PENDING", "RUNNING", "WAITING_FOR_RESOURCE", "SCHEDULED"]);
+/** `detailed_merge_status` values that block the merge button. Case-sensitive,
+ * unlike the CI statuses above: this is a documented lowercase REST enum, and
+ * nothing has been observed spelling it otherwise. */
 const BLOCKED_MERGE = new Set(["not_approved", "discussions_not_resolved", "blocked_status"]);
 
 /** GitLab's four MR states in the `PrFacts` vocabulary. `locked` is an OPEN merge
@@ -64,24 +80,30 @@ export function mapMrState(state?: string): PrFacts["state"] {
 /** Tally one pipeline's jobs. `canceled`/`skipped`/`manual` count as neither pass
  * nor fail, matching `mapRollup`'s posture toward GitHub's equivalents: a cancelled
  * job is usually a superseded one, and calling it a failure would drag cards into
- * Needs you on every force-push. */
+ * Needs you on every force-push.
+ *
+ * Case-insensitive on every arm, not just the pending one: a half-normalized
+ * comparison would read `SUCCESS` as neither passing nor pending. */
 export function mapJobs(jobs: GlabJob[] | null | undefined): PrFacts["ci"] {
   const failing: PrCheck[] = [];
   let passing = 0;
   let pending = 0;
   for (const j of jobs ?? []) {
-    if (j.status === "success") passing++;
-    else if (j.status === "failed") failing.push({ name: j.name || "job", url: j.web_url || "" });
-    else if (j.status && PENDING_JOB.has(j.status)) pending++;
+    const status = j.status?.toUpperCase();
+    if (status === "SUCCESS") passing++;
+    else if (status === "FAILED") failing.push({ name: j.name || "job", url: j.web_url || "" });
+    else if (status && PENDING_JOB.has(status)) pending++;
   }
   return { passing, pending, failing };
 }
 
 /** GitHub's `UNSTABLE` — every required check passed and something optional did
  * not — expressed in GitLab's vocabulary: at least one job failed, and every
- * failing job was `allow_failure`. */
+ * failing job was `allow_failure`. Reads `failed` exactly as `mapJobs` does,
+ * case included: these two grade the same list and must not disagree about which
+ * jobs failed. */
 export function mapJobsAdvisory(jobs: GlabJob[] | null | undefined): boolean {
-  const failed = (jobs ?? []).filter((j) => j.status === "failed");
+  const failed = (jobs ?? []).filter((j) => j.status?.toUpperCase() === "FAILED");
   return failed.length > 0 && failed.every((j) => j.allow_failure === true);
 }
 

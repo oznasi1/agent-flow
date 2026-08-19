@@ -5,7 +5,8 @@ import { composeAgentPrompt } from "../../src/engine/prompt";
 import { fakeContext } from "../_helpers/factories";
 import type { ChangedFile } from "../../src/engine/git";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef, Task } from "../../src/types";
-import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
+import type { FetchResult } from "../../src/engine/pr/provider";
+import type { ForgeGap } from "../../src/engine/forge/types";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
 import type { CommandNode, Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
 import { BRANCH_CI_ARGS, branchCiKey } from "../../src/engine/orchestrator/branchCi";
@@ -50,7 +51,7 @@ const h = vi.hoisted(() => ({
   prFetch: vi.fn(async (_p: string, _b: string | null, _k: string): Promise<FetchResult> => ({ ok: true, facts: null })),
   // Typed as the real union so a test can resolve a gap as well as the null that
   // means "gh is usable".
-  probeGh: vi.fn(async (): Promise<GhGap | null> => null),
+  probeGh: vi.fn(async (): Promise<ForgeGap | null> => null),
   // The branch-CI fetch's spawn (Task 8), standing in for `execRunner`: resolves
   // the raw stdout of one `gh api graphql` call. Green by default, so a test about
   // the fetch's SHAPE (argv, cwd, how many calls) needs no payload of its own; a
@@ -2487,8 +2488,8 @@ describe("DeckPanel PR facts", () => {
     // Two probes end up in flight: the one this test lets resolve late must not
     // win over the one started by the re-probe when prFacts comes back on
     // through a settings change.
-    let resolveFirst!: (v: GhGap | null) => void;
-    let resolveSecond!: (v: GhGap | null) => void;
+    let resolveFirst!: (v: ForgeGap | null) => void;
+    let resolveSecond!: (v: ForgeGap | null) => void;
     h.probeGh
       .mockImplementationOnce(() => new Promise((res) => { resolveFirst = res; }))
       .mockImplementationOnce(() => new Promise((res) => { resolveSecond = res; }));
@@ -3238,6 +3239,24 @@ describe("DeckPanel review submit", () => {
       "Request changes on CyberJackGit/aws-ops#8491?",
       { modal: true, detail: expect.stringContaining('GitLab has no "request changes" review') },
       "Request changes",
+    );
+  });
+
+  // The other side of that disclosure: `approve` and `comment` mean exactly what
+  // they say on GitLab, so a `detail` line there would be noise on the two verbs
+  // people use most — and a modal that always explains something teaches the
+  // reader to click through it, which is precisely how the request-changes
+  // disclosure stops being read.
+  it.each(["approve", "comment"] as const)("adds no disclosure for %s on gitlab", async (verb) => {
+    setConfig({ forge: "gitlab" });
+    h.reviewWrites = true;
+    h.reviewCache = { fetchedAt: Date.now(), issueCount: 1, requests: [reviewFixture()] };
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb, body: "lgtm" }));
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      expect.any(String),
+      { modal: true },
+      expect.any(String),
     );
   });
 

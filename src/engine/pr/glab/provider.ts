@@ -13,6 +13,9 @@ import {
 } from "./mr";
 import { execRunner } from "../provider";
 import type { FetchResult, Locate, PrProvider, Runner } from "../provider";
+// `import type`: `../../forge/types` holds interfaces only, and reaching it as a
+// value would pull `child_process` in through its own imports.
+import type { ForgeGap } from "../../forge/types";
 import { resolveBin } from "../which";
 import { PrFacts } from "../../../types";
 
@@ -25,30 +28,33 @@ export const GLAB_TIMEOUT_MS = 10_000;
  * as stdin. Those belong to `-F`/`--field`, which is why `-F` must never carry
  * one.
  *
- * Do NOT "fix" this to `-F` by analogy with the `gh` provider next door. The two
- * CLIs give the same letter a different long name: `-f` is `--field` on `gh` and
- * `--raw-field` on `glab`. Both happen to be the raw-string one, so the letter is
- * right for both and the reasoning is not transferable. */
+ * Do NOT "fix" this to `-F`. The letter means the same thing on both CLIs — `-f`
+ * is `--raw-field` on `gh` too, and `src/engine/review/provider.ts` relies on
+ * exactly that, using `-f` for its string fields and `-F` only for a numeric
+ * limit. So this is not a glab quirk to be reconciled with the sibling provider;
+ * it is the same rule, and `-F` would read a body's leading `@` as a filename on
+ * either CLI. */
 export const GLAB_FIELD_FLAG = "-f";
 
 const locateGlab: Locate = () => resolveBin("glab");
 
-/** Why forge reads are off. Structurally identical to `GhGap`, and unified into
- * one `ForgeGap` in the forge registry. */
-export type GlabGap = { kind: "missing" | "signed-out"; detail: string };
-
-export const mrListPath = (selector: string): string =>
+// The four routes this provider asks for. Module-private: nothing outside reads
+// them, and the tests assert on the argv that actually reached the `Runner`, which
+// is the honest thing to pin — an exported path helper only lets a test agree with
+// itself about a string neither the CLI nor GitLab ever saw.
+const mrListPath = (selector: string): string =>
   `projects/:fullpath/merge_requests?${selector}&state=all&per_page=10`;
-export const jobsPath = (pipelineId: number): string =>
+const jobsPath = (pipelineId: number): string =>
   `projects/:fullpath/pipelines/${pipelineId}/jobs?per_page=100`;
-export const approvalsPath = (iid: number): string =>
+const approvalsPath = (iid: number): string =>
   `projects/:fullpath/merge_requests/${iid}/approvals`;
-export const discussionsPath = (iid: number): string =>
+const discussionsPath = (iid: number): string =>
   `projects/:fullpath/merge_requests/${iid}/discussions?per_page=100`;
 
 /** Is `glab` installed and logged in? Probed once per Deck session; a gap turns
- * forge reads off with a footer note rather than an error. */
-export async function probeGlab(run: Runner = execRunner, locate: Locate = locateGlab): Promise<GlabGap | null> {
+ * forge reads off with a footer note rather than an error. `ForgeGap` is the
+ * seam's own type, shared with `probeGh` — see its comment there. */
+export async function probeGlab(run: Runner = execRunner, locate: Locate = locateGlab): Promise<ForgeGap | null> {
   const glab = locate() ?? "glab";
   try {
     await run(glab, ["auth", "status"], { cwd: process.cwd(), timeoutMs: GLAB_TIMEOUT_MS });
@@ -87,6 +93,9 @@ export class GlabProvider implements PrProvider {
         facts: toMrFacts(chosen, {
           ci: mapJobs(jobs),
           ciAdvisory: mapJobsAdvisory(jobs),
+          // `as number` rather than a guard, and provably not a lie: `pickMr`
+          // delegates to `pickByState`, which only ever returns a row that passed
+          // `typeof iid === "number"`. A defensive re-check here would be dead code.
           review: mapApprovals(await this.approvals(repoPath, chosen.iid as number)),
           unresolved: await this.unresolved(repoPath, chosen),
         }),

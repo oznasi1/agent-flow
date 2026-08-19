@@ -142,8 +142,9 @@ either forge.
 
 The GitLab variants differ from the GitHub ones only in the mechanics they
 script: `glab mr checkout <iid>` in place of `gh pr checkout <number> --repo
-<repo>`, "merge request" in place of "pull request", and "GitLab" in place of
-"GitHub" where the prompt names the host to the agent. Everything else about
+<repo>`, "merge request" in place of "pull request", "GitLab" in place of
+"GitHub" where the prompt names the host to the agent, and "target branch" in
+place of "base branch" — GitLab's own UI name for the same thing. Everything else about
 each prompt — what the agent is asked to assess, where it writes its findings,
 and the instruction not to post anything itself — is identical, so the two sets
 stay legible as variants of one prompt rather than diverging over time.

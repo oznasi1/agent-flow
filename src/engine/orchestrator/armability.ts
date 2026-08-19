@@ -32,11 +32,12 @@ const NEEDS_LIVE = new Set<Condition["kind"]>(["agent-ended-turn", "agent-idle-o
  * run, so all of these read a missing entry and stay false forever.
  *
  * `branch-ci-passed` reads no pull request at all, and belongs here anyway: the
- * toggle governs the `gh` PATH, not the PR shape. `deckView.ts` gates its branch-CI
- * fetch on the same `ghReady()` every PR fetch goes through — which folds in the
- * `agentFlow.prFacts` setting AND the `gh auth status` probe — so with PR facts off
- * `CondContext.branchCi` is empty for every pass, every verdict reads `"unknown"`,
- * and a rule of this kind waits forever. Named here so arming SAYS so. */
+ * toggle governs the forge path, not the PR shape. `deckView.ts` gates its branch-CI
+ * fetch on the same `forgeReady()` every PR fetch goes through — which folds in the
+ * `agentFlow.prFacts` setting AND the configured forge's own `probe()` (`gh auth
+ * status` / `glab auth status`) — so with PR facts off `CondContext.branchCi` is
+ * empty for every pass, every verdict reads `"unknown"`, and a rule of this kind
+ * waits forever. Named here so arming SAYS so. */
 const NEEDS_PR = new Set<Condition["kind"]>([
   "pr-merged",
   "ci-passed",
