@@ -4303,6 +4303,79 @@ describe("remote control × the Copilot provider", () => {
   });
 });
 
+// Task 2 widened remoteControlBlocksLaunch and resolveRemoteControl from a Copilot-only
+// equality test to "any non-Claude agent". The Copilot describe above already pins the
+// Copilot side of that; these pin the Cursor side of the SAME three conditions, so a
+// revert of any one of them back to `=== "copilot"` (or `!== "copilot"`) shows up here.
+describe("remote control × the Cursor provider", () => {
+  const lastOpen = () =>
+    vi.mocked(openWorkspace).mock.calls[vi.mocked(openWorkspace).mock.calls.length - 1][0];
+  const errorToast = (posted: () => OutboundMessage[]) =>
+    posted().find((m) => m.type === "toast" && m.level === "error") as { message: string } | undefined;
+  const cursor = (over: Partial<ReturnType<typeof getConfig>> = {}) =>
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "cursor" as const, ...over });
+
+  it("refuses a Take before creating any worktree, exactly as it does under Copilot", async () => {
+    // remoteControlBlocksLaunch's condition: `agentProvider === "claude-code"` is
+    // the only exemption now, so "cursor" must trip it the same way "copilot" does.
+    //
+    // resolveRemoteControl's OWN "on" refusal (further down the same launch, inside
+    // resolveKickoff) would produce the identical toast for "on" + a non-Claude
+    // agent, so asserting the toast alone cannot tell the two refusals apart — a
+    // mutant that disables ONLY remoteControlBlocksLaunch would still pass a toast
+    // assertion here. `take_started` is only tracked AFTER remoteControlBlocksLaunch
+    // returns, and well before resolveRemoteControl is ever reached, so its absence
+    // is what actually pins this specific pre-flight predicate.
+    cursor({ remoteControl: "on", seedAgent: true });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(trackSpy.mock.calls.map((c) => (c[0] as { name: string }).name)).not.toContain("take_started");
+  });
+
+  it("does not refuse when seedAgent is off — nothing could ever seed the slash command", async () => {
+    // The `!cfg.seedAgent` clause exists precisely so a user who never opted into
+    // seeding is never locked out of every launch by this predicate.
+    cursor({ remoteControl: "on", seedAgent: false });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(lastOpen().remoteControl).toBe(false);
+  });
+
+  it('never refuses on "ask" — it launches without Remote Control instead', async () => {
+    // resolveRemoteControl's "ask" short-circuit: `agentProvider !== "claude-code"`
+    // must cover "cursor" too, or this would put up a toggle it could only refuse.
+    cursor({ remoteControl: "ask" });
+    const { provider, posted, logged } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(window.showQuickPick).not.toHaveBeenCalled(); // the picker never appears
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1); // the launch proceeds
+    expect(lastOpen().remoteControl).toBe(false); // …just without Remote Control
+    expect(logged.join("\n")).toContain("Remote Control not offered");
+  });
+
+  it("refuses a one-key batch and opens nothing, once the setting resolves on", async () => {
+    // takeBatch is the one launch entry point with no remoteControlBlocksLaunch call
+    // at the top, so this exercises resolveRemoteControl's OWN refusal
+    // (`on && agentProvider !== "claude-code"`) rather than the pre-flight one above.
+    cursor({ remoteControl: "on" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(openWorkspace).not.toHaveBeenCalled();
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+});
+
 // ── capability gating ───────────────────────────────────────────────────────
 // Everything above drives the shipped Jira connector, which declares every optional
 // capability. These drive the Task 7 fixture connector, which declares none — so a
