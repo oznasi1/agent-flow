@@ -57,10 +57,15 @@ describe("renderReviewTemplate", () => {
 });
 
 describe("launchReview", () => {
-  it("refuses a request with no local checkout", async () => {
+  // The wording is forge-neutral on purpose: this refusal is routinely reached on
+  // the GitLab path too (a request for your review may live in a project you have
+  // never cloned), and it used to name GitHub, which sent a GitLab user to the
+  // wrong site. `launchReview` has no forge in scope and does not need one.
+  it("refuses a request with no local checkout, without naming a forge", async () => {
     const d = deps();
     const out = await launchReview({ req: { ...req, localPath: null }, template: "t", workspaceDir: "/ws", seedAgent: true }, d);
-    expect(out).toEqual({ ok: false, message: "aws-ops isn't checked out under your repos root — open the PR on GitHub instead." });
+    expect(out).toEqual({ ok: false, message: "aws-ops isn't checked out under your repos root — open it in your browser instead." });
+    expect((out as { message: string }).message).not.toContain("GitHub");
     expect(d.createWorktrees).not.toHaveBeenCalled();
   });
 

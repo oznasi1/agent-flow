@@ -108,6 +108,19 @@ describe("defaultDeps — delegation", () => {
     expect(resolveForge).toHaveBeenCalled();
   });
 
+  // Doctor is the surface built to report exactly this class of misconfiguration,
+  // and it runs independently of the Deck panel — so `resolveForge`'s
+  // fallback-to-github line must reach Doctor's OWN logger. With a swallowing
+  // `() => {}` here, `agentFlow.forge: "gitla"` produced a report reading
+  // "GitHub / gh: signed in" with nothing, anywhere, saying the setting was ignored.
+  it.each(["forge", "forgeProbe"] as const)("passes Doctor's own logger to resolveForge from %s", (member) => {
+    const log = vi.fn();
+    const d = defaultDeps(fakeConnector(), log);
+    if (member === "forge") d.forge();
+    else void d.forgeProbe();
+    expect(vi.mocked(resolveForge).mock.calls.at(-1)?.[1]).toBe(log);
+  });
+
   it("reuses the forge's own probe rather than re-implementing the gh check", async () => {
     const probe = vi.fn(async () => ({ kind: "signed-out" as const, detail: "exit 1" }));
     vi.mocked(resolveForge).mockReturnValue({

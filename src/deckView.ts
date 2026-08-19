@@ -1805,17 +1805,28 @@ export class DeckPanel {
    *
    * Always stamps, even on failure: an unstamped entry reads as stale forever
    * and re-enqueues the same call every tick (the same trap `enqueuePr`'s own
-   * catch exists for). No `try/catch` of our own is needed here — unlike
-   * `enqueuePr`'s provider, `Forge.branchCi` already normalizes every failure
-   * (a non-zero exit, a timeout, a rate limit, unparseable output) to
-   * `"unknown"` rather than throwing — but the stamping stays exactly as it was:
-   * `"unknown"`, rather than keeping the previous verdict (which is what the PR
-   * cache does with `previous?.facts`), is what stops a branch that was green an
-   * hour ago from opening a deploy gate on the strength of a call that failed
-   * since. */
+   * catch exists for). `"unknown"`, rather than keeping the previous verdict
+   * (which is what the PR cache does with `previous?.facts`), is what stops a
+   * branch that was green an hour ago from opening a deploy gate on the strength
+   * of a call that failed since.
+   *
+   * The `catch` is defense-in-depth for a THIRD-PARTY forge, not a claim about the
+   * shipped two: both already normalize every failure (a non-zero exit, a timeout,
+   * a rate limit, unparseable output) to `"unknown"` rather than throwing, exactly
+   * as docs/FORGES.md requires. But `Forge` is a documented seam, the contract's
+   * strength is identical to the one `enqueuePr` keeps its own catch under, and the
+   * unguarded failure mode is strictly worse than a wrong verdict: the refresh
+   * queue swallows the rejection, the entry stays unstamped, `isStale(undefined, …)`
+   * is always true, and the panel re-enqueues the same spawn every tick forever
+   * with nothing in the log. */
   private enqueueBranchCi(key: string, want: { repo: string; branch: string; cwd: string }): void {
     this.prQueue.push(`branch-ci:${key}`, async () => {
-      const status = await this.forge.branchCi(want.cwd, want.branch);
+      let status: BranchCiStatus;
+      try {
+        status = await this.forge.branchCi(want.cwd, want.branch);
+      } catch {
+        status = "unknown";
+      }
       // Logged, because "unknown" is invisible in the UI by design (a rule that
       // has not fired looks like patience) and this is the only place that can say
       // which branch could not be read.

@@ -6,6 +6,7 @@ import { getConfig } from "./config";
 import type { TaskConnector } from "./tasks/provider";
 import { discoverRepos } from "./engine/repos";
 import { resolveForge } from "./engine/forge/registry";
+import type { Forge } from "./engine/forge/types";
 import { resolveBin } from "./engine/pr/which";
 import { defaultRunsDir, readRuns } from "./engine/runs";
 import {
@@ -211,6 +212,11 @@ function statDir(p: string): { exists: boolean; writable: boolean } {
 /** The real wiring. Kept separate from `showDoctor` so the command is one line and
  *  the tests never touch the network or the filesystem. */
 export function defaultDeps(connector: TaskConnector, log: (message: string) => void): DoctorDeps {
+  /** The configured forge, resolved once per call for whichever member asked.
+   *  Both `forge` and `forgeProbe` go through this, so one config read and one
+   *  `Forge` construction serve each — and, more importantly, both report an
+   *  unknown `agentFlow.forge` through the same logger. */
+  const resolved = (): Forge => resolveForge(getConfig().forge, log);
   const cfg = (): DoctorConfig => {
     const c = getConfig();
     const info = connector.info();
@@ -233,14 +239,17 @@ export function defaultDeps(connector: TaskConnector, log: (message: string) => 
     hasCredentials: () => connector.isAuthenticated(),
     probe: () => connector.probe(),
     which: (bin) => resolveBin(bin),
-    // `() => {}` for the logger: this file has none in scope, and a fallback-to-
-    // github line for an unknown `agentFlow.forge` value is already reported by
-    // the Deck panel's own `resolveForge` call.
+    // `log`, not a swallowing `() => {}`: Doctor is THE surface built to report
+    // this class of misconfiguration, and `agentFlow.forge: "gitla"` otherwise
+    // yields a report reading "GitHub / gh: signed in" with nothing anywhere
+    // telling the user their setting was ignored. The Deck panel logs its own
+    // fallback, but Doctor runs independently of it, so a user who never opened
+    // the Deck would never see that line.
     forge: () => {
-      const { label, cli } = resolveForge(getConfig().forge, () => {});
+      const { label, cli } = resolved();
       return { label, cli: cli.name, installUrl: cli.installUrl };
     },
-    forgeProbe: () => resolveForge(getConfig().forge, () => {}).probe(),
+    forgeProbe: () => resolved().probe(),
     statDir,
     repos: () => {
       const c = cfg();

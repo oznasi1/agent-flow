@@ -55,7 +55,11 @@ export async function launchReview(
   deps: LaunchReviewDeps,
 ): Promise<{ ok: true; runKey: string } | { ok: false; message: string }> {
   if (!req.localPath) {
-    return { ok: false, message: `${req.repoName} isn't checked out under your repos root — open the PR on GitHub instead.` };
+    // Forge-neutral wording, and routinely reached on either forge: a request for
+    // your review may live in a project you have never cloned, which is exactly
+    // when `localPath` is null. Naming GitHub here sent a GitLab user to the wrong
+    // site; the row's own link already knows where the request lives.
+    return { ok: false, message: `${req.repoName} isn't checked out under your repos root — open it in your browser instead.` };
   }
   const key = reviewRunKey(req.repoName, req.number);
   const summary = `Review ${req.repoName}#${req.number}: ${req.title}`;
@@ -69,9 +73,10 @@ export async function launchReview(
   const services = deps.createWorktrees([base], key, req.title, deps.log);
   // createWorktrees falls back to the main checkout when it cannot create a worktree.
   // For an ordinary task that is merely inconvenient; here the seeded prompt scripts a
-  // real `gh pr checkout`, so proceeding would switch the user's OWN checkout to a
-  // teammate's branch. Refuse: an un-launched review costs a click, a hijacked checkout
-  // can cost work in progress.
+  // real checkout of the request's branch (`gh pr checkout` / `glab mr checkout`,
+  // depending on the configured forge), so proceeding would switch the user's OWN
+  // checkout to a teammate's branch. Refuse: an un-launched review costs a click, a
+  // hijacked checkout can cost work in progress.
   if (services.some((s) => s.path === base.path)) {
     return { ok: false, message: `Couldn't create a git worktree in ${req.repoName} — not reviewing ${req.repoName}#${req.number} in your main checkout. The Agent Flow Deck output channel has the reason.` };
   }

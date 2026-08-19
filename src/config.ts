@@ -220,7 +220,7 @@ export const DEFAULT_PR_REVIEW_PROMPT =
 
 /** The GitLab wording of DEFAULT_PR_REVIEW_PROMPT, seeded instead when
  * `agentFlow.forge` is "gitlab" and the user hasn't customized `prReviewPrompt`
- * (see the selection in getConfig). Differs only in the mechanics it scripts —
+ * (see `shippedPrReviewPrompt`). Differs only in the mechanics it scripts —
  * `glab mr checkout` for `gh pr checkout`, "merge request" for "pull request",
  * "GitLab" for "GitHub" — every instruction and placeholder ({key} {summary}
  * {url} {files}) is otherwise identical, so the two stay legible as variants of
@@ -244,8 +244,8 @@ export const DEFAULT_REVIEW_REQUEST_PROMPT =
   "each with the file and line it refers to. Do not post anything to GitHub; the human submits the review.{files}";
 
 /** The GitLab wording of DEFAULT_REVIEW_REQUEST_PROMPT, substituted into the
- * first stock review mode when `agentFlow.forge` is "gitlab" (see the
- * `reviewRequestModes` selection in getConfig). Same substitution-only
+ * first stock review mode when `agentFlow.forge` is "gitlab" (see
+ * `shippedReviewRequestModes`). Same substitution-only
  * relationship as GITLAB_PR_REVIEW_PROMPT above: everything the agent is asked
  * to assess, where it writes findings, the instruction not to post anything
  * itself, and every placeholder are identical to the GitHub wording. */
@@ -270,6 +270,33 @@ export const DEFAULT_REVIEW_REQUEST_MODES: PromptMode[] = [
     prompt: DEFAULT_REVIEW_REQUEST_PROMPT,
   },
 ];
+
+/** The `prReviewPrompt` this forge SHIPS — what a user who never wrote one gets.
+ *
+ * Exported, and the single definition of that baseline, because two callers must
+ * agree on it byte for byte: `getConfig` seeds it, and `settingsSnapshot` decides
+ * `pr_review_prompt_customized` by comparing against it. When the snapshot
+ * compared against the GitHub default unconditionally, every GitLab install
+ * reported a customized prompt on a stock install — which is the direction that
+ * destroys the metric, since it makes "the user wrote their own words" (what
+ * docs/TELEMETRY.md says the field means) indistinguishable from "the user
+ * picked a forge". */
+export function shippedPrReviewPrompt(forge: string): string {
+  return forge === "gitlab" ? GITLAB_PR_REVIEW_PROMPT : DEFAULT_PR_REVIEW_PROMPT;
+}
+
+/** The review modes this forge SHIPS — `DEFAULT_REVIEW_REQUEST_MODES` with only
+ * the first stock mode's prompt forge-flavoured. Exported for the same reason
+ * `shippedPrReviewPrompt` is: `settingsSnapshot`'s `modeCounts` diffs the
+ * resolved list against these built-ins, and diffing a GitLab install against
+ * the GitHub wording reported `review_modes_overridden: 1` for every stock
+ * GitLab install. The github arm returns `DEFAULT_REVIEW_REQUEST_MODES` itself,
+ * exactly as the inline ternary this replaced did. */
+export function shippedReviewRequestModes(forge: string): PromptMode[] {
+  return forge === "gitlab"
+    ? DEFAULT_REVIEW_REQUEST_MODES.map((m, i) => (i === 0 ? { ...m, prompt: GITLAB_REVIEW_REQUEST_PROMPT } : m))
+    : DEFAULT_REVIEW_REQUEST_MODES;
+}
 
 export interface AgentFlowConfig {
   // Which task source to read from — an id in src/tasks/registry.ts. An
@@ -577,9 +604,16 @@ export function getConfig(): AgentFlowConfig {
     // untouched default is forge-flavoured. `explicitConfigValue` is the same
     // "did the user actually write this?" test the reviewRequestModes migration
     // below already uses.
-    prReviewPrompt:
-      explicitConfigValue<string>(c, "prReviewPrompt") ??
-      (forge === "gitlab" ? GITLAB_PR_REVIEW_PROMPT : DEFAULT_PR_REVIEW_PROMPT),
+    //
+    // `||`, NOT `??`, and this is load-bearing: `explicitConfigValue` hands back
+    // the raw setting value including `""`, which is exactly what clearing this
+    // multilineText field in the settings UI writes. `??` short-circuits on
+    // nullish only, so a blank setting would seed an EMPTY prompt — a GitHub
+    // behavior change on the default forge (before the forge seam this read
+    // `c.get("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT`), and there is no net
+    // downstream: `prReviewTemplate` returns its argument unchanged. Same
+    // truthiness posture as `resolvePrompt` above.
+    prReviewPrompt: explicitConfigValue<string>(c, "prReviewPrompt") || shippedPrReviewPrompt(forge),
     worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
     childWorktrees: c.get<boolean>("childWorktrees") ?? true,
     remoteControl: (() => {
@@ -614,10 +648,7 @@ export function getConfig(): AgentFlowConfig {
       // mode's prompt is forge-flavoured (same "don't clobber a customization"
       // scoping as prReviewPrompt above — a legacy custom prompt below still
       // wins over this regardless of forge, since it overwrites `.prompt`).
-      const stock =
-        forge === "gitlab"
-          ? DEFAULT_REVIEW_REQUEST_MODES.map((m, i) => (i === 0 ? { ...m, prompt: GITLAB_REVIEW_REQUEST_PROMPT } : m))
-          : DEFAULT_REVIEW_REQUEST_MODES;
+      const stock = shippedReviewRequestModes(forge);
       // Migrate a customized legacy reviewRequestPrompt into the first built-in,
       // carrying the rest of `stock` along with `slice(1)` rather than
       // hand-building a one-element array — so if a second stock review mode

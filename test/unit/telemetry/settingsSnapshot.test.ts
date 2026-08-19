@@ -215,6 +215,39 @@ describe("settingsSnapshot", () => {
     expect(settingsSnapshot({ ...getConfig(), forge: "our-internal-thing" }).forge).toBe("invalid");
   });
 
+  // A stock GitLab install has touched NOTHING, and must read as untouched. Two of
+  // the shipped values are forge-flavoured — `prReviewPrompt` and the first stock
+  // review mode's prompt — so comparing them against the GitHub baselines fired
+  // `pr_review_prompt_customized: true` and `review_modes_overridden: 1` for the
+  // entire GitLab population, which is the direction that destroys both metrics:
+  // docs/TELEMETRY.md says they mean "the user-authored text was changed from the
+  // shipped default", and picking a forge is not authoring text. Built through the
+  // real `getConfig()`, not a hand-assembled cfg, because the bug lived precisely
+  // in the disagreement between what getConfig seeds and what this file compares
+  // against.
+  it("reports a stock gitlab install as having customized nothing", () => {
+    setConfig({ forge: "gitlab" });
+    const s = settingsSnapshot(getConfig());
+    expect(s.forge).toBe("gitlab");
+    expect(s.pr_review_prompt_customized).toBe(false);
+    expect(s.review_modes_overridden).toBe(0);
+    expect(s.review_modes_custom).toBe(0);
+    expect(s.review_modes_hidden).toBe(0);
+  });
+
+  // The other direction, so the two tests together prove the fields still
+  // DISCRIMINATE on gitlab rather than having been flattened to false.
+  it("still reports a customized prompt and mode on gitlab", () => {
+    setConfig({
+      forge: "gitlab",
+      prReviewPrompt: "my own words",
+      reviewRequestModes: [{ id: "full", prompt: "my own review words" }],
+    });
+    const s = settingsSnapshot(getConfig());
+    expect(s.pr_review_prompt_customized).toBe(true);
+    expect(s.review_modes_overridden).toBe(1);
+  });
+
   it("reports the agent surface, collapsing an unknown value to invalid", () => {
     expect(settingsSnapshot({ ...getConfig(), agentSurface: "terminal" }).agent_surface).toBe("terminal");
     expect(

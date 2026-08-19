@@ -1077,6 +1077,32 @@ describe("forge-flavoured prompts", () => {
     expect(getConfig().prReviewPrompt).toBe("my own words");
   });
 
+  // An EXPLICITLY BLANK setting is what clearing this multilineText field in the
+  // VS Code settings UI writes, and it must fall back to the forge's shipped
+  // wording — never seed an empty prompt. `explicitConfigValue` returns `""`
+  // verbatim, so this only holds while the fallback is `||`; with `??` (which
+  // short-circuits on nullish alone) the agent would be launched with no
+  // instructions at all, and nothing downstream would catch it —
+  // `prReviewTemplate` returns its argument unchanged. On github this is the
+  // pre-seam behaviour (`c.get("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT`),
+  // which this branch promises not to change.
+  it.each([
+    ["github", DEFAULT_PR_REVIEW_PROMPT],
+    ["gitlab", GITLAB_PR_REVIEW_PROMPT],
+  ])("falls back to the %s default when the setting is explicitly blank", (forge, expected) => {
+    setConfig({ forge, prReviewPrompt: "" });
+    expect(getConfig().prReviewPrompt).toBe(expected);
+  });
+
+  // Whitespace is not blank: someone who typed spaces wrote something, and the
+  // `||` fallback deliberately does not trim (unlike `nonBlank`, which the mode
+  // resolver uses for picker chrome). Pinned so a later "tidy-up" that adds a
+  // `.trim()` has to argue with a test rather than change behaviour silently.
+  it("keeps a whitespace-only prompt, since the user did write it", () => {
+    setConfig({ prReviewPrompt: "   " });
+    expect(getConfig().prReviewPrompt).toBe("   ");
+  });
+
   it("preserves every placeholder the GitHub prompt actually offers", () => {
     setConfig({ forge: "gitlab" });
     const p = getConfig().prReviewPrompt;
