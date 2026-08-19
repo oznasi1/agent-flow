@@ -17,7 +17,7 @@ export type CheckStatus = "fail" | "warn" | "skip" | "ok";
  *  of `DoctorInputs.sourceLabel`) — so a Jira user still reads "Jira" while this
  *  module, and the literal union below, stay free of any one source's name. The
  *  other four groups are fixed: every source shares them. */
-export type DoctorGroup = "source" | "Local" | "GitHub" | "Claude Code" | "Copilot" | "State";
+export type DoctorGroup = "source" | "Local" | "GitHub" | "Claude Code" | "Copilot" | "Cursor" | "State";
 
 /** What fixes a failing check. Resolved by the view — this module names the intent
  *  and never touches `vscode`. */
@@ -73,16 +73,18 @@ export interface DoctorInputs {
   claudeCode: { installed: boolean; version: string | null };
   claudeProjectsReadable: boolean;
   runs: number;
-  /** Which agent seeds sessions — decides whether the Claude Code rows or the
-   *  Copilot row appear. Already host-guarded by readAgentProvider, so this is
-   *  never "copilot" outside VS Code, and "cursor" takes the same rows as
-   *  "claude-code" below until Task 2 gives it its own checks. Inlined rather
-   *  than imported from src/config.ts's `AgentProvider` — this module has zero
-   *  imports by design, staying free of `vscode` and testable as a plain table. */
+  /** Which agent seeds sessions — decides whether the Claude Code rows or a
+   *  chat-agent row (Copilot or Cursor) appear. Already host-guarded by
+   *  readAgentProvider, so this is never "copilot" outside VS Code. Inlined
+   *  rather than imported from src/config.ts's `AgentProvider` — this module
+   *  has zero imports by design, staying free of `vscode` and testable as a
+   *  plain table. */
   agentProvider: "claude-code" | "copilot" | "cursor";
   /** Probed by command registration, not extension id: chat is built into VS Code
-   *  and Copilot ships bundled in some builds, so an id check would false-negative. */
-  copilotChat: { available: boolean };
+   *  and Copilot ships bundled in some builds, so an id check would false-negative.
+   *  Cursor registers the same command, which is why one field and one probe serve
+   *  both non-Claude providers. Renamed from `copilotChat` now that it does. */
+  chatCommand: { available: boolean };
 }
 
 const SIGN_IN: DoctorAction = { kind: "command", command: "agentFlow.signIn", label: "Sign in" };
@@ -244,26 +246,48 @@ function ghChecks(i: DoctorInputs): Check[] {
   ];
 }
 
-/** Picks the Claude Code rows or the Copilot row by which agent is configured.
- *  The Claude session-files row runs either way — it's about the Deck's live
- *  signal, which reads `~/.claude/projects` regardless of which agent seeds
- *  sessions. */
+/** Picks the Claude Code rows, or a chat-agent row plus the Claude session-files
+ *  row, by which agent is configured. The session-files row runs for either
+ *  non-Claude provider — it's about the Deck's live signal, which reads
+ *  `~/.claude/projects` regardless of which agent seeds sessions, and Cursor's
+ *  composer sessions don't show up there, so the row still has to explain
+ *  itself under Cursor too. */
 function agentChecks(i: DoctorInputs): Check[] {
-  return i.agentProvider === "copilot" ? [...copilotChecks(i), ...claudeSessionChecks(i)] : claudeChecks(i);
+  return i.agentProvider === "claude-code"
+    ? claudeChecks(i)
+    : [...chatChecks(i, i.agentProvider), ...claudeSessionChecks(i)];
 }
 
-function copilotChecks(i: DoctorInputs): Check[] {
+/** The chat-panel row for whichever non-Claude agent is configured. Both Copilot
+ *  and Cursor serve `workbench.action.chat.open`, so availability is one probe
+ *  (`chatCommand`) — but the group, the row text, and the remedy differ per
+ *  provider, so this stays a branch rather than a single templated row. Copilot's
+ *  text is unchanged from before this row was shared (pinned by doctor.test.ts's
+ *  "agent checks by provider" suite); Cursor's agent ships built into the editor,
+ *  so its row carries no action to point at. */
+function chatChecks(i: DoctorInputs, provider: "copilot" | "cursor"): Check[] {
+  const ok = i.chatCommand.available;
+  if (provider === "copilot") {
+    return [
+      {
+        group: "Copilot",
+        label: "Copilot Chat available",
+        status: ok ? "ok" : "fail",
+        detail: ok
+          ? "workbench.action.chat.open is registered"
+          : "no chat command is registered — GitHub Copilot Chat isn't available in this window",
+        ...(ok ? {} : { action: { kind: "extension", id: "github.copilot-chat", label: "Show extension" } }),
+      },
+    ];
+  }
   return [
     {
-      group: "Copilot",
-      label: "Copilot Chat available",
-      status: i.copilotChat.available ? "ok" : "fail",
-      detail: i.copilotChat.available
+      group: "Cursor",
+      label: "Cursor chat available",
+      status: ok ? "ok" : "fail",
+      detail: ok
         ? "workbench.action.chat.open is registered"
-        : "no chat command is registered — GitHub Copilot Chat isn't available in this window",
-      ...(i.copilotChat.available
-        ? {}
-        : { action: { kind: "extension", id: "github.copilot-chat", label: "Show extension" } }),
+        : "no chat command is registered — Cursor's chat isn't available in this window",
     },
   ];
 }
@@ -370,5 +394,5 @@ export function formatReport(checks: Check[], sourceLabel: string): string {
 }
 
 function groupOrder(g: DoctorGroup): number {
-  return ["source", "Local", "GitHub", "Claude Code", "Copilot", "State"].indexOf(g);
+  return ["source", "Local", "GitHub", "Claude Code", "Copilot", "Cursor", "State"].indexOf(g);
 }

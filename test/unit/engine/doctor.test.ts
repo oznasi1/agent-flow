@@ -21,7 +21,7 @@ const healthy = (): DoctorInputs => ({
   claudeProjectsReadable: true,
   runs: 7,
   agentProvider: "claude-code",
-  copilotChat: { available: false },
+  chatCommand: { available: false },
 });
 
 const find = (inputs: DoctorInputs, label: string) => {
@@ -244,14 +244,14 @@ describe("runChecks — Claude Code", () => {
 
 describe("agent checks by provider", () => {
   it("reports Copilot Chat availability under the copilot provider", () => {
-    const checks = runChecks({ ...healthy(), agentProvider: "copilot", copilotChat: { available: true } });
+    const checks = runChecks({ ...healthy(), agentProvider: "copilot", chatCommand: { available: true } });
     expect(checks.find((c) => c.label === "Copilot Chat available")?.status).toBe("ok");
     expect(checks.find((c) => c.label === "Claude Code installed")).toBeUndefined();
     expect(checks.find((c) => c.label === "Claude Code version")).toBeUndefined();
   });
 
   it("offers the Copilot Chat extension when it isn't available", () => {
-    const checks = runChecks({ ...healthy(), agentProvider: "copilot", copilotChat: { available: false } });
+    const checks = runChecks({ ...healthy(), agentProvider: "copilot", chatCommand: { available: false } });
     const row = checks.find((c) => c.label === "Copilot Chat available");
     expect(row?.status).toBe("fail");
     expect(row?.action).toEqual({ kind: "extension", id: "github.copilot-chat", label: "Show extension" });
@@ -269,6 +269,24 @@ describe("agent checks by provider", () => {
     for (const agentProvider of ["claude-code", "copilot"] as const) {
       expect(runChecks({ ...healthy(), agentProvider }).find((c) => c.label === "Claude session files")).toBeDefined();
     }
+  });
+
+  it("shows the Cursor chat row and the Claude session-files row under cursor", () => {
+    const checks = runChecks({ ...healthy(), agentProvider: "cursor", chatCommand: { available: true } });
+    const groups = checks.map((c) => c.group);
+    expect(groups).toContain("Cursor");
+    expect(groups).not.toContain("Copilot");
+    // Cursor's composer sessions don't show up on the Deck, which reads Claude
+    // Code's session files — so the session-files row still has to explain itself.
+    expect(checks.find((c) => c.label === "Claude session files")).toBeDefined();
+    expect(checks.find((c) => c.label === "Cursor chat available")?.status).toBe("ok");
+  });
+
+  it("fails the Cursor chat row without an action — Cursor's agent ships with the editor", () => {
+    const checks = runChecks({ ...healthy(), agentProvider: "cursor", chatCommand: { available: false } });
+    const row = checks.find((c) => c.group === "Cursor");
+    expect(row?.status).toBe("fail");
+    expect(row?.action).toBeUndefined();
   });
 });
 

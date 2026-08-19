@@ -53,7 +53,7 @@ export interface DoctorDeps {
   repos: () => { repos: number; gitRepos: number };
   claudeExtension: () => { installed: boolean; version: string | null };
   claudeProjectsReadable: () => boolean;
-  copilotChat: () => Promise<{ available: boolean }>;
+  chatCommand: () => Promise<{ available: boolean }>;
   runs: () => number;
   log: (message: string) => void;
 }
@@ -96,7 +96,7 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
     runs: d.runs(),
     agentProvider: cfg.agentProvider,
     // Only probed when it can matter — the Claude Code path must not pay for it.
-    copilotChat: cfg.agentProvider === "copilot" ? await d.copilotChat() : { available: false },
+    chatCommand: cfg.agentProvider !== "claude-code" ? await d.chatCommand() : { available: false },
   };
 }
 
@@ -175,9 +175,10 @@ export function probeClaudeExtension(): { installed: boolean; version: string | 
 }
 
 /** Whether this window can open a chat panel at all. Command registration rather
- *  than an extension id: chat is built into VS Code and Copilot ships bundled in
- *  some builds. */
-export async function probeCopilotChat(): Promise<{ available: boolean }> {
+ *  than an extension id: chat is built into VS Code, Copilot ships bundled in
+ *  some builds, and Cursor registers the same command — so one probe serves
+ *  both non-Claude providers. */
+export async function probeChatCommand(): Promise<{ available: boolean }> {
   try {
     return { available: (await vscode.commands.getCommands(true)).includes("workbench.action.chat.open") };
   } catch {
@@ -232,7 +233,7 @@ export function defaultDeps(connector: TaskConnector, log: (message: string) => 
       return { repos: found.length, gitRepos: found.filter((r) => r.isGit).length };
     },
     claudeExtension: probeClaudeExtension,
-    copilotChat: probeCopilotChat,
+    chatCommand: probeChatCommand,
     claudeProjectsReadable: () => {
       try {
         fs.accessSync(path.join(os.homedir(), ".claude", "projects"), fs.constants.R_OK);
