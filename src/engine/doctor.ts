@@ -271,7 +271,10 @@ function agentChecks(i: DoctorInputs): Check[] {
   if (i.agentProvider === "claude-code") return claudeChecks(i);
   if (i.agentProvider !== "ask") return [...chatChecks(i, i.agentProvider), ...claudeSessionChecks(i)];
   const others = i.hostProviders.filter((p): p is Exclude<Provider, "claude-code"> => p !== "claude-code");
-  return [...claudeChecks(i), ...others.flatMap((p) => chatChecks(i, p)), ...claudeSessionChecks(i)];
+  // No trailing `claudeSessionChecks` here: `claudeChecks` already ends with it. The
+  // non-Claude arm above has to add it because it does NOT call `claudeChecks`.
+  // Appending it a second time duplicated the row and double-counted its warning.
+  return [...claudeChecks(i), ...others.flatMap((p) => chatChecks(i, p))];
 }
 
 /** The chat-panel row for whichever non-Claude agent is configured. Both Copilot

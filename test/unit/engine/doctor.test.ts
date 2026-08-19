@@ -328,6 +328,41 @@ describe("agent checks under ask", () => {
     expect(checks.find((c) => c.label === "Claude session files")).toBeDefined();
   });
 
+  // COUNTS rows rather than searching for one. Every other test in this block uses
+  // `.find()`/`toContain`, which are structurally blind to a duplicated row — which is
+  // exactly how a doubled "Claude session files" row shipped through four CI gates.
+  it("under ask, emits each row exactly once — no agent's rows are duplicated", () => {
+    for (const hostProviders of [
+      ["claude-code"],
+      ["claude-code", "cursor"],
+      ["claude-code", "copilot"],
+    ] as const) {
+      const checks = runChecks({
+        ...healthy(),
+        agentProvider: "ask",
+        hostProviders: [...hostProviders],
+        chatCommand: { available: true },
+      });
+      const counts = new Map<string, number>();
+      for (const c of checks) counts.set(c.label, (counts.get(c.label) ?? 0) + 1);
+      const dupes = [...counts].filter(([, n]) => n > 1);
+      expect(dupes).toEqual([]);
+      expect(counts.get("Claude session files")).toBe(1);
+    }
+  });
+
+  it("under ask, counts an unreadable ~/.claude/projects as ONE warning, not two", () => {
+    const checks = runChecks({
+      ...healthy(),
+      agentProvider: "ask",
+      hostProviders: ["claude-code", "cursor"],
+      chatCommand: { available: true },
+      claudeProjectsReadable: false,
+    });
+    expect(checks.filter((c) => c.status === "warn")).toHaveLength(1);
+    expect(summarize(checks)).toBe("1 warning");
+  });
+
   it("under ask with only Claude Code on this host, shows no chat-agent rows at all", () => {
     const checks = runChecks({ ...healthy(), agentProvider: "ask", hostProviders: ["claude-code"] });
     const groups = checks.map((c) => c.group);
