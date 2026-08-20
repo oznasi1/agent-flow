@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.1] — 2026-08-20
+
 ### Added
 
 - **One-click install, and a header that acts.** The README's badge row was three static
