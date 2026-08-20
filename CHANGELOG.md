@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Static `VS Code ^1.90.0` is gone — the engine requirement is still under Requirements.
   Badge sources are limited to vsce's trusted-SVG allowlist so packaging stays clean.
 
+### Fixed
+
+- **The logo was invisible on the Marketplace.** The header's `<picture>` kept the
+  light-background wordmark in a `<source>` and the white one as the `<img>` fallback. The
+  Marketplace strips `<picture>` and `<source>` outright and its listing page is always
+  light, so every visitor got a white wordmark on white. (GitHub only survived it because
+  its `<themed-picture>` element does the swap in JS — native `<picture>` was already dead
+  there too, since GitHub wraps the `<img>` in a lightbox `<a>`, which stops it being the
+  direct child `<picture>` requires.) The fallback is now the light-background asset and
+  the dark one moved into the `<source>`, so all three surfaces resolve correctly.
+
 ### Changed
 
 - **A README you can finish.** It had grown to 625 lines and answered every question at
