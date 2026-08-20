@@ -142,8 +142,9 @@ store first, and from there it behaves exactly like a task you took, **Forget**
 included. Turn it off with `agentFlow.openAgents`, which the board picks up
 immediately — no need to close and reopen the panel.
 
-Each card also carries the **PR state** of every repo it touches, read from GitHub
-with the `gh` CLI: the PR number, CI (failing check names link to their runs, or a
+Each card also carries the **PR state** of every repo it touches, read from your forge
+with its CLI — `gh`, or `glab` when `agentFlow.forge` is `gitlab`: the PR number, CI
+(failing check names link to their runs, or a
 passing count), the review decision with any unresolved-thread count, and
 mergeability. A PR that needs a human decision — failing required checks,
 requested changes, or a conflict — pulls its card into **In review**'s `fixes needed`
@@ -228,7 +229,8 @@ checks the PR out into a worktree and seeds
 your agent to review the diff and write its findings to
 `.pick-task/REVIEW-<number>.md`, which the row can then load into the review box.
 Turn the strip off with `agentFlow.reviewRequests`; it also goes dark whenever
-`agentFlow.prFacts` is off, since both lean on the same `gh` dependency.
+`agentFlow.prFacts` is off, since both lean on the same forge CLI — `gh`, or
+`glab` when `agentFlow.forge` is `gitlab`.
 
 With `agentFlow.reviewWrites` on (**off by default**), the expanded row also
 submits: **Approve**, **Comment**, or **Request changes** — each disabled while a

@@ -35,7 +35,7 @@ const makeDeps = (over: Partial<LaunchDeps> = {}): LaunchDeps => ({
     services.map((s) => ({ ...s, path: `${s.path}/.claude/worktrees/ASM-12` })),
   ),
   openWorkspace: vi.fn(async (_req: OpenRequest): Promise<OpenResult> => ({
-    mode: "per-window", briefs: [], opened: ["/w"], remoteControl: false,
+    mode: "per-window", briefs: [], opened: ["/w"], remoteControl: false, provider: "claude-code",
   })),
   log: vi.fn(),
   ...over,
@@ -237,5 +237,18 @@ describe("launchPlanned", () => {
     const d = makeDeps();
     await launchPlanned(makeReq({ node: node({ repos: ["aws-ops", "bite-me"] }) }), d);
     expect(d.log).toHaveBeenCalledWith(expect.stringContaining("binding the place to aws-ops"));
+  });
+
+  it("pins claude-code on the request, so an unattended rule can never reach the `ask` picker", async () => {
+    // A flow rule fires with nobody watching. openWorkspace's picker is
+    // `ignoreFocusOut: true`, so an unattended launch that reached it would not time
+    // out — it would hang the poll loop until someone came back and answered. The pin
+    // is what makes that unreachable, and it is read ONLY under `ask`: a user whose
+    // setting says `cursor` still gets Cursor, because openWorkspace ignores a pin
+    // under a fixed setting.
+    const d = makeDeps();
+    await launchPlanned(makeReq(), d);
+    const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
+    expect(arg.provider).toBe("claude-code");
   });
 });

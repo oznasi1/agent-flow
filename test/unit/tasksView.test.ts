@@ -119,7 +119,7 @@ vi.mock("../../src/tasks/jira/client", async () => {
 });
 
 import { parseJiraError } from "../../src/tasks/jira/errors";
-import { getConfig } from "../../src/config";
+import { getConfig, resolvedProvider } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
 import { openWorkspace, writeBriefInto, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge } from "../../src/engine/workspace";
 import { branchName, createWorktrees, ensureBranch } from "../../src/engine/worktree";
@@ -142,6 +142,7 @@ import { SLACK_DM_SENTENCE, PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/pr
 
 const CFG = {
   taskSource: "jira",
+  forge: "github",
   baseUrl: "https://jira",
   project: "ASM",
   reposRoot: "/repos",
@@ -237,13 +238,18 @@ beforeEach(() => {
   vi.mocked(getConfig).mockReturnValue({ ...CFG });
   vi.mocked(discoverRepos).mockReturnValue(mkRepos(["account-service", "centaur"]));
   vi.mocked(JiraClient).mockImplementation(() => clientStub as unknown as JiraClient);
-  vi.mocked(openWorkspace).mockResolvedValue({
+  // An implementation, not a resolved value: `provider` is what the REAL openWorkspace
+  // resolved and seeded, which follows the setting each test installs — and tests set
+  // that after this reset, so a value captured here would be stale and every toast
+  // would name Claude Code whatever the user configured.
+  vi.mocked(openWorkspace).mockImplementation(async () => ({
     mode: "per-window",
     workspaceFile: undefined,
     briefs: [],
     opened: ["/repos/account-service"],
     remoteControl: false,
-  });
+    provider: resolvedProvider(getConfig().agentProvider),
+  }));
   // Restored here, not merely cleared: `clearMocks` drops call history and leaves the
   // implementation in place, so a test that scripts a stale branch would otherwise leak
   // it into every test after it. null is "git cannot answer", which is the truth for
@@ -1744,6 +1750,21 @@ describe("takeTask", () => {
     );
   });
 
+  it("names Claude Code in the pre-seeded toast under `ask`", async () => {
+    // The toast reads "<summary>. <agent> pre-seeded — press Enter to start.", so a
+    // phrase here lands lowercase at a sentence start: "…window. your coding agent
+    // pre-seeded". It has to be a product name.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(posted()).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Claude Code pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
   it("names Copilot in the pre-seeded toast", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot" });
     const { provider, posted } = setup();
@@ -1884,6 +1905,7 @@ describe("takeTask", () => {
       briefs: [],
       opened: ["/ws/ASM-1.code-workspace"],
       remoteControl: false,
+      provider: "claude-code",
     });
     const { provider, posted } = setup();
     await provider.takeTask("ASM-1", "card", ["account-service", "centaur"]);
@@ -2142,6 +2164,7 @@ describe("takeTask", () => {
         opened: ["/ws/team.code-workspace"],
         mergeFailed: true,
         remoteControl: false,
+        provider: "claude-code",
       });
 
       const { provider, posted } = setup();
@@ -2165,6 +2188,7 @@ describe("takeTask", () => {
         opened: ["/ws/team.code-workspace"],
         mergedRepos: ["account-service"],
         remoteControl: false,
+        provider: "claude-code",
       });
 
       const { provider, posted } = setup();
@@ -2283,6 +2307,7 @@ describe("takeTask", () => {
         briefs: [],
         opened: ["/ws/team.code-workspace"],
         remoteControl: false,
+        provider: "claude-code",
       });
 
       const { provider, posted } = setup();
@@ -2310,6 +2335,7 @@ describe("takeTask", () => {
         briefs: [],
         opened: ["/ws/team.code-workspace"],
         remoteControl: false,
+        provider: "claude-code",
       });
 
       const { provider, posted } = setup();
@@ -2368,6 +2394,7 @@ describe("takeTask", () => {
         briefs: [],
         opened: ["/ws/team.code-workspace"],
         remoteControl: false,
+        provider: "claude-code",
       });
 
       const { provider, posted } = setup();
@@ -2440,6 +2467,7 @@ describe("takeTask", () => {
         briefs: [],
         opened: ["/ws/team.code-workspace"],
         remoteControl: false,
+        provider: "claude-code",
       });
 
       const { provider, posted } = setup();
@@ -3054,6 +3082,226 @@ describe("takeBatch", () => {
     );
   });
 
+  // ── Task 6: one question for the whole batch ──────────────────────────────
+  // The loop is non-interactive by design, so `ask` has to be resolved once, up
+  // front, for all N tasks — N pickers for one click would be unusable, and the
+  // stagger between opens means they would not even queue up together.
+  /** Answer the provider picker with Cursor and every other picker with the layout
+   *  default, by TITLE rather than by call order — the order of this path's pickers
+   *  is not what these tests are about. */
+  const pickCursorAgent = () =>
+    vi.mocked(window.showQuickPick).mockImplementation(
+      async (_items: unknown, opts?: unknown) =>
+        ((opts as { title?: string } | undefined)?.title === "Which agent?"
+          ? { label: "Cursor", provider: "cursor" }
+          : { shared: false }) as never,
+    );
+  const agentPicks = () =>
+    vi.mocked(window.showQuickPick).mock.calls.filter(
+      (c) => (c[1] as { title?: string } | undefined)?.title === "Which agent?",
+    );
+
+  it("asks which agent once for the whole batch, and pins the answer onto every task", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    pickCursorAgent();
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(agentPicks()).toHaveLength(1);
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+    for (const call of vi.mocked(openWorkspace).mock.calls) expect(call[0].provider).toBe("cursor");
+  });
+
+  it("uses the same picker title as a single launch, so the two read identically", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    pickCursorAgent();
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(agentPicks()[0][0]).toEqual([
+      { label: "Claude Code", provider: "claude-code" },
+      { label: "Cursor", provider: "cursor" },
+    ]);
+  });
+
+  it("asks a one-key batch about THIS session, not about every task in the batch", async () => {
+    // A one-key "batch" to a shared destination is a single launch. It reaches
+    // `resolveBatchProvider` only because a shared window seeds from plan files and
+    // cannot ask later — the batch placeholder would promise an answer for tasks that
+    // do not exist. Word-for-word the single-launch placeholder `openWorkspace` uses.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask", openIn: "this-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(currentWindow).mockReturnValue({
+      identity: "/repos/api", kind: "folder", roots: [{ name: "api", path: "/repos/api" }],
+    });
+    pickCursorAgent();
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(agentPicks()).toHaveLength(1);
+    expect(agentPicks()[0][1]).toEqual({
+      title: "Which agent?",
+      placeHolder: "Pick the agent to start this session with",
+      ignoreFocusOut: true,
+    });
+  });
+
+  it("keeps the batch placeholder for a real multi-task batch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    pickCursorAgent();
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(agentPicks()[0][1]).toEqual({
+      title: "Which agent?",
+      placeHolder: "Pick the agent for every task in this batch",
+      ignoreFocusOut: true,
+    });
+  });
+
+  // The stale-brief limitation the README documents, pinned so the doc and the code
+  // cannot drift: a one-key batch to its OWN window resolves inside `openWorkspace`,
+  // after `briefMarkdown` has already been called, so the brief names the setting's
+  // default while the session that reads it is the one the user picked.
+  it("writes a one-key own-window batch's brief with the default, not the pick", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/repos/api"],
+      remoteControl: false, provider: "cursor",
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(agentPicks()).toHaveLength(0); // nothing asked up front — openWorkspace asks
+    expect(vi.mocked(openWorkspace).mock.calls[0][0].planMd).toContain("Claude Code");
+  });
+
+  it("raises no batch agent picker on a host with only one possible agent", async () => {
+    // `hostProviders()` is exactly ["claude-code"] outside VS Code and Cursor, so the
+    // picker there could only be answered one way — and `ignoreFocusOut` would hold
+    // that one-item modal open on every launch.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    env.uriScheme = "windsurf";
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(agentPicks()).toHaveLength(0);
+    expect(openWorkspace).toHaveBeenCalledTimes(2);
+    for (const call of vi.mocked(openWorkspace).mock.calls) expect(call[0].provider).toBe("claude-code");
+  });
+
+  it("launches nothing when the batch's agent picker is dismissed", async () => {
+    // A launch-wide question, dismissed, can only mean the launch — every task in it.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockImplementation(
+      async (_items: unknown, opts?: unknown) =>
+        ((opts as { title?: string } | undefined)?.title === "Which agent?" ? undefined : { shared: false }) as never,
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(posted().filter((m) => m.type === "toast")).toEqual([]);
+  });
+
+  it("names the picked agent in each task's brief", async () => {
+    // briefMarkdown renders "_The {agentName} prompt for this task says…_", and the
+    // batch resolves its agent BEFORE the briefs are built — so unlike the pre-launch
+    // copy on the single-take path, this one can be right.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    pickCursorAgent();
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    for (const call of vi.mocked(openWorkspace).mock.calls) {
+      expect(call[0].planMd).toContain("_The Cursor prompt for this task says");
+    }
+  });
+
+  it("carries the picked agent into a shared window's plan files too", async () => {
+    // The shared path never calls openWorkspace, so it cannot inherit the answer from
+    // there: without the pin its plan files carry no provider and the target window
+    // re-reads the setting, which under `ask` degrades to Claude Code — seeding an
+    // agent the user did not pick, minutes after they picked one.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockImplementation(
+      async (_items: unknown, opts?: unknown) =>
+        ((opts as { title?: string } | undefined)?.title === "Which agent?"
+          ? { label: "Cursor", provider: "cursor" }
+          : { shared: true }) as never,
+    );
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(openSharedWorkspace).toHaveBeenCalledWith(expect.objectContaining({ provider: "cursor" }));
+  });
+
+  // ── Fix round 1: the loop must not claim a launch that was cancelled ──────
+  it("reports nothing when a one-key batch is dismissed at openWorkspace's own picker", async () => {
+    // A one-key batch to its own window is a single launch: it does NOT resolve the
+    // agent up front, so `openWorkspace` raises the picker itself and can come back
+    // cancelled. Before the guard, the loop counted it and toasted "Launched 1 of 1 …
+    // A worktree + Claude session per task." over a worktree with no window and no
+    // session in it — the worst kind of wrong, because the user is told to go look for
+    // something that is not there.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", briefs: [], opened: [], remoteControl: false,
+      provider: "claude-code", cancelled: true,
+    });
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    // It really did reach the launch — otherwise this would pass for a batch that
+    // bailed out somewhere earlier and never exercised the guard at all.
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(posted().filter((m) => m.type === "toast")).toEqual([]);
+  });
+
+  it("never raises its own agent picker for a one-key batch to a new window", async () => {
+    // Why the guard above is the fix rather than "pin it up front like a real batch":
+    // one task is one launch, and it asks at exactly the moment a Take does — inside
+    // openWorkspace, after the destination and prompt are settled. Nothing extra here.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(agentPicks()).toHaveLength(0);
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect("provider" in vi.mocked(openWorkspace).mock.calls[0][0]).toBe(false);
+  });
+
+  it("resolves the agent for a one-key batch to a shared destination, which cannot ask later", async () => {
+    // The exception to "one key asks for itself": a shared destination seeds from plan
+    // files and never calls openWorkspace, so there is nothing left downstream to raise
+    // the picker. Without this it would seed Claude Code with nobody asked.
+    // `openIn: "this-window"` fixes the destination without a picker — the same setup
+    // the this-window batch test above uses — so the ONLY picker in this launch is the
+    // agent one, and counting it counts exactly the thing under test.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask", openIn: "this-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(currentWindow).mockReturnValue({
+      identity: "/repos/api",
+      kind: "folder",
+      roots: [{ name: "api", path: "/repos/api" }],
+    });
+    pickCursorAgent();
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(agentPicks()).toHaveLength(1);
+    expect(openSharedWorkspace).toHaveBeenCalledWith(expect.objectContaining({ provider: "cursor" }));
+  });
+
+  it("sends no provider at all under a fixed setting, on either batch path", async () => {
+    // Inertness: a pin is read ONLY under `ask` (see OpenRequest.provider), so sending
+    // one under a fixed setting could only invite the request and the setting to
+    // disagree. The request has to stay exactly what it always was.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    expect(agentPicks()).toHaveLength(0);
+    for (const call of vi.mocked(openWorkspace).mock.calls) expect("provider" in call[0]).toBe(false);
+  });
+
   it("skips a task whose worktree creation falls back to the main checkout and reports it failed", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(createWorktrees).mockImplementation((s) => s); // fallback: path stays === repoRef.path
@@ -3161,7 +3409,7 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(openWorkspace)
       .mockRejectedValueOnce(new Error("disk full"))
-      .mockResolvedValueOnce({ mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/x"], remoteControl: false });
+      .mockResolvedValueOnce({ mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/x"], remoteControl: false, provider: "claude-code" });
     const { provider, posted } = setup();
     await provider.takeBatch(twoKeys, ["api"]);
     expect(openWorkspace).toHaveBeenCalledTimes(2);
@@ -3677,6 +3925,56 @@ describe("takeBatch", () => {
     expect(toast.message).toBe("Launched 1 of 1 in one shared window. A worktree + Copilot session per task.");
     expect(toast.message).not.toContain("isn't seeded");
   });
+
+  // ── The per-task note must name the agent that actually ran ─────────────────
+  // Its else-arm was a pre-branch TWO-value discriminator — "copilot, or else Claude"
+  // — so widening the enum to four left a Cursor batch announced as a Claude one. The
+  // two tests above pin claude-code and copilot byte-identical; these pin cursor and
+  // ask, the two values this branch adds.
+  it("names Cursor in the per-task note across separate windows", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "cursor", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in parallel. A worktree + Cursor session per task.");
+  });
+
+  it("names Cursor in the per-task note for a shared window", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "cursor", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: true } as never);
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in one shared window. A worktree + Cursor session per task.");
+  });
+
+  it("names the agent the batch's ask picker chose, not Claude", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    pickCursorAgent();
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in parallel. A worktree + Cursor session per task.");
+  });
+
+  it("names the agent a one-key ask batch resolved inside openWorkspace", async () => {
+    // A one-key batch has no up-front answer to read — `openWorkspace` raises the
+    // picker inside the loop — so the note has to take the answer back off the
+    // result, which is the one place that choice exists.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/repos/api"],
+      remoteControl: false, provider: "cursor",
+    });
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 1 of 1 in parallel. A worktree + Cursor session per task.");
+  });
 });
 
 describe("live-window open targets", () => {
@@ -4068,6 +4366,7 @@ describe("remote control", () => {
       briefs: [],
       opened: ["/a", "/b"],
       remoteControl: false, // withheld by the single-window guard
+      provider: "claude-code",
     });
     const { provider, posted } = setup();
     await provider.takeTask("ASM-1", "card", ["account-service", "centaur"]);
@@ -4114,6 +4413,7 @@ describe("remote control", () => {
       briefs: [],
       opened: ["/x"],
       remoteControl: true,
+      provider: "claude-code",
     });
     const { provider, posted } = setup();
     await provider.takeBatch(["ASM-1"], ["api"]);
@@ -4302,6 +4602,382 @@ describe("remote control × the Copilot provider", () => {
     vi.mocked(createWorktrees).mockImplementation((s) => s);
   });
 });
+
+// Task 2 widened remoteControlBlocksLaunch and resolveRemoteControl from a Copilot-only
+// equality test to "any non-Claude agent". The Copilot describe above already pins the
+// Copilot side of that; these pin the Cursor side of the SAME three conditions, so a
+// revert of any one of them back to `=== "copilot"` (or `!== "copilot"`) shows up here.
+describe("remote control × the Cursor provider", () => {
+  const lastOpen = () =>
+    vi.mocked(openWorkspace).mock.calls[vi.mocked(openWorkspace).mock.calls.length - 1][0];
+  const errorToast = (posted: () => OutboundMessage[]) =>
+    posted().find((m) => m.type === "toast" && m.level === "error") as { message: string } | undefined;
+  const cursor = (over: Partial<ReturnType<typeof getConfig>> = {}) =>
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "cursor" as const, ...over });
+
+  it("refuses a Take before creating any worktree, exactly as it does under Copilot", async () => {
+    // remoteControlBlocksLaunch's condition: `agentProvider === "claude-code"` is
+    // the only exemption now, so "cursor" must trip it the same way "copilot" does.
+    //
+    // resolveRemoteControl's OWN "on" refusal (further down the same launch, inside
+    // resolveKickoff) would produce the identical toast for "on" + a non-Claude
+    // agent, so asserting the toast alone cannot tell the two refusals apart — a
+    // mutant that disables ONLY remoteControlBlocksLaunch would still pass a toast
+    // assertion here. `take_started` is only tracked AFTER remoteControlBlocksLaunch
+    // returns, and well before resolveRemoteControl is ever reached, so its absence
+    // is what actually pins this specific pre-flight predicate.
+    cursor({ remoteControl: "on", seedAgent: true });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(trackSpy.mock.calls.map((c) => (c[0] as { name: string }).name)).not.toContain("take_started");
+  });
+
+  it("does not refuse when seedAgent is off — nothing could ever seed the slash command", async () => {
+    // The `!cfg.seedAgent` clause exists precisely so a user who never opted into
+    // seeding is never locked out of every launch by this predicate.
+    cursor({ remoteControl: "on", seedAgent: false });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    expect(lastOpen().remoteControl).toBe(false);
+  });
+
+  it('never refuses on "ask" — it launches without Remote Control instead', async () => {
+    // resolveRemoteControl's "ask" short-circuit: `agentProvider !== "claude-code"`
+    // must cover "cursor" too, or this would put up a toggle it could only refuse.
+    cursor({ remoteControl: "ask" });
+    const { provider, posted, logged } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(window.showQuickPick).not.toHaveBeenCalled(); // the picker never appears
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1); // the launch proceeds
+    expect(lastOpen().remoteControl).toBe(false); // …just without Remote Control
+    expect(logged.join("\n")).toContain("Remote Control not offered");
+  });
+
+  it("refuses a one-key batch and opens nothing, once the setting resolves on", async () => {
+    // takeBatch is the one launch entry point with no remoteControlBlocksLaunch call
+    // at the top, so this exercises resolveRemoteControl's OWN refusal
+    // (`on && agentProvider !== "claude-code"`) rather than the pre-flight one above.
+    cursor({ remoteControl: "on" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+    expect(openWorkspace).not.toHaveBeenCalled();
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+});
+
+// ── Remote Control × the `ask` provider ─────────────────────────────────────
+// REGRESSION BLOCK. `ask` is not an agent — it means "pick one per launch" — and while
+// it is inert seedProvider degrades it to Claude Code. Three sites used to compare
+// `cfg.agentProvider` to "claude-code" directly, so `ask` fell through all three and
+// was treated as a non-Claude agent: remoteControlBlocksLaunch HARD-BLOCKED the launch
+// with RC_NEEDS_CLAUDE, and resolveRemoteControl both withheld the "ask" toggle and
+// refused an "on" batch — refusing a session that would in fact have been Claude Code.
+// All three now compare resolvedProvider(cfg.agentProvider).
+//
+// Each case is written as "ask behaves exactly like claude-code", because that is the
+// inertness contract this task ships under, and asserts the launch actually PROCEEDS —
+// a test that only checked for the absence of a toast would still pass if the launch
+// were silently dropped.
+describe("remote control × the `ask` provider", () => {
+  const lastOpen = () =>
+    vi.mocked(openWorkspace).mock.calls[vi.mocked(openWorkspace).mock.calls.length - 1][0];
+  const errorToast = (posted: () => OutboundMessage[]) =>
+    posted().find((m) => m.type === "toast" && m.level === "error") as { message: string } | undefined;
+  const ask = (over: Partial<ReturnType<typeof getConfig>> = {}) =>
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" as const, ...over });
+
+  // ── site 1: remoteControlBlocksLaunch ──
+  it("does NOT block a Take with remoteControl on — the session would be Claude Code", async () => {
+    // The Critical defect: this launch was refused outright, with RC_NEEDS_CLAUDE, for
+    // an agent that seedProvider resolves to Claude Code.
+    ask({ remoteControl: "on" });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1); // the launch really happens
+    expect(lastOpen().remoteControl).toBe(true); // …with Remote Control on, as asked
+  });
+
+  it("blocks a Take with remoteControl on exactly as claude-code does — i.e. not at all", async () => {
+    // The equivalence stated directly: same inputs, same outcome, only the setting
+    // differs. If ask ever diverges from claude-code here, this fails.
+    const run = async (agentProvider: "ask" | "claude-code") => {
+      // Both arms run inside one test, so the shared openWorkspace spy has to be
+      // cleared between them — otherwise the second arm counts the first arm's call
+      // and the comparison fails on the harness, not on the behaviour.
+      vi.mocked(openWorkspace).mockClear();
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider, remoteControl: "on" });
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      return { toast: errorToast(posted)?.message, opens: vi.mocked(openWorkspace).mock.calls.length, rc: lastOpen().remoteControl };
+    };
+    expect(await run("ask")).toEqual(await run("claude-code"));
+  });
+
+  // ── site 2: resolveRemoteControl's "ask" short-circuit ──
+  it("still OFFERS the remoteControl picker — it is not a toggle we could only refuse", async () => {
+    // The silent half of the defect: no toast, no error, the toggle simply never
+    // appeared, so an ask user could never turn Remote Control on for a launch.
+    ask({ remoteControl: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
+    const { provider, logged } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1); // the picker appears
+    expect(lastOpen().remoteControl).toBe(true); // and the answer is honoured
+    expect(logged.join("\n")).not.toContain("Remote Control not offered");
+  });
+
+  // ── site 3: resolveRemoteControl's post-resolution refusal ──
+  it("does NOT refuse a one-key batch with remoteControl on", async () => {
+    // takeBatch is the one entry point with no pre-flight predicate, so it reaches the
+    // `on && provider !== "claude-code"` refusal directly.
+    ask({ remoteControl: "on" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1"], ["api"]);
+    expect(errorToast(posted)).toBeUndefined();
+    expect(openWorkspace).toHaveBeenCalledTimes(1);
+    vi.mocked(createWorktrees).mockImplementation((s) => s);
+  });
+
+  // ── site 4: the toast that explains why it didn't happen ──
+  it("blames the agent, not the window count, when the pick drops Remote Control", async () => {
+    // One window WAS opened. `openWorkspace` withheld Remote Control because the user
+    // picked Cursor, so the single-window reason is simply false here.
+    ask({ remoteControl: "on" });
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", workspaceFile: undefined, briefs: [], opened: ["/repos/account-service"],
+      remoteControl: false, provider: "cursor",
+    });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toContain(" Remote Control skipped — it needs Claude Code, and Cursor was picked.");
+    expect(toast.message).not.toContain("single window");
+  });
+
+  it("keeps the single-window reason byte-identical for the case it really describes", async () => {
+    // Claude Code was seeded and Remote Control still didn't apply: the launch opened
+    // more than one window, which is the ONLY thing that message has ever meant.
+    ask({ remoteControl: "on" });
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", workspaceFile: undefined, briefs: [],
+      opened: ["/repos/account-service", "/repos/centaur"],
+      remoteControl: false, provider: "claude-code",
+    });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toContain(" Remote Control skipped — it needs a single window.");
+  });
+
+  // ── the guard rail: copilot and cursor must STILL be refused ──
+  it("still refuses copilot and cursor — the fix must not widen into a free pass", async () => {
+    for (const agentProvider of ["copilot", "cursor"] as const) {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider, remoteControl: "on" });
+      const { provider, posted } = setup();
+      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
+      expect(openWorkspace).not.toHaveBeenCalled();
+    }
+  });
+});
+
+// ── Copy that names an agent, under `ask` ───────────────────────────────────
+// Every one of these templates uses the label as a PRODUCT NAME — "a X agent",
+// "N X sessions", "The X prompt" — so a label that is a phrase rather than a name
+// ("your coding agent") renders as "a your coding agent agent". An earlier revision of
+// this task shipped exactly that, in all six rendered sites, past four green gates,
+// because nothing pinned the copy under `ask`. These are those pins.
+describe("agent-naming copy under the `ask` provider", () => {
+  const ask = (over: Partial<ReturnType<typeof getConfig>> = {}) =>
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" as const, ...over });
+
+  it("names Claude Code in the posted state's agentLabel", async () => {
+    // Feeds two webview templates: "Explore repos with a {agentLabel} agent" and
+    // "…its own {agentLabel} session". Both need a bare product name.
+    ask();
+    const { send, posted } = setup({ authed: true });
+    await send({ type: "ready" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "state", agentLabel: "Claude Code" }));
+  });
+
+  // Task 6 supersedes this one's original form. It used to pin "2 Claude Code
+  // sessions" under `ask`, which was the honest reading while `ask` was inert: nothing
+  // had been picked by the time the confirmation ran, so it named the degraded default.
+  // Now the batch resolves its agent BEFORE confirming, so the confirmation can — and
+  // must — name the agent the user actually picked. The assertion is stronger than the
+  // one it replaces: it proves the picked answer reaches the copy, which the old
+  // "Claude Code" string would have passed with the answer thrown away.
+  it("names the agent the user picked in the batch launch confirmation", async () => {
+    ask({ batchLaunchConfirmThreshold: 1 });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockImplementation(
+      async (_items: unknown, opts?: unknown) =>
+        ((opts as { title?: string } | undefined)?.title === "Which agent?"
+          ? { label: "Cursor", provider: "cursor" }
+          : { shared: false }) as never,
+    );
+    vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      "Launch 2 tasks in parallel? That's 2 Cursor sessions.",
+      { modal: true },
+      "Launch",
+    );
+  });
+
+  it("asks which agent BEFORE confirming, not after", async () => {
+    // The ordering is the whole mechanism: a confirmation raised first could only name
+    // the setting's default, and this is the one path where an agent-naming line runs
+    // ahead of the launch it describes. Asserted on the real call order rather than on
+    // the string alone, so a confirmation that happened to read correctly for some
+    // other reason would not stand in for it.
+    ask({ batchLaunchConfirmThreshold: 1 });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const order: string[] = [];
+    vi.mocked(window.showQuickPick).mockImplementation(async (_items: unknown, opts?: unknown) => {
+      const title = (opts as { title?: string } | undefined)?.title;
+      if (title === "Which agent?") {
+        order.push("agent");
+        return { label: "Cursor", provider: "cursor" } as never;
+      }
+      return { shared: false } as never;
+    });
+    vi.mocked(window.showWarningMessage).mockImplementation(async () => {
+      order.push("confirm");
+      return "Launch" as never;
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    expect(order).toEqual(["agent", "confirm"]);
+  });
+
+  it("confirms nothing when the agent picker is dismissed", async () => {
+    // The other half of asking first: a dismissal now lands before the confirmation,
+    // so the user is never asked to authorise a launch that has already been called off.
+    ask({ batchLaunchConfirmThreshold: 1 });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValue(undefined as never);
+    const { provider, posted } = setup();
+    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(posted().filter((m) => m.type === "toast")).toEqual([]);
+  });
+
+  it("names Claude Code in the brief handed to the agent", async () => {
+    // briefMarkdown renders "_The {agentName} prompt for this task says…_".
+    ask();
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    const planMd = vi.mocked(openWorkspace).mock.calls[0][0].planMd;
+    expect(planMd).toContain("_The Claude Code prompt for this task says");
+    expect(planMd).not.toMatch(/The (your|a|an|the) /i);
+  });
+});
+
+// ── Task 6: the picker's answer, at the call sites ──────────────────────────
+// Task 5 made `openWorkspace` resolve `ask` before anything is created and report the
+// answer on its result. Until these, nothing read that answer: every caller still
+// asked the SETTING what agent it had, which under `ask` says "Claude Code" no matter
+// what the user picked, and a dismissed picker still ran the whole success path.
+describe("the `ask` picker's answer, at the call sites", () => {
+  const ask = (over: Partial<ReturnType<typeof getConfig>> = {}) =>
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" as const, ...over });
+  const toasts = (posted: () => OutboundMessage[]) => posted().filter((m) => m.type === "toast");
+  /** What `openWorkspace` returns when its picker was dismissed: nothing opened,
+   *  nothing written, nothing seeded. */
+  const cancelled = {
+    mode: "per-window" as const, briefs: [], opened: [], remoteControl: false,
+    provider: "claude-code" as const, cancelled: true as const,
+  };
+
+  it("Take reports nothing when the picker is dismissed", async () => {
+    ask();
+    vi.mocked(openWorkspace).mockResolvedValue(cancelled);
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    // Not "no success toast" — no toast at all. Dismissing a picker is not a failure
+    // either, so an error toast would be just as wrong.
+    expect(toasts(posted)).toEqual([]);
+  });
+
+  it("Take records a dismissed picker as cancelled, not as a completed launch", async () => {
+    // The funnel's own reading of the same fact: `false` from launch() is what
+    // take_completed maps to "cancelled", and a launch that reported "launched" here
+    // would claim a session that does not exist.
+    ask();
+    vi.mocked(openWorkspace).mockResolvedValue(cancelled);
+    const { provider } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(trackSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "take_completed", outcome: "cancelled" }),
+    );
+  });
+
+  it("Take's toast names the agent that actually started, not the setting's default", async () => {
+    ask();
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", briefs: [], opened: ["/repos/account-service"], remoteControl: false, provider: "cursor",
+    });
+    const { provider, posted } = setup();
+    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    expect(posted()).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Cursor pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
+  it("Explore reports nothing when the picker is dismissed", async () => {
+    ask({ exploreMode: "knowledge" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    vi.mocked(openWorkspace).mockResolvedValue(cancelled);
+    const { send, posted } = setup();
+    await send({ type: "explore" });
+    expect(toasts(posted)).toEqual([]);
+  });
+
+  it("Explore's toast names the agent that actually started", async () => {
+    ask({ exploreMode: "knowledge" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", briefs: [], opened: ["/repos/account-service"], remoteControl: false, provider: "cursor",
+    });
+    const { send, posted } = setup();
+    await send({ type: "explore" });
+    expect(posted()).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Cursor pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+});
+
 
 // ── capability gating ───────────────────────────────────────────────────────
 // Everything above drives the shipped Jira connector, which declares every optional
@@ -4781,6 +5457,43 @@ describe("notepad", () => {
     expect(call.ticket.url).toBe("");
     expect(call.planMd).toContain("it double-fires");
     expect((notesIn(store)![0] as { lastRunKey?: string }).lastRunKey).toBe(`notepad-fix-the-retry-banner-${id}`);
+  });
+
+  it("leaves no lastRunKey on the note when the agent picker is dismissed", async () => {
+    // The pointer is written after the launch precisely so a cancelled one leaves
+    // nothing pointing at a run that was never created — which only holds if the
+    // cancellation is noticed BEFORE the note is saved.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", briefs: [], opened: [], remoteControl: false, provider: "claude-code", cancelled: true,
+    });
+    const { store, posted, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "it double-fires" });
+    await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+    expect((notesIn(store)![0] as { lastRunKey?: string }).lastRunKey).toBeUndefined();
+    expect((posted as { type: string }[]).filter((m) => m.type === "toast")).toEqual([]);
+  });
+
+  it("names the agent the launch actually seeded in the note's toast", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", briefs: [], opened: ["/repos/account-service"], remoteControl: false, provider: "cursor",
+    });
+    const { store, posted, sendMsg } = mkProvider();
+    await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
+    await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+    expect(posted as { type: string; message?: string }[]).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Cursor pre-seeded — press Enter to start."),
+      }),
+    );
   });
 
   it("carries the note's detail into the seeded prompt, not only into the brief", async () => {

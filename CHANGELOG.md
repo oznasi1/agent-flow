@@ -45,6 +45,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that column agent-signals-only and moved a blocked PR to In review's `fixes needed`
   lane; the README was never updated to match. Corrected in the README and the new guide.
 
+## [0.33.0] — 2026-08-19
+
+### Added
+
+- **`agentFlow.agentProvider` accepts `cursor`.** Seed a task straight into
+  Cursor's chat, or run `cursor-agent` in a terminal. Cursor only — a stored
+  `cursor` value falls back to Claude Code in every other editor, the same way
+  `copilot` already falls back outside VS Code. **Doctor** gains a Cursor group
+  alongside Copilot's.
+- **`agentFlow.agentProvider` accepts `ask`.** Pick the agent per launch instead
+  of fixing one setting. A batch asks once and uses that answer for every task
+  in it; Orchestrator rules and the Deck's unattended seed run with no picker to
+  show, so they always use Claude Code. Under `ask`, **Doctor** shows every
+  agent this host can run rather than guessing at one.
+## [0.32.0] — 2026-08-19
+
+### Added
+
+- **GitLab, wherever the Deck used to mean GitHub.** Set `agentFlow.forge` to
+  `gitlab` and the Deck reads merge requests through the `glab` CLI instead:
+  MR state, pipeline status and mergeability on the cards, the review-requests
+  strip filled from `reviews_for_me`, branch-CI verdicts for an Orchestrator
+  `branch-ci-passed` rule, and — with `agentFlow.reviewWrites` on — approve,
+  comment and request-changes from the expanded row. **Address PR** and **Review
+  with agent** seed a GitLab-flavoured prompt (`glab mr checkout`, "merge
+  request") unless you have written your own, which is always kept. Doctor
+  reports on whichever forge is configured, and names its CLI in every message.
+  Two GitLab facts the Deck cannot invent: there is no "changes requested"
+  state to read back, so arming a flow says that rule can't fire, and
+  `request-changes` posts your message and withdraws any approval you had —
+  disclosed in the confirmation dialog before anything is sent. See
+  [docs/FORGES.md](docs/FORGES.md) for the full list of what differs.
+
+  `agentFlow.forge` ships as `github`, and an existing install is unaffected
+  until you change it.
+
 ## [0.31.0] — 2026-08-19
 
 ### Changed

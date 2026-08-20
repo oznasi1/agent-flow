@@ -6,7 +6,7 @@
 </picture>
 
 <p><strong>A task pool in your sidebar.</strong> Take a Jira ticket and it opens the repos
-that ticket touches, with a coding agent already briefed — Claude Code, or GitHub Copilot.</p>
+that ticket touches, with a coding agent already briefed — Claude Code, Copilot, or Cursor.</p>
 
 [![CI](https://github.com/oznasi1/agent-flow/actions/workflows/ci.yml/badge.svg)](https://github.com/oznasi1/agent-flow/actions/workflows/ci.yml)
 [![VS Marketplace version](https://vsmarketplacebadges.dev/version-short/Oznasi1.oznasi1-agent-flow.svg)](https://marketplace.visualstudio.com/items?itemName=Oznasi1.oznasi1-agent-flow)
@@ -30,9 +30,10 @@ Pick a Jira task → it infers which repos the task touches → opens them as a 
 seeds a task brief and pre-fills your agent with the plan. You land ready to orchestrate,
 not ready to set up.
 
-Which agent is your choice: **Claude Code** by default, or **GitHub Copilot** with
-`agentFlow.agentProvider: copilot` (VS Code only). "The agent" below means whichever
-you configured.
+Which agent is your choice — **Claude Code** by default, **GitHub Copilot** in VS Code,
+**Cursor's** own agent in Cursor, or `ask` to pick per launch
+(`agentFlow.agentProvider`). Your pull requests can come from **GitHub** or **GitLab**
+(`agentFlow.forge`). "The agent" below means whichever one you configured.
 
 ## What it does
 
@@ -115,8 +116,10 @@ prompt modes, and Remote Control.
   Optional: the brief is the guaranteed fallback.
 - An **Atlassian API token** for your Jira Cloud account
   ([create one](https://id.atlassian.com/manage-profile/security/api-tokens)).
-- The **`gh` CLI**, signed in — optional, for the Deck's PR/CI state and review queue.
-  Without it the Deck falls back to git + Jira.
+- Your **forge's CLI**, signed in — `gh` for GitHub, or `glab` when `agentFlow.forge`
+  is `gitlab`. Optional, for the Deck's PR/CI state and review queue; without it the
+  Deck falls back to git + Jira. See [docs/FORGES.md](docs/FORGES.md) for what GitLab
+  cannot answer.
 
 ## Settings
 
@@ -128,14 +131,15 @@ documented in [docs/SETTINGS.md](docs/SETTINGS.md).
 | `agentFlow.jira.baseUrl` | `""` | Your Jira Cloud site, e.g. `https://your-org.atlassian.net`. |
 | `agentFlow.jira.project` | `""` | Jira project key, e.g. `ABC`. |
 | `agentFlow.reposRoot` | `~/projects` | Where your repo checkouts live. |
-| `agentFlow.agentProvider` | `claude-code` | Which agent starts a session. `copilot` works in VS Code only. |
+| `agentFlow.agentProvider` | `claude-code` | Which agent starts a session: `claude-code`, `copilot` (VS Code only), `cursor` (Cursor only), or `ask` to pick per launch. |
 | `agentFlow.agentSurface` | `extension` | The agent's chat panel, or `terminal` for its CLI. |
+| `agentFlow.forge` | `github` | Where your pull requests live: `github` (via `gh`) or `gitlab` (via `glab`). |
 | `agentFlow.openIn` | `ask` | Where a task opens: a new window, this one, or an existing workspace. |
 
 ## Privacy
 
 Agent Flow Deck talks to **your** Jira site, reads your **local** checkouts, and reads
-GitHub through your **existing** `gh` login — nothing about your tickets, code or repos
+your forge through your **existing** `gh` (or `glab`) login — nothing about your tickets, code or repos
 goes anywhere that isn't already yours. Jira credentials live in VS Code
 **SecretStorage**, never in `settings.json`. Both are **read-only by default** — the only
 writes are ones you trigger yourself: a Jira status change from a card, or, with

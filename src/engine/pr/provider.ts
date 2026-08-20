@@ -2,6 +2,10 @@ import { execFile } from "child_process";
 import { PrFacts } from "../../types";
 import { countUnresolved, GhPr, parseRepoFromUrl, pickPr, toPrFacts } from "./facts";
 import { resolveBin } from "./which";
+// `import type`, and it must stay that way: `../forge/types` type-imports
+// `PrProvider` back from this file, so keeping BOTH directions erased is what
+// stops these two modules from becoming a runtime cycle.
+import type { ForgeGap } from "../forge/types";
 
 /** Every field we need, in one call. Verified against gh 2.89.0 — `pr list --json`
  * exposes the same rollup and review fields as `pr view --json`. */
@@ -54,14 +58,12 @@ export interface PrProvider {
 export type Locate = () => string | null;
 const locateGh: Locate = () => resolveBin("gh");
 
-/** Why PR facts are off. `missing`: there was no binary to spawn. `signed-out`:
- * a gh we did find refused `auth status` — no token, or one it could not
- * validate. `detail` is for the log; the Deck shows only the kind. */
-export type GhGap = { kind: "missing" | "signed-out"; detail: string };
-
 /** Is `gh` installed and logged in? Probed once per Deck session; a gap turns PR
- * facts off with a footer note rather than an error. */
-export async function probeGh(run: Runner = execRunner, locate: Locate = locateGh): Promise<GhGap | null> {
+ * facts off with a footer note rather than an error. `ForgeGap` — the seam's own
+ * type, not a per-CLI copy of the same two kinds: every probe answers the same
+ * question, and three structurally identical types were three places for the
+ * `kind` union to drift. */
+export async function probeGh(run: Runner = execRunner, locate: Locate = locateGh): Promise<ForgeGap | null> {
   const gh = locate() ?? "gh";
   try {
     await run(gh, ["auth", "status"], { cwd: process.cwd(), timeoutMs: GH_TIMEOUT_MS });

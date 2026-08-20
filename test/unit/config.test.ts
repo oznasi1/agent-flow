@@ -4,6 +4,10 @@ import * as path from "path";
 import {
   expandHome,
   getConfig,
+  hostProviders,
+  isCursorHost,
+  providerLabel,
+  resolvedProvider,
   DEFAULT_PROMPT_MODES,
   DEFAULT_EXPLORE_PROMPT,
   DEFAULT_EXPLORE_JIRA_TICKET_PROMPT,
@@ -12,7 +16,9 @@ import {
   DEFAULT_EXPLORE_SUPERVISE_PROMPT,
   DEFAULT_EXPLORE_VERIFY_PROMPT,
   DEFAULT_PR_REVIEW_PROMPT,
+  GITLAB_PR_REVIEW_PROMPT,
   DEFAULT_REVIEW_REQUEST_PROMPT,
+  GITLAB_REVIEW_REQUEST_PROMPT,
   DEFAULT_REVIEW_REQUEST_MODES,
   DEFAULT_ENVIRONMENTS,
   DEFAULT_COMMANDS,
@@ -636,6 +642,108 @@ describe("getConfig — agentProvider", () => {
     setConfig({ agentProvider: "codex" });
     expect(getConfig().agentProvider).toBe("claude-code");
   });
+
+  it("keeps cursor in a Cursor host", () => {
+    env.uriScheme = "cursor";
+    setConfig({ agentProvider: "cursor" });
+    expect(getConfig().agentProvider).toBe("cursor");
+  });
+
+  it("degrades cursor to claude-code in VS Code", () => {
+    env.uriScheme = "vscode";
+    setConfig({ agentProvider: "cursor" });
+    expect(getConfig().agentProvider).toBe("claude-code");
+  });
+
+  it("degrades cursor to claude-code in an unrelated host", () => {
+    env.uriScheme = "windsurf";
+    setConfig({ agentProvider: "cursor" });
+    expect(getConfig().agentProvider).toBe("claude-code");
+  });
+
+  it("still degrades copilot to claude-code in Cursor", () => {
+    env.uriScheme = "cursor";
+    setConfig({ agentProvider: "copilot" });
+    expect(getConfig().agentProvider).toBe("claude-code");
+  });
+
+  // `ask` is the one value that is not an agent, so unlike copilot and cursor it has
+  // no host to be wrong in — it must survive every host untouched, or the picker
+  // Task 5 adds would silently never appear for some users.
+  it("passes ask through in every host", () => {
+    for (const scheme of ["cursor", "vscode", "windsurf"]) {
+      env.uriScheme = scheme;
+      setConfig({ agentProvider: "ask" });
+      expect(getConfig().agentProvider).toBe("ask");
+    }
+  });
+});
+
+describe("hostProviders", () => {
+  afterEach(() => {
+    env.uriScheme = "cursor";
+  });
+
+  it("offers Claude Code and Copilot in VS Code", () => {
+    env.uriScheme = "vscode";
+    expect(hostProviders()).toEqual(["claude-code", "copilot"]);
+  });
+
+  it("offers Claude Code and Cursor in Cursor", () => {
+    env.uriScheme = "cursor";
+    expect(hostProviders()).toEqual(["claude-code", "cursor"]);
+  });
+
+  it("offers only Claude Code in an unrelated host", () => {
+    env.uriScheme = "windsurf";
+    expect(hostProviders()).toEqual(["claude-code"]);
+  });
+});
+
+describe("isCursorHost / providerLabel", () => {
+  afterEach(() => {
+    env.uriScheme = "cursor";
+  });
+
+  it("is true only for the cursor scheme", () => {
+    env.uriScheme = "cursor";
+    expect(isCursorHost()).toBe(true);
+    env.uriScheme = "vscode";
+    expect(isCursorHost()).toBe(false);
+    env.uriScheme = "windsurf";
+    expect(isCursorHost()).toBe(false);
+  });
+
+  it("labels every provider", () => {
+    expect(providerLabel("claude-code")).toBe("Claude Code");
+    expect(providerLabel("copilot")).toBe("Copilot");
+    expect(providerLabel("cursor")).toBe("Cursor");
+  });
+});
+
+describe("resolvedProvider", () => {
+  it("resolves ask to claude-code and leaves every real agent alone", () => {
+    expect(resolvedProvider("ask")).toBe("claude-code");
+    expect(resolvedProvider("claude-code")).toBe("claude-code");
+    expect(resolvedProvider("copilot")).toBe("copilot");
+    expect(resolvedProvider("cursor")).toBe("cursor");
+  });
+
+  // Every copy site that names an agent composes providerLabel over resolvedProvider,
+  // so this pair is what keeps that copy grammatical: the surrounding templates use
+  // the label as a product name ("a X agent", "3 X sessions", "The X prompt"), and a
+  // label that is not one breaks all of them. Pinned so nobody reintroduces a phrase.
+  it("always yields a bare product name, never a phrase, for every setting", () => {
+    for (const setting of ["claude-code", "copilot", "cursor", "ask"] as const) {
+      const label = providerLabel(resolvedProvider(setting));
+      expect(["Claude Code", "Copilot", "Cursor"]).toContain(label);
+      expect(label).not.toMatch(/^(your|the|a|an) /i);
+    }
+  });
+
+  it("names Claude Code under ask, which is the agent an inert ask actually seeds", () => {
+    expect(providerLabel(resolvedProvider("ask"))).toBe("Claude Code");
+  });
 });
 
 describe("PR facts settings", () => {
@@ -1012,4 +1120,118 @@ describe("package.json ⇄ config constants", () => {
       expect(md).toContain('"hidden": true');
     },
   );
+});
+
+describe("forge", () => {
+  it("defaults to github", () => {
+    expect(getConfig().forge).toBe("github");
+  });
+
+  it("reads an explicit gitlab", () => {
+    setConfig({ forge: "gitlab" });
+    expect(getConfig().forge).toBe("gitlab");
+  });
+
+  // Validation belongs to resolveForge, which falls back and logs. getConfig's job
+  // is only to report what the user actually wrote.
+  it("passes an unknown value through untouched", () => {
+    setConfig({ forge: "bitbucket" });
+    expect(getConfig().forge).toBe("bitbucket");
+  });
+
+  it("treats an empty string as the default", () => {
+    setConfig({ forge: "" });
+    expect(getConfig().forge).toBe("github");
+  });
+
+  // This is the actual compatibility guarantee: nothing in getConfig() reads
+  // package.json, so a manifest default of "gitlab" would ship silently unless
+  // something pins it. An existing install with no explicit `agentFlow.forge`
+  // gets whatever VS Code's settings UI serves from this manifest default.
+  it("ships a manifest default of github, so an existing install is unaffected", () => {
+    const props = pkg.contributes.configuration.properties as Record<string, { default?: unknown }>;
+    expect(props["agentFlow.forge"].default).toBe("github");
+  });
+});
+
+describe("forge-flavoured prompts", () => {
+  // The placeholders a template actually offers, read off the template itself
+  // rather than hand-typed here — a hand-typed list can quietly assert a
+  // placeholder the template doesn't really contain (DEFAULT_PR_REVIEW_PROMPT's
+  // own doc comment claims {brief} among its placeholders, but the literal
+  // string never uses it; only {key} {summary} {url} {files} actually appear).
+  const placeholdersOf = (s: string): string[] => s.match(/\{[a-zA-Z]+\}/g) ?? [];
+
+  it("keeps the GitHub prompt verbatim on github", () => {
+    expect(getConfig().prReviewPrompt).toBe(DEFAULT_PR_REVIEW_PROMPT);
+    expect(getConfig().prReviewPrompt).toContain("gh pr checkout");
+  });
+
+  it("seeds the GitLab wording on gitlab", () => {
+    setConfig({ forge: "gitlab" });
+    const p = getConfig().prReviewPrompt;
+    expect(p).toBe(GITLAB_PR_REVIEW_PROMPT);
+    expect(p).toContain("glab mr checkout");
+    expect(p).not.toContain("gh pr checkout");
+    expect(p).toContain("merge request");
+  });
+
+  // A user who wrote their own prompt keeps it on either forge: we do not know
+  // better than they do what their prompt should say.
+  it("never clobbers a customized prompt", () => {
+    setConfig({ forge: "gitlab", prReviewPrompt: "my own words" });
+    expect(getConfig().prReviewPrompt).toBe("my own words");
+  });
+
+  // An EXPLICITLY BLANK setting is what clearing this multilineText field in the
+  // VS Code settings UI writes, and it must fall back to the forge's shipped
+  // wording — never seed an empty prompt. `explicitConfigValue` returns `""`
+  // verbatim, so this only holds while the fallback is `||`; with `??` (which
+  // short-circuits on nullish alone) the agent would be launched with no
+  // instructions at all, and nothing downstream would catch it —
+  // `prReviewTemplate` returns its argument unchanged. On github this is the
+  // pre-seam behaviour (`c.get("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT`),
+  // which this branch promises not to change.
+  it.each([
+    ["github", DEFAULT_PR_REVIEW_PROMPT],
+    ["gitlab", GITLAB_PR_REVIEW_PROMPT],
+  ])("falls back to the %s default when the setting is explicitly blank", (forge, expected) => {
+    setConfig({ forge, prReviewPrompt: "" });
+    expect(getConfig().prReviewPrompt).toBe(expected);
+  });
+
+  // Whitespace is not blank: someone who typed spaces wrote something, and the
+  // `||` fallback deliberately does not trim (unlike `nonBlank`, which the mode
+  // resolver uses for picker chrome). Pinned so a later "tidy-up" that adds a
+  // `.trim()` has to argue with a test rather than change behaviour silently.
+  it("keeps a whitespace-only prompt, since the user did write it", () => {
+    setConfig({ prReviewPrompt: "   " });
+    expect(getConfig().prReviewPrompt).toBe("   ");
+  });
+
+  it("preserves every placeholder the GitHub prompt actually offers", () => {
+    setConfig({ forge: "gitlab" });
+    const p = getConfig().prReviewPrompt;
+    for (const ph of placeholdersOf(DEFAULT_PR_REVIEW_PROMPT)) {
+      expect(p).toContain(ph);
+    }
+  });
+
+  it("swaps the first review mode's prompt too, and keeps its placeholders", () => {
+    setConfig({ forge: "gitlab" });
+    const first = getConfig().reviewRequestModes[0].prompt;
+    expect(first).toBe(GITLAB_REVIEW_REQUEST_PROMPT);
+    expect(first).toContain("glab mr checkout");
+    for (const ph of placeholdersOf(DEFAULT_REVIEW_REQUEST_PROMPT)) {
+      expect(first).toContain(ph);
+    }
+  });
+
+  // The legacy reviewRequestPrompt migration path is untouched by forge: a user
+  // who customized it keeps their exact words on gitlab too, same as the
+  // never-clobbers-a-customized-prompt guarantee above for prReviewPrompt.
+  it("keeps a legacy customized reviewRequestPrompt verbatim on gitlab too", () => {
+    setConfig({ forge: "gitlab", reviewRequestPrompt: "my legacy words" });
+    expect(getConfig().reviewRequestModes[0].prompt).toBe("my legacy words");
+  });
 });

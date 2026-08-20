@@ -1,9 +1,10 @@
 import {
-  AgentFlowConfig, DEFAULT_ENVIRONMENTS, DEFAULT_EXPLORE_ACTIONS, DEFAULT_PR_REVIEW_PROMPT,
-  DEFAULT_PROMPT_MODES, DEFAULT_REVIEW_REQUEST_MODES,
+  AgentFlowConfig, DEFAULT_ENVIRONMENTS, DEFAULT_EXPLORE_ACTIONS,
+  DEFAULT_PROMPT_MODES, shippedPrReviewPrompt, shippedReviewRequestModes,
 } from "../config";
 import { PromptMode } from "../types";
 import { CONNECTOR_IDS } from "../tasks/registry";
+import { FORGE_IDS } from "../engine/forge/registry";
 import { SettingsSnapshot, STOCK_PROMPT_MODES, STOCK_REVIEW_MODES, TaskModeProp } from "./events";
 
 /** Collapse an "ask, or a mode id" setting to a shape-only value. A custom id is
@@ -42,7 +43,7 @@ export const EXPLORE_MODES = ["ask", "jiraTicket", "knowledge", "debug", "genera
 export const WORKTREE_MODES = ["ask", "always", "never"] as const;
 export const REMOTE_CONTROL_MODES = ["off", "on", "ask"] as const;
 export const AGENT_SURFACES = ["extension", "terminal"] as const;
-export const AGENT_PROVIDERS = ["claude-code", "copilot"] as const;
+export const AGENT_PROVIDERS = ["claude-code", "copilot", "cursor", "ask"] as const;
 export const DEFAULT_FILTER_VALUES = ["unassigned", "mysprint", "mine", "sprint", "backlog"] as const;
 
 const DEFAULT_ENVIRONMENT_LIST = DEFAULT_ENVIRONMENTS.join(",");
@@ -87,7 +88,14 @@ function modeCounts(
  * assert none of the above leak. */
 export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
   const promptCounts = modeCounts(cfg.promptModes, DEFAULT_PROMPT_MODES);
-  const reviewCounts = modeCounts(cfg.reviewRequestModes, DEFAULT_REVIEW_REQUEST_MODES);
+  // Against the baseline THIS forge shipped, not the GitHub one. Two of the stock
+  // values are forge-flavoured (the PR-review prompt, and the first stock review
+  // mode's prompt), so comparing a GitLab install against the GitHub wording made
+  // `review_modes_overridden: 1` and `pr_review_prompt_customized: true` fire for
+  // the whole GitLab population on a stock install — reporting "the user wrote
+  // their own words" for a user who only picked a forge, which is exactly the
+  // claim docs/TELEMETRY.md says these two fields make.
+  const reviewCounts = modeCounts(cfg.reviewRequestModes, shippedReviewRequestModes(cfg.forge));
   return {
     workspace_mode: enumOrInvalid(cfg.workspaceMode, WORKSPACE_MODES),
     open_in: enumOrInvalid(cfg.openIn, OPEN_IN_MODES),
@@ -95,6 +103,7 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     agent_surface: enumOrInvalid(cfg.agentSurface, AGENT_SURFACES),
     explore_mode: enumOrInvalid(cfg.exploreMode, EXPLORE_MODES),
     task_source: enumOrInvalid(cfg.taskSource, CONNECTOR_IDS),
+    forge: enumOrInvalid(cfg.forge, FORGE_IDS),
     worktree: enumOrInvalid(cfg.worktree, WORKTREE_MODES),
     remote_control: enumOrInvalid(cfg.remoteControl, REMOTE_CONTROL_MODES),
     default_filter: enumOrInvalid(cfg.defaultFilter, DEFAULT_FILTER_VALUES),
@@ -126,7 +135,7 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     // Order-sensitive, and only ever a boolean — environment names are user-authored
     // and never transmitted.
     environments_customized: cfg.environments.join(",") !== DEFAULT_ENVIRONMENT_LIST,
-    pr_review_prompt_customized: cfg.prReviewPrompt !== DEFAULT_PR_REVIEW_PROMPT,
+    pr_review_prompt_customized: cfg.prReviewPrompt !== shippedPrReviewPrompt(cfg.forge),
     review_mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES),
     review_modes_count: cfg.reviewRequestModes.length,
     review_modes_overridden: reviewCounts.overridden,

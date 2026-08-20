@@ -4,15 +4,20 @@
 // waiting forever on something that can never happen.
 import { Condition, Flow, isSettled } from "./model";
 
-/** The two Deck toggles a condition can depend on. */
+/** The Deck toggles and forge fact a condition can depend on. */
 export interface SourceState {
   liveSignal: boolean;
   prFacts: boolean;
+  /** What the configured forge can answer. Plain data, deliberately: this module
+   *  is bundled into the webview and must not import `../forge/`. Absent means a
+   *  fully capable forge — which is GitHub, the default — so every pre-existing
+   *  caller keeps its meaning. */
+  forge?: { changesRequested: boolean };
 }
 
 export interface UnfirableRule {
   edgeId: string;
-  needs: "live-signal" | "pr-facts";
+  needs: "live-signal" | "pr-facts" | "forge-unsupported";
   /** The condition, in the words the drawer uses. */
   label: string;
 }
@@ -27,11 +32,12 @@ const NEEDS_LIVE = new Set<Condition["kind"]>(["agent-ended-turn", "agent-idle-o
  * run, so all of these read a missing entry and stay false forever.
  *
  * `branch-ci-passed` reads no pull request at all, and belongs here anyway: the
- * toggle governs the `gh` PATH, not the PR shape. `deckView.ts` gates its branch-CI
- * fetch on the same `ghReady()` every PR fetch goes through — which folds in the
- * `agentFlow.prFacts` setting AND the `gh auth status` probe — so with PR facts off
- * `CondContext.branchCi` is empty for every pass, every verdict reads `"unknown"`,
- * and a rule of this kind waits forever. Named here so arming SAYS so. */
+ * toggle governs the forge path, not the PR shape. `deckView.ts` gates its branch-CI
+ * fetch on the same `forgeReady()` every PR fetch goes through — which folds in the
+ * `agentFlow.prFacts` setting AND the configured forge's own `probe()` (`gh auth
+ * status` / `glab auth status`) — so with PR facts off `CondContext.branchCi` is
+ * empty for every pass, every verdict reads `"unknown"`, and a rule of this kind
+ * waits forever. Named here so arming SAYS so. */
 const NEEDS_PR = new Set<Condition["kind"]>([
   "pr-merged",
   "ci-passed",
@@ -82,6 +88,12 @@ export function unfirableRules(flow: Flow, sources: SourceState): UnfirableRule[
     if (isSettled(e)) continue;
     const label = LABEL[e.cond.kind];
     if (!sources.prFacts && NEEDS_PR.has(e.cond.kind)) out.push({ edgeId: e.id, needs: "pr-facts", label });
+    // Ordered after pr-facts on purpose: with PR facts off, that is the bigger and
+    // more actionable reason, and reporting both for one edge would list the same
+    // rule in the warning twice.
+    else if (sources.forge?.changesRequested === false && e.cond.kind === "changes-requested") {
+      out.push({ edgeId: e.id, needs: "forge-unsupported", label });
+    }
     else if (!sources.liveSignal && NEEDS_LIVE.has(e.cond.kind)) out.push({ edgeId: e.id, needs: "live-signal", label });
   }
   return out;

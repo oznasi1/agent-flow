@@ -15,10 +15,11 @@
 | `agentFlow.stampLabelOnWrite` | `true` | Whether to stamp the provenance label on a Jira write, and whether a review body submitted from the Deck is marked as agent-drafted (a fixed line, distinct from `agentFlow.provenanceLabel`). |
 | `agentFlow.defaultFilter` | `mysprint` | Default task filter lens (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`). |
 | `agentFlow.seedAgent` | `true` | Pre-fill the agent's panel after opening. |
-| `agentFlow.agentProvider` | `claude-code` | Which agent starts a session. `copilot` uses GitHub Copilot and works **only in VS Code** — in Cursor and other forks a stored `copilot` value falls back to Claude Code. Copilot sessions do not appear as live agents on the Deck (which reads Claude Code's session files), and **Doctor** reports on whichever provider is configured. |
+| `agentFlow.agentProvider` | `claude-code` | Which agent starts a session: `claude-code`, `copilot`, `cursor`, or `ask`. `copilot` uses GitHub Copilot and works **only in VS Code**; `cursor` uses Cursor's built-in agent and works **only in Cursor** — each falls back to Claude Code in the other editor. `ask` prompts you to pick per launch; a **batch** launch asks once and uses that answer for every task in it. Under `ask`, Orchestrator rules and the Deck's unattended seed (a stale plan reopened with no picker to show) use Claude Code, since nothing there can answer a prompt. Neither Copilot nor Cursor sessions appear as live agents on the Deck, which reads Claude Code's session files — and **Doctor** reports rows for whichever provider(s) are actually in play (every host agent, under `ask`). One more gap under `ask`: some briefs are written before the picker runs, and so name Claude Code even when a different agent was actually picked — taking a single task, an Orchestrator child task, and a one-key **batch** that opens its own window (which, being a single launch, resolves inside that launch rather than up front). Briefs are unaffected wherever the answer is known first: a multi-task batch resolves once up front, and a one-key batch landing in a **shared** window resolves before it writes anything. |
 | `agentFlow.agentSurface` | `extension` | Where a session starts: the agent's chat panel, or `terminal` to run its CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter. |
 | `agentFlow.trackOpenWindows` | `true` | Track open windows so a task can open into one you already have open. |
-| `agentFlow.prFacts` | `true` | Read each in-flight task's PR state from GitHub via the `gh` CLI and show it on the Deck's cards. |
+| `agentFlow.forge` | `github` | Which forge holds your pull/merge requests: `github` (via the `gh` CLI) or `gitlab` (via `glab`). Everything that reads a pull request — the cards' PR state, the review strip, review writes, the Orchestrator's branch-CI rule — goes through the one you pick, and **Address PR** / **Review with agent** seed a prompt worded for it. See [docs/FORGES.md](FORGES.md) for what GitLab cannot answer. |
+| `agentFlow.prFacts` | `true` | Read each in-flight task's PR (or merge request) state from your configured forge via its CLI and show it on the Deck's cards. |
 | `agentFlow.openAgents` | `true` | Show every Claude Code session open on this machine on the Deck: as agents on the card that owns their directory, and as a `local` card of its own for a place Agent Flow Deck never launched. Read from `~/.claude/sessions`. |
 | `agentFlow.prFactsTtlSeconds` | `120` | How stale a cached PR fact may be before the Deck re-fetches it (minimum 30). Only fetched while the Deck is open. |
 | `agentFlow.deckGrouping` | `agents` | One card per agent, or per launched task (`workspaces`). |
@@ -28,9 +29,9 @@
 | `agentFlow.retireAbandonedAfterDays` | `7` | How long a ticketless, PR-less, clean run may sit before its record is deleted. `0` disables it. |
 | `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on the sidebar's Tasks card. The Deck gates its own Address PR button on the review column's waiting lane instead — this setting does not affect it. |
 | `agentFlow.prReviewAutoFix` | `true` | After the PR-review agent assesses the PR, let it implement the requested changes (off = assess only). |
-| `agentFlow.reviewRequests` | `true` | Show the Deck's review-requests strip: open GitHub PRs that ask for your review. |
+| `agentFlow.reviewRequests` | `true` | Show the Deck's review-requests strip: open PRs (or merge requests) on your configured forge that ask for your review. |
 | `agentFlow.reviewRequestsTtlSeconds` | `300` | How stale the cached review queue may be before a refetch (minimum 60). |
-| `agentFlow.reviewWrites` | `false` | Allow submitting approve / comment / request changes to GitHub from the Deck. |
+| `agentFlow.reviewWrites` | `false` | Allow submitting approve / comment / request changes to your configured forge from the Deck. On GitLab, request changes posts your message and withdraws any approval you had — GitLab has no such review state — and the confirmation dialog says so. |
 | `agentFlow.reviewRequestModes` | *(one built-in mode)* | Seed modes offered by **Review with agent**, layered over the built-in one. Add your own — e.g. separate backend and frontend review modes — and clicking asks which to use. |
 | `agentFlow.reviewRequestMode` | `ask` | Pin one review mode by `id` to skip the question. |
 | `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow Deck opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
@@ -109,13 +110,15 @@ this off.
 
 Three settings answer three different questions. `agentFlow.openIn` decides **which
 window** a task lands in. `agentFlow.agentProvider` decides **which agent** starts the
-session — Claude Code, or Copilot in VS Code. `agentFlow.agentSurface` decides **what
-starts the session** once it's there:
+session — Claude Code, Copilot in VS Code, Cursor in Cursor, or `ask` to pick per
+launch. `agentFlow.agentSurface` decides **what starts the session** once it's there:
 
 - `extension` (default) — the agent's chat panel, prompt pre-filled: the Claude Code
-  panel, or Copilot Chat in agent mode when `agentFlow.agentProvider` is `copilot`.
-- `terminal` — an integrated terminal named `Claude · <KEY>` (or `Copilot · <KEY>`)
-  running the agent's CLI (`claude`, or `copilot`), prompt pre-typed.
+  panel, Copilot Chat in agent mode when `agentFlow.agentProvider` resolves to
+  `copilot`, or Cursor's chat when it resolves to `cursor`.
+- `terminal` — an integrated terminal named `Claude · <KEY>` (or `Copilot · <KEY>` /
+  `Cursor · <KEY>`) running the agent's CLI (`claude`, `copilot`, or `cursor-agent`),
+  prompt pre-typed.
 
 Either way you press Enter to start, and both work for every launch path: taking a
 task, batch launches, Explore, Notepad, and **Address PR** — with one exception. A

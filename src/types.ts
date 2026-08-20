@@ -355,10 +355,22 @@ export interface ReviewRequest {
   draftPath: string | null; // .pick-task/REVIEW-<n>.md, once the agent writes it
 }
 
-/** What expanding a row adds — the two things the search cannot return. */
+/** What expanding a row adds — the facts the search cannot return. */
 export interface ReviewDetail {
   failing: PrCheck[];
   unresolved: number | null;
+  /** Diff size, for a forge whose search cannot carry it. Absent on GitHub, whose
+   * search already filled `ReviewRequest.additions`/`deletions`/`changedFiles`;
+   * `null` when the call failed. GitLab's REST API exposes no additions/deletions
+   * aggregate, so its `additions` and `deletions` are 0 and only `changedFiles`
+   * is real — see docs/FORGES.md. */
+  size?: { additions: number; deletions: number; changedFiles: number } | null;
+  /** CI verdict, for a forge whose queue call cannot carry one. Absent on GitHub,
+   * whose search already filled `ReviewRequest.ci`; on GitLab the MR list sends no
+   * pipeline field at all, so the chip starts as `"none"` and this — read off the
+   * single-MR GET `detail` already makes — is the only thing that can correct it.
+   * Optional, so no other forge's `ReviewDetail` has to invent a value. */
+  ci?: ReviewRequest["ci"];
 }
 
 // ── The Marketplace: local asset browser ────────────────────────────────────

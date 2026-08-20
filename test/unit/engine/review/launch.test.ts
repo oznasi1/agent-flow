@@ -15,7 +15,7 @@ const req: ReviewRequest = {
 
 const deps = (over = {}) => ({
   createWorktrees: vi.fn((services) => services.map((s: { name: string; path: string }) => ({ ...s, path: `${s.path}/.claude/worktrees/review-aws-ops-8491` }))),
-  openWorkspace: vi.fn(async (_req: OpenRequest): Promise<OpenResult> => ({ mode: "per-window", briefs: [], opened: ["/w"], remoteControl: false })),
+  openWorkspace: vi.fn(async (_req: OpenRequest): Promise<OpenResult> => ({ mode: "per-window", briefs: [], opened: ["/w"], remoteControl: false, provider: "claude-code" })),
   log: vi.fn(),
   ...over,
 });
@@ -57,10 +57,14 @@ describe("renderReviewTemplate", () => {
 });
 
 describe("launchReview", () => {
-  it("refuses a request with no local checkout", async () => {
+  // The wording is forge-neutral on purpose: this refusal is routinely reached on
+  // the GitLab path too (a request for your review may live in a project you have
+  // never cloned), and it used to name GitHub, which sent a GitLab user to the
+  // wrong site. `launchReview` has no forge in scope and does not need one.
+  it("refuses a request with no local checkout, without naming a forge", async () => {
     const d = deps();
     const out = await launchReview({ req: { ...req, localPath: null }, template: "t", workspaceDir: "/ws", seedAgent: true }, d);
-    expect(out).toEqual({ ok: false, message: "aws-ops isn't checked out under your repos root — open the PR on GitHub instead." });
+    expect(out).toEqual({ ok: false, message: "aws-ops isn't checked out under your repos root — open it in your browser instead." });
     expect(d.createWorktrees).not.toHaveBeenCalled();
   });
 
@@ -83,7 +87,9 @@ describe("launchReview", () => {
   it("opens the worktree as a review run with the PR as its url", async () => {
     const d = deps();
     const out = await launchReview({ req, template: "Review {repo}#{number}", workspaceDir: "/ws", seedAgent: true }, d);
-    expect(out).toEqual({ ok: true, runKey: "review-aws-ops-8491" });
+    // `provider` is the field Task 6 added to the success arm: the agent openWorkspace
+    // actually seeded, straight off its result — here, deps()'s default "claude-code".
+    expect(out).toEqual({ ok: true, runKey: "review-aws-ops-8491", provider: "claude-code" });
     const arg = d.openWorkspace.mock.calls[0][0];
     expect(arg.kind).toBe("review");
     expect(arg.ticket).toEqual({
@@ -165,5 +171,34 @@ describe("resolveReviewMode", () => {
     expect(resolveReviewMode([backend], "ask")).toBe(backend);
     expect(resolveReviewMode([backend], "nonsense")).toBe(backend);
     expect(resolveReviewMode([backend], "backend")).toBe(backend);
+  });
+});
+
+// ── the `ask` picker, from the review path (Task 6) ─────────────────────────
+// A review launch is user-initiated, so it goes through openWorkspace's picker like
+// any other. Both of its answers have to reach the caller: a dismissal is not a
+// failure and must not be toasted as one, and a real choice is what the success toast
+// has to name — the setting says "ask", so it can name nothing on its own.
+describe("launchReview under `ask`", () => {
+  it("reports a dismissed picker as cancelled, with no failure message", async () => {
+    const d = deps({
+      openWorkspace: vi.fn(async (_req: OpenRequest): Promise<OpenResult> => ({
+        mode: "per-window", briefs: [], opened: [], remoteControl: false, provider: "claude-code", cancelled: true,
+      })),
+    });
+    const out = await launchReview({ req, template: "t", workspaceDir: "/ws", seedAgent: true }, d);
+    // Not `{ ok: false, message: … }`: the caller distinguishes these two, and an
+    // empty-string message would still be a failure the Deck has to decide about.
+    expect(out).toEqual({ ok: false, cancelled: true });
+  });
+
+  it("reports the agent that was actually seeded, not the one it asked for", async () => {
+    const d = deps({
+      openWorkspace: vi.fn(async (_req: OpenRequest): Promise<OpenResult> => ({
+        mode: "per-window", briefs: [], opened: ["/w"], remoteControl: false, provider: "cursor",
+      })),
+    });
+    const out = await launchReview({ req, template: "t", workspaceDir: "/ws", seedAgent: true }, d);
+    expect(out).toEqual({ ok: true, runKey: "review-aws-ops-8491", provider: "cursor" });
   });
 });

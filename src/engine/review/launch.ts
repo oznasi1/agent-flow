@@ -47,15 +47,35 @@ export interface LaunchReviewDeps {
   log: (m: string) => void;
 }
 
+/** What a review launch answers with. Three cases, not two: a dismissed `ask` picker
+ *  is neither a success nor a failure. Giving it its own arm — rather than a
+ *  `{ ok: false }` carrying an empty message — is what lets the caller stay SILENT
+ *  about it; a message field, empty or not, is something the Deck would have to decide
+ *  whether to show, and every wrong answer to that reports the user's own Escape key
+ *  as something going wrong.
+ *
+ *  `provider` on the success arm is the agent that was actually seeded, straight off
+ *  `OpenResult`. The caller's toast names it: under `ask` the setting names nobody, so
+ *  this is the only place the answer exists. Typed through `OpenResult` so this module
+ *  keeps its distance from `config.ts` (which imports `vscode`). */
+export type LaunchReviewResult =
+  | { ok: true; runKey: string; provider: OpenResult["provider"] }
+  | { ok: false; cancelled: true }
+  | { ok: false; message: string };
+
 /** Open a teammate's PR in its own worktree with a review agent seeded. Always a
  * worktree and always one window: a review is a side errand, and it must not
  * disturb whatever the main checkout is in the middle of. */
 export async function launchReview(
   { req, template, workspaceDir, seedAgent }: LaunchReviewRequest,
   deps: LaunchReviewDeps,
-): Promise<{ ok: true; runKey: string } | { ok: false; message: string }> {
+): Promise<LaunchReviewResult> {
   if (!req.localPath) {
-    return { ok: false, message: `${req.repoName} isn't checked out under your repos root — open the PR on GitHub instead.` };
+    // Forge-neutral wording, and routinely reached on either forge: a request for
+    // your review may live in a project you have never cloned, which is exactly
+    // when `localPath` is null. Naming GitHub here sent a GitLab user to the wrong
+    // site; the row's own link already knows where the request lives.
+    return { ok: false, message: `${req.repoName} isn't checked out under your repos root — open it in your browser instead.` };
   }
   const key = reviewRunKey(req.repoName, req.number);
   const summary = `Review ${req.repoName}#${req.number}: ${req.title}`;
@@ -69,14 +89,16 @@ export async function launchReview(
   const services = deps.createWorktrees([base], key, req.title, deps.log);
   // createWorktrees falls back to the main checkout when it cannot create a worktree.
   // For an ordinary task that is merely inconvenient; here the seeded prompt scripts a
-  // real `gh pr checkout`, so proceeding would switch the user's OWN checkout to a
-  // teammate's branch. Refuse: an un-launched review costs a click, a hijacked checkout
-  // can cost work in progress.
+  // real checkout of the request's branch (`gh pr checkout` / `glab mr checkout`,
+  // depending on the configured forge), so proceeding would switch the user's OWN
+  // checkout to a teammate's branch. Refuse: an un-launched review costs a click, a
+  // hijacked checkout can cost work in progress.
   if (services.some((s) => s.path === base.path)) {
     return { ok: false, message: `Couldn't create a git worktree in ${req.repoName} — not reviewing ${req.repoName}#${req.number} in your main checkout. The Agent Flow Deck output channel has the reason.` };
   }
+  let result: OpenResult;
   try {
-    await deps.openWorkspace({
+    result = await deps.openWorkspace({
       ticket: { key, summary, url: req.url },
       kind: "review",
       planMd: `## Review: ${req.repo}#${req.number}\n\n${req.title}\n\nOpened by @${req.author}. ${req.url}`,
@@ -90,5 +112,12 @@ export async function launchReview(
   } catch (e) {
     return { ok: false, message: `Couldn't open a review worktree for ${req.repoName}#${req.number}: ${e}` };
   }
-  return { ok: true, runKey: key };
+  // The user dismissed the agent picker. openWorkspace resolves it before anything is
+  // created, so there is no window, no brief and no plan to report on — and no run
+  // either, which is why this returns before the runKey the caller would go looking
+  // for one with. The worktree above is already made; that is the existing cost of
+  // this path's ordering (createWorktrees comes first by design, so a `gh pr checkout`
+  // can never land in the main checkout) and a retry reuses it.
+  if (result.cancelled) return { ok: false, cancelled: true };
+  return { ok: true, runKey: key, provider: result.provider };
 }

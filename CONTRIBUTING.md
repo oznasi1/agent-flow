@@ -39,7 +39,7 @@ src/
 ├── notepad.ts          # the Notepad's globalState store + run-status derivation
 ├── deckView.ts         # the Deck panel: in-flight runs, live signal, open/diff
 ├── marketplaceView.ts  # the Marketplace panel: scan, file reads, open/reveal/copy
-├── doctorView.ts       # the Doctor report: Jira + gh + agent-provider probes
+├── doctorView.ts       # the Doctor report: Jira + forge CLI + agent-provider probes
 ├── config.ts           # settings accessor
 ├── types.ts            # shared host ↔ webview message types
 ├── tasks/              # the task source, behind one connector interface
@@ -54,8 +54,9 @@ src/
 │   ├── runs.ts         # what you've launched, for the Deck
 │   ├── transcript.ts   # best-effort live agent state from ~/.claude/projects
 │   ├── sessions.ts     # Claude Code's own registry of running sessions
-│   ├── pr/             # PR facts + the review queue, over the `gh` CLI
-│   ├── review/         # "Review with agent": search, sort, launch, store
+│   ├── forge/          # which forge is active, behind one interface (docs/FORGES.md)
+│   ├── pr/             # PR/MR facts per repo, over `gh` — and `pr/glab/` over `glab`
+│   ├── review/         # the review queue + "Review with agent": search, sort, launch, store
 │   ├── claudeAssets.ts # scan ~/.claude: marketplaces, plugins, skills, commands, hooks
 │   ├── sections.ts     # the Marketplace's category order (Yours → size → Uncategorized)
 │   ├── fuzzy.ts        # the ranked fuzzy match behind the Marketplace's search
@@ -71,6 +72,12 @@ them — see [docs/CONNECTORS.md](docs/CONNECTORS.md). Jira auth is behind `Jira
 ships the API-token provider; the OAuth web-flow provider (a
 `vscode.AuthenticationProvider` that opens the browser) drops in later with no changes to
 the client or UI.
+
+The forge sits behind a seam of the same kind — `Forge` in `engine/forge/types.ts`,
+selected by `agentFlow.forge` — so nothing outside `engine/forge/` and its two provider
+directories knows whether a pull request came from `gh` or `glab`. A forge that can't
+answer something degrades in a stated way rather than faking an answer;
+[docs/FORGES.md](docs/FORGES.md) lists what those are.
 
 The agent seed is one chokepoint in `engine/workspace.ts` that every launch path — take,
 batch, Explore, Notepad, Deck relaunch, Address PR, Review with agent — goes through. It
@@ -94,6 +101,12 @@ on disk.
   reaches for each connector's factory, and `provider.ts` type-imports `TaskDetail`
   from the Jira client that still declares it.
   To add a source, see [docs/CONNECTORS.md](docs/CONNECTORS.md).
+- **Forges are pluggable too.** GitHub is the default forge, not a hardwired dependency.
+  Anything reading pull/merge requests, branch CI or review requests goes through the
+  `Forge` seam in `src/engine/forge/types.ts`, selected by `agentFlow.forge` — never
+  `src/engine/pr/glab/` or the `gh`-only providers directly. `src/engine/forge/*` imports
+  `child_process` and must never be reachable from webview code. To add a forge, see
+  [docs/FORGES.md](docs/FORGES.md).
 - **Tests.** Add or update tests for any behavior change; coverage thresholds are enforced by
   `npm run test:cov`. The `vscode` module is mocked in `test/_mocks/vscode.ts`.
 - **Type safety.** Keep `npm run typecheck` clean.
