@@ -127,6 +127,16 @@ publishing to the Marketplace:
    heading, and bump `version` in `package.json`.
 4. `npm run package` and `vsce publish`.
 
+## Code of conduct
+
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). By participating you
+agree to uphold it.
+
+## Reporting a security problem
+
+Not in a public issue, please — see [SECURITY.md](SECURITY.md), which also says what is in
+scope and what is deliberately not.
+
 ## License
 
 By contributing, you agree that your contributions are licensed under the [MIT License](LICENSE).

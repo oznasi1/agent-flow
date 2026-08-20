@@ -1,0 +1,64 @@
+name: Feature request
+description: Suggest something Agent Flow Deck should do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful requests describe the **workflow that is currently awkward**, not
+        just the feature. What you were trying to get done tells us more than what button
+        you think is missing — there may already be a setting, or a better shape.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: The situation you keep hitting, and what you do about it today.
+      placeholder: >
+        I review PRs across four repos. Every morning I open the Deck, read the review
+        queue, and copy each PR number by hand into a separate terminal.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like instead
+      description: A rough shape is fine. If you have an idea of where it would live in the UI, say so.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area
+      options:
+        - Tasks (the sidebar task pool)
+        - Notepad
+        - The Deck (in-flight board)
+        - The Deck — review queue
+        - The Deck — Orchestrator drawer
+        - The Marketplace
+        - Task sources / connectors (Jira, and others)
+        - Agent providers and how sessions start
+        - Settings and configuration
+        - Something else
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you have already tried
+      description: >
+        Existing settings you looked at, or workarounds you are using. If you checked
+        [docs/SETTINGS.md](https://github.com/oznasi1/agent-flow/blob/HEAD/README.md#settings)
+        and found nothing that fits, saying so is useful.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I searched existing issues for this idea.
+          required: true
