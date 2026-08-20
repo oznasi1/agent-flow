@@ -1,0 +1,125 @@
+name: Bug report
+description: Something in Agent Flow Deck does not behave the way it says it does.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing this. The fastest fix comes from a **Doctor report** — run the
+        **Doctor** command from the Command Palette (it is listed as just "Doctor") and use
+        its copy action, then paste it below. It probes Jira and `gh` for real rather than only reading config,
+        so it catches a revoked token instead of reporting it as a network problem.
+
+        Please redact your Jira site, ticket keys and repo names. They are never needed to
+        reproduce a bug.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you got instead.
+      placeholder: |
+        1. Filtered the repo lens to one repo
+        2. Ticked three tasks and pressed Launch in parallel
+        3. Expected three worktrees; got one window with no agent seeded
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where
+      description: Which part of the extension.
+      options:
+        - Tasks (the sidebar task pool)
+        - Notepad
+        - The Deck (in-flight board)
+        - The Deck — review queue
+        - The Deck — Orchestrator drawer
+        - The Marketplace
+        - First-run setup / Doctor
+        - Taking a task / opening a workspace
+        - Somewhere else, or not sure
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Agent Flow Deck version
+      description: Extensions view → Agent Flow Deck. Please check this is the latest before filing.
+      placeholder: "0.33.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: editor
+    attributes:
+      label: Editor
+      options:
+        - VS Code
+        - Cursor
+        - Another VS Code fork
+    validations:
+      required: true
+
+  - type: input
+    id: editor-version
+    attributes:
+      label: Editor version
+      description: Help → About, or `code --version`.
+      placeholder: "1.104.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: agentFlow.agentProvider
+      description: Which agent is configured to start sessions.
+      options:
+        - claude-code (default)
+        - copilot
+        - cursor
+        - ask
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface-setting
+    attributes:
+      label: agentFlow.agentSurface
+      options:
+        - extension (default) — the agent's chat panel
+        - terminal — the agent's CLI
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor report
+      description: Command Palette → run **Doctor**, then use its copy action.
+      render: text
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output channel
+      description: >
+        View → Output → **Agent Flow Deck**. Paste anything relevant, especially if the
+        problem involves `gh`, Jira, or an agent that did not get seeded.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I am on the latest published version, and the problem still happens.
+          required: true
+        - label: I searched existing issues.
+          required: true
+        - label: I removed my Jira site, ticket keys and repo names from everything pasted above.
+          required: true

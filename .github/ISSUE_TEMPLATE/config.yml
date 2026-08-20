@@ -1,0 +1,7 @@
+# Blank issues stay enabled: there is no Discussions tab to send questions to, so an
+# odd case needs somewhere to land that is not a form built for something else.
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/oznasi1/agent-flow/security/advisories/new
+    about: Report privately, never as a public issue. SECURITY.md says what is in scope.

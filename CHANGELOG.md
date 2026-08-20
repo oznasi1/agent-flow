@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Community health files.** `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1),
+  `SECURITY.md`, GitHub issue forms for bugs and feature requests, and a pull request
+  template. The security policy states scope explicitly, including what is deliberately
+  *out* of scope — notably that `{note}` substitution in Orchestrator commands is unquoted
+  by design and documented as such, so it is not a vulnerability report. Reporting for both
+  conduct and security goes through GitHub's private advisory form; no email address is
+  published.
+
+
 ## [0.33.0] — 2026-08-19
 
 ### Added
