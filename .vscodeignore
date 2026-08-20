@@ -8,6 +8,7 @@ docs/**
 scripts/**
 .github/**
 .claude/**
+.pick-task/**
 .superpowers/**
 esbuild.js
 tsconfig.json

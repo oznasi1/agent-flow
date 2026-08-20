@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The packaged `.vsix` could ship a task brief.** `.vscodeignore` excluded
+  `.claude/` but never `.pick-task/`, the directory Agent Flow writes task briefs into.
+  Any release packaged while a brief happened to be on disk carried it into the published
+  extension — the note or ticket title, the repos in scope, and the brief's prose — which
+  contradicts the promise that briefs stay local. Published versions to date are unaffected
+  (no brief existed on disk when they were built), but the next one would have been.
+
 - **The logo was invisible on the Marketplace.** The header's `<picture>` kept the
   light-background wordmark in a `<source>` and the white one as the `<img>` fallback. The
   Marketplace strips `<picture>` and `<source>` outright and its listing page is always
