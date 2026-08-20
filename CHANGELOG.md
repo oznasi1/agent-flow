@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.2] — 2026-08-20
+
+### Fixed
+
+- **The logo was invisible in VS Code's extension page.** 0.33.1 fixed a white wordmark on
+  the Marketplace's white listing by making the dark-background lockup the `<img>`
+  fallback — which broke the mirror-image case, because VS Code's own extension page
+  ignores `<picture>` too *and* follows your editor theme. On a dark theme it took that
+  fallback and drew a near-black wordmark on near-black.
+
+  No single themed asset can serve both: `#F0F2F4` is 1.12:1 on white and `#16191C` is
+  1.07:1 on dark. So the fallback is now a third, theme-neutral lockup
+  (`media/logo-neutral.png`, graphite `#808A94`) that clears 3:1 on every ground we
+  actually render against — 3.51 on white, 4.69 on VS Code dark, 5.39 on GitHub dark —
+  while GitHub keeps both optimised per-theme lockups through its `<source>` elements.
+
 ## [0.33.1] — 2026-08-20
 
 ### Added
