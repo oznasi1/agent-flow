@@ -7,7 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-
 ### Added
 
 - **One-click install, and a header that acts.** The README's badge row was three static
@@ -25,7 +24,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by design and documented as such, so it is not a vulnerability report. Reporting for both
   conduct and security goes through GitHub's private advisory form; no email address is
   published.
-
 
 ### Fixed
 
@@ -55,7 +53,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.33.0] — 2026-08-19
 
-
 ### Added
 
 - **`agentFlow.agentProvider` accepts `cursor`.** Seed a task straight into
@@ -69,7 +66,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   show, so they always use Claude Code. Under `ask`, **Doctor** shows every
   agent this host can run rather than guessing at one.
 ## [0.32.0] — 2026-08-19
-
 
 ### Added
 
@@ -92,7 +88,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   until you change it.
 
 ## [0.31.0] — 2026-08-19
-
 
 ### Changed
 
@@ -125,7 +120,6 @@ older local install.
 
 ## [0.30.0] — 2026-08-18
 
-
 ### Changed
 
 - **A ticket with children offers to work them, without a setting to turn on
@@ -137,7 +131,6 @@ older local install.
   behaviour for every ticket.
 
 ## [0.29.0] — 2026-08-18
-
 
 ### Changed
 
@@ -159,7 +152,6 @@ older local install.
 
 ## [0.28.0] — 2026-08-18
 
-
 ### Fixed
 
 - **A merged run leaves Action required.** A card whose PRs have all landed
@@ -173,7 +165,6 @@ older local install.
   waiting on you is the more urgent of the two.
 
 ## [0.27.0] — 2026-08-18
-
 
 ### Changed
 
@@ -200,7 +191,6 @@ older local install.
 
 ## [0.26.0] — 2026-08-17
 
-
 ### Added
 
 - **Child worktrees for a ticket that has them.** Off by default — turn on
@@ -214,7 +204,6 @@ older local install.
 
 ## [0.25.0] — 2026-08-17
 
-
 ### Changed
 
 - **A worktree's workspace folder now leads with its service.** A root pointing at
@@ -227,7 +216,6 @@ older local install.
   already on disk are untouched.
 
 ## [0.24.0] — 2026-08-17
-
 
 ### Added
 
@@ -251,7 +239,6 @@ older local install.
   failing check. An unapproved but otherwise clean PR now correctly offers
   nothing: it is not a PR with a problem.
 
-
 ### Changed
 
 - **A stuck agent no longer reads as an idle one.** Two new states join the card's
@@ -262,7 +249,6 @@ older local install.
   `idle`, the calmest tone on the board, on exactly the cards most in need of
   attention. Both now route to Action required, so expect one or two cards to move
   there on upgrade.
-
 
 ### Fixed
 
@@ -275,7 +261,6 @@ older local install.
 
 ## [0.23.1] — 2026-08-17
 
-
 ### Fixed
 
 - **The card drawer no longer scrolls sideways.** Selecting a notepad card put
@@ -287,7 +272,6 @@ older local install.
   ellipsizes at half the header, and the drawer scrolls on the vertical axis only.
 
 ## [0.23.0] — 2026-08-16
-
 
 ### Changed
 
@@ -312,7 +296,6 @@ older local install.
 
 ## [0.22.0] — 2026-08-16
 
-
 ### Added
 
 - **Ready to merge is its own lane.** A PR that is approved, green and
@@ -326,7 +309,6 @@ older local install.
   nothing new is fetched.
 
 ## [0.21.4] — 2026-08-15
-
 
 ### Changed
 
@@ -343,7 +325,6 @@ older local install.
 
 ## [0.21.3] — 2026-08-15
 
-
 ### Fixed
 
 - **A repo the ticket merely mentions is no longer treated as scope.** The task brief
@@ -357,7 +338,6 @@ older local install.
 
 ## [0.21.2] — 2026-08-15
 
-
 ### Changed
 
 - **Marketplace discoverability.** The extension now lists itself under the **AI**
@@ -368,7 +348,6 @@ older local install.
   name, so the previous seven left most searches unreachable. No behaviour changes.
 
 ## [0.21.1] — 2026-08-15
-
 
 ### Fixed
 
@@ -384,7 +363,6 @@ older local install.
 
 ## [0.21.0] — 2026-08-14
 
-
 ### Added
 
 - **A note's description takes images.** Paste a screenshot into the detail
@@ -399,7 +377,6 @@ older local install.
   storage, never in the note record itself.
 
 ## [0.20.0] — 2026-08-14
-
 
 ### Fixed
 
@@ -425,7 +402,6 @@ older local install.
 
 ## [0.19.3] — 2026-08-13
 
-
 ### Changed
 
 - **Development tooling only, with no change to the extension itself.** The
@@ -437,7 +413,6 @@ older local install.
   The replacement is now a function, whose return value is inserted verbatim.
 
 ## [0.19.2] — 2026-08-13
-
 
 ### Fixed
 
@@ -453,7 +428,6 @@ older local install.
 
 ## [0.19.1] — 2026-08-13
 
-
 ### Fixed
 
 - **An Action required card puts its accent on Address PR, not Open.** A card
@@ -464,7 +438,6 @@ older local install.
   and Open keeps it everywhere else.
 
 ## [0.19.0] — 2026-08-13
-
 
 ### Changed
 
@@ -481,7 +454,6 @@ older local install.
 
 ## [0.18.0] — 2026-08-13
 
-
 ### Added
 
 - **Notepad sections.** Notes can be grouped under sections you create,
@@ -491,7 +463,6 @@ older local install.
   another section's note, or onto a section's own header, to refile it there.
 
 ## [0.17.3] — 2026-08-13
-
 
 ### Fixed
 
@@ -510,14 +481,12 @@ older local install.
 
 ## [0.17.1] — 2026-08-13
 
-
 ### Fixed
 
 - **Take button height matches its neighbors.** It had no explicit height and
   rendered slightly shorter than Address PR and the sprint-remove control.
 
 ## [0.17.0] — 2026-08-13
-
 
 ### Changed
 
@@ -526,7 +495,6 @@ older local install.
   collapses into a new **Recently closed** strip below the board and retires on its
   own after `agentFlow.retireClosedAfterHours` (default 24). Set
   `agentFlow.inflightShowAll` to `true` for the previous behaviour.
-
 
 ### Fixed
 
@@ -538,13 +506,11 @@ older local install.
 
 ## [0.16.0] — 2026-08-12
 
-
 ### Changed
 
 - **A task's diff says which repo you are looking at.** The multi-file diff editor lists files flat, so on a task spanning repos nothing on screen named the repo whose file was open — the tab said only `Changes in ASM-1`. It now names the scope: `Changes in ASM-1 — svc` for one repo, the workspace's own name for a whole multi-root task, `all repos` otherwise. Diffing a task that spans repos asks which one first, with **All repos** as the first answer; a single-repo task, or a card already acting on one repo, still opens straight into the diff.
 
 ## [0.15.2] — 2026-08-12
-
 
 ### Fixed
 
@@ -552,13 +518,11 @@ older local install.
 
 ## [0.15.1] — 2026-08-12
 
-
 ### Changed
 
 - **The README's Notepad screenshot matches the shipping panel again.** It was shot before drag-to-reorder landed, so it showed neither the per-note grip nor today's filter row. The section also documents the reordering it now pictures, and the image is centred like the panel shot at the top of the page.
 
 ## [0.15.0] — 2026-08-12
-
 
 ### Added
 
@@ -569,20 +533,17 @@ older local install.
 
 ## [0.14.0] — 2026-08-12
 
-
 ### Added
 
 - **A ticket's type, on its card.** Every card in the Tasks list now carries a small coloured glyph before its key saying what the ticket is — story, epic, task, sub-task or bug — so a list can be scanned for the bug or the epic without opening anything. A type the project defined for itself (a spike, an incident, a renamed default) gets a neutral glyph and is named in full in the tooltip, so no card is ever left unmarked. Bug takes a muted red rather than the alarm red: an ordinary bug ticket is not a failure.
 
 ## [0.13.3] — 2026-08-12
 
-
 ### Added
 
 - **Notepad: drag to reorder.** Each note has a grip — drag it to put the list in the order you want. The order is yours, persists across reloads, and applies under every filter; "Reset order" puts the list back to newest-first. A notepad you never drag looks exactly as it did.
 
 ## [0.13.2] — 2026-08-12
-
 
 ### Fixed
 
@@ -594,7 +555,6 @@ older local install.
   seeds exactly the prompt it did before.
 
 ## [0.13.1] — 2026-08-12
-
 
 ### Fixed
 
@@ -610,7 +570,6 @@ older local install.
 
 ## [0.13.0] — 2026-08-11
 
-
 ### Added
 
 - **A card names the workspace its session runs in.** A Claude Code session opened inside
@@ -619,7 +578,6 @@ older local install.
   belongs to one card, behind a single chip that unfolds its repo chips, with their diff
   and dirty markers, on hover, keyboard focus or click. A single-repo task's card is
   unchanged.
-
 
 ### Fixed
 
@@ -634,7 +592,6 @@ older local install.
 
 ## [0.12.1] — 2026-08-10
 
-
 ### Fixed
 
 - **A notepad card no longer shows a pull request that is not its own.** A notepad run is
@@ -646,7 +603,6 @@ older local install.
 
 ## [0.12.0] — 2026-08-10
 
-
 ### Changed
 
 - **"This window" no longer asks which repos the task touches.** Choosing it already says
@@ -657,7 +613,6 @@ older local install.
   where the window loses its folders between the destination pick and the launch.
 
 ## [0.11.2] — 2026-08-10
-
 
 ### Changed
 
@@ -678,7 +633,6 @@ older local install.
 No code changed in this release; only `media/screenshot.png` and `media/notepad.png`.
 
 ## [0.11.1] — 2026-08-09
-
 
 ### Changed
 
@@ -704,7 +658,6 @@ No code changed in this release.
 
 ## [0.11.0] — 2026-08-09
 
-
 ### Changed
 
 - **The In-flight header is information again.** It was one non-wrapping row of a
@@ -725,7 +678,6 @@ No code changed in this release.
   `agentFlow.reviewRequests` are unchanged — same keys, same defaults — and now take
   effect the moment you change them, with no need to reopen the panel.
 
-
 ### Fixed
 
 - **Controls no longer flip back before they settle.** Control state was echoed to
@@ -738,7 +690,6 @@ No code changed in this release.
   board rebuild to redraw a board the panel already had the data for.
 
 ## [0.10.0] — 2026-08-09
-
 
 ### Added
 
@@ -758,14 +709,12 @@ No code changed in this release.
 
 ## [0.9.0] — 2026-08-08
 
-
 ### Changed
 
 - **Tabs at the top of the sidebar.** `Tasks | Notepad` is now the panel's first
   row, with the project key and your name moved into the view's own title bar —
   so the panel no longer says "Tasks" twice, and it's a row shorter on both
   tabs. The window gauge and **Explore** trail the tabs on that same row.
-
 
 ### Fixed
 
@@ -775,7 +724,6 @@ No code changed in this release.
   matching the task search and the repo picker.
 
 ## [0.8.0] — 2026-08-08
-
 
 ### Added
 
@@ -787,7 +735,6 @@ No code changed in this release.
   nothing changes unless you ask for it.
 
 ## [0.7.0] — 2026-08-08
-
 
 ### Changed
 
@@ -803,7 +750,6 @@ No code changed in this release.
   `agentFlow.openIn: this-window` opens a new window instead.
 ## [0.6.0] — 2026-08-08
 
-
 ### Added
 
 - **Notepad tab.** A second tab in the Tasks panel holding freeform items that
@@ -817,7 +763,6 @@ No code changed in this release.
   board like any other, and the note shows whether it is running, stale, or
   finished.
 
-
 ### Changed
 
 - **Notepad restyled to match the rest of the panel.** Text links are now real
@@ -826,7 +771,6 @@ No code changed in this release.
   render as a hairline-separated list with a status rail instead of boxed cards.
 
 ## [0.5.0] — 2026-08-07
-
 
 ### Added
 
@@ -838,7 +782,6 @@ No code changed in this release.
   directory under `src/tasks/`; [docs/CONNECTORS.md](docs/CONNECTORS.md) is the
   checklist for wiring one up, including the shared files it still has to touch
   (`src/tasks/`, `src/tasksView.ts`, `src/deckView.ts`, `src/doctorView.ts`).
-
 
 ### Changed
 
@@ -854,7 +797,6 @@ No code changed in this release.
   real URL already set.
 ## [0.4.3] — 2026-08-06
 
-
 ### Fixed
 
 - **README lockup broken on the Marketplace and Open VSX listings.** The
@@ -866,7 +808,6 @@ No code changed in this release.
 
 ## [0.4.2] — 2026-08-05
 
-
 ### Fixed
 
 - **Deck: "Review with agent" is never disabled.** The button used to grey out
@@ -877,7 +818,6 @@ No code changed in this release.
 
 ## [0.4.1] — 2026-08-05
 
-
 ### Changed
 
 - **Deck: the In-flight header stacks its gloss under the title.** "everything you've
@@ -886,7 +826,6 @@ No code changed in this release.
   for it — the stat tiles beside it already set its height (`src/webview/deckStyles.ts`).
 
 ## [0.4.0] — 2026-08-05
-
 
 ### Added
 
@@ -898,14 +837,12 @@ No code changed in this release.
 
 ## [0.3.0] — 2026-08-05
 
-
 ### Fixed
 
 - **Deck: agent chip shows the workspace name, not the first repo.** A multi-repo
   run whose session couldn't be matched to one specific repo used to fall back to
   `repos[0]`'s name on hover, no matter how many repos the run actually had. It now
   shows the run's `.code-workspace` file name instead (`src/webview/DeckApp.tsx`).
-
 
 ### Added
 
@@ -915,7 +852,6 @@ No code changed in this release.
   instead of just naming the repo (`src/webview/DeckApp.tsx`).
 
 ## [0.2.0] — 2026-08-04
-
 
 ### Added
 
@@ -936,7 +872,6 @@ No code changed in this release.
 
 ## [0.1.59] — 2026-08-04
 
-
 ### Changed
 
 - **A card's Diff button opens the editor's own multi-file diff view.** It used to
@@ -949,7 +884,6 @@ No code changed in this release.
   render as mojibake. The flat patch survives as a fallback for editors that never
   registered `vscode.changes`, and a run whose only changes are binary says so instead of
   opening an empty editor.
-
 
 ### Fixed
 
@@ -971,7 +905,6 @@ No code changed in this release.
 
 ## [0.1.57] — 2026-08-04
 
-
 ### Added
 
 - **A Review queue toggle in the Deck's header.** The review-requests strip could only
@@ -981,7 +914,6 @@ No code changed in this release.
   per-session override. Off stops the `gh` search outright, which is what distinguishes it
   from the strip's own collapse caret (`src/deckView.ts`, `src/webview/DeckApp.tsx`).
 
-
 ### Changed
 
 - **The review rows read as columns.** Every field the row carried is still there, but the
@@ -990,7 +922,6 @@ No code changed in this release.
   column, and the repo ellipsises so every title starts at the same x — with the full name
   on its `title` attribute. Below 860px the widths are released and the row behaves exactly
   as it did before (`src/webview/ReviewStrip.tsx`, `src/webview/deckStyles.ts`).
-
 
 ### Fixed
 
@@ -1007,7 +938,6 @@ No code changed in this release.
   gave up (`src/webview/ReviewStrip.tsx`, `src/webview/DeckApp.tsx`).
 
 ## [0.1.56] — 2026-08-04
-
 
 ### Fixed
 
@@ -1032,7 +962,6 @@ No code changed in this release.
 
 ## [0.1.55] — 2026-08-04
 
-
 ### Fixed
 
 - **A landed PR no longer reads `merge unknown` on its card.** GitHub only computes
@@ -1044,7 +973,6 @@ No code changed in this release.
   values after a merge, so they stay.
 
 ## [0.1.54] — 2026-08-04
-
 
 ### Changed
 
@@ -1063,7 +991,6 @@ No code changed in this release.
 
 ## [0.1.53] — 2026-08-04
 
-
 ### Changed
 
 - **The mark's non-brand dots are near-white instead of dark grey.** They sat at 26%
@@ -1078,7 +1005,6 @@ No code changed in this release.
   in hue, not only in weight.
 
 ## [0.1.52] — 2026-08-04
-
 
 ### Fixed
 
@@ -1100,14 +1026,12 @@ No code changed in this release.
 
 ## [0.1.51] — 2026-08-04
 
-
 ### Added
 
 - **The sidebar header mark doubles as a live gauge.** The dot-ring lights one outer
   dot per Agent Flow window currently open, up to eight, and relights whenever the
   task pool refreshes rather than only once at panel load. With window tracking off
   it falls back to its static ring instead of claiming a count it doesn't have.
-
 
 ### Changed
 
@@ -1133,7 +1057,6 @@ No code changed in this release.
 
 ## [0.1.50] — 2026-08-03
 
-
 ### Fixed
 
 - `agentFlow.promptModes` and `agentFlow.reviewRequestModes` now **layer over**
@@ -1152,7 +1075,6 @@ No code changed in this release.
 
 ## [0.1.49] — 2026-08-03
 
-
 ### Added
 
 - **Address PR now appears on Deck cards too.** Once a card's Jira status matches
@@ -1165,7 +1087,6 @@ No code changed in this release.
 
 ## [0.1.48] — 2026-08-03
 
-
 ### Changed
 
 - **Take's repo confirmation puts the pre-checked repos on top.** The
@@ -1175,7 +1096,6 @@ No code changed in this release.
   Inferred repos now lead the list; discovery order still holds within each group.
 
 ## [0.1.47] — 2026-08-03
-
 
 ### Changed
 
@@ -1199,7 +1119,6 @@ No code changed in this release.
 
 ## [0.1.46] — 2026-08-03
 
-
 ### Added
 
 - **The Deck reflects every Claude Code session open on this machine**, not only the
@@ -1209,7 +1128,6 @@ No code changed in this release.
   ticket key inferred from its branch and its pull request found from it. `⋯` →
   **Track it** pins one to the runs store so it survives its agents closing. Read
   from `~/.claude/sessions`; toggle with **Open agents** / `agentFlow.openAgents`.
-
 
 ### Changed
 
@@ -1222,7 +1140,6 @@ No code changed in this release.
 
 ## [0.1.45] — 2026-08-02
 
-
 ### Added
 
 - **Review with agent can offer more than one seed prompt.** The new
@@ -1233,14 +1150,12 @@ No code changed in this release.
   `agentFlow.reviewRequestMode` to skip the question. One **Full review** mode ships, so
   an install that changes nothing still launches a review in a single click.
 
-
 ### Deprecated
 
 - `agentFlow.reviewRequestPrompt` — superseded by `agentFlow.reviewRequestModes`. A value
   you customized is migrated into the **Full review** mode automatically; nothing to do.
 
 ## [0.1.44] — 2026-08-02
-
 
 ### Added
 
@@ -1255,7 +1170,6 @@ No code changed in this release.
 
 ## [0.1.43] — 2026-08-02
 
-
 ### Changed
 
 - **Existing workspaces are no longer modified without asking.** Taking a task into a saved
@@ -1269,7 +1183,6 @@ No code changed in this release.
   those leftover folders from it yourself.
 
 ## [0.1.42] — 2026-08-02
-
 
 ### Added
 
@@ -1295,7 +1208,6 @@ No code changed in this release.
 
 ## [0.1.41] — 2026-07-30
 
-
 ### Changed
 
 - The Deck's review queue now skips PRs in **archived repositories**. An archived
@@ -1304,7 +1216,6 @@ No code changed in this release.
   itself, so the strip's "showing N of M" count drops with them.
 
 ## [0.1.40] — 2026-07-29
-
 
 ### Added
 
@@ -1324,7 +1235,6 @@ No code changed in this release.
   `agentFlow.reviewWrites`, `agentFlow.reviewRequestPrompt`.
 
 ## [0.1.39] — 2026-07-28
-
 
 ### Changed
 
@@ -1357,7 +1267,6 @@ No code changed in this release.
 - **The Live signal and PR facts toggles are one segmented control**, and both are real
   buttons — they were `div`s, so neither could be reached from the keyboard.
 
-
 ### Removed
 
 - **The `open now — Open will focus this window` line.** It occupied a line on every
@@ -1365,7 +1274,6 @@ No code changed in this release.
   the button so the state is still visible at a glance.
 
 ## [0.1.38] — 2026-07-28
-
 
 ### Added
 
@@ -1401,7 +1309,6 @@ No code changed in this release.
 
 ## [0.1.37] — 2026-07-28
 
-
 ### Added
 
 - **Change Status now asks for the fields your workflow requires.** Closing a
@@ -1414,7 +1321,6 @@ No code changed in this release.
   so a refusal gets **one rescue attempt**: Agent Flow Deck reads which field the
   rejection names, asks for it, and retries once. A second refusal is reported
   rather than retried.
-
 
 ### Fixed
 
@@ -1436,7 +1342,6 @@ No code changed in this release.
 
 ## [0.1.36] — 2026-07-28
 
-
 ### Added
 
 - **Four more ways to start a task.** The "how should the agent start?" picker
@@ -1446,7 +1351,6 @@ No code changed in this release.
   then integrate and verify), and **Refine the ticket** (sharpen the description
   and acceptance criteria instead of building it) — alongside Plan first and
   Implementation.
-
 
 ### Fixed
 
@@ -1463,7 +1367,6 @@ than adding to it. Copy the ones you want out of the setting's default, where a
 new optional `detail` field holds the description line.
 
 ## [0.1.35] — 2026-07-27
-
 
 ### Fixed
 
@@ -1486,7 +1389,6 @@ new optional `detail` field holds the description line.
   button spins while a rebuild is in flight, and the next authoritative update
   brings the card back if the delete really did fail.
 
-
 ### Changed
 
 - **The board stopped fighting itself on refresh.** Overlapping refreshes are
@@ -1497,7 +1399,6 @@ new optional `detail` field holds the description line.
   used to spend its time on.
 
 ## [0.1.34] — 2026-07-27
-
 
 ### Fixed
 
@@ -1513,7 +1414,6 @@ new optional `detail` field holds the description line.
 
 ## [0.1.33] — 2026-07-27
 
-
 ### Fixed
 
 - **The Deck said `gh` was missing when it wasn't.** PR facts stayed off with a
@@ -1526,7 +1426,6 @@ new optional `detail` field holds the description line.
 
 ## [0.1.32] — 2026-07-27
 
-
 ### Added
 
 - **The Deck reads your PRs.** Every card now shows the PR state of each repo it
@@ -1537,14 +1436,12 @@ new optional `detail` field holds the description line.
   Settings: `agentFlow.prFacts` (default on) and `agentFlow.prFactsTtlSeconds`
   (default 120). All access is read-only, through your existing `gh` login.
 
-
 ### Fixed
 
 - A Deck card said *merged* whenever Jira said done, regardless of the PR. It now
   says *merged* only when a PR actually merged, and *done* otherwise.
 
 ## [0.1.31] — 2026-07-27
-
 
 ### Added
 
@@ -1563,7 +1460,6 @@ new optional `detail` field holds the description line.
   is skipped for a shared window, because each session is seeded from its own plan file and
   there's no clipboard paste to attach it to, and the toast says so.
 
-
 ### Fixed
 
 - **Re-taking a task seeds its agent again.** The "already seeded this window" guard was
@@ -1575,7 +1471,6 @@ new optional `detail` field holds the description line.
 
 ## [0.1.30] — 2026-07-27
 
-
 ### Added
 
 - **The Marketplace is documented with screenshots.** `media/marketplace.png` shows the
@@ -1584,7 +1479,6 @@ new optional `detail` field holds the description line.
   `SKILL.md` rendered in the detail pane. `media/marketplace-filters.png` shows the
   `Plugins ▾` picker open with two plugins ticked and the matching chips. Both are
   captured from the real webview with sanitized fictional demo data.
-
 
 ### Changed
 
@@ -1597,7 +1491,6 @@ new optional `detail` field holds the description line.
 
 ## [0.1.29] — 2026-07-27
 
-
 ### Fixed
 
 - **The In-flight deck scrolls as one board.** Vertical scrolling was per column, so each
@@ -1609,14 +1502,12 @@ new optional `detail` field holds the description line.
 
 ## [0.1.28] — 2026-07-26
 
-
 ### Fixed
 
 - **In-flight columns scroll instead of clipping cards.** A column holding more cards than
   fit squeezed every card flat, so card content was cut off mid-card and no scrollbar ever
   appeared. Cards now keep their natural height and the column scrolls, with a fade at the
   bottom edge showing there is more below.
-
 
 ### Changed
 
@@ -1630,7 +1521,6 @@ new optional `detail` field holds the description line.
 
 ## [0.1.27] — 2026-07-26
 
-
 ### Added
 
 - **Remote Control for the session you just opened.** A new `agentFlow.remoteControl`
@@ -1643,7 +1533,6 @@ new optional `detail` field holds the description line.
   because one clipboard can't carry a different task prompt for each window.
 
 ## [0.1.26] — 2026-07-26
-
 
 ### Added
 
@@ -1661,7 +1550,6 @@ new optional `detail` field holds the description line.
   tree and never injects HTML, so a hostile file from a third-party marketplace can't run
   anything.
 
-
 ### Fixed
 
 - **A marketplace manifest can no longer point the scan outside its own directory.** A
@@ -1673,7 +1561,6 @@ new optional `detail` field holds the description line.
   landing in the same release, which serves the full contents of whatever the scan found.
 
 ## [0.1.25] — 2026-07-26
-
 
 ### Fixed
 
@@ -1687,7 +1574,6 @@ new optional `detail` field holds the description line.
   type headings repeated once per run — dozens of times on a well-stocked machine. Rows
   are now ordered by type, with each plugin's grouping preserved inside a block.
 
-
 ### Changed
 
 - **Search is fuzzy and ranked.** `revw` finds `/review`, `mkpl` finds `marketplace`, and
@@ -1698,7 +1584,6 @@ new optional `detail` field holds the description line.
 
 ## [0.1.24] — 2026-07-26
 
-
 ### Changed
 
 - **The Marketplace is now a local asset browser.** It reads `~/.claude` and the open
@@ -1708,7 +1593,6 @@ new optional `detail` field holds the description line.
   or copy the invocation. Disabled plugins, `skillOverrides`, and plugins your
   marketplaces catalogue but haven't downloaded are all surfaced.
 
-
 ### Removed
 
 - The `agentFlow.marketplaces` setting and the `gh`-backed remote fetch, along with the
@@ -1716,7 +1600,6 @@ new optional `detail` field holds the description line.
   (`/plugin marketplace add owner/repo`); they appear here on the next scan.
 
 ## [0.1.23] — 2026-07-26
-
 
 ### Added
 - **Remove from sprint.** Each card on the **My sprint** tab now has a **Remove**
@@ -1726,7 +1609,6 @@ new optional `detail` field holds the description line.
   sprint. The action appears only on the My sprint tab.
 
 ## [0.1.22] — 2026-07-24
-
 
 ### Changed
 - **Skip the repo picker for existing-workspace destinations.** When you open a task
@@ -1738,7 +1620,6 @@ new optional `detail` field holds the description line.
 
 ## [0.1.21] — 2026-07-24
 
-
 ### Added
 - **The Marketplace** — a new panel (puzzle-piece button beside the Deck) to register
   GitHub Claude Code plugin-marketplace repos and browse their plugins, skills, agents,
@@ -1746,7 +1627,6 @@ new optional `detail` field holds the description line.
   login (public + private).
 
 ## [0.1.20] — 2026-07-24
-
 
 ### Added
 - **Multi-select & parallel launch.** When the repo filter is narrowed to a single
@@ -1761,14 +1641,12 @@ new optional `detail` field holds the description line.
 
 ## [0.1.19] — 2026-07-22
 
-
 ### Changed
 - **Refreshed the README screenshots to the current UI.** `media/screenshot.png` now
   shows the task pool in its current design — reordered filter tabs (**My sprint**
   first), the **Filter repos** multiselect, the **Search title** fuzzy box, and the
   per-card **Address PR** action — captured from the real webview with sanitized
   fictional demo data (no internal names).
-
 
 ### Added
 - **`media/deck.png`** and a **"The Deck — your in-flight board"** README section
@@ -1779,7 +1657,6 @@ new optional `detail` field holds the description line.
 
 ## [0.1.18] — 2026-07-22
 
-
 ### Fixed
 - **Filter repos dropdown rendered transparent** on themes whose `input.background`
   token carries an alpha channel — the task deck bled through the popup. The dropdown
@@ -1787,7 +1664,6 @@ new optional `detail` field holds the description line.
   fallbacks).
 
 ## [0.1.17] — 2026-07-22
-
 
 ### Added
 - **Repo filter is now a multiselect dropdown.** The old free-text *"Filter by repo…"*
@@ -1798,13 +1674,11 @@ new optional `detail` field holds the description line.
   (powered by fuse.js) and orders results best-match-first.
 - New setting **`agentFlow.filters.search`** (default on) to show/hide the search box.
 
-
 ### Changed
 - **`agentFlow.filters.repo`** now shows/hides the repo **multiselect** (previously the
   free-text repo box).
 
 ## [0.1.16] — 2026-07-22
-
 
 ### Changed
 - **Take a task & Explore:** you now choose *where* the task opens **before** the repo
@@ -1817,7 +1691,6 @@ new optional `detail` field holds the description line.
 
 ## [0.1.15] — 2026-07-22
 
-
 ### Changed
 - **The Deck (in-flight board):** renamed the **Working** column to **In progress**
   and moved the true live state onto each card, so an idle task reads *idle* and a
@@ -1829,13 +1702,11 @@ new optional `detail` field holds the description line.
 - **Open** is presence-aware: an already-open window is silently focused (no duplicate,
   no toast) and marked with an "open now" hint; only failures notify.
 
-
 ### Added
 - Per-card **⋯** overflow menu with **Forget** (drop a stale/merged run from the board)
   and **Open in Jira**.
 
 ## [0.1.14] — 2026-07-22
-
 
 ### Fixed
 - Build/CI: pin the public npm registry via a committed `.npmrc` so `npm ci`
@@ -1845,7 +1716,6 @@ new optional `detail` field holds the description line.
 
 ## [0.1.13] — 2026-07-22
 
-
 ### Added
 - **Configurable filter visibility.** Three settings — `agentFlow.filters.size`,
   `agentFlow.filters.status`, and `agentFlow.filters.repo` (all default `true`) — let you
@@ -1853,11 +1723,9 @@ new optional `detail` field holds the description line.
   sidebar. Hidden controls keep their neutral value, so results are never narrowed. The
   tab bar stays always-visible. Applies on refresh/reload.
 
-
 ### Changed
 - Documentation overhaul for the open-source release: README with a UI screenshot,
   quick-start walkthrough, and badges; a `CHANGELOG.md`; and refreshed copyright.
-
 
 ### Fixed
 - Packaging: include the Deck webview bundle (`dist/deck.js`) and the PNG marketplace
@@ -1866,26 +1734,22 @@ new optional `detail` field holds the description line.
 
 ## [0.1.12] — 2026-07-22
 
-
 ### Changed
 - Reordered the task filter tabs so the most-used lens comes first:
   **My sprint · Unassigned · Mine · Sprint · Backlog**.
 
 ## [0.1.11] — 2026-07-22
 
-
 ### Changed
 - Maintenance release (version bump; no user-facing changes).
 
 ## [0.1.10] — 2026-07-21
-
 
 ### Changed
 - Renamed the card action **"Review PR" → "Address PR"** to better describe what it
   kicks off (assess *and* fix, not just review).
 
 ## [0.1.9] — 2026-07-21
-
 
 ### Added
 - **Address PR kick-off.** When a task reaches your PR-review status (default
@@ -1902,14 +1766,12 @@ new optional `detail` field holds the description line.
 
 ## [0.1.8] — 2026-07-21
 
-
 ### Added
 - **Per-task git worktrees.** Optionally isolate a task in a worktree/branch created
   inside each repo at `.claude/worktrees/<KEY>` (git-excluded automatically). Controlled
   by `agentFlow.worktree` (`ask` / `always` / `never`).
 
 ## [0.1.7] — 2026-07-20
-
 
 ### Added
 - **Status filter lens.** A client-side multi-select to narrow the task pool by Jira
@@ -1918,7 +1780,6 @@ new optional `detail` field holds the description line.
 ## [0.1.0] — 2026-07-19
 
 Initial release (and the early `0.1.x` patch line that followed on the same day).
-
 
 ### Added
 - **Sidebar task pool** — a React webview with filter tabs and an S/M/L size lens
@@ -1937,7 +1798,6 @@ Initial release (and the early `0.1.x` patch line that followed on the same day)
 - **First-run setup wizard** — collects Jira site, project key, and repos directory with
   no organization-specific defaults baked in; credentials go to encrypted SecretStorage.
 - **Branding** — logo, activity-bar icon, and unique Marketplace identifiers.
-
 
 ### Fixed
 - Hardened activation: an optional step (e.g. a missing command or a dead panel) can no
