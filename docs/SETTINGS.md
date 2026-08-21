@@ -59,8 +59,11 @@ and once you add one of your own — a backend-services reviewer, say — clicki
 seed, since your entry joins **Full review** rather than replacing it. Pin one with
 `agentFlow.reviewRequestMode`. Where it opens is a second, separate question —
 `agentFlow.reviewOpenIn`, which ships pinned to a new window and asks nothing until you
-set it to `ask`. The sidebar's **Address PR**
-kick-off always runs in a fresh worktree; a Deck card's re-seeds that run's existing workspace
+set it to `ask` — and which a *batch* of reviews asks with too. Selecting several rows and
+launching them together also offers one extra mode the single-row launch never shows —
+**Read-only review**, which reads each PR at its own revision instead of checking it out,
+so several reviews can share one window (it cannot run tests). Add the `read-only` id to
+`agentFlow.reviewRequestModes` if you want it per row too. The sidebar's **Address PR**kick-off always runs in a fresh worktree; a Deck card's re-seeds that run's existing workspace
 in place instead — whatever `agentFlow.worktree` gave it when it was
 launched. Per-task worktrees are created inside each repo at
 `.claude/worktrees/<KEY>` (and git-excluded automatically).

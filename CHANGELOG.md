@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Hand several PRs to agents in one gesture.** Clearing a review queue meant launching
+  one PR at a time, answering the same question for each. The strip's header now carries a
+  **select** control: it turns the caret column into checkboxes, shift-click takes a range,
+  and a bar under the rows launches the lot — one reviewer per PR, with the mode and the
+  destination asked once for the whole batch instead of once per row. Nothing changes until
+  you ask for it: the rows stay exactly as dense as they were, and launching a single row
+  behaves as it always did.
+  - Batches larger than `agentFlow.batchLaunchConfirmThreshold` (6) confirm first, naming
+    the cost in sessions.
+  - Where they open is the same question, setting and picker a single review already uses
+    (`agentFlow.reviewOpenIn`), asked once for the batch — pin it and the batch stops
+    asking too. Landing several in one window makes each review a session in it; separate
+    windows is today's single launch, once per PR.
+  - PRs in a repo you have not checked out are named once and skipped; the rest launch.
+  - **Approve / Comment / Request changes stay one row at a time.** A batch never submits
+    anything to your forge — the human still presses the button, per PR.
+- **A read-only review mode, offered only to a batch.** It reads the PR at its own revision
+  (`git fetch origin pull/<n>/head`, then the diff) instead of checking the branch out, so
+  several reviews can share one window and none of them can move your working tree. It
+  cannot run tests, and the picker says so. Choose a mode that checks out instead and every
+  PR gets its own worktree, exactly as a single review does. The mode is not added to
+  `agentFlow.reviewRequestModes`, so a single-row launch still goes in one click — add the
+  `read-only` id there yourself if you want it per row.
+- **A `review ready` chip on the row itself.** A PR whose agent has already written its
+  findings now says so on the collapsed line, and the strip's header counts them when more
+  than one is waiting. Distinct from the existing `draft` chip, which is the PR's own draft
+  state on the forge.
+
 ## [0.35.1] — 2026-08-21
 
 ### Fixed

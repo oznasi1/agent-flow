@@ -240,6 +240,29 @@ hover it. Either way it opens a new window on that worktree; set
 somewhere you already have open instead — the review still runs in its own worktree
 whichever you pick, and the seeded prompt names that worktree by absolute path so
 nothing is checked out in your main checkout.
+
+To clear several at once, press **select** in the strip's header: the carets become
+checkboxes, clicking a row picks it instead of expanding it, shift-click takes a range,
+and the bar underneath launches the lot — one reviewer per PR. The batch asks two
+questions, once each, rather than once per row:
+
+- **How should the agent read each PR?** A **read-only review** fetches the PR's own
+  commit and reads the diff without checking anything out, so several reviews can share
+  one window and none of them can move your working tree — but it cannot run tests. Any
+  other mode checks the branch out, so every PR gets its own worktree, exactly as a
+  single review does. The read-only mode is offered by the batch only: it is deliberately
+  not one of `agentFlow.reviewRequestModes`, so a single-row launch stays a one-click
+  launch. Add the `read-only` id to that setting yourself if you want it per row.
+- **Where should they open?** The same question, setting and picker a single review
+  uses — `agentFlow.reviewOpenIn`: a new window, this one, a saved `.code-workspace`, or a
+  window you already have open. Pin it and the batch stops asking, exactly as a single
+  review does. Landing in a new window with more than one PR then asks whether you want
+  them all in one window (a session each) or a window per PR.
+
+Batches larger than `agentFlow.batchLaunchConfirmThreshold` confirm first and name the
+cost in sessions. PRs in a repo you have not checked out are named once and skipped; the
+rest launch. A batch never submits anything: **Approve**, **Comment** and **Request
+changes** stay one row at a time, each behind its own confirmation.
 Turn the strip off with `agentFlow.reviewRequests`; it also goes dark whenever
 `agentFlow.prFacts` is off, since both lean on the same forge CLI — `gh`, or
 `glab` when `agentFlow.forge` is `gitlab`.

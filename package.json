@@ -593,7 +593,7 @@
           "type": "number",
           "default": 6,
           "minimum": 1,
-          "markdownDescription": "When you multi-select tasks (with the repo filter narrowed to a single repo) and launch them in parallel, batches **larger than** this number prompt a confirmation first — a guard against accidentally opening a swarm of windows, one per task."
+          "markdownDescription": "When you launch several things at once — multi-selected tasks (with the repo filter narrowed to a single repo), or several PRs selected in the Deck's review queue — batches **larger than** this number prompt a confirmation first, naming the cost. A guard against accidentally opening a swarm of windows and agent sessions, one per task or PR."
         },
         "agentFlow.trackOpenWindows": {
           "type": "boolean",
