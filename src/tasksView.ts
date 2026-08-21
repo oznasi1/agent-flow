@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { getConfig, hostProviders, providerLabel, resolvedProvider, AgentFlowConfig, AgentProvider, ExploreAction } from "./config";
+import { getConfig, providerLabel, resolvedProvider, AgentFlowConfig, AgentProvider, ExploreAction } from "./config";
 import {
   isTaskNetworkError,
   serializeCaps,
@@ -41,6 +41,7 @@ import { branchName, createWorktrees, ensureBranch, folderName, repoRootOfWorktr
 import { currentBranch } from "./engine/git";
 import { buildTree, type TreeLeaf, type TreeResult } from "./engine/taskTree";
 import { openSharedWorkspace, type BatchTask } from "./engine/batchWorkspace";
+import { providerPin, resolveBatchProvider } from "./agentPick";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { newNote, newSection, noteStatus, sanitizeNotes, sanitizeSections } from "./notepad";
 import { IMAGE_DIR, deleteImages, imageFileName, imagePath, saveImage, sweepOrphans } from "./notepadImages";
@@ -2186,7 +2187,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // and the loop honours the answer — with one exception picked up once the
     // destination is known (see the `shared` re-resolution below).
     const isBatch = keys.length > 1;
-    let batchProvider = isBatch ? await this.resolveBatchProvider(cfg, true) : undefined;
+    let batchProvider = isBatch ? await resolveBatchProvider(cfg, true) : undefined;
     if (isBatch && !batchProvider) return;
     // The agent for copy written BEFORE the launch: the resolved answer when there is
     // one, and otherwise the setting's own — a single launch resolves inside
@@ -2247,7 +2248,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // already resolved above, before its confirmation. Still before the first worktree,
     // so a dismissal here costs nothing either.
     if (shared && !batchProvider) {
-      batchProvider = await this.resolveBatchProvider(cfg, isBatch);
+      batchProvider = await resolveBatchProvider(cfg, isBatch);
       if (!batchProvider) return;
     }
 
@@ -2358,7 +2359,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           // The shared-window batch needs the same "here" the single take does.
           currentWindow: here,
           foldersToAdd: additions.foldersToAdd,
-          ...(batchProvider ? this.providerPin(cfg, batchProvider) : {}),
+          ...(batchProvider ? providerPin(cfg, batchProvider) : {}),
         });
         launched = resolved.length;
         seededInPlace = !!result.seededInPlace;
@@ -2410,7 +2411,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             // the request it always sent — the run record has one representation of
             // "no parent", and that is the field's absence (see Run.parentKey).
             ...(parent ? { parentKey: parent.key } : {}),
-            ...(batchProvider ? this.providerPin(cfg, batchProvider) : {}),
+            ...(batchProvider ? providerPin(cfg, batchProvider) : {}),
           });
           // Cancelled: nothing was opened, written or seeded for this task, so it is
           // neither launched nor failed — a dismissal is the user's own decision, not
@@ -2492,50 +2493,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** The agent for a whole batch, resolved before the loop that cannot ask. Under the
-   *  three fixed settings this is a plain read and NO picker appears — the setting is
-   *  the answer, and it is the same answer `openWorkspace` would have reached on its
-   *  own. Under `ask` it puts up the same picker `openWorkspace` would have, once, and
-   *  the caller pins the answer onto every task so no task asks again.
-   *
-   *  With seeding off there is no agent to start, so there is nothing to ask about and
-   *  `ask` degrades exactly as `resolvedProvider` says it does — the same condition
-   *  `openWorkspace` guards its own picker with.
-   *
-   *  `undefined` means dismissed, at which point the batch must launch nothing. */
-  private async resolveBatchProvider(cfg: AgentFlowConfig, isBatch: boolean): Promise<AgentProvider | undefined> {
-    if (cfg.agentProvider !== "ask" || !cfg.seedAgent) return resolvedProvider(cfg.agentProvider);
-    // One possible agent is not a question — same short-circuit, and same reasoning, as
-    // the picker in `openWorkspace`.
-    const choices = hostProviders();
-    if (choices.length === 1) return choices[0];
-    const choice = await vscode.window.showQuickPick(
-      choices.map((p) => ({ label: providerLabel(p), provider: p })),
-      {
-        // The SAME title as the picker in `openWorkspace` — one launch-time question,
-        // asked in one voice, whichever path raises it. Only the placeholder says what
-        // is different about this one: it answers for every task, not just one.
-        //
-        // …which is only true of a REAL batch. A one-key batch reaches here solely
-        // because a shared window seeds from plan files and cannot ask later; it is a
-        // single launch, so it gets the single-launch placeholder, word for word the
-        // one `openWorkspace` would have shown it.
-        title: "Which agent?",
-        placeHolder: isBatch ? "Pick the agent for every task in this batch" : "Pick the agent to start this session with",
-        ignoreFocusOut: true,
-      },
-    );
-    return choice?.provider;
-  }
 
-  /** A caller's agent pin, for spreading into an open request. Sent ONLY under `ask`,
-   *  where it replaces a prompt that has already been answered. Under a fixed setting
-   *  a pin is ignored (see `OpenRequest.provider`) and the user's preference wins, so
-   *  sending one there could only invite the request and the setting to look like they
-   *  disagree — and it would change a request that must stay exactly what it was. */
-  private providerPin(cfg: AgentFlowConfig, provider: AgentProvider): { provider?: AgentProvider } {
-    return cfg.agentProvider === "ask" ? { provider } : {};
-  }
 
   /** The filtered repo names as git ServiceRefs. Names that don't resolve, and repos
    * that aren't git, are dropped with a note rather than aborting the batch — with
