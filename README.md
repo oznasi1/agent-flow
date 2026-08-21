@@ -10,7 +10,7 @@
 that ticket touches, with a coding agent already briefed — Claude Code, Copilot, or Cursor.</p>
 
 [![CI](https://github.com/oznasi1/agent-flow/actions/workflows/ci.yml/badge.svg)](https://github.com/oznasi1/agent-flow/actions/workflows/ci.yml)
-[![VS Marketplace version](https://vsmarketplacebadges.dev/version-short/Oznasi1.oznasi1-agent-flow.svg)](https://marketplace.visualstudio.com/items?itemName=Oznasi1.oznasi1-agent-flow)
+[![VS Marketplace version](https://img.shields.io/github/package-json/v/oznasi1/agent-flow?label=VS%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=Oznasi1.oznasi1-agent-flow)
 [![Open VSX downloads](https://img.shields.io/open-vsx/dt/Oznasi1/oznasi1-agent-flow?label=downloads&color=blue)](https://open-vsx.org/extension/Oznasi1/oznasi1-agent-flow)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 

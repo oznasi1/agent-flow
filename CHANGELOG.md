@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.3] — 2026-08-21
+
+### Fixed
+
+- **The README's VS Marketplace badge rendered as a broken image.** It was served by
+  vsmarketplacebadges.dev, which now answers HTTP 405, and shields.io has retired its
+  `visual-studio-marketplace` badge family outright. The badge now reads the version
+  from `package.json` on `main` (`img.shields.io/github/package-json/v`) — the same
+  value, since every merge to main is a release — keeping its label and its link to
+  the Marketplace listing.
+
 ## [0.33.2] — 2026-08-20
 
 ### Fixed
