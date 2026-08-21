@@ -90,6 +90,38 @@ export async function chooseOpenTarget(
   return p.target;
 }
 
+export interface PickExistingWorkspaceDeps {
+  listWorkspaceFiles: (dir: string) => readonly { file: string; folders: number }[];
+  pick: <T extends { label: string }>(items: T[], opts: { title: string; placeHolder: string }) => Promise<T | undefined>;
+  /** The "pick a file from anywhere" dialog, answering with a path. */
+  browse: () => Promise<string | undefined>;
+}
+
+/** Pick a `.code-workspace` from `workspaceDir` — or Browse… for one elsewhere. */
+export async function pickExistingWorkspace(
+  workspaceDir: string,
+  deps: PickExistingWorkspaceDeps,
+): Promise<OpenTarget | undefined> {
+  const BROWSE = "__browse__";
+  const files = deps.listWorkspaceFiles(workspaceDir);
+  const items = [
+    ...files.map((f) => ({
+      label: `$(file-code) ${f.file.split("/").pop()}`,
+      detail: `${f.folders} folder${f.folders === 1 ? "" : "s"}`,
+      file: f.file,
+    })),
+    { label: "$(folder-opened) Browse…", detail: "Pick a .code-workspace from anywhere", file: BROWSE },
+  ];
+  const picked = await deps.pick(items, {
+    title: "Open into which workspace?",
+    placeHolder: files.length ? "Pick a workspace, or Browse…" : "No workspaces found — Browse…",
+  });
+  if (!picked) return undefined;
+  if (picked.file !== BROWSE) return { kind: "existing", file: picked.file };
+  const browsed = await deps.browse();
+  return browsed ? { kind: "existing", file: browsed } : undefined;
+}
+
 export interface TargetToOpenArgsDeps {
   currentWindow: () => CurrentWindow | undefined;
   /** The multiroot-vs-per-window question, already bound to the caller's setting and

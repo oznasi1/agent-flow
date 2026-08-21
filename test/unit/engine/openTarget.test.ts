@@ -3,6 +3,7 @@ import {
   chooseOpenTarget,
   targetToOpenArgs,
   liveWindowItems,
+  pickExistingWorkspace,
   NO_IDENTITY_TOAST,
   type OpenTarget,
 } from "../../../src/engine/openTarget";
@@ -205,5 +206,54 @@ describe("targetToOpenArgs", () => {
 
   it("cancels when the layout sub-pick is dismissed", async () => {
     expect(await targetToOpenArgs({ kind: "new" }, 3, argDeps({ chooseWorkspaceMode: vi.fn(async () => undefined) }))).toBeUndefined();
+  });
+});
+
+// Lifted alongside chooseOpenTarget for the same reason: both the `pick-existing`
+// setting and the "Existing workspace…" item need it, from two views now.
+describe("pickExistingWorkspace", () => {
+  const wsDeps = (over: Record<string, unknown> = {}) => ({
+    listWorkspaceFiles: vi.fn((_dir: string) => [{ file: "/ws/team.code-workspace", folders: 2 }]),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    pick: vi.fn(async (_items: any[], _opts: any): Promise<any> => undefined),
+    browse: vi.fn(async (): Promise<string | undefined> => undefined),
+    ...over,
+  });
+
+  it("offers the workspaces in the configured directory, then Browse…", async () => {
+    const d = wsDeps();
+    await pickExistingWorkspace("/ws", d);
+    expect(d.listWorkspaceFiles).toHaveBeenCalledWith("/ws");
+    const items = d.pick.mock.calls[0][0] as { label: string; detail: string }[];
+    expect(items).toEqual([
+      { label: "$(file-code) team.code-workspace", detail: "2 folders", file: "/ws/team.code-workspace" },
+      { label: "$(folder-opened) Browse…", detail: "Pick a .code-workspace from anywhere", file: "__browse__" },
+    ]);
+  });
+
+  it("says so in the placeholder when the directory holds nothing", async () => {
+    const d = wsDeps({ listWorkspaceFiles: vi.fn(() => []) });
+    await pickExistingWorkspace("/ws", d);
+    expect(d.pick.mock.calls[0][1]).toEqual({ title: "Open into which workspace?", placeHolder: "No workspaces found — Browse…" });
+  });
+
+  it("resolves a picked file to an existing-workspace target", async () => {
+    const d = wsDeps();
+    d.pick.mockResolvedValueOnce({ file: "/ws/team.code-workspace" });
+    expect(await pickExistingWorkspace("/ws", d)).toEqual({ kind: "existing", file: "/ws/team.code-workspace" });
+    expect(d.browse).not.toHaveBeenCalled();
+  });
+
+  it("falls through to the file dialog when Browse… is chosen", async () => {
+    const d = wsDeps({ browse: vi.fn(async () => "/elsewhere/x.code-workspace") });
+    d.pick.mockResolvedValueOnce({ file: "__browse__" });
+    expect(await pickExistingWorkspace("/ws", d)).toEqual({ kind: "existing", file: "/elsewhere/x.code-workspace" });
+  });
+
+  it("answers undefined when the list, or the dialog behind Browse…, is dismissed", async () => {
+    expect(await pickExistingWorkspace("/ws", wsDeps())).toBeUndefined();
+    const d = wsDeps();
+    d.pick.mockResolvedValueOnce({ file: "__browse__" });
+    expect(await pickExistingWorkspace("/ws", d)).toBeUndefined();
   });
 });

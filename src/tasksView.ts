@@ -29,6 +29,7 @@ import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, Pres
 // exactly the same words (src/engine/openTarget.ts). The private methods below are now
 // thin adapters over it: they bind the settings, the copy, and the `vscode` pickers.
 import { chooseOpenTarget, targetToOpenArgs, type OpenArgs, type OpenTarget } from "./engine/openTarget";
+import { liveWindowsElsewhere, openTargetDeps } from "./openTargetHost";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { branchName, createWorktrees, ensureBranch, folderName, repoRootOfWorktree, serviceFolderName } from "./engine/worktree";
@@ -2943,22 +2944,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         title: "Open the task where?",
         placeHolder: "New window, this window, a saved workspace, or a window you have open",
       },
-      {
-        currentWindow,
-        liveWindows: () => this.liveWindows(),
-        pick: <T extends { label: string; detail?: string }>(items: T[], opts: { title: string; placeHolder: string }) =>
-          Promise.resolve(vscode.window.showQuickPick(items, { ...opts, ignoreFocusOut: true })),
-        pickExistingWorkspace: () => this.pickExistingWorkspace(cfg),
-        toast: (m: string) => this.toast("info", m),
-      },
+      openTargetDeps(cfg.workspaceDir, (m) => this.toast("info", m)),
     );
   }
 
-  /** Live Agent-Flow windows other than this one. One source for both the open-target
-   * picker and the sidebar's gauge count. */
+  /** Live Agent-Flow windows other than this one — the sidebar's gauge count. */
   private liveWindows(): PresenceRecord[] {
-    const self = windowIdentity()?.identity;
-    return readLiveWindows(defaultWindowsDir()).filter((w) => w.identity !== self);
+    return liveWindowsElsewhere();
   }
 
   /** Resolve an OpenTarget to the openWorkspace arguments (engine/openTarget), binding
@@ -2973,36 +2965,6 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       currentWindow,
       chooseWorkspaceMode: (n) => this.chooseWorkspaceMode(n, cfg.workspaceMode, label),
     });
-  }
-
-  /** Pick a `.code-workspace` from `cfg.workspaceDir` (or Browse… for one elsewhere). */
-  private async pickExistingWorkspace(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
-    const BROWSE = "__browse__";
-    const files = listWorkspaceFiles(cfg.workspaceDir);
-    const items = [
-      ...files.map((f) => ({
-        label: `$(file-code) ${f.file.split("/").pop()}`,
-        detail: `${f.folders} folder${f.folders === 1 ? "" : "s"}`,
-        file: f.file,
-      })),
-      { label: "$(folder-opened) Browse…", detail: "Pick a .code-workspace from anywhere", file: BROWSE },
-    ];
-    const picked = await vscode.window.showQuickPick(items, {
-      title: "Open into which workspace?",
-      placeHolder: files.length ? "Pick a workspace, or Browse…" : "No workspaces found — Browse…",
-      ignoreFocusOut: true,
-    });
-    if (!picked) return undefined;
-    if (picked.file !== BROWSE) return { kind: "existing", file: picked.file };
-    const uris = await vscode.window.showOpenDialog({
-      canSelectFiles: true,
-      canSelectFolders: false,
-      canSelectMany: false,
-      filters: { "VS Code Workspace": ["code-workspace"] },
-      title: "Pick a .code-workspace",
-    });
-    if (!uris || !uris.length) return undefined;
-    return { kind: "existing", file: uris[0].fsPath };
   }
 
   private html(webview: vscode.Webview): string {
