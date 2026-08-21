@@ -226,6 +226,15 @@ describe("brand accent", () => {
       // not-checked-out variant is `--dim`, deliberately NOT a faded brand, and so
       // does not appear here.
       ".rv-go", ".rv-go:not(.busy):hover",
+      // Selecting review rows for a batch. Two spends, both deliberate: the picked
+      // row's 10% wash is a tint in the `.orch-chip` idiom (it marks a set, and six
+      // picked rows still read as one selection rather than six primaries), and the
+      // bar's launch button is a fill — the same verb `.act.primary` and the
+      // sidebar's own `.batch-launch` already spend it on, and while the bar is up it
+      // is the strip's ONLY launch (`.rv-go` is hidden). The tick itself and the
+      // "review ready" chip are deliberately NOT here: a mark and a state, so
+      // --vscode-foreground and --c-done respectively.
+      ".rv-row.picked .rv-head", ".batch-launch", ".batch-launch:hover:not(:disabled)",
     ],
     marketplace: [".btn.pri", ".btn.pri:hover"],
     controls: [],

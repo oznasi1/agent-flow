@@ -911,6 +911,126 @@ describe("DeckApp review strip", () => {
     host({ ...reviewsMsg([], 0), loading: true } as OutboundMessage);
     expect(screen.getByText(/checking for PRs waiting on your review/i)).toBeInTheDocument();
   });
+
+  // ── the batch ─────────────────────────────────────────────────────────────
+  const three = () => [
+    mkReview(),
+    mkReview({ id: "o/r#2", number: 2, title: "second fix" }),
+    mkReview({ id: "o/r#3", number: 3, title: "third fix" }),
+  ];
+
+  it("posts one reviewBatch message carrying every selected id", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview(), mkReview({ id: "o/r#2", number: 2, title: "second fix" })], 2));
+    fireEvent.click(screen.getByText("select"));
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText("second fix"));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 2 selected PRs with agents/i }));
+    // One message for the batch, not one per row — the host asks its questions once.
+    expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1", "o/r#2"] });
+  });
+
+  it("extends the selection with shift-click, in queue order", () => {
+    render(<DeckApp />);
+    host(reviewsMsg(three(), 3));
+    fireEvent.click(screen.getByText("select"));
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText("third fix"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /Review the 3 selected PRs with agents/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1", "o/r#2", "o/r#3"] });
+  });
+
+  it("extends a range picked bottom-up in queue order too", () => {
+    // The ids go out in the order the queue shows them, never the order they were
+    // clicked — the host names repos and worktrees off this list.
+    render(<DeckApp />);
+    host(reviewsMsg(three(), 3));
+    fireEvent.click(screen.getByText("select"));
+    fireEvent.click(screen.getByText("third fix"));
+    fireEvent.click(screen.getByText("a small fix"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /Review the 3 selected PRs with agents/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1", "o/r#2", "o/r#3"] });
+  });
+
+  it("selects every shown row from the bar", () => {
+    render(<DeckApp />);
+    host(reviewsMsg(three(), 3));
+    fireEvent.click(screen.getByText("select"));
+    fireEvent.click(screen.getByText("Select all 3"));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 3 selected PRs with agents/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1", "o/r#2", "o/r#3"] });
+  });
+
+  it("sends ids in queue order even when they were clicked out of order", () => {
+    // Not the shift-range path: two plain clicks, bottom row first. The host names
+    // repos and worktrees off this list, so it must read like the queue does.
+    render(<DeckApp />);
+    host(reviewsMsg(three(), 3));
+    fireEvent.click(screen.getByText("select"));
+    fireEvent.click(screen.getByText("third fix"));
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 2 selected PRs with agents/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1", "o/r#3"] });
+  });
+
+  it("clicking a picked row again unpicks it", () => {
+    render(<DeckApp />);
+    host(reviewsMsg(three(), 3));
+    fireEvent.click(screen.getByText("select"));
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText("second fix"));
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with agents/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#2"] });
+  });
+
+  it("leaves selection mode once the batch is launched", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()], 1));
+    fireEvent.click(screen.getByText("select"));
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with agents/i }));
+    // The bar is gone and the rows expand again — the gesture is over.
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+    // And the selection went with it: coming back to select mode starts from zero,
+    // rather than re-offering the rows that were just launched.
+    fireEvent.click(screen.getByText("select"));
+    expect(screen.getByText(/0 selected/)).toBeInTheDocument();
+  });
+
+  it("drops the selection when selection mode is left without launching", () => {
+    render(<DeckApp />);
+    host(reviewsMsg(three(), 3));
+    fireEvent.click(screen.getByText("select"));
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText("Done"));
+    fireEvent.click(screen.getByText("select"));
+    expect(screen.getByText(/0 selected/)).toBeInTheDocument();
+  });
+
+  it("drops a selected row that leaves the queue before the launch", () => {
+    // A merged PR disappears on the next poll. Launching a stale id would ask the
+    // host to review a row that no longer exists.
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview(), mkReview({ id: "o/r#2", number: 2, title: "second fix" })], 2));
+    fireEvent.click(screen.getByText("select"));
+    fireEvent.click(screen.getByText("a small fix"));
+    fireEvent.click(screen.getByText("second fix"));
+    host(reviewsMsg([mkReview()], 1)); // #2 merged
+    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with agents/i }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1"] });
+  });
+
+  it("closes an open row when selection starts", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([mkReview()], 1));
+    fireEvent.click(screen.getByText("a small fix")); // expands
+    fireEvent.click(screen.getByText("select"));
+    fireEvent.click(screen.getByText("Done"));
+    // Back out of selection and the row is shut — not silently still open underneath.
+    expect(document.querySelector(".rv-detail")).toBeNull();
+  });
+
 });
 
 describe("DeckApp review writes", () => {

@@ -493,7 +493,7 @@ export const DECK_CSS = `
   /* Exactly the caret's width, so turning selection on doesn't shift every title
      sideways — the columns below stay where they were. */
   .rv-chk { flex: none; width: 9px; line-height: 1; color: var(--dim); font-size: var(--t-data); }
-  .rv-chk.on { color: var(--brand); }
+  .rv-chk.on { color: var(--vscode-foreground); }
   .rv-row.picked .rv-head { background: color-mix(in srgb, var(--brand) 10%, transparent); }
   /* Identifiers and counts — the only mono on the row. The title and the handle
      beside them are English, and stay in the UI font. */
@@ -509,9 +509,11 @@ export const DECK_CSS = `
     color: var(--vscode-foreground); }
   .rv-draft { flex: none; font-size: var(--t-micro); color: var(--dim);
     border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0 4px; }
-  /* The agent finished and its findings are waiting — good news, so brand, not attn. */
-  .rv-ready { flex: none; font-size: var(--t-micro); color: var(--brand);
-    border: 1px solid color-mix(in srgb, var(--brand) 45%, transparent);
+  /* The agent finished and its findings are waiting: the done hue, not --brand — the
+     accent belongs to the action you can take, and this chip is a state. Shaped like
+     .rv-draft beside it so the two read as one row of chips. */
+  .rv-ready { flex: none; font-size: var(--t-micro); color: var(--c-done);
+    border: 1px solid color-mix(in srgb, var(--c-done) 40%, transparent);
     border-radius: var(--r-chip); padding: 0 4px; }
   .rv-files, .rv-author, .rv-age { flex: none; color: var(--dim); }
   .rv-running { flex: none; color: var(--c-progress); }
