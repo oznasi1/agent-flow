@@ -278,28 +278,30 @@ In `src/types.ts`, inside `interface Run` (line 128), after the `kind` field's b
 
 - [ ] **Step 2: Write the failing test for `openWorkspace`**
 
-`test/unit/engine/workspace.test.ts` already builds real temp repos and calls `openWorkspace`. Find an existing test that asserts on the written run record (search the file for `readRuns`, `runsDir`, or `writeRun`) and follow its exact setup idiom; add alongside it:
+`test/unit/engine/workspace.test.ts` mocks `fs` and observes writes through its own
+`writeArg(predicate)` helper (defined at line 57) — there is no runs directory on disk to
+read. Add these to the same `describe` block that holds the existing `recordRun` tests
+(around line 164), which already use exactly this predicate for the run record:
 
 ```ts
   it("stamps the provider it actually seeded onto the run record", async () => {
     // The record must name the agent that was started, not the setting — under `ask`
     // those differ, and the card's tool mark reads this field.
-    const res = await openWorkspace(req({ seedAgent: true }));
-    const run = readRuns(runsDir).find((r) => r.key === TICKET.key)!;
-    expect(run.provider).toBe(res.provider);
+    const res = await openWorkspace(baseReq({ seedAgent: true }));
+    const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
+    expect(runWrite).toBeTruthy();
+    expect(JSON.parse(String(runWrite![1])).provider).toBe(res.provider);
   });
 
-  it("stamps no provider when the launch seeded no agent", () => {
+  it("stamps no provider when the launch seeded no agent", async () => {
     // Nothing is driving this run yet; a stamp here would put a tool mark on a card
-    // that never started one.
-    return openWorkspace(req({ seedAgent: false })).then(() => {
-      const run = readRuns(runsDir).find((r) => r.key === TICKET.key)!;
-      expect(run.provider).toBeUndefined();
-    });
+    // that never started an agent at all.
+    await openWorkspace(baseReq({ seedAgent: false }));
+    const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
+    expect(runWrite).toBeTruthy();
+    expect(JSON.parse(String(runWrite![1])).provider).toBeUndefined();
   });
 ```
-
-Adapt `req(...)`, `readRuns`, `runsDir` and `TICKET` to the helper names the existing file actually uses — read the file's top before writing this. Do not introduce a second set of helpers.
 
 - [ ] **Step 3: Run to verify it fails**
 
@@ -323,21 +325,29 @@ Expected: PASS, including every pre-existing test in the file.
 
 - [ ] **Step 6: Write the failing test for `batchWorkspace`**
 
-In `test/unit/engine/batchWorkspace.test.ts`, following that file's existing setup idiom:
+`test/unit/engine/batchWorkspace.test.ts` uses a `writes(predicate)` helper (line 53) that
+returns *all* matching write calls — the batch writes one record per task. Its existing
+"stamps the caller's resolved agent onto every plan file" test (line 95) is the pattern to
+follow:
 
 ```ts
   it("stamps the pinned provider onto every run in the batch", async () => {
-    await openSharedWorkspace(req({ seedAgent: true, provider: "cursor" }));
-    const runs = readRuns(runsDir);
+    await openSharedWorkspace(baseReq({ seedAgent: true, provider: "cursor" }));
+    const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
     expect(runs.length).toBeGreaterThan(1);
-    for (const r of runs) expect(r.provider).toBe("cursor");
+    expect(runs.map((r) => r.provider)).toEqual(runs.map(() => "cursor"));
   });
 
   it("stamps no provider on a batch that seeded no agent", async () => {
-    await openSharedWorkspace(req({ seedAgent: false }));
-    for (const r of readRuns(runsDir)) expect(r.provider).toBeUndefined();
+    await openSharedWorkspace(baseReq({ seedAgent: false }));
+    const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
+    expect(runs.length).toBeGreaterThan(0);
+    for (const r of runs) expect(r.provider).toBeUndefined();
   });
 ```
+
+`/runs/` and `/plans/` are distinct path segments, so this predicate cannot pick up the plan
+files the same launch writes.
 
 - [ ] **Step 7: Run to verify it fails**
 
