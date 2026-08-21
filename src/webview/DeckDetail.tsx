@@ -124,7 +124,7 @@ export function DeckDetail({ card, sourceLabel, usage, onClose, onForget }: Deck
       <div className="dd-hd">
         {/* The card's own mark, at the card's own size: a selected card and its
           * drawer are one object, and a smaller mark here would read as two. */}
-        <CardKindIcon kind={runKind(r.run)} />
+        <CardKindIcon kind={runKind(r.run)} provider={r.provider} />
         {/* The label, not the raw key: a notepad key is ~64 mono characters — wider
          * than the drawer itself, which as a nowrap flex item took the header (and
          * with it the whole drawer) into horizontal scroll, pushing the summary to

@@ -131,6 +131,20 @@ describe("DeckApp", () => {
     expect(within(document.querySelector(".dd") as HTMLElement).getByText("In Progress")).toBeInTheDocument();
   });
 
+  it("marks the card with the tool driving the run", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({ provider: "cursor" })]));
+    expect(container.querySelector(".pv.p-cursor")).toBeTruthy();
+  });
+
+  it("leaves the tile bare when no provider is known", () => {
+    // The board as it looked before this feature: every run record written before the
+    // provider was recorded, with nothing running in it.
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(container.querySelector(".pv")).toBeNull();
+  });
+
   it("groups runs into columns with counts", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" }, column: "needs", agent: { state: "needs-you", lastActivityMs: 1, slug: null } })]));
