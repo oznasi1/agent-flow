@@ -283,6 +283,13 @@ export interface RunStatus {
   windowOpen: boolean; // is this run's target window currently open? (from presence)
   prs: PrEntryMap; // repo name → observed PR state ({} when prFacts is off)
   agents: CardAgent[]; // every open session in this run's directories
+  /** Which tool is driving this run, for the card's provider mark. The run record's own
+   * stamp when it has one; otherwise inferred — a live Claude Code session in this run's
+   * directories means `claude-code`, because `~/.claude/sessions` is the only agent
+   * registry the Deck can read. Absent when neither answers, and the card then shows no
+   * mark rather than guessing from the current setting, which may have changed since the
+   * launch or be `ask`. */
+  provider?: AgentProvider;
   /** A local card's ticket key, inferred from its branch name rather than from a
    * launch — set only when the run is local and its url resolved to one. The
    * branch could name a ticket somebody else owns, so the status shown on the
