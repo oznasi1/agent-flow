@@ -242,6 +242,14 @@ export interface AgentActivity {
    * reducer cannot know. Optional so every existing AgentActivity literal
    * (the test suite is full of them) still compiles; absent means false. */
   midWork?: boolean;
+  /** The model the last main-chain assistant line answered with, e.g. "claude-opus-5".
+   * Null when the tail carries no such line — a transcript whose last 200 lines are all
+   * subagent work, or a session that has not answered yet. Optional so every existing
+   * AgentActivity literal (the test suite is full of them) still compiles. */
+  model?: string | null;
+  /** How many DISTINCT main-chain models the tail holds. 1 in the ordinary case, more
+   * when the session switched mid-run — which the drawer marks with a "+N". */
+  modelCount?: number;
 }
 
 /** One open Claude Code session attached to a card, with its own live state.

@@ -85,6 +85,46 @@ describe("deriveActivity", () => {
   it("does not mark an empty transcript as midWork", () => {
     expect(deriveActivity([], NOW, NOW).midWork).toBeFalsy();
   });
+
+  const asstModel = (model: string, sidechain = false): TranscriptLine =>
+    line({ type: "assistant", message: { role: "assistant", stop_reason: "end_turn", model }, ...(sidechain ? { isSidechain: true } : {}) });
+
+  it("reports the model of the last main-chain assistant line", () => {
+    const a = deriveActivity([asstModel("claude-opus-5")], NOW - 1000, NOW);
+    expect(a.model).toBe("claude-opus-5");
+    expect(a.modelCount).toBe(1);
+  });
+
+  it("counts distinct main-chain models when a session switched mid-run", () => {
+    // Real case: fast mode switches the model inside one session, so a tail holds
+    // both. The drawer marks that with a "+N" and needs the count to do it.
+    const a = deriveActivity(
+      [asstModel("claude-opus-5"), asstModel("claude-fable-5"), asstModel("claude-opus-5")],
+      NOW - 1000, NOW,
+    );
+    expect(a.model).toBe("claude-opus-5");
+    expect(a.modelCount).toBe(2);
+  });
+
+  it("ignores a subagent's model even when it is the last line", () => {
+    // A main session that dispatches a subagent must not report the subagent's
+    // model as its own: sidechain lines are somebody else's turn.
+    const a = deriveActivity([asstModel("claude-opus-5"), asstModel("claude-haiku-4-5", true)], NOW - 1000, NOW);
+    expect(a.model).toBe("claude-opus-5");
+    expect(a.modelCount).toBe(1);
+  });
+
+  it("has no model when the tail carries only subagent turns", () => {
+    const a = deriveActivity([asstModel("claude-haiku-4-5", true)], NOW - 1000, NOW);
+    expect(a.model).toBeNull();
+    expect(a.modelCount).toBe(0);
+  });
+
+  it("has no model on a transcript with nothing meaningful in it", () => {
+    const a = deriveActivity([snapshot], NOW - 1000, NOW);
+    expect(a.state).toBe("unknown");
+    expect(a.model).toBeNull();
+  });
 });
 
 describe("readAgentActivity", () => {
