@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.7] — 2026-08-21
+
 ### Fixed
 
 - **A note's screenshot could be replaced by the next note's, under the agent already
