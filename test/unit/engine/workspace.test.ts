@@ -1922,6 +1922,62 @@ describe("openWorkspace — existing folder window", () => {
     expect(brief).toBeTruthy();
     expect(String(brief![1])).toContain("ASM-1");
   });
+
+  // `absoluteBrief` exists for **Review with agent**: a review's brief belongs in the
+  // review worktree, and the destination window is someone else's working repo. The
+  // fallback write above would land a second brief in it — clobbering the one the agent
+  // already working there was given, and pointing this launch's `{brief}` at it.
+  describe("absoluteBrief", () => {
+    const FALLBACK = "/other/open-window/.pick-task/TASK.md";
+
+    it("writes no brief into the destination folder", async () => {
+      await openWorkspace(baseReq({
+        services: mkRepos(["solo"]), existingFolder: "/other/open-window", absoluteBrief: true,
+      }));
+      expect(writeArg((p) => p === FALLBACK)).toBeUndefined();
+    });
+
+    it("points the seeded {brief} at the launch's own brief instead", async () => {
+      await openWorkspace(baseReq({
+        services: mkRepos(["solo"]), existingFolder: "/other/open-window", absoluteBrief: true,
+        promptTemplate: "brief at {brief}",
+      }));
+      const plan = JSON.parse(String(writeArg((p) => p.includes("/.agentflow/plans/"))![1]));
+      expect(plan.matches[0].prompt).toBe("brief at /repos/solo/.pick-task/TASK.md");
+    });
+
+    // Nothing of ours is written there any more, so there is nothing to exclude — and
+    // .git/info/exclude in a repo this launch does not own is not ours to append to.
+    it("leaves the destination repo's git exclude alone", async () => {
+      await openWorkspace(baseReq({
+        services: mkRepos(["solo"]), existingFolder: "/other/open-window", absoluteBrief: true,
+      }));
+      expect(appendFileSync.mock.calls.some((c) => String(c[0]).startsWith("/other/open-window"))).toBe(false);
+    });
+
+    it("still focuses the destination window and seeds a plan match for it", async () => {
+      const result = await openWorkspace(baseReq({
+        services: mkRepos(["solo"]), existingFolder: "/other/open-window", absoluteBrief: true,
+      }));
+      expect(result.opened).toEqual(["/other/open-window"]);
+      const plan = JSON.parse(String(writeArg((p) => p.includes("/.agentflow/plans/"))![1]));
+      expect(plan.matches[0].matchPath).toBe("/other/open-window");
+    });
+
+    it("changes nothing when the destination IS one of the repos", async () => {
+      // The per-repo brief loop already wrote this folder's brief; the flag has no
+      // second write to suppress, and the plan must still name it.
+      await openWorkspace(baseReq({
+        services: mkRepos(["account-service"]), existingFolder: "/repos/account-service",
+        absoluteBrief: true, promptTemplate: "brief at {brief}",
+      }));
+      expect(
+        writeFileSync.mock.calls.filter((c) => String(c[0]) === "/repos/account-service/.pick-task/TASK.md"),
+      ).toHaveLength(1);
+      const plan = JSON.parse(String(writeArg((p) => p.includes("/.agentflow/plans/"))![1]));
+      expect(plan.matches[0].prompt).toBe("brief at /repos/account-service/.pick-task/TASK.md");
+    });
+  });
 });
 
 describe("openWorkspace — keepExistingBrief", () => {

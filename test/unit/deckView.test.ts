@@ -90,7 +90,14 @@ const h = vi.hoisted(() => ({
   // multi-root workspace window can be asserted to fold its sessions into one
   // card. Empty by default, which groups nothing: every pre-existing
   // local-card test keeps producing its old one-place-one-card shape.
-  liveWindows: [] as { identity: string; kind: "workspace" | "folder"; roots?: string[] }[],
+  // `label`/`folders` are what the destination picker renders a row from; the card
+  // grouping tests that predate it only ever needed identity/kind/roots.
+  liveWindows: [] as { identity: string; kind: "workspace" | "folder"; roots?: string[]; label?: string; folders?: number }[],
+  // This window's identity, for the destination question Review with agent asks.
+  // Undefined by default: a window that can't hold a seeded session.
+  currentWindow: undefined as { identity: string; kind: "workspace" | "folder"; roots: { name?: string; path: string }[] } | undefined,
+  // The `.code-workspace` files the destination question's pick-existing arm lists.
+  workspaceFiles: [] as { file: string; folders: number }[],
   // Per-session live activity (Task 8) — stubbed so a test can assert a real,
   // known AgentActivity is threaded through to the right CardAgent, without
   // this suite re-testing readSessionActivity's own parsing of a real
@@ -109,7 +116,7 @@ const h = vi.hoisted(() => ({
   // actually seeded, which the launch toast names. `{ ok: false, cancelled }` is its
   // third arm: a dismissed picker, which is neither a success nor a failure.
   launchReview: vi.fn(async (..._args: unknown[]): Promise<
-    | { ok: true; runKey: string; provider: AgentProvider }
+    | { ok: true; runKey: string; provider: AgentProvider; seededInPlace?: true }
     | { ok: false; cancelled: true }
     | { ok: false; message: string }
   > => ({
@@ -252,6 +259,8 @@ vi.mock("../../src/engine/workspace", () => ({
   openWorkspace: h.openWorkspace,
   BRIEF_DIR: ".pick-task",
   writePlanFile: h.writePlanFile,
+  // The `pick-existing` arm of the destination question (openTargetHost).
+  listWorkspaceFiles: () => h.workspaceFiles,
   // A stub that encodes its brief argument in the output, so a test can assert
   // which brief a match was rendered against without re-testing renderPrompt —
   // engine/prompt.test.ts already owns that.
@@ -309,6 +318,11 @@ vi.mock("../../src/engine/transcript", async (importActual) => ({
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: () => h.liveWindows,
   defaultWindowsDir: () => "/windows",
+  // Read by the destination question Review with agent now asks (openTargetHost).
+  // Undefined by default — the shape of a window that can't hold a session, which is
+  // what keeps "This window" out of the picker unless a test asks for it.
+  currentWindow: () => h.currentWindow,
+  windowIdentity: () => (h.currentWindow ? { ...h.currentWindow, label: "here", folders: 1 } : undefined),
 }));
 // The usage sweep's reader (Task 5): a class instantiated once and held for the
 // panel's lifetime in deckView.ts, so the mock has to be a class too — a plain
@@ -474,6 +488,12 @@ vi.mock("../../src/config", async (importActual) => {
       promptModes: actual.getConfig().promptModes,
       workspaceMode: actual.getConfig().workspaceMode,
       workspaceDir: actual.getConfig().workspaceDir,
+      // Where Review with agent opens, and whether the picker lists open windows.
+      // Both from the real getConfig() so a test steers them with setConfig — and so
+      // the shipped default (`new-window`: no picker at all) is what a test that never
+      // mentions them exercises.
+      reviewOpenIn: actual.getConfig().reviewOpenIn,
+      trackOpenWindows: actual.getConfig().trackOpenWindows,
     }),
   };
 });
@@ -637,6 +657,8 @@ beforeEach(() => {
   h.reviewRequests = true;
   h.openSessions = [];
   h.liveWindows = [];
+  h.currentWindow = undefined;
+  h.workspaceFiles = [];
   h.sessionActivity.mockClear().mockReturnValue({ state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" });
   // An implementation, not a resolved value: the real launchReview reports the agent
   // it seeded, which follows whatever `h.agentProvider` is when the launch RUNS — and
@@ -8515,5 +8537,126 @@ describe("branch-CI verdicts for an armed flow", () => {
     ];
     await passes(3);
     expect(h.ghRun.mock.calls.filter((c) => c[1].includes("graphql"))).toHaveLength(0);
+  });
+});
+
+// ── where a review opens (agentFlow.reviewOpenIn) ─────────────────────────────
+// Every release up to now opened a new window on the review worktree. The setting
+// defaults to that, so the tests above — which never set it — are the no-regression
+// guard for the one-click launch. These cover the arms it can be turned to.
+describe("DeckPanel review destination", () => {
+  const HERE = { identity: "/repos/bite-me", kind: "folder" as const, roots: [{ path: "/repos/bite-me" }] };
+  const launched = () => (h.launchReview.mock.calls[0]?.[0] as { openTarget?: Record<string, unknown> } | undefined);
+
+  it("asks nothing and hands down no destination on a stock install", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    // Not merely "no picker": launchReview must be told nothing, so it takes the
+    // new-window-on-the-worktree path every earlier release took.
+    expect(launched()?.openTarget).toEqual({ mode: "per-window", openIn: "new" });
+  });
+
+  it("asks where to open when the setting says ask, and hands the answer down", async () => {
+    setConfig({ reviewOpenIn: "ask" });
+    h.currentWindow = HERE;
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "current" } });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ title: "Review aws-ops#8491 — open where?" }),
+    );
+    expect(launched()?.openTarget).toEqual({ mode: "per-window", openIn: "current", currentWindow: HERE });
+  });
+
+  // The same ordering the mode picker already obeys, and for the same reason:
+  // launchReview's first act is createWorktrees, so a question raised after it would
+  // leave a worktree and a branch behind on every Escape.
+  it("creates nothing when the destination picker is dismissed", async () => {
+    setConfig({ reviewOpenIn: "ask" });
+    window.showQuickPick.mockResolvedValueOnce(undefined);
+    const p = await showAndWarm();
+    const before = posts(p).length;
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(h.launchReview).not.toHaveBeenCalled();
+    expect(posts(p).slice(before).some((m) => m.type === "toast")).toBe(false);
+  });
+
+  it("asks which mode first and where to open second, both before anything is created", async () => {
+    setConfig({
+      reviewOpenIn: "ask",
+      reviewRequestModes: [
+        { id: "backend", label: "Backend services", prompt: "BE {number}" },
+        { id: "frontend", label: "Frontend", prompt: "FE {number}" },
+      ],
+    });
+    window.showQuickPick
+      .mockResolvedValueOnce({ label: "Frontend", mode: { id: "frontend", label: "Frontend", prompt: "FE {number}" } })
+      .mockResolvedValueOnce({ target: { kind: "new" } });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick.mock.calls.map((c: unknown[]) => (c[1] as { title: string }).title)).toEqual([
+      "Review aws-ops#8491",
+      "Review aws-ops#8491 — open where?",
+    ]);
+    expect(launched()).toEqual(expect.objectContaining({ template: "FE {number}" }));
+  });
+
+  it("takes this window from the setting without asking", async () => {
+    setConfig({ reviewOpenIn: "this-window" });
+    h.currentWindow = HERE;
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(launched()?.openTarget).toEqual({ mode: "per-window", openIn: "current", currentWindow: HERE });
+  });
+
+  it("falls back to a new window when this window can't hold a session", async () => {
+    setConfig({ reviewOpenIn: "this-window" }); // h.currentWindow stays undefined
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(launched()?.openTarget).toEqual({ mode: "per-window", openIn: "new" });
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "info", message: expect.stringContaining("can't hold a session") }),
+    );
+  });
+
+  it("offers the windows already open, and focuses the one picked", async () => {
+    setConfig({ reviewOpenIn: "ask" });
+    h.liveWindows = [{ identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1 }];
+    window.showQuickPick.mockImplementationOnce(async (items: unknown) => {
+      const row = (items as { label: string }[]).find((i) => i.label.includes("centaur"));
+      expect(row).toBeTruthy();
+      return row;
+    });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(launched()?.openTarget).toEqual({ mode: "per-window", openIn: "new", existingFolder: "/repos/centaur" });
+  });
+
+  it("says where the session landed when no window opened", async () => {
+    setConfig({ reviewOpenIn: "this-window" });
+    h.currentWindow = HERE;
+    h.launchReview.mockResolvedValueOnce({
+      ok: true, runKey: "review-aws-ops-8491", provider: "claude-code", seededInPlace: true,
+    });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    // Nothing opens on this path, so a toast that only says "in a worktree" reads as
+    // though the click did nothing.
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("in this window"),
+      }),
+    );
+  });
+
+  it("does not claim this window for a launch that opened one", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).not.toContain("in this window");
   });
 });

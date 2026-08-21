@@ -2,6 +2,9 @@ import * as vscode from "vscode";
 import * as os from "os";
 import * as path from "path";
 import { AgentProvider, FilterVisibility, FlowCommand, PromptMode } from "./types";
+// The destination vocabulary, defined beside the picker that reads it so the setting and
+// the code that acts on it cannot drift apart.
+import type { OpenInSetting } from "./engine/openTarget";
 
 /** The stock "how should the agent start" modes, in picker order. `detail` is the
  * line shown under the label — written for the user reading the picker, never
@@ -377,6 +380,11 @@ export interface AgentFlowConfig {
   agentSurface: AgentSurface;
   workspaceMode: "auto" | "multiroot" | "per-window" | "ask";
   openIn: "ask" | "new-window" | "this-window" | "pick-existing";
+  // Where **Review with agent** opens, same vocabulary as `openIn` and deliberately its
+  // own setting: a take is a day's work and a review is a five-minute errand, so the two
+  // answers are rarely the same. Defaults to `new-window` — today's behaviour — so the
+  // one-click launch a stock install has always had does not grow a picker on upgrade.
+  reviewOpenIn: OpenInSetting;
   taskMode: string; // "ask", or a PromptMode id
   promptModes: PromptMode[];
   exploreMode: string; // "ask", or an ExploreAction id
@@ -643,6 +651,7 @@ export function getConfig(): AgentFlowConfig {
     agentSurface: readAgentSurface(c),
     workspaceMode: (c.get<AgentFlowConfig["workspaceMode"]>("workspaceMode")) || "auto",
     openIn: (c.get<AgentFlowConfig["openIn"]>("openIn")) || "ask",
+    reviewOpenIn: (c.get<OpenInSetting>("reviewOpenIn")) || "new-window",
     taskMode: c.get<string>("taskMode") || "ask",
     promptModes: resolveModes(c, "promptModes", DEFAULT_PROMPT_MODES),
     exploreMode: c.get<string>("exploreMode") || "ask",
