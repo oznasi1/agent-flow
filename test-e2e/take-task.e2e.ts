@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { makeSandbox, FIXTURE_TASK, type Sandbox } from "./_helpers/sandbox";
 import { launchHost, openTasksView, tasksFrame } from "./_helpers/host";
+import { shot } from "./_helpers/shot";
 
 let sb: Sandbox;
 let app: ElectronApplication | undefined;
@@ -11,7 +12,7 @@ let app: ElectronApplication | undefined;
 test.beforeEach(() => { sb = makeSandbox(); });
 test.afterEach(async () => { await app?.close(); app = undefined; sb.dispose(); });
 
-test("taking a task opens a real window and lands the brief + plan handshake on disk", async () => {
+test("taking a task opens a real window and lands the brief + plan handshake on disk", async ({}, testInfo) => {
   test.setTimeout(180_000);
   const launched = await launchHost(sb);
   app = launched.app;
@@ -21,7 +22,7 @@ test("taking a task opens a real window and lands the brief + plan handshake on 
   const frame = tasksFrame(page);
   const card = frame.locator(".card", { hasText: FIXTURE_TASK.key });
   await expect(card).toBeVisible({ timeout: 30_000 });
-  await page.screenshot({ path: "test-results/e2e-take-1-pool.png" });
+  await shot(page, testInfo, "1 · pool loaded");
 
   // Take. Every downstream prompt except the repo confirm is pre-answered by
   // the sandbox settings (mode, destination, worktree, remote control).
@@ -33,7 +34,7 @@ test("taking a task opens a real window and lands the brief + plan handshake on 
   const quickInput = page.locator(".quick-input-widget");
   await expect(quickInput).toBeVisible({ timeout: 15_000 });
   await expect(quickInput).toContainText("rocket");
-  await page.screenshot({ path: "test-results/e2e-take-2-repo-pick.png" });
+  await shot(page, testInfo, "2 · repos confirmed");
   const newWindow = app.waitForEvent("window", { timeout: 60_000 });
   await page.keyboard.press("Enter");
 
@@ -42,7 +43,7 @@ test("taking a task opens a real window and lands the brief + plan handshake on 
   // working" assertion: no mock can produce this event.
   const opened = await newWindow;
   await opened.locator(".activitybar").waitFor({ timeout: 60_000 });
-  await opened.screenshot({ path: "test-results/e2e-take-3-new-window.png" });
+  await shot(opened, testInfo, "3 · window opened");
 
   // The brief, with content that can only have come from tasks.json through
   // the connector → takeTask → briefMarkdown → fs pipeline.

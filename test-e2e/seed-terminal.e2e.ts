@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import type { ElectronApplication, Page } from "@playwright/test";
 import { makeSandbox, FIXTURE_TASK, type Sandbox } from "./_helpers/sandbox";
 import { launchHost, openTasksView, tasksFrame } from "./_helpers/host";
+import { shot } from "./_helpers/shot";
 
 let sb: Sandbox;
 let app: ElectronApplication | undefined;
@@ -19,7 +20,7 @@ async function terminalText(win: Page): Promise<string> {
   return (await rows.count()) ? await rows.innerText() : "";
 }
 
-test("the opened window seeds the agent prompt into a real integrated terminal", async () => {
+test("the opened window seeds the agent prompt into a real integrated terminal", async ({}, testInfo) => {
   test.setTimeout(180_000);
   const launched = await launchHost(sb);
   app = launched.app;
@@ -53,5 +54,5 @@ test("the opened window seeds the agent prompt into a real integrated terminal",
   // fixture → takeTask → plan file → new-window activation → seedViaTerminal.
   await expect.poll(() => terminalText(opened), { timeout: 30_000 }).toContain(`Jira ${FIXTURE_TASK.key}`);
   expect(await terminalText(opened)).toContain("rocket telemetry");
-  await opened.screenshot({ path: "test-results/e2e-seed-terminal.png" });
+  await shot(opened, testInfo, "1 · prompt seeded, unsubmitted");
 });

@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import type { ElectronApplication } from "@playwright/test";
 import { makeSandbox, FIXTURE_TASK, type Sandbox } from "./_helpers/sandbox";
 import { launchHost, openTasksView, tasksFrame } from "./_helpers/host";
+import { shot } from "./_helpers/shot";
 
 let sb: Sandbox;
 let app: ElectronApplication | undefined;
@@ -9,7 +10,7 @@ let app: ElectronApplication | undefined;
 test.beforeEach(() => { sb = makeSandbox(); });
 test.afterEach(async () => { await app?.close(); app = undefined; sb.dispose(); });
 
-test("a real host boots the extension and the pool renders the fixture task", async () => {
+test("a real host boots the extension and the pool renders the fixture task", async ({}, testInfo) => {
   const launched = await launchHost(sb);
   app = launched.app;
   const page = launched.page;
@@ -21,5 +22,5 @@ test("a real host boots the extension and the pool renders the fixture task", as
   // there only if extension → connector → registry gate → webview all worked.
   await expect(frame.locator(".card", { hasText: FIXTURE_TASK.key })).toBeVisible({ timeout: 30_000 });
   await expect(frame.locator(".card")).toContainText(FIXTURE_TASK.summary);
-  await page.screenshot({ path: "test-results/e2e-smoke-pool.png" });
+  await shot(page, testInfo, "1 · pool loaded");
 });

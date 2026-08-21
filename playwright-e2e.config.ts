@@ -12,8 +12,12 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI
-    ? [["list"], ["html", { open: "never", outputFolder: "playwright-e2e-report" }]]
-    : [["list"]],
+  // The json reporter runs everywhere: it is what scripts/verify-report.mjs
+  // reads to build the screenshot-strip verify-feature report (Layer C).
+  reporter: [
+    ["list"],
+    ["json", { outputFile: "test-results/e2e-results.json" }],
+    ...(process.env.CI ? ([["html", { open: "never", outputFolder: "playwright-e2e-report" }]] as const) : []),
+  ],
   use: { trace: "retain-on-failure", screenshot: "only-on-failure" },
 });

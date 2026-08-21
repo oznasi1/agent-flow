@@ -22,6 +22,7 @@ npm install
 | `npm run test:cov` | Run tests with V8 coverage (thresholds enforced). |
 | `npm run test:ct` | Run the Playwright component tests (real Chromium; covers measured-layout behavior jsdom cannot). |
 | `npm run test:e2e` | Real-host E2E: downloads a pinned VS Code, launches it sandboxed (own HOME, user-data, extensions), and drives take-a-task against the fixture connector. First run downloads ~150MB. |
+| `npm run e2e:report` | Build the verify-feature report from the last `test:e2e` run — one self-contained HTML with a labelled screenshot strip and verdict per journey (`test-results/verify-report.html`). |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run package` | Build a `.vsix` with `vsce`. |
 

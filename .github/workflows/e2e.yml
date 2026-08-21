@@ -29,6 +29,20 @@ jobs:
           key: vscode-test-${{ runner.os }}-${{ hashFiles('test-e2e/_helpers/host.ts') }}
       # A real Electron workbench needs a display; xvfb provides one headlessly.
       - run: xvfb-run -a npm run test:e2e
+      # Layer C: the verify-feature report is generated on every run — pass or
+      # fail — because it is the evidence, not the gate. The markdown summary
+      # lands on the run page; the screenshot-strip HTML rides as an artifact.
+      - name: Verify-feature report
+        if: always()
+        run: |
+          npm run e2e:report
+          cat test-results/verify-report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: verify-report
+          path: test-results/verify-report.html
+          retention-days: 30
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

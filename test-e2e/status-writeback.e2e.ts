@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { makeSandbox, FIXTURE_TASK, type Sandbox } from "./_helpers/sandbox";
 import { launchHost, openTasksView, tasksFrame } from "./_helpers/host";
+import { shot } from "./_helpers/shot";
 
 let sb: Sandbox;
 let app: ElectronApplication | undefined;
@@ -14,7 +15,7 @@ test.afterEach(async () => { await app?.close(); app = undefined; sb.dispose(); 
 /** Journey 3: a status change from a card reaches the task source, and the
  *  provenance label rides with it. The fixture records both writes to
  *  writes.jsonl — the request-recorder that replaced the fake Jira. */
-test("changing a card's status records the transition and the claude-code provenance label", async () => {
+test("changing a card's status records the transition and the claude-code provenance label", async ({}, testInfo) => {
   test.setTimeout(180_000);
   const launched = await launchHost(sb);
   app = launched.app;
@@ -31,7 +32,7 @@ test("changing a card's status records the transition and the claude-code proven
   const quickInput = page.locator(".quick-input-widget");
   await expect(quickInput).toBeVisible({ timeout: 15_000 });
   await expect(quickInput).toContainText("Done");
-  await page.screenshot({ path: "test-results/e2e-status-1-targets.png" });
+  await shot(page, testInfo, "1 · transition targets");
 
   // Filter to the one target and confirm. The fixture's "Done" target carries
   // no field prompts, so the move fires immediately.
@@ -41,7 +42,7 @@ test("changing a card's status records the transition and the claude-code proven
   // A done-category move removes the card from the pool — DOM proof the
   // statusChanged message round-tripped back into the webview.
   await expect(card).toHaveCount(0, { timeout: 30_000 });
-  await page.screenshot({ path: "test-results/e2e-status-2-card-gone.png" });
+  await shot(page, testInfo, "2 · card retired from the pool");
 
   // The writes, in order: the transition, then the provenance stamp — with the
   // shipped defaults (stampLabelOnWrite: true, provenanceLabel: "claude-code").

@@ -5,6 +5,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { makeSandbox, FIXTURE_TASK, type Sandbox } from "./_helpers/sandbox";
 import { launchHost, openTasksView, tasksFrame } from "./_helpers/host";
+import { shot } from "./_helpers/shot";
 
 let sb: Sandbox;
 let app: ElectronApplication | undefined;
@@ -20,7 +21,7 @@ const git = (cwd: string, args: string[]): string =>
 /** Journey 4: worktree mode. The take lands in a REAL `git worktree` with a
  *  per-task branch, and the brief lands in the worktree — the shared checkout
  *  stays untouched, which is the entire point of the mode. */
-test("worktree mode takes the task in a real git worktree on a per-task branch", async () => {
+test("worktree mode takes the task in a real git worktree on a per-task branch", async ({}, testInfo) => {
   test.setTimeout(180_000);
   const launched = await launchHost(sb);
   app = launched.app;
@@ -39,7 +40,7 @@ test("worktree mode takes the task in a real git worktree on a per-task branch",
   await page.keyboard.press("Enter");
   const opened = await newWindow;
   await opened.locator(".activitybar").waitFor({ timeout: 60_000 });
-  await opened.screenshot({ path: "test-results/e2e-worktree-window.png" });
+  await shot(opened, testInfo, "1 · worktree window opened");
 
   // A real worktree, registered with git itself — not merely a directory that
   // looks like one. createWorktrees puts it at <repo>/.claude/worktrees/<KEY>.
