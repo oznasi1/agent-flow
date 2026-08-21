@@ -1,0 +1,39 @@
+name: E2E (real host)
+
+# The heavy lane, per the spec's Model B: it runs at merge-to-main and on
+# demand (workflow_dispatch), never on every PR — the fast lane in ci.yml
+# gates those. Deliberately NOT a required check yet: the lane is proven on
+# macOS locally, and this job is how the Linux/xvfb variant earns that
+# status. Flip it to required only after it has been boringly green here.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Cache the pinned VS Code build
+        uses: actions/cache@v4
+        with:
+          path: .vscode-test
+          # The pin lives in test-e2e/_helpers/host.ts (VSCODE_VERSION);
+          # hashing the file re-downloads exactly when the pin moves.
+          key: vscode-test-${{ runner.os }}-${{ hashFiles('test-e2e/_helpers/host.ts') }}
+      # A real Electron workbench needs a display; xvfb provides one headlessly.
+      - run: xvfb-run -a npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-e2e-report
+          path: |
+            playwright-e2e-report/
+            test-results/
+          retention-days: 7
