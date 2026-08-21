@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] — 2026-08-21
+
 ### Added
 
 - **A card now says which tool is driving it, and the drawer says which model is
