@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { Run, ServiceRef } from "../types";
+import { readAgentProviderSetting, resolvedProvider } from "../config";
 import { extractFileHints, resolveFilesInRepo, mention } from "./files";
 import { ensureGitExcluded } from "./gitExclude";
 import { folderName } from "./worktree";
@@ -190,12 +191,18 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
     });
   }
 
+  // One resolution for the whole batch: `req.provider` is the pin `ask` produced, and a
+  // fixed setting is read here rather than per task, because every task in one batch is
+  // seeded by the same launch and cannot disagree about its agent.
+  const provider = seedAgent ? (req.provider ?? resolvedProvider(readAgentProviderSetting())) : undefined;
+
   tasks.forEach((t) => {
     const run: Run = {
       key: t.ticket.key,
       summary: t.ticket.summary,
       url: t.ticket.url,
       createdAt,
+      ...(provider ? { provider } : {}),
       mode: here ? (here.kind === "workspace" ? "multiroot" : "per-window") : workspaceFile ? "multiroot" : "per-window",
       workspaceFile,
       repos: t.services.map((s) => ({

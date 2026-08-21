@@ -139,6 +139,12 @@ export interface Run {
    * "notepad" is a run launched from the Notepad tab: ticketless like "explore",
    * but distinguishable from it so the board can label it for what it is. */
   kind?: "task" | "explore" | "review" | "local" | "notepad";
+  /** The agent this run was launched with — the one `openWorkspace` actually resolved
+   * and seeded, not the setting, so it names the real agent even under `ask`. Absent on
+   * every record written before this field existed, on a `local` run (never launched by
+   * Agent Flow at all), and on a launch that seeded no agent — in which case nothing
+   * here is driving the run yet and the card must not claim otherwise. */
+  provider?: AgentProvider;
   mode: WorkspaceMode;
   workspaceFile?: string; // multi-root .code-workspace, when mode === "multiroot"
   repos: { name: string; path: string; isGit: boolean; branch?: string }[];

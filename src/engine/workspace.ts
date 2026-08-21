@@ -545,6 +545,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
       url: ticket.url,
       createdAt: Date.now(),
       kind: req.kind,
+      ...(seedAgent ? { provider } : {}),
       mode: effMode,
       workspaceFile,
       repos: services.map((s) => ({

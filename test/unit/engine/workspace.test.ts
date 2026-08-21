@@ -177,6 +177,24 @@ describe("openWorkspace — multiroot", () => {
     await openWorkspace(baseReq());
     expect(writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"))).toBeTruthy();
   });
+
+  it("stamps the provider it actually seeded onto the run record", async () => {
+    // The record must name the agent that was started, not the setting — under `ask`
+    // those differ, and the card's tool mark reads this field.
+    const res = await openWorkspace(baseReq({ seedAgent: true }));
+    const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
+    expect(runWrite).toBeTruthy();
+    expect(JSON.parse(String(runWrite![1])).provider).toBe(res.provider);
+  });
+
+  it("stamps no provider when the launch seeded no agent", async () => {
+    // Nothing is driving this run yet; a stamp here would put a tool mark on a card
+    // that never started an agent at all.
+    await openWorkspace(baseReq({ seedAgent: false }));
+    const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
+    expect(runWrite).toBeTruthy();
+    expect(JSON.parse(String(runWrite![1])).provider).toBeUndefined();
+  });
 });
 
 describe("openWorkspace — attachments", () => {
