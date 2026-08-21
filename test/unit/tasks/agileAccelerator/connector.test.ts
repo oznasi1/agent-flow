@@ -386,3 +386,175 @@ describe("provider()", () => {
     expect(tasks[0].url).toBe("https://gus.lightning.force.com/lightning/r/ADM_Work__c/a01/view");
   });
 });
+
+describe("the setup wizard's input validators", () => {
+  /** The validators are the only thing standing between a typo and a connector
+   * that fails on every query with an opaque CLI error, so they are worth
+   * asserting directly rather than through the happy path. `showInputBox` is
+   * never actually driven by a human here — we pull the validator back out of
+   * the options object the wizard handed the editor. */
+  async function validatorFor(step: 0 | 1): Promise<(v: string) => string | undefined> {
+    vi.mocked(window.showInputBox)
+      .mockResolvedValueOnce("https://gus.lightning.force.com")
+      .mockResolvedValueOnce("Falcons")
+      .mockResolvedValueOnce("gus");
+    await makeAgileAcceleratorConnector(ctx).configure(1, 4);
+    const opts = vi.mocked(window.showInputBox).mock.calls[step][0] as {
+      validateInput: (v: string) => string | undefined;
+    };
+    return opts.validateInput;
+  }
+
+  it("rejects an empty instance url", async () => {
+    expect((await validatorFor(0))("   ")).toBe("Enter your Lightning URL");
+  });
+
+  it("rejects a plain-http instance url — the CLI will only talk to https", async () => {
+    expect((await validatorFor(0))("http://gus.lightning.force.com")).toBe("URL must start with https://");
+  });
+
+  it("rejects something that is not a url at all", async () => {
+    expect((await validatorFor(0))("gus")).toBe(
+      "Enter a valid URL (e.g. https://your-org.lightning.force.com)",
+    );
+  });
+
+  it("accepts a valid https url, trimming before it judges", async () => {
+    expect((await validatorFor(0))("  https://gus.lightning.force.com  ")).toBeUndefined();
+  });
+
+  it("rejects an empty team name but accepts a filled one", async () => {
+    const v = await validatorFor(1);
+    expect(v("  ")).toBe("Enter your team name");
+    expect(v("Falcons")).toBeUndefined();
+  });
+});
+
+describe("isAuthenticated", () => {
+  it("is true when the CLI names a user", async () => {
+    const c = makeAgileAcceleratorConnector(ctx, () => fakeCli());
+    await expect(c.isAuthenticated()).resolves.toBe(true);
+  });
+
+  it("is false when the CLI returns no username — an org with no active session", async () => {
+    const cli = fakeCli({ userInfo: async () => ({ username: "", id: "" }) });
+    const c = makeAgileAcceleratorConnector(ctx, () => cli);
+    await expect(c.isAuthenticated()).resolves.toBe(false);
+  });
+});
+
+describe("identity() cache", () => {
+  it("does not poison the cache with a transient failure — the next call retries", async () => {
+    // The parked concern from Task 7's review: a timeout must not read as a
+    // durable "signed out" for the rest of the session. Counting calls is the
+    // only thing that distinguishes a retry from a cached negative, because
+    // both report false the first time.
+    let calls = 0;
+    const cli = fakeCli({
+      userInfo: async () => {
+        calls++;
+        if (calls === 1) throw new Error("socket hang up");
+        return { username: "jane", id: "005xx0000000001" };
+      },
+    });
+    const c = makeAgileAcceleratorConnector(ctx, () => cli);
+
+    await expect(c.isAuthenticated()).resolves.toBe(false);
+    expect(calls).toBe(1);
+
+    await expect(c.isAuthenticated()).resolves.toBe(true);
+    expect(calls).toBe(2); // retried rather than replaying the cached failure
+  });
+
+  it("caches a success, so repeated calls cost one CLI round trip", async () => {
+    let calls = 0;
+    const cli = fakeCli({
+      userInfo: async () => {
+        calls++;
+        return { username: "jane", id: "005xx0000000001" };
+      },
+    });
+    const c = makeAgileAcceleratorConnector(ctx, () => cli);
+    await c.isAuthenticated();
+    await c.isAuthenticated();
+    expect(calls).toBe(1);
+  });
+});
+
+describe("signIn", () => {
+  it("names the CLI command rather than pretending to own the flow, and reports no session yet", async () => {
+    const c = makeAgileAcceleratorConnector(ctx, () => fakeCli());
+    await expect(c.signIn()).resolves.toBe(false);
+
+    const shown = vi.mocked(window.showInformationMessage).mock.calls[0][0] as string;
+    expect(shown).toContain("sf org login web");
+  });
+
+  it("clears a cached negative, so the advised sign-in is actually observable afterwards", async () => {
+    // Without the cache clear, "run the command then refresh" re-reads the same
+    // stale failure and the user is stuck. Counting proves the clear happened.
+    let calls = 0;
+    const cli = fakeCli({
+      userInfo: async () => {
+        calls++;
+        if (calls === 1) return { username: "", id: "" }; // not signed in yet
+        return { username: "jane", id: "005xx0000000001" }; // after `sf org login web`
+      },
+    });
+    const c = makeAgileAcceleratorConnector(ctx, () => cli);
+
+    await expect(c.isAuthenticated()).resolves.toBe(false);
+    await c.signIn();
+    await expect(c.isAuthenticated()).resolves.toBe(true);
+    expect(calls).toBe(2);
+  });
+});
+
+describe("statusOf() degradation and cache bounds", () => {
+  it("answers unknown rather than throwing when the schema cannot be resolved", async () => {
+    // A background poll sits behind an already-rendered card; deckView has no
+    // way to show a thrown error there, so the contract is never-throw.
+    const cli = fakeCli({ describeImpl: async () => { throw new Error("describe unavailable"); } });
+    const c = makeAgileAcceleratorConnector(ctx, () => cli);
+    await expect(c.provider().status("W-1")).resolves.toEqual({ status: null, category: null });
+  });
+
+  it("answers unknown for a key the query comes back without", async () => {
+    const cli = fakeCli({ query: async () => [] });
+    const c = makeAgileAcceleratorConnector(ctx, () => cli);
+    await expect(c.provider().status("W-404")).resolves.toEqual({ status: null, category: null });
+  });
+
+  it("evicts the oldest entry once the cache is full, instead of growing without bound", async () => {
+    // A long Deck session polls thousands of keys; an unbounded Map is a leak.
+    // The observable consequence of eviction is that the evicted key costs
+    // another query, so count queries rather than reaching into the Map.
+    const CAP = 500;
+    let queryCalls = 0;
+    const cli = fakeCli({
+      query: async (soql) => {
+        queryCalls++;
+        // Echo back a record for every key the query asked about.
+        return [...soql.matchAll(/'(W-\d+)'/g)].map((m, i) => ({
+          Id: `a${i}`,
+          Name: m[1],
+          Status__c: "New",
+        }));
+      },
+    });
+    const c = makeAgileAcceleratorConnector(ctx, () => cli);
+    const p = c.provider();
+
+    const keys = Array.from({ length: CAP + 1 }, (_, i) => `W-${i + 1}`);
+    await Promise.all(keys.map((k) => p.status(k)));
+    const afterFill = queryCalls;
+
+    // The most recent key is still cached — no new query.
+    await p.status(keys[CAP]);
+    expect(queryCalls).toBe(afterFill);
+
+    // The very first key was evicted to make room, so it must be re-fetched.
+    await p.status(keys[0]);
+    expect(queryCalls).toBe(afterFill + 1);
+  });
+});
