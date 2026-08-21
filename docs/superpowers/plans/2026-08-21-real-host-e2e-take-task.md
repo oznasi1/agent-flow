@@ -56,7 +56,7 @@ A `TaskConnector` whose data is a JSON file and whose writes are a JSONL file. N
 - Consumes: `TaskConnector`, `TaskProvider`, `SourceInfo`, `Capabilities`, `StatusTarget`, `Task`, `TaskDetail` from `src/tasks/provider.ts`.
 - Produces: `makeFixtureConnector(dir: string): TaskConnector`; the registry rule *"`taskSource === "fixture"` && `AGENT_FLOW_FIXTURE_DIR` set → fixture; anything else → today's behavior"*; the fixture file contract `tasks.json` = `FixtureTaskRecord[]` where `FixtureTaskRecord = Task & { descriptionText: string }`; `writes.jsonl` = one JSON object per line, `{ op: "moveTo", key, targetId, values, at } | { op: "addLabel", key, label, at } | { op: "assignToMe", key, meId, at }`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `test/unit/fixtureConnector.test.ts`:
 
@@ -159,12 +159,12 @@ describe("the registry gate", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify the tests fail**
+- [x] **Step 2: Run to verify the tests fail**
 
 Run: `npx vitest run test/unit/fixtureConnector.test.ts` (timeout: 120000)
 Expected: FAIL — `Cannot find module '../../src/tasks/fixture/connector'`.
 
-- [ ] **Step 3: Implement the connector**
+- [x] **Step 3: Implement the connector**
 
 Create `src/tasks/fixture/connector.ts`. Before writing, open `src/tasks/provider.ts` and `src/tasks/jira/connector.ts` and copy the **current** member lists — `TaskConnector` and `SourceInfo` are the contract; if a field listed here has drifted, the interface wins:
 
@@ -255,7 +255,7 @@ export function makeFixtureConnector(dir: string): TaskConnector {
 
 If `Capabilities` requires more members than shown (check the interface), add them with the "not supported" value the interface documents. If `TaskProvider.caps` is not a member (it is — `readonly caps: Capabilities`), adjust to where caps actually live.
 
-- [ ] **Step 4: Gate it in the registry**
+- [x] **Step 4: Gate it in the registry**
 
 In `src/tasks/registry.ts`, add the import and the guarded branch at the top of `resolveConnector`, leaving `CONNECTORS` and `CONNECTOR_IDS` untouched:
 
@@ -287,12 +287,12 @@ export function resolveConnector(
 }
 ```
 
-- [ ] **Step 5: Run the new tests**
+- [x] **Step 5: Run the new tests**
 
 Run: `npx vitest run test/unit/fixtureConnector.test.ts` (timeout: 120000)
 Expected: PASS, 9 tests.
 
-- [ ] **Step 6: Run every repo gate**
+- [x] **Step 6: Run every repo gate**
 
 ```bash
 npm run typecheck    # clean
@@ -301,7 +301,7 @@ npm run test:cov     # thresholds hold — the connector is fully covered by Tas
 npm run build        # succeeds
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/tasks/fixture/connector.ts src/tasks/registry.ts test/unit/fixtureConnector.test.ts
@@ -322,14 +322,14 @@ Everything a journey needs to exist before it can be written: a throwaway world,
 - Consumes: the fixture file contract from Task 1 (`tasks.json` = `FixtureTaskRecord[]`).
 - Produces: `makeSandbox(): Sandbox` where `Sandbox = { root, home, userDataDir, extensionsDir, fixtureDir, reposRoot, repoPath, dispose(): void }`; `launchHost(sb: Sandbox): Promise<{ app: ElectronApplication, page: Page }>`; `tasksFrame(page: Page): FrameLocator`; `openTasksView(page: Page): Promise<void>`; the npm script `test:e2e`.
 
-- [ ] **Step 1: Install the pinned downloader**
+- [x] **Step 1: Install the pinned downloader**
 
 ```bash
 npm install -D --save-exact --registry=https://registry.npmjs.org @vscode/test-electron@2.4.1
 grep -c codeartifact package-lock.json   # expect 0
 ```
 
-- [ ] **Step 2: Add the E2E runner config**
+- [x] **Step 2: Add the E2E runner config**
 
 Create `playwright-e2e.config.ts`:
 
@@ -355,7 +355,7 @@ export default defineConfig({
 
 (Escape note: the `**\/` in the comment is only to keep this markdown fence intact — write real `**/` in the file.)
 
-- [ ] **Step 3: Build the sandbox helper**
+- [x] **Step 3: Build the sandbox helper**
 
 Create `test-e2e/_helpers/sandbox.ts`:
 
@@ -445,7 +445,7 @@ export function makeSandbox(): Sandbox {
 }
 ```
 
-- [ ] **Step 4: Build the host launcher**
+- [x] **Step 4: Build the host launcher**
 
 Create `test-e2e/_helpers/host.ts`:
 
@@ -505,7 +505,7 @@ export function tasksFrame(page: Page): FrameLocator {
 }
 ```
 
-- [ ] **Step 5: Write the smoke spec**
+- [x] **Step 5: Write the smoke spec**
 
 Create `test-e2e/smoke.e2e.ts`:
 
@@ -537,7 +537,7 @@ test("a real host boots the extension and the pool renders the fixture task", as
 });
 ```
 
-- [ ] **Step 6: Wire scripts, tsconfig, gitignore**
+- [x] **Step 6: Wire scripts, tsconfig, gitignore**
 
 `package.json` scripts (E2E drives the built bundle, so build first):
 
@@ -555,7 +555,7 @@ test("a real host boots the extension and the pool renders the fixture task", as
 playwright-e2e-report/
 ```
 
-- [ ] **Step 7: Run the smoke spec**
+- [x] **Step 7: Run the smoke spec**
 
 Run: `npm run test:e2e` (timeout: 600000 — first run downloads VS Code)
 Expected: PASS, 1 test, and `test-results/e2e-smoke-pool.png` shows the pool with E2E-1.
@@ -566,7 +566,7 @@ Debugging ladder, in order:
 3. Pool shows the sign-in gate instead of cards → the registry gate didn't fire: env var not delivered (check `launch({ env })`) or settings.json not read (wrong `userDataDir/User/` path).
 4. `tasksFrame` matches nothing → inspect `await page.content()` for the actual iframe classes and fix the ONE selector in `tasksFrame`.
 
-- [ ] **Step 8: Repo gates, then commit**
+- [x] **Step 8: Repo gates, then commit**
 
 ```bash
 npm run typecheck && npm test && npm run build   # timeout: 600000
@@ -593,7 +593,7 @@ Ground truth for the assertions (verified against source, re-verify if lines mov
 - Plan handshake: `<HOME>/.agentflow/plans/<KEY>-<createdAt>.json` (`workspace.ts:18,243-246`), written with `seedAgent: true` because settings say so.
 - New window: the `open` shim forces the `vscode.openFolder{forceNewWindow:true}` fallback (`workspace.ts:261`) — a new BrowserWindow in the same Electron app, so `app.waitForEvent("window")` sees it.
 
-- [ ] **Step 1: Write the journey spec**
+- [x] **Step 1: Write the journey spec**
 
 Create `test-e2e/take-task.e2e.ts`:
 
@@ -666,7 +666,7 @@ test("taking a task opens a real window and lands the brief + plan handshake on 
 });
 ```
 
-- [ ] **Step 2: Run it**
+- [x] **Step 2: Run it**
 
 Run: `npm run test:e2e` (timeout: 600000)
 Expected: PASS, 2 tests (smoke + journey), with the three labelled screenshots in `test-results/`.
@@ -677,7 +677,7 @@ Failure ladder specific to this spec:
 3. No second window → read the toast: if it names `open -a`, the PATH shim didn't win — verify the shim file is executable and first on the child's PATH.
 4. Brief missing but window opened → look for the error toast; `openWorkspace` writes briefs before opening (step 1 of that function), so this ordering means a thrown error — check the extension host log via the Output panel screenshot.
 
-- [ ] **Step 3: Prove the assertions are live — break the product, watch the journey fail**
+- [x] **Step 3: Prove the assertions are live — break the product, watch the journey fail**
 
 E2E asserting pre-existing behavior has the same vacuous-test hazard the CT plan had. Temporarily sabotage the brief write in `src/engine/workspace.ts` (line ~293):
 
@@ -696,7 +696,7 @@ git diff --exit-code src/engine/workspace.ts
 npm run test:e2e    # timeout: 600000 — PASS, 2 tests
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add test-e2e/take-task.e2e.ts
@@ -718,7 +718,7 @@ Per the spec's own discipline (§9: "expect some early flake, driven to near-zer
 - Consumes: the `test:e2e` script from Task 2.
 - Produces: developer-facing documentation.
 
-- [ ] **Step 1: Document the command and the sandbox contract**
+- [x] **Step 1: Document the command and the sandbox contract**
 
 In `CONTRIBUTING.md`, add to the "Everyday commands" table:
 
@@ -738,7 +738,7 @@ write the extension performs is appended to `<dir>/writes.jsonl` for tests to
 assert on. See `src/tasks/fixture/connector.ts` and `test-e2e/_helpers/sandbox.ts`.
 ```
 
-- [ ] **Step 2: Full local gate**
+- [x] **Step 2: Full local gate**
 
 ```bash
 npm run typecheck   # clean
@@ -748,7 +748,7 @@ npm run test:e2e    # 2 passing                        (timeout: 600000)
 npm run build       # succeeds
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add CONTRIBUTING.md
