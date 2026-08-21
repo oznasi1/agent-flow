@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.4] — 2026-08-21
+
+### Added
+
+- **A `CLAUDE.md`, so the repo's rules travel with a checkout.** There wasn't one, and
+  `.claude/` is git-ignored, which left every contributor and coding agent to rediscover
+  the gates that actually bite here: `npm run build` is the only check that fully sees a
+  webview module reaching a Node builtin, `test/unit/compat.test.ts` freezes the released
+  settings, storage and telemetry surface, and the connector, forge and agent-seed seams
+  each carry a rule about what may import what. It states those alongside the commands,
+  the bundle layout and where cross-window state lives, and — like `CONTRIBUTING.md` — is
+  excluded from the packaged `.vsix`. Nothing about the extension itself changed: what
+  this release ships is identical to 0.33.3.
+
 ## [0.33.3] — 2026-08-21
 
 ### Fixed
