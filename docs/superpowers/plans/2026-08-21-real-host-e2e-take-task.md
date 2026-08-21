@@ -759,7 +759,7 @@ git commit -m "docs: document the real-host E2E lane and the fixture connector"
 
 ## Out of Scope (next increments)
 
-1. **Journey 2 — panel seeding**: needs a pinned Claude Code build installed into the sandbox's `extensionsDir`, plus the seed-DOM assertion. The plan-file assertion in journey 1 already proves the handshake's producer side.
+1. **Journey 2 — seeding**: the **terminal surface is done** in `test-e2e/seed-terminal.e2e.ts` — plan file → new-window activation → identity match → terminal opened → prompt typed unsubmitted, asserted from real xterm DOM, with a `claude` shim so the developer's real CLI can never start. The **panel surface** (default) remains: it needs a pinned Claude Code build installed into the sandbox's `extensionsDir`, and its URI-handler rung must be neutralized first — `vscode://` on a developer machine routes to the REAL installed editor, the same escape class as `open -a`.
 2. ~~**Journey 3 — status write-back**~~ — **done** in `test-e2e/status-writeback.e2e.ts`: transition + claude-code provenance stamp asserted from `writes.jsonl`, card removal asserted from the DOM; sabotage-checked against a no-opped `stampProvenance`.
 3. ~~**Journey 4 — worktree mode**~~ — **done** in `test-e2e/worktree-take.e2e.ts`: git-registered worktree, per-task branch, brief in the worktree and not the checkout. **Journey 5** (sign-in/out; needs its own SecretStorage seam) remains.
    *Harness note:* the sandboxed HOME makes macOS throw "Keychain Not Found" at the developer — `--use-inmemory-secretstorage` (VS Code's own test seam, present in 1.96.2) is required; `--password-store=basic` alone is not enough.
