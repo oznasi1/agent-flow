@@ -623,6 +623,10 @@ export type InboundMessage =
   | { type: "deck:setReviewSort"; sort: ReviewSort }
   | { type: "deck:reviewExpand"; id: string }
   | { type: "deck:reviewLaunch"; id: string }
+  /** Several rows at once. One agent per PR, one mode and one destination asked for
+   *  the whole batch — see `launchReviewBatch`. Never a batch *submit*: a single click
+   *  that posts four reviews to the forge is the one thing this must not become. */
+  | { type: "deck:reviewBatch"; ids: string[] }
   | { type: "deck:reviewLoadDraft"; id: string }
   | { type: "deck:reviewSubmit"; id: string; verb: ReviewVerb; body: string; fromDraft: boolean }
   // ── Orchestrator flows ──────────────────────────────────────────────
