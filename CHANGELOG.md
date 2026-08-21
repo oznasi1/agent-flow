@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A note's screenshot could be replaced by the next note's, under the agent already
+  reading it.** Attachments were staged at `.pick-task/images/<filename>`, and every image
+  pasted into the notepad is called `image.png` — so two notes taken into the same checkout
+  landed on the same file, the second launch silently overwriting the first. An agent opens
+  that file when it gets to it rather than when it starts, so the one that had been running
+  longest was the one most likely to be handed someone else's screenshot and to go and
+  work on it. Images are now staged per run — `.pick-task/images/<run key>/<filename>` —
+  which separates the two without deleting anything, since the other agent may still be
+  working. Nothing prunes the directory, as before; `.pick-task/` stays git-excluded whole.
+
 ## [0.33.6] — 2026-08-21
 
 ### Changed
