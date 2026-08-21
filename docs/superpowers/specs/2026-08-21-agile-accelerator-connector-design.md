@@ -79,19 +79,44 @@ so a provider-level cache would never be hit.
 `status()` returns `{status: null, category: null}` for anything it cannot
 resolve. It must never throw — it runs behind an already-rendered card.
 
-### The `Runner` seam
+### The runner seam — and why it is not `Runner`
 
-`cli.ts` is the only module in the connector that spawns a process. It takes the
-`Runner` type already defined in `src/engine/pr/provider.ts`:
+`cli.ts` is the only module in the connector that spawns a process.
+
+It does **not** reuse the `Runner` type from `src/engine/pr/provider.ts`, and
+that is a deliberate correction to an earlier version of this design.
+`execRunner` rejects on a non-zero exit and attaches only `stderr` — it
+**discards stdout**. But `sf --json` writes its error envelope to *stdout* and
+still exits non-zero, so a `Runner`-based client would throw away the very
+`name`/`message` it needs to classify the failure, and every `sf` error would
+degrade to an uninformative exit code.
+
+`cli.ts` therefore declares its own local runner type:
 
 ```ts
-type Runner = (file: string, args: string[], opts: { cwd: string; timeoutMs: number }) => Promise<string>;
+export interface SfResult { stdout: string; stderr: string; code: number }
+export type SfRunner = (
+  file: string,
+  args: string[],
+  opts: { cwd: string; timeoutMs: number },
+) => Promise<SfResult>;
 ```
 
-and resolves the binary through `resolveBin("sf")`. Tests inject a fake
-`Runner` and never spawn a real process. A spawn failure with
-`code === "ENOENT"` means "not installed"; anything else came from an `sf` that
-ran — the same classification `probeGh`/`probeGlab` already make.
+The default implementation wraps `execFile` and **resolves** on a non-zero exit,
+carrying stdout back so the envelope can be parsed. It rejects only when the
+process could not be spawned at all.
+
+Two things are still reused from the forge seam, because they are genuinely
+shared concerns: `resolveBin("sf")` for locating the binary, and the
+`code === "ENOENT"` ⇒ "not installed" / anything-else ⇒ "it ran and complained"
+classification that `probeGh`/`probeGlab` already make.
+
+`src/engine/pr/provider.ts` is **not modified**. Widening `execRunner` to carry
+stdout would change a function every `gh` and `glab` call already runs through,
+which is exactly the kind of shared-path edit this work is under instruction to
+avoid.
+
+Tests inject a fake `SfRunner` and never spawn a real process.
 
 `child_process` must not appear anywhere in the connector except `cli.ts`.
 `src/tasks/provider.ts` is contractually free of `vscode` and of dependencies
@@ -150,7 +175,7 @@ New directory `src/tasks/agileAccelerator/`:
 
 | File | Responsibility | Pure? |
 |---|---|---|
-| `cli.ts` | The only spawner. `sf` invocations via `Runner`, JSON envelope unwrapping, ENOENT classification. | no |
+| `cli.ts` | The only spawner. `sf` invocations via its own `SfRunner` (§3), JSON envelope unwrapping, ENOENT classification. | no |
 | `describe.ts` | Namespace detection, field intersection, team-field resolution. Takes a describe result as data. | yes |
 | `soql.ts` | SOQL builder per lens. The analogue of `jql.ts`. | yes |
 | `shape.ts` | Salesforce record → `Task` / `TaskDetail`, including status-category mapping. | yes |
@@ -377,7 +402,7 @@ lines 90** (`vitest.config.ts:41`).
 - `soql.ts`, `shape.ts`, `describe.ts`, `errors.ts` — pure, tested directly and
   exhaustively. This is where the bulk of coverage comes from.
 - `cli.ts`, `provider.ts`, `connector.ts` — tested with an injected fake
-  `Runner`. **No test spawns a real process or touches the network.**
+  `SfRunner`. **No test spawns a real process or touches the network.**
 - Fixtures are real `sf --json` envelope shapes, including its error envelope.
 - Required behavioural tests: unknown status maps to `indeterminate`;
   `keyFromUrl` returns `null` for a foreign URL and for our own `Id`-shaped
