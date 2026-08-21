@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Flow — Fully-Automated Verify &amp; Release Cycle</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --panel:#ffffff; --ink:#1c2024; --muted:#5b6570; --faint:#8a95a1;
+    --line:#e5e8ec; --line2:#eef1f4; --accent:#3b6ef5; --accent-soft:#eaf0ff;
+    --ok:#1a7f52; --ok-soft:#e6f4ec; --warn:#8a6d1f; --warn-soft:#fbf3dc;
+    --stop:#b0341d; --stop-soft:#fbe9e5; --code-bg:#f3f4f6; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0f1216; --panel:#161a20; --ink:#e8ebee; --muted:#9aa4af; --faint:#6b7681;
+      --line:#242a31; --line2:#1d2228; --accent:#6d9bff; --accent-soft:#1a2233;
+      --ok:#5cc48d; --ok-soft:#132419; --warn:#d8b45a; --warn-soft:#2a2413;
+      --stop:#e88872; --stop-soft:#2a1713; --code-bg:#1b2027;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f1216; --panel:#161a20; --ink:#e8ebee; --muted:#9aa4af; --faint:#6b7681;
+    --line:#242a31; --line2:#1d2228; --accent:#6d9bff; --accent-soft:#1a2233;
+    --ok:#5cc48d; --ok-soft:#132419; --warn:#d8b45a; --warn-soft:#2a2413;
+    --stop:#e88872; --stop-soft:#2a1713; --code-bg:#1b2027;
+  }
+  :root[data-theme="light"]{
+    --bg:#f7f8fa; --panel:#ffffff; --ink:#1c2024; --muted:#5b6570; --faint:#8a95a1;
+    --line:#e5e8ec; --line2:#eef1f4; --accent:#3b6ef5; --accent-soft:#eaf0ff;
+    --ok:#1a7f52; --ok-soft:#e6f4ec; --warn:#8a6d1f; --warn-soft:#fbf3dc;
+    --stop:#b0341d; --stop-soft:#fbe9e5; --code-bg:#f3f4f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  .wrap{max-width:940px;margin:0 auto;padding:48px 24px 96px}
+  header.hero{margin-bottom:36px}
+  .eyebrow{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+  h1{font-size:30px;line-height:1.2;margin:10px 0 8px;letter-spacing:-.02em}
+  .sub{color:var(--muted);font-size:16px;margin:0}
+  .meta{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px}
+  .chip{font-size:12px;padding:4px 10px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
+  .chip b{color:var(--ink);font-weight:600}
+  h2{font-size:20px;margin:44px 0 12px;letter-spacing:-.01em;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:24px 0 8px}
+  p{margin:10px 0}
+  section{margin-top:8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin:16px 0}
+  .num-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .stat .v{font-size:24px;font-weight:700;letter-spacing:-.02em}
+  .stat .k{font-size:12px;color:var(--muted);margin-top:2px}
+  .stat .d{font-size:11px;color:var(--ok);margin-top:4px;font-weight:600}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px;display:block;overflow-x:auto}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line2);vertical-align:top}
+  thead th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);border-bottom:1px solid var(--line)}
+  tbody tr:last-child td{border-bottom:none}
+  code{font-family:var(--mono);font-size:.86em;background:var(--code-bg);padding:1px 5px;border-radius:5px}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.55}
+  pre code{background:none;padding:0}
+  .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;letter-spacing:.02em}
+  .b-ok{background:var(--ok-soft);color:var(--ok)}
+  .b-warn{background:var(--warn-soft);color:var(--warn)}
+  .b-stop{background:var(--stop-soft);color:var(--stop)}
+  .b-accent{background:var(--accent-soft);color:var(--accent)}
+  .callout{border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;padding:14px 18px;margin:16px 0}
+  .callout.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+  .callout.stop{border-left-color:var(--stop);background:var(--stop-soft)}
+  .callout .t{font-weight:700;font-size:13px;margin-bottom:4px}
+  ul,ol{margin:10px 0;padding-left:22px}
+  li{margin:6px 0}
+  .lead{font-size:16px;color:var(--ink)}
+  .pri{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:6px;font-size:12px;font-weight:700;background:var(--accent-soft);color:var(--accent);margin-right:6px}
+  .foot{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);color:var(--faint);font-size:13px}
+  .yes{color:var(--ok);font-weight:600}
+  .no{color:var(--stop);font-weight:600}
+  .toc{font-size:14px;columns:2;column-gap:32px}
+  .toc a{color:var(--muted);text-decoration:none}
+  .toc a:hover{color:var(--accent)}
+  /* pipeline */
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:18px 0}
+  .step{flex:1 1 140px;min-width:140px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;position:relative}
+  .step .n{font-size:11px;font-weight:700;color:var(--accent)}
+  .step .h{font-weight:600;font-size:13.5px;margin:3px 0}
+  .step .s{font-size:12px;color:var(--muted)}
+  .arrow{align-self:center;color:var(--faint);font-size:18px}
+  @media(max-width:760px){.arrow{display:none}.flow{flex-direction:column}.step{min-width:0}}
+  @media(max-width:640px){.num-grid{grid-template-columns:repeat(2,1fr)}.toc{columns:1}h1{font-size:24px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">Design / Test Strategy · v2</div>
+  <h1>A fully-automated verify &amp; release cycle</h1>
+  <p class="sub">No manual gate. Every feature is proven end-to-end in a real editor host — driven, screenshotted, asserted, and reported — before it ships.</p>
+  <div class="meta">
+    <span class="chip"><b>Repo</b> agent-flow</span>
+    <span class="chip"><b>main</b> b463626 · v0.21.1</span>
+    <span class="chip"><b>Verified</b> 2026-08-15</span>
+    <span class="chip"><b>Status</b> Draft — awaiting approval</span>
+  </div>
+</header>
+
+<div class="callout">
+  <div class="t">The goal in one line</div>
+  <b>Zero manual steps before a feature ships.</b> No smoke checklist for the bits that cross into the OS and the Claude Code extension — instead, host-driven E2E is the <b>core</b> layer, and a <b>screenshot-backed "verify feature" report</b> (the pattern used at At-Bay) posts to the PR and gates the release.
+</div>
+
+<div class="card">
+  <div class="toc">
+    <a href="#tldr">1 · TL;DR</a><br>
+    <a href="#goal">2 · The goal</a><br>
+    <a href="#state">3 · Where we are today</a><br>
+    <a href="#pipeline">4 · The automated cycle</a><br>
+    <a href="#layers">5 · The three automated layers</a><br>
+    <a href="#la">5a · Layer A — webview CT</a><br>
+    <a href="#lb">5b · Layer B — real-host E2E</a><br>
+    <a href="#lc">5c · Layer C — verify report</a><br>
+    <a href="#ld">5d · Report on the GitHub PR</a><br>
+    <a href="#seams">6 · Testability seams</a><br>
+    <a href="#host">7 · Host &amp; platform constraints</a><br>
+    <a href="#gate">8 · CI as the release gate</a><br>
+    <a href="#effort">9 · Effort, risks &amp; the flake budget</a><br>
+    <a href="#open">10 · Decisions (resolved)</a><br>
+    <a href="#dod">11 · Definition of done</a><br>
+  </div>
+</div>
+
+<section id="tldr">
+<h2>1 · TL;DR</h2>
+<p class="lead">Drive a <b>real VS Code Electron host</b> with <b>Playwright</b>, running the actual extension against a <b>fixture task connector</b> (a JSON-backed <code>TaskConnector</code>, env-gated in the registry — no HTTP server, no network) and <b>temp git repos</b>. For each critical feature the run: takes the action, lets a real window open and the Claude panel seed, captures <b>labelled screenshots</b> at each step, asserts on real DOM + filesystem + the fixture's recorded writes, and emits a <b>verify-feature report</b>. A fast <b>Playwright Component Test</b> layer covers webview interaction (incl. the drag-and-drop jsdom can't reach). Both run in CI and <b>block the release</b> — no human in the loop.</p>
+</section>
+
+<section id="goal">
+<h2>2 · The goal</h2>
+<ul>
+  <li><b>No manual testing, ever</b>, before a feature ships. The release-on-merge flow gets an automated proof step, not a checklist.</li>
+  <li><b>Prove the feature in a real host</b> — a real window opens, the real Claude Code panel receives its seed — not a mock's approximation.</li>
+  <li><b>Screenshots + a report</b> as first-class output: an auto-generated "verify feature" artifact, deliverable to Slack / At-Bay / CI, mirroring the MCP flow you already use.</li>
+  <li><b>Deterministic enough to gate on</b> — the whole thing is only worth it if it's green when the product is good and red when it isn't.</li>
+</ul>
+</section>
+
+<section id="state">
+<h2>3 · Where we are today</h2>
+<div class="num-grid">
+  <div class="stat"><div class="v">3,769</div><div class="k">tests passing</div><div class="d">108 files · ~146s</div></div>
+  <div class="stat"><div class="v">99.1%</div><div class="k">statements / lines</div><div class="d">gate: 90%</div></div>
+  <div class="stat"><div class="v">95.0%</div><div class="k">branches</div><div class="d">gate: 85%</div></div>
+  <div class="stat"><div class="v">0</div><div class="k">real-host / real-browser tests</div><div class="d" style="color:var(--stop)">the gap</div></div>
+</div>
+<p>Coverage is excellent and unit-level confidence is high — but 100% of it runs against a hand-written <code>vscode</code> mock or jsdom. Nothing today proves the extension works in a real editor. That is exactly the gap a fully-automated E2E cycle closes.</p>
+<p>Scale check, since it drives the plan: <b>108 source files</b>, <b>17 webview components</b>, <b>3,769 tests</b> at <b>99.1%</b> coverage. The unit suite now takes ~2.5&nbsp;min with coverage — still fast, but no longer free, which is why §8 keeps the heavy host lane off every push.</p>
+</section>
+
+<section id="pipeline">
+<h2>4 · The automated cycle</h2>
+<p>One pipeline, triggered on every PR and on <code>main</code>, no manual hand-off:</p>
+<div class="flow">
+  <div class="step"><div class="n">01</div><div class="h">Build</div><div class="s">bundle extension + webview (esbuild)</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="n">02</div><div class="h">Stand up fixtures</div><div class="s">fixture tasks JSON, temp git repos, seeded settings</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="n">03</div><div class="h">Launch host</div><div class="s">real VS Code Electron, extension dev path, Playwright attached</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="n">04</div><div class="h">Drive feature</div><div class="s">take task → window opens → panel seeds</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="n">05</div><div class="h">Assert + shoot</div><div class="s">DOM / fs / recorded-write assertions + labelled screenshots</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="n">06</div><div class="h">Report</div><div class="s">verify-feature HTML + trace/video → Slack / At-Bay / artifact</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="n">07</div><div class="h">Gate</div><div class="s">green → release proceeds · red → blocked</div></div>
+</div>
+</section>
+
+<section id="layers">
+<h2>5 · The three automated layers</h2>
+<table>
+<thead><tr><th>Layer</th><th>Tool</th><th>Proves</th><th>Speed</th></tr></thead>
+<tbody>
+<tr><td><b>A · Webview CT</b></td><td>Playwright Component Testing (real Chromium)</td><td>the React UI's interaction + layout, incl. drag-and-drop reorder</td><td>fast (sec)</td></tr>
+<tr><td><b>B · Real-host E2E</b></td><td>Playwright <code>_electron</code> driving a real VS Code</td><td>the critical paths actually work in a real editor, window-open + seed included</td><td>slow (min)</td></tr>
+<tr><td><b>C · Verify report</b></td><td>Playwright screenshots/traces → curated HTML + delivery</td><td>a human-readable, screenshot-backed record of each feature passing</td><td>—</td></tr>
+</tbody>
+</table>
+<p>A stays the fast pre-filter; B is the real proof; C turns B's evidence into the "verify feature" artifact. A shared <b>message-contract fixture</b> keeps the webview and host halves from drifting.</p>
+
+<h3 id="la">5a · Layer A — webview component tests</h3>
+<p>The quick inner loop. <code>@playwright/experimental-ct-react</code> mounts each real component in Chromium; a support file fakes <code>window.acquireVsCodeApi</code> (recording <code>postMessage</code> into <code>window.__posted</code>), mirroring today's jsdom <code>vi.mock</code>. Keep pure rendering in the existing vitest suite; <b>CT covers interaction + measured layout only</b>.</p>
+<p><b>Priority targets — the jsdom blind spot.</b> jsdom returns all-zeros from <code>getBoundingClientRect()</code>, so every feature whose logic depends on measured layout is untestable today. Of the <b>17</b> webview components, three measure layout and three implement drag:</p>
+<table>
+<thead><tr><th>#</th><th>Component</th><th>Why CT is the only way</th></tr></thead>
+<tbody>
+<tr><td><span class="pri">1</span></td><td><b>App.tsx</b> <code>:804</code></td><td>sprint <b>drag-and-drop reorder</b> — drop target computed from the measured rect</td></tr>
+<tr><td><span class="pri">2</span></td><td><b>Notepad.tsx</b> <code>:587</code></td><td>note <b>drag reorder</b> — same measured-rect pattern</td></tr>
+<tr><td><span class="pri">3</span></td><td><b>OrchestratorDrawer.tsx</b> <code>:455, :622, :1385</code></td><td><b>graph layout</b> measured in four places — the most layout-dependent surface in the app</td></tr>
+<tr><td><span class="pri">4</span></td><td><b>DeckApp.tsx</b></td><td>third drag surface; in-flight row actions</td></tr>
+<tr><td><span class="pri">5</span></td><td><code>App</code> core interactions</td><td>filter tabs, size lens, fuzzy search, pick→confirm</td></tr>
+<tr><td><span class="pri">6</span></td><td><code>MarketplaceApp</code> / <code>PluginPicker</code> / <code>ReviewStrip</code></td><td>filters, selection, review actions</td></tr>
+</tbody>
+</table>
+<div class="callout warn">
+  <div class="t">This grew since the first draft</div>
+  Drafted against v0.1.55, this was <em>one</em> untested drag surface. On v0.21.1 it is <b>three layout-measuring components and three drag surfaces</b> — Notepad and OrchestratorDrawer both landed in between. The case for Layer A got stronger, not weaker, and it will keep growing at this repo's release cadence.
+</div>
+
+<h3 id="lb">5b · Layer B — real-host end-to-end (the heart of this plan)</h3>
+<p><b>How the host is driven.</b> Use <code>@vscode/test-electron</code> only to <em>download</em> a pinned VS Code build; then <code>playwright._electron.launch({ executablePath, args:["--extensionDevelopmentPath=…","--user-data-dir=…","--disable-workspace-trust"] })</code> to <em>drive</em> it. Playwright gets the workbench window, and can switch into webview iframes to click the real task pool. Screenshots, video, and trace come for free.</p>
+<p><b>What each E2E proves</b> (a real window genuinely opens — seeding rides on <code>vscode.openFolder</code>, <code>workspace.ts:256</code>):</p>
+<table>
+<thead><tr><th>#</th><th>Feature journey</th><th>Automated assertions</th></tr></thead>
+<tbody>
+<tr><td><span class="pri">1</span></td><td><b>Take a task</b> — pick from pool → confirm → open</td><td>a folder/workspace window opens; <code>.pick-task/TASK.md</code> written with the right brief; <code>.code-workspace</code> generated; correct repos resolved</td></tr>
+<tr><td><span class="pri">2</span></td><td><b>Claude panel seeds</b> in the opened window</td><td>the plan-handshake file is written; the Claude Code command fires; the panel shows the seeded prompt (DOM/text assertion + screenshot) — <em>seeded, not run</em></td></tr>
+<tr><td><span class="pri">3</span></td><td><b>Status write-back</b> from a card</td><td>the fixture connector records the transition <em>and</em> the <code>claude-code</code> provenance label (writes land in a JSONL the test reads)</td></tr>
+<tr><td><span class="pri">4</span></td><td><b>Worktree mode</b></td><td>a real git worktree + branch is created off the temp repo</td></tr>
+<tr><td><span class="pri">5</span></td><td><b>Sign-in / sign-out</b></td><td>token round-trips through SecretStorage (the one journey that keeps a Jira-specific seam); the pool renders the fixture's tasks</td></tr>
+</tbody>
+</table>
+<div class="callout warn">
+  <div class="t">The boundary I won't fake</div>
+  The gate proves the panel is <b>seeded with the correct prompt</b> — the extension's actual responsibility. It does <b>not</b> press Enter to run the agent: that is Claude Code's job, hits the Anthropic API, and would make CI slow, costly, and nondeterministic. "Seeded correctly" is the honest, sufficient contract — and it still needs no human.
+</div>
+
+<h3 id="lc">5c · Layer C — the verify-feature report</h3>
+<p>Playwright already captures a screenshot/video/trace per step. Layer C curates them into the artifact you're used to: for each feature, an ordered strip of <b>labelled screenshots</b> ("1 · pool loaded", "2 · task picked", "3 · window opened", "4 · panel seeded"), a pass/fail verdict, and the run's metadata. Options, in priority order:</p>
+<ul>
+  <li><span class="badge b-ok">baseline</span> Playwright's built-in HTML report + trace viewer (zero extra code) as the CI artifact.</li>
+  <li><span class="badge b-accent">the "verify feature" analog</span> a thin generator that lays the labelled screenshots into a single self-contained HTML report per feature — matching the At-Bay flow.</li>
+  <li><span class="badge b-stop">out of scope</span> <b>No pixel-diff visual regression.</b> No <code>toHaveScreenshot()</code>, no committed baselines, no baseline-maintenance tax. Screenshots are <b>evidence attached to the PR</b>, read by a human when they want to look — they never fail a build on their own. Correctness is proven by the DOM / filesystem / recorded-write assertions.</li>
+  <li><span class="badge b-accent">delivery</span> <b>the PR itself</b> — see §5d. Slack / At-Bay endpoint remain optional extras.</li>
+</ul>
+
+<h3 id="ld">5d · Delivering the report on the GitHub PR <span class="badge b-ok">DECIDED</span></h3>
+<p>The report lands where the work is reviewed. Three mechanisms, used together:</p>
+<table>
+<thead><tr><th>Mechanism</th><th>What it gives</th><th>Cost</th></tr></thead>
+<tbody>
+<tr><td><b>Sticky PR comment</b><br><code>gh pr comment</code> / <code>actions/github-script</code></td><td>verdict table per feature journey — pass/fail, timing, screenshot links. One comment, <b>updated in place</b> each run (no comment spam).</td><td>trivial</td></tr>
+<tr><td><b>Job summary</b><br><code>$GITHUB_STEP_SUMMARY</code></td><td>full markdown report on the Actions run page, linked from the PR's checks. Renders images from the Pages URL.</td><td>trivial</td></tr>
+<tr><td><b>GitHub Pages</b><br>(publish HTML report)</td><td>the real screenshot-strip report + Playwright trace viewer, at a stable URL the PR comment deep-links into.</td><td><span class="badge b-ok">free</span> — public repo</td></tr>
+</tbody>
+</table>
+<div class="callout warn">
+  <div class="t">The one real constraint: screenshots must be hosted</div>
+  GitHub sanitizes markdown in comments — <b><code>data:</code> URIs are stripped</b>, so base64-inlined screenshots will <em>not</em> render in a PR comment. Images need a real URL. That's why <b>GitHub Pages</b> (free on this public repo) is in the mix: the run publishes the HTML report + PNGs there, and the sticky comment links/embeds from that URL. Fallback if Pages is undesirable: upload the report as a <b>workflow artifact</b> (downloadable zip) and keep the comment text-only with a link — less pretty, zero hosting.
+</div>
+<div class="callout">
+  <div class="t">Model-B wrinkle — worth deciding now</div>
+  Under §8, Layer B runs at <b>merge-to-main / pre-release</b>, not on every PR — so by default a normal PR has only the CT results to report. To get a full verify report <em>on the PR</em>, add an <b>on-demand trigger</b>: apply an <code>e2e</code> label (or <code>workflow_dispatch</code>) and the full lane runs against that PR and posts its report. Best of both: PRs stay fast, and any PR can ask for the real-host proof on demand.
+</div>
+</section>
+
+<section id="seams">
+<h2>6 · Testability seams (the honest cost)</h2>
+<div class="callout">
+  <div class="t">Decision (2026-08-21): fixture connector, not a fake Jira</div>
+  A fake Jira asserts <em>our model of Jira</em>, not Jira — it can never catch Jira changing, so its marginal value over a fixture is small while its cost (a server process, ports, lifecycle, all inside the flakiest tier) is real. And it aims at the wrong layer: what E2E must prove is the <b>host boundary</b>, and the Jira HTTP client has zero VS Code API surface — it stays covered by unit/contract tests. <code>TaskConnector</code> is already the seam the pluggable-connectors work bought us.
+</div>
+<p>A real, fresh host has empty settings and empty SecretStorage. With the fixture connector, the seam list shrinks to:</p>
+<ul>
+  <li><b>Fixture task connector</b> — a JSON-backed <code>TaskConnector</code> (<code>src/tasks/fixture/</code>), registered in the connector registry <em>only</em> when an env flag names its fixture directory. Unset (every real user) → the registry is byte-identical to today: ships inert. It reads tasks from <code>tasks.json</code> and records every write (<code>moveTo</code>, labels) to <code>writes.jsonl</code>, which is what journey 3 asserts on — a request-recorder without a server.</li>
+  <li><b>Settings, not seams</b> — every mid-take prompt is already answerable from settings: <code>taskMode</code> (a configured mode id skips the prompt-mode pick), <code>openIn: "new-window"</code>, <code>worktree: "never"|"always"</code>, <code>remoteControl: "off"</code>. The repo-confirm QuickPick stays and is <em>driven</em> — it is real take UX, and the workbench quick-input is ordinary DOM.</li>
+  <li><b>Deterministic "opened-by-take" handshake</b> — the seed handshake already uses a plan file with a 15-min TTL (<code>workspace.ts</code>, <code>PLAN_TTL_MS</code>); the test controls timing, no product change needed. The launcher overrides <code>HOME</code> for the child host so <code>~/.agentflow/plans</code> lands in the sandbox, never in the developer's real home.</li>
+  <li><b>Test sign-in (journey 5 only)</b> — sign-in/out genuinely exercises SecretStorage against the Jira connector, so that one journey keeps an env-gated seam (<code>agentFlow.__test.signIn</code>). Not needed for journeys 1–4.</li>
+</ul>
+<p>What this deliberately gives up: nothing end-to-end exercises real Jira request/response shaping. That belongs to a contract test in the unit suite against a recorded real response — not to an editor-host lane.</p>
+<p>Everything else the extension already does through real VS Code APIs, so the E2E exercises production code paths, not test shims.</p>
+</section>
+
+<section id="host">
+<h2>7 · Host &amp; platform constraints (read before committing)</h2>
+<ul>
+  <li><span class="badge b-ok">reliable gate</span> <b>Stock VS Code</b> is the target the release blocks on — it downloads reproducibly and Playwright-drives cleanly.</li>
+  <li><span class="badge b-warn">best-effort</span> <b>Cursor as host:</b> your own hard-won note stands — the <em>Cursor CLI silently drops</em> <code>--extensionDevelopmentPath</code>. Playwright launches the binary <em>directly</em> (bypassing the CLI), so Cursor <em>may</em> work, but it's unproven. Treat a Cursor lane as a nice-to-have that never blocks a release until it's shown stable.</li>
+  <li><span class="badge b-warn">CI display</span> Linux runners need <b>xvfb</b> to launch the Electron host headlessly; browsers/binaries are cached.</li>
+  <li><span class="badge b-warn">dependency</span> The host must have <code>anthropic.claude-code</code> installed to verify seeding. CI installs a pinned build into the test host's extensions dir. If Claude Code is absent, the extension's documented fallback (write the brief, skip the panel) is what the E2E asserts instead — a valid path to cover too.</li>
+  <li><span class="badge b-stop">never in CI</span> The agent is <b>not run</b> — no Anthropic API calls from the gate (see §5b boundary).</li>
+</ul>
+</section>
+
+<section id="gate">
+<h2>8 · Where it runs — the tiered gate <span class="badge b-ok">DECIDED</span></h2>
+<p>Both CI and local, each doing the job it's good at. Extends the existing <code>ci.yml</code> (today: <code>typecheck → vitest → build</code>):</p>
+<table>
+<thead><tr><th>Lane</th><th>Runs</th><th>Contains</th><th>Blocks</th></tr></thead>
+<tbody>
+<tr><td><b>Fast (CI)</b></td><td>every PR + push</td><td><code>typecheck</code> · <code>vitest</code> · <code>build</code> · <b>Layer A (CT)</b></td><td><span class="badge b-stop">merge</span> — every PR</td></tr>
+<tr><td><b>Full (CI)</b></td><td>merge-to-main / pre-release, under xvfb</td><td><b>Layer B (host E2E)</b> + <b>Layer C report</b></td><td><span class="badge b-stop">the release</span></td></tr>
+<tr><td><b>Local</b></td><td>on demand — <code>npm run test:e2e</code></td><td>the same Layer B specs, headed &amp; debuggable</td><td>nothing — authoring &amp; the macOS-path check</td></tr>
+<tr><td><b>macOS (CI)</b></td><td>optional, nightly</td><td>Layer B on a macOS runner (covers <code>open -a</code>-class paths)</td><td>advisory</td></tr>
+</tbody>
+</table>
+<p>Rationale: the fast lane keeps PR feedback in minutes; the full lane puts the expensive, real-host proof exactly at the moment it matters — the release — so <b>no feature ships without an automated real-editor proof</b>, and the manual checklist is retired. Release-on-merge stays as-is, now standing on that proof.</p>
+
+<h3>Cost — dollars, time, maintenance</h3>
+<table>
+<thead><tr><th>Dimension</th><th>Reality for this repo</th></tr></thead>
+<tbody>
+<tr><td><b>Dollars</b></td><td><span class="badge b-ok">$0</span> — <b>public repo → free unlimited Linux runner minutes.</b> The only non-free path is macOS runners (~10×), which is why the macOS lane is optional/nightly, never per-PR.</td></tr>
+<tr><td><b>Time — fast lane</b></td><td>~5–8 min (typecheck + vitest + build + CT). The unit suite alone is now ~2.5 min with coverage at 3,769 tests — it grows with the repo, so watch this number.</td></tr>
+<tr><td><b>Time — full lane</b></td><td>~5–12 min for ~5 journeys. VS Code + Playwright binaries cached, so the download is seconds after the first run. Only at merge/pre-release.</td></tr>
+<tr><td><b>Maintenance</b></td><td>The real cost: human time triaging Layer B flakes. Budget it as ongoing, not one-time.</td></tr>
+</tbody>
+</table>
+
+<h3>Reliability — by layer, because they differ sharply</h3>
+<ul>
+  <li><span class="badge b-ok">high</span> <b>Layer A (CT, headless Chromium):</b> standard Playwright, flake ≈ zero. No concern.</li>
+  <li><span class="badge b-warn">the flaky tier</span> <b>Layer B (real VS Code under xvfb):</b> CI-stable with discipline — deterministic fakes (no real network), Playwright auto-waiting (never fixed sleeps), <code>--no-sandbox</code>/<code>--disable-gpu</code> + dismissing first-run UI (workspace-trust, telemetry, welcome), pinned VS Code <em>and</em> Claude Code builds, bounded retries with trace-on-failure, and a <b>quarantine lane</b> so one bad spec can't wedge the pipeline. Expect some early flake, driven to near-zero with hardening.</li>
+</ul>
+
+<div class="callout warn">
+  <div class="t">Honest limitation — macOS-only paths</div>
+  A <b>Linux</b> gate proves all cross-platform logic but won't exercise the extension's macOS-only window handling (e.g. the <code>open -a</code> note in <code>workspace.ts</code>). Covered by the <b>local</b> run on your Mac and the optional <b>nightly macOS lane</b> — not by the per-release Linux gate.
+</div>
+</section>
+
+<section id="effort">
+<h2>9 · Effort, risks &amp; the flake budget</h2>
+<table>
+<thead><tr><th>Work</th><th>Rough effort</th></tr></thead>
+<tbody>
+<tr><td>Layer A — CT harness + priority webview tests</td><td>~1–2 days</td></tr>
+<tr><td>Layer B — host launcher, fixture connector, temp-repo fixtures, first 3 journeys</td><td>~2–4 days (fixture connector replaces the fake-Jira server)</td></tr>
+<tr><td>Layer B — remaining journeys (worktree, sign-in, fallback)</td><td>~2 days</td></tr>
+<tr><td>Layer C — verify-feature report generator + delivery</td><td>~1–2 days</td></tr>
+<tr><td>CI wiring (xvfb, caching, artifacts, gate)</td><td>~1 day</td></tr>
+</tbody>
+</table>
+<div class="callout stop">
+  <div class="t">The trade-off of "no manual step," stated plainly</div>
+  Full UI automation is inherently the flakiest test tier — real windows, timing, focus. Making it a <b>hard release gate</b> means a flake can block a good release. This is the price of retiring manual testing, and it's payable, but only with discipline: deterministic fakes (no real network), Playwright auto-waiting (no fixed sleeps), bounded retries with trace-on-failure, and a <b>quarantine lane</b> for a newly-flaky test so one bad spec never wedges the pipeline. Budget ongoing maintenance, not just build cost.
+</div>
+<h3>Other risks</h3>
+<ul>
+  <li><span class="badge b-warn">experimental</span> Playwright CT + <code>_electron</code>-driving-VS Code are community-proven but not first-party VS Code testing → pin versions; keep the launcher thin and swappable for ExTester if it regresses.</li>
+  <li><span class="badge b-warn">webview iframes</span> driving the extension's webview from the host means iframe-switching; encapsulate in one page-object helper.</li>
+  <li><span class="badge b-warn">Claude Code coupling</span> a Claude Code UI change could break the seed assertion → assert on the seeded <em>text</em> we control, screenshot the rest, and pin the Claude Code build in CI.</li>
+</ul>
+</section>
+
+<section id="open">
+<h2>10 · Decisions <span class="badge b-ok">ALL RESOLVED</span></h2>
+<table>
+<thead><tr><th>#</th><th>Decision</th><th>Resolution</th></tr></thead>
+<tbody>
+<tr><td>1</td><td><b>Report destination</b></td><td><span class="badge b-ok">DECIDED — on the GitHub PR</span> sticky comment + job summary + Pages-hosted HTML report, with an <code>e2e</code> label to run the full lane on demand. See §5d. Slack / At-Bay optional later.</td></tr>
+<tr><td>2</td><td><b>Cursor lane</b></td><td><span class="badge b-ok">DECIDED — VS Code first</span> ship and stabilize the VS Code gate; add a non-blocking Cursor lane later (CLI-drops-<code>--extensionDevelopmentPath</code> caveat, §7, still to be disproven).</td></tr>
+<tr><td>3</td><td><b>Visual regression</b></td><td><span class="badge b-ok">DECIDED — screenshots only</span> no pixel-diff, no baselines. Screenshots ride along as PR evidence; assertions decide pass/fail. See §5c.</td></tr>
+<tr><td>4</td><td><b>Where it runs / gate strictness</b></td><td><span class="badge b-ok">DECIDED — Model B</span> CT gates every PR; Layer B gates at merge-to-main / pre-release; local <code>test:e2e</code> for authoring + macOS check; optional nightly macOS lane. See §8.</td></tr>
+</tbody>
+</table>
+</section>
+
+<section id="dod">
+<h2>11 · Definition of done</h2>
+<ul>
+  <li><span class="yes">✓</span> A real VS Code host launches in CI and drives the extension against the fixture connector + temp repos — no real network.</li>
+  <li><span class="yes">✓</span> The core journeys (take task → window opens → panel seeds; status write-back + label) pass with assertions <em>and</em> screenshots.</li>
+  <li><span class="yes">✓</span> A verify-feature report is generated every run and posted <b>on the GitHub PR</b> — sticky comment + job summary, with screenshots attached via the Pages-hosted report.</li>
+  <li><span class="yes">✓</span> Drag-and-drop reorder is covered in real Chromium (Layer A).</li>
+  <li><span class="yes">✓</span> The gate blocks the release on failure; <b>no manual checklist remains</b>.</li>
+  <li><span class="yes">✓</span> A quarantine path exists so a single flake can't wedge the pipeline.</li>
+</ul>
+</section>
+
+<div class="foot">
+  Agent Flow · fully-automated verify &amp; release cycle · drafted 2026-08-15 against main @ b463626 (v0.21.1).
+  All numbers, file counts and line references verified from a live <code>npm ci &amp;&amp; npm run test:cov</code> in an isolated worktree — 3,769 tests, 99.1% statements, clean baseline.
+</div>
+
+</div>
+</body>
+</html>
