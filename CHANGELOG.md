@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.9] — 2026-08-21
+
 ### Fixed
 
 - **A finished Explore or Notepad session now leaves the In-flight board.** These
@@ -23,6 +25,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sight) keeps the old behaviour available as a window in hours. Worktrees, branches,
   commits and briefs on disk are untouched, and a run with a ticket, an open pull
   request, or anything uncommitted it owns is unaffected.
+
+## [0.33.8] — 2026-08-21
+
+### Added
+
+- **Hand a PR to an agent without opening its row.** The review queue's agent action lived
+  only inside an expanded row, so clearing a queue meant expanding each row, clicking, and
+  collapsing it again — three gestures for the one thing the queue exists to start. Every
+  row now carries the action on the line itself, as a play glyph in the product's own accent
+  at the end of the row, tooltipped **Review with agent**. It is the same accent the
+  expanded row's own button already uses, so the two read as one action reachable two ways
+  rather than as two different ones. A row whose review is already running shows the loading
+  mark instead and stops being clickable at all — the row says `reviewing` beside it, and a
+  second launch would be a second worktree for a PR mid-review. A row whose repo isn't
+  checked out locally keeps a live button, greyed rather than accented, and says why in its
+  tooltip; clicking it still explains what to do, exactly as the expanded button did.
 
 ## [0.33.7] — 2026-08-21
 

@@ -215,7 +215,18 @@ describe("brand accent", () => {
     // no longer appears in deckStyles.ts at all. (It had already lost its
     // `::after` sibling here, which the tightened detector showed spends only
     // `var(--brand-ink)`, never `var(--brand)`.)
-    deck: [".act.primary", ".act.primary:hover"],
+    deck: [
+      ".act.primary", ".act.primary:hover",
+      // The review row's play button — the agent action reachable without opening
+      // the row. A deliberate addition, and the same action `.act.primary` already
+      // spends the hue on inside the open row, so it is one action in one colour
+      // rather than a second claim on attention. Like `.orch-chip` it is a tint,
+      // not a fill: the glyph takes the hue and only :hover washes the cell, so a
+      // queue of six rows does not put six filled primaries on the board. The
+      // not-checked-out variant is `--dim`, deliberately NOT a faded brand, and so
+      // does not appear here.
+      ".rv-go", ".rv-go:not(.busy):hover",
+    ],
     marketplace: [".btn.pri", ".btn.pri:hover"],
     controls: [],
     orchestrator: [
