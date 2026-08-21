@@ -105,6 +105,13 @@ export interface OpenRequest {
    *  not consent to rewrite it. */
   foldersToAdd?: { name: string; path: string }[];
   existingFolder?: string; // when set: focus this already-open folder window + seed it
+  /** Name this launch's OWN brief absolutely in the seeded prompt, instead of writing a
+   *  fallback copy into `existingFolder`. Set by **Review with agent**, whose brief
+   *  belongs in the review worktree while the destination is a repo another agent is
+   *  already working in — see the `existingFolder` arm below for why the fallback write
+   *  is destructive there. No effect on any other destination: they all name the brief
+   *  absolutely already. */
+  absoluteBrief?: boolean;
   remoteControl?: boolean; // offer Claude Code's Remote Control in the opened session
   kind?: Run["kind"]; // what launched this run; omitted means a task
   /** Whether to record a Run for this open. Defaults to true. Set false when opening
@@ -519,7 +526,13 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     // Focus an already-open folder window and seed there. VS Code offers no way to
     // inject roots into a folder window remotely, so its folder set is unchanged;
     // ensure a brief exists IN that folder so the seeded relative {brief} resolves.
-    if (!services.some((s) => canon(s.path) === canon(folder))) {
+    //
+    // `absoluteBrief` skips that entirely, because for its one caller the fallback is
+    // destructive rather than helpful: a review's brief belongs in the review worktree,
+    // and this folder is a repo someone else's agent is working in — writing here
+    // clobbers the brief that agent was given and then points this launch's `{brief}`
+    // at it. Naming our own brief absolutely resolves from any cwd, so nothing is lost.
+    if (!req.absoluteBrief && !services.some((s) => canon(s.path) === canon(folder))) {
       const dir = path.join(folder, BRIEF_DIR);
       fs.mkdirSync(dir, { recursive: true });
       const fallbackBrief = path.join(dir, BRIEF_FILE);
@@ -532,7 +545,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     }
     unaddedRepos = services.filter((s) => canon(s.path) !== canon(folder)).map((s) => s.name);
     const mentions = services.flatMap((s) => (filesByRepo.get(s.name) ?? []).map((f) => mention("per-window", s.name, f)));
-    matches.push({ matchPath: folder, prompt: seedPrompt(mentions) });
+    matches.push({ matchPath: folder, prompt: seedPrompt(mentions, req.absoluteBrief ? briefs[0]?.path : undefined) });
   } else if (mode === "multiroot") {
     fs.mkdirSync(workspaceDir, { recursive: true });
     workspaceFile = path.join(workspaceDir, `${ticket.key}.code-workspace`);
@@ -580,6 +593,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
       url: ticket.url,
       createdAt: Date.now(),
       kind: req.kind,
+      ...(seedAgent ? { provider } : {}),
       mode: effMode,
       workspaceFile,
       repos: services.map((s) => ({

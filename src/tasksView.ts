@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { getConfig, hostProviders, providerLabel, resolvedProvider, AgentFlowConfig, AgentProvider, ExploreAction } from "./config";
+import { getConfig, providerLabel, resolvedProvider, AgentFlowConfig, AgentProvider, ExploreAction } from "./config";
 import {
   isTaskNetworkError,
   serializeCaps,
@@ -25,6 +25,11 @@ import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prom
 import { openWorkspace, writeBriefInto, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, attachmentFileName, attachmentRelPath, BRIEF_DIR, type MergeCandidate } from "./engine/workspace";
 import { briefMarkdown } from "./engine/brief";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, PresenceRecord, type CurrentWindow } from "./engine/presence";
+// The destination question, lifted so **Review with agent** on the Deck asks it in
+// exactly the same words (src/engine/openTarget.ts). The private methods below are now
+// thin adapters over it: they bind the settings, the copy, and the `vscode` pickers.
+import { chooseOpenTarget, targetToOpenArgs, type OpenArgs, type OpenTarget } from "./engine/openTarget";
+import { liveWindowsElsewhere, openTargetDeps } from "./openTargetHost";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { branchName, createWorktrees, ensureBranch, folderName, repoRootOfWorktree, serviceFolderName } from "./engine/worktree";
@@ -36,6 +41,7 @@ import { branchName, createWorktrees, ensureBranch, folderName, repoRootOfWorktr
 import { currentBranch } from "./engine/git";
 import { buildTree, type TreeLeaf, type TreeResult } from "./engine/taskTree";
 import { openSharedWorkspace, type BatchTask } from "./engine/batchWorkspace";
+import { providerPin, resolveBatchProvider } from "./agentPick";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { newNote, newSection, noteStatus, sanitizeNotes, sanitizeSections } from "./notepad";
 import { IMAGE_DIR, deleteImages, imageFileName, imagePath, saveImage, sweepOrphans } from "./notepadImages";
@@ -185,14 +191,6 @@ function isRetryable(failureClass: FailureClass): boolean {
  *  `open -a` thrash when several windows launch back-to-back. */
 const BATCH_STAGGER_MS = 250;
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-/** Where to open a taken task — a new window, the current one, merged into an
- * existing .code-workspace file, or focused into an already-open folder window. */
-type OpenTarget =
-  | { kind: "new" }
-  | { kind: "current" }
-  | { kind: "existing"; file: string }
-  | { kind: "live-folder"; folder: string };
 
 export class TasksViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "agentFlow.tasks";
@@ -2189,7 +2187,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // and the loop honours the answer — with one exception picked up once the
     // destination is known (see the `shared` re-resolution below).
     const isBatch = keys.length > 1;
-    let batchProvider = isBatch ? await this.resolveBatchProvider(cfg, true) : undefined;
+    let batchProvider = isBatch ? await resolveBatchProvider(cfg, true) : undefined;
     if (isBatch && !batchProvider) return;
     // The agent for copy written BEFORE the launch: the resolved answer when there is
     // one, and otherwise the setting's own — a single launch resolves inside
@@ -2250,7 +2248,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // already resolved above, before its confirmation. Still before the first worktree,
     // so a dismissal here costs nothing either.
     if (shared && !batchProvider) {
-      batchProvider = await this.resolveBatchProvider(cfg, isBatch);
+      batchProvider = await resolveBatchProvider(cfg, isBatch);
       if (!batchProvider) return;
     }
 
@@ -2361,7 +2359,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           // The shared-window batch needs the same "here" the single take does.
           currentWindow: here,
           foldersToAdd: additions.foldersToAdd,
-          ...(batchProvider ? this.providerPin(cfg, batchProvider) : {}),
+          ...(batchProvider ? providerPin(cfg, batchProvider) : {}),
         });
         launched = resolved.length;
         seededInPlace = !!result.seededInPlace;
@@ -2413,7 +2411,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             // the request it always sent — the run record has one representation of
             // "no parent", and that is the field's absence (see Run.parentKey).
             ...(parent ? { parentKey: parent.key } : {}),
-            ...(batchProvider ? this.providerPin(cfg, batchProvider) : {}),
+            ...(batchProvider ? providerPin(cfg, batchProvider) : {}),
           });
           // Cancelled: nothing was opened, written or seeded for this task, so it is
           // neither launched nor failed — a dismissal is the user's own decision, not
@@ -2495,50 +2493,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** The agent for a whole batch, resolved before the loop that cannot ask. Under the
-   *  three fixed settings this is a plain read and NO picker appears — the setting is
-   *  the answer, and it is the same answer `openWorkspace` would have reached on its
-   *  own. Under `ask` it puts up the same picker `openWorkspace` would have, once, and
-   *  the caller pins the answer onto every task so no task asks again.
-   *
-   *  With seeding off there is no agent to start, so there is nothing to ask about and
-   *  `ask` degrades exactly as `resolvedProvider` says it does — the same condition
-   *  `openWorkspace` guards its own picker with.
-   *
-   *  `undefined` means dismissed, at which point the batch must launch nothing. */
-  private async resolveBatchProvider(cfg: AgentFlowConfig, isBatch: boolean): Promise<AgentProvider | undefined> {
-    if (cfg.agentProvider !== "ask" || !cfg.seedAgent) return resolvedProvider(cfg.agentProvider);
-    // One possible agent is not a question — same short-circuit, and same reasoning, as
-    // the picker in `openWorkspace`.
-    const choices = hostProviders();
-    if (choices.length === 1) return choices[0];
-    const choice = await vscode.window.showQuickPick(
-      choices.map((p) => ({ label: providerLabel(p), provider: p })),
-      {
-        // The SAME title as the picker in `openWorkspace` — one launch-time question,
-        // asked in one voice, whichever path raises it. Only the placeholder says what
-        // is different about this one: it answers for every task, not just one.
-        //
-        // …which is only true of a REAL batch. A one-key batch reaches here solely
-        // because a shared window seeds from plan files and cannot ask later; it is a
-        // single launch, so it gets the single-launch placeholder, word for word the
-        // one `openWorkspace` would have shown it.
-        title: "Which agent?",
-        placeHolder: isBatch ? "Pick the agent for every task in this batch" : "Pick the agent to start this session with",
-        ignoreFocusOut: true,
-      },
-    );
-    return choice?.provider;
-  }
 
-  /** A caller's agent pin, for spreading into an open request. Sent ONLY under `ask`,
-   *  where it replaces a prompt that has already been answered. Under a fixed setting
-   *  a pin is ignored (see `OpenRequest.provider`) and the user's preference wins, so
-   *  sending one there could only invite the request and the setting to look like they
-   *  disagree — and it would change a request that must stay exactly what it was. */
-  private providerPin(cfg: AgentFlowConfig, provider: AgentProvider): { provider?: AgentProvider } {
-    return cfg.agentProvider === "ask" ? { provider } : {};
-  }
 
   /** The filtered repo names as git ServiceRefs. Names that don't resolve, and repos
    * that aren't git, are dropped with a note rather than aborting the batch — with
@@ -2937,117 +2892,37 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Where to open a taken task — new window, this window, a saved workspace, or a
-   * window you already have open. Live windows appear only in the interactive "ask"
-   * flow (a specific open window is inherently a per-take choice). */
-  private async chooseOpenTarget(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
-    // A window with no identity can't be named by a plan match, so it can't hold a
-    // seeded session — "this window" is not offered, and the setting can't force it.
-    const here = currentWindow();
-    if (cfg.openIn === "new-window") return { kind: "new" };
-    if (cfg.openIn === "this-window") {
-      if (here) return { kind: "current" };
-      this.toast(
-        "info",
-        "This window has no saved workspace file and no single folder, so it can't hold a session — opening a new window instead.",
-      );
-      return { kind: "new" };
-    }
-    if (cfg.openIn === "pick-existing") return this.pickExistingWorkspace(cfg);
-
-    type PickTarget = OpenTarget | { kind: "existing-pick" };
-    const thisWindow: { label: string; detail: string; target: PickTarget }[] = here
-      ? [{ label: "$(window) This window", detail: "Start a session here — keeps this window's folders", target: { kind: "current" } }]
-      : [];
-    const base: { label: string; detail: string; target: PickTarget }[] = [
-      { label: "$(empty-window) New window", detail: "Open the task in a separate window", target: { kind: "new" } },
-      ...thisWindow,
-      { label: "$(folder-library) Existing workspace…", detail: "Open the task into a .code-workspace you already have", target: { kind: "existing-pick" } },
-    ];
-    const live = cfg.trackOpenWindows ? this.liveWindowItems() : [];
-    const p = await vscode.window.showQuickPick([...base, ...live], {
-      title: "Open the task where?",
-      placeHolder: "New window, this window, a saved workspace, or a window you have open",
-      ignoreFocusOut: true,
-    });
-    if (!p) return undefined;
-    if (p.target.kind === "existing-pick") return this.pickExistingWorkspace(cfg);
-    return p.target;
+   * window you already have open. The picker itself is engine/openTarget's; this binds
+   * the take flow's copy, its settings and the `vscode` pickers to it. */
+  private chooseOpenTarget(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
+    return chooseOpenTarget(
+      {
+        openIn: cfg.openIn,
+        trackOpenWindows: cfg.trackOpenWindows,
+        title: "Open the task where?",
+        placeHolder: "New window, this window, a saved workspace, or a window you have open",
+      },
+      openTargetDeps(cfg.workspaceDir, (m) => this.toast("info", m)),
+    );
   }
 
-  /** Live Agent-Flow windows other than this one. One source for both the open-target
-   * picker and the sidebar's gauge count. */
+  /** Live Agent-Flow windows other than this one — the sidebar's gauge count. */
   private liveWindows(): PresenceRecord[] {
-    const self = windowIdentity()?.identity;
-    return readLiveWindows(defaultWindowsDir()).filter((w) => w.identity !== self);
+    return liveWindowsElsewhere();
   }
 
-  /** Live Agent-Flow windows (excluding the current one) as open-target picks. A
-   * workspace window maps to the existing merge+focus path; a folder window focuses
-   * and seeds in place. */
-  private liveWindowItems(): { label: string; detail: string; target: OpenTarget }[] {
-    return this.liveWindows().map((w) => ({
-      label: `$(window) ${w.label}`,
-      detail: w.kind === "workspace" ? `open now · ${w.folders} folder${w.folders === 1 ? "" : "s"}` : "open now",
-      target: w.kind === "workspace" ? { kind: "existing", file: w.identity } : { kind: "live-folder", folder: w.identity },
-    }));
-  }
-
-  /** Resolve an OpenTarget to the openWorkspace arguments, asking the multiroot-vs-
-   * per-window question only for a NEW window with more than one repo. Returns
-   * undefined if the user cancels that sub-pick. */
-  private async targetToOpenArgs(
+  /** Resolve an OpenTarget to the openWorkspace arguments (engine/openTarget), binding
+   * the take flow's own multiroot-vs-per-window question to it. */
+  private targetToOpenArgs(
     target: OpenTarget,
     count: number,
     label: string,
     cfg: AgentFlowConfig,
-  ): Promise<
-    | { mode: WorkspaceMode; openIn: "new" | "current"; existingWorkspaceFile?: string; existingFolder?: string; currentWindow?: CurrentWindow }
-    | undefined
-  > {
-    if (target.kind === "existing") return { mode: "multiroot", openIn: "new", existingWorkspaceFile: target.file };
-    if (target.kind === "live-folder") return { mode: "per-window", openIn: "new", existingFolder: target.folder };
-    if (target.kind === "current") {
-      // The window's own shape is the mode — nothing is being laid out, so the repo
-      // count has no say. A window that lost its identity between the pick and here
-      // has no seed destination left, so the take cancels rather than opening something
-      // the user didn't choose.
-      const here = currentWindow();
-      if (!here) return undefined;
-      return { mode: here.kind === "workspace" ? "multiroot" : "per-window", openIn: "current", currentWindow: here };
-    }
-    const mode = await this.chooseWorkspaceMode(count, cfg.workspaceMode, label);
-    if (!mode) return undefined;
-    return { mode, openIn: "new" };
-  }
-
-  /** Pick a `.code-workspace` from `cfg.workspaceDir` (or Browse… for one elsewhere). */
-  private async pickExistingWorkspace(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
-    const BROWSE = "__browse__";
-    const files = listWorkspaceFiles(cfg.workspaceDir);
-    const items = [
-      ...files.map((f) => ({
-        label: `$(file-code) ${f.file.split("/").pop()}`,
-        detail: `${f.folders} folder${f.folders === 1 ? "" : "s"}`,
-        file: f.file,
-      })),
-      { label: "$(folder-opened) Browse…", detail: "Pick a .code-workspace from anywhere", file: BROWSE },
-    ];
-    const picked = await vscode.window.showQuickPick(items, {
-      title: "Open into which workspace?",
-      placeHolder: files.length ? "Pick a workspace, or Browse…" : "No workspaces found — Browse…",
-      ignoreFocusOut: true,
+  ): Promise<OpenArgs | undefined> {
+    return targetToOpenArgs(target, count, {
+      currentWindow,
+      chooseWorkspaceMode: (n) => this.chooseWorkspaceMode(n, cfg.workspaceMode, label),
     });
-    if (!picked) return undefined;
-    if (picked.file !== BROWSE) return { kind: "existing", file: picked.file };
-    const uris = await vscode.window.showOpenDialog({
-      canSelectFiles: true,
-      canSelectFolders: false,
-      canSelectMany: false,
-      filters: { "VS Code Workspace": ["code-workspace"] },
-      title: "Pick a .code-workspace",
-    });
-    if (!uris || !uris.length) return undefined;
-    return { kind: "existing", file: uris[0].fsPath };
   }
 
   private html(webview: vscode.Webview): string {

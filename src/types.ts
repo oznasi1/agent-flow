@@ -139,6 +139,12 @@ export interface Run {
    * "notepad" is a run launched from the Notepad tab: ticketless like "explore",
    * but distinguishable from it so the board can label it for what it is. */
   kind?: "task" | "explore" | "review" | "local" | "notepad";
+  /** The agent this run was launched with — the one `openWorkspace` actually resolved
+   * and seeded, not the setting, so it names the real agent even under `ask`. Absent on
+   * every record written before this field existed, on a `local` run (never launched by
+   * Agent Flow at all), and on a launch that seeded no agent — in which case nothing
+   * here is driving the run yet and the card must not claim otherwise. */
+  provider?: AgentProvider;
   mode: WorkspaceMode;
   workspaceFile?: string; // multi-root .code-workspace, when mode === "multiroot"
   repos: { name: string; path: string; isGit: boolean; branch?: string }[];
@@ -177,6 +183,12 @@ export function runKind(run: Run): "task" | "explore" | "review" | "local" | "no
     ? (run.kind as "task" | "explore" | "review" | "local" | "notepad")
     : "task";
 }
+
+/** Which agent Agent Flow starts a session with. Declared here rather than in
+ * config.ts because the webview renders a per-provider mark and must not import a
+ * module that touches `vscode`; config.ts re-exports it, so every existing importer
+ * keeps working. */
+export type AgentProvider = "claude-code" | "copilot" | "cursor";
 
 /** One open Claude Code session, as ~/.claude/sessions/<pid>.json records it.
  * Only the fields the Deck reads; the file carries more. Declared here rather
@@ -236,6 +248,14 @@ export interface AgentActivity {
    * reducer cannot know. Optional so every existing AgentActivity literal
    * (the test suite is full of them) still compiles; absent means false. */
   midWork?: boolean;
+  /** The model the last main-chain assistant line answered with, e.g. "claude-opus-5".
+   * Null when the tail carries no such line — a transcript whose last 200 lines are all
+   * subagent work, or a session that has not answered yet. Optional so every existing
+   * AgentActivity literal (the test suite is full of them) still compiles. */
+  model?: string | null;
+  /** How many DISTINCT main-chain models the tail holds. 1 in the ordinary case, more
+   * when the session switched mid-run — which the drawer marks with a "+N". */
+  modelCount?: number;
 }
 
 /** One open Claude Code session attached to a card, with its own live state.
@@ -263,6 +283,13 @@ export interface RunStatus {
   windowOpen: boolean; // is this run's target window currently open? (from presence)
   prs: PrEntryMap; // repo name → observed PR state ({} when prFacts is off)
   agents: CardAgent[]; // every open session in this run's directories
+  /** Which tool is driving this run, for the card's provider mark. The run record's own
+   * stamp when it has one; otherwise inferred — a live Claude Code session in this run's
+   * directories means `claude-code`, because `~/.claude/sessions` is the only agent
+   * registry the Deck can read. Absent when neither answers, and the card then shows no
+   * mark rather than guessing from the current setting, which may have changed since the
+   * launch or be `ask`. */
+  provider?: AgentProvider;
   /** A local card's ticket key, inferred from its branch name rather than from a
    * launch — set only when the run is local and its url resolved to one. The
    * branch could name a ticket somebody else owns, so the status shown on the
@@ -596,6 +623,10 @@ export type InboundMessage =
   | { type: "deck:setReviewSort"; sort: ReviewSort }
   | { type: "deck:reviewExpand"; id: string }
   | { type: "deck:reviewLaunch"; id: string }
+  /** Several rows at once. One agent per PR, one mode and one destination asked for
+   *  the whole batch — see `launchReviewBatch`. Never a batch *submit*: a single click
+   *  that posts four reviews to the forge is the one thing this must not become. */
+  | { type: "deck:reviewBatch"; ids: string[] }
   | { type: "deck:reviewLoadDraft"; id: string }
   | { type: "deck:reviewSubmit"; id: string; verb: ReviewVerb; body: string; fromDraft: boolean }
   // ── Orchestrator flows ──────────────────────────────────────────────

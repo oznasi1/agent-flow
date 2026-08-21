@@ -26,7 +26,7 @@ const input = (over: Partial<RetireInput> = {}): RetireInput => ({
   run: run(), repos: [repo()], ticketCategory: "indeterminate", prs: {},
   hasLiveSession: false, prsAuthoritative: true,
   finishedAfterMs: 24 * HOUR, abandonedAfterMs: 7 * DAY, nowMs: NOW,
-  shelf: "board", closedAfterMs: 24 * HOUR,
+  shelf: "board", closedAfterMs: 24 * HOUR, inPlaceAfterMs: 0,
   exists: () => true, ...over,
 });
 
@@ -223,5 +223,80 @@ describe("a live session", () => {
     const r = run({ finishedAt: NOW - 25 * HOUR });
     expect(retireVerdict(input({ run: r, hasLiveSession: true, prs: prs(facts({ state: "MERGED" })) })))
       .toEqual({ action: "unstamp" });
+  });
+});
+
+describe("rule 0 — an in-place run that closed", () => {
+  // Explore and Notepad runs launch in the main checkout rather than a worktree,
+  // so `hasLiveSession` and `repos` here describe a directory the run does not own:
+  // any agent open anywhere in that repo, and its permanent dirty state, used to
+  // pin every such record forever. `shelf` is the ownership-scoped answer.
+  const inPlace = (over: Partial<Run> = {}): Run =>
+    run({ key: "explore-retries", url: "", kind: "explore", ...over });
+
+  it("retires past the unscoped live-session veto", () => {
+    expect(retireVerdict(input({ run: inPlace(), shelf: "closed", hasLiveSession: true })))
+      .toEqual({ action: "retire", reason: "in-place" });
+  });
+
+  it("retires past the unscoped dirty-checkout veto", () => {
+    expect(retireVerdict(input({
+      run: inPlace(), shelf: "closed", repos: [repo({ dirty: true, ahead: 3 })],
+    }))).toEqual({ action: "retire", reason: "in-place" });
+  });
+
+  it("retires a notepad run on the same terms", () => {
+    expect(retireVerdict(input({
+      run: inPlace({ key: "notepad-x-1", kind: "notepad" }), shelf: "closed", hasLiveSession: true,
+    }))).toEqual({ action: "retire", reason: "in-place" });
+  });
+
+  it("leaves an in-place run that is still on the board to the ordinary rules", () => {
+    expect(retireVerdict(input({ run: inPlace(), shelf: "board", hasLiveSession: true })))
+      .toEqual({ action: "keep" });
+  });
+
+  it("spares a task run in a worktree — its record is the only pointer back", () => {
+    expect(retireVerdict(input({
+      shelf: "closed", hasLiveSession: true, repos: [repo({ dirty: true })],
+    }))).toEqual({ action: "keep" });
+  });
+
+  it("spares a ticket-bearing run even when its kind says explore", () => {
+    expect(retireVerdict(input({
+      run: inPlace({ url: "https://jira/browse/ASM-1" }), shelf: "closed",
+      repos: [repo({ dirty: true })],
+    }))).toEqual({ action: "keep" });
+  });
+
+  it("spares a ticketless run of another kind — the kind test is the discriminator", () => {
+    // A legacy record with no `kind` reads as "task", and one with no url is ticketless,
+    // so the ticket guard cannot speak for this case: only the kind test spares it.
+    expect(retireVerdict(input({
+      run: run({ url: "" }), shelf: "closed", repos: [repo({ dirty: true })],
+    }))).toEqual({ action: "keep" });
+  });
+
+  it("stamps rather than retires when a window is configured", () => {
+    expect(retireVerdict(input({ run: inPlace(), shelf: "closed", inPlaceAfterMs: 24 * HOUR })))
+      .toEqual({ action: "stampClosed", closedAt: NOW });
+  });
+
+  it("retires once that window elapses", () => {
+    expect(retireVerdict(input({
+      run: inPlace({ closedAt: NOW - 25 * HOUR }), shelf: "closed", inPlaceAfterMs: 24 * HOUR,
+    }))).toEqual({ action: "retire", reason: "in-place" });
+  });
+
+  it("retires exactly on that window's boundary, not a tick after it", () => {
+    expect(retireVerdict(input({
+      run: inPlace({ closedAt: NOW - 24 * HOUR }), shelf: "closed", inPlaceAfterMs: 24 * HOUR,
+    }))).toEqual({ action: "retire", reason: "in-place" });
+  });
+
+  it("keeps it while that window is still running", () => {
+    expect(retireVerdict(input({
+      run: inPlace({ closedAt: NOW - 1 * HOUR }), shelf: "closed", inPlaceAfterMs: 24 * HOUR,
+    }))).toEqual({ action: "keep" });
   });
 });

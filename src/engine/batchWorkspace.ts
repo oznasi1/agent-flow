@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { Run, ServiceRef } from "../types";
+import { readAgentProviderSetting, resolvedProvider } from "../config";
 import { extractFileHints, resolveFilesInRepo, mention } from "./files";
 import { ensureGitExcluded } from "./gitExclude";
 import { folderName } from "./worktree";
@@ -30,6 +31,19 @@ export interface BatchTask {
   /** The parent ticket this task was fanned out from, when it was. Reaches the run
    *  record unchanged; see `Run.parentKey`. */
   parentKey?: string;
+  /** What launched this run, written straight onto the Run record. Reviews pass
+   *  "review" — `decorateReviews` matches a row to its run with
+   *  `runKind(r) === "review"`, and `Run.kind` is also what keeps a run carrying a
+   *  PR url out of Jira polling. Absent means "task", exactly as before. */
+  kind?: Run["kind"];
+  /** Overrides the shared `promptTemplate` for this task only. A review batch
+   *  pre-renders {repo}/{number}/{author} per PR — placeholders one shared
+   *  template cannot carry. Absent uses the shared template, as always. */
+  promptTemplate?: string;
+  /** Sub-directory under `.pick-task/` for this task's brief. Reviews pass
+   *  `REVIEW-<n>` so two PRs sharing one checkout cannot overwrite each other's
+   *  brief. Absent keeps `.pick-task/TASK.md`. */
+  briefSubdir?: string;
 }
 
 export type SharedTarget =
@@ -92,7 +106,9 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
     for (const s of t.services) {
       const files = resolveFilesInRepo(s.path, hints);
       filesByPair.set(`${t.ticket.key}:${s.name}`, files);
-      const dir = path.join(s.path, BRIEF_DIR);
+      // The subdir is part of BRIEF_DIR's tree, so `ensureGitExcluded(s.path, ".pick-task/")`
+      // below still covers it — no new exclude rule is needed.
+      const dir = t.briefSubdir ? path.join(s.path, BRIEF_DIR, t.briefSubdir) : path.join(s.path, BRIEF_DIR);
       fs.mkdirSync(dir, { recursive: true });
       const briefPath = path.join(dir, BRIEF_FILE);
       fs.writeFileSync(briefPath, briefMarkdown(t.ticket, t.planMd, t.services, s.name, files));
@@ -177,7 +193,7 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
       );
       // Absolute, not the usual relative path: N worktree roots each hold
       // `.pick-task/TASK.md`, so a relative reference names no file in particular.
-      const prompt = agentPrompt(t.ticket, mentions, promptTemplate, briefPathFor.get(t.ticket.key));
+      const prompt = agentPrompt(t.ticket, mentions, t.promptTemplate ?? promptTemplate, briefPathFor.get(t.ticket.key));
       // Remote Control is never offered here — one clipboard can't serve N sessions.
       // The pin is spread rather than written as `provider: req.provider`, so a batch
       // under a fixed setting produces the plan file it always produced: absent is how
@@ -190,12 +206,21 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
     });
   }
 
+  // One resolution for the whole batch: `req.provider` is the pin `ask` produced, and a
+  // fixed setting is read here rather than per task, because every task in one batch is
+  // seeded by the same launch and cannot disagree about its agent.
+  const provider = seedAgent ? (req.provider ?? resolvedProvider(readAgentProviderSetting())) : undefined;
+
   tasks.forEach((t) => {
     const run: Run = {
       key: t.ticket.key,
       summary: t.ticket.summary,
       url: t.ticket.url,
       createdAt,
+      ...(provider ? { provider } : {}),
+      // Spread-conditional, not `kind: t.kind`: absent is how "task" is spelled on
+      // every record a task batch has ever written, and this keeps those bytes identical.
+      ...(t.kind ? { kind: t.kind } : {}),
       mode: here ? (here.kind === "workspace" ? "multiroot" : "per-window") : workspaceFile ? "multiroot" : "per-window",
       workspaceFile,
       repos: t.services.map((s) => ({

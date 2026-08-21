@@ -90,7 +90,14 @@ const h = vi.hoisted(() => ({
   // multi-root workspace window can be asserted to fold its sessions into one
   // card. Empty by default, which groups nothing: every pre-existing
   // local-card test keeps producing its old one-place-one-card shape.
-  liveWindows: [] as { identity: string; kind: "workspace" | "folder"; roots?: string[] }[],
+  // `label`/`folders` are what the destination picker renders a row from; the card
+  // grouping tests that predate it only ever needed identity/kind/roots.
+  liveWindows: [] as { identity: string; kind: "workspace" | "folder"; roots?: string[]; label?: string; folders?: number }[],
+  // This window's identity, for the destination question Review with agent asks.
+  // Undefined by default: a window that can't hold a seeded session.
+  currentWindow: undefined as { identity: string; kind: "workspace" | "folder"; roots: { name?: string; path: string }[] } | undefined,
+  // The `.code-workspace` files the destination question's pick-existing arm lists.
+  workspaceFiles: [] as { file: string; folders: number }[],
   // Per-session live activity (Task 8) — stubbed so a test can assert a real,
   // known AgentActivity is threaded through to the right CardAgent, without
   // this suite re-testing readSessionActivity's own parsing of a real
@@ -109,7 +116,7 @@ const h = vi.hoisted(() => ({
   // actually seeded, which the launch toast names. `{ ok: false, cancelled }` is its
   // third arm: a dismissed picker, which is neither a success nor a failure.
   launchReview: vi.fn(async (..._args: unknown[]): Promise<
-    | { ok: true; runKey: string; provider: AgentProvider }
+    | { ok: true; runKey: string; provider: AgentProvider; seededInPlace?: true }
     | { ok: false; cancelled: true }
     | { ok: false; message: string }
   > => ({
@@ -117,6 +124,9 @@ const h = vi.hoisted(() => ({
     runKey: "review-aws-ops-8491",
     provider: "claude-code",
   })),
+  // The shared-window opener a review BATCH goes through, stubbed for the same
+  // reason openWorkspace above is: the tests assert on what deckView PASSED it.
+  openSharedWorkspace: vi.fn(async (_req: unknown) => ({ opened: true, briefs: [], seeded: 0 })),
   // True by default, unlike every other stub here: the retire sweep asks
   // existsSync whether a run's repo directories are still on disk, and a blanket
   // false would make every fixture run "unreachable" — retiring the very cards
@@ -252,6 +262,8 @@ vi.mock("../../src/engine/workspace", () => ({
   openWorkspace: h.openWorkspace,
   BRIEF_DIR: ".pick-task",
   writePlanFile: h.writePlanFile,
+  // The `pick-existing` arm of the destination question (openTargetHost).
+  listWorkspaceFiles: () => h.workspaceFiles,
   // A stub that encodes its brief argument in the output, so a test can assert
   // which brief a match was rendered against without re-testing renderPrompt —
   // engine/prompt.test.ts already owns that.
@@ -309,6 +321,12 @@ vi.mock("../../src/engine/transcript", async (importActual) => ({
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: () => h.liveWindows,
   defaultWindowsDir: () => "/windows",
+  // Read by the destination question Review with agent now asks (openTargetHost) — the
+  // single-row launch and the batch both go through it. Undefined by default: the shape
+  // of a window that can't hold a session, which keeps "This window" out of the picker
+  // unless a test asks for it.
+  currentWindow: () => h.currentWindow,
+  windowIdentity: () => (h.currentWindow ? { ...h.currentWindow, label: "here", folders: 1 } : undefined),
 }));
 // The usage sweep's reader (Task 5): a class instantiated once and held for the
 // panel's lifetime in deckView.ts, so the mock has to be a class too — a plain
@@ -421,6 +439,12 @@ vi.mock("../../src/engine/review/launch", async (importActual) => {
   const actual = await importActual<typeof import("../../src/engine/review/launch")>();
   return { ...actual, launchReview: (...args: Parameters<typeof actual.launchReview>) => h.launchReview(...args) };
 });
+// Same shape, same reason: the pure half of batchWorkspace (its types, and the
+// BatchTask shape a review batch fills in) stays real; only the opener is replaced.
+vi.mock("../../src/engine/batchWorkspace", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/engine/batchWorkspace")>();
+  return { ...actual, openSharedWorkspace: (...args: Parameters<typeof actual.openSharedWorkspace>) => h.openSharedWorkspace(...args) };
+});
 vi.mock("../../src/config", async (importActual) => {
   const actual = await importActual<typeof import("../../src/config")>();
   return {
@@ -460,6 +484,7 @@ vi.mock("../../src/config", async (importActual) => {
       retireFinishedAfterHours: actual.getConfig().retireFinishedAfterHours,
       retireAbandonedAfterDays: actual.getConfig().retireAbandonedAfterDays,
       retireClosedAfterHours: actual.getConfig().retireClosedAfterHours,
+      retireInPlaceAfterHours: actual.getConfig().retireInPlaceAfterHours,
       // Steered per test the way openAgents is: the shelf rule's escape hatch has
       // to be flippable without going through the real config store.
       inflightShowAll: h.inflightShowAll,
@@ -474,6 +499,14 @@ vi.mock("../../src/config", async (importActual) => {
       promptModes: actual.getConfig().promptModes,
       workspaceMode: actual.getConfig().workspaceMode,
       workspaceDir: actual.getConfig().workspaceDir,
+      // Where Review with agent opens, and whether the picker lists open windows.
+      // Both from the real getConfig() so a test steers them with setConfig — and so
+      // the shipped default (`new-window`: no picker at all) is what a test that never
+      // mentions them exercises.
+      reviewOpenIn: actual.getConfig().reviewOpenIn,
+      // What a review BATCH reads on top: how big a batch confirms first.
+      batchLaunchConfirmThreshold: actual.getConfig().batchLaunchConfirmThreshold,
+      trackOpenWindows: actual.getConfig().trackOpenWindows,
     }),
   };
 });
@@ -486,6 +519,13 @@ import { COMMAND_TIMEOUT_MS } from "../../src/engine/orchestrator/command";
 import { LOCK_TTL_MS } from "../../src/engine/orchestrator/lock";
 import { ACTION_MISMATCH_PREFIX } from "../../src/engine/orchestrator/model";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
+// The batch-only read-only mode, and the stock one: a batch test that restated either
+// prompt could not catch the batch offering a mode it never built.
+import { readOnlyReviewMode } from "../../src/engine/review/batch";
+import { DEFAULT_REVIEW_REQUEST_MODES } from "../../src/config";
+// Through the module mock above, so a batch test can steer what a worktree attempt
+// answers with — including the fallback-to-the-main-checkout a batch must refuse.
+import { createWorktrees } from "../../src/engine/worktree";
 import { TaskAuthError } from "../../src/tasks/provider";
 
 describe("reviewProvenance", () => {
@@ -637,6 +677,8 @@ beforeEach(() => {
   h.reviewRequests = true;
   h.openSessions = [];
   h.liveWindows = [];
+  h.currentWindow = undefined;
+  h.workspaceFiles = [];
   h.sessionActivity.mockClear().mockReturnValue({ state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" });
   // An implementation, not a resolved value: the real launchReview reports the agent
   // it seeded, which follows whatever `h.agentProvider` is when the launch RUNS — and
@@ -646,6 +688,8 @@ beforeEach(() => {
     runKey: "review-aws-ops-8491",
     provider: h.agentProvider === "ask" ? "claude-code" : h.agentProvider,
   }));
+  h.openSharedWorkspace.mockClear().mockResolvedValue({ opened: true, briefs: [], seeded: 0 });
+  vi.mocked(createWorktrees).mockReset();
   h.existsSync.mockClear().mockReturnValue(true);
   h.readFileSync.mockClear().mockReturnValue("");
   h.gitState.mockClear().mockImplementation((name: string, path: string) => ({
@@ -1381,6 +1425,11 @@ describe("shelf", () => {
   const notepad = (key: string, createdAt: number): Run =>
     mkRun({ key, kind: "notepad", url: "", createdAt, summary: key,
       repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }] });
+  // A ticket run sharing that same checkout — what `agentFlow.worktree: "never"`
+  // produces, and the only kind for which the dirty tree is still its own.
+  const dirtyShare = (key: string, createdAt: number): Run =>
+    mkRun({ key, createdAt, summary: key,
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }] });
 
   it("keeps a just-launched run on the board with no agent and no PR", async () => {
     // mkRun's createdAt is now, and the launch grace is what holds this one: the
@@ -1412,6 +1461,11 @@ describe("shelf", () => {
   });
 
   it("closes a notepad run with no agent, no PR and a clean tree", async () => {
+    // The window is what keeps the record alive long enough to HAVE a shelf: on the
+    // shipped `retireInPlaceAfterHours: 0` the sweep retires this run on sight, so
+    // there would be no posted card to read a shelf off. `shelfFor` is the subject
+    // here, and rule 0 reads its answer rather than the other way round.
+    setConfig({ retireInPlaceAfterHours: 24 });
     h.runs = [notepad("notepad-a", NOW - 90 * MIN)];
     h.openSessions = [];
     show();
@@ -1430,7 +1484,10 @@ describe("shelf", () => {
   it("counts a shared checkout's dirty state only for the run that owns it", async () => {
     // Without path ownership this one dirty tree reads as work to lose on BOTH
     // runs and neither ever leaves the board — the defect this exists for.
-    h.runs = [notepad("notepad-old", NOW - 90 * MIN), notepad("notepad-new", NOW - 10 * MIN)];
+    // Task runs rather than notepad ones: an in-place run ignores the checkout's
+    // dirty state outright (the test below), so ownership only decides this for a
+    // run that owns its branch — which is what `agentFlow.worktree: "never"` makes.
+    h.runs = [dirtyShare("ASM-old", NOW - 90 * MIN), dirtyShare("ASM-new", NOW - 10 * MIN)];
     h.openSessions = [];
     h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
       ...statusFor(i.run, i.ticket?.category ?? null),
@@ -1438,8 +1495,91 @@ describe("shelf", () => {
     }));
     show();
     await settled();
-    expect(shelfOf("notepad-new")).toBe("board");   // newest holder owns the path
+    expect(shelfOf("ASM-new")).toBe("board");   // newest holder owns the path
+    expect(shelfOf("ASM-old")).toBe("closed");
+  });
+
+  it("closes an in-place run whose only claim is the checkout's dirty state", async () => {
+    // The other half of the same defect. This run OWNS /r/svc — it is the only
+    // record holding it — so ownership scoping cannot help: counting the dirty tree
+    // pinned the card for as long as the checkout stayed dirty, which for a repo
+    // you work in is forever. An Explore session did not make that mess.
+    setConfig({ retireInPlaceAfterHours: 24 }); // keeps the record observable; see above
+    h.runs = [notepad("explore-a", NOW - 90 * MIN)];
+    h.openSessions = [];
+    h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "main", dirty: true, ahead: 4, added: 9, removed: 1, files: 3 }],
+    }));
+    show();
+    await settled();
+    expect(shelfOf("explore-a")).toBe("closed");
+  });
+
+  it("closes every in-place run sharing one dirty checkout, not just the losers", async () => {
+    // The reported symptom, and the coverage the ownership test above gave up when it
+    // moved to task runs: a repo you work in every day collects one record per Explore
+    // and per note. Ownership hands the dirty path to exactly one of them — the newest —
+    // so scoping alone still left that one pinned, and the pile shrank by all-but-one
+    // rather than emptying. None of these sessions made that mess; all of them go.
+    setConfig({ retireInPlaceAfterHours: 24 }); // keeps the records observable; see above
+    h.runs = [
+      notepad("notepad-old", NOW - 90 * MIN),
+      notepad("notepad-mid", NOW - 40 * MIN),
+      mkRun({
+        key: "explore-new", kind: "explore", url: "", createdAt: NOW - 20 * MIN,
+        summary: "explore-new",
+        repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }],
+      }),
+    ];
+    h.openSessions = [];
+    h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "main", dirty: true, ahead: 2, added: 5, removed: 0, files: 2 }],
+    }));
+    show();
+    await settled();
     expect(shelfOf("notepad-old")).toBe("closed");
+    expect(shelfOf("notepad-mid")).toBe("closed");
+    // The path's owner, and closed all the same — the assertion that fails if the
+    // in-place guard on `hasWorkToLose` is reverted.
+    expect(shelfOf("explore-new")).toBe("closed");
+  });
+
+  it("keeps a ticket-bearing run in place, whose dirty tree is its own", async () => {
+    // The guard on the rule above. A record claiming kind "explore" but carrying a
+    // ticket is not something Explore can produce — it is hand-edited or from a
+    // source we do not know — so it keeps the ordinary veto and holds the board.
+    h.runs = [mkRun({
+      key: "explore-ticketed", kind: "explore", createdAt: NOW - 90 * MIN, summary: "s",
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }],
+    })];
+    h.openSessions = [];
+    h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "main", dirty: true, ahead: 0, added: 1, removed: 0, files: 1 }],
+    }));
+    show();
+    await settled();
+    expect(shelfOf("explore-ticketed")).toBe("board");
+  });
+
+  it("keeps a ticketless task run in place — the kind test is the discriminator", async () => {
+    // The other guard. A legacy record with no url reads as ticketless, but a task
+    // run owns its branch whether or not a url survived, so its dirty tree still
+    // counts. Only the kind test separates this from an Explore session.
+    h.runs = [mkRun({
+      key: "ASM-nourl", url: "", createdAt: NOW - 90 * MIN, summary: "s",
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }],
+    })];
+    h.openSessions = [];
+    h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "main", dirty: true, ahead: 0, added: 1, removed: 0, files: 1 }],
+    }));
+    show();
+    await settled();
+    expect(shelfOf("ASM-nourl")).toBe("board");
   });
 
   it("does not close a run merely because openAgents hides its agents", async () => {
@@ -1577,14 +1717,37 @@ describe("retire sweep", () => {
   });
 
   it("stamps closedAt on a run the board shelved as closed, and keeps rendering it", async () => {
-    h.runs = [mkRun({ key: "notepad-x", kind: "notepad", url: "", createdAt: Date.now() - 3_600_000 })];
+    // An aged TASK run, not a notepad one: rule 0 now retires an in-place run on
+    // sight, so rule 2b — the rule under test — is only reachable for a run that
+    // owns a worktree. The neighbouring shelf test proves an aged task run with no
+    // agent and no PR shelves as closed, which is the state this needs.
+    h.runs = [mkRun({ key: "ASM-CLOSED", createdAt: Date.now() - 3_600_000 })];
     await sweep();
     expect(h.writeRun).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ key: "notepad-x", closedAt: expect.any(Number) }),
+      expect.objectContaining({ key: "ASM-CLOSED", closedAt: expect.any(Number) }),
     );
     expect(h.removeRun).not.toHaveBeenCalled();
-    expect(lastRuns().map((r) => r.run.key)).toContain("notepad-x");
+    expect(lastRuns().map((r) => r.run.key)).toContain("ASM-CLOSED");
+  });
+
+  it("retires a finished Explore session on sight, the shipped default", async () => {
+    // The defect this exists for: an Explore run launches in the checkout, so the
+    // sweep's `hasLiveSession` was any agent anywhere in that repo and its `repos`
+    // carried the checkout's permanent dirty state. Either one pinned the record
+    // forever. Both are supplied here, and the run must still go.
+    h.runs = [mkRun({
+      key: "explore-retries", kind: "explore", url: "", createdAt: Date.now() - 90 * 60_000,
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }],
+    })];
+    h.openSessions = [sess({ sessionId: "s1", cwd: "/r/other", startedAt: Date.now() - 60_000 })];
+    h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "main", dirty: true, ahead: 2, added: 1, removed: 0, files: 1 }],
+    }));
+    await sweep();
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "explore-retries");
+    expect(lastRuns().map((r) => r.run.key)).not.toContain("explore-retries");
   });
 
   it("retires a closed run once its stamp is older than the window", async () => {
@@ -3282,6 +3445,241 @@ describe("DeckPanel review launch", () => {
     await p._fire({ type: "deck:reviewLoadDraft", id: "CyberJackGit/aws-ops#8491" });
     expect(posts(p).some((m) => m.type === "deck:reviewDraft")).toBe(false);
     expect(posts(p).some((m) => m.type === "toast" && m.level === "error")).toBe(true);
+  });
+
+  // ── the batch ─────────────────────────────────────────────────────────────
+  const ID_A = "CyberJackGit/aws-ops#8491";
+  const ID_B = "CyberJackGit/aws-ops#9000";
+  /** Two queued PRs of the same repo — the case that makes a shared brief path collide,
+   *  and the only way to reach the layout question. */
+  const twoQueued = () => {
+    h.reviewCache = {
+      fetchedAt: Date.now(),
+      issueCount: 2,
+      requests: [reviewFixture(), { ...reviewFixture(), id: ID_B, number: 9000, title: "drain the retry queue" }],
+    };
+  };
+  const pickMode = (mode: unknown) => window.showQuickPick.mockResolvedValueOnce({ label: "m", mode });
+  const pickLayout = (shared: boolean) => window.showQuickPick.mockResolvedValueOnce({ label: "l", shared });
+  /** The batch asks the destination question with the same setting and the same pickers
+   *  the single-row launch does (`agentFlow.reviewOpenIn`, engine/openTarget). Pinning
+   *  it to this window is how a test reaches the shared-window path without a picker;
+   *  the stock default is a new window, which for one PR is the ordinary single launch. */
+  const HERE = { identity: "/repos/aws-ops", kind: "folder" as const, roots: [{ path: "/repos/aws-ops" }] };
+  const shareThisWindow = () => { setConfig({ reviewOpenIn: "this-window" }); h.currentWindow = HERE; };
+  const toastText = (p: ReturnType<typeof lastPanel>) =>
+    posts(p).filter((m) => m.type === "toast").map((m) => m.message).join(" | ");
+  const sharedReq = () =>
+    h.openSharedWorkspace.mock.calls[0][0] as unknown as {
+      tasks: { kind?: string; briefSubdir?: string; promptTemplate?: string; services: { path: string }[] }[];
+      foldersToAdd?: unknown;
+      target: { kind: string };
+    };
+
+  it("asks the cost, then the mode, then the destination — in that order", async () => {
+    setConfig({ batchLaunchConfirmThreshold: 1, reviewOpenIn: "ask" });
+    twoQueued();
+    const p = await showAndWarm();
+    window.showWarningMessage.mockResolvedValueOnce(undefined); // refused
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, ID_B] });
+    expect(window.showWarningMessage).toHaveBeenCalled();
+    // Nothing else was asked, and nothing was created.
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("does not confirm a batch at or below the threshold", async () => {
+    twoQueued();
+    shareThisWindow();
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, ID_B] });
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.openSharedWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens one shared workspace with a review-kinded task per PR", async () => {
+    twoQueued();
+    shareThisWindow();
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, ID_B] });
+    expect(h.openSharedWorkspace).toHaveBeenCalledTimes(1);
+    const req = sharedReq();
+    expect(req.tasks).toHaveLength(2);
+    expect(req.tasks.map((t) => t.kind)).toEqual(["review", "review"]);
+    // Its own brief sub-directory each: both PRs are in ONE checkout here, so a shared
+    // `.pick-task/TASK.md` would have let the second overwrite the first.
+    expect(req.tasks.map((t) => t.briefSubdir)).toEqual(["REVIEW-8491", "REVIEW-9000"]);
+    // Pre-rendered per PR: the shared template could not have carried these.
+    expect(req.tasks[0].promptTemplate).toContain("8491");
+    expect(req.tasks[1].promptTemplate).toContain("9000");
+  });
+
+  it("creates no worktree under the read-only mode, and reviews in the checkout itself", async () => {
+    // A shared destination on purpose: one PR into a NEW window is the ordinary
+    // single launch (launchReview owns its own worktree), and read-only's whole point
+    // is worktrees saved *within* one window.
+    shareThisWindow();
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A] });
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(sharedReq().tasks[0].services[0].path).toBe("/repos/aws-ops");
+    expect(toastText(p)).toContain("without checking anything out");
+  });
+
+  it("creates one worktree per PR under a mode that checks out", async () => {
+    twoQueued();
+    shareThisWindow();
+    vi.mocked(createWorktrees).mockImplementation((services: ServiceRef[], key: string) =>
+      services.map((s) => ({ ...s, path: `${s.path}/.claude/worktrees/${key}` })),
+    );
+    const p = await showAndWarm();
+    pickMode(DEFAULT_REVIEW_REQUEST_MODES[0]);
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, ID_B] });
+    expect(createWorktrees).toHaveBeenCalledTimes(2);
+    expect(sharedReq().tasks.map((t) => t.services[0].path)).toEqual([
+      "/repos/aws-ops/.claude/worktrees/review-aws-ops-8491",
+      "/repos/aws-ops/.claude/worktrees/review-aws-ops-9000",
+    ]);
+    expect(toastText(p)).toContain("in a worktree each");
+  });
+
+  it("drops a PR whose worktree could not be made rather than using the main checkout", async () => {
+    // createWorktrees falls back to the checkout it was given; launchReview refuses
+    // that, and a batch must not be laxer than a single launch — a `gh pr checkout`
+    // there can cost work in progress.
+    shareThisWindow();
+    const p = await showAndWarm();
+    vi.mocked(createWorktrees).mockImplementation((services: ServiceRef[]) => services);
+    pickMode(DEFAULT_REVIEW_REQUEST_MODES[0]);
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A] });
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+    // Not merely "a toast mentioning worktrees" — the refusal, and nothing launched.
+    expect(h.launchReview).not.toHaveBeenCalled();
+    expect(toastText(p)).toMatch(/Couldn't create a git worktree/i);
+  });
+
+  it("asks how to lay out a multi-PR new window, and separate windows goes one at a time", async () => {
+    twoQueued();
+    const p = await showAndWarm(); // stock reviewOpenIn: a new window, asked nothing
+    pickMode(readOnlyReviewMode("github"));
+    pickLayout(false);
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, ID_B] });
+    // Separate windows IS the single-PR path, N times — worktree included.
+    expect(h.launchReview).toHaveBeenCalledTimes(2);
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("asks no layout question when the destination is already one window", async () => {
+    twoQueued();
+    setConfig({ reviewOpenIn: "ask" });
+    h.currentWindow = HERE;
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "current" } });
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, ID_B] });
+    expect(window.showQuickPick).toHaveBeenCalledTimes(2); // mode, destination — no layout
+    expect(sharedReq().target).toEqual({ kind: "current" });
+  });
+
+  it("opens nothing into a window that lost its identity between the pick and the launch", async () => {
+    // Without an identity openSharedWorkspace falls through to a NEW window — one
+    // nobody asked for. Fail before anything is opened instead.
+    shareThisWindow();
+    // The window goes away between the destination answer and the open — simulated at
+    // the one step that sits between them, cutting the worktrees.
+    vi.mocked(createWorktrees).mockImplementation((services: ServiceRef[], key: string) => {
+      h.currentWindow = undefined;
+      return services.map((s) => ({ ...s, path: `${s.path}/.claude/worktrees/${key}` }));
+    });
+    const p = await showAndWarm();
+    pickMode(DEFAULT_REVIEW_REQUEST_MODES[0]);
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A] });
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+    expect(toastText(p)).toMatch(/no longer hold a session/i);
+  });
+
+  it("treats one PR into a new window as the ordinary single launch", async () => {
+    // No layout question, no shared workspace: launchReview is exactly this, and it
+    // owns its own worktree and its own refusal to run without one.
+    const p = await showAndWarm(); // stock reviewOpenIn: a new window, asked nothing
+    pickMode(readOnlyReviewMode("github"));
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A] });
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1); // the mode, and nothing else
+    expect(h.launchReview).toHaveBeenCalledTimes(1);
+    // And it hands the resolved destination down, exactly as a single launch does.
+    expect((h.launchReview.mock.calls[0][0] as { openTarget?: unknown }).openTarget)
+      .toEqual({ mode: "per-window", openIn: "new" });
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+    // And it says a worktree was made, because one WAS — launchReview always cuts one,
+    // whatever the read-only mode would have preferred.
+    expect(toastText(p)).toContain("in a worktree each");
+  });
+
+  it("says nothing and creates nothing when a picker is dismissed", async () => {
+    const p = await showAndWarm();
+    window.showQuickPick.mockResolvedValueOnce(undefined); // the mode
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A] });
+    expect(createWorktrees).not.toHaveBeenCalled();
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+    expect(posts(p).filter((m) => m.type === "toast")).toHaveLength(0);
+  });
+
+  it("names an un-checked-out repo once, and reviews the rest", async () => {
+    h.reviewCache = {
+      fetchedAt: Date.now(),
+      issueCount: 3,
+      requests: [
+        reviewFixture(),
+        { ...reviewFixture(), id: "x/ext-svc#1", repo: "x/ext-svc", repoName: "ext-svc", number: 1 },
+        { ...reviewFixture(), id: "x/ext-svc#2", repo: "x/ext-svc", repoName: "ext-svc", number: 2 },
+      ],
+    };
+    shareThisWindow();
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, "x/ext-svc#1", "x/ext-svc#2"] });
+    expect(sharedReq().tasks).toHaveLength(1);
+    expect(toastText(p).match(/ext-svc/g)).toHaveLength(1);
+  });
+
+  it("reviews nothing, and says why once, when no selected repo is checked out", async () => {
+    h.reviewCache = {
+      fetchedAt: Date.now(),
+      issueCount: 1,
+      requests: [{ ...reviewFixture(), id: "x/ext-svc#1", repo: "x/ext-svc", repoName: "ext-svc", number: 1 }],
+    };
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    await p._fire({ type: "deck:reviewBatch", ids: ["x/ext-svc#1"] });
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+    expect(toastText(p)).toContain("ext-svc");
+    // Asked the mode, then stopped: no destination question for a batch with nothing in it.
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+  });
+
+  it("never edits an existing workspace file", async () => {
+    // A review batch passes no foldersToAdd, so mergeReposIntoWorkspace finds nothing
+    // missing and returns without writing — the user's artifact stays byte-identical.
+    setConfig({ reviewOpenIn: "pick-existing" });
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    // listWorkspaceFiles is stubbed empty, so the only row is Browse…
+    window.showQuickPick.mockImplementationOnce(async (items: unknown) => (items as unknown[])[0]);
+    window.showOpenDialog.mockResolvedValueOnce([{ fsPath: "/ws/team.code-workspace" }]);
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A] });
+    expect(sharedReq().target).toEqual({ kind: "existing", file: "/ws/team.code-workspace" });
+    expect(sharedReq().foldersToAdd).toBeUndefined();
+  });
+
+  it("does nothing at all when the queue moved on before the click landed", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewBatch", ids: ["gone/repo#1"] });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(posts(p).filter((m) => m.type === "toast")).toHaveLength(0);
   });
 });
 
@@ -8515,5 +8913,126 @@ describe("branch-CI verdicts for an armed flow", () => {
     ];
     await passes(3);
     expect(h.ghRun.mock.calls.filter((c) => c[1].includes("graphql"))).toHaveLength(0);
+  });
+});
+
+// ── where a review opens (agentFlow.reviewOpenIn) ─────────────────────────────
+// Every release up to now opened a new window on the review worktree. The setting
+// defaults to that, so the tests above — which never set it — are the no-regression
+// guard for the one-click launch. These cover the arms it can be turned to.
+describe("DeckPanel review destination", () => {
+  const HERE = { identity: "/repos/bite-me", kind: "folder" as const, roots: [{ path: "/repos/bite-me" }] };
+  const launched = () => (h.launchReview.mock.calls[0]?.[0] as { openTarget?: Record<string, unknown> } | undefined);
+
+  it("asks nothing and hands down no destination on a stock install", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    // Not merely "no picker": launchReview must be told nothing, so it takes the
+    // new-window-on-the-worktree path every earlier release took.
+    expect(launched()?.openTarget).toEqual({ mode: "per-window", openIn: "new" });
+  });
+
+  it("asks where to open when the setting says ask, and hands the answer down", async () => {
+    setConfig({ reviewOpenIn: "ask" });
+    h.currentWindow = HERE;
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "current" } });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ title: "Review aws-ops#8491 — open where?" }),
+    );
+    expect(launched()?.openTarget).toEqual({ mode: "per-window", openIn: "current", currentWindow: HERE });
+  });
+
+  // The same ordering the mode picker already obeys, and for the same reason:
+  // launchReview's first act is createWorktrees, so a question raised after it would
+  // leave a worktree and a branch behind on every Escape.
+  it("creates nothing when the destination picker is dismissed", async () => {
+    setConfig({ reviewOpenIn: "ask" });
+    window.showQuickPick.mockResolvedValueOnce(undefined);
+    const p = await showAndWarm();
+    const before = posts(p).length;
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(h.launchReview).not.toHaveBeenCalled();
+    expect(posts(p).slice(before).some((m) => m.type === "toast")).toBe(false);
+  });
+
+  it("asks which mode first and where to open second, both before anything is created", async () => {
+    setConfig({
+      reviewOpenIn: "ask",
+      reviewRequestModes: [
+        { id: "backend", label: "Backend services", prompt: "BE {number}" },
+        { id: "frontend", label: "Frontend", prompt: "FE {number}" },
+      ],
+    });
+    window.showQuickPick
+      .mockResolvedValueOnce({ label: "Frontend", mode: { id: "frontend", label: "Frontend", prompt: "FE {number}" } })
+      .mockResolvedValueOnce({ target: { kind: "new" } });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick.mock.calls.map((c: unknown[]) => (c[1] as { title: string }).title)).toEqual([
+      "Review aws-ops#8491",
+      "Review aws-ops#8491 — open where?",
+    ]);
+    expect(launched()).toEqual(expect.objectContaining({ template: "FE {number}" }));
+  });
+
+  it("takes this window from the setting without asking", async () => {
+    setConfig({ reviewOpenIn: "this-window" });
+    h.currentWindow = HERE;
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(launched()?.openTarget).toEqual({ mode: "per-window", openIn: "current", currentWindow: HERE });
+  });
+
+  it("falls back to a new window when this window can't hold a session", async () => {
+    setConfig({ reviewOpenIn: "this-window" }); // h.currentWindow stays undefined
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(launched()?.openTarget).toEqual({ mode: "per-window", openIn: "new" });
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "info", message: expect.stringContaining("can't hold a session") }),
+    );
+  });
+
+  it("offers the windows already open, and focuses the one picked", async () => {
+    setConfig({ reviewOpenIn: "ask" });
+    h.liveWindows = [{ identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1 }];
+    window.showQuickPick.mockImplementationOnce(async (items: unknown) => {
+      const row = (items as { label: string }[]).find((i) => i.label.includes("centaur"));
+      expect(row).toBeTruthy();
+      return row;
+    });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(launched()?.openTarget).toEqual({ mode: "per-window", openIn: "new", existingFolder: "/repos/centaur" });
+  });
+
+  it("says where the session landed when no window opened", async () => {
+    setConfig({ reviewOpenIn: "this-window" });
+    h.currentWindow = HERE;
+    h.launchReview.mockResolvedValueOnce({
+      ok: true, runKey: "review-aws-ops-8491", provider: "claude-code", seededInPlace: true,
+    });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    // Nothing opens on this path, so a toast that only says "in a worktree" reads as
+    // though the click did nothing.
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("in this window"),
+      }),
+    );
+  });
+
+  it("does not claim this window for a launch that opened one", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).not.toContain("in this window");
   });
 });

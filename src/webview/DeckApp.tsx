@@ -221,7 +221,7 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
           selected the card, and the title now lives in here. Only the key slot
           swallows the click, because the key is the interactive part. */}
       <div className="c-hd">
-        <CardKindIcon kind={kind} />
+        <CardKindIcon kind={kind} provider={r.provider} />
         <div className="hd-t">
           <div className="c-title" title={r.run.summary}>
             {local && inferredKey && <span className="chip">local</span>}
@@ -352,6 +352,15 @@ export function DeckApp(): JSX.Element {
     { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false, loading: false },
   );
   const [reviewsCollapsed, setReviewsCollapsed] = React.useState(false);
+  /** The review strip's selection, for a batch launch. Opt-in and short-lived: it
+   *  turns on from the strip's own `select` control and ends when the batch is sent
+   *  or Done is pressed. Ids, not rows — the queue re-posts every poll. */
+  const [selecting, setSelecting] = React.useState(false);
+  const [selectedReviews, setSelectedReviews] = React.useState<string[]>([]);
+  /** The last row toggled, as the anchor a shift-click extends from. A ref rather
+   *  than state: it never renders anything, and a re-render per click would be one
+   *  the selection itself already caused. */
+  const selectAnchor = React.useRef<string | null>(null);
   // Collapsed is the point: a closed run should cost one line, not a card.
   const [closedCollapsed, setClosedCollapsed] = React.useState(true);
   const [expanded, setExpanded] = React.useState<string | null>(null);
@@ -434,6 +443,13 @@ export function DeckApp(): JSX.Element {
         // ever being hidden — which also means the collapse state is purely the user's,
         // with no seeded-once ref and no setState nested inside another's updater.
         setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale, reviewWrites: m.reviewWrites, loading: m.loading });
+        // A merged PR leaves the queue on the next poll. Keeping its id selected would
+        // let the launch ask the host to review a row that no longer exists — and the
+        // host would silently drop it, so the count and the outcome would disagree.
+        setSelectedReviews((cur) => {
+          const live = cur.filter((id) => m.requests.some((r) => r.id === id));
+          return live.length === cur.length ? cur : live;
+        });
       } else if (m.type === "deck:reviewDetail") {
         setDetails((d) => ({ ...d, [m.id]: m.detail }));
       } else if (m.type === "deck:reviewDraft") {
@@ -729,6 +745,48 @@ export function DeckApp(): JSX.Element {
         onSubmit={(id, verb) => {
           setSubmitting((s) => ({ ...s, [id]: true }));
           send({ type: "deck:reviewSubmit", id, verb, body: bodies[id] ?? "", fromDraft: !!fromDraft[id] });
+        }}
+        selecting={selecting}
+        selected={selectedReviews}
+        onSelectMode={(next) => {
+          setSelecting(next);
+          // Leaving selection mode drops the selection with it: a bar that is gone
+          // cannot show what is still picked, and a hidden selection is a launch
+          // waiting to surprise somebody.
+          if (!next) { setSelectedReviews([]); selectAnchor.current = null; }
+          // Nothing can be open while picking (the strip hides .rv-detail), so close
+          // it here too rather than leaving state the UI is contradicting.
+          if (next) setExpanded(null);
+        }}
+        onToggle={(id, shift) => {
+          const order = reviews.requests.map((r) => r.id);
+          // Read the anchor BEFORE moving it, and hold it in a local the updater
+          // closes over: a functional updater runs at render time, by which point the
+          // assignment below has already happened — so reading the ref inside it made
+          // every anchor equal the row just clicked, and no range ever extended.
+          const anchor = selectAnchor.current;
+          selectAnchor.current = id;
+          setSelectedReviews((cur) => {
+            // A shift-click with a live anchor takes the whole span between them, in
+            // queue order — the range the user drew, not the order they clicked in.
+            if (shift && anchor && order.includes(anchor) && anchor !== id) {
+              const [from, to] = [order.indexOf(anchor), order.indexOf(id)].sort((x, y) => x - y);
+              const span = order.slice(from, to + 1);
+              return [...cur.filter((x) => !span.includes(x)), ...span].sort((x, y) => order.indexOf(x) - order.indexOf(y));
+            }
+            return cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id].sort((x, y) => order.indexOf(x) - order.indexOf(y));
+          });
+        }}
+        onSelectAll={() => { setSelectedReviews(reviews.requests.map((r) => r.id)); selectAnchor.current = null; }}
+        onLaunchBatch={() => {
+          // One message for the batch: the host asks its questions — mode, destination
+          // — once for all of them. The guard is belt-and-braces: the bar's own button
+          // is disabled at zero, so nothing reaches here with an empty list today.
+          if (!selectedReviews.length) return;
+          send({ type: "deck:reviewBatch", ids: selectedReviews });
+          setSelecting(false);
+          setSelectedReviews([]);
+          selectAnchor.current = null;
         }}
       />
 

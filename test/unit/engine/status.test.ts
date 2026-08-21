@@ -238,6 +238,37 @@ describe("buildRunStatus", () => {
     });
   });
 
+  describe("buildRunStatus's provider", () => {
+    it("prefers the provider the run record was stamped with", () => {
+      const s = buildRunStatus({
+        run: { ...run, provider: "cursor" }, ticket: null, projectsRoot: projRoot, nowMs: NOW,
+        agents: [agent("working", NOW - 1000)],
+      });
+      // The record wins over the inference: a Cursor run with a stray Claude session open
+      // in its directory is still a Cursor run.
+      expect(s.provider).toBe("cursor");
+    });
+
+    it("infers claude-code from a live session when the record has none", () => {
+      const s = buildRunStatus({
+        run, ticket: null, projectsRoot: projRoot, nowMs: NOW,
+        agents: [agent("working", NOW - 1000)],
+      });
+      expect(s.provider).toBe("claude-code");
+    });
+
+    it("leaves the provider absent when neither the record nor a session answers", () => {
+      // Every record written before this field existed, with nothing running: the card
+      // shows no mark at all rather than guessing. Checking the key itself, not just its
+      // value, is deliberate: an always-present `provider: undefined` would still read
+      // as undefined through `.provider` but must not survive the JSON round trip to the
+      // webview the way an absent key does.
+      const s = buildRunStatus({ run, ticket: null, projectsRoot: projRoot, nowMs: NOW, agents: [] });
+      expect(s.provider).toBeUndefined();
+      expect("provider" in s).toBe(false);
+    });
+  });
+
   describe("buildRunStatus's branch reuse (F3)", () => {
     it("reuses a local card's already-known branch instead of re-reading it", () => {
       // A local card's `run.repos[].branch` was read moments earlier, in this

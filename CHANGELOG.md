@@ -7,6 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] — 2026-08-21
+
+### Added
+
+- **Hand several PRs to agents in one gesture.** Clearing a review queue meant launching
+  one PR at a time, answering the same question for each. The strip's header now carries a
+  **select** control: it turns the caret column into checkboxes, shift-click takes a range,
+  and a bar under the rows launches the lot — one reviewer per PR, with the mode and the
+  destination asked once for the whole batch instead of once per row. Nothing changes until
+  you ask for it: the rows stay exactly as dense as they were, and launching a single row
+  behaves as it always did.
+  - Batches larger than `agentFlow.batchLaunchConfirmThreshold` (6) confirm first, naming
+    the cost in sessions.
+  - Where they open is the same question, setting and picker a single review already uses
+    (`agentFlow.reviewOpenIn`), asked once for the batch — pin it and the batch stops
+    asking too. Landing several in one window makes each review a session in it; separate
+    windows is today's single launch, once per PR.
+  - PRs in a repo you have not checked out are named once and skipped; the rest launch.
+  - **Approve / Comment / Request changes stay one row at a time.** A batch never submits
+    anything to your forge — the human still presses the button, per PR.
+- **A read-only review mode, offered only to a batch.** It reads the PR at its own revision
+  (`git fetch origin pull/<n>/head`, then the diff) instead of checking the branch out, so
+  several reviews can share one window and none of them can move your working tree. It
+  cannot run tests, and the picker says so. Choose a mode that checks out instead and every
+  PR gets its own worktree, exactly as a single review does. The mode is not added to
+  `agentFlow.reviewRequestModes`, so a single-row launch still goes in one click — add the
+  `read-only` id there yourself if you want it per row.
+- **A `review ready` chip on the row itself.** A PR whose agent has already written its
+  findings now says so on the collapsed line, and the strip's header counts them when more
+  than one is waiting. Distinct from the existing `draft` chip, which is the PR's own draft
+  state on the forge.
+
+## [0.35.1] — 2026-08-21
+
+### Fixed
+
+- **A finished Explore or Notepad session now leaves the In-flight board.** These
+  sessions run in your checkout rather than in a worktree, so the retire sweep read
+  two signals that belonged to the directory rather than to the run: any agent open
+  anywhere in that repo, and the checkout's own uncommitted work. Either one pinned
+  the record forever — a session you closed days ago kept its card, and a repo you
+  work in daily accumulated one per Explore and per note. The sweep now uses the
+  same ownership-scoped answer the board itself uses, and the board no longer counts
+  that checkout's dirty state as work such a run owns — it has no branch of its own,
+  and attributing your work in progress to whichever record happens to be newest was
+  arbitrary. Together those two mean such a run leaves the board once its own agent
+  closes. New `agentFlow.retireInPlaceAfterHours` (default `0`, retire on
+  sight) keeps the old behaviour available as a window in hours. Worktrees, branches,
+  commits and briefs on disk are untouched, and a run with a ticket, an open pull
+  request, or anything uncommitted it owns is unaffected.
+
+## [0.35.0] — 2026-08-21
+
+### Added
+
+- **A card now says which tool is driving it, and the drawer says which model is
+  answering.** The board could tell you a run was working but not what was doing the work
+  — with three agent providers selectable, two of them launched into surfaces the Deck
+  cannot observe, a row of identical tiles hid the one fact that explains why two cards
+  behave differently. Each card's kind tile now carries a small brand mark on its corner —
+  Claude Code, GitHub Copilot or Cursor — repeated in the detail drawer's header, and the
+  tile's tooltip names both (`Task · Claude Code`). The provider is recorded on the run at
+  launch, from the value the launch already resolved, so it is the tool that actually
+  opened rather than whatever the setting says today; a live Claude Code session in a run
+  that predates the stamp is inferred, and that is the only inference anywhere in the
+  path. In the drawer, each row in **Agents** names the model that session is answering
+  with, read from the transcript the activity sweep already parses and trimmed to how a
+  card reads it (`claude-opus-5` → `opus-5`) — a mid-run model switch moves the label,
+  because the tail is what it reports.
+
+  Both facts are absent-tolerant by construction: a run with no recorded provider and no
+  live session shows no mark at all, and a session whose model cannot be read shows no
+  model line — the tile and the row look exactly as they did before. Nothing is
+  backfilled, so runs already on your board gain the mark as they relaunch.
+
+## [0.34.0] — 2026-08-21
+
+### Added
+
+- **Review with agent can ask where to open.** It has always opened a new window on
+  the review worktree, which is one window per review whether or not you wanted one.
+  `agentFlow.reviewOpenIn` now answers that question the same way `agentFlow.openIn`
+  answers it for a task you take — new window, this window, a `.code-workspace` you
+  already have, or a window you have open — from the same picker, in the same words.
+  It ships set to `new-window`, so a stock install keeps today's one-click launch and
+  nothing changes until you set it; `ask` raises the picker, right after the review-mode
+  question and still before the worktree is created, so an Escape leaves nothing behind.
+  The review runs in its own git worktree whichever destination you pick — that part was
+  never optional, since the seeded prompt checks the PR out — so a session landing
+  anywhere but a new window is handed the worktree's absolute path and told to work
+  there, and the launch toast says when it seeded this window rather than opening one.
+
+### Fixed
+
+- **Seeding into a window you already have open no longer clobbers its brief.** Any
+  launch aimed at an already-open folder window wrote a `.pick-task/TASK.md` into that
+  folder so the seeded prompt's relative `{brief}` would resolve — including over the
+  brief the agent working there was already reading from. A review now names its own
+  brief absolutely instead and writes nothing into the destination, which also leaves
+  that repo's `.git/info/exclude` alone.
+
+## [0.33.8] — 2026-08-21
+
+### Added
+
+- **Hand a PR to an agent without opening its row.** The review queue's agent action lived
+  only inside an expanded row, so clearing a queue meant expanding each row, clicking, and
+  collapsing it again — three gestures for the one thing the queue exists to start. Every
+  row now carries the action on the line itself, as a play glyph in the product's own accent
+  at the end of the row, tooltipped **Review with agent**. It is the same accent the
+  expanded row's own button already uses, so the two read as one action reachable two ways
+  rather than as two different ones. A row whose review is already running shows the loading
+  mark instead and stops being clickable at all — the row says `reviewing` beside it, and a
+  second launch would be a second worktree for a PR mid-review. A row whose repo isn't
+  checked out locally keeps a live button, greyed rather than accented, and says why in its
+  tooltip; clicking it still explains what to do, exactly as the expanded button did.
+
 ## [0.33.7] — 2026-08-21
 
 ### Fixed

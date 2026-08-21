@@ -452,13 +452,13 @@ describe("settingsSnapshot — field-count guard", () => {
   // field is enum-ish, the "invalid" sentinel paragraph and its own field
   // list) — update the doc, don't just bump the number here.
 
-  it("emits exactly 40 fields — a count also stated in docs/TELEMETRY.md's " +
+  it("emits exactly 41 fields — a count also stated in docs/TELEMETRY.md's " +
     "'Settings snapshot' section; a mismatch means that doc is now wrong too", () => {
     const s = settingsSnapshot(getConfig());
-    expect(Object.keys(s)).toHaveLength(40);
+    expect(Object.keys(s)).toHaveLength(41);
   });
 
-  it("reports the \"invalid\" sentinel on exactly 10 fields when every enum-ish " +
+  it("reports the \"invalid\" sentinel on exactly 11 fields when every enum-ish " +
     "setting holds an unrecognized value — docs/TELEMETRY.md's sentinel " +
     "paragraph states this same count and must move with it", () => {
     // Every config property whose SettingsSnapshot field is built with
@@ -471,6 +471,7 @@ describe("settingsSnapshot — field-count guard", () => {
       ...getConfig(),
       workspaceMode: secret as unknown as AgentFlowConfig["workspaceMode"],
       openIn: secret as unknown as AgentFlowConfig["openIn"],
+      reviewOpenIn: secret as unknown as AgentFlowConfig["reviewOpenIn"],
       agentProvider: secret as unknown as AgentFlowConfig["agentProvider"],
       agentSurface: secret as unknown as AgentFlowConfig["agentSurface"],
       exploreMode: secret as unknown as AgentFlowConfig["exploreMode"],
@@ -487,7 +488,7 @@ describe("settingsSnapshot — field-count guard", () => {
     const invalidFields = Object.entries(s).filter(([, v]) => v === "invalid").map(([k]) => k);
     expect(invalidFields.sort()).toEqual([
       "agent_provider", "agent_surface", "default_filter", "explore_mode", "forge",
-      "open_in", "remote_control", "task_source", "workspace_mode", "worktree",
+      "open_in", "remote_control", "review_open_in", "task_source", "workspace_mode", "worktree",
     ]);
   });
 });

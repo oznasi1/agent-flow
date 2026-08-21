@@ -155,6 +155,46 @@ describe("ReviewStrip", () => {
     expect(onCollapse).toHaveBeenCalledWith(false);
   });
 
+  // ── The row's own play button: the agent action without opening the row ────
+  // .rv-line is itself a button, so this one is a SIBLING of it rather than a
+  // child. That is what makes "launch without expanding" possible at all — a
+  // nested button's click would bubble into the row's own onExpand.
+  it("starts an agent review from a collapsed row, without expanding it", () => {
+    const onLaunch = vi.fn();
+    const onExpand = vi.fn();
+    render(<ReviewStrip {...props({ onLaunch, onExpand })} />);
+    fireEvent.click(screen.getByLabelText("Review with agent"));
+    expect(onLaunch).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
+    expect(onExpand).not.toHaveBeenCalled();
+  });
+
+  it("stands the play button down for a loading mark while a review is already running", () => {
+    // The row already says "reviewing". A live play button beside it invites a
+    // second worktree for a PR that is mid-review, so the cell stops being a
+    // button at all rather than merely looking busy.
+    const { container } = render(<ReviewStrip {...props({
+      requests: [mk({ runKey: "review-aws-ops-8491" })],
+    })} />);
+    expect(screen.queryByLabelText("Review with agent")).not.toBeInTheDocument();
+    expect(container.querySelector(".rv-go svg.lmark")).toBeInTheDocument();
+  });
+
+  it("keeps the play button live but marks it apart when the repo is not checked out", () => {
+    // Same call as the expanded button makes: the host explains what to do rather
+    // than the row refusing the click. The bare label is no explanation on its
+    // own, so this is the one state whose tooltip carries the reason — and it is
+    // marked .cold, not brand, because a washed-out brand glyph reads as the
+    // primary action gone wrong rather than one that isn't available here.
+    const onLaunch = vi.fn();
+    render(<ReviewStrip {...props({ onLaunch, requests: [mk({ localPath: null })] })} />);
+    const go = screen.getByLabelText("Review with agent") as HTMLButtonElement;
+    expect(go.disabled).toBe(false);
+    expect(go.title).toMatch(/isn't checked out/i);
+    expect(go.className).toMatch(/\bcold\b/);
+    fireEvent.click(go);
+    expect(onLaunch).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
+  });
+
   it("offers Review with agent when the repo is checked out", () => {
     const onLaunch = vi.fn();
     render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", onLaunch })} />);
@@ -436,5 +476,128 @@ describe("ReviewStrip", () => {
       expect(screen.getByText(/showing the last result/i)).toBeInTheDocument();
       expect(screen.getByText(/1 PR waiting on your review/i)).toBeInTheDocument();
     });
+  });
+  // ── selection (batch review) ──────────────────────────────────────────────
+  it("shows no select control and no batch bar by default", () => {
+    render(<ReviewStrip {...props()} />);
+    expect(screen.queryByText("select")).not.toBeInTheDocument();
+    expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
+  });
+
+  it("offers select once the host supplies a handler", () => {
+    render(<ReviewStrip {...props({ onSelectMode: vi.fn(), onToggle: vi.fn(), onLaunchBatch: vi.fn() })} />);
+    expect(screen.getByText("select")).toBeInTheDocument();
+  });
+
+  it("toggles a row instead of expanding it while selecting", () => {
+    const onToggle = vi.fn();
+    const onExpand = vi.fn();
+    render(<ReviewStrip {...props({ selecting: true, selected: [], onToggle, onExpand, onSelectMode: vi.fn(), onLaunchBatch: vi.fn() })} />);
+    fireEvent.click(screen.getByText("isolate renew queue"));
+    expect(onToggle).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491", false);
+    expect(onExpand).not.toHaveBeenCalled();
+  });
+
+  it("passes the shift key through so the host can extend a range", () => {
+    const onToggle = vi.fn();
+    render(<ReviewStrip {...props({ selecting: true, selected: [], onToggle, onSelectMode: vi.fn(), onLaunchBatch: vi.fn() })} />);
+    fireEvent.click(screen.getByText("isolate renew queue"), { shiftKey: true });
+    expect(onToggle).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491", true);
+  });
+
+  it("counts the selection and launches it", () => {
+    const onLaunchBatch = vi.fn();
+    render(<ReviewStrip {...props({
+      requests: [mk(), mk({ id: "b#2", number: 2 })], issueCount: 2,
+      selecting: true, selected: ["CyberJackGit/aws-ops#8491"],
+      onToggle: vi.fn(), onSelectMode: vi.fn(), onSelectAll: vi.fn(), onLaunchBatch,
+    })} />);
+    expect(screen.getByText(/1 selected/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with agents/i }));
+    expect(onLaunchBatch).toHaveBeenCalled();
+  });
+
+  it("marks the picked rows, and only those", () => {
+    render(<ReviewStrip {...props({
+      requests: [mk(), mk({ id: "b#2", number: 2 })], issueCount: 2,
+      selecting: true, selected: ["b#2"],
+      onToggle: vi.fn(), onSelectMode: vi.fn(), onLaunchBatch: vi.fn(),
+    })} />);
+    const rows = document.querySelectorAll(".rv-row");
+    expect(rows[0].className).not.toContain("picked");
+    expect(rows[1].className).toContain("picked");
+  });
+
+  it("does not count a selected id that is no longer in the queue", () => {
+    // The host drops stale ids too, but the count must never claim a row that is
+    // not on screen — a merged PR leaves on the next poll.
+    render(<ReviewStrip {...props({
+      selecting: true, selected: ["CyberJackGit/aws-ops#8491", "gone#1"],
+      onToggle: vi.fn(), onSelectMode: vi.fn(), onLaunchBatch: vi.fn(),
+    })} />);
+    expect(screen.getByText(/1 selected/)).toBeInTheDocument();
+  });
+
+  it("hides the per-row play button while selecting", () => {
+    // Two competing launches in one gesture: .rv-go starts ONE review, the bar starts
+    // the batch. While picking rows, only the bar may launch.
+    render(<ReviewStrip {...props({ selecting: true, selected: [], onToggle: vi.fn(), onSelectMode: vi.fn(), onLaunchBatch: vi.fn() })} />);
+    expect(screen.queryByRole("button", { name: "Review with agent" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a row shut while selecting, even the one that was open", () => {
+    render(<ReviewStrip {...props({
+      expanded: "CyberJackGit/aws-ops#8491", selecting: true, selected: [],
+      onToggle: vi.fn(), onSelectMode: vi.fn(), onLaunchBatch: vi.fn(),
+    })} />);
+    expect(document.querySelector(".rv-detail")).toBeNull();
+  });
+
+  it("cannot launch an empty selection", () => {
+    render(<ReviewStrip {...props({ selecting: true, selected: [], onToggle: vi.fn(), onSelectMode: vi.fn(), onLaunchBatch: vi.fn() })} />);
+    expect(screen.getByRole("button", { name: /Review the 0 selected PRs with agents/i })).toBeDisabled();
+  });
+
+  it("leaves selection mode from the bar", () => {
+    const onSelectMode = vi.fn();
+    render(<ReviewStrip {...props({ selecting: true, selected: [], onToggle: vi.fn(), onSelectMode, onLaunchBatch: vi.fn() })} />);
+    fireEvent.click(screen.getByText("Done"));
+    expect(onSelectMode).toHaveBeenCalledWith(false);
+  });
+
+  it("selects every shown row from the bar", () => {
+    const onSelectAll = vi.fn();
+    render(<ReviewStrip {...props({
+      requests: [mk(), mk({ id: "b#2", number: 2 })], issueCount: 2,
+      selecting: true, selected: [], onToggle: vi.fn(), onSelectMode: vi.fn(), onSelectAll, onLaunchBatch: vi.fn(),
+    })} />);
+    fireEvent.click(screen.getByText("Select all 2"));
+    expect(onSelectAll).toHaveBeenCalled();
+  });
+
+  // ── the agent's findings, on the collapsed row ────────────────────────────
+  it("says a review is ready rather than naming a file", () => {
+    render(<ReviewStrip {...props({ requests: [mk({ draftPath: "/repos/aws-ops/.pick-task/REVIEW-8491.md" })] })} />);
+    expect(screen.getByText("review ready")).toBeInTheDocument();
+  });
+
+  it("does not confuse the PR's own draft state with a ready review", () => {
+    // `isDraft` is the forge's draft flag; `draftPath` is the agent's findings. One
+    // chip for each — a row can honestly show both.
+    render(<ReviewStrip {...props({ requests: [mk({ isDraft: true })] })} />);
+    expect(screen.getByText("draft")).toBeInTheDocument();
+    expect(screen.queryByText("review ready")).not.toBeInTheDocument();
+  });
+
+  it("counts the ready reviews in the header when there is more than one", () => {
+    render(<ReviewStrip {...props({
+      requests: [mk({ draftPath: "/a" }), mk({ id: "b#2", number: 2, draftPath: "/b" })], issueCount: 2,
+    })} />);
+    expect(screen.getByText(/2 agent reviews ready/i)).toBeInTheDocument();
+  });
+
+  it("says nothing in the header about a single ready review", () => {
+    render(<ReviewStrip {...props({ requests: [mk({ draftPath: "/a" })] })} />);
+    expect(screen.queryByText(/reviews ready/i)).not.toBeInTheDocument();
   });
 });

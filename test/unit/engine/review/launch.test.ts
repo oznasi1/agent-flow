@@ -202,3 +202,82 @@ describe("launchReview under `ask`", () => {
     expect(out).toEqual({ ok: true, runKey: "review-aws-ops-8491", provider: "cursor" });
   });
 });
+
+// ── the destination question ──────────────────────────────────────────────────
+// Every release up to now opened a new window on the review worktree. `openTarget`
+// lets the Deck hand down an answer from engine/openTarget's picker instead — and
+// wherever the session lands, the work still happens in the worktree, which is what
+// the prompt prefix below guarantees.
+describe("launchReview — where it opens", () => {
+  const WORKTREE = "/repos/aws-ops/.claude/worktrees/review-aws-ops-8491";
+  const launch = (openTarget?: Parameters<typeof launchReview>[0]["openTarget"], d = deps()) =>
+    launchReview({ req, template: "Review {repo}#{number}", workspaceDir: "/ws", seedAgent: true, openTarget }, d)
+      .then((out) => ({ out, arg: d.openWorkspace.mock.calls[0]?.[0] as OpenRequest }));
+
+  it("opens a new window on the worktree when nothing is handed down", async () => {
+    const { arg } = await launch();
+    expect(arg.openIn).toBeUndefined();
+    expect(arg.existingFolder).toBeUndefined();
+    expect(arg.existingWorkspaceFile).toBeUndefined();
+    expect(arg.mode).toBe("per-window");
+  });
+
+  it("seeds this window in place when that is the answer", async () => {
+    const here = { identity: "/repos/bite-me", kind: "folder" as const, roots: [{ path: "/repos/bite-me" }] };
+    const { arg } = await launch({ mode: "per-window", openIn: "current", currentWindow: here });
+    expect(arg.openIn).toBe("current");
+    expect(arg.currentWindow).toBe(here);
+  });
+
+  it("focuses a live folder window when that is the answer", async () => {
+    const { arg } = await launch({ mode: "per-window", openIn: "new", existingFolder: "/repos/bite-me" });
+    expect(arg.existingFolder).toBe("/repos/bite-me");
+  });
+
+  it("focuses a saved workspace when that is the answer, adding no folders to it", async () => {
+    const { arg } = await launch({ mode: "multiroot", openIn: "new", existingWorkspaceFile: "/ws/team.code-workspace" });
+    expect(arg.existingWorkspaceFile).toBe("/ws/team.code-workspace");
+    expect(arg.mode).toBe("multiroot");
+    // A review is a side errand in a throwaway worktree. Merging it in would edit a
+    // file the user owns, and `foldersToAdd` absent is what leaves it byte-identical.
+    expect(arg.foldersToAdd).toBeUndefined();
+  });
+
+  // The seeded prompt is cwd-relative — the shipped one says `gh pr checkout {number}`.
+  // Landing that in a window rooted on the MAIN checkout is the branch hijack this
+  // module already refuses to do via createWorktrees; the destination must be named.
+  it("tells the agent which worktree to work in whenever the session lands elsewhere", async () => {
+    for (const target of [
+      { mode: "per-window" as const, openIn: "current" as const, currentWindow: { identity: "/x", kind: "folder" as const, roots: [] } },
+      { mode: "per-window" as const, openIn: "new" as const, existingFolder: "/repos/bite-me" },
+      { mode: "multiroot" as const, openIn: "new" as const, existingWorkspaceFile: "/ws/team.code-workspace" },
+    ]) {
+      const { arg } = await launch(target);
+      expect(arg.promptTemplate).toBe(
+        `Work in \`${WORKTREE}\` — the git worktree made for this review. Run every command below there.\n\nReview CyberJackGit/aws-ops#8491`,
+      );
+    }
+  });
+
+  it("adds no such preamble for a new window, whose cwd IS the worktree", async () => {
+    const { arg } = await launch({ mode: "per-window", openIn: "new" });
+    expect(arg.promptTemplate).toBe("Review CyberJackGit/aws-ops#8491");
+  });
+
+  // The destination folder is a repo another agent may be working in; see the
+  // absoluteBrief arm in engine/workspace.
+  it("always names its own brief absolutely, so no destination's brief is clobbered", async () => {
+    expect((await launch()).arg.absoluteBrief).toBe(true);
+    expect((await launch({ mode: "per-window", openIn: "new", existingFolder: "/repos/bite-me" })).arg.absoluteBrief).toBe(true);
+  });
+
+  it("reports a session seeded in place, so the caller can say no window opened", async () => {
+    const d = deps({
+      openWorkspace: vi.fn(async (_req: OpenRequest): Promise<OpenResult> => ({
+        mode: "per-window", briefs: [], opened: ["/repos/bite-me"], remoteControl: false, provider: "claude-code", seededInPlace: true,
+      })),
+    });
+    const { out } = await launch({ mode: "per-window", openIn: "current", currentWindow: { identity: "/repos/bite-me", kind: "folder", roots: [] } }, d);
+    expect(out).toEqual({ ok: true, runKey: "review-aws-ops-8491", provider: "claude-code", seededInPlace: true });
+  });
+});

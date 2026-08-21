@@ -116,6 +116,20 @@ describe("getConfig — normalization", () => {
     setConfig({ openIn: "pick-existing" });
     expect(getConfig().openIn).toBe("pick-existing");
   });
+
+  // Review with agent has always opened a new window on the review worktree. The
+  // destination question ships inert so nobody's one-click launch grows a picker on
+  // upgrade — and it is its own setting, because a review is a five-minute errand and a
+  // take is a day's work.
+  it("defaults reviewOpenIn to new-window rather than following openIn", () => {
+    setConfig({ openIn: "ask" });
+    expect(getConfig().reviewOpenIn).toBe("new-window");
+  });
+
+  it("passes through reviewOpenIn: ask", () => {
+    setConfig({ reviewOpenIn: "ask" });
+    expect(getConfig().reviewOpenIn).toBe("ask");
+  });
 });
 
 describe("getConfig — PR review", () => {

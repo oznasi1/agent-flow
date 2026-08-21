@@ -14,7 +14,10 @@ export interface TranscriptLine {
   gitBranch?: string;
   cwd?: string;
   slug?: string;
-  message?: { role?: string; stop_reason?: string | null };
+  /** True on a subagent's turn. Its `message.model` is the subagent's, not this
+   * session's, so the model read skips these. */
+  isSidechain?: boolean;
+  message?: { role?: string; stop_reason?: string | null; model?: string };
 }
 
 /**
@@ -26,6 +29,17 @@ export function encodeProjectDir(cwd: string): string {
   return cwd.replace(/[/.]/g, "-");
 }
 
+/** The model this session is answering with, and how many it has used, from the tail.
+ * Main chain only: a sidechain line is a subagent's turn and carries the subagent's
+ * model, which is not this session's answer. One session legitimately holds several —
+ * fast mode switches models mid-run — so the count travels with the current one. */
+function modelOf(lines: TranscriptLine[]): { model: string | null; modelCount: number } {
+  const models = lines
+    .filter((l) => l.type === "assistant" && !l.isSidechain && l.message?.model)
+    .map((l) => l.message!.model!);
+  return { model: models.length > 0 ? models[models.length - 1] : null, modelCount: new Set(models).size };
+}
+
 /**
  * Derive live agent activity from the tail of a transcript plus the file's mtime.
  * Pure — `nowMs` is injected so callers control the clock. When no meaningful
@@ -34,14 +48,15 @@ export function encodeProjectDir(cwd: string): string {
  */
 export function deriveActivity(lines: TranscriptLine[], mtimeMs: number, nowMs: number): AgentActivity {
   const slug = [...lines].reverse().find((l) => l.slug)?.slug ?? null;
+  const model = modelOf(lines);
   const meaningful = lines.filter((l) => l.type === "user" || l.type === "assistant");
-  if (meaningful.length === 0) return { state: "unknown", lastActivityMs: mtimeMs ?? null, slug, midWork: false };
+  if (meaningful.length === 0) return { state: "unknown", lastActivityMs: mtimeMs ?? null, slug, midWork: false, ...model };
 
   const last = meaningful[meaningful.length - 1];
   // Turn ended and control is back with the human — actionable regardless of how
   // long ago it happened.
   if (last.type === "assistant" && last.message?.stop_reason === "end_turn") {
-    return { state: "needs-you", lastActivityMs: mtimeMs, slug, midWork: false };
+    return { state: "needs-you", lastActivityMs: mtimeMs, slug, midWork: false, ...model };
   }
   // A tool call that never returned. Nothing follows the last meaningful line by
   // definition, so "no tool_result after it" needs no separate check.
@@ -51,12 +66,12 @@ export function deriveActivity(lines: TranscriptLine[], mtimeMs: number, nowMs: 
   // Code writes tool results as type "user".
   const midWork = pendingTool || last.type === "user";
   const age = nowMs - mtimeMs;
-  if (age <= WORKING_WINDOW_MS) return { state: "working", lastActivityMs: mtimeMs, slug, midWork };
+  if (age <= WORKING_WINDOW_MS) return { state: "working", lastActivityMs: mtimeMs, slug, midWork, ...model };
   // Stale with a tool still outstanding: the agent is at a permission prompt, or
   // a long command is running. The transcript cannot separate the two, so the
   // label is chosen to be true under either.
-  if (pendingTool) return { state: "stalled", lastActivityMs: mtimeMs, slug, midWork };
-  return { state: "idle", lastActivityMs: mtimeMs, slug, midWork };
+  if (pendingTool) return { state: "stalled", lastActivityMs: mtimeMs, slug, midWork, ...model };
+  return { state: "idle", lastActivityMs: mtimeMs, slug, midWork, ...model };
 }
 
 // Defined in ./activity now, so a browser bundle can reach the constant without

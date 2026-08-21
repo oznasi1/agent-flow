@@ -13,6 +13,9 @@ const mkAgent = (name: string, state: CardAgent["activity"]["state"]): CardAgent
   activity: { state, lastActivityMs: Date.now(), slug: null },
 });
 
+const withModel = (a: CardAgent, model: string | null, modelCount = 1): CardAgent =>
+  ({ ...a, activity: { ...a.activity, model, modelCount } });
+
 describe("AgentsRow", () => {
   // The drawer is the one caller with room to spare, and it passes defaultOpen
   // explicitly (see DeckDetail.tsx). Every other/future caller must keep getting
@@ -29,5 +32,33 @@ describe("AgentsRow", () => {
   it("starts expanded when defaultOpen is passed", () => {
     render(<AgentsRow agents={[mkAgent("svc-7e", "working"), mkAgent("svc-fa", "idle")]} defaultOpen />);
     expect(screen.getByText("svc-fa")).toBeTruthy();
+  });
+});
+
+describe("AgentsRow model", () => {
+  it("shows the model the session is answering with", () => {
+    render(<AgentsRow agents={[withModel(mkAgent("svc-7e", "working"), "claude-opus-5")]} defaultOpen />);
+    expect(screen.getByText("opus-5")).toBeTruthy();
+  });
+
+  it("shows nothing where there is no model to show", () => {
+    // A transcript that yielded no main-chain model must leave the row exactly as it
+    // was — never a dash, never "unknown".
+    const { container } = render(<AgentsRow agents={[withModel(mkAgent("svc-7e", "working"), null)]} defaultOpen />);
+    expect(container.querySelector(".ag-model")).toBeNull();
+  });
+
+  it("marks a session that used more than one model", () => {
+    const { container } = render(
+      <AgentsRow agents={[withModel(mkAgent("svc-7e", "working"), "claude-opus-5", 2)]} defaultOpen />,
+    );
+    expect(container.querySelector(".ag-model .plus")!.textContent).toBe("+1");
+  });
+
+  it("does not mark a session that used exactly one", () => {
+    const { container } = render(
+      <AgentsRow agents={[withModel(mkAgent("svc-7e", "working"), "claude-opus-5", 1)]} defaultOpen />,
+    );
+    expect(container.querySelector(".ag-model .plus")).toBeNull();
   });
 });

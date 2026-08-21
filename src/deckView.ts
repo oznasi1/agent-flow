@@ -19,7 +19,11 @@ import { COMMAND_KILLED_EXIT_CODE, CommandRunner, chainSourcePlace, resolveComma
 import { buildRunStatus } from "./engine/status";
 import { UsageReader } from "./engine/usageFs";
 import type { UsageTotals } from "./engine/usage";
-import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
+import { readLiveWindows, defaultWindowsDir, currentWindow } from "./engine/presence";
+// The destination question, shared with Take in the sidebar so **Review with agent**
+// asks it in the same words with the same pickers.
+import { chooseOpenTarget, targetToOpenArgs } from "./engine/openTarget";
+import { openTargetDeps } from "./openTargetHost";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { currentBranch, gitState, prEligible, repoRoot, taskDiff } from "./engine/git";
@@ -32,6 +36,9 @@ import { RefreshQueue } from "./engine/pr/queue";
 import { discoverRepos } from "./engine/repos";
 import { composeAgentPrompt, hasNote, prReviewTemplate, prWorkClause } from "./engine/prompt";
 import { launchReview, resolveReviewMode, reviewRunKey } from "./engine/review/launch";
+import { batchReviewModes, needsWorktrees, planReviewBatch, toBatchTask, type ReviewBatchItem } from "./engine/review/batch";
+import { openSharedWorkspace } from "./engine/batchWorkspace";
+import { providerPin, resolveBatchProvider } from "./agentPick";
 // The one seam: every PR fetch, review call, and branch-CI probe on this panel
 // goes through the `Forge` `resolveForge` returns, in place of the GitHub-only
 // providers this file used to construct directly. `Forge`/`ForgeGap` are
@@ -2065,8 +2072,29 @@ export class DeckPanel {
         { title: `Review ${req.repoName}#${req.number}`, ignoreFocusOut: true },
       ))?.mode;
     if (!mode) return; // picker cancelled — no worktree, no window, no toast
+    // Where it opens, settled before launchReview for exactly the reason above: this is
+    // the second question that can be Escaped, and createWorktrees is still ahead of
+    // both. The count is 1 — a review is one repo — so `targetToOpenArgs` never reaches
+    // the multiroot-vs-per-window question, which is why it can be answered here with a
+    // constant instead of a picker.
+    const target = await chooseOpenTarget(
+      {
+        openIn: cfg.reviewOpenIn,
+        trackOpenWindows: cfg.trackOpenWindows,
+        title: `Review ${req.repoName}#${req.number} — open where?`,
+        placeHolder: "New window, this window, a saved workspace, or a window you have open",
+        noun: "the review",
+      },
+      openTargetDeps(cfg.workspaceDir, (m) => this.toast("info", m)),
+    );
+    if (!target) return; // dismissed — same silence as the mode picker
+    const openTarget = await targetToOpenArgs(target, 1, {
+      currentWindow,
+      chooseWorkspaceMode: async () => "per-window",
+    });
+    if (!openTarget) return; // this window lost its identity between the pick and here
     const res = await launchReview(
-      { req, template: mode.prompt, workspaceDir: cfg.workspaceDir, seedAgent: cfg.seedAgent },
+      { req, template: mode.prompt, workspaceDir: cfg.workspaceDir, seedAgent: cfg.seedAgent, openTarget },
       { createWorktrees, openWorkspace, log: this.log },
     );
     if (!res.ok) {
@@ -2079,11 +2107,208 @@ export class DeckPanel {
     }
     // `res.provider`, not the setting: under `ask` the setting names nobody, and the
     // launch is the only thing that knows which agent the user picked for it.
+    //
+    // `seededInPlace` earns its clause: nothing opens on that path, so a toast that
+    // only says "in a worktree" reads as though the click did nothing at all.
     this.toast(
       "success",
-      `Reviewing ${req.repoName}#${req.number} in a worktree.${cfg.seedAgent ? ` ${providerLabel(res.provider)} pre-seeded — press Enter to start.` : ""}`,
+      `Reviewing ${req.repoName}#${req.number} in a worktree${res.seededInPlace ? ", in this window" : ""}.${cfg.seedAgent ? ` ${providerLabel(res.provider)} pre-seeded — press Enter to start.` : ""}`,
     );
     await this.refreshBusy(); // picks up the new run so the row shows "reviewing"
+  }
+
+  /** Review several PRs at once. The ordering below IS the design: every question that
+   *  can be cancelled is asked before anything is created, because `createWorktrees`
+   *  leaves a worktree and a branch behind on every Escape — the same reason
+   *  `launchReviewFor` resolves its mode up front.
+   *
+   *  Deliberately not a batch *submit*: approve/comment/request-changes stay one row and
+   *  one confirmation at a time. */
+  private async launchReviewBatch(ids: string[]): Promise<void> {
+    const cfg = getConfig();
+    const requests = ids.map((id) => this.reviewById(id)).filter((r): r is ReviewRequest => !!r);
+    if (!requests.length) return; // the queue moved on before the click landed
+
+    // 1 — the cost. The mode is not known yet, so this names sessions (always true)
+    //     rather than worktrees (mode-dependent).
+    if (requests.length > cfg.batchLaunchConfirmThreshold) {
+      const go = await vscode.window.showWarningMessage(
+        `Review ${requests.length} PRs with agents? That's ${requests.length} agent sessions.`,
+        { modal: true },
+        "Review",
+      );
+      if (go !== "Review") return;
+    }
+
+    // 2 — the mode, once, for the whole batch. This list always holds at least two
+    //     modes (read-only plus the stock one), so an unpinned batch always asks:
+    //     worktrees-or-not is its one consequential choice.
+    const modes = batchReviewModes(cfg.reviewRequestModes, cfg.forge);
+    const mode =
+      resolveReviewMode(modes, cfg.reviewRequestMode) ??
+      (await vscode.window.showQuickPick(
+        modes.map((m) => ({ label: m.label, detail: m.detail, mode: m })),
+        {
+          title: `Review ${requests.length} ${requests.length === 1 ? "PR" : "PRs"} with agents`,
+          ignoreFocusOut: true,
+        },
+      ))?.mode;
+    if (!mode) return; // dismissed: nothing created, nothing said
+
+    // 3 — plan. A row with no local checkout is named once per repo, not once per PR.
+    const { items, skipped } = planReviewBatch(requests, mode);
+    if (!items.length) {
+      this.toast(
+        "error",
+        `${skipped.join(", ")} isn't checked out under your repos root — open those PRs in your browser instead.`,
+      );
+      return;
+    }
+
+    // 4 — where. The same question, the same pickers and the same setting the single-row
+    //     launch now asks with (`agentFlow.reviewOpenIn`) — a batch that asked it in
+    //     different words, or ignored a pinned answer, would be a second destination
+    //     question living beside the first.
+    const target = await chooseOpenTarget(
+      {
+        openIn: cfg.reviewOpenIn,
+        trackOpenWindows: cfg.trackOpenWindows,
+        title: `Review ${items.length} ${items.length === 1 ? "PR" : "PRs"} — open where?`,
+        placeHolder: "New window, this window, a saved workspace, or a window you have open",
+        noun: items.length === 1 ? "the review" : "the reviews",
+      },
+      openTargetDeps(cfg.workspaceDir, (m) => this.toast("info", m)),
+    );
+    if (!target) return;
+
+    // 5 — layout. Only a new window can go either way; every other destination IS a
+    //     single window. One PR is an ordinary single launch and needs no layout pick.
+    let shared = target.kind !== "new";
+    if (target.kind === "new" && items.length > 1) {
+      const p = await vscode.window.showQuickPick(
+        [
+          { label: "$(multiple-windows) Separate windows", detail: "One window per PR", shared: false },
+          { label: "$(window) One shared window", detail: `All ${items.length} reviews in one window, a session each`, shared: true },
+        ],
+        { title: `Review ${items.length} PRs — how should I lay them out?`, ignoreFocusOut: true },
+      );
+      if (!p) return;
+      shared = p.shared;
+    }
+
+    // 6 — separate windows is the single-PR path, N times over. launchReview owns its
+    //     own worktree and its own refusal to run without one, so nothing is
+    //     pre-created here — and read-only's saving is worktrees *within* one window,
+    //     which this shape does not need.
+    if (!shared) {
+      let launched = 0;
+      const failures: string[] = [];
+      // One repo per review, so `targetToOpenArgs` never reaches the
+      // multiroot-vs-per-window question — the same constant the single-row launch
+      // answers it with. Resolved once, outside the loop: it is the same destination
+      // for every PR, and asking per PR is exactly what this batch exists to avoid.
+      const openTarget = await targetToOpenArgs(target, 1, {
+        currentWindow,
+        chooseWorkspaceMode: async () => "per-window",
+      });
+      if (!openTarget) {
+        this.toast("error", "This window can no longer hold a session — nothing was opened.");
+        return;
+      }
+      for (const item of items) {
+        const res = await launchReview(
+          { req: item.request, template: mode.prompt, workspaceDir: cfg.workspaceDir, seedAgent: cfg.seedAgent, openTarget },
+          { createWorktrees, openWorkspace, log: this.log },
+        );
+        if (res.ok) launched++;
+        else if (!("cancelled" in res)) failures.push(res.message);
+      }
+      // `true`, not `needsWorktrees(mode)`: launchReview ALWAYS cuts a worktree, whatever
+      // the mode says, so read-only in separate windows still gets one per PR. The toast
+      // has to say what happened rather than what the mode would have preferred.
+      this.reviewBatchToast(launched, true, skipped, failures);
+      await this.refreshBusy();
+      return;
+    }
+
+    // 7 — one window. Worktrees only when the mode checks out; under read-only the
+    //     checkout itself is the service, which is exactly what lets several reviews
+    //     share it.
+    const ready: { item: ReviewBatchItem; services: ServiceRef[] }[] = [];
+    const failures: string[] = [];
+    for (const item of items) {
+      if (!needsWorktrees(mode)) {
+        ready.push({ item, services: [item.base] });
+        continue;
+      }
+      const services = createWorktrees([item.base], item.key, item.request.title, this.log);
+      if (services.some((s) => s.path === item.base.path)) {
+        // createWorktrees falls back to the checkout it was given. This mode's prompt
+        // scripts a real checkout, so proceeding would switch the user's OWN checkout
+        // to a teammate's branch — the same refusal launchReview makes, per PR.
+        failures.push(`couldn't create a worktree for ${item.request.repoName}#${item.request.number}`);
+        continue;
+      }
+      ready.push({ item, services });
+    }
+    if (!ready.length) {
+      this.toast("error", "Couldn't create a git worktree for any of them — the Agent Flow Deck output channel has the reason.");
+      return;
+    }
+
+    // 8 — the agent. A shared window seeds from plan files and can never ask later, so
+    //     under `ask` this is the only chance to know which agent the user wants.
+    const provider = await resolveBatchProvider(cfg, ready.length > 1);
+    if (!provider) return; // the picker was dismissed
+
+    // "current" needs this window's identity, and it can be lost between the pick and
+    // here. Without it openSharedWorkspace falls through to opening a new window —
+    // spawning one nobody asked for — so fail instead, before anything is opened.
+    const here = target.kind === "current" ? currentWindow() : undefined;
+    if (target.kind === "current" && !here) {
+      this.toast("error", "This window can no longer hold a session — nothing was opened.");
+      return;
+    }
+
+    try {
+      await openSharedWorkspace({
+        tasks: ready.map((r) => toBatchTask(r.item, r.services)),
+        // Every review task carries its own pre-rendered template, so this shared one
+        // is never read. The type requires a value; the mode's own prompt is the honest
+        // one to give it.
+        promptTemplate: mode.prompt,
+        workspaceDir: cfg.workspaceDir,
+        seedAgent: cfg.seedAgent,
+        target,
+        currentWindow: here,
+        // Deliberately no foldersToAdd: a review batch never edits the user's
+        // .code-workspace. mergeReposIntoWorkspace finds nothing missing and returns
+        // without writing, so the file stays byte-identical, and the briefs carry
+        // absolute paths regardless.
+        ...providerPin(cfg, provider),
+      });
+    } catch (e) {
+      this.toast("error", `Couldn't open the review workspace: ${e}`);
+      return;
+    }
+    this.reviewBatchToast(ready.length, needsWorktrees(mode), skipped, failures);
+    await this.refreshBusy(); // picks up the new runs so the rows show "reviewing"
+  }
+
+  /** One toast for the whole batch, never one per PR. Says what launched, what could not
+   *  be, and whether worktrees were made — `worktrees` is passed rather than derived from
+   *  the mode because the two disagree: a separate-windows batch gets a worktree per PR
+   *  even under read-only, since that is what `launchReview` does. */
+  private reviewBatchToast(launched: number, worktrees: boolean, skipped: string[], failures: string[]): void {
+    if (!launched) {
+      this.toast("error", `Nothing was reviewed. ${failures.join("; ")}`);
+      return;
+    }
+    const where = worktrees ? "in a worktree each" : "without checking anything out";
+    const parts = [`Reviewing ${launched} ${launched === 1 ? "PR" : "PRs"} ${where}.`];
+    if (skipped.length) parts.push(`${skipped.join(", ")} isn't checked out — skipped.`);
+    if (failures.length) parts.push(failures.join("; "));
+    this.toast("success", parts.join(" "));
   }
 
   /** Hand the agent's findings to the review box. Read on demand rather than
@@ -2461,12 +2686,21 @@ export class DeckPanel {
       // Computed before the sweep, not after: rule 2b reads the shelf off the
       // status it is handed, so the verdict has to see the shelved one.
       const ownsPath = (p: string) => ownership.pathOwner.get(canon(p)) === run.key;
+      // An in-place run — Explore or Notepad — opened your checkout rather than
+      // creating a worktree, so its dirty/ahead state is not evidence about this
+      // run. It is your own work in progress far more often than the session's,
+      // and ownership hands it to whichever record happens to be newest, which is
+      // arbitrary. Counting it pinned a sole-holder Explore card to the board for
+      // as long as the checkout stayed dirty — which, for a repo you work in, is
+      // forever. Ticketless on purpose: a task run launched in place
+      // (`agentFlow.worktree: "never"`) does own its branch, and keeps the veto.
+      const inPlace = (runKind(run) === "explore" || runKind(run) === "notepad") && !isTicketRun(run);
       const shelf = getConfig().inflightShowAll ? "board" : shelfFor({
         hasLiveSession: ownership.runsWithSession.has(run.key),
         prOpen: Object.values(status.prs).some((e) => e.facts?.state === "OPEN"),
         merged: prSignals(status.prs).merged,
         justLaunched: now - run.createdAt < JUST_LAUNCHED_MS,
-        hasWorkToLose: status.repos.some((r) => ownsPath(r.path) && (r.dirty || r.ahead > 0)),
+        hasWorkToLose: !inPlace && status.repos.some((r) => ownsPath(r.path) && (r.dirty || r.ahead > 0)),
       });
       const shelved = { ...status, shelf, usage: this.usageByRun.get(run.key) };
       if (this.applyVerdict(run, this.verdictFor(shelved, livePlaces, now))) continue;
@@ -2563,6 +2797,7 @@ export class DeckPanel {
       finishedAfterMs: overrideGates ? 0 : cfg.retireFinishedAfterHours * 3_600_000,
       abandonedAfterMs: overrideGates ? 1 : cfg.retireAbandonedAfterDays * 86_400_000,
       closedAfterMs: overrideGates ? 0 : cfg.retireClosedAfterHours * 3_600_000,
+      inPlaceAfterMs: overrideGates ? 0 : cfg.retireInPlaceAfterHours * 3_600_000,
       nowMs,
       exists: (p) => fs.existsSync(p),
     });
@@ -2611,6 +2846,10 @@ export class DeckPanel {
       // rule 2b inert and leaves rules 1, 2 and 3 to sweep it as they always have.
       shelf: "board",
       closedAfterMs: 0,
+      // Rule 0 is shelf-gated like 2b, so "board" already keeps it inert. Zero
+      // rather than the setting, for the same reason `closedAfterMs` is: a window
+      // that can never be consulted should not read as though it might be.
+      inPlaceAfterMs: 0,
       finishedAfterMs: overrideGates ? 0 : cfg.retireFinishedAfterHours * 3_600_000,
       abandonedAfterMs: overrideGates ? 1 : cfg.retireAbandonedAfterDays * 86_400_000,
       nowMs,
@@ -2755,6 +2994,9 @@ export class DeckPanel {
         break;
       case "deck:reviewLaunch":
         await this.launchReviewFor(m.id);
+        break;
+      case "deck:reviewBatch":
+        await this.launchReviewBatch(m.ids);
         break;
       case "deck:reviewLoadDraft":
         this.loadReviewDraft(m.id);

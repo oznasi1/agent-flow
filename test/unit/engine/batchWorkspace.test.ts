@@ -111,6 +111,31 @@ describe("openSharedWorkspace", () => {
     expect(plans.every((p) => !("provider" in p))).toBe(true);
   });
 
+  it("stamps the pinned provider onto every run in the batch", async () => {
+    await openSharedWorkspace(baseReq({ seedAgent: true, provider: "cursor" }));
+    const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
+    expect(runs.length).toBeGreaterThan(1);
+    expect(runs.map((r) => r.provider)).toEqual(runs.map(() => "cursor"));
+  });
+
+  it("stamps no provider on a batch that seeded no agent", async () => {
+    await openSharedWorkspace(baseReq({ seedAgent: false }));
+    const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
+    expect(runs.length).toBeGreaterThan(0);
+    for (const r of runs) expect(r.provider).toBeUndefined();
+  });
+
+  it("stamps the setting's resolution onto every run when the caller sends no pin", async () => {
+    // No `req.provider` means `ask` produced no pin — under a fixed setting this is
+    // every ordinary batch. The resolver falls back to reading the live setting, and
+    // the store-backed vscode mock resolves an untouched `agentProvider` to
+    // "claude-code", exactly what `readAgentProviderSetting` returns by default.
+    await openSharedWorkspace(baseReq({ seedAgent: true }));
+    const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
+    expect(runs.length).toBeGreaterThan(1);
+    expect(runs.map((r) => r.provider)).toEqual(runs.map(() => "claude-code"));
+  });
+
   it("seeds each prompt with that task's absolute brief path", async () => {
     await openSharedWorkspace(baseReq());
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
@@ -293,6 +318,90 @@ describe("openSharedWorkspace", () => {
       const plan = JSON.parse(String(writes((p) => p.includes("plans") && p.endsWith(".json"))[0][1]));
       expect(String(plan.matches[0].prompt)).toContain("@api/.claude/worktrees/ASM-1/src/export.py");
     });
+  });
+
+  // ── review batches: the kind passthrough ──────────────────────────────────
+  it("writes each task's kind onto its run record", async () => {
+    // decorateReviews finds a row's run with runKind(r) === "review". A batched
+    // review whose run says "task" is invisible to the strip AND gets polled as
+    // if `review-aws-ops-8491` were a Jira key.
+    await openSharedWorkspace(
+      baseReq({
+        tasks: [
+          { ...baseReq().tasks[0], kind: "review" },
+          { ...baseReq().tasks[1], kind: "review" },
+        ],
+      }),
+    );
+    const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
+    expect(runs.map((r) => r.kind)).toEqual(["review", "review"]);
+  });
+
+  it("leaves kind absent — not null — when a task does not set one", async () => {
+    // Absent is how "task" is spelled on every record written before review runs
+    // existed. A literal `kind: undefined` would serialize away too, but only by
+    // accident of JSON.stringify; this asserts the key is genuinely not there.
+    await openSharedWorkspace(baseReq());
+    const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
+    expect(runs.every((r) => !("kind" in r))).toBe(true);
+  });
+
+  // ── review batches: per-task prompt and brief path ────────────────────────
+  it("prefers a task's own promptTemplate over the shared one", async () => {
+    // A review's {repo}/{number}/{author} are rendered per PR before the batch is
+    // assembled, so no single shared template can carry them.
+    await openSharedWorkspace(
+      baseReq({
+        tasks: [
+          { ...baseReq().tasks[0], promptTemplate: "Review aws-ops#8491 — {key}" },
+          baseReq().tasks[1],
+        ],
+      }),
+    );
+    const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
+    expect(plans[0].matches[0].prompt).toContain("Review aws-ops#8491 — ASM-1");
+    // The task that set nothing still gets the shared template, rendered as always.
+    expect(plans[1].matches[0].prompt).toContain("Start ASM-2");
+  });
+
+  it("puts a task's brief in its own sub-directory when it asks for one", async () => {
+    // Two PRs of the SAME repo reviewed without worktrees share one checkout, so
+    // `.pick-task/TASK.md` would collide and the second would win silently.
+    const result = await openSharedWorkspace(
+      baseReq({
+        tasks: [
+          {
+            ticket: { key: "review-api-7", summary: "seven", url: "https://gh/7" },
+            planMd: "p", descriptionText: "",
+            services: [{ name: "api", path: "/repos/api", isGit: true }],
+            briefSubdir: "REVIEW-7",
+          },
+          {
+            ticket: { key: "review-api-9", summary: "nine", url: "https://gh/9" },
+            planMd: "p", descriptionText: "",
+            services: [{ name: "api", path: "/repos/api", isGit: true }],
+            briefSubdir: "REVIEW-9",
+          },
+        ],
+      }),
+    );
+    expect(writes((p) => p.endsWith("TASK.md")).map((c) => String(c[0]))).toEqual([
+      "/repos/api/.pick-task/REVIEW-7/TASK.md",
+      "/repos/api/.pick-task/REVIEW-9/TASK.md",
+    ]);
+    // The result's briefs must name the same paths the plans point the agents at.
+    expect(result.briefs.map((b) => b.path)).toEqual([
+      "/repos/api/.pick-task/REVIEW-7/TASK.md",
+      "/repos/api/.pick-task/REVIEW-9/TASK.md",
+    ]);
+  });
+
+  it("leaves a task batch's brief path exactly where it was", async () => {
+    await openSharedWorkspace(baseReq());
+    expect(writes((p) => p.endsWith("TASK.md")).map((c) => String(c[0]))).toEqual([
+      "/repos/api/.claude/worktrees/ASM-1/.pick-task/TASK.md",
+      "/repos/api/.claude/worktrees/ASM-2/.pick-task/TASK.md",
+    ]);
   });
 });
 

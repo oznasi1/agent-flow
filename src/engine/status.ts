@@ -99,6 +99,11 @@ export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
   });
   const target = runTarget(run);
   const windowOpen = target ? (i.openIdentities ?? new Set<string>()).has(canon(target)) : false;
+  // The record's own stamp, else the one inference the Deck can honestly make: a live
+  // session means Claude Code, because that is the only agent registry there is to read.
+  // Deliberately NOT the current setting — it may have changed since the launch, or be
+  // `ask`, which names no agent at all.
+  const provider = run.provider ?? (agents.length > 0 ? ("claude-code" as const) : undefined);
   return {
     run,
     column,
@@ -109,6 +114,7 @@ export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
     windowOpen,
     prs,
     agents,
+    ...(provider ? { provider } : {}),
     // The board's own membership rule needs path ownership across *every* run,
     // which only `buildAll` can see — it overwrites this before the status
     // reaches a card. "board" is the safe placeholder: it hides nothing.

@@ -14,7 +14,7 @@ const OWNED = [
   "--k-skill", "--k-command", "--k-agent", "--k-hook", "--k-plugin",
   "--k-story", "--k-epic", "--k-task", "--k-subtask", "--k-bug", "--k-other",
   "--hair", "--edge", "--mono", "--dim",
-  "--brand", "--brand-ink",
+  "--brand", "--brand-ink", "--p-claude",
 ];
 
 const SURFACES: [string, string][] = [
@@ -215,7 +215,27 @@ describe("brand accent", () => {
     // no longer appears in deckStyles.ts at all. (It had already lost its
     // `::after` sibling here, which the tightened detector showed spends only
     // `var(--brand-ink)`, never `var(--brand)`.)
-    deck: [".act.primary", ".act.primary:hover"],
+    deck: [
+      ".act.primary", ".act.primary:hover",
+      // The review row's play button — the agent action reachable without opening
+      // the row. A deliberate addition, and the same action `.act.primary` already
+      // spends the hue on inside the open row, so it is one action in one colour
+      // rather than a second claim on attention. Like `.orch-chip` it is a tint,
+      // not a fill: the glyph takes the hue and only :hover washes the cell, so a
+      // queue of six rows does not put six filled primaries on the board. The
+      // not-checked-out variant is `--dim`, deliberately NOT a faded brand, and so
+      // does not appear here.
+      ".rv-go", ".rv-go:not(.busy):hover",
+      // Selecting review rows for a batch. Two spends, both deliberate: the picked
+      // row's 10% wash is a tint in the `.orch-chip` idiom (it marks a set, and six
+      // picked rows still read as one selection rather than six primaries), and the
+      // bar's launch button is a fill — the same verb `.act.primary` and the
+      // sidebar's own `.batch-launch` already spend it on, and while the bar is up it
+      // is the strip's ONLY launch (`.rv-go` is hidden). The tick itself and the
+      // "review ready" chip are deliberately NOT here: a mark and a state, so
+      // --vscode-foreground and --c-done respectively.
+      ".rv-row.picked .rv-head", ".batch-launch", ".batch-launch:hover:not(:disabled)",
+    ],
     marketplace: [".btn.pri", ".btn.pri:hover"],
     controls: [],
     orchestrator: [
