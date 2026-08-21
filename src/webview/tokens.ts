@@ -70,6 +70,15 @@ export const TOKENS_CSS = `
        white is 2.96:1, which fails. */
     --brand: #2AA79B;
     --brand-ink: #04211E;
+
+    /* A provider hue is a different kind of constant than --brand: it names a
+       fixed mark that belongs to someone else, not this product's own theme, so
+       it does not get a light-mode override — Claude's orange was checked on
+       both themes at this exact value and reads correctly on white as well as
+       dark. Only Claude gets one: Cursor and GitHub Copilot are black-on-white
+       marks with no hue that would survive a dark theme, so their badges take
+       the theme's own ink instead (see deckStyles.ts's .pv rule). */
+    --p-claude: #D97757;
   }
 
   /* VS Code stamps the theme kind onto <body>, so the swap needs no JavaScript. */

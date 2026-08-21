@@ -25,6 +25,11 @@ import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prom
 import { openWorkspace, writeBriefInto, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, attachmentFileName, attachmentRelPath, BRIEF_DIR, type MergeCandidate } from "./engine/workspace";
 import { briefMarkdown } from "./engine/brief";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, PresenceRecord, type CurrentWindow } from "./engine/presence";
+// The destination question, lifted so **Review with agent** on the Deck asks it in
+// exactly the same words (src/engine/openTarget.ts). The private methods below are now
+// thin adapters over it: they bind the settings, the copy, and the `vscode` pickers.
+import { chooseOpenTarget, targetToOpenArgs, type OpenArgs, type OpenTarget } from "./engine/openTarget";
+import { liveWindowsElsewhere, openTargetDeps } from "./openTargetHost";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { branchName, createWorktrees, ensureBranch, folderName, repoRootOfWorktree, serviceFolderName } from "./engine/worktree";
@@ -185,14 +190,6 @@ function isRetryable(failureClass: FailureClass): boolean {
  *  `open -a` thrash when several windows launch back-to-back. */
 const BATCH_STAGGER_MS = 250;
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-/** Where to open a taken task — a new window, the current one, merged into an
- * existing .code-workspace file, or focused into an already-open folder window. */
-type OpenTarget =
-  | { kind: "new" }
-  | { kind: "current" }
-  | { kind: "existing"; file: string }
-  | { kind: "live-folder"; folder: string };
 
 export class TasksViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "agentFlow.tasks";
@@ -2937,117 +2934,37 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Where to open a taken task — new window, this window, a saved workspace, or a
-   * window you already have open. Live windows appear only in the interactive "ask"
-   * flow (a specific open window is inherently a per-take choice). */
-  private async chooseOpenTarget(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
-    // A window with no identity can't be named by a plan match, so it can't hold a
-    // seeded session — "this window" is not offered, and the setting can't force it.
-    const here = currentWindow();
-    if (cfg.openIn === "new-window") return { kind: "new" };
-    if (cfg.openIn === "this-window") {
-      if (here) return { kind: "current" };
-      this.toast(
-        "info",
-        "This window has no saved workspace file and no single folder, so it can't hold a session — opening a new window instead.",
-      );
-      return { kind: "new" };
-    }
-    if (cfg.openIn === "pick-existing") return this.pickExistingWorkspace(cfg);
-
-    type PickTarget = OpenTarget | { kind: "existing-pick" };
-    const thisWindow: { label: string; detail: string; target: PickTarget }[] = here
-      ? [{ label: "$(window) This window", detail: "Start a session here — keeps this window's folders", target: { kind: "current" } }]
-      : [];
-    const base: { label: string; detail: string; target: PickTarget }[] = [
-      { label: "$(empty-window) New window", detail: "Open the task in a separate window", target: { kind: "new" } },
-      ...thisWindow,
-      { label: "$(folder-library) Existing workspace…", detail: "Open the task into a .code-workspace you already have", target: { kind: "existing-pick" } },
-    ];
-    const live = cfg.trackOpenWindows ? this.liveWindowItems() : [];
-    const p = await vscode.window.showQuickPick([...base, ...live], {
-      title: "Open the task where?",
-      placeHolder: "New window, this window, a saved workspace, or a window you have open",
-      ignoreFocusOut: true,
-    });
-    if (!p) return undefined;
-    if (p.target.kind === "existing-pick") return this.pickExistingWorkspace(cfg);
-    return p.target;
+   * window you already have open. The picker itself is engine/openTarget's; this binds
+   * the take flow's copy, its settings and the `vscode` pickers to it. */
+  private chooseOpenTarget(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
+    return chooseOpenTarget(
+      {
+        openIn: cfg.openIn,
+        trackOpenWindows: cfg.trackOpenWindows,
+        title: "Open the task where?",
+        placeHolder: "New window, this window, a saved workspace, or a window you have open",
+      },
+      openTargetDeps(cfg.workspaceDir, (m) => this.toast("info", m)),
+    );
   }
 
-  /** Live Agent-Flow windows other than this one. One source for both the open-target
-   * picker and the sidebar's gauge count. */
+  /** Live Agent-Flow windows other than this one — the sidebar's gauge count. */
   private liveWindows(): PresenceRecord[] {
-    const self = windowIdentity()?.identity;
-    return readLiveWindows(defaultWindowsDir()).filter((w) => w.identity !== self);
+    return liveWindowsElsewhere();
   }
 
-  /** Live Agent-Flow windows (excluding the current one) as open-target picks. A
-   * workspace window maps to the existing merge+focus path; a folder window focuses
-   * and seeds in place. */
-  private liveWindowItems(): { label: string; detail: string; target: OpenTarget }[] {
-    return this.liveWindows().map((w) => ({
-      label: `$(window) ${w.label}`,
-      detail: w.kind === "workspace" ? `open now · ${w.folders} folder${w.folders === 1 ? "" : "s"}` : "open now",
-      target: w.kind === "workspace" ? { kind: "existing", file: w.identity } : { kind: "live-folder", folder: w.identity },
-    }));
-  }
-
-  /** Resolve an OpenTarget to the openWorkspace arguments, asking the multiroot-vs-
-   * per-window question only for a NEW window with more than one repo. Returns
-   * undefined if the user cancels that sub-pick. */
-  private async targetToOpenArgs(
+  /** Resolve an OpenTarget to the openWorkspace arguments (engine/openTarget), binding
+   * the take flow's own multiroot-vs-per-window question to it. */
+  private targetToOpenArgs(
     target: OpenTarget,
     count: number,
     label: string,
     cfg: AgentFlowConfig,
-  ): Promise<
-    | { mode: WorkspaceMode; openIn: "new" | "current"; existingWorkspaceFile?: string; existingFolder?: string; currentWindow?: CurrentWindow }
-    | undefined
-  > {
-    if (target.kind === "existing") return { mode: "multiroot", openIn: "new", existingWorkspaceFile: target.file };
-    if (target.kind === "live-folder") return { mode: "per-window", openIn: "new", existingFolder: target.folder };
-    if (target.kind === "current") {
-      // The window's own shape is the mode — nothing is being laid out, so the repo
-      // count has no say. A window that lost its identity between the pick and here
-      // has no seed destination left, so the take cancels rather than opening something
-      // the user didn't choose.
-      const here = currentWindow();
-      if (!here) return undefined;
-      return { mode: here.kind === "workspace" ? "multiroot" : "per-window", openIn: "current", currentWindow: here };
-    }
-    const mode = await this.chooseWorkspaceMode(count, cfg.workspaceMode, label);
-    if (!mode) return undefined;
-    return { mode, openIn: "new" };
-  }
-
-  /** Pick a `.code-workspace` from `cfg.workspaceDir` (or Browse… for one elsewhere). */
-  private async pickExistingWorkspace(cfg: AgentFlowConfig): Promise<OpenTarget | undefined> {
-    const BROWSE = "__browse__";
-    const files = listWorkspaceFiles(cfg.workspaceDir);
-    const items = [
-      ...files.map((f) => ({
-        label: `$(file-code) ${f.file.split("/").pop()}`,
-        detail: `${f.folders} folder${f.folders === 1 ? "" : "s"}`,
-        file: f.file,
-      })),
-      { label: "$(folder-opened) Browse…", detail: "Pick a .code-workspace from anywhere", file: BROWSE },
-    ];
-    const picked = await vscode.window.showQuickPick(items, {
-      title: "Open into which workspace?",
-      placeHolder: files.length ? "Pick a workspace, or Browse…" : "No workspaces found — Browse…",
-      ignoreFocusOut: true,
+  ): Promise<OpenArgs | undefined> {
+    return targetToOpenArgs(target, count, {
+      currentWindow,
+      chooseWorkspaceMode: (n) => this.chooseWorkspaceMode(n, cfg.workspaceMode, label),
     });
-    if (!picked) return undefined;
-    if (picked.file !== BROWSE) return { kind: "existing", file: picked.file };
-    const uris = await vscode.window.showOpenDialog({
-      canSelectFiles: true,
-      canSelectFolders: false,
-      canSelectMany: false,
-      filters: { "VS Code Workspace": ["code-workspace"] },
-      title: "Pick a .code-workspace",
-    });
-    if (!uris || !uris.length) return undefined;
-    return { kind: "existing", file: uris[0].fsPath };
   }
 
   private html(webview: vscode.Webview): string {

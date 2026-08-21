@@ -35,6 +35,7 @@
 | `agentFlow.reviewWrites` | `false` | Allow submitting approve / comment / request changes to your configured forge from the Deck. On GitLab, request changes posts your message and withdraws any approval you had — GitLab has no such review state — and the confirmation dialog says so. |
 | `agentFlow.reviewRequestModes` | *(one built-in mode)* | Seed modes offered by **Review with agent**, layered over the built-in one. Add your own — e.g. separate backend and frontend review modes — and clicking asks which to use. |
 | `agentFlow.reviewRequestMode` | `ask` | Pin one review mode by `id` to skip the question. |
+| `agentFlow.reviewOpenIn` | `new-window` | Where **Review with agent** opens: a new window on the review worktree (the default, and what every release so far did), `this-window`, `pick-existing` for a `.code-workspace` you already have, or `ask` to choose each time — the same question `agentFlow.openIn` asks for a task you take, kept separate because a review is a shorter errand. The review always runs in its own worktree whichever you pick; anything but a new window seeds a session that is told, by absolute path, to work in that worktree. |
 | `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow Deck opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
 | `agentFlow.environments` | `["dev", "staging", "production"]` | Environments offered by the **Verify on an environment** Explore action. The picker also offers **Custom…** for a one-off. |
 | `agentFlow.orchestrator` | `false` | Show the Deck's Orchestrator drawer, where you wire in-flight agents into a flow with a condition on each connection. |
@@ -56,7 +57,9 @@ under `agentFlow.explorePrompts.*`, or pin one action with `agentFlow.exploreMod
 **Review with agent** works the same way on its own list: one **Full review** mode ships,
 and once you add one of your own — a backend-services reviewer, say — clicking asks which to
 seed, since your entry joins **Full review** rather than replacing it. Pin one with
-`agentFlow.reviewRequestMode`. The sidebar's **Address PR**
+`agentFlow.reviewRequestMode`. Where it opens is a second, separate question —
+`agentFlow.reviewOpenIn`, which ships pinned to a new window and asks nothing until you
+set it to `ask`. The sidebar's **Address PR**
 kick-off always runs in a fresh worktree; a Deck card's re-seeds that run's existing workspace
 in place instead — whatever `agentFlow.worktree` gave it when it was
 launched. Per-task worktrees are created inside each repo at

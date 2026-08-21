@@ -66,6 +66,11 @@ describe("DeckDetail", () => {
     expect(hd.querySelector(".av")!.getAttribute("aria-label")).toBe("Explore place");
   });
 
+  it("opens the drawer with the same mark the card carries", () => {
+    render1(mkCard({ provider: "claude-code" }));
+    expect(document.querySelector(".dd-hd .pv.p-claude-code")).toBeTruthy();
+  });
+
   it("relocates the branch, launched time and repo chips", () => {
     render1(mkCard());
     expect(document.querySelector(".dd .c-branch .bn")!.textContent).toContain("feat/x");

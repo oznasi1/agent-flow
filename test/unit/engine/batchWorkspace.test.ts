@@ -111,6 +111,31 @@ describe("openSharedWorkspace", () => {
     expect(plans.every((p) => !("provider" in p))).toBe(true);
   });
 
+  it("stamps the pinned provider onto every run in the batch", async () => {
+    await openSharedWorkspace(baseReq({ seedAgent: true, provider: "cursor" }));
+    const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
+    expect(runs.length).toBeGreaterThan(1);
+    expect(runs.map((r) => r.provider)).toEqual(runs.map(() => "cursor"));
+  });
+
+  it("stamps no provider on a batch that seeded no agent", async () => {
+    await openSharedWorkspace(baseReq({ seedAgent: false }));
+    const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
+    expect(runs.length).toBeGreaterThan(0);
+    for (const r of runs) expect(r.provider).toBeUndefined();
+  });
+
+  it("stamps the setting's resolution onto every run when the caller sends no pin", async () => {
+    // No `req.provider` means `ask` produced no pin — under a fixed setting this is
+    // every ordinary batch. The resolver falls back to reading the live setting, and
+    // the store-backed vscode mock resolves an untouched `agentProvider` to
+    // "claude-code", exactly what `readAgentProviderSetting` returns by default.
+    await openSharedWorkspace(baseReq({ seedAgent: true }));
+    const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
+    expect(runs.length).toBeGreaterThan(1);
+    expect(runs.map((r) => r.provider)).toEqual(runs.map(() => "claude-code"));
+  });
+
   it("seeds each prompt with that task's absolute brief path", async () => {
     await openSharedWorkspace(baseReq());
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));

@@ -111,10 +111,11 @@ export type CommandId =
  * `*_fp` properties are matched by suffix and must be 16-char hex. */
 export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as const;
 
-/** The 37 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
+/** The 41 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
  *
- * `"invalid"` on the seven enum-ish fields below (workspace_mode, open_in,
- * agent_surface, explore_mode, worktree, remote_control, default_filter) is a sentinel, not a
+ * `"invalid"` on the eleven enum-ish fields below (workspace_mode, open_in,
+ * review_open_in, agent_provider, agent_surface, explore_mode, worktree, remote_control,
+ * default_filter, task_source, forge) is a sentinel, not a
  * real setting value: settingsSnapshot.ts emits it whenever the underlying
  * AgentFlowConfig value isn't one of the shipped choices — e.g. a hand-edited
  * settings.json holding a value VS Code's own settings UI would never offer.
@@ -122,10 +123,14 @@ export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as c
  * genuinely left the setting at its default; collapsing both to the same
  * shipped-default value would silently inflate the "default configuration"
  * bucket in the resulting analytics. task_mode's "custom" plays the same role
- * for that field and is not part of this six-field sentinel scheme. */
+ * for that field and is not part of this sentinel scheme. */
 export interface SettingsSnapshot {
   workspace_mode: "auto" | "multiroot" | "per-window" | "ask" | "invalid";
   open_in: "ask" | "new-window" | "this-window" | "pick-existing" | "invalid";
+  /** Where **Review with agent** opens. Same vocabulary as `open_in` and reported
+   *  separately: the interesting question is whether people answer it differently for a
+   *  five-minute review than for a day's work. */
+  review_open_in: "ask" | "new-window" | "this-window" | "pick-existing" | "invalid";
   agent_provider: "claude-code" | "copilot" | "cursor" | "ask" | "invalid";
   agent_surface: "extension" | "terminal" | "invalid";
   explore_mode: "ask" | "jiraTicket" | "knowledge" | "debug" | "general" | "supervise" | "verify" | "invalid";

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.33.9] — 2026-08-21
+## [0.35.1] — 2026-08-21
 
 ### Fixed
 
@@ -25,6 +25,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sight) keeps the old behaviour available as a window in hours. Worktrees, branches,
   commits and briefs on disk are untouched, and a run with a ticket, an open pull
   request, or anything uncommitted it owns is unaffected.
+
+## [0.35.0] — 2026-08-21
+
+### Added
+
+- **A card now says which tool is driving it, and the drawer says which model is
+  answering.** The board could tell you a run was working but not what was doing the work
+  — with three agent providers selectable, two of them launched into surfaces the Deck
+  cannot observe, a row of identical tiles hid the one fact that explains why two cards
+  behave differently. Each card's kind tile now carries a small brand mark on its corner —
+  Claude Code, GitHub Copilot or Cursor — repeated in the detail drawer's header, and the
+  tile's tooltip names both (`Task · Claude Code`). The provider is recorded on the run at
+  launch, from the value the launch already resolved, so it is the tool that actually
+  opened rather than whatever the setting says today; a live Claude Code session in a run
+  that predates the stamp is inferred, and that is the only inference anywhere in the
+  path. In the drawer, each row in **Agents** names the model that session is answering
+  with, read from the transcript the activity sweep already parses and trimmed to how a
+  card reads it (`claude-opus-5` → `opus-5`) — a mid-run model switch moves the label,
+  because the tail is what it reports.
+
+  Both facts are absent-tolerant by construction: a run with no recorded provider and no
+  live session shows no mark at all, and a session whose model cannot be read shows no
+  model line — the tile and the row look exactly as they did before. Nothing is
+  backfilled, so runs already on your board gain the mark as they relaunch.
+
+## [0.34.0] — 2026-08-21
+
+### Added
+
+- **Review with agent can ask where to open.** It has always opened a new window on
+  the review worktree, which is one window per review whether or not you wanted one.
+  `agentFlow.reviewOpenIn` now answers that question the same way `agentFlow.openIn`
+  answers it for a task you take — new window, this window, a `.code-workspace` you
+  already have, or a window you have open — from the same picker, in the same words.
+  It ships set to `new-window`, so a stock install keeps today's one-click launch and
+  nothing changes until you set it; `ask` raises the picker, right after the review-mode
+  question and still before the worktree is created, so an Escape leaves nothing behind.
+  The review runs in its own git worktree whichever destination you pick — that part was
+  never optional, since the seeded prompt checks the PR out — so a session landing
+  anywhere but a new window is handed the worktree's absolute path and told to work
+  there, and the launch toast says when it seeded this window rather than opening one.
+
+### Fixed
+
+- **Seeding into a window you already have open no longer clobbers its brief.** Any
+  launch aimed at an already-open folder window wrote a `.pick-task/TASK.md` into that
+  folder so the seeded prompt's relative `{brief}` would resolve — including over the
+  brief the agent working there was already reading from. A review now names its own
+  brief absolutely instead and writes nothing into the destination, which also leaves
+  that repo's `.git/info/exclude` alone.
 
 ## [0.33.8] — 2026-08-21
 

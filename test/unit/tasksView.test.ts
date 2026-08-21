@@ -155,6 +155,7 @@ const CFG = {
   agentSurface: "extension" as const,
   workspaceMode: "auto" as const,
   openIn: "new-window" as const,
+  reviewOpenIn: "new-window" as const,
   taskMode: "plan",
   promptModes: [{ id: "plan", label: "Plan", prompt: "P {key}" }],
   exploreMode: "ask",

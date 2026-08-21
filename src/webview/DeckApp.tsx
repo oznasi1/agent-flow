@@ -221,7 +221,7 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
           selected the card, and the title now lives in here. Only the key slot
           swallows the click, because the key is the interactive part. */}
       <div className="c-hd">
-        <CardKindIcon kind={kind} />
+        <CardKindIcon kind={kind} provider={r.provider} />
         <div className="hd-t">
           <div className="c-title" title={r.run.summary}>
             {local && inferredKey && <span className="chip">local</span>}

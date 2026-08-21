@@ -1,5 +1,6 @@
 import { PromptMode, ReviewRequest, ServiceRef } from "../../types";
 import type { OpenRequest, OpenResult } from "../workspace";
+import type { OpenArgs } from "../openTarget";
 
 /** A review's synthetic run key, and therefore its worktree directory name under
  * `<repo>/.claude/worktrees/`. Mirrors `explore-<slug>`: not a Jira key, and never
@@ -39,6 +40,11 @@ export interface LaunchReviewRequest {
   template: string;
   workspaceDir: string;
   seedAgent: boolean;
+  /** Where the session lands, already resolved by the caller from
+   *  `agentFlow.reviewOpenIn` (engine/openTarget). Absent means what every release
+   *  before it did: a new window on the review worktree. The worktree is NOT optional
+   *  either way — only the window is. */
+  openTarget?: OpenArgs;
 }
 
 export interface LaunchReviewDeps {
@@ -59,15 +65,16 @@ export interface LaunchReviewDeps {
  *  this is the only place the answer exists. Typed through `OpenResult` so this module
  *  keeps its distance from `config.ts` (which imports `vscode`). */
 export type LaunchReviewResult =
-  | { ok: true; runKey: string; provider: OpenResult["provider"] }
+  | { ok: true; runKey: string; provider: OpenResult["provider"]; seededInPlace?: true }
   | { ok: false; cancelled: true }
   | { ok: false; message: string };
 
 /** Open a teammate's PR in its own worktree with a review agent seeded. Always a
- * worktree and always one window: a review is a side errand, and it must not
- * disturb whatever the main checkout is in the middle of. */
+ * worktree — a review is a side errand, and it must not disturb whatever the main
+ * checkout is in the middle of — but not always its own window: `openTarget` can send
+ * the session to this window or one already open instead. */
 export async function launchReview(
-  { req, template, workspaceDir, seedAgent }: LaunchReviewRequest,
+  { req, template, workspaceDir, seedAgent, openTarget }: LaunchReviewRequest,
   deps: LaunchReviewDeps,
 ): Promise<LaunchReviewResult> {
   if (!req.localPath) {
@@ -96,6 +103,19 @@ export async function launchReview(
   if (services.some((s) => s.path === base.path)) {
     return { ok: false, message: `Couldn't create a git worktree in ${req.repoName} — not reviewing ${req.repoName}#${req.number} in your main checkout. The Agent Flow Deck output channel has the reason.` };
   }
+  // A destination other than a new window means the seeded session's cwd is NOT the
+  // worktree — it is whatever the destination window is rooted on, which for "this
+  // window" is typically the user's own main checkout. The shipped prompts are
+  // cwd-relative (`gh pr checkout {number}` / `glab mr checkout {number}`), so landing
+  // one there unnamed is the same branch hijack the refusal above exists to prevent.
+  // Prefixed rather than appended, and prefixed onto the RENDERED template so a user's
+  // own reviewRequestModes prompt gets the same guarantee without being rewritten.
+  const landsElsewhere =
+    !!openTarget && (openTarget.openIn === "current" || !!openTarget.existingFolder || !!openTarget.existingWorkspaceFile);
+  const rendered = renderReviewTemplate(template, { repo: req.repo, number: req.number, author: req.author });
+  const promptTemplate = landsElsewhere
+    ? `Work in \`${services[0].path}\` — the git worktree made for this review. Run every command below there.\n\n${rendered}`
+    : rendered;
   let result: OpenResult;
   try {
     result = await deps.openWorkspace({
@@ -104,10 +124,22 @@ export async function launchReview(
       planMd: `## Review: ${req.repo}#${req.number}\n\n${req.title}\n\nOpened by @${req.author}. ${req.url}`,
       descriptionText: "",
       services,
-      mode: "per-window",
-      promptTemplate: renderReviewTemplate(template, { repo: req.repo, number: req.number, author: req.author }),
+      mode: openTarget?.mode ?? "per-window",
+      promptTemplate,
       workspaceDir,
       seedAgent,
+      openIn: openTarget?.openIn,
+      currentWindow: openTarget?.currentWindow,
+      existingFolder: openTarget?.existingFolder,
+      existingWorkspaceFile: openTarget?.existingWorkspaceFile,
+      // Deliberately no `foldersToAdd`: a review's worktree is throwaway, and a saved
+      // .code-workspace is the user's own artifact. Absent leaves that file
+      // byte-identical (see OpenRequest.foldersToAdd).
+      //
+      // The review's brief lives in the worktree and is named absolutely, so a
+      // destination window that belongs to other work keeps the brief its own agent is
+      // reading — see the absoluteBrief arm in engine/workspace.
+      absoluteBrief: true,
     });
   } catch (e) {
     return { ok: false, message: `Couldn't open a review worktree for ${req.repoName}#${req.number}: ${e}` };
@@ -119,5 +151,8 @@ export async function launchReview(
   // this path's ordering (createWorktrees comes first by design, so a `gh pr checkout`
   // can never land in the main checkout) and a retry reuses it.
   if (result.cancelled) return { ok: false, cancelled: true };
-  return { ok: true, runKey: key, provider: result.provider };
+  // Present only when it happened: the caller's toast has to say so (no window opens on
+  // that path, so silence reads as nothing having happened), and an always-present
+  // `false` would make every other launch answer a question it wasn't asked.
+  return { ok: true, runKey: key, provider: result.provider, ...(result.seededInPlace ? { seededInPlace: true } : {}) };
 }

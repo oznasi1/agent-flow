@@ -211,6 +211,23 @@ export const DECK_CSS = `
   .av.k-explore { color: color-mix(in srgb, var(--c-progress) 78%, var(--vscode-foreground)); }
   .av.k-review  { color: color-mix(in srgb, var(--c-review) 78%, var(--vscode-foreground)); }
   .av.k-local   { color: var(--dim); }
+  /* The tool driving this card, on the kind tile's corner. Overflow has to open up for
+     it: the badge deliberately breaks the tile's edge, which is what makes it read as a
+     badge rather than as a second glyph crammed inside. */
+  .av { overflow: visible; }
+  .pv { position: absolute; right: -5px; bottom: -5px; width: 15px; height: 15px;
+    border-radius: 5px; display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--hair);
+    background: color-mix(in srgb, var(--vscode-foreground) 10%, var(--vscode-editor-background));
+    color: color-mix(in srgb, var(--vscode-foreground) 72%, transparent); }
+  .pv svg { display: block; }
+  /* Claude has a brand colour that survives both themes; Cursor and GitHub Copilot are
+     black-on-white marks and take the theme's own ink instead. The hue is safe here in a
+     way it would not be on the card's ground: the badge never changes with state, so it
+     cannot be read as the status that colour otherwise always means on a card. */
+  .pv.p-claude-code { color: var(--p-claude);
+    border-color: color-mix(in srgb, var(--p-claude) 34%, var(--hair));
+    background: color-mix(in srgb, var(--p-claude) 10%, var(--vscode-editor-background)); }
   .status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto;
     font-size: var(--t-body); color: var(--dim); font-variant-numeric: tabular-nums;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -291,6 +308,11 @@ export const DECK_CSS = `
   .ag-state.tone-attn { color: var(--c-attn); }
   .ag-age { margin-left: auto; flex: none; }
   .ag-open { flex: none; opacity: .7; }
+  /* An identifier, so mono — the same rule .ag-name and .key follow. Quieter than the
+     name: which session this is matters more than what is driving it. */
+  .ag-model { flex: none; font-family: var(--mono); font-size: var(--t-data);
+    color: color-mix(in srgb, var(--vscode-foreground) 62%, transparent); }
+  .ag-model .plus { margin-left: 3px; opacity: .6; }
 
   /* Still live: it moved off the card's old .c-foot into the drawer header,
      where it carries the run's tracker status (DeckDetail.tsx's .dd-hd .pill). */

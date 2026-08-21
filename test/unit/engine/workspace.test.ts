@@ -177,6 +177,24 @@ describe("openWorkspace — multiroot", () => {
     await openWorkspace(baseReq());
     expect(writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"))).toBeTruthy();
   });
+
+  it("stamps the provider it actually seeded onto the run record", async () => {
+    // The record must name the agent that was started, not the setting — under `ask`
+    // those differ, and the card's tool mark reads this field.
+    const res = await openWorkspace(baseReq({ seedAgent: true }));
+    const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
+    expect(runWrite).toBeTruthy();
+    expect(JSON.parse(String(runWrite![1])).provider).toBe(res.provider);
+  });
+
+  it("stamps no provider when the launch seeded no agent", async () => {
+    // Nothing is driving this run yet; a stamp here would put a tool mark on a card
+    // that never started an agent at all.
+    await openWorkspace(baseReq({ seedAgent: false }));
+    const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
+    expect(runWrite).toBeTruthy();
+    expect(JSON.parse(String(runWrite![1])).provider).toBeUndefined();
+  });
 });
 
 describe("openWorkspace — attachments", () => {
@@ -1904,6 +1922,62 @@ describe("openWorkspace — existing folder window", () => {
     expect(brief).toBeTruthy();
     expect(String(brief![1])).toContain("ASM-1");
   });
+
+  // `absoluteBrief` exists for **Review with agent**: a review's brief belongs in the
+  // review worktree, and the destination window is someone else's working repo. The
+  // fallback write above would land a second brief in it — clobbering the one the agent
+  // already working there was given, and pointing this launch's `{brief}` at it.
+  describe("absoluteBrief", () => {
+    const FALLBACK = "/other/open-window/.pick-task/TASK.md";
+
+    it("writes no brief into the destination folder", async () => {
+      await openWorkspace(baseReq({
+        services: mkRepos(["solo"]), existingFolder: "/other/open-window", absoluteBrief: true,
+      }));
+      expect(writeArg((p) => p === FALLBACK)).toBeUndefined();
+    });
+
+    it("points the seeded {brief} at the launch's own brief instead", async () => {
+      await openWorkspace(baseReq({
+        services: mkRepos(["solo"]), existingFolder: "/other/open-window", absoluteBrief: true,
+        promptTemplate: "brief at {brief}",
+      }));
+      const plan = JSON.parse(String(writeArg((p) => p.includes("/.agentflow/plans/"))![1]));
+      expect(plan.matches[0].prompt).toBe("brief at /repos/solo/.pick-task/TASK.md");
+    });
+
+    // Nothing of ours is written there any more, so there is nothing to exclude — and
+    // .git/info/exclude in a repo this launch does not own is not ours to append to.
+    it("leaves the destination repo's git exclude alone", async () => {
+      await openWorkspace(baseReq({
+        services: mkRepos(["solo"]), existingFolder: "/other/open-window", absoluteBrief: true,
+      }));
+      expect(appendFileSync.mock.calls.some((c) => String(c[0]).startsWith("/other/open-window"))).toBe(false);
+    });
+
+    it("still focuses the destination window and seeds a plan match for it", async () => {
+      const result = await openWorkspace(baseReq({
+        services: mkRepos(["solo"]), existingFolder: "/other/open-window", absoluteBrief: true,
+      }));
+      expect(result.opened).toEqual(["/other/open-window"]);
+      const plan = JSON.parse(String(writeArg((p) => p.includes("/.agentflow/plans/"))![1]));
+      expect(plan.matches[0].matchPath).toBe("/other/open-window");
+    });
+
+    it("changes nothing when the destination IS one of the repos", async () => {
+      // The per-repo brief loop already wrote this folder's brief; the flag has no
+      // second write to suppress, and the plan must still name it.
+      await openWorkspace(baseReq({
+        services: mkRepos(["account-service"]), existingFolder: "/repos/account-service",
+        absoluteBrief: true, promptTemplate: "brief at {brief}",
+      }));
+      expect(
+        writeFileSync.mock.calls.filter((c) => String(c[0]) === "/repos/account-service/.pick-task/TASK.md"),
+      ).toHaveLength(1);
+      const plan = JSON.parse(String(writeArg((p) => p.includes("/.agentflow/plans/"))![1]));
+      expect(plan.matches[0].prompt).toBe("brief at /repos/account-service/.pick-task/TASK.md");
+    });
+  });
 });
 
 describe("openWorkspace — keepExistingBrief", () => {
@@ -2027,6 +2101,21 @@ describe("openWorkspace — ask", () => {
     expect(window.showQuickPick).toHaveBeenCalledTimes(1);
     expect(result.provider).toBe("cursor");
     expect(planOf().provider).toBe("cursor");
+  });
+
+  it("stamps the run record with the picked agent, not the setting's resolution", async () => {
+    // `resolvedProvider("ask")` is pinned at "claude-code" regardless of what the
+    // picker returns, so this is the one arrangement where the picked agent and the
+    // setting's own resolution genuinely disagree. A stamp that reached for
+    // `resolvedProvider(setting)` instead of the picked `provider` would still read
+    // "claude-code" here and this is the only test that would catch it.
+    setConfig({ agentProvider: "ask" });
+    env.uriScheme = "cursor";
+    window.showQuickPick.mockResolvedValueOnce({ label: "Cursor", provider: "cursor" });
+    await openWorkspace(baseReq({ seedAgent: true }));
+    const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
+    expect(runWrite).toBeTruthy();
+    expect(JSON.parse(String(runWrite![1])).provider).toBe("cursor");
   });
 
   it("offers only the agents this host can run, under their product names", async () => {
