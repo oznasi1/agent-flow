@@ -244,7 +244,7 @@ git commit -m "feat(agileAccelerator): classify sf CLI failures into seam errors
 import { describe, expect, it, vi } from "vitest";
 import { SfCli, SfMissingError, SfRunner } from "../../../../src/tasks/agileAccelerator/cli";
 import { SfApiError } from "../../../../src/tasks/agileAccelerator/errors";
-import { TaskAuthError } from "../../../../src/tasks/provider";
+import { isTaskNetworkError, TaskAuthError } from "../../../../src/tasks/provider";
 
 const ok = (result: unknown): string => JSON.stringify({ status: 0, result });
 
@@ -298,11 +298,20 @@ describe("SfCli.query", () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it("marks a spawn-level ENOENT as a network-origin failure rather than auth", async () => {
+  it("treats a spawn-level ENOENT as a missing binary, not an auth problem", async () => {
     const run: SfRunner = async () => {
       throw Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" });
     };
     await expect(new SfCli("", run, () => "sf").query("SELECT Id FROM x")).rejects.toBeInstanceOf(SfMissingError);
+  });
+
+  it("marks a timeout as network-origin so views do not show a sign-in gate", async () => {
+    const run: SfRunner = async () => {
+      throw Object.assign(new Error("timed out"), { code: "ETIMEDOUT" });
+    };
+    const err = await new SfCli("", run, () => "sf").query("SELECT Id FROM x").catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(TaskAuthError);
+    expect(isTaskNetworkError(err)).toBe(true);
   });
 });
 
@@ -376,11 +385,23 @@ export const execSfRunner: SfRunner = (file, args, opts) =>
       { cwd: opts.cwd, timeout: opts.timeoutMs, maxBuffer: 16 * 1024 * 1024 },
       (err, stdout, stderr) => {
         const out = { stdout: stdout?.toString() ?? "", stderr: stderr?.toString() ?? "" };
-        // A spawn failure has no exit code at all. Anything with a code ran and
-        // complained, so its stdout is the envelope we want.
-        const code = (err as NodeJS.ErrnoException & { code?: unknown } | null)?.code;
-        if (err && (code === "ENOENT" || typeof code === "string")) {
-          reject(err);
+        const e = err as (NodeJS.ErrnoException & { killed?: boolean }) | null;
+
+        // A timeout is not a complaint from `sf` — there is no envelope to read,
+        // and the seam wants it marked as network-origin (spec §12). execFile
+        // reports it with `killed: true`, so surface it as ETIMEDOUT for exec()
+        // to mark. Checked FIRST: a killed process may also carry a numeric code.
+        if (e?.killed) {
+          reject(Object.assign(new Error("The Salesforce CLI timed out."), { code: "ETIMEDOUT" }));
+          return;
+        }
+
+        // A spawn failure carries a STRING code ("ENOENT"); a non-zero exit
+        // carries a NUMBER (the exit status). Only the former means the process
+        // never ran, so only the former rejects — the latter's stdout is the
+        // error envelope we need.
+        if (e && typeof e.code === "string") {
+          reject(e);
           return;
         }
         resolve({ ...out, code: err ? 1 : 0 });
@@ -486,7 +507,7 @@ export class SfCli {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run test/unit/tasks/agileAccelerator/cli.test.ts`
-Expected: PASS, 9 tests.
+Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -768,8 +789,13 @@ describe("buildListQuery", () => {
     expect(buildListQuery(full, "unassigned", opts)).toContain("agf__Assignee__c = null");
   });
 
-  it("omits an assignee clause entirely for the all lens", () => {
-    expect(buildListQuery(full, "all", opts)).not.toContain("Assignee");
+  it("omits any assignee FILTER for the all lens", () => {
+    // Careful: the SELECT legitimately contains agf__Assignee__r.Name for any
+    // schema that has the field, so this must assert the absence of a WHERE
+    // comparison, not the absence of the word "Assignee".
+    const q = buildListQuery(full, "all", opts);
+    expect(q).not.toContain("agf__Assignee__c =");
+    expect(q).not.toContain("agf__Assignee__r.Name =");
   });
 
   it("escapes a team name containing a quote", () => {
@@ -901,7 +927,7 @@ export function buildStatusQuery(schema: Schema, keys: readonly string[]): strin
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run test/unit/tasks/agileAccelerator/soql.test.ts`
-Expected: PASS, 15 tests.
+Expected: PASS, 16 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -1162,7 +1188,7 @@ export function toDetail(rec: SfRecord, schema: Schema, instanceUrl: string): Ta
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `npx vitest run test/unit/tasks/agileAccelerator/shape.test.ts`
-Expected: PASS, 15 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 5: Commit**
 
