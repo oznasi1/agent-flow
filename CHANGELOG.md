@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Hand a PR to an agent without opening its row.** The review queue's agent action lived
+  only inside an expanded row, so clearing a queue meant expanding each row, clicking, and
+  collapsing it again — three gestures for the one thing the queue exists to start. Every
+  row now carries the action on the line itself, as a play glyph in the product's own accent
+  at the end of the row, tooltipped **Review with agent**. It is the same accent the
+  expanded row's own button already uses, so the two read as one action reachable two ways
+  rather than as two different ones. A row whose review is already running shows the loading
+  mark instead and stops being clickable at all — the row says `reviewing` beside it, and a
+  second launch would be a second worktree for a PR mid-review. A row whose repo isn't
+  checked out locally keeps a live button, greyed rather than accented, and says why in its
+  tooltip; clicking it still explains what to do, exactly as the expanded button did.
+
 ## [0.33.7] — 2026-08-21
 
 ### Fixed

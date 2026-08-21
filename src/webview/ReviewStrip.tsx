@@ -10,6 +10,14 @@ function age(ms: number): string {
   return `${h}h`;
 }
 
+/** Why the agent action might not do what you expect. Both of the row's launch
+ * controls — the play button on the line and the labelled one inside the open
+ * row — carry it, so it lives here rather than being written out twice and left
+ * to drift. Neither control is disabled by it: the host explains on click. */
+function notCheckedOut(repoName: string): string {
+  return `${repoName} isn't checked out under your repos root — clicking will explain what to do`;
+}
+
 const CI_GLYPH: Record<ReviewRequest["ci"], { text: string; cls: string }> = {
   passing: { text: "✓", cls: "pr-ok" },
   failing: { text: "✗", cls: "pr-bad" },
@@ -75,31 +83,65 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
   const ci = CI_GLYPH[r.ci];
   return (
     <div className={`rv-row ${expanded ? "open" : ""}`}>
-      <button type="button" className="rv-line" onClick={() => onExpand(r.id)}>
-        <span className="rv-caret">{expanded ? "▾" : "▸"}</span>
-        {/* Fixed-width and ellipsised (see deckStyles) so every row's title starts
-            at the same x — repo names run from 7 to 20+ characters, and the ragged
-            left edge landed on the one field anybody actually reads. The title
-            attribute is what makes a truncated name recoverable. */}
-        <span className="rv-repo" title={r.repoName}>{r.repoName}</span>
-        <span className="rv-num">#{r.number}</span>
-        <span className="rv-title" title={r.title}>{r.title}</span>
-        {r.runKey && <span className="rv-running">reviewing</span>}
-        {r.isDraft && <span className="rv-draft">draft</span>}
-        <span className={`rv-size s-${sizeBucket(linesChanged(r))}`}>{sizeBucket(linesChanged(r))}</span>
-        {/* Three separate text nodes, not one interpolated string: each is then a
-            single queryable element, and the +/− keep the card chips' colours. The
-            wrapper makes the pair one fixed-width column — sized individually they
-            were two ragged ones, since "+3923 −1998" and "+106 −0" share no width. */}
-        <span className="rv-diff">
-          <span className="add">+{r.additions}</span>
-          <span className="del">−{r.deletions}</span>
-        </span>
-        <span className="rv-files">{r.changedFiles} files</span>
-        <span className={`rv-ci ${ci.cls}`}>{ci.text}</span>
-        <span className="rv-author" title={r.author}>@{r.author}</span>
-        <span className="rv-age">{age(r.createdAt)}</span>
-      </button>
+      {/* The head is its own line because the row also holds .rv-detail when it is
+          open: the two controls below have to sit side by side, and .rv-detail has
+          to sit under both of them, which one flex container cannot do. */}
+      <div className="rv-head">
+        <button type="button" className="rv-line" onClick={() => onExpand(r.id)}>
+          <span className="rv-caret">{expanded ? "▾" : "▸"}</span>
+          {/* Fixed-width and ellipsised (see deckStyles) so every row's title starts
+              at the same x — repo names run from 7 to 20+ characters, and the ragged
+              left edge landed on the one field anybody actually reads. The title
+              attribute is what makes a truncated name recoverable. */}
+          <span className="rv-repo" title={r.repoName}>{r.repoName}</span>
+          <span className="rv-num">#{r.number}</span>
+          <span className="rv-title" title={r.title}>{r.title}</span>
+          {r.runKey && <span className="rv-running">reviewing</span>}
+          {r.isDraft && <span className="rv-draft">draft</span>}
+          <span className={`rv-size s-${sizeBucket(linesChanged(r))}`}>{sizeBucket(linesChanged(r))}</span>
+          {/* Three separate text nodes, not one interpolated string: each is then a
+              single queryable element, and the +/− keep the card chips' colours. The
+              wrapper makes the pair one fixed-width column — sized individually they
+              were two ragged ones, since "+3923 −1998" and "+106 −0" share no width. */}
+          <span className="rv-diff">
+            <span className="add">+{r.additions}</span>
+            <span className="del">−{r.deletions}</span>
+          </span>
+          <span className="rv-files">{r.changedFiles} files</span>
+          <span className={`rv-ci ${ci.cls}`}>{ci.text}</span>
+          <span className="rv-author" title={r.author}>@{r.author}</span>
+          <span className="rv-age">{age(r.createdAt)}</span>
+        </button>
+        {/* The agent action, without opening the row. A SIBLING of .rv-line rather
+            than a child, because .rv-line is itself a button: nested, its click
+            would bubble straight into the row's own onExpand, so starting a review
+            would always also expand the row.
+
+            Mid-review the cell stops being a button rather than being a disabled
+            one: the row already says "reviewing" beside it, and a dimmed play glyph
+            reads as an action you could retry, which is not what a second worktree
+            for the same PR would be. */}
+        {r.runKey ? (
+          <span className="rv-go busy">
+            <LoadingMark size={12} />
+          </span>
+        ) : (
+          <button
+            type="button"
+            className={`rv-go${r.localPath ? "" : " cold"}`}
+            // The accessible name stays the bare action either way — the caveat is
+            // a caveat, not a different action. The title is where it goes, which
+            // is also where the expanded button already puts it.
+            aria-label="Review with agent"
+            title={r.localPath
+              ? "Review with agent"
+              : notCheckedOut(r.repoName)}
+            onClick={() => onLaunch(r.id)}
+          >
+            ▶
+          </button>
+        )}
+      </div>
       {expanded && (
         <div className="rv-detail">
           {/* The review decision and mergeability come from the row's own
@@ -148,7 +190,7 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
             <button
               type="button"
               className="act primary"
-              title={r.localPath ? `Review in a worktree of ${r.repoName}` : `${r.repoName} isn't checked out under your repos root — clicking will explain what to do`}
+              title={r.localPath ? `Review in a worktree of ${r.repoName}` : notCheckedOut(r.repoName)}
               onClick={() => onLaunch(r.id)}
             >
               ▶ Review with agent
@@ -194,11 +236,15 @@ function Skeleton(): JSX.Element {
     <div className="rv-rows">
       {[0, 1, 2].map((i) => (
         <div className="rv-row" key={i} aria-hidden="true">
-          <div className="rv-line rv-skel">
-            <span className="rv-caret">▸</span>
-            <span className="sk sk-repo" />
-            <span className="sk sk-title" />
-            <span className="sk sk-meta" />
+          {/* Same head wrapper as a real row, minus the play button: nothing has
+              been found yet, so there is nothing to launch a review of. */}
+          <div className="rv-head">
+            <div className="rv-line rv-skel">
+              <span className="rv-caret">▸</span>
+              <span className="sk sk-repo" />
+              <span className="sk sk-title" />
+              <span className="sk sk-meta" />
+            </div>
           </div>
         </div>
       ))}
