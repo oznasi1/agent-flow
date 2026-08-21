@@ -73,8 +73,11 @@ export function buildDetailQuery(schema: Schema, key: string): string {
 }
 
 /** One query for many keys — the reason `status()` can be polled per card
- *  without one process spawn per card. */
+ *  without one process spawn per card. Callers must pass at least one key: an
+ *  empty list would render `IN ()`, which is not valid SOQL, so this throws
+ *  rather than emit a malformed query or a silently match-nothing one. */
 export function buildStatusQuery(schema: Schema, keys: readonly string[]): string {
+  if (keys.length === 0) throw new RangeError("buildStatusQuery requires at least one key");
   const inList = keys.map(lit).join(",");
   const status = schema.has("Status__c") ? `, ${schema.field("Status__c")}` : "";
   return `SELECT Id, Name${status} FROM ${schema.object} WHERE Name IN (${inList}) LIMIT ${keys.length}`;

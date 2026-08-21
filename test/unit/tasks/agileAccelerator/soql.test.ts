@@ -102,4 +102,8 @@ describe("buildDetailQuery / buildStatusQuery", () => {
   it("escapes keys in the IN clause too", () => {
     expect(buildStatusQuery(full, ["W-1'"])).toContain("'W-1\\''");
   });
+
+  it("throws on an empty key list rather than emit IN ()", () => {
+    expect(() => buildStatusQuery(full, [])).toThrow(RangeError);
+  });
 });
