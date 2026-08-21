@@ -432,6 +432,11 @@ export const DECK_CSS = `
   .rv-sort button { border: 0; background: none; padding: 0; cursor: pointer;
     font-size: var(--t-body); color: var(--dim); }
   .rv-sort button.on { color: var(--vscode-foreground); text-decoration: underline; text-underline-offset: 2px; }
+  /* Same control language as sort — it sits beside it and does the same kind of job. */
+  .rv-select { display: inline-flex; align-items: center; gap: 5px; }
+  .rv-select button { border: 0; background: none; padding: 0; cursor: pointer;
+    font-size: var(--t-body); color: var(--dim); }
+  .rv-select button.on { color: var(--vscode-foreground); text-decoration: underline; text-underline-offset: 2px; }
   /* A queue we could not refresh is stale, not broken — attn, never danger. */
   .rv-note.warn { color: var(--c-attn); }
 
@@ -485,6 +490,11 @@ export const DECK_CSS = `
   .rv-go.cold { color: var(--dim); }
   .rv-go.cold:hover { background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
   .rv-caret { flex: none; width: 9px; color: var(--dim); }
+  /* Exactly the caret's width, so turning selection on doesn't shift every title
+     sideways — the columns below stay where they were. */
+  .rv-chk { flex: none; width: 9px; line-height: 1; color: var(--dim); font-size: var(--t-data); }
+  .rv-chk.on { color: var(--brand); }
+  .rv-row.picked .rv-head { background: color-mix(in srgb, var(--brand) 10%, transparent); }
   /* Identifiers and counts — the only mono on the row. The title and the handle
      beside them are English, and stay in the UI font. */
   /* flex: none + nowrap so a long title absorbs the squeeze through its own ellipsis
@@ -499,8 +509,27 @@ export const DECK_CSS = `
     color: var(--vscode-foreground); }
   .rv-draft { flex: none; font-size: var(--t-micro); color: var(--dim);
     border: 1px solid var(--hair); border-radius: var(--r-chip); padding: 0 4px; }
+  /* The agent finished and its findings are waiting — good news, so brand, not attn. */
+  .rv-ready { flex: none; font-size: var(--t-micro); color: var(--brand);
+    border: 1px solid color-mix(in srgb, var(--brand) 45%, transparent);
+    border-radius: var(--r-chip); padding: 0 4px; }
   .rv-files, .rv-author, .rv-age { flex: none; color: var(--dim); }
   .rv-running { flex: none; color: var(--c-progress); }
+
+  /* The batch bar, values carried over from the sidebar's own (src/webview/styles.ts)
+     so selecting rows here and selecting tasks there look like the same gesture. The
+     count and the shift-click hint are English, so no mono; the launch carries --brand,
+     and nothing here is red — an empty selection is disabled, not an error. */
+  .batch-bar { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+    border-top: 1px solid var(--hair); }
+  .batch-count { font-size: var(--t-micro); color: var(--dim); }
+  .batch-link { background: none; border: none; cursor: pointer; padding: 0;
+    font-size: var(--t-micro); color: var(--vscode-textLink-foreground); }
+  .batch-launch { margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+    font-size: var(--t-body); padding: 3px 11px; border-radius: 8px; border: none; cursor: pointer;
+    background: var(--brand); color: var(--brand-ink); }
+  .batch-launch:hover:not(:disabled) { background: color-mix(in srgb, var(--brand) 84%, var(--vscode-foreground)); }
+  .batch-launch:disabled { cursor: default; opacity: 0.45; }
 
   /* Fixed widths so the row's fields stack into real columns down the strip.
      Sized naturally they were ragged — "+3923 −1998" and "+106 −0" share no

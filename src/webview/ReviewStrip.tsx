@@ -63,11 +63,27 @@ export interface ReviewStripProps {
   onLoadDraft: (id: string) => void;
   onBody: (id: string, body: string) => void;
   onSubmit: (id: string, verb: ReviewVerb) => void;
+  /** Selection mode — the batch. Every one of these is optional, and absent means
+   *  the strip the Deck shipped before batches existed: no `select` control, no
+   *  checkboxes, no bar, and a row click that expands exactly as it always did.
+   *  `onSelectMode` is the one that gates the control, so a host that supplies
+   *  nothing renders byte-identically. */
+  selecting?: boolean;
+  selected?: string[];
+  onSelectMode?: (next: boolean) => void;
+  /** `shift` is passed through rather than resolved here: extending a range needs
+   *  the queue order and the last-toggled anchor, both of which live in the host. */
+  onToggle?: (id: string, shift: boolean) => void;
+  onSelectAll?: () => void;
+  onLaunchBatch?: () => void;
 }
 
-function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed, onExpand, onOpen, onLaunch, onLoadDraft, onBody, onSubmit }: {
+function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed, selecting, picked, onToggle, onExpand, onOpen, onLaunch, onLoadDraft, onBody, onSubmit }: {
   r: ReviewRequest;
   expanded: boolean;
+  selecting: boolean;
+  picked: boolean;
+  onToggle: (id: string, shift: boolean) => void;
   detail: ReviewDetail | null | undefined;
   reviewWrites: boolean;
   body: string;
@@ -82,13 +98,23 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
 }): JSX.Element {
   const ci = CI_GLYPH[r.ci];
   return (
-    <div className={`rv-row ${expanded ? "open" : ""}`}>
+    <div className={`rv-row ${expanded ? "open" : ""}${picked ? " picked" : ""}`}>
       {/* The head is its own line because the row also holds .rv-detail when it is
           open: the two controls below have to sit side by side, and .rv-detail has
           to sit under both of them, which one flex container cannot do. */}
       <div className="rv-head">
-        <button type="button" className="rv-line" onClick={() => onExpand(r.id)}>
-          <span className="rv-caret">{expanded ? "▾" : "▸"}</span>
+        {/* One button, two jobs: while selecting, the whole line is the checkbox.
+            .rv-line is itself a <button>, and a button cannot nest inside one, so the
+            box is a <span> and the click is branched here rather than added beside. */}
+        <button
+          type="button"
+          className="rv-line"
+          onClick={(e) => (selecting ? onToggle(r.id, e.shiftKey) : onExpand(r.id))}
+          aria-pressed={selecting ? picked : undefined}
+        >
+          {selecting
+            ? <span className={`rv-chk${picked ? " on" : ""}`}>{picked ? "✓" : ""}</span>
+            : <span className="rv-caret">{expanded ? "▾" : "▸"}</span>}
           {/* Fixed-width and ellipsised (see deckStyles) so every row's title starts
               at the same x — repo names run from 7 to 20+ characters, and the ragged
               left edge landed on the one field anybody actually reads. The title
@@ -98,6 +124,9 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
           <span className="rv-title" title={r.title}>{r.title}</span>
           {r.runKey && <span className="rv-running">reviewing</span>}
           {r.isDraft && <span className="rv-draft">draft</span>}
+          {/* The agent's findings, waiting to be read — NOT r.isDraft above, which is
+              the PR's own draft state on the forge. Open the row to load it. */}
+          {r.draftPath && <span className="rv-ready">review ready</span>}
           <span className={`rv-size s-${sizeBucket(linesChanged(r))}`}>{sizeBucket(linesChanged(r))}</span>
           {/* Three separate text nodes, not one interpolated string: each is then a
               single queryable element, and the +/− keep the card chips' colours. The
@@ -121,7 +150,10 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
             one: the row already says "reviewing" beside it, and a dimmed play glyph
             reads as an action you could retry, which is not what a second worktree
             for the same PR would be. */}
-        {r.runKey ? (
+        {/* Nothing launchable on the line while selecting: .rv-go starts ONE review and
+            the bar starts the batch, and two competing launches in one gesture is how a
+            half-built selection turns into a single review nobody asked for. */}
+        {selecting ? null : r.runKey ? (
           <span className="rv-go busy">
             <LoadingMark size={12} />
           </span>
@@ -142,7 +174,9 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
           </button>
         )}
       </div>
-      {expanded && (
+      {/* A row cannot be both open and being picked — the click that would have
+          expanded it is the click that selects it. */}
+      {expanded && !selecting && (
         <div className="rv-detail">
           {/* The review decision and mergeability come from the row's own
               search-level facts (`r`), not from `detail` — they render whether
@@ -261,6 +295,12 @@ function Skeleton(): JSX.Element {
 export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
   if (p.requests.length === 0 && !p.loading && !p.stale) return null;
   const shown = p.requests.length;
+  const selecting = !!p.selecting;
+  const picked = new Set(p.selected ?? []);
+  const n = p.requests.filter((r) => picked.has(r.id)).length;
+  // Only worth a header line in the plural: one row says "review ready" on itself,
+  // and the header is where you look when the queue is longer than the screen.
+  const ready = p.requests.filter((r) => r.draftPath).length;
   return (
     <div className="rv-strip">
       <div className="rv-hd">
@@ -278,9 +318,19 @@ export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
         {p.loading && <LoadingMark size={12} />}
         {p.issueCount > shown && <span className="rv-note">showing {shown} of {p.issueCount}</span>}
         {p.stale && shown > 0 && <span className="rv-note warn">couldn't refresh — showing the last result</span>}
+        {ready > 1 && <span className="rv-note">{ready} agent reviews ready</span>}
         <span className="sp" />
         {/* No sort control while loading: there is nothing to sort, and a live
             control over skeleton rows invites a click that changes nothing. */}
+        {/* Opt-in, and only when the host can act on it: the rows stay as dense as they
+            have always been until somebody asks to pick some. Styled as the sort
+            buttons are, because it is the same kind of control. */}
+        {!p.loading && p.onSelectMode && (
+          <span className="rv-select">
+            <button type="button" className={selecting ? "on" : ""} onClick={() => p.onSelectMode?.(!selecting)}>select</button>
+            <span className="rv-sep">·</span>
+          </span>
+        )}
         {!p.loading && (
           <span className="rv-sort">
             sort:{" "}
@@ -297,9 +347,32 @@ export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
             <Row key={r.id} r={r} expanded={p.expanded === r.id} detail={p.details[r.id]}
                  reviewWrites={p.reviewWrites} body={p.bodies[r.id] ?? ""}
                  submitting={!!p.submitting[r.id]} submitFailed={!!p.submitFailed[r.id]}
+                 selecting={selecting} picked={picked.has(r.id)}
+                 onToggle={(id, shift) => p.onToggle?.(id, shift)}
                  onExpand={p.onExpand} onOpen={p.onOpen} onLaunch={p.onLaunch} onLoadDraft={p.onLoadDraft}
                  onBody={p.onBody} onSubmit={p.onSubmit} />
           ))}
+        </div>
+      )}
+      {/* The batch's one action, under the rows it acts on. Mirrors the sidebar's own
+          batch bar so the two read as one feature. */}
+      {selecting && !p.collapsed && (
+        <div className="batch-bar">
+          <span className="batch-count">{n} selected · shift-click for a range</span>
+          <button type="button" className="batch-link" onClick={() => p.onSelectAll?.()}>Select all {shown}</button>
+          <button type="button" className="batch-link" onClick={() => p.onSelectMode?.(false)}>Done</button>
+          <button
+            type="button"
+            className="batch-launch"
+            disabled={n === 0}
+            // Unambiguous against .rv-go's own "Review with agent": both are on screen
+            // in the same strip, and one accessible name for two different actions is
+            // how a click lands on the wrong one.
+            aria-label={`Review the ${n} selected PR${n === 1 ? "" : "s"} with agents`}
+            onClick={() => p.onLaunchBatch?.()}
+          >
+            ▶ Review {n} with agent{n === 1 ? "" : "s"}
+          </button>
         </div>
       )}
     </div>
