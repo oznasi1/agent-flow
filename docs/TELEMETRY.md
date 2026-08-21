@@ -107,7 +107,7 @@ Suppressed entirely when `telemetry.telemetryLevel` is `"error"` (or lower).
 | `extension_installed` | *(none)* | Once per machine, on the first activation ever. |
 | `extension_activated` | `is_first_ever: boolean`, `has_jira_auth: boolean`, `is_configured: boolean`, plus the full settings snapshot (see [Settings snapshot](#settings-snapshot) below) | Every activation, after the sign-in check resolves. |
 | `command_invoked` | `command`: one of `"refresh"`, `"setup"`, `"doctor"`, `"signIn"`, `"signOut"`, `"takeTask"`, `"openDeck"`, `"openMarketplace"` | Whenever one of Agent Flow Deck's commands runs. |
-| `take_started` | `flow_id: string` (random UUID), `source`: `"card"` (a Deck card's Take button, expanded or not) \| `"command"` (the `agentFlow.takeTask` palette command) \| `"batch"`, `task_fp: string`, `inferred_count: number` | A Take begins. `source` is passed in by whichever entry point started the Take, not inferred. `"batch"` is reserved and unused today: `takeBatch` is not instrumented in Phase 1, so no event carries it. |
+| `take_started` | `flow_id: string` (random UUID), `source`: `"card"` (a Deck card's Take button, expanded or not) \| `"command"` (the `agentFlow.takeTask` palette command) \| `"batch"`, `task_fp: string`, `inferred_count: number` | A Take begins. `source` is passed in by whichever entry point started the Take, not inferred. `"batch"` is reserved and unused today: `takeBatch` is not instrumented in Phase 1, so no event carries it. Not every Take emits this: a card **or command** Take that becomes a fan-out or an orchestrator take — possible whenever `agentFlow.childWorktrees` is on, which it is by default — routes away before the funnel opens and emits no funnel events at all, so `take_started` volume falls as that setting is adopted rather than because Takes stopped; the settings snapshot's `child_worktrees` field is how to correlate the two. |
 | `take_prompt_mode_picked` | `flow_id`, `prompt_mode`: a stock mode id (`"plan"`, `"implementation"`, `"tdd"`, `"investigate"`, `"orchestrator"`, `"refine"`) or `"custom"`, `is_custom_mode: boolean` | The prompt mode for this Take is resolved. |
 | `take_destination_picked` | `flow_id`, `destination`: `"new"` \| `"current"` \| `"existing"` \| `"live-folder"`, `workspace_mode`: `"multiroot"` \| `"per-window"` | The open target for this Take is resolved. |
 | `take_repos_picked` | `flow_id`, `repo_count: number`, `repo_source`: `"preselected"` \| `"destination"` \| `"quickpick"`, `accepted_inference?: boolean`, `inferred_count: number` | The repo set for this Take is resolved. `"destination"` covers every destination that already has folders — an existing workspace, another open window, or this window. `accepted_inference` is present only for the `"quickpick"` source, where it's meaningful; omitted (not `false`) otherwise, so "inference never ran" stays distinguishable from a genuine rejection. |
@@ -170,24 +170,24 @@ entry point:
 
 ### Settings snapshot
 
-`extension_activated` includes a 38-field reduction of your configuration,
+`extension_activated` includes a 40-field reduction of your configuration,
 built by `settingsSnapshot()`. Every field is either a boolean, a count, or a
 value drawn from a fixed, shipped set of choices — never a user-authored string:
 
 | Field | Values |
 |---|---|
-| `workspace_mode`, `open_in`, `agent_provider`, `agent_surface`, `explore_mode`, `worktree`, `remote_control`, `default_filter`, `task_source` | One of that setting's shipped choices, or the literal string `"invalid"` |
+| `workspace_mode`, `open_in`, `agent_provider`, `agent_surface`, `explore_mode`, `worktree`, `remote_control`, `default_filter`, `task_source`, `forge` | One of that setting's shipped choices, or the literal string `"invalid"` |
 | `task_mode`, `review_mode` | `"ask"`, `"stock"` (pinned to a shipped mode), or `"custom"` |
-| `seed_agent`, `filters_size`, `filters_status`, `filters_repo`, `filters_search`, `pr_review_auto_fix`, `pr_facts`, `review_requests`, `open_agents`, `review_writes`, `orchestrator`, `stamp_label_on_write`, `track_open_windows` | `true` / `false` |
+| `seed_agent`, `filters_size`, `filters_status`, `filters_repo`, `filters_search`, `pr_review_auto_fix`, `pr_facts`, `review_requests`, `open_agents`, `review_writes`, `orchestrator`, `child_worktrees`, `stamp_label_on_write`, `track_open_windows` | `true` / `false` |
 | `batch_confirm_threshold`, `repo_blocklist_count`, `commands_count`, `prompt_modes_count`, `review_modes_count`, `prompt_modes_overridden`, `prompt_modes_custom`, `prompt_modes_hidden`, `review_modes_overridden`, `review_modes_custom`, `review_modes_hidden` | Numbers |
 | `explore_prompts_customized`, `environments_customized`, `pr_review_prompt_customized` | `true` / `false` — *whether* the corresponding user-authored text was changed from the shipped default, never the text itself |
 
-**The `"invalid"` sentinel.** Nine of the fields above (`workspace_mode`,
+**The `"invalid"` sentinel.** Ten of the fields above (`workspace_mode`,
 `open_in`, `agent_provider`, `agent_surface`, `explore_mode`, `worktree`,
-`remote_control`, `default_filter`, `task_source`) can report the literal
+`remote_control`, `default_filter`, `task_source`, `forge`) can report the literal
 string `"invalid"` instead of a real value. VS Code's settings UI only ever
 offers a valid choice for these — the shipped enum for most of them, or, for
-`task_source`, whichever task connectors are actually registered — but a
+`task_source`/`forge`, whichever task connectors/forges are actually registered — but a
 hand-edited `settings.json` can hold anything. When it does, the raw value is
 **never** transmitted and never silently mapped to a real default (e.g.
 `"auto"`) either — `"invalid"` marks it as "this install has an unrecognised

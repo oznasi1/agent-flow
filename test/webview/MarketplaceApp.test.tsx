@@ -314,6 +314,14 @@ describe("MarketplaceApp", () => {
     host({ type: "mkt:loading", loading: true });
     expect(screen.getByText(/scanning/i)).toBeInTheDocument();
   });
+
+  it("runs the animated logo beside the scanning line, and stops when the scan ends", () => {
+    const { container } = render(<MarketplaceApp />);
+    host({ type: "mkt:loading", loading: true });
+    expect(container.querySelector("svg.lmark")).toBeInTheDocument();
+    host({ type: "mkt:loading", loading: false });
+    expect(container.querySelector("svg.lmark")).not.toBeInTheDocument();
+  });
 });
 
 describe("MarketplaceApp plugin filter", () => {

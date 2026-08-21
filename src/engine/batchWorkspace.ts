@@ -3,11 +3,13 @@ import * as path from "path";
 import { Run, ServiceRef } from "../types";
 import { extractFileHints, resolveFilesInRepo, mention } from "./files";
 import { ensureGitExcluded } from "./gitExclude";
+import { folderName } from "./worktree";
 import { gitState } from "./git";
 import { writeRun, defaultRunsDir } from "./runs";
 import {
   BRIEF_DIR,
   BRIEF_FILE,
+  PlanFile,
   TicketRef,
   agentPrompt,
   briefMarkdown,
@@ -25,6 +27,9 @@ export interface BatchTask {
   descriptionText: string;
   /** Already resolved to per-task worktrees by the caller. */
   services: ServiceRef[];
+  /** The parent ticket this task was fanned out from, when it was. Reaches the run
+   *  record unchanged; see `Run.parentKey`. */
+  parentKey?: string;
 }
 
 export type SharedTarget =
@@ -45,6 +50,14 @@ export interface SharedOpenRequest {
   /** Folders the user approved adding to an `existing` target — the ONLY thing merged.
    *  Absent or empty leaves that workspace file byte-identical. */
   foldersToAdd?: { name: string; path: string }[];
+  /** The agent the caller resolved for this batch, stamped onto every plan file. Set
+   *  ONLY under `agentFlow.agentProvider: "ask"`, where the target window has no
+   *  preference left to read and would otherwise degrade the whole batch to Claude
+   *  Code — seeding an agent the user did not pick, minutes after they picked one.
+   *  Absent under a fixed setting, so the plan files stay byte-identical and the target
+   *  window keeps reading the setting live at seed time. Exactly the split
+   *  `openWorkspace` makes with its own `planProvider`. */
+  provider?: PlanFile["provider"];
 }
 
 export interface SharedOpenResult {
@@ -56,13 +69,6 @@ export interface SharedOpenResult {
   unaddedFolders?: string[]; // live-folder: roots VS Code can't inject remotely
   seeded: number; // plan files written
   seededInPlace?: boolean; // "current": this window was seeded as-is; nothing was opened
-}
-
-/** A task's worktree as a workspace folder. The key qualifier is load-bearing: two
- * tasks in one repo would otherwise present as two identically-named roots, and the
- * folder name is what an `@mention` resolves against. */
-export function folderName(key: string, repo: string): string {
-  return `${key}-${repo}`;
 }
 
 /**
@@ -101,7 +107,7 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
     }
   }
 
-  // 2 — every worktree as a workspace folder, key-qualified.
+  // 2 — every worktree as a workspace folder, named `<repo>-<KEY>`.
   const folders = tasks.flatMap((t) =>
     t.services.map((s) => ({ name: folderName(t.ticket.key, s.name), path: s.path })),
   );
@@ -173,7 +179,14 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
       // `.pick-task/TASK.md`, so a relative reference names no file in particular.
       const prompt = agentPrompt(t.ticket, mentions, promptTemplate, briefPathFor.get(t.ticket.key));
       // Remote Control is never offered here — one clipboard can't serve N sessions.
-      writePlanFile({ key: t.ticket.key, createdAt, seedAgent: true, seq: i, matches: [{ matchPath, prompt }] });
+      // The pin is spread rather than written as `provider: req.provider`, so a batch
+      // under a fixed setting produces the plan file it always produced: absent is how
+      // "read the setting live" is spelled, and `undefined` would serialize as a
+      // missing key anyway only by accident of JSON.stringify.
+      writePlanFile({
+        key: t.ticket.key, createdAt, seedAgent: true, seq: i, matches: [{ matchPath, prompt }],
+        ...(req.provider ? { provider: req.provider } : {}),
+      });
     });
   }
 
@@ -192,6 +205,7 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
         branch: gitState(s.name, s.path).branch ?? undefined,
       })),
       briefPaths: briefs.filter((b) => b.key === t.ticket.key).map((b) => b.path),
+      ...(t.parentKey ? { parentKey: t.parentKey } : {}),
     };
     try {
       writeRun(defaultRunsDir(), run);

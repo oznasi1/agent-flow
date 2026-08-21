@@ -13,6 +13,17 @@ describe("FilePreview", () => {
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
   });
 
+  it("marks the in-flight read with the animated logo, and drops it once the file lands", () => {
+    const { container, rerender } = render(
+      <FilePreview file="/a/SKILL.md" cached={undefined} fence="" onOpen={vi.fn()} />,
+    );
+    expect(container.querySelector("svg.lmark")).toBeInTheDocument();
+    rerender(
+      <FilePreview file="/a/SKILL.md" cached={{ text: "body", truncated: false }} fence="" onOpen={vi.fn()} />,
+    );
+    expect(container.querySelector("svg.lmark")).not.toBeInTheDocument();
+  });
+
   it("renders the file once it arrives", () => {
     const { container } = render(
       <FilePreview file="/a/SKILL.md" cached={{ text: "# Build\n\nbody", truncated: false }} fence="" onOpen={vi.fn()} />,

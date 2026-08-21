@@ -1,5 +1,6 @@
 import { JiraAuth } from "./auth";
 import { buildJql, stripPriorityOrder, stripSprint } from "./jql";
+import { childrenJql } from "./childJql";
 import { parseJiraError } from "./errors";
 import { TransitionFieldMeta } from "./transitionFields";
 import { Filter, Task, Size } from "../../types";
@@ -40,6 +41,9 @@ const cachedComponents = new Map<string, { names: string[]; at: number }>();
 
 const LIST_FIELDS = ["summary", "status", "priority", "assignee", "labels", "components", "updated", "timeoriginalestimate", "issuetype"];
 const DETAIL_FIELDS = ["summary", "description", "labels", "components", "priority", "status", "assignee"];
+/** All a child row needs: what to call it, what kind it is, whether it is already
+ *  done. Deliberately narrower than LIST_FIELDS — a tree probe runs once per node. */
+const CHILD_FIELDS = ["summary", "issuetype", "status"];
 
 /** A workflow transition plus the fields its screen declares — the metadata that
  *  tells us what to prompt for before attempting the write. */
@@ -60,6 +64,16 @@ export interface TaskDetail {
   url: string;
   status: string | null; // status name, e.g. "In Review"
   statusCategory: string | null; // "new" | "indeterminate" | "done"
+}
+
+/** One child of a ticket, one level down. Lives here rather than in `../provider`
+ *  for the same reason `TaskDetail` does: the connector owns the shape it produces,
+ *  and `provider.ts` re-exports it type-only. */
+export interface ChildRef {
+  key: string;
+  summary: string;
+  type: string;
+  statusCategory: "new" | "indeterminate" | "done" | null;
 }
 
 export class JiraClient {
@@ -283,6 +297,42 @@ export class JiraClient {
       status: f.status?.name ?? null,
       statusCategory: f.status?.statusCategory?.key ?? null,
     };
+  }
+
+  /** The children of one issue, one level down. The first candidate JQL with a
+   *  non-empty answer wins (see `childrenJql` for why non-empty and not merely
+   *  non-failing); a rejected candidate moves to the next; every candidate answering
+   *  empty means "no children", which is the common case and not an error. */
+  async childrenOf(key: string): Promise<ChildRef[]> {
+    let answered = false;
+    let lastErr: unknown;
+    for (const jql of childrenJql(key)) {
+      try {
+        const data = await this.searchJql(jql, CHILD_FIELDS, 100);
+        answered = true;
+        const kids: ChildRef[] = (data?.issues ?? []).map((i: any) => ({
+          key: i.key,
+          summary: i.fields?.summary ?? "",
+          type: i.fields?.issuetype?.name ?? "",
+          // Same boundary cast `normalize` documents: a real site's category key is
+          // not guaranteed to be one of the three the union names.
+          statusCategory: (i.fields?.status?.statusCategory?.key ?? null) as ChildRef["statusCategory"],
+        }));
+        if (kids.length) return kids;
+      } catch (e) {
+        if (e instanceof JiraAuthError) throw e;
+        lastErr = e;
+      }
+    }
+    // An authoritative empty answer is final: a site that answered "no children" via
+    // the modern `parent` spelling has told us what we asked, and a later candidate
+    // failing because its field does not exist there is not a failure to read the tree.
+    // `Epic Link` is a company-managed Jira Software custom field, so on a team-managed
+    // project — the default for new Jira Cloud projects — that candidate 400s for every
+    // ordinary childless ticket. Throwing on it would make the caller announce a failed
+    // read on the single most common path in the product.
+    if (!answered && lastErr) throw lastErr;
+    return [];
   }
 
   /** Lightweight status lookup for the Deck — just the fields a card needs. */

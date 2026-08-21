@@ -116,10 +116,21 @@ export function makeTerminal() {
   };
 }
 
+/** The two arguments the real `withProgress` hands its task. Separate factories so a
+ *  test that wants a cancelled token can build one without reaching into `window`. */
+export function noopProgress() {
+  return { report: vi.fn((_v: { message?: string; increment?: number }) => {}) };
+}
+export function liveToken(cancelled = false) {
+  return { isCancellationRequested: cancelled, onCancellationRequested: vi.fn(() => ({ dispose: vi.fn() })) };
+}
+
 export const window = {
   showInputBox: vi.fn(async (_opts?: unknown): Promise<string | undefined> => undefined),
   showQuickPick: vi.fn(async (_items?: unknown, _opts?: unknown): Promise<any> => undefined),
-  withProgress: vi.fn(async (_opts: unknown, task: (...a: any[]) => any) => task()),
+  // Faithful to the real signature: the task is handed a progress reporter and a
+  // never-cancelled token. A test that needs a cancel overrides the implementation.
+  withProgress: vi.fn(async (_opts: unknown, task: (...a: any[]) => any) => task(noopProgress(), liveToken())),
   showInformationMessage: vi.fn(async (..._a: unknown[]): Promise<string | undefined> => undefined),
   showWarningMessage: vi.fn(async (..._a: unknown[]): Promise<string | undefined> => undefined),
   showErrorMessage: vi.fn(async (..._a: unknown[]): Promise<string | undefined> => undefined),
@@ -133,6 +144,9 @@ export const window = {
 };
 
 export const ViewColumn = { Active: -1, Beside: -2, One: 1 } as const;
+
+// The real enum's values, so a call site that passes one through is testable as itself.
+export const ProgressLocation = { SourceControl: 1, Window: 10, Notification: 15 } as const;
 
 export const commands = {
   executeCommand: vi.fn(async (..._a: unknown[]): Promise<any> => undefined),
@@ -300,7 +314,7 @@ export function resetVscodeMocks(): void {
 
   window.showInputBox.mockReset().mockResolvedValue(undefined);
   window.showQuickPick.mockReset().mockResolvedValue(undefined);
-  window.withProgress.mockReset().mockImplementation(async (_opts: unknown, task: (...a: any[]) => any) => task());
+  window.withProgress.mockReset().mockImplementation(async (_opts: unknown, task: (...a: any[]) => any) => task(noopProgress(), liveToken()));
   window.showInformationMessage.mockReset().mockResolvedValue(undefined);
   window.showWarningMessage.mockReset().mockResolvedValue(undefined);
   window.showErrorMessage.mockReset().mockResolvedValue(undefined);

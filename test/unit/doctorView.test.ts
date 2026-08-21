@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { commands, env, extensions, window, Uri } from "../_mocks/vscode";
-import { collectInputs, showDoctor, probeClaudeExtension, probeCopilotChat, type DoctorDeps } from "../../src/doctorView";
+import { collectInputs, showDoctor, probeClaudeExtension, probeChatCommand, type DoctorDeps } from "../../src/doctorView";
 import { formatReport, runChecks } from "../../src/engine/doctor";
 
 /** Every seam healthy. Each test spoils exactly one. */
@@ -24,12 +24,13 @@ const deps = (over: Partial<DoctorDeps> = {}): DoctorDeps => ({
     scope: { ok: true, name: "Assembly" },
   }),
   which: (bin) => `/usr/bin/${bin}`,
-  gh: async () => null,
+  forge: () => ({ label: "GitHub", cli: "gh", installUrl: "https://cli.github.com" }),
+  forgeProbe: async () => null,
   statDir: () => ({ exists: true, writable: true }),
   repos: () => ({ repos: 3, gitRepos: 3 }),
   claudeExtension: () => ({ installed: true, version: "2.1.220" }),
   claudeProjectsReadable: () => true,
-  copilotChat: async () => ({ available: false }),
+  chatCommand: async () => ({ available: false }),
   runs: () => 4,
   log: () => undefined,
   ...over,
@@ -76,15 +77,21 @@ describe("collectInputs — local and tooling probes", () => {
 
   it("names where gh was found — the bare-PATH case", async () => {
     const i = await collectInputs(deps({ which: (b) => (b === "gh" ? "/opt/homebrew/bin/gh" : "/usr/bin/git") }));
-    expect(i.gh).toEqual({ gap: null, foundAt: "/opt/homebrew/bin/gh" });
+    expect(i.forge).toEqual({
+      label: "GitHub",
+      cli: "gh",
+      installUrl: "https://cli.github.com",
+      gap: null,
+      foundAt: "/opt/homebrew/bin/gh",
+    });
   });
 
   it("does not run the gh probe when PR facts are off", async () => {
-    const gh = vi.fn();
+    const forgeProbe = vi.fn();
     const cfg = deps().config;
-    const i = await collectInputs(deps({ config: () => ({ ...cfg(), prFacts: false }), gh }));
-    expect(gh).not.toHaveBeenCalled();
-    expect(i.gh).toBeUndefined();
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), prFacts: false }), forgeProbe }));
+    expect(forgeProbe).not.toHaveBeenCalled();
+    expect(i.forge.gap).toBeNull();
     expect(i.prFacts).toBe(false);
   });
 
@@ -105,14 +112,47 @@ describe("collectInputs — the agent provider", () => {
   });
 
   it("probes Copilot Chat only when the provider is copilot", async () => {
-    const copilotChat = vi.fn(async () => ({ available: true }));
+    const chatCommand = vi.fn(async () => ({ available: true }));
     const cfg = deps().config;
-    await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "claude-code" }), copilotChat }));
-    expect(copilotChat).not.toHaveBeenCalled();
+    await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "claude-code" }), chatCommand }));
+    expect(chatCommand).not.toHaveBeenCalled();
 
-    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "copilot" }), copilotChat }));
-    expect(copilotChat).toHaveBeenCalled();
-    expect(i.copilotChat).toEqual({ available: true });
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "copilot" }), chatCommand }));
+    expect(chatCommand).toHaveBeenCalled();
+    expect(i.chatCommand).toEqual({ available: true });
+  });
+
+  it("also probes the chat command under cursor", async () => {
+    const chatCommand = vi.fn(async () => ({ available: true }));
+    const cfg = deps().config;
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "cursor" }), chatCommand }));
+    expect(chatCommand).toHaveBeenCalled();
+    expect(i.chatCommand).toEqual({ available: true });
+  });
+
+  it("forwards ask unresolved — runChecks decides what that means, not collectInputs", async () => {
+    const cfg = deps().config;
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "ask" }) }));
+    expect(i.agentProvider).toBe("ask");
+  });
+
+  it("also probes the chat command under ask — any host agent could be the one that runs", async () => {
+    const chatCommand = vi.fn(async () => ({ available: true }));
+    const cfg = deps().config;
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "ask" }), chatCommand }));
+    expect(chatCommand).toHaveBeenCalled();
+    expect(i.chatCommand).toEqual({ available: true });
+  });
+
+  it("supplies the host's agent providers so runChecks can show ask's full set", async () => {
+    env.uriScheme = "vscode";
+    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "copilot"]);
+
+    env.uriScheme = "cursor";
+    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "cursor"]);
+
+    env.uriScheme = "windsurf";
+    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code"]);
   });
 });
 
@@ -169,7 +209,7 @@ describe("showDoctor — the QuickPick", () => {
 
   it("opens the install page externally for a gh gap", async () => {
     window.showQuickPick.mockImplementation(async (items: any) => items[0]);
-    await showDoctor(deps({ gh: async () => ({ kind: "missing", detail: "spawn ENOENT" }) }));
+    await showDoctor(deps({ forgeProbe: async () => ({ kind: "missing", detail: "spawn ENOENT" }) }));
     expect(Uri.parse).toHaveBeenCalledWith("https://cli.github.com");
     expect(env.openExternal).toHaveBeenCalled();
   });
@@ -207,19 +247,19 @@ describe("probeClaudeExtension", () => {
   });
 });
 
-describe("probeCopilotChat", () => {
+describe("probeChatCommand", () => {
   it("is available when the chat-open command is registered", async () => {
     commands.getCommands.mockResolvedValue(["workbench.action.chat.open", "other.command"]);
-    await expect(probeCopilotChat()).resolves.toEqual({ available: true });
+    await expect(probeChatCommand()).resolves.toEqual({ available: true });
   });
 
   it("is unavailable when no chat command is registered — an extension id would false-negative here", async () => {
     commands.getCommands.mockResolvedValue(["some.other.command"]);
-    await expect(probeCopilotChat()).resolves.toEqual({ available: false });
+    await expect(probeChatCommand()).resolves.toEqual({ available: false });
   });
 
   it("treats a failed command lookup as unavailable rather than throwing", async () => {
     commands.getCommands.mockRejectedValue(new Error("boom"));
-    await expect(probeCopilotChat()).resolves.toEqual({ available: false });
+    await expect(probeChatCommand()).resolves.toEqual({ available: false });
   });
 });

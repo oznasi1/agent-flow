@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { openSharedWorkspace, folderName, type SharedOpenRequest } from "../../../src/engine/batchWorkspace";
+import { openSharedWorkspace, type SharedOpenRequest } from "../../../src/engine/batchWorkspace";
 import { commands } from "../../_mocks/vscode";
 
 vi.mock("fs");
@@ -64,12 +64,12 @@ describe("openSharedWorkspace", () => {
     expect(result.briefs).toHaveLength(2);
   });
 
-  it("names each folder <KEY>-<repo> so two worktrees of one repo stay distinct", async () => {
+  it("names each folder <repo>-<KEY> so two worktrees of one repo stay distinct", async () => {
     await openSharedWorkspace(baseReq());
     const ws = JSON.parse(String(writes((p) => p.endsWith(".code-workspace"))[0][1]));
     expect(ws.folders).toEqual([
-      { name: "ASM-1-api", path: "/repos/api/.claude/worktrees/ASM-1" },
-      { name: "ASM-2-api", path: "/repos/api/.claude/worktrees/ASM-2" },
+      { name: "api-ASM-1", path: "/repos/api/.claude/worktrees/ASM-1" },
+      { name: "api-ASM-2", path: "/repos/api/.claude/worktrees/ASM-2" },
     ]);
   });
 
@@ -89,6 +89,26 @@ describe("openSharedWorkspace", () => {
     expect(runs.map((r) => r.key)).toEqual(["ASM-1", "ASM-2"]);
     expect(runs.every((r) => r.workspaceFile === "/ws/ASM-1+1.code-workspace")).toBe(true);
     expect(runs.every((r) => r.mode === "multiroot")).toBe(true);
+  });
+
+  // ── Task 6: the batch's resolved agent ────────────────────────────────────
+  it("stamps the caller's resolved agent onto every plan file", async () => {
+    // The shared path never calls openWorkspace, so nothing else can carry the answer
+    // to the target window: without this the plan files say nothing, that window falls
+    // back to reading `agentProvider` live, and under `ask` it degrades the whole
+    // batch to Claude Code — an agent the user did not pick, minutes after picking one.
+    await openSharedWorkspace(baseReq({ provider: "cursor" }));
+    const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
+    expect(plans.map((p) => p.provider)).toEqual(["cursor", "cursor"]);
+  });
+
+  it("writes no provider at all when the caller sends none", async () => {
+    // Inertness: under a fixed setting the caller sends nothing, and the plan file has
+    // to stay byte-identical — absent is how "read the setting live at seed time" is
+    // spelled, and it is what every plan file said before `ask` existed.
+    await openSharedWorkspace(baseReq());
+    const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
+    expect(plans.every((p) => !("provider" in p))).toBe(true);
   });
 
   it("seeds each prompt with that task's absolute brief path", async () => {
@@ -113,7 +133,7 @@ describe("openSharedWorkspace", () => {
       }),
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/plans/"))[0][1]));
-    expect(plan.matches[0].prompt).toContain("@ASM-1-api/src/foo.ts");
+    expect(plan.matches[0].prompt).toContain("@api-ASM-1/src/foo.ts");
   });
 
   it("writes no plan file when seeding is off", async () => {
@@ -132,7 +152,7 @@ describe("openSharedWorkspace", () => {
   it("adds no folders to a live folder window and reports them unadded", async () => {
     const result = await openSharedWorkspace(baseReq({ target: { kind: "live-folder", folder: "/repos/web" } }));
     expect(result.workspaceFile).toBeUndefined();
-    expect(result.unaddedFolders).toEqual(["ASM-1-api", "ASM-2-api"]);
+    expect(result.unaddedFolders).toEqual(["api-ASM-1", "api-ASM-2"]);
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
     expect(plans.every((p) => p.matches[0].matchPath === "/repos/web")).toBe(true);
   });
@@ -154,7 +174,7 @@ describe("openSharedWorkspace", () => {
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/plans/"))[0][1]));
     expect(plan.matches[0].prompt).toContain("@src/foo.ts");
-    expect(plan.matches[0].prompt).not.toContain("@ASM-1-api/src/foo.ts");
+    expect(plan.matches[0].prompt).not.toContain("@api-ASM-1/src/foo.ts");
   });
 
   it("bares the mentions when merging into an existing workspace failed", async () => {
@@ -174,7 +194,7 @@ describe("openSharedWorkspace", () => {
       }),
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/plans/"))[0][1]));
-    expect(plan.matches[0].prompt).not.toContain("@ASM-1-api/src/foo.ts");
+    expect(plan.matches[0].prompt).not.toContain("@api-ASM-1/src/foo.ts");
   });
 
   // The plan-dir watcher coalesces events 300ms after the last one, so an N-plan batch
@@ -299,12 +319,12 @@ describe("openSharedWorkspace — existing workspace", () => {
       baseReq({
         target: { kind: "existing", file: "/ws/team.code-workspace" },
         foldersToAdd: [
-          { name: "ASM-1-infra", path: "/repos/infra/.claude/worktrees/ASM-1" },
-          { name: "ASM-2-infra", path: "/repos/infra/.claude/worktrees/ASM-2" },
+          { name: "infra-ASM-1", path: "/repos/infra/.claude/worktrees/ASM-1" },
+          { name: "infra-ASM-2", path: "/repos/infra/.claude/worktrees/ASM-2" },
         ],
       }),
     );
-    expect(result.mergedFolders).toEqual(["ASM-1-infra", "ASM-2-infra"]);
+    expect(result.mergedFolders).toEqual(["infra-ASM-1", "infra-ASM-2"]);
     expect(result.workspaceFile).toBe("/ws/team.code-workspace");
     // No new batch workspace file is written when the destination is an existing one.
     expect(writes((p) => p.endsWith("ASM-1+1.code-workspace"))).toHaveLength(0);
@@ -331,9 +351,49 @@ describe("openSharedWorkspace — existing workspace", () => {
   });
 });
 
-describe("folderName", () => {
-  it("key-qualifies so two tasks in one repo stay distinct roots", () => {
-    expect(folderName("ASM-1", "api")).toBe("ASM-1-api");
-    expect(folderName("ASM-2", "api")).toBe("ASM-2-api");
+describe("openSharedWorkspace: parentKey on each run", () => {
+  const lastWrittenRun = () => {
+    const runWrites = writes((p) => p.includes("/runs/"));
+    expect(runWrites.length).toBeGreaterThan(0);
+    return JSON.parse(String(runWrites[runWrites.length - 1][1]));
+  };
+
+  it("stamps the parentKey a batch task carries", async () => {
+    await openSharedWorkspace(
+      baseReq({
+        tasks: [
+          {
+            ticket: { key: "ASM-2", summary: "two", url: "https://jira/ASM-2" },
+            planMd: "## Plan\n\nb",
+            descriptionText: "",
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-2", isGit: true }],
+            parentKey: "ASM-1",
+          },
+        ],
+      }),
+    );
+    expect(lastWrittenRun().parentKey).toBe("ASM-1");
+  });
+
+  // `in` rather than `toBeUndefined()`: a key that exists holding `undefined` would
+  // satisfy the latter. Note the limit of this assertion — `writeRun` serialises with
+  // JSON.stringify, which drops undefined-valued keys, so it cannot distinguish the
+  // conditional spread from an unconditional `parentKey: t.parentKey`. What it DOES
+  // catch is a falsy default (`?? ""`, `|| null`), which is how this realistically
+  // regresses: those land in the JSON and a reader then sees a run whose parent is "".
+  it("omits the field for an ordinary batch", async () => {
+    await openSharedWorkspace(
+      baseReq({
+        tasks: [
+          {
+            ticket: { key: "ASM-2", summary: "two", url: "https://jira/ASM-2" },
+            planMd: "## Plan\n\nb",
+            descriptionText: "",
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-2", isGit: true }],
+          },
+        ],
+      }),
+    );
+    expect("parentKey" in lastWrittenRun()).toBe(false);
   });
 });

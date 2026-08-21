@@ -16,12 +16,13 @@ const healthy = (): DoctorInputs => ({
   reposRoot: { path: "/home/j/projects", exists: true, repos: 12, gitRepos: 11 },
   workspaceDir: { path: "/home/j/projects", exists: true, writable: true },
   prFacts: true,
-  gh: { gap: null, foundAt: "/opt/homebrew/bin/gh" },
+  forge: { label: "GitHub", cli: "gh", installUrl: "https://cli.github.com", gap: null, foundAt: "/opt/homebrew/bin/gh" },
   claudeCode: { installed: true, version: "2.1.220" },
   claudeProjectsReadable: true,
   runs: 7,
   agentProvider: "claude-code",
-  copilotChat: { available: false },
+  hostProviders: ["claude-code"],
+  chatCommand: { available: false },
 });
 
 const find = (inputs: DoctorInputs, label: string) => {
@@ -167,7 +168,19 @@ describe("runChecks — local environment", () => {
 
 describe("runChecks — gh", () => {
   it("fails a missing gh with a link to install it", () => {
-    const c = find({ ...healthy(), gh: { gap: { kind: "missing", detail: "spawn ENOENT" }, foundAt: null } }, "gh");
+    const c = find(
+      {
+        ...healthy(),
+        forge: {
+          label: "GitHub",
+          cli: "gh",
+          installUrl: "https://cli.github.com",
+          gap: { kind: "missing", detail: "spawn ENOENT" },
+          foundAt: null,
+        },
+      },
+      "gh",
+    );
     expect(c.status).toBe("fail");
     expect(c.detail).toContain("not installed");
     expect(c.action).toEqual({ kind: "external", url: "https://cli.github.com", label: "Install gh" });
@@ -175,7 +188,16 @@ describe("runChecks — gh", () => {
 
   it("distinguishes a gh that is installed but signed out", () => {
     const c = find(
-      { ...healthy(), gh: { gap: { kind: "signed-out", detail: "auth status: exit 1" }, foundAt: "/usr/bin/gh" } },
+      {
+        ...healthy(),
+        forge: {
+          label: "GitHub",
+          cli: "gh",
+          installUrl: "https://cli.github.com",
+          gap: { kind: "signed-out", detail: "auth status: exit 1" },
+          foundAt: "/usr/bin/gh",
+        },
+      },
       "gh",
     );
     expect(c.status).toBe("fail");
@@ -184,7 +206,7 @@ describe("runChecks — gh", () => {
   });
 
   it("skips gh entirely when PR facts are switched off", () => {
-    const c = find({ ...healthy(), prFacts: false, gh: undefined }, "gh");
+    const c = find({ ...healthy(), prFacts: false }, "gh");
     expect(c.status).toBe("skip");
     expect(c.detail).toContain("prFacts");
   });
@@ -244,14 +266,14 @@ describe("runChecks — Claude Code", () => {
 
 describe("agent checks by provider", () => {
   it("reports Copilot Chat availability under the copilot provider", () => {
-    const checks = runChecks({ ...healthy(), agentProvider: "copilot", copilotChat: { available: true } });
+    const checks = runChecks({ ...healthy(), agentProvider: "copilot", chatCommand: { available: true } });
     expect(checks.find((c) => c.label === "Copilot Chat available")?.status).toBe("ok");
     expect(checks.find((c) => c.label === "Claude Code installed")).toBeUndefined();
     expect(checks.find((c) => c.label === "Claude Code version")).toBeUndefined();
   });
 
   it("offers the Copilot Chat extension when it isn't available", () => {
-    const checks = runChecks({ ...healthy(), agentProvider: "copilot", copilotChat: { available: false } });
+    const checks = runChecks({ ...healthy(), agentProvider: "copilot", chatCommand: { available: false } });
     const row = checks.find((c) => c.label === "Copilot Chat available");
     expect(row?.status).toBe("fail");
     expect(row?.action).toEqual({ kind: "extension", id: "github.copilot-chat", label: "Show extension" });
@@ -270,6 +292,105 @@ describe("agent checks by provider", () => {
       expect(runChecks({ ...healthy(), agentProvider }).find((c) => c.label === "Claude session files")).toBeDefined();
     }
   });
+
+  it("shows the Cursor chat row and the Claude session-files row under cursor", () => {
+    const checks = runChecks({ ...healthy(), agentProvider: "cursor", chatCommand: { available: true } });
+    const groups = checks.map((c) => c.group);
+    expect(groups).toContain("Cursor");
+    expect(groups).not.toContain("Copilot");
+    // Cursor's composer sessions don't show up on the Deck, which reads Claude
+    // Code's session files — so the session-files row still has to explain itself.
+    expect(checks.find((c) => c.label === "Claude session files")).toBeDefined();
+    expect(checks.find((c) => c.label === "Cursor chat available")?.status).toBe("ok");
+  });
+
+  it("fails the Cursor chat row without an action — Cursor's agent ships with the editor", () => {
+    const checks = runChecks({ ...healthy(), agentProvider: "cursor", chatCommand: { available: false } });
+    const row = checks.find((c) => c.group === "Cursor");
+    expect(row?.status).toBe("fail");
+    expect(row?.action).toBeUndefined();
+  });
+});
+
+describe("agent checks under ask", () => {
+  it("under ask, shows the rows for every agent this host can run", () => {
+    const checks = runChecks({
+      ...healthy(),
+      agentProvider: "ask",
+      hostProviders: ["claude-code", "cursor"],
+      chatCommand: { available: true },
+    });
+    const groups = checks.map((c) => c.group);
+    expect(groups).toContain("Claude Code");
+    expect(groups).toContain("Cursor");
+    expect(groups).not.toContain("Copilot");
+  });
+
+  it("under ask in VS Code, shows Copilot's rows and not Cursor's", () => {
+    const checks = runChecks({
+      ...healthy(),
+      agentProvider: "ask",
+      hostProviders: ["claude-code", "copilot"],
+      chatCommand: { available: true },
+    });
+    const groups = checks.map((c) => c.group);
+    expect(groups).toContain("Copilot");
+    expect(groups).not.toContain("Cursor");
+  });
+
+  it("under ask, still shows the Claude Code rows themselves, not just the other agents'", () => {
+    const checks = runChecks({
+      ...healthy(),
+      agentProvider: "ask",
+      hostProviders: ["claude-code", "cursor"],
+      chatCommand: { available: true },
+    });
+    expect(checks.find((c) => c.label === "Claude Code installed")).toBeDefined();
+    expect(checks.find((c) => c.label === "Claude session files")).toBeDefined();
+  });
+
+  // COUNTS rows rather than searching for one. Every other test in this block uses
+  // `.find()`/`toContain`, which are structurally blind to a duplicated row — which is
+  // exactly how a doubled "Claude session files" row shipped through four CI gates.
+  it("under ask, emits each row exactly once — no agent's rows are duplicated", () => {
+    for (const hostProviders of [
+      ["claude-code"],
+      ["claude-code", "cursor"],
+      ["claude-code", "copilot"],
+    ] as const) {
+      const checks = runChecks({
+        ...healthy(),
+        agentProvider: "ask",
+        hostProviders: [...hostProviders],
+        chatCommand: { available: true },
+      });
+      const counts = new Map<string, number>();
+      for (const c of checks) counts.set(c.label, (counts.get(c.label) ?? 0) + 1);
+      const dupes = [...counts].filter(([, n]) => n > 1);
+      expect(dupes).toEqual([]);
+      expect(counts.get("Claude session files")).toBe(1);
+    }
+  });
+
+  it("under ask, counts an unreadable ~/.claude/projects as ONE warning, not two", () => {
+    const checks = runChecks({
+      ...healthy(),
+      agentProvider: "ask",
+      hostProviders: ["claude-code", "cursor"],
+      chatCommand: { available: true },
+      claudeProjectsReadable: false,
+    });
+    expect(checks.filter((c) => c.status === "warn")).toHaveLength(1);
+    expect(summarize(checks)).toBe("1 warning");
+  });
+
+  it("under ask with only Claude Code on this host, shows no chat-agent rows at all", () => {
+    const checks = runChecks({ ...healthy(), agentProvider: "ask", hostProviders: ["claude-code"] });
+    const groups = checks.map((c) => c.group);
+    expect(groups).not.toContain("Copilot");
+    expect(groups).not.toContain("Cursor");
+    expect(checks.find((c) => c.label === "Claude Code installed")).toBeDefined();
+  });
 });
 
 describe("runChecks — state", () => {
@@ -287,7 +408,6 @@ describe("ordering", () => {
       gitOnPath: false,
       claudeCode: { installed: true, version: "2.0.4" },
       prFacts: false,
-      gh: undefined,
     });
     const rank = checks.map((c) => c.status);
     const order = ["fail", "warn", "skip", "ok"];
@@ -367,5 +487,41 @@ describe("runChecks — source-agnostic rows", () => {
     const c = find({ ...healthy(), endpoint: "" }, "Site configured");
     expect(c.status).toBe("fail");
     expect(c.detail).toBe("agentFlow.jira.baseUrl is empty");
+  });
+});
+
+describe("runChecks — a GitLab forge", () => {
+  const gitlab = {
+    label: "GitLab", cli: "glab", installUrl: "https://gitlab.com/gitlab-org/cli",
+    gap: null, foundAt: "/opt/homebrew/bin/glab",
+  };
+
+  it("groups the row under GitLab and labels it with glab, naming where it was found", () => {
+    const c = find({ ...healthy(), forge: gitlab }, "glab");
+    expect(c.group).toBe("GitLab");
+    expect(c.status).toBe("ok");
+    // Naming WHERE the binary was found is the most valuable line in the report: a
+    // Homebrew CLI invisible to the extension host's bare launchd PATH reads, to a
+    // signed-in user, as the Deck simply being broken.
+    expect(c.detail).toContain("/opt/homebrew/bin/glab");
+  });
+
+  it("offers GitLab's own install link when glab is missing", () => {
+    const c = find({ ...healthy(), forge: { ...gitlab, gap: { kind: "missing" as const, detail: "spawn ENOENT" }, foundAt: null } }, "glab");
+    expect(c.status).toBe("fail");
+    expect(c.action).toEqual({ kind: "external", url: "https://gitlab.com/gitlab-org/cli", label: "Install glab" });
+  });
+
+  it("skips under the forge's own group and label when PR facts are off", () => {
+    const c = find({ ...healthy(), prFacts: false, forge: gitlab }, "glab");
+    expect(c.group).toBe("GitLab");
+    expect(c.status).toBe("skip");
+    expect(c.detail).toContain("prFacts");
+  });
+
+  it("replaces the GitHub group entirely — a GitLab user sees no GitHub row", () => {
+    const groups = new Set(runChecks({ ...healthy(), forge: gitlab }).map((c) => c.group));
+    expect(groups.has("GitLab")).toBe(true);
+    expect(groups.has("GitHub")).toBe(false);
   });
 });

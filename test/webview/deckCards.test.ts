@@ -47,12 +47,12 @@ describe("projectCards", () => {
     expect(cards.map((c) => c.column)).toEqual(["progress", "needs"]);
   });
 
-  it("still lets a blocked PR outrank a working agent, per run", () => {
+  it("still lets a blocked PR outrank a working agent, per run — into In review now", () => {
     const cards = projectCards([mkStatus({
       agents: [mkAgent("s1", "working")],
       prs: prs(facts({ mergeable: "conflicting" })),
     })]);
-    expect(cards[0].column).toBe("needs");
+    expect(cards[0].column).toBe("review");
   });
 
   it("makes one parked card for an agentless run, keeping the host's own column", () => {
@@ -77,5 +77,77 @@ describe("projectCards", () => {
 
   it("returns nothing for no runs", () => {
     expect(projectCards([])).toEqual([]);
+  });
+});
+
+describe("projectCards and the merge column", () => {
+  it("lands an idle agent on an approved, green PR in the merge column's ready lane", () => {
+    const cards = projectCards([mkStatus({
+      agents: [mkAgent("s1", "idle")],
+      prs: prs(facts({ review: "approved" })),
+    })]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["merge", "ready"]]);
+  });
+
+  it("keeps a PR nobody has approved in In review, waiting on them", () => {
+    const cards = projectCards([mkStatus({ agents: [mkAgent("s1", "idle")], prs: prs(facts()) })]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["review", "waiting"]]);
+  });
+
+  it("takes an agent still working on an approved PR to the merge too", () => {
+    // The one bucketing this migration deliberately changed: the merge outranks
+    // the live agent signal now that it has a column to be seen in.
+    const cards = projectCards([mkStatus({
+      agents: [mkAgent("s1", "working"), mkAgent("s2", "needs-you")],
+      prs: prs(facts({ review: "approved" })),
+    })]);
+    expect(cards.map((c) => c.column).sort()).toEqual(["merge", "needs"]);
+  });
+
+  it("puts a merged run in the merged lane, wrap-up agent and all", () => {
+    const cards = projectCards([mkStatus({
+      agents: [mkAgent("s1", "working")], prs: prs(facts({ state: "MERGED" })),
+    })]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["merge", "merged"]]);
+  });
+
+  it("gives a done ticket that never merged no merge column at all", () => {
+    // Nothing landed, so there is no wrap-up: this run is on the board only while
+    // an agent is open in it, and `shelfFor` closes it the moment that stops.
+    const cards = projectCards([mkStatus({ agents: [mkAgent("s2", "idle")], ticketCategory: "done" })]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["progress", "parked"]]);
+  });
+
+  it("lanes a working agent into the working lane and a quiet one into parked", () => {
+    const live = projectCards([mkStatus({ agents: [mkAgent("s1", "working")] })]);
+    expect(live.map((c) => [c.column, c.lane])).toEqual([["progress", "working"]]);
+    const quiet = projectCards([mkStatus({ agents: [mkAgent("s1", "idle")] })]);
+    expect(quiet.map((c) => [c.column, c.lane])).toEqual([["progress", "parked"]]);
+  });
+
+  it("lanes a mixed progress card as working — one live agent makes the card live", () => {
+    // A working and an idle agent share the progress column, so they share one
+    // card. Reading the lane off `agents[0]` would file that card under whichever
+    // agent the host happened to list first.
+    const cards = projectCards([mkStatus({ agents: [mkAgent("s1", "idle"), mkAgent("s2", "working")] })]);
+    expect(cards.map((c) => [c.id, c.lane])).toEqual([["g:ASM-1:progress", "working"]]);
+  });
+
+  it("parks an agentless run rather than leaving it out of every lane", () => {
+    const cards = projectCards([mkStatus({ agents: [], column: "progress" })]);
+    expect(cards.map((c) => [c.id, c.column, c.lane])).toEqual([["p:ASM-1", "progress", "parked"]]);
+  });
+
+  it("lanes a red PR under a working agent as fixes needed", () => {
+    const cards = projectCards([mkStatus({
+      agents: [mkAgent("s1", "working")],
+      prs: prs(facts({ ci: { passing: 0, pending: 0, failing: [{ name: "build", url: "" }] } })),
+    })]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["review", "fixes"]]);
+  });
+
+  it("lanes a parked card from the host's column and the run's own PRs", () => {
+    const cards = projectCards([mkStatus({ agents: [], column: "merge", prs: prs(facts({ state: "MERGED" })) })]);
+    expect(cards.map((c) => [c.id, c.column, c.lane])).toEqual([["p:ASM-1", "merge", "merged"]]);
   });
 });

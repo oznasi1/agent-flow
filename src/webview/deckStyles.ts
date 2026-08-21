@@ -47,18 +47,27 @@ export const DECK_CSS = `
      block on their own, and a header that only folded around them (via .hd's
      own flex-wrap) would still lose its right edge below ~400px. */
   .stats { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
-  /* Sentence case, matching the column headers: these three tiles name three of
-     the board's four columns — Done has no tile, since a done card needs
-     nothing counted for you — and name the ones they share the same way, which
-     used to differ in case. */
+  /* Sentence case, matching the column headers: one tile per board column, named
+     exactly as the column names itself. The two used to differ in case. */
   .stat { display: flex; flex-direction: column; gap: 2px; padding: 4px 11px 5px; border-radius: 8px;
     border: 1px solid var(--edge); background: var(--vscode-editorWidget-background, transparent); }
   .stat .n { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.05;
     letter-spacing: -.02em; }
+  /* Same muted-suffix treatment as the card's own \`.spend .u\` — the unit reads
+     as a footnote on the number, not a second figure. */
+  .stat .n .u { font-family: var(--vscode-font-family); font-size: var(--t-micro); font-weight: 400;
+    opacity: .55; margin-left: 2px; }
   .stat .l { font-size: var(--t-micro); color: var(--dim); letter-spacing: .01em; white-space: nowrap; }
   .stat.attn { border-color: color-mix(in srgb, var(--c-attn) 55%, var(--hair)); }
   .stat.attn .n { color: var(--c-attn); }
   .stat.attn .l { color: color-mix(in srgb, var(--c-attn) 70%, var(--dim)); }
+  /* The good-news tile, lit on exactly the same terms as .attn and in the merge
+     column's own green. Two lit tiles in a row is the point: one says something
+     is wrong, the other says something is at the merge, and they are the only two
+     numbers on this header you can act on without opening anything. */
+  .stat.up { border-color: color-mix(in srgb, var(--c-done) 55%, var(--hair)); }
+  .stat.up .n { color: var(--c-done); }
+  .stat.up .l { color: color-mix(in srgb, var(--c-done) 70%, var(--dim)); }
   .hd .sp { flex: 1; }
 
   /* The header's one remaining .ctls user is the Agents/Workspaces lens: a joined
@@ -100,12 +109,51 @@ export const DECK_CSS = `
      cards pass underneath it. */
   .col-hd { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px;
     padding: 16px 2px 10px; flex: none; background: var(--vscode-editor-background); }
-  .col-hd .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .col-hd .nm { font-size: 12px; font-weight: 600; letter-spacing: -.005em; white-space: nowrap; }
+  .col-hd .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--zone); }
+  /* The halo, on the zones where the dot means something is alive right now. A
+     spread-only shadow rather than a blur ring: it reads as light coming off the
+     dot at 8px, where a blurred ring reads as a smudge. Static, not animated —
+     .sdot's pulse is reserved for one working agent, and four pulsing column
+     headers would drown it. */
+  .col-hd .dot.glow { box-shadow: 0 0 0 3px color-mix(in srgb, var(--zone) 26%, transparent),
+    0 0 9px 1px color-mix(in srgb, var(--zone) 55%, transparent); }
+  /* Mono uppercase micro, not a 12px semibold sentence: a zone label is a
+     coordinate on the board, in the same voice as every other identifier here,
+     and it must not compete with the card titles underneath it. Tracking opens up
+     because uppercase at 10px sets too tight to read otherwise. */
+  .col-hd .nm { font-family: var(--mono); font-size: var(--t-micro); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; color: var(--zone); }
+  /* Right-aligned, past the rule: the count is the answer to "how many", which you
+     ask after reading the label, and a column of counts down the board's right edge
+     is comparable at a glance in a way four counts at four label widths is not. */
   .col-hd .ct { font-size: var(--t-micro); font-variant-numeric: tabular-nums; color: var(--dim);
     border: 1px solid var(--hair); border-radius: 20px; padding: 1px 7px; line-height: 1.3; }
-  .col-hd .rule { flex: 1; height: 1px; background: var(--hair); }
-  .col-body { display: flex; flex-direction: column; gap: 10px; padding: 1px 3px 3px; }
+  .col-hd .rule { flex: 1; height: 1px; background: color-mix(in srgb, var(--zone) 22%, var(--hair)); }
+  /* The zone tint: a flat field of the column's own hue behind its cards. Faint on
+     purpose — it says "this is a place" without fighting the cards, which carry
+     their own accent rail and their own state colour.
+     Flat rather than a gradient fading out down the column: a fade has to stop
+     somewhere, and wherever it stops draws a horizontal edge across the column
+     that reads as a panel boundary or a selection highlight rather than as tint.
+     Ending at the field's own bottom is the one edge that means something.
+     It sits on .col-body rather than .col so it starts under the sticky header
+     instead of scrolling out from behind it, and the padding is what keeps the
+     field visibly wider than the cards standing in it. */
+  .col-body { display: flex; flex-direction: column; gap: 10px; padding: 8px 7px 8px;
+    border-radius: var(--r-card);
+    background: color-mix(in srgb, var(--zone) 5%, transparent); }
+  /* A band inside a column. Deliberately quieter than .col-hd — no dot, no sticky,
+     lowercase from the markup — so the column header still reads as the heading and
+     this reads as a divider under it. The first lane sits tight to the column
+     header; later ones open a gap so the break between bands is visible without a
+     heavier rule. It takes no zone colour of its own: the column body is already
+     tinted, and a second green inside a green column adds nothing. */
+  .lane-hd { display: flex; align-items: center; gap: 7px; flex: none;
+    padding: 2px 2px 0; color: var(--dim); font-size: var(--t-micro); }
+  .lane-hd:not(:first-child) { margin-top: 6px; }
+  .lane-hd .nm { letter-spacing: .01em; white-space: nowrap; }
+  .lane-hd .ct { font-variant-numeric: tabular-nums; }
+  .lane-hd .rule { flex: 1; height: 1px; background: var(--hair); }
 
   /* \`flex: none\` is load-bearing: .card sets overflow:hidden to clip the accent rail, which
      zeroes its automatic minimum size — without it the flex column squeezes every card and
@@ -131,7 +179,38 @@ export const DECK_CSS = `
   /* Wraps for the agent name only: state and ticket always share line one, and
      the name drops beneath the ticket when the column is too narrow for three —
      which beats ellipsizing an identifier, and costs no height when it fits. */
-  .c-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; row-gap: 2px; min-width: 0; }
+  /* The card's header: the kind avatar leads from the same x on every card, the
+     title is the anchor, the key trails it. \`align-items: flex-start\` so a two-line
+     title grows downward and leaves the avatar and the key on line one. */
+  .c-hd { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+  .c-hd .hd-t { flex: 1; min-width: 0; }
+  .c-hd .hd-t .c-title { margin-top: -1px; }
+  /* \`flex: none\` and \`max-width: none\` together: the key must not shrink, and the
+     .key rule below caps every key at 46% of its row — a cap meant for a row the key
+     shared with the state text, and far too tight for its own slot. The title wraps
+     instead; it is already built to. */
+  .c-hd .hd-k { flex: none; padding-top: 1px; }
+  .c-hd .hd-k .key, .c-hd .hd-k .key-wrap { margin-left: 0; max-width: none; }
+
+  /* The kind avatar. A neutral tile with a hued glyph: the ground stays neutral
+     because a column of cards must not become a column of colours — the board's
+     colour vocabulary belongs to the columns and to .attn, and a kind is not a
+     status. */
+  .av { position: relative; flex: none; width: 22px; height: 22px; border-radius: 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--hair); color: var(--dim);
+    background: color-mix(in srgb, var(--vscode-foreground) 5%, transparent); }
+  .av svg { display: block; }
+  /* A ticket is the ordinary case and appears in every column, so it stays
+     neutral: any accent hue here would be read as a status the card does not have
+     — a purple tag on an In-progress card says "in review". The other four kinds
+     are the exceptions, and each borrows the hue of the column it naturally lives
+     in, which reinforces rather than contradicts. */
+  .av.k-task    { color: color-mix(in srgb, var(--vscode-foreground) 62%, transparent); }
+  .av.k-notepad { color: color-mix(in srgb, var(--vscode-charts-yellow) 78%, var(--vscode-foreground)); }
+  .av.k-explore { color: color-mix(in srgb, var(--c-progress) 78%, var(--vscode-foreground)); }
+  .av.k-review  { color: color-mix(in srgb, var(--c-review) 78%, var(--vscode-foreground)); }
+  .av.k-local   { color: var(--dim); }
   .status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto;
     font-size: var(--t-body); color: var(--dim); font-variant-numeric: tabular-nums;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -160,14 +239,14 @@ export const DECK_CSS = `
   .sdot.tone-parked, .sdot.tone-merged { background: transparent; border: 1.5px solid var(--dim); }
   .sdot.pulse { animation: pulse 1.7s ease-out infinite; }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 var(--c-done); } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+  /* The refresh button's glyph at rest. It no longer turns: the mark takes over
+     while a refresh is in flight, so nothing sets an "on" modifier any more. */
   .spin { display: inline-block; font-size: 12px; }
-  .spin.on { animation: spin .9s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
 
   /* Clamped so long summaries can't stretch one card out of the column's rhythm; the full
      text stays available on hover. */
   .c-title { margin-top: 5px; font-size: var(--t-title); font-weight: 550; line-height: 1.42; letter-spacing: -.008em;
-    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 
   .c-branch { margin-top: 7px; display: flex; align-items: baseline; gap: 8px; min-width: 0; }
   .c-branch .bn { font-family: var(--mono); font-size: var(--t-data); color: var(--dim);
@@ -183,19 +262,15 @@ export const DECK_CSS = `
   .repo .add { color: var(--c-done); } .repo .del { color: var(--c-danger); }
   .repo .dirty { color: var(--c-idle); }
 
-  /* The workspace chip and its fold. The name is an identifier, so it is mono;
-     "2 repos" is prose, so it is not. The fold is in the DOM at rest and hidden
-     with display:none — a card that has to grow anyway on hover should not also
-     pay for a mount. */
+  /* The workspace label and the repo chips under it. The name is an identifier,
+     so it is mono; "2 repos" is prose, so it is not. Nothing folds, so the label
+     is a label — no pointer, no hover affordance, nothing to click. The chips
+     below it are the .c-repos row above, margin and all. */
   .c-ws { margin-top: 7px; }
   .ws { display: inline-flex; align-items: baseline; gap: 5px; font-size: var(--t-data);
     color: var(--dim); background: none; border: 1px solid var(--hair); border-radius: var(--r-chip);
-    padding: 1px 6px; cursor: pointer; }
-  .ws:hover { border-color: color-mix(in srgb, var(--vscode-foreground) 25%, transparent); }
-  .ws .wsi { font-size: 9px; color: color-mix(in srgb, var(--vscode-foreground) 40%, transparent); }
+    padding: 1px 6px; }
   .ws .n { font-family: var(--mono); color: color-mix(in srgb, var(--vscode-foreground) 82%, transparent); }
-  .ws-fold { display: none; margin-top: 6px; flex-wrap: wrap; gap: 5px 7px; }
-  .c-ws:hover .ws-fold, .c-ws:focus-within .ws-fold, .c-ws.open .ws-fold { display: flex; }
 
   /* Agents open in this card's directories. Names are identifiers, so mono; the
      row is a control, so it takes the same focus treatment as .act. */
@@ -217,20 +292,17 @@ export const DECK_CSS = `
   .ag-age { margin-left: auto; flex: none; }
   .ag-open { flex: none; opacity: .7; }
 
-  .c-foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; min-width: 0; }
+  /* Still live: it moved off the card's old .c-foot into the drawer header,
+     where it carries the run's tracker status (DeckDetail.tsx's .dd-hd .pill). */
   .pill { flex: 0 1 auto; min-width: 0; font-size: var(--t-body);
     border: 1px solid var(--hair); border-radius: 20px; padding: 1px 9px;
     color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* One button language, three weights of the same 26px shape. The primary is a quiet
      raised surface at rest and only takes the theme's button color under the pointer:
-     an Open slab on every card is ambient noise, not emphasis. The dimming lives on
-     the buttons, not on .actions — opacity on the container would composite the whole
-     subtree and make the overflow menu see-through. */
-  .actions { margin-left: auto; flex: none; display: flex; align-items: center; gap: 5px; }
-  .act:not(.primary), .more { opacity: .7; transition: opacity .12s ease; }
-  .card:hover .act, .card:focus-within .act,
-  .card:hover .more, .card:focus-within .more { opacity: 1; }
+     an Open slab on every card is ambient noise, not emphasis. */
+  .act:not(.primary) { opacity: .7; transition: opacity .12s ease; }
+  .card:hover .act, .card:focus-within .act { opacity: 1; }
   .act { display: inline-flex; align-items: center; gap: 6px; font-size: var(--t-body); font-weight: 500;
     height: 26px; padding: 0 11px; border-radius: var(--r-ctl); cursor: pointer; white-space: nowrap;
     border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
@@ -275,20 +347,6 @@ export const DECK_CSS = `
   .act.primary:disabled, .act.primary:disabled:hover,
   .card.attn .act.primary:disabled, .card.attn .act.primary:disabled:hover {
     cursor: default; color: var(--dim); background: transparent; border-color: var(--hair); }
-
-  .more-wrap { position: relative; display: inline-flex; }
-  .more { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
-    border: 0; background: none; border-radius: var(--r-ctl); color: var(--dim); cursor: pointer;
-    font-size: 13px; line-height: 1; }
-  .more:hover { background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
-  .menu { position: absolute; right: 0; bottom: calc(100% + 5px); z-index: 20; min-width: 132px;
-    border: 1px solid var(--hair); border-radius: 8px; padding: 4px;
-    background: var(--vscode-menu-background, var(--vscode-editorWidget-background));
-    box-shadow: 0 8px 24px -10px rgba(0,0,0,.6); }
-  .mi { display: block; width: 100%; text-align: left; font-size: 12px; padding: 6px 9px; border: 0;
-    border-radius: var(--r-chip); cursor: pointer; background: none; color: var(--vscode-foreground); white-space: nowrap; }
-  .mi:hover { background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)); }
-  .mi.danger { color: var(--c-danger); }
 
   .empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 8px; color: var(--dim); text-align: center; padding: 40px; }
@@ -507,4 +565,188 @@ export const DECK_CSS = `
     font-size: 11px; padding: 1px 7px; cursor: pointer; flex: none; opacity: 0; }
   .rc-row:hover .rc-act, .rc-act:focus { opacity: 1; }
   .rc-act:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
+
+  /* The selected card's detail. Same geometry as the Orchestrator drawer — below
+     the header, anchored right, no scrim — because it is the same kind of object
+     and the two are mutually exclusive. 460px is the narrowest width at which a
+     .pr-block's label column and value column both fit without wrapping. */
+  /* \`hidden auto\`, not \`auto\`: the drawer is a fixed-width panel of rows that all
+     ellipsize, so sideways scroll here is never a feature — it is always a row that
+     failed to shrink (a long mono key did exactly that), and it takes the close
+     button off-screen with it. Vertical scroll is the only axis it needs. */
+  .dd { position: fixed; top: 53px; right: 0; bottom: 0; width: 460px; z-index: 40;
+    display: flex; flex-direction: column; overflow: hidden auto;
+    background: var(--vscode-editorWidget-background);
+    border-left: 1px solid var(--hair); box-shadow: -10px 0 26px rgba(0,0,0,.28); }
+  .dd-hd { display: flex; align-items: center; gap: 8px; padding: 9px 12px;
+    border-bottom: 1px solid var(--hair); }
+  /* \`max-width\` is load-bearing: a nowrap flex item's automatic minimum size is its
+     full text width, so an unbounded key could not shrink and any key wider than the
+     drawer pushed the row past 460px instead of ellipsizing. Capping it — rather than
+     letting it shrink with \`min-width: 0\` — is what keeps a short key whole: under
+     free shrinking, "notepad" beside a long summary came out as "not…". Half the
+     header is the widest a key can be before it stops being context for the summary
+     and starts replacing it. \`flex: none\` so it is the cap, not the summary, that
+     decides: the summary ellipsizes first, and the key only past 50%. */
+  .dd-hd .k { font-family: var(--vscode-editor-font-family); font-size: 12px; white-space: nowrap;
+    flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
+  /* The drawer opens with the card's own mark, at the card's own size — a smaller
+     one here would read as a different object. */
+  .dd-hd .av { flex: none; }
+  .dd-hd .t { font-size: var(--t-body); color: var(--dim);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dd-x { margin-left: auto; background: none; border: none; cursor: pointer;
+    color: var(--dim); font-size: 13px; padding: 2px 5px; }
+  .dd-x:hover { color: var(--vscode-foreground); }
+  .dd-sec { padding: 10px 12px; }
+  .dd-sec + .dd-sec { border-top: 1px solid var(--hair); }
+  .dd-lbl { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--dim); opacity: .8; margin-bottom: 7px; }
+  .dd-count { padding: 9px 12px 0; margin: 0; }
+  .dd-none { font-size: var(--t-body); color: var(--dim); }
+  /* A list row, not a button slab: twelve bordered controls in a column would
+     read as twelve competing calls to action. */
+  .dd-act { display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left;
+    background: none; border: none; border-radius: var(--r-ctl); cursor: pointer;
+    padding: 5px 7px; color: var(--vscode-foreground); font-size: var(--t-body); }
+  .dd-act:hover { background: var(--vscode-toolbar-hoverBackground); }
+  .dd-act:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+  .dd-act.danger { color: var(--c-attn); }
+  /* UI font by default: most hints ("already running", "give this place a
+     ticket") read as English. The .id modifier overrides to mono for the
+     hints that are actually identifiers — a branch, a ticket key, a PR
+     number, a path. */
+  .dd-act .h { margin-left: auto;
+    font-size: 11.5px; color: var(--dim);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dd-act .h.id { font-family: var(--vscode-editor-font-family); }
+
+  /* One child worktree, same list-row shape as .dd-act. Same bug this file's
+     .dd-hd .k comment already names, and the same fix commit (8ebdd43,
+     "stop the detail drawer scrolling sideways") already measured: a
+     \`white-space: nowrap\` flex item's automatic minimum size is its own full
+     text width UNLESS its own overflow is non-visible — and \`flex: none\`
+     (used below on \`.k\`/\`.bn\`, the identifiers) sets flex-shrink to 0, which
+     means that automatic-minimum rule never even gets asked; the item simply
+     renders at its natural content width every time. Left uncapped, a long
+     branch name would claim however much width it wants and \`.t\` — the only
+     item with flex-grow, and the only one meant to give ground — would be
+     the one squeezed, all the way to invisible if \`.k\`+\`.bn\`'s natural widths
+     alone already exceed the row. \`max-width\` on \`.k\` and \`.bn\` is what
+     bounds that: past it they ellipsize on their OWN box instead of
+     continuing to claim space from \`.t\`, so the summary is guaranteed some
+     share and is the thing that visibly shortens first in the ordinary case
+     (it usually has the most text). \`.dd\`'s own \`overflow: hidden auto\`
+     (see above) is the backstop if a row still doesn't fit even capped: it
+     clips rather than taking the close button off-screen, exactly as it
+     already does for every other row in this drawer. */
+  .dd-child { display: flex; align-items: baseline; gap: 6px; width: 100%; text-align: left;
+    background: none; border: 0; padding: 3px 0; color: inherit; cursor: pointer; min-width: 0; }
+  .dd-child:hover { background: var(--vscode-list-hoverBackground); }
+  .dd-child .k { flex: none; max-width: 30%; font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .85;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dd-child .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dd-child .bn { flex: none; max-width: 40%; font-family: var(--vscode-editor-font-family); font-size: 11px; opacity: .7;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* At any realistic panel width there is no arrangement in which four columns
+     and a 460px drawer all fit — something is always off-screen. .board is
+     already a horizontal scroller, so this does not MOVE the columns: it adds
+     scroll run-out past the last one, which is what lets a covered column be
+     scrolled clear of the drawer. Nothing becomes unreachable. */
+  .board.dd-open { padding-right: 470px; }
+
+  /* The two-tier card. A floor with no flex column would hang dead space under
+     the last row; making the card a column is what lets the footer's margin-top:
+     auto seat it on the bottom edge, so a card taller than its content reads as
+     deliberately that tall rather than as one that ran out of things to say.
+     152px is the approved density — 132 crowds a two-line title, 176 leaves a
+     hollow middle on the one-line cards that dominate a real board. */
+  .card { display: flex; flex-direction: column; min-height: 152px;
+    padding: 13px 14px 13px 16px; gap: 9px; cursor: pointer; }
+  .col-body { gap: 14px; }
+  /* Under the card's own flex column, margins between children don't collapse —
+     they add to .card's 9px gap — so .c-title's own margin-top: 5px (set before
+     the card was a flex column) would ship the top-to-title gap at 14px against
+     the approved 9px. Zeroing it here is what makes the gap exactly 9px. */
+  .c-title { line-height: 1.45; margin-top: 0; }
+  .card.sel { border-color: var(--vscode-focusBorder);
+    background: color-mix(in srgb, var(--vscode-focusBorder) 7%, var(--vscode-editor-background)); }
+  .card.sel::before { opacity: 1; width: 3px; }
+  /* .card.attn:hover is (0,3,0) against .card.sel's (0,2,0), so without this a
+     selected Action-required card would revert to the attn hover tint the
+     moment the pointer sits on it. Same specificity as .card.attn:hover
+     (0,3,0), and declared after it, so the selected state wins the tie
+     whether or not the card is also hovered — without weakening .card.attn's
+     own hover treatment for a card that isn't selected. */
+  .card.attn.sel { border-color: var(--vscode-focusBorder); }
+
+  /* One line, always. The three-bit cap in cardSignal is not enough on its own —
+     a long branch name still pushes the third bit onto a second row — so the line
+     never wraps and the one elastic bit (the mono branch) takes the ellipsis. */
+  /* Under the title as a caption rather than a third band of body text: same bits,
+     same order, same cap of three — only the typography changes. Mono because every
+     bit it carries is an identifier or a count. */
+  .c-sig { display: flex; align-items: center; gap: 7px; flex-wrap: nowrap; overflow: hidden;
+    margin-top: 4px; font-family: var(--mono); font-size: var(--t-data); color: var(--dim); }
+  .c-sig > * { flex: none; white-space: nowrap; }
+  .c-sig .m { font-family: var(--vscode-editor-font-family);
+    flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .c-sig .sep { opacity: .45; }
+  .c-sig .bad, .c-sig .warn { color: var(--c-attn); }
+  .c-sig .ok { color: var(--c-done); }
+  .c-diff { display: inline-flex; gap: 5px; font-family: var(--vscode-editor-font-family); }
+  .c-diff .add { color: var(--c-done); }
+  .c-diff .del { color: var(--c-danger); }
+
+  /* The card's only rule. Identity and facts above it, live state below. */
+  .c-hr { border: 0; height: 1px; margin: 9px 0 7px;
+    background: color-mix(in srgb, var(--vscode-foreground) 8%, transparent); }
+
+  /* State left, the run's age right. The age is mono and tabular so a column of
+     cards lines its numbers up; the state text is not, because it is English.
+     The dot is .status's sibling here rather than its child, so the gap is this
+     row's to set. */
+  .c-st { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .c-st .status { flex: 0 1 auto; }
+  .c-meta { margin-left: auto; flex: none; display: inline-flex; align-items: baseline; gap: 6px;
+    font-family: var(--mono); font-size: var(--t-data); color: var(--dim); font-variant-numeric: tabular-nums; }
+
+  .c-foot2 { display: flex; gap: 5px; margin-top: auto; padding-top: 2px; }
+
+  /* The spend figure. A count, so it is mono — the deck's rule is mono for
+     identifiers and counts, prose in the UI font. It sits in the footer's dead
+     right side: on the top row it wraps the ticket key onto a second line
+     whenever the state text is long, and on the signal line it breaks the
+     three-bit cap and truncates the branch further. */
+  /* Spend, in the drawer only — never on the card. Counts are mono, the class
+     names beside them are prose in the UI font: the deck's standing rule is mono
+     for identifiers and numbers, UI font for anything that reads as English.
+     Right-aligned values so four rows of very different magnitudes line up on
+     their last digit and can be compared down the column. */
+  .dd-spend { display: flex; flex-direction: column; gap: 3px; }
+  .dd-spend .sp-row { display: flex; align-items: baseline; gap: 8px; font-size: var(--t-body); }
+  .dd-spend .sp-k { color: var(--dim); }
+  .dd-spend .sp-v { margin-left: auto; font-family: var(--vscode-editor-font-family);
+    font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* The weighted total is the one figure that is not a raw token count, so it is
+     separated by a hairline rather than just sitting as a fifth sibling. */
+  .dd-spend .sp-tot { margin-top: 4px; padding-top: 5px; border-top: 1px solid var(--hair); }
+  .dd-spend .sp-tot .sp-k { color: var(--vscode-foreground); cursor: help; }
+  .dd-spend .sp-tot .u { font-family: var(--vscode-font-family); opacity: .55; margin-left: 2px; }
+
+  /* One row per PR failure, each with the verb that fixes it. These REPLACE the
+     signal line on a failing card, so a card is never taller than the problems
+     it actually has — and a card with three failures grows past the 152px floor,
+     which is the intended trade: attention should follow size. */
+  .c-rows { display: flex; flex-direction: column; gap: 5px; }
+  .c-row { display: flex; align-items: center; gap: 7px; overflow: hidden;
+    font-size: 11.5px; color: var(--dim); }
+  /* The elastic member: a long list of failing check names takes the ellipsis
+     rather than pushing the button off the card. */
+  .c-row > .lbl { flex: 0 1 auto; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .c-row > .m { flex: none; font-family: var(--vscode-editor-font-family); }
+  .c-row .bad, .c-row .warn { color: var(--c-attn); }
+  .c-row .act { margin-left: auto; flex: none; height: 20px; padding: 0 7px; font-size: 11px; }
 `;

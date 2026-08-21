@@ -1,8 +1,9 @@
 // Agent Flow Deck depends on five things outside itself — a reachable Jira site, valid
-// credentials, `gh` installed *and* signed in, a reposRoot that holds checkouts, and
-// the Claude Code extension. Today each one fails at the moment of use, narrowly,
-// and three of them fail silently. This module decides what is broken; it does no
-// probing of its own so it stays free of `vscode` and testable as a plain table.
+// credentials, the configured forge's CLI installed *and* signed in, a reposRoot
+// that holds checkouts, and the Claude Code extension. Today each one fails at the
+// moment of use, narrowly, and three of them fail silently. This module decides
+// what is broken; it does no probing of its own so it stays free of `vscode` and
+// testable as a plain table.
 
 /** The Claude Code build that introduced `claude-vscode.editor.open`, which the
  *  shared-window batch launch needs. Below this, that one feature degrades. */
@@ -15,9 +16,13 @@ export type CheckStatus = "fail" | "warn" | "skip" | "ok";
 /** `"source"` is a placeholder a connector's own label stands in for at render
  *  time (see `formatReport`'s `sourceLabel` parameter and `doctorView.ts`'s use
  *  of `DoctorInputs.sourceLabel`) — so a Jira user still reads "Jira" while this
- *  module, and the literal union below, stay free of any one source's name. The
- *  other four groups are fixed: every source shares them. */
-export type DoctorGroup = "source" | "Local" | "GitHub" | "Claude Code" | "Copilot" | "State";
+ *  module, and the literal union below, stay free of any one source's name.
+ *  The forge group is different: it is not a placeholder swapped in later but
+ *  the forge's own label written straight into the check (`"GitHub"`, `"GitLab"`,
+ *  or whatever a future forge names itself) — see `forgeChecks`. `(string & {})`
+ *  keeps the named literals as hover suggestions while still accepting that
+ *  value. The others are fixed: every source and every forge share them. */
+export type DoctorGroup = "source" | "Local" | "Claude Code" | "Copilot" | "Cursor" | "State" | (string & {});
 
 /** What fixes a failing check. Resolved by the view — this module names the intent
  *  and never touches `vscode`. */
@@ -34,6 +39,11 @@ export interface Check {
   detail: string;
   action?: DoctorAction;
 }
+
+/** Inlined rather than importing `AgentProvider` from src/config.ts — this module
+ *  has zero imports by design, staying free of `vscode` and testable as a plain
+ *  table. */
+type Provider = "claude-code" | "copilot" | "cursor";
 
 /** A live `GET /myself`. Distinguishing these three is the whole reason Doctor
  *  cannot reuse `getMyself()`, which collapses every failure to `null`. */
@@ -68,18 +78,39 @@ export interface DoctorInputs {
   reposRoot: { path: string; exists: boolean; repos: number; gitRepos: number };
   workspaceDir: { path: string; exists: boolean; writable: boolean };
   prFacts: boolean;
-  // Structural rather than importing GhGap, which lives beside `vscode`-aware code.
-  gh?: { gap: { kind: "missing" | "signed-out"; detail: string } | null; foundAt: string | null };
+  /** The configured forge, and whether its CLI is usable. `gap` is null both when
+   *  the CLI is healthy and when `prFacts` is off (nothing was probed) — `prFacts`
+   *  is what distinguishes those, and it is read separately.
+   *  Structural rather than importing `ForgeGap`, which lives in forge/types.ts
+   *  alongside the other forge-only types this module has no other reason to know. */
+  forge: {
+    label: string;
+    cli: string;
+    installUrl: string;
+    gap: { kind: "missing" | "signed-out"; detail: string } | null;
+    foundAt: string | null;
+  };
   claudeCode: { installed: boolean; version: string | null };
   claudeProjectsReadable: boolean;
   runs: number;
-  /** Which agent seeds sessions — decides whether the Claude Code rows or the
-   *  Copilot row appear. Already host-guarded by readAgentProvider, so this is
-   *  never "copilot" in Cursor. */
-  agentProvider: "claude-code" | "copilot";
+  /** Which agent seeds sessions — decides whether the Claude Code rows or a
+   *  chat-agent row (Copilot or Cursor) appear. Already host-guarded by
+   *  readAgentProviderSetting, so `"copilot"`/`"cursor"` are never present
+   *  outside their host. `"ask"` means the choice isn't made until launch, so
+   *  every agent this host can run gets its rows — see `hostProviders` below.
+   *  Inlined rather than imported from src/config.ts's `AgentProviderSetting` —
+   *  this module has zero imports by design, staying free of `vscode` and
+   *  testable as a plain table. */
+  agentProvider: Provider | "ask";
+  /** The agents this host can actually start, in picker order — src/config.ts's
+   *  `hostProviders()`, supplied by the caller since this module cannot call it
+   *  itself. Only consulted when `agentProvider` is `"ask"`. */
+  hostProviders: Provider[];
   /** Probed by command registration, not extension id: chat is built into VS Code
-   *  and Copilot ships bundled in some builds, so an id check would false-negative. */
-  copilotChat: { available: boolean };
+   *  and Copilot ships bundled in some builds, so an id check would false-negative.
+   *  Cursor registers the same command, which is why one field and one probe serve
+   *  both non-Claude providers. Renamed from `copilotChat` now that it does. */
+  chatCommand: { available: boolean };
 }
 
 const SIGN_IN: DoctorAction = { kind: "command", command: "agentFlow.signIn", label: "Sign in" };
@@ -89,7 +120,7 @@ const RANK: Record<CheckStatus, number> = { fail: 0, warn: 1, skip: 2, ok: 3 };
 
 /** Every check, most decisive first, so the QuickPick opens on the thing to fix. */
 export function runChecks(i: DoctorInputs): Check[] {
-  const checks: Check[] = [...sourceChecks(i), ...localChecks(i), ...ghChecks(i), ...agentChecks(i), ...stateChecks(i)];
+  const checks: Check[] = [...sourceChecks(i), ...localChecks(i), ...forgeChecks(i), ...agentChecks(i), ...stateChecks(i)];
   // A stable sort keeps the authored group order inside one status, so the report
   // reads top-to-bottom the way the check set is documented.
   return checks
@@ -216,51 +247,85 @@ function localChecks(i: DoctorInputs): Check[] {
   return out;
 }
 
-function ghChecks(i: DoctorInputs): Check[] {
-  if (!i.prFacts || !i.gh) {
-    return [{ group: "GitHub", label: "gh", status: "skip", detail: "agentFlow.prFacts is off" }];
+function forgeChecks(i: DoctorInputs): Check[] {
+  const f = i.forge;
+  // The skip row still carries the forge's own group and label: a row that named
+  // no forge would read as a row about nothing, and the group set is what tells a
+  // GitLab user their Deck is pointed where they think it is.
+  if (!i.prFacts) {
+    return [{ group: f.label, label: f.cli, status: "skip", detail: "agentFlow.prFacts is off" }];
   }
-  const { gap, foundAt } = i.gh;
-  // Naming where gh was found is the most valuable line in the report: a Homebrew
-  // gh invisible to the extension host's bare launchd PATH reads, to a signed-in
-  // user, as the Deck simply being broken.
-  if (!gap) {
-    return [{ group: "GitHub", label: "gh", status: "ok", detail: `signed in — ${foundAt ?? "gh"}` }];
+  // Naming where the CLI was found is the most valuable line in the report: a
+  // Homebrew binary invisible to the extension host's bare launchd PATH reads, to
+  // a signed-in user, as the Deck simply being broken.
+  const where = f.foundAt ?? f.cli;
+  if (!f.gap) {
+    return [{ group: f.label, label: f.cli, status: "ok", detail: `signed in — ${where}` }];
   }
   return [
     {
-      group: "GitHub",
-      label: "gh",
+      group: f.label,
+      label: f.cli,
       status: "fail",
       detail:
-        gap.kind === "missing"
+        f.gap.kind === "missing"
           ? "not installed, or not on a PATH the extension host can see"
-          : `signed out — ${foundAt ?? "gh"}`,
-      action: { kind: "external", url: "https://cli.github.com", label: "Install gh" },
+          : `signed out — ${where}`,
+      action: { kind: "external", url: f.installUrl, label: `Install ${f.cli}` },
     },
   ];
 }
 
-/** Picks the Claude Code rows or the Copilot row by which agent is configured.
- *  The Claude session-files row runs either way — it's about the Deck's live
- *  signal, which reads `~/.claude/projects` regardless of which agent seeds
- *  sessions. */
+/** Picks the Claude Code rows, or a chat-agent row plus the Claude session-files
+ *  row, by which agent is configured. The session-files row runs for any
+ *  non-Claude provider — it's about the Deck's live signal, which reads
+ *  `~/.claude/projects` regardless of which agent seeds sessions, and Cursor's
+ *  composer sessions don't show up there, so the row still has to explain
+ *  itself under Cursor too.
+ *
+ *  Under `ask` the answer is not known until launch time, so every agent this
+ *  host can run gets its rows — a user about to be asked needs all of the
+ *  answers, not one of them. */
 function agentChecks(i: DoctorInputs): Check[] {
-  return i.agentProvider === "copilot" ? [...copilotChecks(i), ...claudeSessionChecks(i)] : claudeChecks(i);
+  if (i.agentProvider === "claude-code") return claudeChecks(i);
+  if (i.agentProvider !== "ask") return [...chatChecks(i, i.agentProvider), ...claudeSessionChecks(i)];
+  const others = i.hostProviders.filter((p): p is Exclude<Provider, "claude-code"> => p !== "claude-code");
+  // No trailing `claudeSessionChecks` here: `claudeChecks` already ends with it. The
+  // non-Claude arm above has to add it because it does NOT call `claudeChecks`.
+  // Appending it a second time duplicated the row and double-counted its warning.
+  return [...claudeChecks(i), ...others.flatMap((p) => chatChecks(i, p))];
 }
 
-function copilotChecks(i: DoctorInputs): Check[] {
+/** The chat-panel row for whichever non-Claude agent is configured. Both Copilot
+ *  and Cursor serve `workbench.action.chat.open`, so availability is one probe
+ *  (`chatCommand`) — but the group, the row text, and the remedy differ per
+ *  provider, so this stays a branch rather than a single templated row. Copilot's
+ *  text is unchanged from before this row was shared (pinned by doctor.test.ts's
+ *  "agent checks by provider" suite); Cursor's agent ships built into the editor,
+ *  so its row carries no action to point at. */
+function chatChecks(i: DoctorInputs, provider: Exclude<Provider, "claude-code">): Check[] {
+  const ok = i.chatCommand.available;
+  if (provider === "copilot") {
+    return [
+      {
+        group: "Copilot",
+        label: "Copilot Chat available",
+        status: ok ? "ok" : "fail",
+        detail: ok
+          ? "workbench.action.chat.open is registered"
+          : "no chat command is registered — GitHub Copilot Chat isn't available in this window",
+        ...(ok ? {} : { action: { kind: "extension", id: "github.copilot-chat", label: "Show extension" } }),
+      },
+    ];
+  }
   return [
     {
-      group: "Copilot",
-      label: "Copilot Chat available",
-      status: i.copilotChat.available ? "ok" : "fail",
-      detail: i.copilotChat.available
+      group: "Cursor",
+      label: "Cursor chat available",
+      status: ok ? "ok" : "fail",
+      detail: ok
         ? "workbench.action.chat.open is registered"
-        : "no chat command is registered — GitHub Copilot Chat isn't available in this window",
-      ...(i.copilotChat.available
-        ? {}
-        : { action: { kind: "extension", id: "github.copilot-chat", label: "Show extension" } }),
+        : "no chat command is registered — Cursor's chat isn't available in this window",
     },
   ];
 }
@@ -366,6 +431,14 @@ export function formatReport(checks: Check[], sourceLabel: string): string {
   return lines.join("\n");
 }
 
+/** The groups whose position is fixed regardless of which source or forge is
+ *  configured. The forge's own group (`"GitHub"`, `"GitLab"`, …) is deliberately
+ *  absent — it is never one of these literals, so it always falls into the `-1`
+ *  branch below and lands in the slot the old hardcoded `"GitHub"` used to hold. */
+const FIXED_GROUP_ORDER: DoctorGroup[] = ["source", "Local", "Claude Code", "Copilot", "Cursor", "State"];
+
 function groupOrder(g: DoctorGroup): number {
-  return ["source", "Local", "GitHub", "Claude Code", "Copilot", "State"].indexOf(g);
+  const idx = FIXED_GROUP_ORDER.indexOf(g);
+  if (idx === -1) return 2; // the forge's own group, between Local and Claude Code
+  return idx < 2 ? idx : idx + 1;
 }

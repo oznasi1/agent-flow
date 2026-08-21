@@ -13,8 +13,7 @@ const prs = (...f: (PrFacts | null)[]): PrEntryMap =>
   Object.fromEntries(f.map((x, i) => [`repo${i}`, { facts: x, fetchedAt: 0 }]));
 
 const input = (over: Partial<VisibilityInput> = {}): VisibilityInput => ({
-  hasLiveSession: false, prOpen: false, landed: false,
-  ticketActive: false, hasWorkToLose: false, ...over,
+  hasLiveSession: false, prOpen: false, merged: false, hasWorkToLose: false, justLaunched: false, ...over,
 });
 
 describe("visibility.ts is webview-safe", () => {
@@ -38,12 +37,30 @@ describe("shelfFor", () => {
     expect(shelfFor(input({ prOpen: true }))).toBe("board");
   });
 
-  it("keeps landed work on the board so it reaches the Done column", () => {
-    expect(shelfFor(input({ landed: true }))).toBe("board");
+  it("keeps a merged run on the board, so its wrap-up is somewhere you can see it", () => {
+    expect(shelfFor(input({ merged: true }))).toBe("board");
   });
 
-  it("keeps an active ticket on the board with nothing else going on", () => {
-    expect(shelfFor(input({ ticketActive: true }))).toBe("board");
+  it("closes a done ticket that never merged — nothing landed, so nothing to wrap up", () => {
+    // The one case where `merged` and `landed()` disagree, and the whole reason
+    // the shelf reads the narrower of the two.
+    expect(landed(prs(facts({ state: "CLOSED" })), "done")).toBe(true);
+    expect(shelfFor(input({ merged: false }))).toBe("closed");
+  });
+
+  it("closes a parked run whose ticket is the only thing still open", () => {
+    // An open ticket is not work in flight. Nobody is in the run, there is no PR
+    // and nothing to lose — the card had nothing on it to act on, and the strip
+    // it lands on offers the two things left: reopen, forget.
+    expect(shelfFor(input())).toBe("closed");
+  });
+
+  it("keeps a just-launched run on the board before its session exists", () => {
+    // The gap between taking work and Claude Code writing a transcript for the
+    // new worktree is seconds to minutes, and during it every other signal is
+    // false: a fresh worktree is clean, unpushed nothing, PR-less. Without this
+    // the card you just created would flash into Recently closed and back.
+    expect(shelfFor(input({ justLaunched: true }))).toBe("board");
   });
 
   it("keeps a run with uncommitted or unpushed work on the board", () => {

@@ -2,6 +2,23 @@
 // host-side caller can depend on it, including ones (like the orchestrator's
 // launcher) that must themselves stay free of `vscode`.
 
+/** One child worktree, as the parent's brief names it. `path` is what the agent
+ *  should `cd` into — the caller decides whether that is absolute or repo-relative,
+ *  because only the caller knows how many repos the run spans. */
+export interface BriefChild {
+  key: string;
+  summary: string;
+  path: string;
+  branch: string;
+}
+
+export interface BriefOrchestration {
+  children: readonly BriefChild[];
+  /** The branch every child merges into. Named in the brief because "not main" is
+   *  the one instruction a subagent cannot infer from its own worktree. */
+  parentBranch: string;
+}
+
 /** The markdown brief a run gets. Extracted so a flow-launched run and an
  * ordinary Take cannot drift apart — they must read identically, and two copies
  * of four lines is how that promise quietly breaks.
@@ -16,8 +33,32 @@
 export function briefMarkdown(
   detail: { key: string; summary: string; descriptionText: string },
   agentName = "Claude Code",
+  orchestration?: BriefOrchestration,
 ): string {
   const desc = detail.descriptionText?.trim();
   const body = desc ? `## Ticket description\n\n${desc}` : "_(No description on the ticket.)_";
-  return `## ${detail.key}: ${detail.summary}\n\n${body}\n\n## Plan\n\n_The ${agentName} prompt for this task says whether to plan first or implement._`;
+  const base = `## ${detail.key}: ${detail.summary}\n\n${body}\n\n## Plan\n\n_The ${agentName} prompt for this task says whether to plan first or implement._`;
+  // Absent or empty children must leave the brief byte-identical: every existing
+  // caller passes nothing, and the two paths have to read the same for a run that
+  // has no tree under it.
+  if (!orchestration?.children.length) return base;
+  const rows = orchestration.children
+    .map((c) => `| ${c.key} | ${cell(c.summary)} | \`${c.path}\` | \`${c.branch}\` |`)
+    .join("\n");
+  return `${base}
+
+## Children — one subagent each
+
+| Ticket | Summary | Worktree | Branch |
+|---|---|---|---|
+${rows}
+
+Dispatch one subagent per row. Each works ONLY inside its worktree path.
+Merge finished children into \`${orchestration.parentBranch}\`; never into main.`;
+}
+
+/** A summary safe to drop in a markdown table cell: an unescaped pipe would end the
+ *  cell early and shift every column after it. */
+function cell(text: string): string {
+  return text.replace(/\|/g, "\\|");
 }

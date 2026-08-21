@@ -131,6 +131,16 @@ export async function launchPlanned(req: LaunchRequest, deps: LaunchDeps): Promi
       workspaceDir,
       seedAgent,
       openIn: node.dest === "current-window" ? "current" : "new",
+      // Unattended: a rule fires with nobody watching, so it must never reach the
+      // `ask` picker — which is `ignoreFocusOut: true`, so reaching it would not time
+      // out, it would hold the Deck's refresh open until someone came back and
+      // answered. Claude Code is the one agent every host can run.
+      //
+      // A pin is read ONLY under `ask` (see OpenRequest.provider), so this suppresses a
+      // prompt and never overrides a preference: a user whose setting says `cursor`
+      // still gets Cursor here, and `agentName` — which the caller resolved from that
+      // same setting — still names it in the brief.
+      provider: "claude-code",
     });
 
     // The run's key IS `ticket.key` above — openWorkspace writes `run.key = ticket.key`

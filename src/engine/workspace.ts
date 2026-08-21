@@ -10,8 +10,9 @@ import { renderPrompt } from "./prompt";
 import { writeRun, defaultRunsDir } from "./runs";
 import { gitState } from "./git";
 import { ensureGitExcluded } from "./gitExclude";
+import { serviceFolderName } from "./worktree";
 import { windowIdentity, type CurrentWindow } from "./presence";
-import { providerLabel, readAgentProvider, readAgentSurface, type AgentProvider } from "../config";
+import { hostProviders, providerLabel, readAgentProviderSetting, readAgentSurface, resolvedProvider, type AgentProvider } from "../config";
 
 export const BRIEF_DIR = ".pick-task";
 export const BRIEF_FILE = "TASK.md";
@@ -32,6 +33,10 @@ const SEED_STAGGER_MS = 400;
 const CLI: Record<AgentProvider, { cmd: string; label: string; bootMs: number }> = {
   "claude-code": { cmd: "claude", label: "Claude", bootMs: 1500 },
   copilot: { cmd: "copilot", label: "Copilot", bootMs: 2000 }, // UNVERIFIED — measure in the dev host before release
+  // UNVERIFIED — and note `cursor-agent` is NOT installed alongside Cursor itself;
+  // it is a separate install, so the `command not found` fallback is reached more
+  // often here than for the other two.
+  cursor: { cmd: "cursor-agent", label: "Cursor", bootMs: 2000 },
 };
 
 /** Wrap text so the terminal delivers it as a *paste*. renderPrompt appends the
@@ -49,11 +54,13 @@ const CLAUDE_OPEN_CMD = "claude-vscode.primaryEditor.open";
 // Claude tab group, so a batch's sessions stack in one column instead of one per launch.
 const CLAUDE_NEW_TAB_CMD = "claude-vscode.editor.open";
 
-// VS Code's built-in chat command, which GitHub Copilot Chat serves.
+// VS Code's built-in chat command, served by both GitHub Copilot Chat and Cursor.
 // `isPartialQuery: true` fills the input without submitting, so Copilot honors the
-// same "we pre-fill, you press Enter" contract as the Claude Code panel.
-// Documented shape, not yet confirmed in a dev host — that verification pass is
-// still outstanding.
+// same "we pre-fill, you press Enter" contract as the Claude Code panel. Cursor
+// ignores both `isPartialQuery` and `mode` — prefill-without-submit is already its
+// default — and its handler was read from the shipped workbench bundle but not yet
+// run. Copilot's shape is documented; neither has been confirmed in a dev host —
+// that verification pass is still outstanding.
 const CHAT_OPEN_CMD = "workbench.action.chat.open";
 
 export interface TicketRef {
@@ -107,6 +114,19 @@ export interface OpenRequest {
    * are taken from this request. That silently rewrites the card the user is
    * looking at. */
   recordRun?: boolean;
+  /** Stamped onto the run record verbatim; see `Run.parentKey`. */
+  parentKey?: string;
+  /** Stamped onto the run record verbatim; see `Run.children`. An empty array is
+   *  stored as absent, so "no children" has exactly one representation. */
+  children?: Run["children"];
+  /** Pin the agent and suppress the `ask` picker. Set by the callers that must never
+   *  prompt: a batch, which resolves once for the whole batch before its loop, and an
+   *  Orchestrator rule, which runs unattended with nobody there to answer.
+   *
+   *  Read ONLY under `ask` — it replaces the prompt, it does not override a preference.
+   *  A pin set under `claude-code`/`copilot`/`cursor` is ignored, and `OpenResult.provider`
+   *  reports the setting. See the resolution at the top of `openWorkspace`. */
+  provider?: AgentProvider;
   /** Never overwrite a brief that is already on disk. Defaults to false, which is what
    * every caller before it relied on: a Take rewrites the brief because the brief IS
    * the task it is starting.
@@ -131,6 +151,12 @@ export interface OpenResult {
   unaddedRepos?: string[]; // repos that couldn't be added as roots to a folder window
   remoteControl: boolean; // whether Remote Control actually applies (see the single-window guard)
   seededInPlace?: boolean; // "current": this window was seeded as-is; nothing was opened
+  /** The agent that was actually seeded. Post-launch copy reads this rather than the
+   *  setting, so it names the real agent even under `ask`. */
+  provider: AgentProvider;
+  /** The `ask` picker was dismissed. Nothing was opened, written, or seeded — every
+   *  other field is empty and the caller must return without reporting success. */
+  cancelled?: true;
 }
 
 export interface PlanFile {
@@ -141,6 +167,9 @@ export interface PlanFile {
   /** Position in a batch. Several plans written in one loop can share a
    * createdAt millisecond; this keeps the seeded tabs in selection order. */
   seq?: number;
+  /** Present only when `ask` resolved it in the source window; absent means read the
+   * setting live. */
+  provider?: AgentProvider;
   matches: { matchPath: string; prompt: string }[];
 }
 
@@ -218,6 +247,48 @@ cannot be done within them.
 `;
 }
 
+/** Write `.pick-task/TASK.md` into each of `services` — worktrees that get a brief but
+ *  deliberately no window, which is what a child worktree is: its subagent is
+ *  dispatched by the parent's session, not opened by us.
+ *
+ *  `planMd` arrives already rendered (engine/brief's `briefMarkdown`), the same way
+ *  `openWorkspace` receives it, so the two paths cannot drift into producing different
+ *  briefs. Best-effort per repo: one unwritable worktree must not cost the others
+ *  theirs. Returns the files it wrote.
+ *
+ *  Deliberately no `ensureGitExcluded` call: it follows a worktree's `commondir` and
+ *  writes to the repo's SHARED `info/exclude` (see gitExclude.ts), so the entry
+ *  `openWorkspace` writes later in the same take covers every worktree of that repo,
+ *  children included — one entry, not one per worktree. Until then the brief shows as
+ *  untracked inside the child worktree, and it stays that way if the take ends early at
+ *  one of `launch`'s own pickers. That transient window is the price of keeping this
+ *  helper to one responsibility. */
+export function writeBriefInto(
+  services: ServiceRef[],
+  ticket: TicketRef,
+  planMd: string,
+  log: (m: string) => void,
+): string[] {
+  const written: string[] = [];
+  for (const s of services) {
+    try {
+      const dir = path.join(s.path, BRIEF_DIR);
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, BRIEF_FILE);
+      // `[s]` and `s.name`, not the whole set: a child's brief names the one worktree
+      // its subagent works in, so "Repos in scope" must not list the siblings it is
+      // being kept out of. No file hints either — those come from the ticket
+      // description resolved against a repo, and the caller has already rendered the
+      // description into `planMd`.
+      fs.writeFileSync(file, briefMarkdown(ticket, planMd, [s], s.name, []));
+      written.push(file);
+    } catch (e) {
+      log(`brief ${s.name}: could not write into ${s.path} (${e})`);
+    }
+  }
+  return written;
+}
+
 /** The filename one attachment lands under: its own name, unless an earlier
  * attachment in the same launch already claimed that name, in which case the source
  * file's stem is folded in. Deterministic and exported because the brief NAMES these
@@ -230,6 +301,38 @@ export function attachmentFileName(all: readonly { path: string; name: string }[
   const stem = path.basename(att.path, path.extname(att.path));
   const ext = path.extname(att.name);
   return `${path.basename(att.name, ext)}-${stem}${ext}`;
+}
+
+/** Where one attachment sits under the brief's `images/` directory: `<run key>/<name>`.
+ *
+ * The run key is load-bearing, not decoration. `attachmentFileName` de-duplicates within
+ * ONE launch's list, which is all a single launch needs and nothing a second launch can
+ * use — and several tasks share a checkout routinely (a repo taken twice, a note taken
+ * beside a running one). Every pasted screenshot is called `image.png`, because that is
+ * what `saveImage` names a note's clipboard paste, so two notes taken into one repo used
+ * to land on the same `images/image.png`: the later take silently replaced the earlier
+ * agent's screenshot, and an agent reads that file when it gets to it, not when it is
+ * launched. Keying the directory by run separates them without deleting anything, which
+ * matters precisely because the other agent may still be working.
+ *
+ * Re-taking the SAME note reuses its key and so overwrites its own directory — the same
+ * "a re-run replaces that note's own record" rule the run store follows.
+ *
+ * Always "/"-joined: the return value goes into brief and prompt text, where the path is
+ * repo-relative markdown and git-style POSIX, never `path.sep`. Callers writing files
+ * split it back into segments. */
+export function attachmentRelPath(runKey: string, all: readonly { path: string; name: string }[], index: number): string {
+  return `${attachmentDirName(runKey)}/${attachmentFileName(all, index)}`;
+}
+
+/** The run key as ONE path segment. Keys reaching a filesystem path is not new — worktree
+ * folders are `<repo>-<KEY>` — but a key becoming a directory here is, and the keys are
+ * built from free text (a notepad title) or handed over by a task source, so anything that
+ * could climb out of `images/` or split into a second segment is folded to a dash rather
+ * than trusted. The slug shape matches `slugify`/`branchName`, minus their length cap: the
+ * key is already bounded by the callers that build it. */
+function attachmentDirName(runKey: string): string {
+  return runKey.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "") || "task";
 }
 
 export function agentPrompt(t: TicketRef, mentions: string[], template: string, briefPath?: string): string {
@@ -267,6 +370,50 @@ export function openInEditor(target: string): Promise<boolean> {
 // ── Public: open + seed ────────────────────────────────────────────────────────
 export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   const { ticket, planMd, descriptionText, services, mode, promptTemplate, workspaceDir, seedAgent } = req;
+  // Resolve the agent before anything is created. Under the three fixed settings this
+  // is a plain read and the plan file carries no provider, so the target window keeps
+  // reading the preference live at seed time — flipping the setting still affects
+  // plans already on disk. Only `ask` pins a choice into the plan, because by then
+  // there is no preference left for the target window to read.
+  const setting = readAgentProviderSetting();
+  // A caller's pin (`OpenRequest.provider`) means "resolve to this INSTEAD OF
+  // PROMPTING", so it applies under `ask` and nowhere else. Under a fixed setting
+  // there is no prompt to suppress and the user's explicit preference wins: an
+  // Orchestrator rule that pins Claude Code purely to avoid a dialog must still seed
+  // Cursor for a user whose setting says `cursor`. Honouring it there would also split
+  // the answer in two — a fixed setting writes no provider into the plan, so the target
+  // window would seed the setting while `OpenResult.provider` named the pin, and the
+  // toast would contradict the session the user is looking at. The invariant this
+  // upholds, and the one every caller may rely on: `OpenResult.provider` is always what
+  // the target window will actually seed, on every path.
+  let pinned: AgentProvider | undefined = setting === "ask" ? req.provider : undefined;
+  if (seedAgent && !pinned && setting === "ask") {
+    // A one-item picker is not a question. On a host that is neither VS Code nor
+    // Cursor, `hostProviders()` is exactly `["claude-code"]`, and a modal held open by
+    // `ignoreFocusOut` that can be answered only one way is pure friction on every
+    // launch. Short-circuited HERE rather than in `hostProviders`, which is read as a
+    // capability LIST elsewhere — Doctor feeds it straight into `DoctorInputs` to
+    // decide which agents' rows to show under `ask` — and must keep answering "what
+    // can this host run", not "should we prompt".
+    const choices = hostProviders();
+    if (choices.length === 1) {
+      pinned = choices[0];
+    } else {
+      const choice = await vscode.window.showQuickPick(
+        choices.map((p) => ({ label: providerLabel(p), provider: p })),
+        { title: "Which agent?", placeHolder: "Pick the agent to start this session with", ignoreFocusOut: true },
+      );
+      // Dismissed: the user cancelled the launch itself. Nothing has been created yet,
+      // so returning here leaves no window, no worktree, no brief and no plan behind.
+      if (!choice) {
+        return { mode, briefs: [], opened: [], remoteControl: false, provider: "claude-code", cancelled: true };
+      }
+      pinned = choice.provider;
+    }
+  }
+  const provider: AgentProvider = pinned ?? resolvedProvider(setting);
+  // Written into the plan only when `ask` produced it — see the comment above.
+  const planProvider = setting === "ask" ? provider : undefined;
   // "This window" only means anything if this window can be named by a plan match.
   // Without an identity there is nothing to seed, so the request degrades to the
   // normal open path rather than silently doing nothing.
@@ -299,9 +446,12 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     const attachments = req.attachments ?? [];
     if (attachments.length > 0) {
       const imagesDir = path.join(dir, "images");
-      fs.mkdirSync(imagesDir, { recursive: true });
       for (const [i, att] of attachments.entries()) {
-        fs.copyFileSync(att.path, path.join(imagesDir, attachmentFileName(attachments, i)));
+        // `attachmentRelPath` is "/"-joined for the brief text; split it back out so the
+        // directory it names is created and written with this platform's separator.
+        const target = path.join(imagesDir, ...attachmentRelPath(ticket.key, attachments, i).split("/"));
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(att.path, target);
       }
     }
     return { repo: s.name, path: briefPath, gitExcluded: ensureGitExcluded(s.path, `${BRIEF_DIR}/`), files: files.length };
@@ -386,11 +536,20 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   } else if (mode === "multiroot") {
     fs.mkdirSync(workspaceDir, { recursive: true });
     workspaceFile = path.join(workspaceDir, `${ticket.key}.code-workspace`);
+    // One name per root, computed once: the folder the file declares and the folder an
+    // `@mention` names have to be the same string, or the mention resolves to nothing.
+    const names = new Map(services.map((s) => [s.name, serviceFolderName(ticket.key, s)]));
     fs.writeFileSync(
       workspaceFile,
-      JSON.stringify({ folders: services.map((s) => ({ name: s.name, path: s.path })), settings: {} }, null, 2) + "\n",
+      JSON.stringify(
+        { folders: services.map((s) => ({ name: names.get(s.name)!, path: s.path })), settings: {} },
+        null,
+        2,
+      ) + "\n",
     );
-    const mentions = services.flatMap((s) => (filesByRepo.get(s.name) ?? []).map((f) => mention("multiroot", s.name, f)));
+    const mentions = services.flatMap((s) =>
+      (filesByRepo.get(s.name) ?? []).map((f) => mention("multiroot", names.get(s.name)!, f)),
+    );
     matches.push({ matchPath: workspaceFile, prompt: seedPrompt(mentions) });
   } else {
     for (const s of services) {
@@ -402,13 +561,17 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
   // One clipboard, one window. A launch that opens several windows would leave every
   // window but the last pasting another task's brief, so withhold it entirely. Also
   // withhold it when seedAgent is off: nothing seeds without a plan file (below), so
-  // "applies" must never be true when no plan file will carry it.
-  const remoteControl = !!req.remoteControl && seedAgent && matches.length === 1;
+  // "applies" must never be true when no plan file will carry it. And it is Claude
+  // Code's feature alone, so a non-Claude agent withholds it too — under `ask` this is
+  // where a Copilot or Cursor pick drops it. Dropping is right where refusing would be
+  // wrong: the user made that choice interactively moments ago, and `remoteControl`
+  // already feeds `seededNote`, so the toast corrects itself with no new message.
+  const remoteControl = !!req.remoteControl && seedAgent && matches.length === 1 && provider === "claude-code";
 
   // 3 — durable writes BEFORE opening: a window that opens (or is focused) and seeds
   //     can otherwise race these to disk, so nothing may be opened before this lands.
   if (seedAgent) {
-    writePlanFile({ key: ticket.key, createdAt: Date.now(), seedAgent: true, remoteControl, matches });
+    writePlanFile({ key: ticket.key, createdAt: Date.now(), seedAgent: true, remoteControl, provider: planProvider, matches });
   }
   if (req.recordRun !== false) {
     const run: Run = {
@@ -426,6 +589,8 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
         branch: gitState(s.name, s.path).branch ?? undefined,
       })),
       briefPaths: briefs.map((b) => b.path),
+      ...(req.parentKey ? { parentKey: req.parentKey } : {}),
+      ...(req.children?.length ? { children: req.children } : {}),
     };
     try {
       writeRun(defaultRunsDir(), run);
@@ -448,7 +613,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     }
   }
 
-  return { mode: effMode, workspaceFile, briefs, opened, mergedRepos, mergeFailed, unaddedRepos, remoteControl, seededInPlace: !!here };
+  return { mode: effMode, workspaceFile, briefs, opened, mergedRepos, mergeFailed, unaddedRepos, remoteControl, seededInPlace: !!here, provider };
 }
 
 /** Additively merge `repos` into an existing `.code-workspace` file, preserving
@@ -561,8 +726,8 @@ export function workspaceFolderPaths(file: string): string[] {
 
 /** A folder that might be added to an existing workspace. `label` is the folder name
  *  written into the file; `repoName` is the bare repo name dedup compares on — batch
- *  labels are key-qualified (`ASM-1-api`) but must still dedup against a folder the
- *  workspace already calls `api`. */
+ *  a worktree's label is key-qualified (`api-ASM-1`) but must still dedup against a
+ *  folder the workspace already calls `api`. */
 export interface MergeCandidate {
   label: string;
   repoName: string;
@@ -696,6 +861,17 @@ export function maybeSeedAgent(context: vscode.ExtensionContext, log: (m: string
   return thisPass;
 }
 
+/** The agent to seed with, resolved in the target window at seed time. A plan carries
+ *  `provider` only when `ask` resolved it in the source window; otherwise the setting
+ *  is read live, which is what makes flipping the preference affect plans already on
+ *  disk. A bare `ask` reaching here means the plan predates its own resolution — a
+ *  settings flip inside the 15-minute PLAN_TTL_MS window — so it degrades to the one
+ *  agent every host can run rather than putting a dialog in a window the user was not
+ *  expecting one in. */
+function seedProvider(plan: PlanFile): AgentProvider {
+  return plan.provider ?? resolvedProvider(readAgentProviderSetting());
+}
+
 async function runSeedPass(context: vscode.ExtensionContext, log: (m: string) => void): Promise<void> {
   const identity = windowIdentity()?.identity;
   log(`activation: window identity = ${identity ?? "(no single workspace)"}`);
@@ -751,6 +927,7 @@ async function runSeedPass(context: vscode.ExtensionContext, log: (m: string) =>
       log,
       remoteControl: plan.remoteControl === true,
       multi,
+      provider: seedProvider(plan),
     });
     // Claude Code picks a session's column by scanning the tab groups for an existing
     // Claude group, and that model doesn't update synchronously — without this pause
@@ -820,38 +997,46 @@ async function seedViaTerminal(
   }
 }
 
-/** Open Copilot Chat with the prompt pre-filled and unsubmitted. Polls for the
- * command the same way the Claude Code path does: Agent Flow and the chat extension
- * both activate on `onStartupFinished`, so the same activation race applies.
+/** Open a chat panel with the prompt pre-filled and unsubmitted. Serves both Copilot
+ * and Cursor: they register the same command id, `workbench.action.chat.open`. Polls
+ * for it because Agent Flow and the chat extension both activate on
+ * `onStartupFinished`, so the same activation race applies to either host.
  *
- * There is no URI-handler rung here — Copilot publishes no documented
- * open-with-prompt URI — so a false return means the caller should fall back to the
- * clipboard.
+ * There is no URI-handler rung here — neither publishes a documented
+ * open-with-prompt URI we are willing to use. Cursor does register
+ * `deeplink.prompt.prefill`, but it raises a "Create chat with prompt" confirmation
+ * modal before doing anything, which is worse than the clipboard fallback below. So a
+ * false return means the caller should fall back to the clipboard.
  *
- * `multi`: Copilot's chat panel is single-instance, so a batch of N tasks calling
- * this command would each overwrite the previous prompt — the user would silently
- * end up with only the last task seeded. There is no verified editor-tab command to
- * open one Copilot chat per task instead (that dev-host spike hasn't been run), so
- * for now a batch skips the panel entirely and returns false immediately, which
- * sends the caller (seedAgentSession) down its existing `multi` fallback: the
- * "briefs are in .pick-task/" notification, clipboard withheld. Revisit once a
- * verified per-task command exists. */
-async function seedCopilotPanel(
+ * `multi` forks by provider, because their handlers differ:
+ *   - Copilot's chat panel is single-instance, so a batch of N tasks would each
+ *     overwrite the previous prompt and the user would silently end up with only the
+ *     last one seeded. It bails immediately, sending the caller down its existing
+ *     `multi` fallback: the "briefs are in .pick-task/" notification.
+ *   - Cursor's handler calls `createComposer({ openInNewTab: true })`, so each call
+ *     gets its own composer tab and a batch seeds correctly. It proceeds. */
+async function seedChatPanel(
+  provider: AgentProvider,
   seedText: string,
   key: string,
   log: (m: string) => void,
   multi = false,
 ): Promise<boolean> {
-  if (multi) {
+  if (multi && provider === "copilot") {
     log(`seed ${key}: per-task Copilot chat tabs are not wired up yet — batch falls back to the briefs`);
     return false;
   }
+  // Copilot's product name for the chat panel itself is "Copilot Chat", distinct
+  // from providerLabel's generic "Copilot" used everywhere else (toasts, session
+  // names) — this line predates providerLabel and keeps its original wording so the
+  // emitted log stays byte-identical to what shipped before Cursor existed.
+  const label = provider === "copilot" ? "Copilot Chat" : providerLabel(provider);
   for (let attempt = 1; attempt <= 7; attempt++) {
     let cmds: string[];
     try {
       cmds = await vscode.commands.getCommands(true);
     } catch (e) {
-      log(`seed ${key}: copilot command attempt ${attempt} threw: ${e}`);
+      log(`seed ${key}: ${provider} command attempt ${attempt} threw: ${e}`);
       await delay(700);
       continue;
     }
@@ -860,17 +1045,16 @@ async function seedCopilotPanel(
       continue;
     }
     // The command is registered, so any throw from here on is a real failure on its
-    // merits (e.g. the still-unverified argument shape) rather than the activation
-    // race this loop exists to ride out. Retrying it would stall ~4.9s and could
-    // reopen the chat panel on every attempt, so try exactly once and fall through
-    // to the clipboard fallback below.
+    // merits rather than the activation race this loop exists to ride out. Retrying
+    // would stall ~4.9s and could reopen the panel on every attempt, so try exactly
+    // once and fall through to the clipboard fallback below.
     try {
       await vscode.commands.executeCommand(CHAT_OPEN_CMD, {
         query: seedText,
         isPartialQuery: true,
         mode: "agent",
       });
-      log(`seed ${key}: opened Copilot Chat via ${CHAT_OPEN_CMD} (attempt ${attempt})`);
+      log(`seed ${key}: opened ${label} via ${CHAT_OPEN_CMD} (attempt ${attempt})`);
       return true;
     } catch (e) {
       log(`seed ${key}: ${CHAT_OPEN_CMD} is registered but threw — not retrying: ${e}`);
@@ -895,21 +1079,25 @@ async function seedAgentSession(opts: {
   log: (m: string) => void;
   remoteControl?: boolean;
   multi?: boolean;
+  /** Already resolved by seedProvider, in this window, at seed time — the plan's own
+   *  choice if it carried one, otherwise the live setting. */
+  provider: AgentProvider;
 }): Promise<void> {
-  const { prompt, key, matchPath, log, remoteControl = false, multi = false } = opts;
+  const { prompt, key, matchPath, log, remoteControl = false, multi = false, provider } = opts;
 
-  // `/remote-control` is a Claude Code slash command; Copilot would seed it as literal
-  // prompt text. tasksView already refuses the combination pre-flight, but a plan file
-  // written under Claude Code can outlive a flip to Copilot — the plan does not carry
-  // the provider, it is re-read here — so the block is repeated at the last moment
-  // before anything is seeded. Refuse rather than silently drop one of the two.
-  // Only this exact pair is refused: an ordinary Copilot seed falls straight through.
-  // The advice has to name re-taking the task, not just the settings change: the
-  // caller sets this plan's `seeded:` guard BEFORE calling us (see runSeedPass), and
-  // nothing clears it short of PLAN_TTL_MS — so fixing the setting and reloading would
-  // find the plan already consumed and seed nothing. Telling the user to reload would
-  // be telling them to do something that cannot work.
-  if (remoteControl && readAgentProvider() === "copilot") {
+  // `/remote-control` is a Claude Code slash command; every other agent would seed it
+  // as literal prompt text. tasksView already refuses the combination pre-flight, but
+  // a plan file written under Claude Code can outlive a flip to Copilot or Cursor —
+  // the plan does not carry the provider, it is re-read here — so the block is
+  // repeated at the last moment before anything is seeded. Refuse rather than
+  // silently drop one of the two. Only this exact pair is refused: an ordinary
+  // non-Claude seed falls straight through. The advice has to name re-taking the
+  // task, not just the settings change: the caller sets this plan's `seeded:` guard
+  // BEFORE calling us (see runSeedPass), and nothing clears it short of PLAN_TTL_MS —
+  // so fixing the setting and reloading would find the plan already consumed and seed
+  // nothing. Telling the user to reload would be telling them to do something that
+  // cannot work.
+  if (remoteControl && provider !== "claude-code") {
     log(`seed ${key}: refused — Remote Control needs Claude Code`);
     vscode.window.showErrorMessage(
       `Agent Flow Deck: ${key} not seeded — Remote Control needs Claude Code. Set agentFlow.agentProvider to claude-code (or turn agentFlow.remoteControl off), then take ${key} again — reloading this window won't re-seed it.`,
@@ -929,11 +1117,10 @@ async function seedAgentSession(opts: {
     );
   };
 
-  // Both settings are read here, in the target window, at seed time — never carried
-  // in the plan file. Flipping either therefore also affects plans already on disk,
-  // which is what a preference should do.
-  const provider = readAgentProvider();
-
+  // The surface is read here, in the target window, at seed time — never carried in
+  // the plan file. Flipping it therefore also affects plans already on disk, which is
+  // what a preference should do. The provider is resolved the same way, one level up
+  // in seedProvider, which also gets to honor a plan's own recorded choice.
   if (readAgentSurface() === "terminal") {
     if (await seedViaTerminal(provider, seedText, key, matchPath, log)) {
       announceRemoteControl();
@@ -973,7 +1160,7 @@ async function seedAgentSession(opts: {
     } catch (e) {
       log(`seed ${key}: URI failed: ${e}`);
     }
-  } else if (await seedCopilotPanel(seedText, key, log, multi)) {
+  } else if (await seedChatPanel(provider, seedText, key, log, multi)) {
     announceRemoteControl();
     return;
   }

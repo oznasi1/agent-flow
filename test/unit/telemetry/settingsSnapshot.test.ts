@@ -6,6 +6,7 @@ import {
 } from "../../../src/telemetry/settingsSnapshot";
 import { STOCK_REVIEW_MODES } from "../../../src/telemetry/events";
 import { CONNECTOR_IDS } from "../../../src/tasks/registry";
+import { FORGE_IDS } from "../../../src/engine/forge/registry";
 import { setConfig } from "../../_mocks/vscode";
 import pkg from "../../../package.json";
 
@@ -28,6 +29,7 @@ describe("settingsSnapshot", () => {
     expect(s.open_agents).toBe(true);
     expect(s.review_writes).toBe(false);
     expect(s.orchestrator).toBe(false);
+    expect(s.child_worktrees).toBe(true);
     expect(s.repo_blocklist_count).toBe(0);
     // One, not zero: DEFAULT_COMMANDS now ships a single inert example, and an
     // untouched setting resolves to it.
@@ -37,6 +39,7 @@ describe("settingsSnapshot", () => {
     expect(s.review_modes_overridden).toBe(0);
     expect(s.review_modes_custom).toBe(0);
     expect(s.review_modes_hidden).toBe(0);
+    expect(s.forge).toBe("github");
   });
 
   it("collapses a user-authored taskMode id to 'custom'", () => {
@@ -204,6 +207,47 @@ describe("settingsSnapshot", () => {
     expect(settingsSnapshot({ ...getConfig(), taskSource: "acme" }).task_source).toBe("invalid");
   });
 
+  it("reports a registered forge as itself", () => {
+    expect(settingsSnapshot({ ...getConfig(), forge: "gitlab" }).forge).toBe("gitlab");
+  });
+
+  it("reports an unregistered forge as invalid rather than transmitting it", () => {
+    expect(settingsSnapshot({ ...getConfig(), forge: "our-internal-thing" }).forge).toBe("invalid");
+  });
+
+  // A stock GitLab install has touched NOTHING, and must read as untouched. Two of
+  // the shipped values are forge-flavoured — `prReviewPrompt` and the first stock
+  // review mode's prompt — so comparing them against the GitHub baselines fired
+  // `pr_review_prompt_customized: true` and `review_modes_overridden: 1` for the
+  // entire GitLab population, which is the direction that destroys both metrics:
+  // docs/TELEMETRY.md says they mean "the user-authored text was changed from the
+  // shipped default", and picking a forge is not authoring text. Built through the
+  // real `getConfig()`, not a hand-assembled cfg, because the bug lived precisely
+  // in the disagreement between what getConfig seeds and what this file compares
+  // against.
+  it("reports a stock gitlab install as having customized nothing", () => {
+    setConfig({ forge: "gitlab" });
+    const s = settingsSnapshot(getConfig());
+    expect(s.forge).toBe("gitlab");
+    expect(s.pr_review_prompt_customized).toBe(false);
+    expect(s.review_modes_overridden).toBe(0);
+    expect(s.review_modes_custom).toBe(0);
+    expect(s.review_modes_hidden).toBe(0);
+  });
+
+  // The other direction, so the two tests together prove the fields still
+  // DISCRIMINATE on gitlab rather than having been flattened to false.
+  it("still reports a customized prompt and mode on gitlab", () => {
+    setConfig({
+      forge: "gitlab",
+      prReviewPrompt: "my own words",
+      reviewRequestModes: [{ id: "full", prompt: "my own review words" }],
+    });
+    const s = settingsSnapshot(getConfig());
+    expect(s.pr_review_prompt_customized).toBe(true);
+    expect(s.review_modes_overridden).toBe(1);
+  });
+
   it("reports the agent surface, collapsing an unknown value to invalid", () => {
     expect(settingsSnapshot({ ...getConfig(), agentSurface: "terminal" }).agent_surface).toBe("terminal");
     expect(
@@ -297,6 +341,16 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
       props["agentFlow.taskSource"].enum?.length,
     );
   });
+
+  it("keeps FORGE_IDS equal to agentFlow.forge's manifest enum", () => {
+    expect([...FORGE_IDS]).toEqual(props["agentFlow.forge"].enum);
+  });
+
+  it("keeps agentFlow.forge's enum and enumDescriptions the same length", () => {
+    expect(props["agentFlow.forge"].enumDescriptions?.length).toBe(
+      props["agentFlow.forge"].enum?.length,
+    );
+  });
 });
 
 describe("events.ts ⇄ config.ts stock review mode ids", () => {
@@ -377,6 +431,14 @@ describe("settingsSnapshot — orchestrator", () => {
   });
 });
 
+describe("settingsSnapshot — childWorktrees", () => {
+  it("carries the childWorktrees setting", () => {
+    expect(settingsSnapshot(getConfig()).child_worktrees).toBe(true);
+    setConfig({ childWorktrees: false });
+    expect(settingsSnapshot(getConfig()).child_worktrees).toBe(false);
+  });
+});
+
 describe("settingsSnapshot — field-count guard", () => {
   // docs/TELEMETRY.md hand-states two counts about this exact interface: the
   // total field count ("a 38-field reduction") and how many of those fields
@@ -390,13 +452,13 @@ describe("settingsSnapshot — field-count guard", () => {
   // field is enum-ish, the "invalid" sentinel paragraph and its own field
   // list) — update the doc, don't just bump the number here.
 
-  it("emits exactly 38 fields — a count also stated in docs/TELEMETRY.md's " +
+  it("emits exactly 40 fields — a count also stated in docs/TELEMETRY.md's " +
     "'Settings snapshot' section; a mismatch means that doc is now wrong too", () => {
     const s = settingsSnapshot(getConfig());
-    expect(Object.keys(s)).toHaveLength(38);
+    expect(Object.keys(s)).toHaveLength(40);
   });
 
-  it("reports the \"invalid\" sentinel on exactly 9 fields when every enum-ish " +
+  it("reports the \"invalid\" sentinel on exactly 10 fields when every enum-ish " +
     "setting holds an unrecognized value — docs/TELEMETRY.md's sentinel " +
     "paragraph states this same count and must move with it", () => {
     // Every config property whose SettingsSnapshot field is built with
@@ -416,6 +478,7 @@ describe("settingsSnapshot — field-count guard", () => {
       remoteControl: secret as unknown as AgentFlowConfig["remoteControl"],
       defaultFilter: secret as unknown as AgentFlowConfig["defaultFilter"],
       taskSource: secret as unknown as AgentFlowConfig["taskSource"],
+      forge: secret as unknown as AgentFlowConfig["forge"],
     };
     const s = settingsSnapshot(cfg);
     // Booleans and numbers can never equal the string "invalid", and
@@ -423,7 +486,7 @@ describe("settingsSnapshot — field-count guard", () => {
     // a genuine enumOrInvalid field, not a coincidence.
     const invalidFields = Object.entries(s).filter(([, v]) => v === "invalid").map(([k]) => k);
     expect(invalidFields.sort()).toEqual([
-      "agent_provider", "agent_surface", "default_filter", "explore_mode",
+      "agent_provider", "agent_surface", "default_filter", "explore_mode", "forge",
       "open_in", "remote_control", "task_source", "workspace_mode", "worktree",
     ]);
   });

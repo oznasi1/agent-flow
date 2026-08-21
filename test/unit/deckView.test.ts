@@ -5,12 +5,13 @@ import { composeAgentPrompt } from "../../src/engine/prompt";
 import { fakeContext } from "../_helpers/factories";
 import type { ChangedFile } from "../../src/engine/git";
 import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef, Task } from "../../src/types";
-import type { FetchResult, GhGap } from "../../src/engine/pr/provider";
+import type { FetchResult } from "../../src/engine/pr/provider";
+import type { ForgeGap } from "../../src/engine/forge/types";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
 import type { CommandNode, Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
 import { BRANCH_CI_ARGS, branchCiKey } from "../../src/engine/orchestrator/branchCi";
 import { GH_TIMEOUT_MS } from "../../src/engine/pr/provider";
-import type { AgentProvider } from "../../src/config";
+import type { AgentProvider, AgentProviderSetting } from "../../src/config";
 import type { FlowCommand } from "../../src/types";
 
 /** The shape `child_process.exec`'s callback is invoked with, narrowed to the four
@@ -50,7 +51,7 @@ const h = vi.hoisted(() => ({
   prFetch: vi.fn(async (_p: string, _b: string | null, _k: string): Promise<FetchResult> => ({ ok: true, facts: null })),
   // Typed as the real union so a test can resolve a gap as well as the null that
   // means "gh is usable".
-  probeGh: vi.fn(async (): Promise<GhGap | null> => null),
+  probeGh: vi.fn(async (): Promise<ForgeGap | null> => null),
   // The branch-CI fetch's spawn (Task 8), standing in for `execRunner`: resolves
   // the raw stdout of one `gh api graphql` call. Green by default, so a test about
   // the fetch's SHAPE (argv, cwd, how many calls) needs no payload of its own; a
@@ -78,7 +79,7 @@ const h = vi.hoisted(() => ({
   reviewWrites: false as boolean,
   stampLabelOnWrite: true as boolean,
   seedAgent: true as boolean,
-  agentProvider: "claude-code" as AgentProvider,
+  agentProvider: "claude-code" as AgentProviderSetting,
   reviewSubmit: vi.fn(async (_repo: string, _number: number, _verb: ReviewVerb, _body: string): Promise<{ ok: true } | { ok: false; message: string }> => ({ ok: true })),
   repos: [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }] as ServiceRef[],
   reviewRequests: true as boolean,
@@ -104,9 +105,17 @@ const h = vi.hoisted(() => ({
   // `{ ok: false, message }` as well as the success shape without a type error.
   // Rest-params rather than the real (req, deps) signature: the mock never
   // inspects its arguments, only the launch/launch.ts wrapper below forwards them.
-  launchReview: vi.fn(async (..._args: unknown[]): Promise<{ ok: true; runKey: string } | { ok: false; message: string }> => ({
+  // `provider` is the field Task 6 added to the success arm — the agent openWorkspace
+  // actually seeded, which the launch toast names. `{ ok: false, cancelled }` is its
+  // third arm: a dismissed picker, which is neither a success nor a failure.
+  launchReview: vi.fn(async (..._args: unknown[]): Promise<
+    | { ok: true; runKey: string; provider: AgentProvider }
+    | { ok: false; cancelled: true }
+    | { ok: false; message: string }
+  > => ({
     ok: true,
     runKey: "review-aws-ops-8491",
+    provider: "claude-code",
   })),
   // True by default, unlike every other stub here: the retire sweep asks
   // existsSync whether a run's repo directories are still on disk, and a blanket
@@ -217,6 +226,17 @@ const h = vi.hoisted(() => ({
   // repo" case — identity can't express that on its own.
   nonGitRoots: new Set<string>(),
   repoRootRemap: new Map<string, string>(),
+  // The usage sweep's reader (Task 5): stubbed so a test can assert which runs
+  // it was called for without touching a real ~/.claude/projects. Zeroed by
+  // default so every existing test's postedRuns stay exactly as they were
+  // before this field existed; a test that cares about the sweep's coverage
+  // overrides one call with `.mockReturnValueOnce`.
+  usageReadRun: vi.fn((_root: string, _cwds: string[]) => ({ input: 0, output: 0, cacheWrite: 0, cacheRead: 0 })),
+  /** Mirrors `agentFlow.deck.showTokenTotal`. True by default HERE only — the
+   * shipped default is false, and the "sweep stays off" case below sets it false
+   * explicitly. Kept true so the sweep tests written before the setting existed
+   * still exercise the eager path they were built to cover. */
+  showTokenTotal: true,
 }));
 vi.mock("../../src/engine/runs", () => ({
   defaultRunsDir: () => "/runs",
@@ -289,6 +309,13 @@ vi.mock("../../src/engine/transcript", async (importActual) => ({
 vi.mock("../../src/engine/presence", () => ({
   readLiveWindows: () => h.liveWindows,
   defaultWindowsDir: () => "/windows",
+}));
+// The usage sweep's reader (Task 5): a class instantiated once and held for the
+// panel's lifetime in deckView.ts, so the mock has to be a class too — a plain
+// object export would not survive `new UsageReader()`. Its one method forwards
+// to `h.usageReadRun`, the same indirection every other engine stub here uses.
+vi.mock("../../src/engine/usageFs", () => ({
+  UsageReader: vi.fn().mockImplementation(() => ({ readRun: h.usageReadRun })),
 }));
 vi.mock("../../src/engine/pr/store", () => ({
   defaultPrFactsDir: () => "/prfacts",
@@ -406,6 +433,11 @@ vi.mock("../../src/config", async (importActual) => {
       prReviewPrompt: h.prReviewPrompt, prReviewAutoFix: h.prReviewAutoFix, seedAgent: h.seedAgent,
       agentProvider: h.agentProvider,
       prReviewStatus: "PR initiated",
+      // Steered per test: the board-wide usage sweep is opt-in (the shipped default
+      // is false), so a test that wants the eager sweep has to switch it on the way
+      // a user would. Default here is `true` to keep the sweep tests that predate
+      // the setting reading as they were written; the "off" case sets it false.
+      showTokenTotal: h.showTokenTotal,
       // The named commands a `run` rule's node can point at by `commandId`. Steered
       // per test rather than sourced from the real getConfig(): the real default is
       // now DEFAULT_COMMANDS' single inert example, which would make "the runner got
@@ -416,6 +448,11 @@ vi.mock("../../src/config", async (importActual) => {
       // reviewRequestModes / reviewRequestMode }) actually reaches launchReviewFor.
       reviewRequestModes: actual.getConfig().reviewRequestModes,
       reviewRequestMode: actual.getConfig().reviewRequestMode,
+      // Same reason: a test steers which forge the panel resolves through
+      // setConfig({ forge }) — the real getConfig() applies the same "" → default
+      // fallback the shipped setting does, so a test that never sets it keeps
+      // exercising the GitHub path every other fixture in this file assumes.
+      forge: actual.getConfig().forge,
       // Same reason: the retire sweep reads both windows, and the grouping is a
       // persisted setting — a test steers all three through setConfig, so they
       // must come from the real getConfig() rather than being frozen here.
@@ -440,7 +477,7 @@ vi.mock("../../src/config", async (importActual) => {
     }),
   };
 });
-import { DeckPanel, POLL_MS, reviewProvenance, shellCommandRunner } from "../../src/deckView";
+import { DeckPanel, POLL_MS, USAGE_POLL_MS, reviewProvenance, shellCommandRunner } from "../../src/deckView";
 // The real ceiling, not a number restated here: a call site that passed a literal
 // (or nothing at all) would still satisfy a test that hardcoded 120_000.
 import { COMMAND_TIMEOUT_MS } from "../../src/engine/orchestrator/command";
@@ -566,6 +603,8 @@ beforeEach(() => {
   h.prReviewPrompt = "Assess the PR for {key}.{files}";
   h.prReviewAutoFix = false;
   h.seedAgent = true;
+  h.showTokenTotal = true; // see the field's own comment: eager sweep on unless a test opts out
+  h.usageReadRun.mockClear();
   h.taskDiff.mockClear().mockReturnValue("");
   h.taskDiffBase.mockClear().mockReturnValue("base-sha");
   h.taskChangedFiles.mockClear().mockReturnValue([]);
@@ -599,7 +638,14 @@ beforeEach(() => {
   h.openSessions = [];
   h.liveWindows = [];
   h.sessionActivity.mockClear().mockReturnValue({ state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" });
-  h.launchReview.mockClear().mockResolvedValue({ ok: true, runKey: "review-aws-ops-8491" });
+  // An implementation, not a resolved value: the real launchReview reports the agent
+  // it seeded, which follows whatever `h.agentProvider` is when the launch RUNS — and
+  // tests set that after this reset. A value captured here would be stale.
+  h.launchReview.mockClear().mockImplementation(async () => ({
+    ok: true,
+    runKey: "review-aws-ops-8491",
+    provider: h.agentProvider === "ask" ? "claude-code" : h.agentProvider,
+  }));
   h.existsSync.mockClear().mockReturnValue(true);
   h.readFileSync.mockClear().mockReturnValue("");
   h.gitState.mockClear().mockImplementation((name: string, path: string) => ({
@@ -1336,8 +1382,30 @@ describe("shelf", () => {
     mkRun({ key, kind: "notepad", url: "", createdAt, summary: key,
       repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }] });
 
-  it("keeps an active ticket run on the board with no agent and no PR", async () => {
-    h.runs = [mkRun()]; // mkRun's url is a real Jira url, so isTicketRun is true
+  it("keeps a just-launched run on the board with no agent and no PR", async () => {
+    // mkRun's createdAt is now, and the launch grace is what holds this one: the
+    // window is still opening and Claude Code has not written a transcript for
+    // the new worktree yet, so every other signal is false.
+    h.runs = [mkRun()];
+    show();
+    await settled();
+    expect(shelfOf("ASM-1")).toBe("board");
+  });
+
+  it("closes an aged ticket run whose open ticket is the only thing left", async () => {
+    // The signal that stopped counting. An open Jira ticket is somebody else's
+    // status field, not work in flight: no agent, no PR, nothing uncommitted or
+    // unpushed means there is nothing on this card to act on.
+    h.runs = [mkRun({ createdAt: NOW - 90 * MIN })];
+    h.openSessions = [];
+    show();
+    await settled();
+    expect(shelfOf("ASM-1")).toBe("closed");
+  });
+
+  it("keeps an aged ticket run with a live agent on the board", async () => {
+    h.runs = [mkRun({ createdAt: NOW - 90 * MIN })];
+    h.openSessions = [sess({ sessionId: "s1", cwd: "/r/svc", startedAt: NOW - 10 * MIN })];
     show();
     await settled();
     expect(shelfOf("ASM-1")).toBe("board");
@@ -2457,8 +2525,8 @@ describe("DeckPanel PR facts", () => {
     // Two probes end up in flight: the one this test lets resolve late must not
     // win over the one started by the re-probe when prFacts comes back on
     // through a settings change.
-    let resolveFirst!: (v: GhGap | null) => void;
-    let resolveSecond!: (v: GhGap | null) => void;
+    let resolveFirst!: (v: ForgeGap | null) => void;
+    let resolveSecond!: (v: ForgeGap | null) => void;
     h.probeGh
       .mockImplementationOnce(() => new Promise((res) => { resolveFirst = res; }))
       .mockImplementationOnce(() => new Promise((res) => { resolveSecond = res; }));
@@ -2482,6 +2550,45 @@ describe("DeckPanel PR facts", () => {
     await p._fire({ type: "deck:refresh" });
     const note = posts(p).filter((m) => m.type === "deck:runs").at(-1)?.ghNote;
     expect(note).toBeNull();
+  });
+});
+
+// Task 10: deckView reads everything through one `Forge`, resolved once from
+// `agentFlow.forge`. `GhProvider` is replaced wholesale by the module mock
+// above (`fetch = h.prFetch`), but `GlabProvider` is not — it is the REAL class,
+// spawning through the same `execRunner` seam that mock's `execRunner` member
+// replaces with `h.ghRun`. So with `forge: "gitlab"` the real GitLab provider
+// runs against the existing spawn stub with no new mock at all, and `h.ghRun`'s
+// recorded argv is the proof of which forge is actually live.
+describe("forge selection", () => {
+  it("reads PR facts through glab, not gh, when the forge is gitlab", async () => {
+    setConfig({ forge: "gitlab" });
+    h.ghRun.mockResolvedValue("[]"); // an empty MR list — the argv is the assertion
+    await showAndWarm();
+    // `GhProvider` never ran at all — the GitHub path's own mock proves it.
+    expect(h.prFetch).not.toHaveBeenCalled();
+    const calls = h.ghRun.mock.calls.map((call) => call[1].join(" "));
+    expect(calls.some((a) => a.includes("api") && a.includes("merge_requests"))).toBe(true);
+    expect(calls.some((a) => a.includes("pr list"))).toBe(false);
+  });
+
+  it("still reads PR facts through gh when the forge is left at its default", async () => {
+    // No setConfig({ forge }) at all — the shipped default, and the path every
+    // other fixture in this file already exercises.
+    await showAndWarm();
+    expect(h.prFetch).toHaveBeenCalled();
+  });
+
+  it("names the configured forge's CLI in the footer note", async () => {
+    setConfig({ forge: "gitlab" });
+    // `resolveBin("glab")` returns null on a machine with no `glab` installed
+    // (this one, in CI), so the spawned file is the bare name "glab" — the same
+    // shape a real ENOENT would produce.
+    h.ghRun.mockRejectedValue(Object.assign(new Error("spawn glab ENOENT"), { code: "ENOENT" }));
+    const p = await showAndWarm();
+    const note = posts(p).filter((m) => m.type === "deck:runs").at(-1)?.ghNote;
+    expect(note).toContain("glab");
+    expect(note).not.toContain("gh CLI");
   });
 });
 
@@ -2793,6 +2900,50 @@ describe("DeckPanel review detail", () => {
     });
   });
 
+  // Task 10: GitLab's REST API carries no diff-stats aggregate in the queue call
+  // the way GitHub's search does — and no pipeline field either, verified against
+  // gitlab.com — so a forge that needs them fills them in here instead, merged into
+  // the cached request rather than posted separately, so the strip's existing size
+  // and CI chips render them with no webview change at all.
+  it("merges a detail-supplied size and ci verdict into the cached request", async () => {
+    h.reviewDetail.mockResolvedValueOnce({
+      failing: [], unresolved: null,
+      size: { additions: 12, deletions: 3, changedFiles: 4 },
+      ci: "failing",
+    });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    await settled();
+    // reviewDetail() itself only posts deck:reviewDetail — force a re-post of
+    // deck:reviews (the cache is fresh, so this re-serves it rather than
+    // re-searching) to observe the merge landed on the cached row itself.
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    const row = (posts(p).filter((m) => m.type === "deck:reviews").at(-1) as {
+      requests: ReviewRequest[];
+    }).requests.find((r) => r.id === "CyberJackGit/aws-ops#8491");
+    expect(row).toMatchObject({ additions: 12, deletions: 3, changedFiles: 4, ci: "failing" });
+  });
+
+  // `ci` is OPTIONAL on ReviewDetail: GitHub's search already filled the chip, so its
+  // detail sends none, and an unguarded `cached.ci = detail.ci` would overwrite a real
+  // verdict with `undefined` — a row whose CI chip renders as nothing at all.
+  it("leaves the row's own ci alone when the detail carries none", async () => {
+    h.reviewSearch.mockResolvedValue({ issueCount: 1, requests: [{ ...reviewFixture(), ci: "passing" }] });
+    h.reviewDetail.mockResolvedValueOnce({
+      failing: [], unresolved: null, size: { additions: 1, deletions: 0, changedFiles: 1 },
+    });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewExpand", id: "CyberJackGit/aws-ops#8491" });
+    await settled();
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    const row = (posts(p).filter((m) => m.type === "deck:reviews").at(-1) as {
+      requests: ReviewRequest[];
+    }).requests.find((r) => r.id === "CyberJackGit/aws-ops#8491");
+    expect(row).toMatchObject({ ci: "passing", changedFiles: 1 });
+  });
+
   it("ignores an id that is not in the queue", async () => {
     const p = await showAndWarm();
     const before = posts(p).length;
@@ -2956,6 +3107,20 @@ describe("DeckPanel review launch", () => {
     );
   });
 
+  it("names Claude Code in the launch toast under `ask`", async () => {
+    // Same sentence-start problem as the Tasks-panel toast: this one reads
+    // "Reviewing acme#8491 in a worktree. <agent> pre-seeded — …".
+    h.agentProvider = "ask";
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Claude Code pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
   it("names Copilot in the launch toast when Copilot is configured", async () => {
     h.agentProvider = "copilot";
     const p = await showAndWarm();
@@ -2966,6 +3131,35 @@ describe("DeckPanel review launch", () => {
         message: expect.stringContaining("Copilot pre-seeded — press Enter to start."),
       }),
     );
+  });
+
+  // ── Task 6: the review path under `ask` ───────────────────────────────────
+  it("names the agent the launch actually seeded, not the one the setting names", async () => {
+    // Under `ask` the setting names nobody: the answer exists only on what
+    // launchReview returned. Reading the setting here says "Claude Code" while a
+    // Cursor session is what is starting in the worktree the toast is about.
+    h.agentProvider = "ask";
+    h.launchReview.mockResolvedValueOnce({ ok: true, runKey: "review-aws-ops-8491", provider: "cursor" });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "success",
+        message: expect.stringContaining("Cursor pre-seeded — press Enter to start."),
+      }),
+    );
+  });
+
+  it("says nothing at all when the agent picker is dismissed", async () => {
+    // A dismissal is the user's own decision, not a failure: an error toast here
+    // would report their Escape key as something going wrong. The mode-picker
+    // cancellation above is silent for the same reason.
+    h.agentProvider = "ask";
+    h.launchReview.mockResolvedValueOnce({ ok: false, cancelled: true });
+    const p = await showAndWarm();
+    const before = posts(p).length;
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(posts(p).slice(before).some((m) => m.type === "toast")).toBe(false);
   });
 
   it("refreshes after a successful launch, so the row picks up its new run", async () => {
@@ -3125,6 +3319,45 @@ describe("DeckPanel review submit", () => {
       "Request changes on CyberJackGit/aws-ops#8491?",
       { modal: true },
       "Request changes",
+    );
+  });
+
+  // Task 10: GitLab has no stable "request changes" verb, so ours degrades to a
+  // comment plus withdrawing any standing approval — gated on
+  // `this.forge.caps.changesRequested`, the one capability that differs by
+  // forge. The person clicking deserves to know before they click, not after.
+  it("discloses GitLab's request-changes semantics in the confirmation modal", async () => {
+    setConfig({ forge: "gitlab" });
+    h.reviewWrites = true;
+    // Fresh on disk, so `reviewsEnabled()`'s cache-first path never has to reach
+    // the real (unmocked) `GlabReviewProvider.search()` for this test to see the
+    // queued row — see "posts the cached queue on deck:ready…" above for the
+    // same reasoning.
+    h.reviewCache = { fetchedAt: Date.now(), issueCount: 1, requests: [reviewFixture()] };
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "request-changes" }));
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      "Request changes on CyberJackGit/aws-ops#8491?",
+      { modal: true, detail: expect.stringContaining('GitLab has no "request changes" review') },
+      "Request changes",
+    );
+  });
+
+  // The other side of that disclosure: `approve` and `comment` mean exactly what
+  // they say on GitLab, so a `detail` line there would be noise on the two verbs
+  // people use most — and a modal that always explains something teaches the
+  // reader to click through it, which is precisely how the request-changes
+  // disclosure stops being read.
+  it.each(["approve", "comment"] as const)("adds no disclosure for %s on gitlab", async (verb) => {
+    setConfig({ forge: "gitlab" });
+    h.reviewWrites = true;
+    h.reviewCache = { fetchedAt: Date.now(), issueCount: 1, requests: [reviewFixture()] };
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb, body: "lgtm" }));
+    expect(window.showWarningMessage).toHaveBeenCalledWith(
+      expect.any(String),
+      { modal: true },
+      expect.any(String),
     );
   });
 
@@ -3550,6 +3783,15 @@ describe("DeckPanel — Address PR", () => {
 
   it("leaves the run record untouched — the card keeps its launched-at", async () => {
     h.runs = [mkRun({ createdAt: 1_700_000_000_000 })];
+    // Unpushed work is what keeps this one on the board. A run this old with
+    // nothing open and nothing on disk reaches the closed shelf, and the retire
+    // sweep stamps `closedAt` there — a write of its own that would mask the one
+    // this test is watching for. It goes through buildRunStatus rather than
+    // h.gitState because this file mocks buildRunStatus wholesale.
+    h.buildRunStatus.mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "b", dirty: true, ahead: 1, added: 1, removed: 0, files: 1 }],
+    }));
     show();
     await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
     // A positive assertion that the handler actually ran: without it, deleting
@@ -3661,6 +3903,49 @@ describe("DeckPanel — Address PR", () => {
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
     expect(posts(p)).toContainEqual(
       expect.objectContaining({ type: "toast", level: "info", message: expect.stringContaining("agentFlow.seedAgent") }),
+    );
+  });
+});
+
+// I3: nothing here ever fired `deck:seedPrWork` before this — every existing
+// case above dispatches the older `deck:addressPr` instead, which always seeds
+// reason "review" with no detail. Proven by mutation: hardcoding the handler's
+// dispatch to seedPrWork(m.key, "review") and dropping `detail` still passed
+// every test in this file and in engine/prompt.test.ts. prWorkClause itself is
+// unit-tested there; what was missing is proof the message handler actually
+// reads `m.reason`/`m.detail` off the wire and carries them into the seeded
+// prompt, rather than ignoring them the way `deck:addressPr` always has.
+describe("DeckPanel — seedPrWork", () => {
+  it("carries the CI clause and check names from reason: \"ci\" into the seeded prompt", async () => {
+    h.runs = [mkRun()];
+    show();
+    await lastPanel()._fire({
+      type: "deck:seedPrWork", key: "ASM-1", reason: "ci", detail: "integration, lint",
+    });
+    const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { matchPath: string; prompt: string }[] };
+    expect(plan.matches).toEqual([{
+      matchPath: "/r/svc",
+      prompt: "CI is failing on this PR (integration, lint). Find out why and make it pass.\n\n"
+        + "Assess the PR for {key}.{files} [key=ASM-1 brief=(relative)]",
+    }]);
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
+  });
+
+  it("produces the plain review template for reason: \"review\", byte-identical to deck:addressPr", async () => {
+    h.runs = [mkRun()];
+    show();
+    await lastPanel()._fire({ type: "deck:seedPrWork", key: "ASM-1", reason: "review" });
+    const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { prompt: string }[] };
+    expect(plan.matches[0].prompt).toBe("Assess the PR for {key}.{files} [key=ASM-1 brief=(relative)]");
+  });
+
+  it("carries the conflict clause from reason: \"conflict\" into the seeded prompt", async () => {
+    h.runs = [mkRun()];
+    show();
+    await lastPanel()._fire({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+    const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { prompt: string }[] };
+    expect(plan.matches[0].prompt).toContain(
+      "This PR conflicts with its base branch. Rebase it onto the base and resolve the conflicts.",
     );
   });
 });
@@ -4668,6 +4953,31 @@ describe("a met launch rule acts", () => {
     expect(w.edges[0].error).toBeUndefined();
     expect(w.edges[0].firedNote).toContain("ASM-12");
   });
+
+  // ── the receipt's agent name ────────────────────────────────────────────────
+  // An Orchestrator launch resolves the agent from the SETTING (`agentName` on the
+  // request says so), so `cursor` really does start Cursor and the hardcoded copy
+  // became wrong when this branch added that value.
+  it("names Cursor in the launch receipt when Cursor is configured", async () => {
+    h.agentProvider = "cursor";
+    const { p, send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toContain("Cursor pre-seeded — press Enter to start.");
+  });
+
+  it.each([["claude-code"], ["ask"], ["copilot"]])(
+    "keeps the launch receipt saying Claude Code under %s",
+    async (agentProvider) => {
+      // `claude-code` and `ask` are right — an unattended launch pins Claude Code.
+      // `copilot` is wrong and stays wrong: that string predates this branch.
+      h.agentProvider = agentProvider as typeof h.agentProvider;
+      const { p, send } = await warmed([launchFlow()]);
+      await send({ type: "deck:refresh" });
+      const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
+      expect(toast.message).toContain("Claude Code pre-seeded — press Enter to start.");
+    },
+  );
 
   it("does nothing at all when another window holds the flows lock", async () => {
     const { p, send } = await warmed([launchFlow()]);
@@ -5771,6 +6081,32 @@ describe("a met seed rule acts", () => {
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success" && /bite-me/.test(m.message ?? ""))).toBe(true);
   });
 
+  // ── the receipt's agent name ────────────────────────────────────────────────
+  // `provider: "claude-code"` here is a PIN, read only under `ask` — so a `cursor`
+  // user's unattended seed really does start Cursor, and the hardcoded "Claude Code"
+  // in the receipt became wrong the moment this branch added that value.
+  it("names Cursor in the seed receipt when Cursor is configured", async () => {
+    h.agentProvider = "cursor";
+    const { p, send } = await warmed([seedFlow()]);
+    await send({ type: "deck:refresh" });
+    const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toContain("Cursor pre-seeded — press Enter to start.");
+  });
+
+  it.each([["claude-code"], ["ask"], ["copilot"]])(
+    "keeps the seed receipt saying Claude Code under %s",
+    async (agentProvider) => {
+      // `claude-code` and `ask` are simply right — the pin resolves to Claude Code on
+      // both. `copilot` is wrong and stays wrong: that string predates this branch,
+      // and thousands of Copilot users already read it.
+      h.agentProvider = agentProvider as typeof h.agentProvider;
+      const { p, send } = await warmed([seedFlow()]);
+      await send({ type: "deck:refresh" });
+      const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
+      expect(toast.message).toContain("Claude Code pre-seeded — press Enter to start.");
+    },
+  );
+
   it("composes the edge's note into the prompt template handed to openWorkspace", async () => {
     const note = "This place already has context — just wire up the retry logic.";
     const implMode = DEFAULT_PROMPT_MODES.find((m) => m.id === "implementation")!;
@@ -5795,6 +6131,18 @@ describe("a met seed rule acts", () => {
     await send({ type: "deck:refresh" });
     const req = h.openWorkspace.mock.calls.at(-1)![0] as any;
     expect(req.promptTemplate).toBe(implMode.prompt);
+  });
+
+  it("pins claude-code, so an unattended seed can never reach the `ask` picker", async () => {
+    // A seed rule fires from the poll loop with nobody watching, exactly like a
+    // launch rule. openWorkspace's picker is `ignoreFocusOut: true`, so reaching it
+    // here would not time out — it would hold the refresh open until someone came
+    // back and answered. Read ONLY under `ask`: a user whose setting says `cursor`
+    // still gets Cursor, because openWorkspace ignores a pin under a fixed setting.
+    const { send } = await warmed([seedFlow()]);
+    await send({ type: "deck:refresh" });
+    const req = h.openWorkspace.mock.calls.at(-1)![0] as any;
+    expect(req.provider).toBe("claude-code");
   });
 
   it("latches when the place's run is no longer on the board, naming the run", async () => {
@@ -7267,6 +7615,27 @@ describe("arm, disarm and reset", () => {
     expect(toast).toBeTruthy();
   });
 
+  // Task 10 threads `forge: this.forge.caps` through this call site — until now,
+  // `unfirableRules` was always called with no `forge` at all, so the
+  // "forge-unsupported" branch (Task 9, armability.ts) was dead code from here.
+  // `caps` is static data on the `Forge` object, resolved synchronously at
+  // construction, so this needs no probe-warming tick the way a PR-facts or
+  // footer-note test does.
+  it("flow:arm names a changes-requested rule as forge-unsupported on gitlab", async () => {
+    setConfig({ orchestrator: true, forge: "gitlab" });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "changes-requested" }, action: "notify" }],
+    }];
+    const { p, send } = await openPanel();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    const toast = posts(p).find((m) => m.type === "toast" && /can never fire/i.test(m.message ?? ""));
+    // Reworded (Task 10) from the em-dash aside "1 needs — your forge cannot
+    // report this" to read naturally alongside its siblings "1 needs PR facts"
+    // and "1 needs the Live signal".
+    expect(toast?.message).toContain("1 rule's forge cannot report this");
+  });
+
   it("flow:arm with armed:false disarms", async () => {
     setConfig({ orchestrator: true });
     h.flows = [{ ...mkFlow("f1", "n"), armed: true }];
@@ -7758,6 +8127,81 @@ describe("the poll and the close confirmation", () => {
     p._fireDispose();
     await settle();
     expect(commands.executeCommand).toHaveBeenCalledWith("agentFlow.openDeck");
+  });
+
+  // Task 5 fix round 1: sweepTargets() must cover a local card, not just tracked
+  // runs — a local card has no record in `readRuns`, only in the in-memory
+  // `localRuns` map the status build itself populates. Pins the coverage at the
+  // observable seam (a local run's own posted `usage`) rather than reaching into
+  // the private `sweepTargets`/`sweepUsage` methods.
+  it("keeps the usage sweep covering a local run, not just tracked ones", async () => {
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    const { p } = await openPanel();
+    // The panel's construction already ran one sweep (before this local card
+    // existed) and one buildAll (which just minted it) — from here, only the
+    // usage timer's own cadence sweeps again, and only then does the local
+    // card's key exist for the reader to be called with.
+    h.usageReadRun.mockReturnValueOnce({ input: 3, output: 7, cacheWrite: 0, cacheRead: 1 });
+    await settle(USAGE_POLL_MS + 1);
+    // The sweep updates `usageByRun` in memory; a fresh build is what actually
+    // reads it back onto a `RunStatus` for the webview.
+    await p._fire({ type: "deck:refresh" });
+    await settle();
+    const local = lastRunsPost().runs.find((r: RunStatus) => r.run.kind === "local");
+    expect(local?.usage).toEqual({ input: 3, output: 7, cacheWrite: 0, cacheRead: 1 });
+  });
+
+  // The board-wide sweep exists only to feed the header total, which ships off. With
+  // it off nothing on screen shows a board-wide figure, so parsing every run's
+  // transcripts every minute would be pure cost — the drawer reads its one run on
+  // demand instead. This is the test that makes "off by default" mean "costs
+  // nothing by default" rather than merely "displays nothing by default".
+  it("never sweeps the board when the token total is switched off", async () => {
+    h.showTokenTotal = false;
+    await openPanel();
+    h.usageReadRun.mockClear();
+    await settle(USAGE_POLL_MS * 2 + 1);
+    expect(h.usageReadRun).not.toHaveBeenCalled();
+  });
+
+  it("still sweeps the board when the token total is switched on", async () => {
+    h.showTokenTotal = true;
+    await openPanel();
+    h.usageReadRun.mockClear();
+    await settle(USAGE_POLL_MS + 1);
+    expect(h.usageReadRun).toHaveBeenCalled();
+  });
+
+  // The drawer's own path, and the only transcript read a default install performs.
+  it("answers deck:usageFor with that run's usage", async () => {
+    const { p } = await openPanel();
+    h.usageReadRun.mockClear().mockReturnValueOnce({ input: 1, output: 2, cacheWrite: 3, cacheRead: 4 });
+    await p._fire({ type: "deck:usageFor", key: mkRun().key });
+    await settle();
+    const post = posts(lastPanel()).filter((m) => m.type === "deck:usage").at(-1);
+    expect(post).toEqual({ type: "deck:usage", key: mkRun().key, usage: { input: 1, output: 2, cacheWrite: 3, cacheRead: 4 } });
+  });
+
+  // null, not a zeroed total: the drawer distinguishes "could not read" from "cost
+  // nothing", and a zero would assert the latter.
+  it("answers deck:usageFor with null when the read throws", async () => {
+    const { p } = await openPanel();
+    h.usageReadRun.mockClear().mockImplementationOnce(() => { throw new Error("EACCES"); });
+    await p._fire({ type: "deck:usageFor", key: mkRun().key });
+    await settle();
+    const post = posts(lastPanel()).filter((m) => m.type === "deck:usage").at(-1);
+    expect(post).toEqual({ type: "deck:usage", key: mkRun().key, usage: null });
+  });
+
+  it("answers deck:usageFor even with the board sweep off — the drawer is its own path", async () => {
+    h.showTokenTotal = false;
+    const { p } = await openPanel();
+    h.usageReadRun.mockClear().mockReturnValueOnce({ input: 0, output: 5, cacheWrite: 0, cacheRead: 0 });
+    await p._fire({ type: "deck:usageFor", key: mkRun().key });
+    await settle();
+    const post = posts(lastPanel()).filter((m) => m.type === "deck:usage").at(-1);
+    expect(post).toMatchObject({ type: "deck:usage", usage: { output: 5 } });
   });
 });
 

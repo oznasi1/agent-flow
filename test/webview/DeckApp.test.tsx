@@ -6,6 +6,7 @@ import { render, screen, fireEvent, act, within } from "@testing-library/react";
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
 import { DeckApp } from "../../src/webview/DeckApp";
+import { DECK_CSS } from "../../src/webview/deckStyles";
 import { DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { send } from "../../src/webview/vscodeApi";
 import type { AgentActivity, CardAgent, OutboundMessage, PrFacts, RepoGit, ReviewRequest, RunStatus } from "../../src/types";
@@ -37,13 +38,37 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   ...over,
 });
 
-const runsMsg = (runs: RunStatus[], prReviewStatus = "PR initiated", sourceLabel = "Jira"): OutboundMessage =>
-  ({ type: "deck:runs", runs, ghNote: null, prReviewStatus, staleCount: 0, sourceLabel });
+// showTokenTotal defaults to false here, mirroring the shipped setting default, so
+// every pre-existing test renders a board with no header token tile — which is what
+// they were written against. A test that wants the tile passes it explicitly.
+const runsMsg = (
+  runs: RunStatus[],
+  prReviewStatus = "PR initiated",
+  sourceLabel = "Jira",
+  showTokenTotal = false,
+): OutboundMessage =>
+  ({ type: "deck:runs", runs, ghNote: null, prReviewStatus, showTokenTotal, staleCount: 0, sourceLabel });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
   activity: { state, lastActivityMs, slug: null },
 });
+
+/** A PR with every problem at once — the card the per-signal actions exist for. */
+const failingPr = (): PrFacts => ({
+  number: 3181, url: "https://gh/pr/3181", title: "t", state: "OPEN", isDraft: false,
+  ci: { passing: 4, pending: 0, failing: [{ name: "integration", url: "" }, { name: "lint", url: "" }] },
+  review: "changes_requested", unresolved: null, mergeable: "conflicting", ciAdvisory: false,
+});
+
+const healthyPr = (): PrFacts => ({
+  number: 2044, url: "https://gh/pr/2044", title: "t", state: "OPEN", isDraft: false,
+  ci: { passing: 8, pending: 0, failing: [] },
+  review: "approved", unresolved: null, mergeable: "clean", ciAdvisory: false,
+});
+
+const withPr = (f: PrFacts, over: Partial<RunStatus> = {}): RunStatus =>
+  mkStatus({ prs: { svc: { facts: f, fetchedAt: 1 } }, ...over } as Partial<RunStatus>);
 
 /** Renders the board with exactly one run and returns its card element, found by
  * the run's own key (rendered as button text regardless of column or agent). Reuses
@@ -82,6 +107,12 @@ describe("DeckApp", () => {
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
   });
 
+  it("runs the animated logo in the first-load state instead of the old glyph", () => {
+    const { container } = render(<DeckApp />);
+    expect(container.querySelector(".empty svg.lmark")).toBeInTheDocument();
+    expect(container.querySelector(".empty .spin")).not.toBeInTheDocument();
+  });
+
   it("replaces the loading state once deck:runs lands, even with cards present", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
@@ -89,13 +120,15 @@ describe("DeckApp", () => {
     expect(screen.getByText("ASM-1")).toBeInTheDocument();
   });
 
-  it("renders a card with key, summary, Jira status and diff stat", () => {
+  it("renders a card with key, summary and a diff stat, and the Jira status in its drawer", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     expect(screen.getByText("ASM-1")).toBeInTheDocument();
     expect(screen.getByText("Export fails on large accounts")).toBeInTheDocument();
-    expect(screen.getByText("In Progress")).toBeInTheDocument();
     expect(screen.getByText(/\+12/)).toBeInTheDocument();
+    // The Jira status pill moved off the card's own footer into the drawer.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(within(document.querySelector(".dd") as HTMLElement).getByText("In Progress")).toBeInTheDocument();
   });
 
   it("groups runs into columns with counts", () => {
@@ -136,11 +169,20 @@ describe("DeckApp", () => {
     expect(tiles).toContainEqual(["In progress", "2"]);
   });
 
-  it("shows three tiles: the board's own columns", () => {
+  it("shows one tile per board column, in board order", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ column: "progress" }), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" }, column: "needs" })]));
     const labels = screen.getAllByText(/./, { selector: ".stat .l" }).map((n) => n.textContent);
-    expect(labels).toEqual(["In progress", "Action required", "In review"]);
+    expect(labels).toEqual(["In progress", "Action required", "In review", "Merge"]);
+  });
+
+  it("lights the Merge tile only when something is at the merge", () => {
+    const lit = () => (document.querySelector(".stat.up") as HTMLElement | null)?.querySelector(".l")?.textContent ?? null;
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "progress" })]));
+    expect(lit()).toBeNull();
+    host(runsMsg([mkStatus({ column: "merge" })]));
+    expect(lit()).toBe("Merge");
   });
 
   it("drops the To review and Total tiles", () => {
@@ -205,18 +247,37 @@ describe("DeckApp", () => {
     expect(screen.getByText(/idle ·/i)).toBeInTheDocument();
   });
 
-  it("shows the branch and a launched-ago time on a card", () => {
+  // Extra pair authorized beyond the brief: nothing pinned a wrong tone or label
+  // on either new agent state before this — both would have passed every test
+  // in the suite.
+  it("labels a stalled agent as stalled, with the attention tone", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "needs", agent: { state: "stalled", lastActivityMs: Date.now(), slug: null } })]));
+    expect(screen.getByText(/stalled ·/i)).toBeInTheDocument();
+    expect(container.querySelector(".status.tone-attn")).not.toBeNull();
+  });
+
+  it("labels an exited agent as exited, with the attention tone", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({ column: "needs", agent: { state: "exited", lastActivityMs: Date.now(), slug: null } })]));
+    expect(screen.getByText(/exited ·/i)).toBeInTheDocument();
+    expect(container.querySelector(".status.tone-attn")).not.toBeNull();
+  });
+
+  it("shows the branch on the card's signal line, and a launched-ago time in its drawer", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     expect(screen.getByText(/ASM-1-x/)).toBeInTheDocument();
-    expect(screen.getByText(/^launched/i)).toBeInTheDocument();
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(within(document.querySelector(".dd") as HTMLElement).getByText(/^launched/i)).toBeInTheDocument();
   });
 
   it("omits the Jira status pill when the run has no Jira status", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ ticketStatus: null })]));
     expect(screen.getByText("Export fails on large accounts")).toBeInTheDocument();
-    expect(screen.queryByText("—")).not.toBeInTheDocument();
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd .pill")).toBeNull();
   });
 
   it("exposes the card controls as buttons so they are keyboard reachable", () => {
@@ -225,7 +286,10 @@ describe("DeckApp", () => {
     for (const label of ["ASM-1", "Open", "Diff"]) {
       expect(screen.getByText(label).tagName).toBe("BUTTON");
     }
-    expect(screen.getByTitle(/more actions/i).tagName).toBe("BUTTON");
+    // The overflow menu's "more actions" toggle is gone — its former contents are
+    // now the drawer's always-visible action list, itself real buttons.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(screen.getByRole("button", { name: "Open workspace" }).tagName).toBe("BUTTON");
   });
 
   // The hint is the Open button's tooltip plus a marker on the button, not a line of
@@ -251,19 +315,19 @@ describe("DeckApp", () => {
     expect(container.querySelector(".act.primary.live")).toBeNull();
   });
 
-  it("forgets a run from the overflow menu", () => {
+  it("forgets a run from the drawer's action list", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByTitle(/more actions/i));
-    fireEvent.click(screen.getByText(/^Forget$/));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "ASM-1" });
   });
 
   it("removes a forgotten card immediately, without waiting for the host", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
-    fireEvent.click(screen.getAllByTitle(/more actions/i)[0]);
-    fireEvent.click(screen.getByText(/^Forget$/));
+    fireEvent.click(document.querySelectorAll(".card")[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     // No deck:runs has arrived; the card is gone regardless.
     expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
     expect(screen.getByText("ASM-2")).toBeInTheDocument();
@@ -274,11 +338,25 @@ describe("DeckApp", () => {
     // The host post is authoritative — a delete that failed must not vanish the run.
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByTitle(/more actions/i));
-    fireEvent.click(screen.getByText(/^Forget$/));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
     host(runsMsg([mkStatus()]));
     expect(screen.getByText("ASM-1")).toBeInTheDocument();
+  });
+
+  // The refresh button keeps its ⟳ at rest: a static logo on a button reads as
+  // branding, not as something you can press. The mark takes over only in flight.
+  it("swaps the refresh glyph for the animated logo while syncing, and back after", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(container.querySelector(".hd svg.lmark")).not.toBeInTheDocument();
+    expect(container.querySelector(".hd .spin")).toBeInTheDocument();
+    host({ type: "deck:loading", loading: true });
+    expect(container.querySelector(".hd svg.lmark")).toBeInTheDocument();
+    expect(container.querySelector(".hd .spin")).not.toBeInTheDocument();
+    host({ type: "deck:loading", loading: false });
+    expect(container.querySelector(".hd svg.lmark")).not.toBeInTheDocument();
   });
 
   it("shows a syncing indicator while the host is refreshing", () => {
@@ -291,11 +369,11 @@ describe("DeckApp", () => {
     expect(screen.getByText(/synced/i)).toBeInTheDocument();
   });
 
-  it("opens the ticket in Jira from the overflow menu", () => {
+  it("opens the ticket in Jira from the drawer's action list", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByTitle(/more actions/i));
-    fireEvent.click(screen.getByText(/Open in Jira/i));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Open in Jira" }));
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
   });
 
@@ -322,9 +400,9 @@ describe("DeckApp", () => {
   it("does not offer to open a ticketless run in Jira", () => {
     render(<DeckApp />);
     host(runsMsg([untracked()]));
-    fireEvent.click(screen.getByTitle(/more actions/i));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.queryByText(/Open in Jira/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/^Forget$/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Forget" })).toBeInTheDocument();
   });
 
   it("keeps the Jira link on a tracked run", () => {
@@ -405,7 +483,7 @@ describe("DeckApp", () => {
   it("offers Track it and no Forget", () => {
     render(<DeckApp />);
     host(runsMsg([mkLocal()]));
-    fireEvent.click(screen.getByRole("button", { name: "⋯" }));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByRole("button", { name: "Track it" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Forget" })).toBeNull();
   });
@@ -413,7 +491,7 @@ describe("DeckApp", () => {
   it("posts deck:track", () => {
     render(<DeckApp />);
     host(runsMsg([mkLocal()]));
-    fireEvent.click(screen.getByRole("button", { name: "⋯" }));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: "Track it" }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:track", key: "local-centaur-1a2b3c4d" });
   });
@@ -421,7 +499,7 @@ describe("DeckApp", () => {
   it("still offers Forget on a tracked card", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByRole("button", { name: "⋯" }));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByRole("button", { name: "Forget" })).toBeTruthy();
   });
 
@@ -450,17 +528,24 @@ const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
 });
 
 describe("DeckApp PR block", () => {
-  it("renders no block for a run with no PR entries", () => {
+  // The PR block moved off the card into the drawer, so every case here selects
+  // the card first — none of these assert anything about the card's own DOM.
+  it("renders no block in the drawer for a run with no PR entries", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    expect(screen.queryByText("pr")).toBeNull();
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    const dd = document.querySelector(".dd") as HTMLElement;
+    expect(within(dd).queryByText("pr", { selector: ".pr-lbl" })).toBeNull();
+    expect(within(dd).getByText("No pull request yet")).toBeInTheDocument();
   });
 
   it("renders no block for a repo whose entry resolved to no PR", () => {
-    const { container } = render(<DeckApp />);
+    render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: null, fetchedAt: 1 } } })]));
-    expect(screen.queryByText("pr")).toBeNull();
-    expect(container.querySelector(".pr-block")).toBeNull();
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    const dd = document.querySelector(".dd") as HTMLElement;
+    expect(dd.querySelector(".pr-block")).toBeNull();
+    expect(within(dd).getByText("No pull request yet")).toBeInTheDocument();
   });
 
   it("shows the PR number, failing checks, review state and mergeability", () => {
@@ -471,18 +556,24 @@ describe("DeckApp PR block", () => {
         review: "changes_requested", unresolved: 3, mergeable: "blocked",
       }), fetchedAt: 1 } },
     })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
 
-    expect(screen.getByText("#4821")).toBeTruthy();
-    expect(screen.getByText("build-backend")).toBeTruthy();
-    expect(screen.getByText("lint")).toBeTruthy();
-    expect(screen.getByText(/changes/)).toBeTruthy();
-    expect(screen.getByText(/3 open/)).toBeTruthy();
-    expect(screen.getByText("blocked")).toBeTruthy();
+    // The card's own signal line now shares some of these words ("#4821",
+    // "changes") — scope to the drawer's PR block, the fact this test is
+    // actually about.
+    const dd = within(document.querySelector(".dd") as HTMLElement);
+    expect(dd.getByRole("button", { name: "#4821" })).toBeTruthy();
+    expect(dd.getByText("build-backend")).toBeTruthy();
+    expect(dd.getByText("lint")).toBeTruthy();
+    expect(dd.getByText(/changes/)).toBeTruthy();
+    expect(dd.getByText(/3 open/)).toBeTruthy();
+    expect(dd.getByText("blocked")).toBeTruthy();
   });
 
   it("keeps the merge row while the PR is open", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ mergeable: "behind" }), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByText("merge", { selector: ".pr-lbl" })).toBeTruthy();
     expect(screen.getByText("behind")).toBeTruthy();
   });
@@ -494,27 +585,31 @@ describe("DeckApp PR block", () => {
     // no longer has an answer — the rows that kept their meaning stay.
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ state, mergeable: "unknown" }), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.queryByText("merge", { selector: ".pr-lbl" })).toBeNull();
     expect(screen.queryByText("unknown")).toBeNull();
-    expect(screen.getByText("#4821")).toBeTruthy();
+    expect(within(document.querySelector(".dd") as HTMLElement).getByRole("button", { name: "#4821" })).toBeTruthy();
     expect(screen.getByText(/6 passing/)).toBeTruthy();
   });
 
   it("omits the thread count when unresolved is null", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ review: "changes_requested", unresolved: null }), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.queryByText(/open$/)).toBeNull();
   });
 
   it("shows a passing-check count when nothing is failing", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts(), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByText(/6 passing/)).toBeTruthy();
   });
 
   it("heads each block with its repo name only when more than one repo has a PR", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts(), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.queryByText("svc", { selector: ".pr-repo" })).toBeNull();
 
     host(runsMsg([mkStatus({ prs: {
@@ -528,13 +623,15 @@ describe("DeckApp PR block", () => {
   it("opens the PR externally from its number", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts(), fetchedAt: 1 } } })]));
-    fireEvent.click(screen.getByText("#4821"));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(within(document.querySelector(".dd") as HTMLElement).getByRole("button", { name: "#4821" }));
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://github.com/acme/svc/pull/4821" });
   });
 
   it("opens a failing check's run externally", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ ci: { passing: 0, pending: 0, failing: [{ name: "build", url: "https://ci/run/7" }] } }), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     fireEvent.click(screen.getByText("build"));
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://ci/run/7" });
   });
@@ -542,6 +639,7 @@ describe("DeckApp PR block", () => {
   it("does not linkify a failing check with no url", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ prs: { svc: { facts: prFacts({ ci: { passing: 0, pending: 0, failing: [{ name: "build", url: "" }] } }), fetchedAt: 1 } } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     // Structural: must fail if "build" ever regresses to an <a> or a <button> — not just
     // that clicking it happens to send nothing (a dead <a href=""> or handler-less
     // <button> would pass that check too).
@@ -553,38 +651,56 @@ describe("DeckApp PR block", () => {
 });
 
 describe("DeckApp PR-facts chrome", () => {
-  it("says merged only when a PR actually merged", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus({ column: "done", prs: { svc: { facts: prFacts({ state: "MERGED" }), fetchedAt: 1 } } })]));
-    expect(screen.getByText("merged")).toBeTruthy();
+  it("says ready to merge, or merged, on a merge card with nobody home", () => {
+    // The column and the PRs are the only things that know: the agent read on a
+    // parked card says "unknown", which would otherwise render the grey parked
+    // line on the one column that means press this, or wrap this up.
+    const parkedMerge = (over: Partial<PrFacts>) => mkStatus({
+      column: "merge", agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null },
+      prs: { svc: { facts: prFacts(over), fetchedAt: 1 } },
+    });
+    const { container } = render(<DeckApp />);
+    host(runsMsg([parkedMerge({ review: "approved" })]));
+    const status = () => container.querySelector(".status") as HTMLElement;
+    expect(within(status()).getByText("ready to merge")).toBeTruthy();
+    expect(status().className).toContain("tone-merged");
+    host(runsMsg([parkedMerge({ state: "MERGED" })]));
+    expect(within(status()).getByText("merged")).toBeTruthy();
   });
 
-  it("says done for a Jira-done run with no merged PR", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus({ column: "done" })]));
-    expect(screen.getByText("done")).toBeTruthy();
-    expect(screen.queryByText("merged")).toBeNull();
-  });
-
-  it("says done, not merged, when only one of two repos' PRs merged (F2)", () => {
-    // The spec's prMerged rule requires EVERY PR-bearing repo to be MERGED — a
-    // two-repo run whose backend merged and whose frontend is still open must
-    // not claim "merged" just because `.some()` finds one.
-    render(<DeckApp />);
+  it("says merged only when every PR-bearing repo actually merged", () => {
+    // A two-repo run whose backend landed and whose frontend is still open has
+    // not merged, and its parked line must not claim it did. Scoped to the state
+    // line: the signal line's own lead-PR bit can legitimately say "merged" about
+    // the one repo that did, which is a different claim.
+    const { container } = render(<DeckApp />);
     host(runsMsg([mkStatus({
-      column: "done",
+      column: "merge", agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null },
       prs: {
         svc: { facts: prFacts({ state: "MERGED" }), fetchedAt: 1 },
         web: { facts: prFacts({ number: 99, url: "https://github.com/acme/web/pull/99", state: "OPEN" }), fetchedAt: 1 },
       },
     })]));
-    expect(screen.getByText("done")).toBeTruthy();
-    expect(screen.queryByText("merged")).toBeNull();
+    const status = within(container.querySelector(".status") as HTMLElement);
+    expect(status.getByText("ready to merge")).toBeTruthy();
+    expect(status.queryByText("merged")).toBeNull();
+  });
+
+  it("still lets a live agent's own state speak on a merge card", () => {
+    // Only the parked case is overridden. An agent working in a run whose PR is
+    // already green — or already landed, running the wrap-up — is doing
+    // something, and the line must say so.
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "merge", agent: { state: "working", lastActivityMs: Date.now(), slug: null },
+      prs: { svc: { facts: prFacts({ review: "approved" }), fetchedAt: 1 } },
+    })]));
+    expect((container.querySelector(".status") as HTMLElement).textContent).toContain("working");
   });
 
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", staleCount: 0, sourceLabel: "Jira" });
+    host({ type: "deck:runs", runs: [mkStatus()], ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", showTokenTotal: false, staleCount: 0, sourceLabel: "Jira" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 
@@ -595,21 +711,30 @@ describe("DeckApp PR-facts chrome", () => {
     render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })]));
-    expect(screen.getByText("svc-7e")).toBeTruthy();
+    // The agents fold moved off the card into the drawer's Agents section,
+    // which ships expanded by default — the name appears both on the toggle
+    // and on the row it discloses, so getAllByText rather than getByText.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(screen.getAllByText("svc-7e").length).toBeGreaterThan(0);
     expect(screen.queryByText(/1 agent/)).toBeNull();
   });
 
-  it("counts several agents and lists them when expanded", () => {
+  // The drawer's AgentsRow ships expanded (Task: the design doc requires it —
+  // "there is room; the fold existed because the card had none"), so this no
+  // longer needs a click to see every row, unlike the card-level fold
+  // AgentsRow still defaults to for any other caller (see deckParts.test.tsx).
+  it("counts several agents and shows every row without expanding", () => {
     render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
-    const disclosure = screen.getByRole("button", { name: /2 agents/ });
-    expect(screen.queryByText("svc-fa")).toBeNull();
-    fireEvent.click(disclosure);
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(screen.getByRole("button", { name: /2 agents/ })).toBeTruthy();
     expect(screen.getByText("svc-fa")).toBeTruthy();
-    // Each row carries its OWN state — the whole point of listing them.
-    expect(screen.getByText("working")).toBeTruthy();
-    expect(screen.getByText("idle")).toBeTruthy();
+    // Each row carries its OWN state — the whole point of listing them. Scoped to
+    // .ag-state because "working" is also the name of an In-progress lane header
+    // now, and an unscoped match would pick up the sub-header instead of the row.
+    expect(screen.getByText("working", { selector: ".ag-state" })).toBeTruthy();
+    expect(screen.getByText("idle", { selector: ".ag-state" })).toBeTruthy();
   });
 
   it("gives the collapsed label mono only when it is a name, not a count", () => {
@@ -619,6 +744,7 @@ describe("DeckApp PR-facts chrome", () => {
     const solo = render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now())] })]));
+    fireEvent.click(solo.container.querySelector(".card") as HTMLElement);
     const soloLabel = solo.container.querySelector(".ag-label")!;
     expect(soloLabel.classList.contains("id")).toBe(true);
     solo.unmount();
@@ -626,6 +752,7 @@ describe("DeckApp PR-facts chrome", () => {
     const many = render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
+    fireEvent.click(many.container.querySelector(".card") as HTMLElement);
     const manyLabel = many.container.querySelector(".ag-label")!;
     expect(manyLabel.classList.contains("id")).toBe(false);
   });
@@ -641,7 +768,8 @@ describe("DeckApp PR-facts chrome", () => {
     };
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [noStart, mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
-    fireEvent.click(screen.getByRole("button", { name: /2 agents/ }));
+    // The drawer's AgentsRow ships expanded by default — no click needed.
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     const rows = [...container.querySelectorAll(".ag-row")];
     const zeroRow = rows.find((r) => r.textContent?.includes("svc-7e"))!;
     expect(zeroRow.querySelector(".ag-open")).toBeNull();
@@ -998,85 +1126,137 @@ describe("DeckApp review writes", () => {
   });
 });
 
-describe("DeckApp — Address PR", () => {
-  const prCard = (over: Partial<RunStatus> = {}) => mkStatus({ ticketStatus: "PR initiated", ...over });
-
-  it("shows the button when the Jira status matches the configured one", () => {
-    render(<DeckApp />);
-    host(runsMsg([prCard()]));
-    expect(screen.getByRole("button", { name: "Address PR" })).toBeInTheDocument();
+// This block used to pin a lane-driven gate (`canAddressPr`): one generic
+// "Address PR" button, shown on the review column's waiting lane regardless
+// of whether anything was actually wrong with the PR. The design replaces
+// that with cardActions() naming each real problem with its own row and
+// verb — a failing check, a conflict, or changes requested — so a lane can no
+// longer say "there is something to address" on its own; only a genuine
+// problem can. Every test below is converted, not deleted: the old
+// button-presence assertions become "no action row at all" assertions (most
+// of these fixtures have nothing wrong with their PR, so cardActions
+// correctly returns nothing), and the local-card case is strengthened to
+// prove the guard holds under real pressure. The original lane-gated
+// assertions live in git history at commit daff687.
+describe("DeckApp — per-failure PR actions", () => {
+  // Still waiting on a human, but nothing actually WRONG with it: review
+  // pending, CI clean, nothing conflicting. Under the old lane-driven rule
+  // this alone earned "Address PR"; cardActions earns it nothing.
+  const waitingPr = (over: Partial<RunStatus> = {}) => mkStatus({
+    column: "review",
+    prs: { svc: { facts: prFacts({ review: "review_required" }), fetchedAt: 1 } },
+    ...over,
   });
 
-  it("matches the status case-insensitively and ignores surrounding space", () => {
+  // The sharpest behavioural change in this task: an unapproved PR is not a PR
+  // with a problem. cardActions produces a row only for a failing check, a
+  // conflict, or changes_requested — none of which review_required + clean CI
+  // + clean mergeability has, however long it has been sitting on the lane.
+  it("shows no action row for a waiting PR with nothing actually wrong with it", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard({ ticketStatus: "  pr initiated  " })]));
-    expect(screen.getByRole("button", { name: "Address PR" })).toBeInTheDocument();
+    host(runsMsg([waitingPr()]));
+    expect(document.querySelector(".c-rows")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Fix CI" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resolve conflict" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Address review" })).toBeNull();
   });
 
-  it("hides the button on a card in any other status", () => {
+  it("shows no action row on the review column's ready lane either", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ ticketStatus: "In Progress" })]));
-    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+    host(runsMsg([mkStatus({
+      column: "review",
+      prs: { svc: { facts: prFacts({ review: "approved", mergeable: "clean" }), fetchedAt: 1 } },
+    })]));
+    expect(document.querySelector(".c-rows")).toBeNull();
   });
 
-  it("hides the button when the run has no Jira status at all", () => {
+  it("shows no action row on a card outside the review column", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ ticketStatus: null })]));
-    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+    host(runsMsg([mkStatus({ column: "progress" })]));
+    expect(document.querySelector(".c-rows")).toBeNull();
   });
 
-  it("hides the button when the setting is empty", () => {
+  // Proves the old ticket-status path is actually dead, not just superseded
+  // in the common case: a Jira status that exactly matched the configured
+  // prReviewStatus used to be sufficient on its own, from any column.
+  // cardActions never reads `ticketStatus` at all.
+  it("shows no action row from a matching Jira status alone, off the review column", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard()], ""));
-    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+    host(runsMsg([mkStatus({ ticketStatus: "PR initiated", column: "progress" })], "PR initiated"));
+    expect(document.querySelector(".c-rows")).toBeNull();
   });
 
-  it("hides the button on a local card, whose ticket key is only inferred", () => {
+  // deriveBucket's isReviewStatus (`/review|qa|verif/i`) can land a run in the
+  // review column off a Jira status alone, with no PR entries at all —
+  // cardActions' own `!f` guard (leadPr returns null with no PR facts) is
+  // what keeps this card silent, not any lane check.
+  it("shows no action row on the review column with no PR at all (prs: {})", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard({ run: { ...mkStatus().run, kind: "local" } })]));
-    expect(screen.queryByRole("button", { name: "Address PR" })).not.toBeInTheDocument();
+    host(runsMsg([mkStatus({ column: "review", ticketStatus: "In QA", prs: {} })]));
+    expect(document.querySelector(".c-rows")).toBeNull();
   });
 
-  it("posts deck:addressPr with the run key on click", () => {
+  // The most important case in this block. The `local` guard exists because a
+  // local card's ticket is inferred from a branch name that may belong to
+  // somebody else's ticket, and seeding an agent against that inference on
+  // one click is what this must never do. Strengthened from a healthy PR (the
+  // old fixture) to one with every kind of problem at once — failing CI,
+  // changes requested, and a conflict — so this pins the guard against real
+  // pressure, not against a PR that would show nothing anyway.
+  it("shows no action row on a local card even when its PR is failing outright", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard()]));
-    fireEvent.click(screen.getByRole("button", { name: "Address PR" }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:addressPr", key: "ASM-1" });
+    host(runsMsg([waitingPr({
+      run: { ...mkStatus().run, key: "local-a", url: "", kind: "local" } as never,
+      prs: { svc: { facts: failingPr(), fetchedAt: 1 } },
+    })]));
+    expect(document.querySelector(".c-rows")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Fix CI" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resolve conflict" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Address review" })).toBeNull();
   });
 
-  it("leads the action row, before Open", () => {
+  it("sends deck:seedPrWork with reason review when Address review is clicked", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard()]));
-    const labels = Array.from(document.querySelectorAll(".actions .act")).map((b) => b.textContent);
-    expect(labels).toEqual(["Address PR", "Open", "Diff"]);
+    host(runsMsg([waitingPr({ prs: { svc: { facts: prFacts({ review: "changes_requested" }), fetchedAt: 1 } } })]));
+    fireEvent.click(screen.getByRole("button", { name: "Address review" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:seedPrWork", key: "ASM-1", reason: "review" });
   });
 
-  // A card gets exactly one primary. Address PR is the verb the board is asking for
-  // when it is there, so it takes that weight and Open gives it up — which is also
-  // what puts the accent on the right button on an attn card, where .card.attn
-  // .act.primary is the only colored call to action.
-  it("takes the primary weight from Open when it is on the card", () => {
+  it("moves the named action off the footer into .c-rows, leaving Open and Diff as the only footer buttons", () => {
     render(<DeckApp />);
-    host(runsMsg([prCard()]));
-    expect(screen.getByRole("button", { name: "Address PR" })).toHaveClass("primary");
-    expect(screen.getByRole("button", { name: "Open" })).not.toHaveClass("primary");
+    host(runsMsg([waitingPr({ prs: { svc: { facts: prFacts({ review: "changes_requested" }), fetchedAt: 1 } } })]));
+    const footerLabels = Array.from(document.querySelectorAll(".card .c-foot2 .act")).map((b) => b.textContent);
+    expect(footerLabels).toEqual(["Open", "Diff"]);
+    const reviewBtn = screen.getByRole("button", { name: "Address review" });
+    expect(document.querySelector(".c-foot2")!.contains(reviewBtn)).toBe(false);
+    expect(document.querySelector(".c-rows")!.contains(reviewBtn)).toBe(true);
   });
 
-  it("leaves Open the primary on a card that has no Address PR", () => {
+  // Open is always the footer's one primary now — the design drops the old
+  // swap where Address PR took that weight instead. One card, one primary,
+  // decided the same way whether or not an action row is also there.
+  it("keeps Open primary even when the card also has action rows", () => {
+    render(<DeckApp />);
+    host(runsMsg([waitingPr({ prs: { svc: { facts: prFacts({ review: "changes_requested" }), fetchedAt: 1 } } })]));
+    expect(screen.getByRole("button", { name: "Open" })).toHaveClass("primary");
+    expect(screen.getByRole("button", { name: "Address review" })).not.toHaveClass("primary");
+  });
+
+  it("leaves Open the primary on a card with no action rows", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ ticketStatus: "In Progress" })]));
     expect(screen.getByRole("button", { name: "Open" })).toHaveClass("primary");
   });
 });
 
-// An Action required card with no agent open got there because a PR is blocked —
-// deriveBucket has no other route into `needs` without an agent. Its state line used
-// to read the parked grey, which says "nothing is happening" on the one column that
-// means act now, and with no agents anywhere that made the whole column read as
-// disabled.
-describe("DeckApp — an agentless Action required card", () => {
+// An In-review card with no agent open and a blocked PR is the fixes-needed lane's
+// normal inhabitant — the PR wants something and there is nobody in the run to ask.
+// Its state line used to read the parked grey, which says "nothing is happening" on
+// a card that is the whole reason the lane exists, and with no agents anywhere that
+// made the lane read as uniformly disabled.
+describe("DeckApp — an agentless In review card with a blocked PR", () => {
   const blocked = (over: Partial<PrFacts> = {}) => mkStatus({
-    column: "needs",
+    column: "review",
     agent: { state: "unknown", lastActivityMs: null, slug: null },
     agents: [],
     prs: { svc: { facts: prFacts({ review: "changes_requested", ...over }), fetchedAt: 1 } },
@@ -1113,9 +1293,11 @@ describe("DeckApp — an agentless Action required card", () => {
   });
 
   it("leaves an agentless card in another column parked", () => {
+    // The line is scoped to the column that owns PR trouble. In progress does not:
+    // a card there is described by its agent read, whatever a stale PR fact says.
     render(<DeckApp />);
     host(runsMsg([mkStatus({
-      column: "review",
+      column: "progress",
       agent: { state: "unknown", lastActivityMs: null, slug: null },
       agents: [],
       prs: { svc: { facts: prFacts({ review: "changes_requested" }), fetchedAt: 1 } },
@@ -1175,9 +1357,10 @@ describe("Agents view", () => {
     render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [{ ...mkAgent("agent-flow-2e", "working", 100), repo: "svc" }] })]));
-    // The collapsed agents row, not a card per agent.
-    expect(screen.getByTitle(/sessions open in this directory/i)).toBeInTheDocument();
     expect(screen.getAllByText("ASM-1")).toHaveLength(1);
+    // The collapsed agents row moved into the drawer's Agents section.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(screen.getByTitle(/sessions open in this directory/i)).toBeInTheDocument();
   });
 
   it("shows the session slug as a tooltip on an expanded agent row", () => {
@@ -1186,7 +1369,8 @@ describe("Agents view", () => {
     host(runsMsg([mkStatus({
       agents: [{ ...mkAgent("agent-flow-2e", "working", 100), activity: { state: "working", lastActivityMs: 100, slug: "export-streaming-fix" } }],
     })]));
-    fireEvent.click(screen.getByTitle(/sessions open in this directory/i));
+    // The drawer's AgentsRow ships expanded by default — no click needed.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByTitle("export-streaming-fix")).toBeInTheDocument();
   });
 
@@ -1196,7 +1380,8 @@ describe("Agents view", () => {
     host(runsMsg([mkStatus({
       agents: [mkAgent("agent-flow-2e", "working", 100)],
     })]));
-    fireEvent.click(screen.getByTitle(/sessions open in this directory/i));
+    // The drawer's AgentsRow ships expanded by default — no click needed.
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     expect(container.querySelector(".ag-name")).not.toHaveAttribute("title");
   });
 
@@ -1292,12 +1477,13 @@ describe("DeckApp — source label", () => {
     expect(document.querySelector(".note")!.textContent).toBe("git + Jira backbone · best-effort live from ~/.claude/projects");
   });
 
-  it("renders a tracked card's Jira strings byte-for-byte: key title, status pill title, overflow menu item", () => {
+  it("renders a tracked card's Jira strings byte-for-byte: key title, status pill title, drawer action item", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     expect(screen.getByTitle("Open ASM-1 in Jira")).toBeInTheDocument();
+    // The status pill and the "Open in <source>" action both moved into the drawer.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByTitle("Jira status: In Progress")).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle(/more actions/i));
     expect(screen.getByText("Open in Jira")).toBeInTheDocument();
   });
 
@@ -1313,8 +1499,9 @@ describe("DeckApp — source label", () => {
     expect(screen.getByTitle("Re-read git, Acme and PR state now")).toBeInTheDocument();
     expect(document.querySelector(".note")!.textContent).toBe("git + Acme backbone · best-effort live from ~/.claude/projects");
     expect(screen.getByTitle("Open ASM-1 in Acme")).toBeInTheDocument();
+    // The status pill and the "Open in <source>" action both moved into the drawer.
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByTitle("Acme status: In Progress")).toBeInTheDocument();
-    fireEvent.click(screen.getByTitle(/more actions/i));
     expect(screen.getByText("Open in Acme")).toBeInTheDocument();
     // A fresh deck:runs post with an unknown agent activity is the only way left
     // to reach the parked string — the live signal is unconditional now, so
@@ -1625,6 +1812,21 @@ describe("the deck:flows handler", () => {
     host(flowsMsg([mkFlow("f2", "Two")]));
     expect(drawer()).toBeNull();
   });
+
+  // The two drawers share one fixed slot at z-index 40 (.dd and .orch in
+  // deckStyles.ts) — reachable in practice because postFlows fires on every
+  // refresh, so a flow created in a second VS Code window can land here while a
+  // card is selected in this one, with no click on this window's own chip.
+  it("closes a selected card's detail when a flow it has not seen before arrives", () => {
+    render(<DeckApp />);
+    host(flowsMsg([])); // establishes seenFlowsRef, previous list []
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd")).not.toBeNull();
+    host(flowsMsg([mkFlow("f1", "New flow")])); // a fresh flow, not from this chip
+    expect(document.querySelector(".dd")).toBeNull();
+    expect(document.querySelector(".orch")).not.toBeNull();
+  });
 });
 
 describe("the drawer's callbacks", () => {
@@ -1777,51 +1979,55 @@ const wsStatus = () => mkStatus({
   ],
 });
 
-describe("workspace chip", () => {
+// The workspace label and its repo chips live in the drawer's Work section —
+// every case here selects the card first.
+describe("the drawer's workspace block", () => {
   it("names the workspace and counts its repos", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     const chip = container.querySelector(".c-ws .ws")!;
     expect(chip.textContent).toContain("centaur+e2e");
     expect(chip.textContent).toContain("2 repos");
     expect(chip.textContent).not.toContain(".code-workspace");
   });
 
-  it("tooltips the chip with the workspace file's own path, not a generic sentence", () => {
+  it("tooltips the label with the workspace file's own path, not a generic sentence", () => {
     // The path is the only thing that tells apart two open .code-workspace files
     // sharing a label — a generic sentence can't disambiguate them.
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     const chip = container.querySelector(".c-ws .ws")!;
     expect(chip.getAttribute("title")).toBe("/ws/centaur+e2e.code-workspace");
   });
 
-  it("keeps both repo chips in the fold, with their git signal", () => {
+  it("shows every repo chip under the label, with its git signal", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
-    const fold = container.querySelector(".c-ws .ws-fold")!;
-    expect(Array.from(fold.querySelectorAll(".repo")).map((r) => r.textContent))
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
+    const row = container.querySelector(".c-ws .c-repos")!;
+    expect(Array.from(row.querySelectorAll(".repo")).map((r) => r.textContent))
       .toEqual(["centaur●", "automation_e2e+12−2↑1"]);
   });
 
-  it("replaces the flat chip row, so the card says the workspace once", () => {
+  it("has nothing to expand — no fold, and a label rather than a toggle", () => {
+    // The drawer is the surface with room to spare, so a reader who opened it to
+    // find out which repos a task spans must not have to hover or click. Both
+    // halves matter: a leftover .ws-fold rule would hide the chips with
+    // display:none even though the markup renders them.
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
-    expect(container.querySelector(".c-repos")).toBeNull();
-  });
-
-  it("toggles the fold open for keyboard and touch", () => {
-    const { container } = render(<DeckApp />);
-    host(runsMsg([wsStatus()]));
-    const wrap = container.querySelector(".c-ws")!;
-    expect(wrap.className).not.toContain("open");
-    fireEvent.click(container.querySelector(".ws")!);
-    expect(container.querySelector(".c-ws")!.className).toContain("open");
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
+    expect(container.querySelector(".c-ws .ws-fold")).toBeNull();
+    expect(container.querySelector(".c-ws button")).toBeNull();
+    expect(DECK_CSS).not.toContain("ws-fold");
   });
 
   it("leaves a single-repo run on the plain chip row", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([mkStatus()]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     expect(container.querySelector(".c-ws")).toBeNull();
     expect(container.querySelector(".c-repos .repo")!.textContent).toContain("svc");
   });
@@ -1831,11 +2037,13 @@ describe("workspace chip", () => {
     const s = wsStatus();
     const { container } = render(<DeckApp />);
     host(runsMsg([{ ...s, run: { ...s.run, workspaceFile: undefined, mode: "per-window" } }]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     expect(container.querySelector(".c-ws")).toBeNull();
     expect(container.querySelectorAll(".c-repos .repo")).toHaveLength(2);
   });
 });
 
+// The branch/launched row moved off the card into the drawer's Work section.
 describe("branch line", () => {
   it("shows the branch of the repo this agent runs in", () => {
     // repos[0] is centaur on ASM-9-x; the agent runs in automation_e2e on main.
@@ -1849,12 +2057,14 @@ describe("branch line", () => {
     // as one card per agent with no toggling.
     const { container } = render(<DeckApp />);
     host(runsMsg([{ ...s, agents: [agent] }]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     expect(container.querySelector(".c-branch .bn")!.textContent).toContain("main");
   });
 
   it("falls back to the run's first repo on a card with no agent", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
+    fireEvent.click(container.querySelector(".card") as HTMLElement);
     expect(container.querySelector(".c-branch .bn")!.textContent).toContain("ASM-9-x");
   });
 });
@@ -1936,5 +2146,588 @@ describe("Recently closed strip", () => {
     render(<DeckApp />);
     host(runsMsg([]));
     expect(screen.getByText("No tasks in flight")).toBeInTheDocument();
+  });
+});
+
+describe("board zones", () => {
+  /** The `.col` section whose header carries `label`. */
+  const column = (label: string): HTMLElement =>
+    [...document.querySelectorAll<HTMLElement>(".col")]
+      .find((c) => c.querySelector(".col-hd .nm")?.textContent === label)!;
+
+  const keys = (label: string) =>
+    [...column(label).querySelectorAll(".card .key")].map((n) => n.textContent);
+
+  /** A parked, PR-bearing run, on whichever column its PR facts earn it — the
+   * host would have derived exactly this via deriveBucket. */
+  const inReview = (key: string, over: Partial<PrFacts>): RunStatus => mkStatus({
+    run: { ...mkStatus().run, key },
+    column: over.review === "approved" || over.state === "MERGED" ? "merge" : "review",
+    agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null },
+    prs: { svc: { facts: prFacts(over), fetchedAt: 1 } },
+  });
+
+  it("runs four zones left to right, ending at the merge", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect([...document.querySelectorAll(".col-hd .nm")].map((n) => n.textContent))
+      .toEqual(["In progress", "Action required", "In review", "Merge"]);
+  });
+
+  it("gives a ready-to-merge run the merge column, apart from the ones still waiting", () => {
+    render(<DeckApp />);
+    host(runsMsg([inReview("ASM-2", { review: "none" }), inReview("ASM-1", { review: "approved" })]));
+    expect(keys("Merge")).toEqual(["ASM-1"]);
+    expect(keys("In review")).toEqual(["ASM-2"]);
+    expect(column("Merge").querySelector(".col-hd .ct")?.textContent).toBe("1");
+  });
+
+  it("has no Done column at all — a merged run is not a stage of work", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(document.querySelector(".col-hd .nm")).toBeTruthy();
+    expect([...document.querySelectorAll(".col-hd .nm")].map((n) => n.textContent)).not.toContain("Done");
+  });
+
+  it("glows the dot on the live zones only — In review is a queue, not an activity", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    const glowing = [...document.querySelectorAll<HTMLElement>(".col")]
+      .filter((c) => c.querySelector(".col-hd .dot.glow"))
+      .map((c) => c.querySelector(".col-hd .nm")?.textContent);
+    expect(glowing).toEqual(["In progress", "Action required", "Merge"]);
+  });
+
+  it("hands each zone its own hue through one custom property", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(column("Merge").style.getPropertyValue("--zone")).toBe("var(--c-done)");
+    expect(column("In review").style.getPropertyValue("--zone")).toBe("var(--c-review)");
+  });
+
+  it("puts the count after the rule, so every column's count aligns right", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect([...column("In progress").querySelectorAll(".col-hd > *")].map((n) => n.className))
+      .toEqual(["dot glow", "nm", "rule", "ct"]);
+  });
+
+  /** Every lane header and card key in the column, in render order — the one
+   * assertion that catches a lane header sitting above the wrong cards. */
+  const flow = (label: string) =>
+    [...column(label).querySelectorAll(".lane-hd .nm, .card .key")].map((n) => n.textContent);
+
+  const lanes = (label: string) =>
+    [...column(label).querySelectorAll(".lane-hd")].map((h) => [
+      h.querySelector(".nm")?.textContent,
+      h.querySelector(".ct")?.textContent,
+    ]);
+
+  it("splits the merge column into the press and its aftermath, press first", () => {
+    render(<DeckApp />);
+    host(runsMsg([inReview("ASM-9", { state: "MERGED" }), inReview("ASM-1", { review: "approved" })]));
+    expect(lanes("Merge")).toEqual([["ready to merge", "1"], ["merged · wrap up", "1"]]);
+    expect(flow("Merge")).toEqual(["ready to merge", "ASM-1", "merged · wrap up", "ASM-9"]);
+  });
+
+  it("still names the lane when every card in the column is on one side", () => {
+    render(<DeckApp />);
+    host(runsMsg([inReview("ASM-9", { state: "MERGED" })]));
+    expect(lanes("Merge")).toEqual([["merged · wrap up", "1"]]);
+  });
+
+  it("keeps the column header counting both lanes", () => {
+    render(<DeckApp />);
+    host(runsMsg([inReview("ASM-9", { state: "MERGED" }), inReview("ASM-1", { review: "approved" })]));
+    expect(column("Merge").querySelector(".col-hd .ct")?.textContent).toBe("2");
+  });
+
+  /** A parked run in the In-progress column: no agents, and a run-level read
+   * that says nobody is home. */
+  const quiet = (key: string): RunStatus => mkStatus({
+    run: { ...mkStatus().run, key },
+    column: "progress", agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null },
+  });
+
+  it("splits In progress into the live agents and the parked ones, live first", () => {
+    render(<DeckApp />);
+    host(runsMsg([quiet("ASM-2"), mkStatus()]));
+    expect(lanes("In progress")).toEqual([["working", "1"], ["parked", "1"]]);
+    expect(flow("In progress")).toEqual(["working", "ASM-1", "parked", "ASM-2"]);
+  });
+
+  it("splits In review into the PRs that want you and the ones that want somebody else", () => {
+    render(<DeckApp />);
+    host(runsMsg([inReview("ASM-2", { review: "none" }), inReview("ASM-3", { mergeable: "conflicting" })]));
+    expect(lanes("In review")).toEqual([["fixes needed", "1"], ["waiting on review", "1"]]);
+    expect(flow("In review")).toEqual(["fixes needed", "ASM-3", "waiting on review", "ASM-2"]);
+  });
+
+  it("leaves Action required without sub-headers — it is the one column that means one thing", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "needs", agents: [], agent: { state: "needs-you", lastActivityMs: 1_000, slug: null },
+    })]));
+    expect(lanes("Action required")).toEqual([]);
+  });
+
+  it("keeps the In-progress header counting both of its lanes", () => {
+    render(<DeckApp />);
+    host(runsMsg([quiet("ASM-2"), mkStatus()]));
+    expect(column("In progress").querySelector(".col-hd .ct")?.textContent).toBe("2");
+  });
+});
+
+describe("card selection", () => {
+  const card = () => document.querySelector(".card") as HTMLElement;
+
+  it("mounts no drawer until a card is selected", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(document.querySelector(".dd")).toBeNull();
+  });
+
+  it("selects on click and opens the drawer for that card", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(card());
+    expect(document.querySelector(".dd")).not.toBeNull();
+    expect(document.querySelector(".dd-hd .k")!.textContent).toBe("ASM-1");
+    expect(card().className).toContain("sel");
+  });
+
+  it("does not select when a card action is clicked", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(within(card()).getByRole("button", { name: /^open$/i }));
+    expect(document.querySelector(".dd")).toBeNull();
+  });
+
+  it("clicking the selected card again clears it", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(card());
+    fireEvent.click(card());
+    expect(document.querySelector(".dd")).toBeNull();
+  });
+
+  it("re-targets the drawer when a second card is selected", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
+    const cards = document.querySelectorAll(".card");
+    fireEvent.click(cards[0]);
+    fireEvent.click(cards[1]);
+    expect(document.querySelectorAll(".dd")).toHaveLength(1);
+    expect(document.querySelector(".dd-hd .k")!.textContent).toBe("ASM-2");
+  });
+
+  it("clears the selection on Escape", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(card());
+    act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
+    expect(document.querySelector(".dd")).toBeNull();
+  });
+
+  it("drops a selection whose card is gone from the next post", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(card());
+    expect(document.querySelector(".dd")).not.toBeNull();
+    host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "ASM-9" } })]));
+    expect(document.querySelector(".dd")).toBeNull();
+    // The `selId` state itself must clear, not just this render's recomputed
+    // `selected` — otherwise a stale selId that outlived the card's absence
+    // would silently reopen the drawer the moment a card with that same id
+    // (e.g. the same run, ASM-1) reappears in a later post, with no click.
+    host(runsMsg([mkStatus()]));
+    expect(document.querySelector(".dd")).toBeNull();
+  });
+
+  it("gives the board scroll run-out so a covered column stays reachable", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(document.querySelector(".board")!.className).not.toContain("dd-open");
+    fireEvent.click(card());
+    expect(document.querySelector(".board")!.className).toContain("dd-open");
+  });
+
+  it("closes the Orchestrator drawer when a card is selected", () => {
+    render(<DeckApp />);
+    host({ type: "deck:flows", flows: [{ id: "f1", name: "F", nodes: [], edges: [], armed: false } as never],
+      enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {} } as OutboundMessage);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(screen.getByRole("button", { name: /orchestrator/i }));
+    expect(document.querySelector(".orch")).not.toBeNull();
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd")).not.toBeNull();
+    // The two drawers share the slot: selecting a card must set `openFlowId`
+    // to null so the Orchestrator drawer starts its slide-out — it stays
+    // mounted (as `.orch.closing`) for its exit animation rather than
+    // vanishing in the same frame, so `.closing` rather than absence is the
+    // proof `onSelect` actually closed it. Selecting a card always opens
+    // `.dd` regardless of `openFlowId` (they are independent state), so the
+    // `.dd` assertion above alone cannot tell "closed" from "never closed."
+    expect(document.querySelector(".orch.closing")).not.toBeNull();
+  });
+
+  // The reverse direction of the test above: the spec asks for mutual exclusion
+  // both ways, and only "selecting a card closes the Orchestrator" had a test.
+  it("closes the card detail drawer when the Orchestrator chip is clicked", () => {
+    render(<DeckApp />);
+    host({ type: "deck:flows", flows: [{ id: "f1", name: "F", nodes: [], edges: [], armed: false } as never],
+      enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {} } as OutboundMessage);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /orchestrator/i }));
+    expect(document.querySelector(".dd")).toBeNull();
+  });
+
+  // "does not select when a PR link is clicked" is deleted here, not re-pointed:
+  // the PR block no longer renders on an unselected card at all (it only exists
+  // inside `.dd`, which is itself proof the card is already selected), so there
+  // is no longer a scenario where a PR link is clickable before selection. The
+  // card's own click-guard on `.c-foot2` is exercised instead by "does not
+  // select when a card action is clicked" above.
+});
+
+describe("the card at rest", () => {
+  it("renders the signal line and no PR block, repo chips or branch row", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      prs: { svc: { facts: {
+        number: 5, url: "u", title: "t", state: "OPEN", isDraft: false,
+        ci: { passing: 1, pending: 0, failing: [] }, review: "approved",
+        unresolved: 0, mergeable: "clean", ciAdvisory: false,
+      }, fetchedAt: 1 } } as never,
+    })]));
+    const card = document.querySelector(".card")!;
+    expect(card.querySelector(".c-sig")).not.toBeNull();
+    expect(card.querySelector(".pr-block")).toBeNull();
+    expect(card.querySelector(".c-repos")).toBeNull();
+    expect(card.querySelector(".c-branch")).toBeNull();
+    expect(card.querySelector(".c-agents")).toBeNull();
+    expect(card.querySelector(".pill")).toBeNull();
+  });
+
+  it("names the repos behind the \"N repos\" bit in its tooltip, one per line", () => {
+    // The card has no room to list them and must not grow to: the count says how
+    // many, the tooltip says which. Newline-separated, which a native title honors.
+    render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    const bits = Array.from(document.querySelectorAll(".card .c-sig span"));
+    const count = bits.find((b) => b.textContent === "2 repos")!;
+    expect(count.getAttribute("title")).toBe("centaur\nautomation_e2e");
+  });
+
+  it("shows Open and Diff in the footer, and no overflow menu", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    const labels = Array.from(document.querySelectorAll(".card .c-foot2 .act")).map((b) => b.textContent);
+    expect(labels).toEqual(["Open", "Diff"]);
+    expect(document.querySelector(".card .more")).toBeNull();
+  });
+
+  // Converted from a lane-gated "Address PR" assertion (see the git history
+  // at commit daff687): review_required with clean CI and clean mergeability
+  // is a PR still waiting on a human, but nothing about it is actually WRONG,
+  // so cardActions() gives it no row — the signal line stays instead, which
+  // is what "the card at rest" describes.
+  it("shows no action row and keeps the signal line for a waiting PR with nothing wrong", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "review",
+      prs: { svc: { facts: {
+        number: 5, url: "u", title: "t", state: "OPEN", isDraft: false,
+        ci: { passing: 1, pending: 0, failing: [] }, review: "review_required",
+        unresolved: 0, mergeable: "clean", ciAdvisory: false,
+      }, fetchedAt: 1 } } as never,
+    })]));
+    const card = document.querySelector(".card")!;
+    expect(card.querySelector(".c-rows")).toBeNull();
+    expect(card.querySelector(".c-sig")).not.toBeNull();
+    const footerLabels = Array.from(card.querySelectorAll(".c-foot2 .act")).map((b) => b.textContent);
+    expect(footerLabels).toEqual(["Open", "Diff"]);
+  });
+
+  it("shows no action row on the review column's ready lane", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "review",
+      prs: { svc: { facts: {
+        number: 5, url: "u", title: "t", state: "OPEN", isDraft: false,
+        ci: { passing: 1, pending: 0, failing: [] }, review: "approved",
+        unresolved: 0, mergeable: "clean", ciAdvisory: false,
+      }, fetchedAt: 1 } } as never,
+    })]));
+    expect(document.querySelector(".card .c-rows")).toBeNull();
+  });
+
+  // Strengthened per the same reasoning as the local-card test above: a PR
+  // with every kind of problem at once (failing CI, changes requested, a
+  // conflict) still produces nothing on a local card. The `local` guard must
+  // hold against real pressure — a local card's ticket is only inferred from
+  // its branch name, which may belong to somebody else's ticket.
+  it("keeps every action row off a local card even when its PR is failing outright", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "review", run: { ...mkStatus().run, key: "local-a", url: "", kind: "local" } as never,
+      prs: { svc: { facts: failingPr(), fetchedAt: 1 } },
+    })]));
+    expect(document.querySelector(".card .c-rows")).toBeNull();
+  });
+
+  it("renders a diff bit as two distinct elements, each with a color rule of its own in the stylesheet", () => {
+    // jsdom has no CSS cascade, so a resolved computed color can't be asserted
+    // here — that's exactly why a prior version of this test (asserting only
+    // textContent) passed against a real gray-on-gray bug: .c-diff had no color
+    // rules at all, and every bit inherited .c-sig's dim gray. The structural
+    // half (two distinct elements, one carrying .add and one .del) is what the
+    // CSS rules below actually key off; the stylesheet half is the only way this
+    // suite can catch either rule going missing.
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    const sig = document.querySelector(".card .c-sig")!;
+    const add = sig.querySelector(".add")!;
+    const del = sig.querySelector(".del")!;
+    expect(add).not.toBe(del);
+    expect(add.textContent).toBe("+12");
+    expect(del.textContent).toBe("−2");
+    expect(DECK_CSS).toMatch(/\.c-diff\s+\.add\s*\{\s*color:\s*var\(--c-done\)/);
+    expect(DECK_CSS).toMatch(/\.c-diff\s+\.del\s*\{\s*color:\s*var\(--c-danger\)/);
+  });
+});
+
+describe("DeckApp card anatomy", () => {
+  beforeEach(() => sent.mockClear());
+
+  it("shows a named button for each PR failure", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(failingPr(), { column: "needs" })]));
+    expect(screen.getByRole("button", { name: "Fix CI" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Resolve conflict" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Address review" })).toBeTruthy();
+    // The rows REPLACE the signal line rather than joining it — a card showing
+    // both would restate the very facts the rows already name.
+    expect(document.querySelector(".card .c-sig")).toBeNull();
+  });
+
+  it("no longer offers a generic Address PR", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(failingPr(), { column: "review" })]));
+    expect(screen.queryByRole("button", { name: "Address PR" })).toBeNull();
+  });
+
+  it("sends deck:seedPrWork with the reason for the button pressed", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(failingPr(), { column: "needs" })]));
+    fireEvent.click(screen.getByRole("button", { name: "Resolve conflict" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+  });
+
+  it("carries the failing check names as the ci action's detail", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(failingPr(), { column: "needs" })]));
+    fireEvent.click(screen.getByRole("button", { name: "Fix CI" }));
+    expect(sent).toHaveBeenCalledWith({
+      type: "deck:seedPrWork", key: "ASM-1", reason: "ci", detail: "integration, lint",
+    });
+  });
+
+  it("keeps the ordinary signal line on a healthy card", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr())]));
+    expect(screen.getByText(/✓ ci/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Fix CI" })).toBeNull();
+  });
+
+  // Spend was removed from the card by request: it lives only in the detail
+  // drawer now (see test/webview/DeckDetail.test.tsx's "DeckDetail — Spend"
+  // block, which carries over the eq-label and unread-vs-zero invariants these
+  // card tests used to protect). The card must show no figure for ANY usage
+  // value — including a large one, which is the case that would regress if the
+  // footer span were ever reinstated.
+  it("never shows a spend figure on the card, whatever the usage", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 0, cacheWrite: 0, cacheRead: 3_804_000 } })]));
+    expect(screen.getByText(/✓ ci/)).toBeTruthy(); // the card did render
+    expect(document.querySelector(".c-foot2 .spend")).toBeNull();
+    expect(screen.queryByText("380k")).toBeNull();
+    expect(screen.queryByText(/\beq\b/)).toBeNull();
+  });
+
+  it("totals the board's spend in the header", () => {
+    render(<DeckApp />);
+    const a = withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
+    const b = withPr(healthyPr(), {
+      run: { ...mkStatus().run, key: "ASM-2" },
+      usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 },
+    });
+    // 4th arg turns the setting on: the tile is opt-in and absent by default, so
+    // every other test on this board renders without it.
+    host(runsMsg([a, b], "PR initiated", "Jira", true));
+    // 2 × (20,000 × 5) = 200,000 → "200k"
+    expect(screen.getByText("200k")).toBeTruthy();
+  });
+
+  // I2: the header total used to reduce over every run the host ever posted
+  // (live and closed alike), while every sibling tile in the same header —
+  // "In progress", "Action required", "In review" — reduces over the live
+  // cards only. A closed run's card leaves the board, but its tokens used to
+  // linger in "Tokens on board" forever.
+  // The setting is off by default, so the tile must be absent on a board whose
+  // runs carry real usage — otherwise "off by default" is only true of the
+  // package.json default and not of the code.
+  it("hides the header total when the setting is off", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } })]));
+    expect(screen.queryByText("Tokens on board")).toBeNull();
+    expect(screen.queryByText("100k")).toBeNull();
+  });
+
+  it("shows the header total once the setting is on", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } })], "PR initiated", "Jira", true));
+    expect(screen.getByText("Tokens on board")).toBeTruthy();
+  });
+
+  // With the board sweep off by default, opening a drawer is the ONLY thing that
+  // makes the host read transcripts. If this request stopped being sent, the
+  // drawer would sit on "Reading transcripts…" forever and nothing else would fail.
+  it("asks the host for the selected run's usage when its drawer opens, and not before", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr())]));
+    expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "deck:usageFor" }));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(sent).toHaveBeenCalledWith({ type: "deck:usageFor", key: "ASM-1" });
+  });
+
+  it("feeds a deck:usage reply into the open drawer", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr())]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(screen.getByText(/Reading transcripts/)).toBeTruthy();
+    host({ type: "deck:usage", key: "ASM-1", usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
+    expect(document.querySelector(".dd-spend")).not.toBeNull();
+    expect(screen.queryByText(/Reading transcripts/)).toBeNull();
+  });
+
+  // A reply can land after the user has moved on. Keying by run rather than
+  // holding one "current" slot is what stops the new drawer showing the old
+  // run's figure.
+  it("ignores a deck:usage reply for a run other than the open one", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr())]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    host({ type: "deck:usage", key: "SOMEONE-ELSE", usage: { input: 0, output: 99_000, cacheWrite: 0, cacheRead: 0 } });
+    expect(screen.getByText(/Reading transcripts/)).toBeTruthy();
+    expect(document.querySelector(".dd-spend")).toBeNull();
+  });
+
+  it("excludes a closed run's tokens from the header total", () => {
+    render(<DeckApp />);
+    const a = withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
+    const b = withPr(healthyPr(), {
+      run: { ...mkStatus().run, key: "ASM-2" },
+      shelf: "closed",
+      usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 },
+    });
+    host(runsMsg([a, b], "PR initiated", "Jira", true));
+    // Only `a`'s spend counts: 20,000 × 5 = 100,000 → "100k". The card no longer
+    // prints a figure of its own, so the header is the only place it can appear;
+    // if the closed run's tokens were still folded in it would read "200k".
+    const hd = document.querySelector(".hd") as HTMLElement;
+    expect(within(hd).getByText("100k")).toBeTruthy();
+    expect(within(hd).queryByText("200k")).toBeNull();
+  });
+
+  // I4: the header figure is effort-weighted, so it must carry the `eq` unit and
+  // the formula tooltip — "Tokens on board" with no qualifier understates real
+  // tokens by ~6.6x and reads as a raw count. (This originally said "same as the
+  // card"; the card's own figure has since been removed, so the header and the
+  // drawer's weighted row are now the only two places the unit appears.)
+  it("carries the eq unit and formula tooltip on the header total", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } })], "PR initiated", "Jira", true));
+    const stat = screen.getByText("Tokens on board").closest(".stat") as HTMLElement;
+    expect(within(stat).getByText("eq")).toBeTruthy();
+    expect(stat.title).toMatch(/input×1.*cache-write×1\.25.*cache-read×0\.1.*output×5/);
+  });
+
+  describe("card avatar and state row", () => {
+    /** The board with exactly one run, and that run's card. */
+    const oneCard = (over: Partial<RunStatus> = {}): HTMLElement => {
+      const { container } = render(<DeckApp />);
+      host(runsMsg([mkStatus(over)]));
+      return container.querySelector(".card") as HTMLElement;
+    };
+
+    it("leads the card with its kind, and keeps the ticket key whole beside the title", () => {
+      const card = oneCard();
+      const hd = card.querySelector(".c-hd")!;
+      // The avatar is the header's FIRST child: the whole point is that every card
+      // starts at the same x with the same kind of mark.
+      expect(hd.firstElementChild!.className).toBe("av k-task");
+      expect(hd.querySelector(".hd-t .c-title")!.textContent).toContain("Export fails on large accounts");
+      // Its own slot, not sharing a row with the branch and the diff: a truncated
+      // ticket key is the one identifier on this card nobody can reconstruct.
+      expect(hd.querySelector(".hd-k .key")!.textContent).toBe("ASM-1");
+    });
+
+    it("gives a notepad card the notepad mark, not the ticket one", () => {
+      const card = oneCard({ run: { ...mkStatus().run, kind: "notepad" } });
+      expect(card.querySelector(".c-hd .av")!.className).toBe("av k-notepad");
+    });
+
+    it("gives an explore card the explore mark", () => {
+      const card = oneCard({ run: { ...mkStatus().run, kind: "explore" } });
+      expect(card.querySelector(".c-hd .av")!.className).toBe("av k-explore");
+    });
+
+    it("selects the card when the title is clicked, as it did before the header existed", () => {
+      const card = oneCard();
+      fireEvent.click(card.querySelector(".c-hd .c-title")!);
+      // The header must NOT stop propagation as a whole — only its key slot does.
+      // Clicking the summary has always selected the card.
+      expect(card.className).toContain("sel");
+    });
+
+    it("does not select the card when its key is clicked", () => {
+      const card = oneCard();
+      fireEvent.click(card.querySelector(".hd-k .key")!);
+      expect(card.className).not.toContain("sel");
+      expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+    });
+
+    it("puts the state on its own row under a hairline, with the age in mono", () => {
+      const card = oneCard({
+        run: { ...mkStatus().run, createdAt: Date.now() - 2 * 3_600_000 },
+        usage: { input: 2_000, output: 40_000, cacheWrite: 100_000, cacheRead: 4_000_000 },
+      });
+      // One hairline, and only one: a second rule would stop it meaning anything.
+      expect(card.querySelectorAll(".c-hr").length).toBe(1);
+      const st = card.querySelector(".c-st")!;
+      expect(st.querySelector(".sdot")!.className).toContain("tone-working");
+      expect(st.querySelector(".status")!.textContent).toContain("working");
+      const meta = st.querySelector(".c-meta")!;
+      // The age, and only the age — even for a run whose usage the host HAS read.
+      // a66c543 took spend off the card on purpose; the drawer owns it.
+      expect(meta.textContent).toBe("2h ago");
+      expect(meta.querySelector(".age")!.textContent).toBe("2h ago");
+      // The age carries its own title in words: the state text beside it also ends
+      // in a duration (the last activity), and the two are different clocks.
+      expect(meta.querySelector(".age")!.getAttribute("title")).toBe("launched 2h ago");
+    });
+
+    it("keeps the new state row clear of any spend figure, measured or not", () => {
+      // Both directions of the invariant a66c543 established: an unread run and a
+      // read one look the same on the card, because the card never carries spend.
+      for (const over of [{}, { usage: { input: 0, output: 0, cacheWrite: 0, cacheRead: 0 } }]) {
+        const card = oneCard(over);
+        expect(card.querySelector(".c-meta")!.textContent).not.toContain("eq");
+        expect(card.querySelector(".c-meta .age")).not.toBeNull();
+      }
+    });
   });
 });

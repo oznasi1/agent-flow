@@ -1,6 +1,7 @@
 import * as React from "react";
 import { ReviewDetail, ReviewRequest, ReviewSort, ReviewVerb } from "../types";
 import { linesChanged, sizeBucket } from "../engine/review/sort";
+import { LoadingMark } from "./LoadingMark";
 
 function age(ms: number): string {
   const d = Math.max(0, Math.round((Date.now() - ms) / 86_400_000));
@@ -228,7 +229,7 @@ export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
               ? "couldn't check for PRs waiting on your review"
               : `${p.issueCount} ${p.issueCount === 1 ? "PR" : "PRs"} waiting on your review`}
         </button>
-        {p.loading && <span className="spin on" aria-hidden="true">⟳</span>}
+        {p.loading && <LoadingMark size={12} />}
         {p.issueCount > shown && <span className="rv-note">showing {shown} of {p.issueCount}</span>}
         {p.stale && shown > 0 && <span className="rv-note warn">couldn't refresh — showing the last result</span>}
         <span className="sp" />

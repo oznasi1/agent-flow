@@ -1,8 +1,8 @@
 {
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
-  "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a coding agent already briefed — Claude Code, or GitHub Copilot.",
-  "version": "0.21.2",
+  "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a coding agent already briefed — Claude Code, GitHub Copilot, or Cursor.",
+  "version": "0.33.7",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",
   "license": "MIT",
@@ -33,6 +33,8 @@
     "ai",
     "copilot",
     "github copilot",
+    "cursor",
+    "cursor agent",
     "agent orchestration",
     "git worktree",
     "worktree",
@@ -145,6 +147,19 @@
           "default": "jira",
           "description": "Where Agent Flow reads tasks from. Each source has its own settings under agentFlow.<source>.*. Requires a window reload."
         },
+        "agentFlow.forge": {
+          "type": "string",
+          "enum": [
+            "github",
+            "gitlab"
+          ],
+          "enumDescriptions": [
+            "GitHub, through the `gh` CLI.",
+            "GitLab, through the `glab` CLI."
+          ],
+          "default": "github",
+          "description": "Which forge Agent Flow reads pull/merge requests, CI, and review requests from. Each forge needs its own CLI installed and signed in — run Doctor to check. Requires a window reload."
+        },
         "agentFlow.jira.baseUrl": {
           "type": "string",
           "default": "",
@@ -226,15 +241,18 @@
           "type": "string",
           "enum": [
             "claude-code",
-            "copilot"
+            "copilot",
+            "cursor",
+            "ask"
           ],
           "enumDescriptions": [
             "Claude Code",
-            "GitHub Copilot — VS Code only"
+            "GitHub Copilot — VS Code only",
+            "Cursor's composer — Cursor only",
+            "Ask every launch — pick from the agents this editor can run"
           ],
           "default": "claude-code",
-          "when": "agentFlow.host.vscode",
-          "markdownDescription": "Which agent Agent Flow starts a session with. `copilot` works only in VS Code — in Cursor and other forks it falls back to Claude Code. Note that Copilot sessions do **not** appear as live agents on the Deck, which reads Claude Code's session files."
+          "markdownDescription": "Which agent Agent Flow starts a session with. `copilot` works only in VS Code and `cursor` only in Cursor — each falls back to Claude Code in the other editor. Note that neither Copilot nor Cursor sessions appear as live agents on the Deck, which reads Claude Code's session files.\n\nSet to `ask` to choose per launch. Batch launches ask once for the whole batch, and Orchestrator rules — which run unattended — always use Claude Code, because there is nobody there to answer a picker."
         },
         "agentFlow.agentSurface": {
           "type": "string",
@@ -518,17 +536,22 @@
         "agentFlow.prReviewStatus": {
           "type": "string",
           "default": "PR initiated",
-          "description": "Task status that reveals the \"Address PR\" button on a card (matched case-insensitively against the Jira status name). When a task reaches this status, clicking the button kicks off an agent that finds the task's GitHub PR and assesses whether it's ready for our fixes — in a fresh worktree from the sidebar's task card, or in the run's own already-open workspace from a Deck card."
+          "description": "Task status that reveals the \"Address PR\" button on the sidebar's Tasks card (matched case-insensitively against the Jira status name). The Deck's own Address PR button is unaffected — it goes by the card's review/waiting lane instead. Either way, clicking the button kicks off an agent that finds the task's GitHub PR and assesses whether it's ready for our fixes — in a fresh worktree from the sidebar's task card, or in the run's own already-open workspace from a Deck card."
         },
         "agentFlow.prReviewAutoFix": {
           "type": "boolean",
           "default": true,
           "description": "After the PR-review agent assesses the PR, let it proceed to implement the requested changes on the PR's branch. Turn off to have it only assess and report back."
         },
+        "agentFlow.deck.showTokenTotal": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show a \"Tokens on board\" total in the Deck header. Off by default: the total needs a transcript sweep across every run on the board, while each task's own token breakdown is read on demand when you open its detail drawer. The figure is effort-weighted (input×1, cache-write×1.25, cache-read×0.1, output×5) and labelled \"eq\" — cache reads are the overwhelming majority of raw tokens at a tenth the rate, so a raw sum would rank tasks by conversation length rather than by cost."
+        },
         "agentFlow.prReviewPrompt": {
           "type": "string",
           "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **Address PR** kick-off. The agent locates the task's GitHub PR by its Jira key and assesses readiness; when `#agentFlow.prReviewAutoFix#` is on, a fixing instruction is appended automatically. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`.",
+          "markdownDescription": "Prompt seeded for the **Address PR** kick-off. The agent locates the task's GitHub PR by its Jira key and assesses readiness; when `#agentFlow.prReviewAutoFix#` is on, a fixing instruction is appended automatically. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`. Under `#agentFlow.forge#: gitlab` an equivalent GitLab-flavoured default is used instead, unless you have customized this setting.",
           "default": "Jira {key} ({url}): \"{summary}\". This task has an open GitHub PR — all our PRs carry the Jira key in their title and branch. Using `gh` (or the GitHub tools available to you): find the PR for {key}, run `gh pr checkout` to bring its branch into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}"
         },
         "agentFlow.worktree": {
@@ -545,6 +568,11 @@
           ],
           "default": "ask",
           "description": "Whether to isolate the task in a git worktree. Worktrees are created inside each repo at .claude/worktrees/<KEY> (git-excluded automatically)."
+        },
+        "agentFlow.childWorktrees": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When you take a ticket that has children, offer to work them as a worktree per child (a session each) or as one orchestrator session dispatching a subagent per child. Turn it off to take such a ticket on its own, with no question asked."
         },
         "agentFlow.remoteControl": {
           "type": "string",
@@ -647,7 +675,7 @@
         },
         "agentFlow.reviewRequestModes": {
           "type": "array",
-          "markdownDescription": "Seed modes offered by **Review with agent** on the Deck's review strip. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`. Add your own — e.g. separate backend and frontend review modes — and clicking **Review with agent** asks which to use, since your entry joins the built-in **Full review** rather than replacing it. Pin one with `#agentFlow.reviewRequestMode#` to skip the question. Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"full\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you.",
+          "markdownDescription": "Seed modes offered by **Review with agent** on the Deck's review strip. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`. Add your own — e.g. separate backend and frontend review modes — and clicking **Review with agent** asks which to use, since your entry joins the built-in **Full review** rather than replacing it. Pin one with `#agentFlow.reviewRequestMode#` to skip the question. Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"full\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you. Under `#agentFlow.forge#: gitlab` the built-in **Full review** mode carries an equivalent GitLab-flavoured prompt, unless you have overridden that mode's `prompt` yourself.",
           "items": {
             "type": "object",
             "required": [

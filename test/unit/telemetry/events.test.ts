@@ -22,11 +22,11 @@ const SAMPLES = [
   { name: "extension_installed" },
   {
     name: "extension_activated", is_first_ever: true, has_jira_auth: false, is_configured: true,
-    workspace_mode: "auto", open_in: "ask", agent_provider: "claude-code", agent_surface: "extension", explore_mode: "ask", task_source: "jira", worktree: "ask",
+    workspace_mode: "auto", open_in: "ask", agent_provider: "claude-code", agent_surface: "extension", explore_mode: "ask", task_source: "jira", forge: "github", worktree: "ask",
     remote_control: "off", default_filter: "mysprint", task_mode: "ask",
     seed_agent: true, filters_size: true, filters_status: true, filters_repo: true,
     filters_search: true, pr_review_auto_fix: true, pr_facts: true, review_requests: true,
-    open_agents: true, review_writes: false, orchestrator: false, stamp_label_on_write: true, track_open_windows: true,
+    open_agents: true, review_writes: false, orchestrator: false, child_worktrees: false, stamp_label_on_write: true, track_open_windows: true,
     batch_confirm_threshold: 6, repo_blocklist_count: 0, commands_count: 0,
     prompt_modes_count: 6, prompt_modes_overridden: 0, prompt_modes_custom: 0, prompt_modes_hidden: 0,
     explore_prompts_customized: false, environments_customized: false,

@@ -2,10 +2,11 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { getConfig } from "./config";
+import { getConfig, hostProviders, type AgentProviderSetting } from "./config";
 import type { TaskConnector } from "./tasks/provider";
 import { discoverRepos } from "./engine/repos";
-import { probeGh } from "./engine/pr/provider";
+import { resolveForge } from "./engine/forge/registry";
+import type { Forge } from "./engine/forge/types";
 import { resolveBin } from "./engine/pr/which";
 import { defaultRunsDir, readRuns } from "./engine/runs";
 import {
@@ -35,7 +36,7 @@ export interface DoctorConfig {
   workspaceDir: string;
   repoBlocklist: string[];
   prFacts: boolean;
-  agentProvider: "claude-code" | "copilot";
+  agentProvider: AgentProviderSetting;
 }
 
 /** Every outside-world touch Doctor makes, injected. `collectInputs` is then pure
@@ -48,12 +49,16 @@ export interface DoctorDeps {
   hasCredentials: () => Promise<boolean>;
   probe: () => Promise<{ auth?: AuthProbe; scope?: ProjectProbe }>;
   which: (bin: string) => string | null;
-  gh: () => Promise<{ kind: "missing" | "signed-out"; detail: string } | null>;
+  /** Describing the forge is cheap — a config read plus a registry lookup — so it
+   *  is always resolved. Probing it is not, so `forgeProbe` is its own member and
+   *  `collectInputs` gates the call on `prFacts`. */
+  forge: () => { label: string; cli: string; installUrl: string };
+  forgeProbe: () => Promise<{ kind: "missing" | "signed-out"; detail: string } | null>;
   statDir: (p: string) => { exists: boolean; writable: boolean };
   repos: () => { repos: number; gitRepos: number };
   claudeExtension: () => { installed: boolean; version: string | null };
   claudeProjectsReadable: () => boolean;
-  copilotChat: () => Promise<{ available: boolean }>;
+  chatCommand: () => Promise<{ available: boolean }>;
   runs: () => number;
   log: (message: string) => void;
 }
@@ -75,6 +80,11 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
   const { auth: authProbe, scope: projectProbe } = hasCredentials ? await d.probe() : {};
 
   const repos = d.repos();
+  // Resolved unconditionally — describing the forge is cheap — while the probe
+  // itself stays gated on `prFacts` so a Deck with PR facts off does not pay for
+  // an `auth status` call.
+  const f = d.forge();
+  const forge = { ...f, gap: cfg.prFacts ? await d.forgeProbe() : null, foundAt: d.which(f.cli) };
   return {
     sourceLabel: cfg.sourceLabel,
     scopeNoun: cfg.scopeNoun,
@@ -90,13 +100,15 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
     reposRoot: { path: cfg.reposRoot, exists: d.statDir(cfg.reposRoot).exists, ...repos },
     workspaceDir: { path: cfg.workspaceDir, ...d.statDir(cfg.workspaceDir) },
     prFacts: cfg.prFacts,
-    gh: cfg.prFacts ? { gap: await d.gh(), foundAt: d.which("gh") } : undefined,
+    forge,
     claudeCode: d.claudeExtension(),
     claudeProjectsReadable: d.claudeProjectsReadable(),
     runs: d.runs(),
     agentProvider: cfg.agentProvider,
-    // Only probed when it can matter — the Claude Code path must not pay for it.
-    copilotChat: cfg.agentProvider === "copilot" ? await d.copilotChat() : { available: false },
+    hostProviders: hostProviders(),
+    // Probed whenever a chat-panel agent could be the one that runs — which under
+    // `ask` is any host that offers one.
+    chatCommand: cfg.agentProvider !== "claude-code" ? await d.chatCommand() : { available: false },
   };
 }
 
@@ -175,9 +187,10 @@ export function probeClaudeExtension(): { installed: boolean; version: string | 
 }
 
 /** Whether this window can open a chat panel at all. Command registration rather
- *  than an extension id: chat is built into VS Code and Copilot ships bundled in
- *  some builds. */
-export async function probeCopilotChat(): Promise<{ available: boolean }> {
+ *  than an extension id: chat is built into VS Code, Copilot ships bundled in
+ *  some builds, and Cursor registers the same command — so one probe serves
+ *  both non-Claude providers. */
+export async function probeChatCommand(): Promise<{ available: boolean }> {
   try {
     return { available: (await vscode.commands.getCommands(true)).includes("workbench.action.chat.open") };
   } catch {
@@ -202,6 +215,11 @@ function statDir(p: string): { exists: boolean; writable: boolean } {
 /** The real wiring. Kept separate from `showDoctor` so the command is one line and
  *  the tests never touch the network or the filesystem. */
 export function defaultDeps(connector: TaskConnector, log: (message: string) => void): DoctorDeps {
+  /** The configured forge, resolved once per call for whichever member asked.
+   *  Both `forge` and `forgeProbe` go through this, so one config read and one
+   *  `Forge` construction serve each — and, more importantly, both report an
+   *  unknown `agentFlow.forge` through the same logger. */
+  const resolved = (): Forge => resolveForge(getConfig().forge, log);
   const cfg = (): DoctorConfig => {
     const c = getConfig();
     const info = connector.info();
@@ -216,6 +234,10 @@ export function defaultDeps(connector: TaskConnector, log: (message: string) => 
       workspaceDir: c.workspaceDir,
       repoBlocklist: c.repoBlocklist,
       prFacts: c.prFacts,
+      // Passed through unresolved: under `ask` the answer isn't known until launch,
+      // so `collectInputs` hands `runChecks` every host agent's rows rather than
+      // guessing at one. `resolvedProvider` is not used here — that helper is for
+      // copy that must name one concrete agent before a launch has picked.
       agentProvider: c.agentProvider,
     };
   };
@@ -224,7 +246,17 @@ export function defaultDeps(connector: TaskConnector, log: (message: string) => 
     hasCredentials: () => connector.isAuthenticated(),
     probe: () => connector.probe(),
     which: (bin) => resolveBin(bin),
-    gh: () => probeGh(),
+    // `log`, not a swallowing `() => {}`: Doctor is THE surface built to report
+    // this class of misconfiguration, and `agentFlow.forge: "gitla"` otherwise
+    // yields a report reading "GitHub / gh: signed in" with nothing anywhere
+    // telling the user their setting was ignored. The Deck panel logs its own
+    // fallback, but Doctor runs independently of it, so a user who never opened
+    // the Deck would never see that line.
+    forge: () => {
+      const { label, cli } = resolved();
+      return { label, cli: cli.name, installUrl: cli.installUrl };
+    },
+    forgeProbe: () => resolved().probe(),
     statDir,
     repos: () => {
       const c = cfg();
@@ -232,7 +264,7 @@ export function defaultDeps(connector: TaskConnector, log: (message: string) => 
       return { repos: found.length, gitRepos: found.filter((r) => r.isGit).length };
     },
     claudeExtension: probeClaudeExtension,
-    copilotChat: probeCopilotChat,
+    chatCommand: probeChatCommand,
     claudeProjectsReadable: () => {
       try {
         fs.accessSync(path.join(os.homedir(), ".claude", "projects"), fs.constants.R_OK);

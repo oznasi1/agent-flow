@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import { getConfig, providerLabel, AgentFlowConfig, AgentProvider, ExploreAction } from "./config";
+import { getConfig, hostProviders, providerLabel, resolvedProvider, AgentFlowConfig, AgentProvider, ExploreAction } from "./config";
 import {
   isTaskNetworkError,
   serializeCaps,
@@ -22,13 +22,20 @@ import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prompt";
-import { openWorkspace, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, attachmentFileName, BRIEF_DIR, type MergeCandidate } from "./engine/workspace";
+import { openWorkspace, writeBriefInto, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, attachmentFileName, attachmentRelPath, BRIEF_DIR, type MergeCandidate } from "./engine/workspace";
 import { briefMarkdown } from "./engine/brief";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, PresenceRecord, type CurrentWindow } from "./engine/presence";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
-import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
-import { openSharedWorkspace, folderName, type BatchTask } from "./engine/batchWorkspace";
+import { branchName, createWorktrees, ensureBranch, folderName, repoRootOfWorktree, serviceFolderName } from "./engine/worktree";
+// `currentBranch`, not `gitState`: the only thing asked here is which branch a worktree
+// is on, and that is one `rev-parse` rather than the four subprocesses gitState spends
+// on dirtiness, ahead-count and a numstat diff nobody reads. A fan-out of 20 children
+// across 3 repos would otherwise pay 240 git spawns for 60 answers. Same observation
+// `engine/workspace.ts` makes for `repos[].branch`, at the price of the question.
+import { currentBranch } from "./engine/git";
+import { buildTree, type TreeLeaf, type TreeResult } from "./engine/taskTree";
+import { openSharedWorkspace, type BatchTask } from "./engine/batchWorkspace";
 import { sortBySavedOrder, applyReorder, pruneOrder } from "./engine/order";
 import { newNote, newSection, noteStatus, sanitizeNotes, sanitizeSections } from "./notepad";
 import { IMAGE_DIR, deleteImages, imageFileName, imagePath, saveImage, sweepOrphans } from "./notepadImages";
@@ -43,6 +50,7 @@ import {
   Task,
   OutboundMessage,
   PromptMode,
+  Run,
   ServiceRef,
   Size,
   WorkspaceMode,
@@ -234,7 +242,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
     this.post({ type: "state", authed, configured, project: info.scopeValue, me,
       prReviewStatus: cfg.prReviewStatus, filters: cfg.filters,
-      sourceLabel: info.label, agentLabel: providerLabel(cfg.agentProvider), caps: serializeCaps(this.provider().caps),
+      sourceLabel: info.label, agentLabel: providerLabel(resolvedProvider(cfg.agentProvider)), caps: serializeCaps(this.provider().caps),
       liveCount: cfg.trackOpenWindows ? this.liveWindows().length : undefined });
   }
 
@@ -1307,10 +1315,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       remoteControl: wantRemoteControl,
       kind: "explore",
     });
+    // The agent picker was dismissed, which dismisses the launch: nothing was opened,
+    // written or seeded, so there is nothing to report. Not an error toast either — a
+    // cancellation is the user's own decision, and every other picker on this path
+    // returns just as quietly.
+    if (result.cancelled) return;
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, cfg.agentProvider, result.seededInPlace);
-    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl, result.provider);
     const what = env
       ? `to verify on ${env}`
       : action.id === "supervise"
@@ -1364,8 +1377,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }));
     // Repo-relative, not relative to the brief: the agent's cwd is the repo root, so a
     // bare `images/foo.png` names no file from there — the trap batchWorkspace.ts
-    // already records for brief-relative references.
-    const imageLines = attachments.map((a) => `- \`${BRIEF_DIR}/images/${a.name}\``).join("\n");
+    // already records for brief-relative references. Run-keyed via `attachmentRelPath`,
+    // the same helper the copy uses, so a note taken beside another note's running agent
+    // names its OWN screenshot rather than whichever landed in the checkout last.
+    const imageLines = attachments
+      .map((_, i) => `- \`${BRIEF_DIR}/images/${attachmentRelPath(key, attachments, i)}\``)
+      .join("\n");
     const planMd =
       `## Notepad: ${topic}\n\n_No ticket — an item you wrote in the Agent Flow notepad. ` +
       `If it turns into tracked work, open a ticket afterwards._` +
@@ -1408,6 +1425,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       remoteControl: wantRemoteControl,
       kind: "notepad",
     });
+    // Dismissed at the agent picker: no window, no brief, no plan, no run. Returning
+    // HERE — before saveNotes below — is what makes that comment true.
+    if (result.cancelled) return;
 
     // Point the note at its run so the badge has something to derive from. Written
     // after the launch, not before: a cancelled picker must leave no pointer to a
@@ -1415,8 +1435,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     await this.saveNotes(this.notes().map((n) => (n.id === id ? { ...n, lastRunKey: key } : n)));
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, cfg.agentProvider, result.seededInPlace);
-    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl, result.provider);
     this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
   }
 
@@ -1646,11 +1666,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     return p?.yes === true;
   }
 
-  /** Remote Control seeds `/remote-control <key>`, a Claude Code slash command Copilot
-   * has no equivalent for — Copilot would take it as literal prompt text and start a
-   * session that silently does the wrong thing. `remoteControl: "on"` under Copilot is
-   * therefore refused, rather than silently dropping one of the two things the user
-   * turned on.
+  /** Remote Control seeds `/remote-control <key>`, a Claude Code slash command neither
+   * Copilot nor Cursor has an equivalent for — either would take it as literal prompt
+   * text and start a session that silently does the wrong thing. `remoteControl: "on"`
+   * under any non-Claude agent is therefore refused, rather than silently dropping one
+   * of the two things the user turned on.
    *
    * Refused HERE, at the very top of a launch entry point: this is a settings-only
    * synchronous check, so it lands ahead of every picker, every worktree and every
@@ -1659,19 +1679,26 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    *
    * Only `"on"` is refused. `"ask"` is handled in resolveRemoteControl, which declines
    * to offer a toggle it could not honour and proceeds without Remote Control — a
-   * Copilot user is never blocked from taking a task by an "ask" setting. `"off"` and
-   * every Claude Code configuration return false here before anything else is read,
-   * so those paths are untouched. `cfg.agentProvider` is host-guarded by
-   * readAgentProvider, so none of this can fire in Cursor.
+   * non-Claude user is never blocked from taking a task by an "ask" setting. `"off"`
+   * and every Claude Code configuration return false here before anything else is
+   * read, so those paths are untouched. This predicate runs on every host, Cursor
+   * included: `cfg.agentProvider` reads back `"cursor"` there once it's selected, so
+   * this is exactly what fires under it.
    *
    * The `seedAgent` clause mirrors resolveRemoteControlSetting's own precondition
    * above, and has to: with seeding off, no plan file ever carries the decision, so
-   * `/remote-control` could never reach Copilot in the first place and there is
-   * nothing to refuse. Without the clause this predicate would be stricter than the
-   * resolver it stands in front of, and a Copilot user with seeding off — who never
-   * opted into any of this — would be locked out of every launch. */
+   * `/remote-control` could never reach a non-Claude agent in the first place and
+   * there is nothing to refuse. Without the clause this predicate would be stricter
+   * than the resolver it stands in front of, and a non-Claude user with seeding off —
+   * who never opted into any of this — would be locked out of every launch. */
   private remoteControlBlocksLaunch(cfg: AgentFlowConfig): boolean {
-    if (cfg.agentProvider !== "copilot" || cfg.remoteControl !== "on" || !cfg.seedAgent) {
+    // `resolvedProvider`, not a bare `=== "claude-code"`: `ask` is not an agent, and
+    // while it is inert seedProvider degrades it to Claude Code — so refusing an `ask`
+    // launch here would block a session that WOULD have been Claude Code, and this
+    // predicate would contradict the seeding path it stands in front of.
+    // TASK 5: once the picker is real the launch resolves its own agent before this
+    // runs, and this must test THAT answer rather than degrading the setting.
+    if (resolvedProvider(cfg.agentProvider) === "claude-code" || cfg.remoteControl !== "on" || !cfg.seedAgent) {
       return false;
     }
     this.toast("error", RC_NEEDS_CLAUDE);
@@ -1688,14 +1715,20 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * refused the pair, so the null is also the backstop that keeps a future entry point
    * added without a pre-flight call from seeding a broken session. */
   private async resolveRemoteControl(cfg: AgentFlowConfig): Promise<boolean | null> {
-    // "ask" under Copilot: putting up a toggle we could only refuse is a broken offer,
-    // so the picker never appears and the launch simply proceeds without it.
-    if (cfg.agentProvider === "copilot" && cfg.remoteControl === "ask") {
+    // Both tests resolve the setting for the same reason remoteControlBlocksLaunch
+    // does: an `ask` agentProvider seeds Claude Code while `ask` is inert, so it must
+    // be OFFERED the toggle here, not silently denied one. See that predicate's
+    // comment, including its TASK 5 note — this pair moves with it.
+    const provider = resolvedProvider(cfg.agentProvider);
+    // "ask" under a non-Claude agent: putting up a toggle we could only refuse is a
+    // broken offer, so the picker never appears and the launch simply proceeds
+    // without it.
+    if (provider !== "claude-code" && cfg.remoteControl === "ask") {
       this.log("Remote Control not offered — it needs Claude Code; launching without it");
       return false;
     }
     const on = await this.resolveRemoteControlSetting(cfg);
-    if (on && cfg.agentProvider === "copilot") {
+    if (on && provider !== "claude-code") {
       this.toast("error", RC_NEEDS_CLAUDE);
       return null;
     }
@@ -1755,10 +1788,19 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   /** Toast fragment for a launch that asked for Remote Control and didn't get it —
-   * `openWorkspace` withholds it when the launch opens more than one window. Without
-   * this the user waits for a `/remote-control` prompt that never arrives. */
-  private remoteControlNote(wanted: boolean, applied: boolean): string {
-    return wanted && !applied ? " Remote Control skipped — it needs a single window." : "";
+   * `openWorkspace` withholds it when the launch opens more than one window, and, under
+   * `ask`, when the agent picked isn't Claude Code. Without this the user waits for a
+   * `/remote-control` prompt that never arrives.
+   *
+   * `seeded` names the agent that actually ran, so the note can give the reason that
+   * applies. Reachable with a non-Claude agent under `ask` alone: a fixed `copilot` or
+   * `cursor` setting never gets `wanted` past `resolveRemoteControl`, so the
+   * single-window sentence is byte-identical to what those users have always seen. */
+  private remoteControlNote(wanted: boolean, applied: boolean, seeded: AgentProvider = "claude-code"): string {
+    if (!wanted || applied) return "";
+    return seeded === "claude-code"
+      ? " Remote Control skipped — it needs a single window."
+      : ` Remote Control skipped — it needs Claude Code, and ${providerLabel(seeded)} was picked.`;
   }
 
   /** Toast fragment announcing the pre-seed, shared by `launch()` and `explore()`. With
@@ -1818,6 +1860,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     forceWorktree: boolean,
     target: OpenTarget,
     onWorktreeDecision?: (used: boolean) => void,
+    /** Orchestrator-mode extras: the child worktrees this run owns. Absent for every
+     *  other caller, which keeps their brief and their run record byte-identical. */
+    orchestration?: { children: NonNullable<Run["children"]>; parentBranch: string },
   ): Promise<boolean> {
     const cfg = getConfig();
     const key = detail.key;
@@ -1840,7 +1885,34 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }
     onWorktreeDecision?.(useWorktree);
     if (useWorktree) {
-      services = createWorktrees(services, detail.key, detail.summary, this.log);
+      const made = createWorktrees(services, detail.key, detail.summary, this.log);
+      // createWorktrees falls back to the main checkout when it cannot create a
+      // worktree. Only the orchestrator path refuses that: its brief instructs the
+      // agent to merge every finished child into the parent branch, so a session that
+      // landed in the main checkout would check that branch out over whatever the user
+      // has open and write merge commits there. engine/orchestrator/launch.ts refuses
+      // on this same condition for the same reason.
+      //
+      // Gated on `orchestration`, NOT on `forceWorktree`: addressPr forces a worktree
+      // too, and its behaviour for existing users must stay exactly as it is.
+      //
+      // Refusing costs nothing already on disk: createWorktrees reuses an existing
+      // worktree directory, so a retry adopts the child worktrees this take made.
+      if (orchestration) {
+        // `base.isGit` matters: createWorktrees returns the ref UNCHANGED for a non-git
+        // repo by design ("not a git repo — opening the checkout directly"), which is
+        // shaped exactly like its failure return. Without this, a supported mixed repo
+        // set would be refused for a failure that never happened.
+        const stuck = services.find((base, i) => base.isGit && made[i]?.path === base.path);
+        if (stuck) {
+          this.toast(
+            "error",
+            `Couldn't create a git worktree for ${key} in ${stuck.name} — not opening an orchestrator in your main checkout. The Agent Flow Deck output channel has the reason.`,
+          );
+          return false;
+        }
+      }
+      services = made;
     }
 
     const args = await this.targetToOpenArgs(target, services.length, key, cfg);
@@ -1850,7 +1922,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const additions = args.existingWorkspaceFile
       ? await this.resolveWorkspaceAdditions(
           args.existingWorkspaceFile,
-          services.map((s) => ({ label: s.name, repoName: s.name, path: s.path })),
+          services.map((s) => ({ label: serviceFolderName(detail.key, s), repoName: s.name, path: s.path })),
         )
       : { foldersToAdd: [], skipped: [], declined: false };
 
@@ -1860,7 +1932,29 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // nothing opened, and take_completed records it as cancelled rather than failed.
     if (wantRemoteControl === null) return false;
 
-    const planMd = briefMarkdown(detail, providerLabel(cfg.agentProvider));
+    // The Children table is built from the rows that were actually created, never from
+    // the leaves that were intended: a subagent dispatched at a worktree that is not
+    // there would land in whatever the path resolves to instead.
+    const planMd = briefMarkdown(
+      detail,
+      providerLabel(resolvedProvider(cfg.agentProvider)),
+      orchestration?.children.length
+        ? {
+            children: orchestration.children.map((c) => ({
+              key: c.key, summary: c.summary, path: c.path, branch: c.branch,
+            })),
+            // Observed for the same reason each child row's branch is, and observable
+            // only here: `services` has just been replaced by createWorktrees' answer
+            // (above), which is the first point at which the parent's actual worktree
+            // exists. A reused parent worktree sits on whatever branch it was already
+            // on, so the computed name would tell the orchestrator to merge every
+            // finished child into a branch nothing is on. The first git service answers
+            // — createWorktrees puts every repo on one branch per key — and the computed
+            // name stands in when git cannot say.
+            parentBranch: this.observedParentBranch(services, orchestration.parentBranch),
+          }
+        : undefined,
+    );
     const result = await openWorkspace({
       ticket: { key: detail.key, summary: detail.summary, url: detail.url },
       planMd,
@@ -1876,11 +1970,19 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       currentWindow: args.currentWindow,
       foldersToAdd: additions.foldersToAdd,
       remoteControl: wantRemoteControl,
+      // Absent rather than empty for every non-orchestrator caller: a run record with
+      // no children has to look exactly as it did before children existed.
+      ...(orchestration?.children.length ? { children: orchestration.children } : {}),
     });
+    // Dismissed at the agent picker — one of this function's own pickers, as far as the
+    // caller is concerned, so it gets this function's own "the user backed out" answer:
+    // `takeTask` records take_completed as cancelled rather than launched, and nothing
+    // is toasted. Nothing was opened, written or seeded either.
+    if (result.cancelled) return false;
 
     const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, cfg.agentProvider, result.seededInPlace);
-    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl);
+    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
+    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl, result.provider);
     if (result.mergeFailed) {
       this.toast(
         "info",
@@ -1901,6 +2003,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       this.toast("success", `Opened ${where} for ${key}. Brief seeded in each repo.${added}${skipped}${unadded}${declined}${seeded}${rcNote}`);
     }
     return true;
+  }
+
+  /** The branch the parent's worktree is ACTUALLY on, for the brief's "merge finished
+   *  children into X". The first git service answers for the set: createWorktrees puts
+   *  every repo of one key on one branch, and a non-git repo has no branch to read.
+   *  `computed` — `branchName(key, summary)` — stands in when git cannot answer, which
+   *  is what this line named unconditionally before. */
+  private observedParentBranch(services: ServiceRef[], computed: string): string {
+    const git = services.find((s) => s.isGit);
+    return (git && currentBranch(git.path)) || computed;
   }
 
   /** Resolve the task prompt mode: the configured `taskMode` when it names a known
@@ -1932,6 +2044,55 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // Ahead of take_started deliberately: the take never begins, so the funnel gets
     // neither a start nor a terminator rather than a phantom "cancelled".
     if (this.remoteControlBlocksLaunch(cfg)) return;
+
+    // A ticket with children is a different question from a ticket without them, and it
+    // has to be asked before anything else: fan-out hands the whole take to takeBatch,
+    // which asks its own prompt-mode and destination questions.
+    //
+    // Ahead of take_started for the same reason the guard above is, though for the
+    // opposite cause: takeBatch emits no telemetry at all — it is deliberately
+    // uninstrumented in Phase 1, which is why `"batch"` sits reserved-but-unused in the
+    // TakeSource union (see telemetry/events.ts). So a take that becomes a fan-out must
+    // get neither a start nor a terminator; emitting take_started here would open a
+    // funnel nothing ever closes. The consequence is real and intended: fan-out takes
+    // are absent from the Take funnel entirely, and instrumenting takeBatch is its own
+    // piece of work, not this one.
+    //
+    // Both pickers also resolve before any git write: cancelling either leaves nothing
+    // on disk.
+    const probed = await this.probeTree(key);
+    if (probed?.tree.leaves.length) {
+      const mode = await this.chooseTreeMode(key, probed.tree.leaves.length);
+      if (!mode) return;
+      if (mode !== "parent") {
+        const picked = await this.chooseLeaves(probed.tree);
+        if (!picked) return;
+        // Ticking nothing is "just the parent" said the long way round — fall through
+        // to the ordinary take rather than launching an empty fan-out.
+        if (picked.length) {
+          const parent = { key, branch: branchName(key, probed.detail.summary) };
+          if (mode === "fanout") {
+            const leafKeys = picked.map((l) => l.key);
+            const repos = this.fanOutRepos(cfg, probed.detail, preselected);
+            // Said out loud before any worktree exists: a child whose own ticket infers
+            // no repo lands in every repo of this set, so when the worktree count
+            // surprises someone the set that produced it has to be findable.
+            this.log(
+              `fan-out ${key}: ${leafKeys.length} ${leafKeys.length === 1 ? "leaf" : "leaves"} into ${repos.length} repo(s) — ${repos.join(", ")}`,
+            );
+            await this.takeBatch(leafKeys, repos, parent);
+          } else {
+            // `preselected` rides along for the same reason the fan-out passes it to
+            // fanOutRepos: it is the only repo intent the user has expressed on this
+            // take, and re-asking for it would make this flow ask three questions
+            // where the other mode reached from the same picker asks two.
+            await this.takeOrchestrated(probed.detail, picked, parent.branch, preselected);
+          }
+          return;
+        }
+      }
+    }
+
     const flow = startFlow();
     const taskFp = fingerprint(key);
     let destination: DestinationProp | undefined;
@@ -1983,8 +2144,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** Launch several tasks at once, each in its own git worktree with its own seeded
    * Claude session. The prompt mode, destination and layout are asked once and applied
    * to all; one task's failure never aborts the rest. Each task opens worktrees in the
-   * repos it's inferred to touch, narrowed to the filtered set. */
-  public async takeBatch(keys: string[], repos: string[]): Promise<void> {
+   * repos it's inferred to touch, narrowed to the filtered set.
+   *
+   * `parent` turns the batch into a fan-out under one ticket: every child branches off
+   * the parent's branch instead of the checkout's HEAD, and carries `parentKey` onto
+   * its run record. Omitting it must leave every existing caller's behaviour
+   * byte-identical — no `ensureBranch` call, no `baseRef`, no `parentKey`. */
+  public async takeBatch(
+    keys: string[],
+    repos: string[],
+    parent?: { key: string; branch: string },
+  ): Promise<void> {
     const cfg = getConfig();
     if (!keys.length) return;
 
@@ -1996,9 +2166,42 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const filterSet = this.resolveBatchRepos(repos, cfg);
     if (!filterSet.length) return;
 
-    if (keys.length > cfg.batchLaunchConfirmThreshold) {
+    // A fan-out authorises WORKTREES, not keys: `reposForTask` widens to the whole filter
+    // set for a child whose ticket infers nothing, so 3 leaves across 12 repos is 36
+    // worktrees and 36 `git worktree add` calls with no confirmation at all under a
+    // key-only comparison. `keys.length * filterSet.length` is the upper bound — a child
+    // that DOES infer repos opens fewer — and an upper bound is the right thing to ask
+    // about before the first one exists.
+    //
+    // Only for the parented case. The unparented batch path is a set of tickets the user
+    // picked one by one, and its threshold has meant "tasks" since it shipped; changing
+    // that would re-prompt existing users who changed nothing.
+    // A real batch resolves its agent HERE — before the confirmation below, which
+    // counts the sessions it is about to start and therefore has to name them ("That's
+    // 3 Cursor sessions"). Under the three fixed settings this is a plain read and no
+    // picker appears; under `ask` it is one question, asked once, whose answer is then
+    // pinned onto every task so the loop never asks again. Nothing has been created at
+    // this point, so a dismissal costs nothing: dismissing a launch-wide question
+    // abandons the whole batch, which is the only thing it can mean.
+    //
+    // A ONE-key batch deliberately does not resolve here. It is a single launch —
+    // `openWorkspace` asks for it inside the loop at exactly the moment a Take does,
+    // and the loop honours the answer — with one exception picked up once the
+    // destination is known (see the `shared` re-resolution below).
+    const isBatch = keys.length > 1;
+    let batchProvider = isBatch ? await this.resolveBatchProvider(cfg, true) : undefined;
+    if (isBatch && !batchProvider) return;
+    // The agent for copy written BEFORE the launch: the resolved answer when there is
+    // one, and otherwise the setting's own — a single launch resolves inside
+    // `openWorkspace`, after this copy has already been written.
+    const namedProvider = () => providerLabel(batchProvider ?? resolvedProvider(cfg.agentProvider));
+
+    const authorising = parent ? keys.length * filterSet.length : keys.length;
+    if (authorising > cfg.batchLaunchConfirmThreshold) {
       const go = await vscode.window.showWarningMessage(
-        `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${providerLabel(cfg.agentProvider)} sessions.`,
+        parent
+          ? `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${namedProvider()} sessions and up to ${authorising} git worktrees across ${filterSet.length} repo${filterSet.length === 1 ? "" : "s"}.`
+          : `Launch ${keys.length} tasks in parallel? That's ${keys.length} ${namedProvider()} sessions.`,
         { modal: true },
         "Launch",
       );
@@ -2030,7 +2233,6 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // launch, so it resolves Remote Control exactly like Take does. A shared window
     // seeds every session straight from its own plan file rather than a clipboard
     // paste, so it can't carry the answer either — don't even ask when shared.
-    const isBatch = keys.length > 1;
     const rcSkipped = isBatch && cfg.remoteControl !== "off";
     if (rcSkipped) this.log("takeBatch: Remote Control skipped — one clipboard, several sessions");
     const wantRemoteControl = isBatch || shared ? false : await this.resolveRemoteControl(cfg);
@@ -2042,13 +2244,43 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // effect to leave behind.
     if (wantRemoteControl === null) return;
 
+    // The shared path seeds every session from a plan file and never calls
+    // `openWorkspace` at all, so nothing downstream of here can ask: a one-key batch
+    // that lands there has to resolve now, or seed an agent nobody picked. A real batch
+    // already resolved above, before its confirmation. Still before the first worktree,
+    // so a dismissal here costs nothing either.
+    if (shared && !batchProvider) {
+      batchProvider = await this.resolveBatchProvider(cfg, isBatch);
+      if (!batchProvider) return;
+    }
+
     const resolved: { task: BatchTask; key: string }[] = [];
     const failed: string[] = [];
     for (const key of keys) {
       try {
         const detail = await this.provider().detail(key);
         const wanted = this.reposForTask(detail, filterSet);
-        const services = createWorktrees(wanted, detail.key, detail.summary, this.log);
+        // A child branches off its parent's branch, so that branch has to exist first —
+        // in every repo this child is about to open, before any worktree is made there.
+        // ensureBranch is idempotent, so children sharing a repo cost one rev-parse
+        // each. A repo where it cannot be made fails this child rather than letting it
+        // branch off main, which would look identical to a correct worktree until the
+        // merge.
+        if (parent) {
+          const noBranch = wanted.filter((r) => !ensureBranch(r.path, parent.branch));
+          if (noBranch.length) {
+            throw new Error(
+              `couldn't create the parent branch ${parent.branch} in ${noBranch.map((r) => r.name).join(", ")}`,
+            );
+          }
+        }
+        const services = createWorktrees(
+          wanted,
+          detail.key,
+          detail.summary,
+          this.log,
+          parent ? { baseRef: parent.branch } : {},
+        );
         // A worktree is mandatory: two tasks sharing a checkout would clobber each
         // other's brief. createWorktrees returns the original ref when `git worktree
         // add` fails — detect that and fail the task rather than launch into a collision.
@@ -2064,9 +2296,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           key,
           task: {
             ticket: { key: detail.key, summary: detail.summary, url: detail.url },
-            planMd: briefMarkdown(detail, providerLabel(cfg.agentProvider)),
+            // `namedProvider()`, not a bare read of the setting: when the batch has
+            // resolved its own answer, this is one pre-launch copy site that can name
+            // the agent that will actually read the brief.
+            planMd: briefMarkdown(detail, namedProvider()),
             descriptionText: detail.descriptionText,
             services,
+            ...(parent ? { parentKey: parent.key } : {}),
           },
         });
       } catch (e) {
@@ -2079,6 +2315,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     let launched = 0;
     let extra = "";
     let seededInPlace = false;
+    // Set by the per-window loop below from the one place the truth lives — see the
+    // assignment's own comment. `undefined` until a launch reports one, at which point
+    // the summary copy falls back to `namedProvider()`.
+    let seededProvider: AgentProvider | undefined;
+    // The user dismissed `openWorkspace`'s own agent picker. Only the one-key,
+    // own-window shape can get here — every other shape resolved the agent up front and
+    // pinned it, which is exactly what stops that picker from ever being raised — but
+    // this loop does not get to assume that, because it is the thing that counts the
+    // launches it claims in the summary toast.
+    let dismissed = false;
     if (shared && resolved.length) {
       try {
         // This window can lose its identity between the destination pick and here: the
@@ -2115,6 +2361,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           // The shared-window batch needs the same "here" the single take does.
           currentWindow: here,
           foldersToAdd: additions.foldersToAdd,
+          ...(batchProvider ? this.providerPin(cfg, batchProvider) : {}),
         });
         launched = resolved.length;
         seededInPlace = !!result.seededInPlace;
@@ -2162,8 +2409,32 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             seedAgent: cfg.seedAgent,
             openIn: "new",
             remoteControl: wantRemoteControl,
+            // Spread rather than `parentKey: parent?.key`, so a parentless batch sends
+            // the request it always sent — the run record has one representation of
+            // "no parent", and that is the field's absence (see Run.parentKey).
+            ...(parent ? { parentKey: parent.key } : {}),
+            ...(batchProvider ? this.providerPin(cfg, batchProvider) : {}),
           });
+          // Cancelled: nothing was opened, written or seeded for this task, so it is
+          // neither launched nor failed — a dismissal is the user's own decision, not
+          // something that went wrong, and counting it would put a window in the
+          // summary toast that does not exist.
+          //
+          // It abandons the REST of the batch rather than skipping one task: the agent
+          // is a launch-wide question, and re-asking it for task i+1 is precisely the
+          // N-pickers-for-one-click this path resolves up front to avoid. Same answer
+          // the up-front resolution gives to the same gesture.
+          if (result.cancelled) {
+            dismissed = true;
+            break;
+          }
           appliedRemoteControl = result.remoteControl;
+          // The agent `openWorkspace` actually seeded. Only load-bearing for a ONE-key
+          // batch under `ask`, which has no up-front answer — `openWorkspace` raised
+          // the picker inside this call, so its result is the only record of that
+          // choice. The shared branch above needs no equivalent: both routes into it
+          // resolve `batchProvider` before the first worktree.
+          seededProvider = result.provider;
           launched++;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -2172,8 +2443,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
         if (i < resolved.length - 1) await delay(BATCH_STAGGER_MS);
       }
-      if (!isBatch) extra += this.remoteControlNote(wantRemoteControl, appliedRemoteControl);
+      if (!isBatch) extra += this.remoteControlNote(wantRemoteControl, appliedRemoteControl, seededProvider);
     }
+
+    // Dismissed before anything opened: report exactly as a cancelled single launch
+    // does — silently. `launched > 0` means earlier tasks really did open, and those
+    // are still worth reporting, so the summary below runs and its "N of M" count tells
+    // the truth about the ones that were abandoned.
+    if (dismissed && launched === 0) return;
 
     // A batch seeded into this window opened nothing — "in one shared window" would
     // imply one appeared.
@@ -2195,14 +2472,72 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       // shared window is really a single-task launch — runSeedPass sees just its own
       // plan there too. All three still get a live session per task; only a real
       // multi-task batch sharing a window on the extension surface actually can't.
+      //
+      // The else-arm is deliberately keyed on `cursor`/`ask` rather than on "not
+      // claude-code": those two values are new on this branch, and everything else —
+      // `claude-code` and any unrecognized value that degrades to it — must keep the
+      // exact string it has always had.
+      //
+      // `batchProvider` first: when the launch resolved an answer up front it was
+      // pinned onto every task, so that IS what every window seeded. Only a one-key
+      // batch to its own window leaves it unset, and there `seededProvider` — the
+      // answer `openWorkspace` reached inside the loop — is the only record of the
+      // choice. `resolvedProvider` is the floor for a launch that reported neither.
       const perTaskNote =
         cfg.agentProvider === "copilot"
           ? isBatch && shared && cfg.agentSurface !== "terminal"
             ? `A worktree + brief per task — ${providerLabel(cfg.agentProvider)} isn't seeded for a batch; open each brief to start it.`
             : `A worktree + ${providerLabel(cfg.agentProvider)} session per task.`
-          : "A worktree + Claude session per task.";
+          : cfg.agentProvider === "cursor" || cfg.agentProvider === "ask"
+            ? `A worktree + ${providerLabel(batchProvider ?? seededProvider ?? resolvedProvider(cfg.agentProvider))} session per task.`
+            : "A worktree + Claude session per task.";
       this.toast("success", `${summary} ${perTaskNote}${extra}${rcNote}`);
     }
+  }
+
+  /** The agent for a whole batch, resolved before the loop that cannot ask. Under the
+   *  three fixed settings this is a plain read and NO picker appears — the setting is
+   *  the answer, and it is the same answer `openWorkspace` would have reached on its
+   *  own. Under `ask` it puts up the same picker `openWorkspace` would have, once, and
+   *  the caller pins the answer onto every task so no task asks again.
+   *
+   *  With seeding off there is no agent to start, so there is nothing to ask about and
+   *  `ask` degrades exactly as `resolvedProvider` says it does — the same condition
+   *  `openWorkspace` guards its own picker with.
+   *
+   *  `undefined` means dismissed, at which point the batch must launch nothing. */
+  private async resolveBatchProvider(cfg: AgentFlowConfig, isBatch: boolean): Promise<AgentProvider | undefined> {
+    if (cfg.agentProvider !== "ask" || !cfg.seedAgent) return resolvedProvider(cfg.agentProvider);
+    // One possible agent is not a question — same short-circuit, and same reasoning, as
+    // the picker in `openWorkspace`.
+    const choices = hostProviders();
+    if (choices.length === 1) return choices[0];
+    const choice = await vscode.window.showQuickPick(
+      choices.map((p) => ({ label: providerLabel(p), provider: p })),
+      {
+        // The SAME title as the picker in `openWorkspace` — one launch-time question,
+        // asked in one voice, whichever path raises it. Only the placeholder says what
+        // is different about this one: it answers for every task, not just one.
+        //
+        // …which is only true of a REAL batch. A one-key batch reaches here solely
+        // because a shared window seeds from plan files and cannot ask later; it is a
+        // single launch, so it gets the single-launch placeholder, word for word the
+        // one `openWorkspace` would have shown it.
+        title: "Which agent?",
+        placeHolder: isBatch ? "Pick the agent for every task in this batch" : "Pick the agent to start this session with",
+        ignoreFocusOut: true,
+      },
+    );
+    return choice?.provider;
+  }
+
+  /** A caller's agent pin, for spreading into an open request. Sent ONLY under `ask`,
+   *  where it replaces a prompt that has already been answered. Under a fixed setting
+   *  a pin is ignored (see `OpenRequest.provider`) and the user's preference wins, so
+   *  sending one there could only invite the request and the setting to look like they
+   *  disagree — and it would change a request that must stay exactly what it was. */
+  private providerPin(cfg: AgentFlowConfig, provider: AgentProvider): { provider?: AgentProvider } {
+    return cfg.agentProvider === "ask" ? { provider } : {};
   }
 
   /** The filtered repo names as git ServiceRefs. Names that don't resolve, and repos
@@ -2218,7 +2553,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const usable = found.filter((r) => r.isGit);
 
     if (!usable.length) {
-      this.toast("error", `No git repo among ${names.join(", ")} under ${cfg.reposRoot}. Each task opens a worktree.`);
+      // `names` can be empty — a fan-out whose repo set was already filtered to git repos
+      // hands one in when `reposRoot` holds none — and "No git repo among  under /repos"
+      // reads as a bug in the sentence rather than a fact about the machine.
+      this.toast(
+        "error",
+        names.length
+          ? `No git repo among ${names.join(", ")} under ${cfg.reposRoot}. Each task opens a worktree.`
+          : `No git repo under ${cfg.reposRoot}. Each task opens a worktree.`,
+      );
       return [];
     }
     if (missing.length) this.toast("info", `Skipping ${missing.join(", ")} — not found under ${cfg.reposRoot}.`);
@@ -2238,6 +2581,343 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     );
     const narrowed = filterSet.filter((r) => inferred.has(r.name));
     return narrowed.length ? narrowed : filterSet;
+  }
+
+  /** The leaves under `key`, with the detail the probe already had to fetch.
+   *
+   *  `null` means "behave exactly as Take did before trees existed": this source has no
+   *  children concept, or the probe failed. Never throws and never blocks the take — a
+   *  tree is an offer, and the ticket must stay takeable when the offer cannot be made.
+   *  The `detail` comes back because the parent's branch name needs its summary; the
+   *  ordinary path fetches its own again, which is one extra read on a path that is
+   *  already several. */
+  private async probeTree(key: string): Promise<{ detail: TaskDetail; tree: TreeResult } | null> {
+    // The whole feature's off switch, and deliberately the FIRST thing here: every
+    // picker, every git write and the extra ticket read are downstream of this method,
+    // so returning here is what makes "off" mean byte-identical, not merely quieter.
+    if (!getConfig().childWorktrees) return null;
+    const children = this.provider().caps.children;
+    if (!children) return null;
+    try {
+      const detail = await this.provider().detail(key);
+      // Cancellable, and the walk actually consults the token: a wide tree is hundreds of
+      // sequential reads, and before this the only way out of the wait was to keep
+      // waiting. A cancel returns null, which every caller already treats as "take the
+      // ticket on its own" — the same degradation an unreadable tree gets.
+      //
+      // Notification rather than this view's own progress bar — the one place in this
+      // file that does not follow `resolveKickoff`'s viewId location — because VS Code
+      // renders a cancel button ONLY for a notification. `cancellable: true` on a
+      // view-located progress is accepted and then ignored, which would have made this
+      // fix inert for exactly the user it is for.
+      let cancelled = false;
+      const tree = await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: `Looking for work under ${key}…`, cancellable: true },
+        (_p, token) =>
+          buildTree(key, (k) => children.of(k), {
+            // Latched: once cancelled the walk must stay cancelled, and the flag has to
+            // outlive the token for the check below.
+            cancelled: () => {
+              cancelled ||= token.isCancellationRequested;
+              return cancelled;
+            },
+          }),
+      );
+      if (cancelled) {
+        this.log(`probeTree ${key}: cancelled — taking the ticket on its own`);
+        return null;
+      }
+      // Reported here rather than at the routing block, because every one of the four
+      // ways a take can continue from here drops the same leaves: a cancelled picker,
+      // "just the parent", a fan-out, and the plain take that runs when nothing was
+      // readable. Nothing is ever omitted silently, so the keys are named and not just
+      // counted.
+      if (tree.dropped.length) {
+        // Deduped for the log: buildTree reports one entry per sighting, so a key whose
+        // own fetch failed AND which the cap then cut appeared twice, inflating the count
+        // and naming itself twice. The engine's answer is left as it is — the duplication
+        // is meaningful there, just not in a diagnostic listing keys.
+        const dropped = [...new Set(tree.dropped)];
+        this.log(`probeTree ${key}: tree dropped ${dropped.length} (${dropped.join(", ")})`);
+        // Leaves empty with omissions recorded means the root's own children could not
+        // be read (buildTree keeps an unreadable *child* as a leaf — the work is still
+        // real — and exempts only the root). The take degrades to the ordinary one, and
+        // saying so is the same "degrade, but out loud" contract the catch below
+        // follows for a total failure.
+        if (!tree.leaves.length) {
+          this.toast("info", `Couldn't read the work under ${key} — taking the ticket on its own.`);
+        }
+      }
+      return { detail, tree };
+    } catch (e) {
+      this.log(`probeTree ${key}: failed (${e}) — taking the ticket on its own`);
+      return null;
+    }
+  }
+
+  /** How to work the leaves. `undefined` is a cancel; "parent" is today's behaviour,
+   *  and doubles as the integrate-later path once the children have landed. */
+  private async chooseTreeMode(
+    key: string,
+    leafCount: number,
+  ): Promise<"fanout" | "orchestrator" | "parent" | undefined> {
+    const p = await vscode.window.showQuickPick(
+      [
+        {
+          label: "A session per child",
+          detail: `${leafCount} worktree${leafCount === 1 ? "" : "s"}, ${leafCount} session${leafCount === 1 ? "" : "s"}, each on its own branch`,
+          mode: "fanout" as const,
+        },
+        {
+          label: "One orchestrator session, children as subagents",
+          detail: `1 session in ${key}, ${leafCount} child worktree${leafCount === 1 ? "" : "s"} for it to dispatch into`,
+          mode: "orchestrator" as const,
+        },
+        {
+          label: `Just ${key}`,
+          detail: "One worktree for the parent, as before",
+          mode: "parent" as const,
+        },
+      ],
+      {
+        title: `${key} — ${leafCount} ${leafCount === 1 ? "leaf" : "leaves"} under it. How do you want to work them?`,
+        ignoreFocusOut: true,
+      },
+    );
+    return p?.mode;
+  }
+
+  /** Which leaves to take. Nothing is pre-picked: a tree can be large, and every ticked
+   *  row costs a worktree and a session. `undefined` is a cancel; an empty array is a
+   *  deliberate "none of them", which the caller treats as "just the parent".
+   *
+   *  The title carries the omissions, because truncation is a fact about the list on
+   *  screen: a toast would arrive after the user had already chosen from a list that
+   *  looked complete. */
+  private async chooseLeaves(tree: TreeResult): Promise<TreeLeaf[] | undefined> {
+    // `dropped` and `leaves` are NOT disjoint: buildTree keeps an unreadable node as a
+    // leaf (it is still real work) while also reporting it, because what was dropped
+    // there is that node's SUBTREE, not the node. Counting the raw sum would claim a
+    // hidden item that is sitting visibly in the list below — so only the dropped keys
+    // that are nowhere in the list count as not shown.
+    // Deduped against itself first: a key can land in `dropped` twice — its own fetch
+    // failed AND the cap later cut it — which inflated "not shown" by one and named the
+    // same key twice.
+    const hidden = [...new Set(tree.dropped)].filter((k) => !tree.leaves.some((l) => l.key === k)).length;
+    const shortfall = hidden
+      ? ` (${tree.leaves.length} of ${tree.leaves.length + hidden} — ${hidden} not shown)`
+      : "";
+    const taken = this.alreadyTakenKeys();
+    const picked = await vscode.window.showQuickPick(
+      tree.leaves.map((l) => ({
+        label: `${l.key} — ${l.summary}`,
+        // Both facts when both hold: "done" is the ticket's status, "already taken" is
+        // this machine's. Neither blocks the row — re-taking a child is legitimate, and
+        // the point is only that a take which will overwrite a live session's brief and
+        // discard that child's run timestamps says so before the tick, not after.
+        description: [l.statusCategory === "done" ? "done" : "", taken.has(l.key) ? "already taken" : ""]
+          .filter(Boolean)
+          .join(" · ") || undefined,
+        detail: `${l.parentKey} › ${l.key}`,
+        leaf: l,
+      })),
+      {
+        title: `Which of these do you want to take?${shortfall}`,
+        canPickMany: true,
+        ignoreFocusOut: true,
+      },
+    );
+    return picked?.map((p) => p.leaf);
+  }
+
+  /** Ticket keys this machine has already taken: one with a run record, or one whose own
+   *  per-task worktree currently holds a live session.
+   *
+   *  Why it matters at the leaf picker: taking a leaf writes `.pick-task/TASK.md` into a
+   *  worktree a live session may be reading from, and in fan-out mode `writeRun`
+   *  overwrites that child's run record, discarding its createdAt/finishedAt/closedAt —
+   *  for a ticket the user never named individually. This only labels; the decision
+   *  stays the user's.
+   *
+   *  A finished run counts: what would be discarded is precisely its timestamps. The
+   *  live half needs no run record at all — a session's place is a git worktree root, so
+   *  a path with the worktree marker in it is named after the key it belongs to
+   *  (`repoRootOfWorktree` is the same convention `createWorktrees` writes). */
+  private alreadyTakenKeys(): Set<string> {
+    const keys = new Set(readRuns(defaultRunsDir()).map((r) => r.key));
+    for (const place of groupByPlace(readOpenSessions(defaultSessionsDir())).keys()) {
+      if (repoRootOfWorktree(place)) keys.add(path.basename(place));
+    }
+    return keys;
+  }
+
+  /** The repo names a fan-out hands `takeBatch` as its filter set.
+   *
+   *  `takeBatch`'s `repos` is a filter, not a suggestion: `resolveBatchRepos` reads an
+   *  empty list as "nothing usable here", toasts, and launches nothing — so the fan-out
+   *  has to name a set.
+   *
+   *  The in-card selection wins when there is one: it is the only repo intent the user
+   *  has actually expressed on this take. Otherwise the set is the PARENT ticket's own
+   *  inferred repos. Not every discovered repo: `reposForTask` widens to the whole
+   *  filter set for a child whose ticket infers nothing, so an unbounded set would let
+   *  one such child open a worktree in every repo on the machine. Scoping to the parent
+   *  bounds that to the work the user chose by taking this ticket, and makes fan-out
+   *  agree with orchestrator mode, which confines children to the parent's set too.
+   *  `detail` is the probe's own read, so this costs no extra round trip.
+   *
+   *  A parent that itself infers nothing still widens to every discovered repo — that is
+   *  `reposForTask`'s documented last resort, and the caller logs the resolved set so an
+   *  unexpected worktree count is explicable rather than mysterious. */
+  private fanOutRepos(cfg: AgentFlowConfig, detail: TaskDetail, preselected?: string[]): string[] {
+    if (preselected?.length) return preselected;
+    // Git repos only. A fan-out child MUST have a worktree, so a non-git folder under
+    // `reposRoot` can only fail its task — and it fails it loudly: an unsolicited
+    // "Skipping … not a git repo" toast naming folders the user never picked, and, when
+    // a misconfigured `reposRoot` has no git repo at all, `"No git repo among  under
+    // /repos"` with a blank where the names belong.
+    const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist).filter((r) => r.isGit);
+    return this.reposForTask(detail, repos).map((r) => r.name);
+  }
+
+  /**
+   * Orchestrator-mode take: one session in the parent's worktree, one worktree per
+   * selected leaf for it to dispatch a subagent into.
+   *
+   * The children get worktrees in the PARENT's resolved repo set, not in their own.
+   * An orchestrator can only dispatch into directories its own window can see, and a
+   * child's repos are its own ticket's inference — following those would scatter
+   * worktrees across repos this session never opens. A child that names something
+   * outside the set is said out loud rather than silently narrowed.
+   *
+   * No telemetry, for the same reason a fan-out emits none: this path never opened a
+   * funnel (see `takeTask`), so there is nothing here to terminate.
+   */
+  private async takeOrchestrated(
+    detail: TaskDetail,
+    leaves: TreeLeaf[],
+    parentBranch: string,
+    preselected?: string[],
+  ): Promise<void> {
+    const cfg = getConfig();
+    // No prompt-mode question: the mode is forced to `orchestrator` below. The
+    // destination and repo questions are resolveKickoff's own, and neither the tree-mode
+    // nor the leaf picker asked them, so this is the first time either is put up — and
+    // an in-card selection skips the repo one entirely, exactly as a fan-out's does.
+    const resolved = await this.resolveKickoff(detail.key, preselected);
+    if (!resolved) return;
+    const { services: parentRepos, target } = resolved;
+
+    // The parent branch is the base every child branches off. Without it in a repo, a
+    // child worktree there would silently start from main — refuse instead. Resolved
+    // for EVERY repo before any worktree is created, so a refusal leaves nothing behind.
+    const noBranch = parentRepos.filter((r) => r.isGit && !ensureBranch(r.path, parentBranch));
+    if (noBranch.length) {
+      this.toast(
+        "error",
+        `Couldn't create the parent branch ${parentBranch} in ${noBranch.map((r) => r.name).join(", ")} — nothing was taken.`,
+      );
+      return;
+    }
+
+    const inScope = new Set(parentRepos.map((r) => r.name));
+    const discovered = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+    const children: NonNullable<Run["children"]> = [];
+    const failed: string[] = [];
+    for (const leaf of leaves) {
+      const made = createWorktrees(parentRepos, leaf.key, leaf.summary, this.log, { baseRef: parentBranch });
+      // createWorktrees hands back the ORIGINAL ref when it could not create the
+      // worktree. Launching a subagent there would put it in the parent's own
+      // checkout, so that child is dropped rather than mislocated. Index-aligned
+      // because createWorktrees maps one result per service it was handed.
+      const usable = made.filter((s, i) => s.path !== parentRepos[i].path);
+      if (!usable.length) {
+        failed.push(leaf.key);
+        continue;
+      }
+      for (const s of usable) {
+        children.push({
+          key: leaf.key,
+          summary: leaf.summary,
+          repo: s.name,
+          path: s.path,
+          // OBSERVED, not computed. createWorktrees hands back an existing worktree
+          // directory without checking which branch it is on, so after a Jira summary
+          // edit `branchName(leaf.key, leaf.summary)` names a branch that does not
+          // exist — and that name is what the drawer chip shows, what Run.children[]
+          // stores, and what the brief tells the orchestrator to merge. Falling back to
+          // the computed name only when git cannot answer at all keeps a non-git or
+          // unreadable path behaving as it did.
+          branch: currentBranch(s.path) ?? branchName(leaf.key, leaf.summary),
+        });
+      }
+      // Each child worktree gets its own brief, from its own ticket — a subagent reads a
+      // real brief, not a row in the parent's table. A failed read degrades to what the
+      // leaf already told us rather than costing the child its worktree or the take.
+      const childDetail = await this.provider().detail(leaf.key).catch(() => null);
+      if (childDetail) this.logReposOutsideParent(childDetail, discovered, inScope);
+      writeBriefInto(
+        usable,
+        { key: leaf.key, summary: leaf.summary, url: childDetail?.url ?? "" },
+        briefMarkdown(
+          childDetail ?? { key: leaf.key, summary: leaf.summary, descriptionText: "" },
+          providerLabel(resolvedProvider(cfg.agentProvider)),
+        ),
+        this.log,
+      );
+    }
+    if (failed.length) {
+      this.toast("info", `Couldn't create a worktree for ${failed.join(", ")} — dispatch those by hand.`);
+    }
+
+    // `parentBranch` is NOT passed to launch as a branch to use: launch's own
+    // createWorktrees call re-derives it as branchName(detail.key, detail.summary).
+    // The two agree only because `detail` is the object `parentBranch` was computed
+    // from in takeTask — keep it that way. Divergence would sit the orchestrator on one
+    // branch while its brief told it to merge children into another, silently.
+    await this.launch(
+      detail,
+      parentRepos,
+      this.orchestratorTemplate(cfg),
+      true, // forceWorktree: the parent session works on the parent branch, isolated
+      target,
+      undefined,
+      { children, parentBranch },
+    );
+  }
+
+  /** Say which repos a child's own ticket names that the parent's set does not cover.
+   *  Logged, not acted on: the child works the parent's repos either way (see
+   *  `takeOrchestrated`), and a subagent quietly working somewhere its ticket never
+   *  named is the kind of surprise that has to be findable afterwards. */
+  private logReposOutsideParent(
+    childDetail: TaskDetail,
+    discovered: ServiceRef[],
+    inScope: Set<string>,
+  ): void {
+    const outside = inferServices(
+      { summary: childDetail.summary, descriptionText: childDetail.descriptionText, labels: childDetail.labels, components: childDetail.components },
+      discovered,
+    )
+      .map((r) => r.service.name)
+      .filter((n) => !inScope.has(n));
+    if (!outside.length) return;
+    this.log(
+      `orchestrator ${childDetail.key}: skipping ${outside.join(", ")} — outside the parent's repos (${[...inScope].join(", ")})`,
+    );
+  }
+
+  /** The orchestrator prompt mode's template. A user can delete or rename modes, so an
+   *  absent one falls back to the first configured mode rather than failing the take —
+   *  and says so, because the session then gets a prompt that does not mention
+   *  subagents while the brief's Children table tells it to dispatch them. */
+  private orchestratorTemplate(cfg: AgentFlowConfig): string {
+    const mode = cfg.promptModes.find((m) => m.id === "orchestrator");
+    if (mode) return mode.prompt;
+    this.log(
+      `orchestrator mode: no "orchestrator" prompt mode configured — falling back to ${cfg.promptModes[0]?.label ?? "the default prompt"}`,
+    );
+    return cfg.promptModes[0]?.prompt ?? "";
   }
 
   /** PR-review kick-off: the same open+seed flow as Take, but always in a worktree and

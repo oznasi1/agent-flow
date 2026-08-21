@@ -147,7 +147,7 @@ export function readAgentSurface(
 }
 
 /** Which agent Agent Flow starts a session with. */
-export type AgentProvider = "claude-code" | "copilot";
+export type AgentProvider = "claude-code" | "copilot" | "cursor";
 
 /** The VS Code family, by uri scheme: `vscode`, `vscode-insiders`, and any other
  * `vscode*` build. Cursor is `cursor`, Windsurf is `windsurf`. Preferred over
@@ -157,23 +157,69 @@ export function isVSCodeHost(): boolean {
   return (vscode.env.uriScheme ?? "").startsWith("vscode");
 }
 
-/** Read the agent. Anything unrecognized — including undefined — means Claude Code,
- * so a typo in settings.json degrades rather than breaking seeding. `copilot`
- * additionally requires a VS Code host: settings sync carries values between
- * editors and Cursor has no Copilot, so the value degrades there instead of failing
- * at seed time. This runtime guard — not the manifest `when` clause — is what makes
- * the behavior correct. Called with no argument from the seeding path, which reads
- * at seed time rather than capturing at activation. */
-export function readAgentProvider(
+/** Cursor, by the same signal. Exact match, not a prefix: unlike the VS Code family
+ * there are no `cursor-*` sibling builds, and a prefix test would claim any future
+ * scheme that merely starts with those six letters. */
+export function isCursorHost(): boolean {
+  return (vscode.env.uriScheme ?? "") === "cursor";
+}
+
+/** What `agentFlow.agentProvider` holds. `ask` is not an agent — it means "pick one
+ * per launch" — so it is deliberately kept out of `AgentProvider`, which keeps
+ * `providerLabel` and workspace.ts's `CLI` record total and stops every copy site
+ * from having to invent a label for it. */
+export type AgentProviderSetting = AgentProvider | "ask";
+
+/** The agents this host can actually start, in picker order. Claude Code is the one
+ * universal choice, so it is always first and the list is never empty. */
+export function hostProviders(): AgentProvider[] {
+  return [
+    "claude-code",
+    ...(isVSCodeHost() ? (["copilot"] as const) : []),
+    ...(isCursorHost() ? (["cursor"] as const) : []),
+  ];
+}
+
+/** Read the agent. `ask` passes through — it is host-independent, because every host
+ * can offer at least Claude Code. Anything unrecognized — including undefined —
+ * means Claude Code, so a typo in settings.json degrades rather than breaking
+ * seeding. `copilot` and `cursor` each additionally require their own host: settings
+ * sync carries values between editors, so each value degrades in the wrong editor
+ * instead of failing at seed time. This runtime guard — not the manifest — is what
+ * makes the behavior correct, and it is the reason the manifest needs no `when`
+ * clause at all. Called with no argument from the seeding path, which reads at seed
+ * time rather than capturing at activation. */
+export function readAgentProviderSetting(
   c: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration("agentFlow"),
-): AgentProvider {
-  return c.get<string>("agentProvider") === "copilot" && isVSCodeHost() ? "copilot" : "claude-code";
+): AgentProviderSetting {
+  const raw = c.get<string>("agentProvider");
+  if (raw === "ask") return "ask";
+  if (raw === "copilot" && isVSCodeHost()) return "copilot";
+  if (raw === "cursor" && isCursorHost()) return "cursor";
+  return "claude-code";
 }
 
 /** The agent's name, for copy that tells the user what was just seeded. */
 export function providerLabel(p: AgentProvider): string {
-  return p === "copilot" ? "Copilot" : "Claude Code";
+  return p === "copilot" ? "Copilot" : p === "cursor" ? "Cursor" : "Claude Code";
 }
+
+/** The agent a launch actually starts when nothing has resolved `ask` into a concrete
+ * choice — Claude Code, the one agent every host can run. The single place that
+ * degradation is spelled out, so seeding, Doctor's rows, the Remote Control
+ * pre-flight and every copy site cannot drift apart on it.
+ *
+ * Every caller that names an agent in copy goes through this rather than through some
+ * agent-neutral wording, and deliberately: while `ask` is inert it resolves to Claude
+ * Code at seed time, so "Claude Code" is the literal truth at each of those sites, and
+ * a neutral phrase composes in none of them — the surrounding templates all use the
+ * label as a product name ("a X agent", "3 X sessions", "The X prompt").
+ *
+ * TASK 5: once the picker is real, the agent for a launch comes from the launch, not
+ * from here. Sites that render BEFORE the picker runs cannot use this and need copy
+ * designed against their own templates. */
+export const resolvedProvider = (s: AgentProviderSetting): AgentProvider =>
+  s === "ask" ? "claude-code" : s;
 
 /** One Explore action as seen by the flow: id + picker label + resolved prompt + Slack toggle. */
 export interface ExploreAction {
@@ -218,6 +264,19 @@ export const DEFAULT_PR_REVIEW_PROMPT =
   "into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested " +
   "changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}";
 
+/** The GitLab wording of DEFAULT_PR_REVIEW_PROMPT, seeded instead when
+ * `agentFlow.forge` is "gitlab" and the user hasn't customized `prReviewPrompt`
+ * (see `shippedPrReviewPrompt`). Differs only in the mechanics it scripts —
+ * `glab mr checkout` for `gh pr checkout`, "merge request" for "pull request",
+ * "GitLab" for "GitHub" — every instruction and placeholder ({key} {summary}
+ * {url} {files}) is otherwise identical, so the two stay legible as variants of
+ * one prompt rather than drifting apart over time. */
+export const GITLAB_PR_REVIEW_PROMPT =
+  'Jira {key} ({url}): "{summary}". This task has an open GitLab merge request — all our MRs carry the Jira key in their title and branch. ' +
+  "Using `glab` (or the GitLab tools available to you): find the MR for {key}, run `glab mr checkout` to bring its branch " +
+  "into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested " +
+  "changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}";
+
 /** Seed for reviewing a teammate's PR from the Deck's review strip. Distinct from
  * DEFAULT_PR_REVIEW_PROMPT, which addresses feedback on *your own* PR. The agent
  * writes its findings to a file; the human submits the review. Placeholders:
@@ -229,6 +288,23 @@ export const DEFAULT_REVIEW_REQUEST_PROMPT =
   "Assess correctness, edge cases, tests, and anything that would break in production. " +
   "Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, " +
   "each with the file and line it refers to. Do not post anything to GitHub; the human submits the review.{files}";
+
+/** The GitLab wording of DEFAULT_REVIEW_REQUEST_PROMPT, substituted into the
+ * first stock review mode when `agentFlow.forge` is "gitlab" (see
+ * `shippedReviewRequestModes`). Same substitution-only
+ * relationship as GITLAB_PR_REVIEW_PROMPT above: everything the agent is asked
+ * to assess, where it writes findings, the instruction not to post anything
+ * itself, and every placeholder are identical to the GitHub wording. "target
+ * branch" for "base branch" is the fourth substitution (see the spec's §4.1
+ * list): it is GitLab's own UI name for the same thing, and every other
+ * forge-specific noun in this prompt was translated — leaving one behind is what
+ * makes a prompt read as machine-generated to the user whose forge it names. */
+export const GITLAB_REVIEW_REQUEST_PROMPT =
+  'Review merge request {url} — {repo}#{number}, "{summary}", by {author}. ' +
+  "Check it out with `glab mr checkout {number} --repo {repo}`, then read the full diff against its target branch. " +
+  "Assess correctness, edge cases, tests, and anything that would break in production. " +
+  "Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, " +
+  "each with the file and line it refers to. Do not post anything to GitLab; the human submits the review.{files}";
 
 /** The stock review modes offered by **Review with agent**, in picker order.
  * One entry by default: a single mode short-circuits the picker, so a fresh
@@ -245,10 +321,41 @@ export const DEFAULT_REVIEW_REQUEST_MODES: PromptMode[] = [
   },
 ];
 
+/** The `prReviewPrompt` this forge SHIPS — what a user who never wrote one gets.
+ *
+ * Exported, and the single definition of that baseline, because two callers must
+ * agree on it byte for byte: `getConfig` seeds it, and `settingsSnapshot` decides
+ * `pr_review_prompt_customized` by comparing against it. When the snapshot
+ * compared against the GitHub default unconditionally, every GitLab install
+ * reported a customized prompt on a stock install — which is the direction that
+ * destroys the metric, since it makes "the user wrote their own words" (what
+ * docs/TELEMETRY.md says the field means) indistinguishable from "the user
+ * picked a forge". */
+export function shippedPrReviewPrompt(forge: string): string {
+  return forge === "gitlab" ? GITLAB_PR_REVIEW_PROMPT : DEFAULT_PR_REVIEW_PROMPT;
+}
+
+/** The review modes this forge SHIPS — `DEFAULT_REVIEW_REQUEST_MODES` with only
+ * the first stock mode's prompt forge-flavoured. Exported for the same reason
+ * `shippedPrReviewPrompt` is: `settingsSnapshot`'s `modeCounts` diffs the
+ * resolved list against these built-ins, and diffing a GitLab install against
+ * the GitHub wording reported `review_modes_overridden: 1` for every stock
+ * GitLab install. The github arm returns `DEFAULT_REVIEW_REQUEST_MODES` itself,
+ * exactly as the inline ternary this replaced did. */
+export function shippedReviewRequestModes(forge: string): PromptMode[] {
+  return forge === "gitlab"
+    ? DEFAULT_REVIEW_REQUEST_MODES.map((m, i) => (i === 0 ? { ...m, prompt: GITLAB_REVIEW_REQUEST_PROMPT } : m))
+    : DEFAULT_REVIEW_REQUEST_MODES;
+}
+
 export interface AgentFlowConfig {
   // Which task source to read from — an id in src/tasks/registry.ts. An
   // unregistered value resolves to Jira with a log line, never an empty board.
   taskSource: string;
+  // Which forge holds our pull/merge requests: "github" (via `gh`) or "gitlab"
+  // (via `glab`). Validated by `resolveForge`, not here — an unknown value falls
+  // back to github with a log line rather than being silently rewritten.
+  forge: string;
   baseUrl: string;
   project: string;
   reposRoot: string;
@@ -257,9 +364,11 @@ export interface AgentFlowConfig {
   repoBlocklist: string[];
   defaultFilter: string;
   seedAgent: boolean;
-  // Which agent a seeded session starts: Claude Code, or GitHub Copilot. `copilot`
-  // is VS Code only and degrades to claude-code elsewhere — see readAgentProvider.
-  agentProvider: AgentProvider;
+  // Which agent a seeded session starts: Claude Code, GitHub Copilot, or Cursor —
+  // or `ask`, meaning pick one per launch. `copilot` is VS Code only and `cursor` is
+  // Cursor only; each degrades to claude-code in the other host — see
+  // readAgentProviderSetting.
+  agentProvider: AgentProviderSetting;
   // Where a seeded session opens: the Claude Code extension panel, or the `claude`
   // CLI in an integrated terminal.
   agentSurface: AgentSurface;
@@ -274,10 +383,21 @@ export interface AgentFlowConfig {
   // Named commands an Orchestrator command node can run. No built-ins — an
   // empty list means the user hasn't opted into any.
   commands: FlowCommand[];
+  /** Show the Deck header's "Tokens on board" total. Off by default: the figure
+   * costs a board-wide transcript sweep, and the per-run breakdown in the detail
+   * drawer is read lazily instead, so a default install parses nothing until a
+   * drawer is opened. */
+  showTokenTotal: boolean;
   prReviewStatus: string; // task status that reveals the "Address PR" card action
   prReviewAutoFix: boolean; // after assessing, proceed to implement the PR's requested changes
   prReviewPrompt: string; // seeded prompt for the PR-review kick-off
   worktree: "ask" | "always" | "never";
+  /** Offer the child-worktree flow: a Take of a ticket with children asks whether to
+   *  fan out into a worktree per child or run one orchestrator over them. Off by
+   *  default, and the default is load-bearing — with it off, `probeTree` returns before
+   *  reading anything, so an existing user's Take is byte-identical to what it was
+   *  before this feature existed: no extra round trip, no new pickers, no new git. */
+  childWorktrees: boolean;
   // Offer Claude Code's Remote Control for the session we open: the panel is seeded
   // with /remote-control <KEY> and the task prompt goes to the clipboard.
   remoteControl: "off" | "on" | "ask";
@@ -497,8 +617,14 @@ export function getConfig(): AgentFlowConfig {
     slackDm: slackRaw[def.id] === true,
     needsEnv: def.needsEnv === true,
   }));
+  // Hoisted so both the `forge:` property below and the prompt selections that
+  // follow (prReviewPrompt, reviewRequestModes) read the same value — a second,
+  // independent `c.get("forge")` couldn't disagree with this one, but it would
+  // be untidy, and untidy invites drift the next time either read changes.
+  const forge = c.get<string>("forge") || "github";
   return {
     taskSource: c.get<string>("taskSource") || "jira",
+    forge,
     baseUrl: (c.get<string>("jira.baseUrl") || "").replace(/\/+$/, ""),
     project: c.get<string>("jira.project") || "",
     reposRoot: expandHome(c.get<string>("reposRoot") || "~/projects"),
@@ -510,7 +636,7 @@ export function getConfig(): AgentFlowConfig {
     })(),
     defaultFilter: c.get<string>("defaultFilter") || "mysprint",
     seedAgent: c.get<boolean>("seedAgent") ?? true,
-    agentProvider: readAgentProvider(c),
+    agentProvider: readAgentProviderSetting(c),
     agentSurface: readAgentSurface(c),
     workspaceMode: (c.get<AgentFlowConfig["workspaceMode"]>("workspaceMode")) || "auto",
     openIn: (c.get<AgentFlowConfig["openIn"]>("openIn")) || "ask",
@@ -520,10 +646,28 @@ export function getConfig(): AgentFlowConfig {
     exploreActions,
     environments: readEnvironments(c),
     commands: readCommands(c),
+    // `?? false` rather than `|| false`: an explicit `false` and an unset value
+    // must both read false, and neither may be silently coerced by a truthiness
+    // check the way the string settings above are.
+    showTokenTotal: c.get<boolean>("deck.showTokenTotal") ?? false,
     prReviewStatus: c.get<string>("prReviewStatus") || "PR initiated",
     prReviewAutoFix: c.get<boolean>("prReviewAutoFix") ?? true,
-    prReviewPrompt: c.get<string>("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT,
+    // A user who customized their prompt keeps it on either forge; only the
+    // untouched default is forge-flavoured. `explicitConfigValue` is the same
+    // "did the user actually write this?" test the reviewRequestModes migration
+    // below already uses.
+    //
+    // `||`, NOT `??`, and this is load-bearing: `explicitConfigValue` hands back
+    // the raw setting value including `""`, which is exactly what clearing this
+    // multilineText field in the settings UI writes. `??` short-circuits on
+    // nullish only, so a blank setting would seed an EMPTY prompt — a GitHub
+    // behavior change on the default forge (before the forge seam this read
+    // `c.get("prReviewPrompt") || DEFAULT_PR_REVIEW_PROMPT`), and there is no net
+    // downstream: `prReviewTemplate` returns its argument unchanged. Same
+    // truthiness posture as `resolvePrompt` above.
+    prReviewPrompt: explicitConfigValue<string>(c, "prReviewPrompt") || shippedPrReviewPrompt(forge),
     worktree: (c.get<AgentFlowConfig["worktree"]>("worktree")) || "ask",
+    childWorktrees: c.get<boolean>("childWorktrees") ?? true,
     remoteControl: (() => {
       const v = c.get<string>("remoteControl");
       return v === "on" || v === "ask" ? v : "off";
@@ -552,15 +696,18 @@ export function getConfig(): AgentFlowConfig {
       if (explicitConfigValue<unknown>(c, "reviewRequestModes") !== undefined) {
         return resolveModes(c, "reviewRequestModes", DEFAULT_REVIEW_REQUEST_MODES);
       }
+      // The untouched-default built-ins for this forge: only the first stock
+      // mode's prompt is forge-flavoured (same "don't clobber a customization"
+      // scoping as prReviewPrompt above — a legacy custom prompt below still
+      // wins over this regardless of forge, since it overwrites `.prompt`).
+      const stock = shippedReviewRequestModes(forge);
       // Migrate a customized legacy reviewRequestPrompt into the first built-in,
-      // carrying the rest of DEFAULT_REVIEW_REQUEST_MODES along with `slice(1)`
-      // rather than hand-building a one-element array — so if a second stock
-      // review mode ever ships, legacy-prompt users still receive it instead of
-      // freezing at just the one mode this migration patches.
+      // carrying the rest of `stock` along with `slice(1)` rather than
+      // hand-building a one-element array — so if a second stock review mode
+      // ever ships, legacy-prompt users still receive it instead of freezing at
+      // just the one mode this migration patches.
       const legacy = explicitConfigValue<string>(c, "reviewRequestPrompt");
-      return legacy
-        ? [{ ...DEFAULT_REVIEW_REQUEST_MODES[0], prompt: legacy }, ...DEFAULT_REVIEW_REQUEST_MODES.slice(1)]
-        : DEFAULT_REVIEW_REQUEST_MODES;
+      return legacy ? [{ ...stock[0], prompt: legacy }, ...stock.slice(1)] : stock;
     })(),
     reviewRequestMode: c.get<string>("reviewRequestMode") || "ask",
     stampLabelOnWrite: c.get<boolean>("stampLabelOnWrite") ?? true,

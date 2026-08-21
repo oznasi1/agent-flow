@@ -1,15 +1,24 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { AgentActivity, BranchCiStatus, CardAgent, DeckColumn, FlowCommand, FlowPromptMode, OutboundMessage, PendingResume, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewSort, Run, RunStatus, isTicketRun, runKind } from "../types";
+import { BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromptMode, OutboundMessage, PendingResume, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind } from "../types";
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
-import { DeckCard, projectCards } from "./deckCards";
+import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
 import { prSignals } from "../engine/bucket";
 import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
-import { isPrReviewStatus, timeAgo } from "./helpers";
+import { LoadingMark } from "./LoadingMark";
+import { CardKindIcon } from "./icons";
+import { keyLabel, timeAgo } from "./helpers";
+import { type Tone } from "./deckParts";
+import { DeckDetail } from "./DeckDetail";
+import { cardActions, cardSignal } from "./deckSignal";
+// src/engine/usage.ts imports NOTHING — this is what makes it legal in a
+// browser bundle. npm run build is the only gate that would catch a violation
+// here; neither tsc nor the test suite resolves real module graphs.
+import { formatEq, weightedEq, type UsageTotals } from "../engine/usage";
 
 /** The Orchestrator's mark: one node on the left feeding two on the right
  * through elbow connectors — the drawer's own object, drawn. It replaced a ⚡
@@ -47,15 +56,57 @@ let toastSeq = 0;
 // moment later. Same reasoning, same default, as App.tsx's DEFAULT_SOURCE_LABEL.
 const DEFAULT_SOURCE_LABEL = "Jira";
 
-// `needs` stays the column id — it is the engine's vocabulary (DeckColumn, deriveBucket)
-// and never reaches a user. "Action required" is what the board says, in the summary
-// tile, the column header and the legend alike: one name for one thing.
-const COLUMNS: { id: DeckColumn; label: string; varName: string }[] = [
-  { id: "progress", label: "In progress", varName: "--c-progress" },
-  { id: "needs", label: "Action required", varName: "--c-attn" },
-  { id: "review", label: "In review", varName: "--c-review" },
-  { id: "done", label: "Done", varName: "--c-done" },
+// `needs` stays the column id — it is the engine's vocabulary (DeckColumn,
+// deriveBucket) and never reaches a user. "Action required" is what the board
+// says, in the summary tile, the column header and the legend alike: one name for
+// one thing. `merge` needs no translation: Merge is the label too.
+//
+// Board order is the attention ramp: something is running, an agent wants you,
+// a pull request wants somebody, something is at the merge. Three of the four are
+// stages rather than states and split into lanes below; Action required is the
+// exception, and means exactly one thing. There is no Done column: a ticket
+// closed with nothing merged left no wrap-up, and leaves for the Recently closed
+// strip.
+//
+// `glow` marks a zone where the dot means something is alive right now, and only
+// those zones get the halo. In review deliberately does not. A live agent *can*
+// land there — a blocked PR outranks the working signal, so an agent fixing red
+// CI sits in `fixes needed` — but the column as a whole is a queue you cannot
+// drain by watching it, and a pulsing dot over that would be the board's loudest
+// lie.
+const COLUMNS: { id: DeckColumn; label: string; varName: string; glow: boolean }[] = [
+  { id: "progress", label: "In progress", varName: "--c-progress", glow: true },
+  { id: "needs", label: "Action required", varName: "--c-attn", glow: true },
+  { id: "review", label: "In review", varName: "--c-review", glow: false },
+  { id: "merge", label: "Merge", varName: "--c-done", glow: true },
 ];
+
+// Each laned column, most actionable band first. Lowercase, because a lane is a
+// sub-header under a column and should not compete with it.
+//
+// No lane is marked as good news or bad news in its own colour: the column
+// already carries the hue, and a lit lane header inside a lit column says nothing
+// the column did not. A column with a lane list renders no unlaned cards —
+// deriveLane answers for every route into all three, and deckCards.test.ts holds
+// it to that.
+//
+// `needs` has no entry on purpose. It is the only column left that means exactly
+// one thing — an agent stopped and wants you — so a sub-header under it could
+// only restate the header above it.
+const LANES: Partial<Record<DeckColumn, { id: DeckLane; label: string }[]>> = {
+  progress: [
+    { id: "working", label: "working" },
+    { id: "parked", label: "parked" },
+  ],
+  review: [
+    { id: "fixes", label: "fixes needed" },
+    { id: "waiting", label: "waiting on review" },
+  ],
+  merge: [
+    { id: "ready", label: "ready to merge" },
+    { id: "merged", label: "merged · wrap up" },
+  ],
+};
 
 /** A copy of `r` with `key` removed. Used to clear a per-row flag or body
  * without leaving a stale `false`/`""` entry sitting in the map forever. */
@@ -64,206 +115,51 @@ function drop<T>(r: Record<string, T>, key: string): Record<string, T> {
   return rest;
 }
 
-type Tone = "working" | "idle" | "attn" | "parked" | "merged";
-
-/** Did every PR this run has actually land? Mirrors prSignals' `merged` rule in
- * status.ts — a run whose backend merged and whose frontend has not is not merged. */
-function allMerged(prs: PrEntryMap): boolean {
-  const facts = Object.values(prs).map((e) => e.facts).filter((f): f is PrFacts => f !== null);
-  return facts.length > 0 && facts.every((f) => f.state === "MERGED");
-}
-
 function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Tone } {
-  if (r.column === "done") return { text: allMerged(r.prs) ? "merged" : "done", tone: "merged" };
-  /* An Action required card with no agent open is there because a PR is blocked:
-     deriveBucket has no other route into `needs` without an agent state to read.
-     Reading the agent first told that card "nothing is happening" in the parked
-     grey, on the one column that means act now — and a board with no agents open
-     anywhere is *all* such cards, which is how a column of real work came to look
-     uniformly disabled. So the column leads here, exactly as `done` leads above:
-     where the column knows more than the agent read, it says so.
+  /* An In-review card with no agent open and a blocked PR is the fixes-needed
+     lane's normal inhabitant: the PR wants something and there is nobody in the
+     run to ask. Reading the agent first told that card "nothing is happening" in
+     the parked grey — on the one lane that exists to say something is wrong — and
+     a board with no agents open anywhere is *all* such cards, which is how a lane
+     of real work came to look uniformly disabled. So the column leads here,
+     exactly as `merge` does below: where the column knows more than the agent
+     read, it says so.
 
      The line names the reason rather than restating the specifics — the PR block
      directly beneath already enumerates the failing check, the review and the
-     conflict. `blocked` is still required, not assumed from the column: `needs`
-     with no agent and nothing blocking is a state the ladder should not produce,
-     and announcing a block that no fact supports would be a lie on the card. */
-  if (r.column === "needs" && r.agent.state === "unknown" && prSignals(r.prs).blocked) {
+     conflict. `blocked` is required rather than assumed from the column, because
+     unlike `needs` this column has plenty of other routes in: an unblocked PR
+     waiting on somebody, or a ticket sitting in a review status with no PR at
+     all. Announcing a block that no fact supports would be a lie on the card. */
+  if (r.column === "review" && r.agent.state === "unknown" && prSignals(r.prs).blocked) {
     return { text: "pr blocked", tone: "attn" };
+  }
+  /* Same reasoning one column to the right: a Merge card with nobody home is not
+     "parked", it is waiting on a press or on its wrap-up. The column and the PRs
+     are the only things that know which — the agent read says nothing at all. */
+  if (r.column === "merge" && r.agent.state === "unknown") {
+    return { text: prSignals(r.prs).merged ? "merged" : "ready to merge", tone: "merged" };
   }
   if (r.agent.state === "unknown") return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
     case "needs-you": return { text: `ended turn · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
+    case "stalled": return { text: `stalled · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
+    case "exited": return { text: `exited · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
     case "idle": return { text: `idle · ${timeAgo(r.agent.lastActivityMs)}`, tone: "idle" };
     default: return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
   }
 }
 
-const REVIEW_TEXT: Record<PrFacts["review"], string> = {
-  approved: "approved",
-  changes_requested: "changes",
-  review_required: "required",
-  none: "pending",
-};
-
-function PrBlock({ repo, f, showRepo }: { repo: string; f: PrFacts; showRepo: boolean }): JSX.Element {
-  const ci = f.ci.failing.length > 0
-    ? <span className="pr-bad">
-        ✗ {f.ci.failing.map((c, i) => (
-          <React.Fragment key={c.name}>
-            {i > 0 && ", "}
-            {c.url
-              ? <button className="pr-link" title={c.url} onClick={() => send({ type: "openExternal", url: c.url })}>{c.name}</button>
-              : <span>{c.name}</span>}
-          </React.Fragment>
-        ))}
-      </span>
-    : f.ci.pending > 0
-      ? <span className="pr-wait">· {f.ci.pending} running</span>
-      : <span className="pr-ok">✓ {f.ci.passing} passing</span>;
-
-  return (
-    <div className="pr-block">
-      {showRepo && <div className="pr-repo">{repo}</div>}
-      <div className="pr-line">
-        <span className="pr-lbl">pr</span>
-        <button className="pr-link" title={f.title} onClick={() => send({ type: "openExternal", url: f.url })}>
-          #{f.number}
-        </button>
-        {f.isDraft && <span className="pr-draft">draft</span>}
-      </div>
-      <div className="pr-line"><span className="pr-lbl">ci</span>{ci}</div>
-      <div className="pr-line">
-        <span className="pr-lbl">review</span>
-        <span className={f.review === "changes_requested" ? "pr-warn" : f.review === "approved" ? "pr-ok" : ""}>
-          {REVIEW_TEXT[f.review]}{f.unresolved !== null && f.unresolved > 0 ? ` · ${f.unresolved} open` : ""}
-        </span>
-      </div>
-      {/* Only an open PR has mergeability: GitHub stops computing it once the PR
-        * merges or closes, handing back UNKNOWN for both fields it derives from.
-        * The row could then only read "unknown" — a stale question, not a fact,
-        * on the very cards whose header already says "merged". `ci` and `review`
-        * keep their meaning after the merge, so they stay. */}
-      {f.state === "OPEN" && (
-        <div className="pr-line">
-          <span className="pr-lbl">merge</span>
-          <span className={f.mergeable === "conflicting" ? "pr-warn" : f.mergeable === "clean" ? "pr-ok" : ""}>
-            {f.mergeable === "conflicting" ? "conflicts" : f.mergeable}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// No ⎇ here: that glyph means "branch" on this card, and a repo chip is a repo.
-// Every part is its own element so the chip's flex `gap` sets the spacing — literal
-// spaces and "·" separators between them would each become an anonymous flex item
-// and get gapped on both sides.
-function RepoChip({ g }: { g: RepoGit }): JSX.Element {
-  return (
-    <span className="repo" title={g.path}>
-      <span>{g.name}</span>
-      {g.files > 0 && (
-        <><span className="add">+{g.added}</span><span className="del">−{g.removed}</span></>
-      )}
-      {g.ahead > 0 && <span>↑{g.ahead}</span>}
-      {g.dirty && <span className="dirty" title="uncommitted changes">●</span>}
-    </span>
-  );
-}
-
-/** The repos of a multi-root run, behind the workspace that holds them. A card
- * for a two-repo task used to spend a line on chips whose names the workspace
- * already implies; at rest this says the one thing that identifies the task, and
- * hovering it gives back every chip with its own git signal.
- *
- * Hover and focus reveal the fold in CSS, with no state to keep in sync. The
- * click toggle exists for touch and for a keyboard user who tabs past: `.open`
- * survives the pointer leaving, which a :hover rule cannot. */
-function WorkspaceChip({ label, repos, filePath }: { label: string; repos: RepoGit[]; filePath: string }): JSX.Element {
-  const [open, setOpen] = React.useState(false);
-  return (
-    <div className={`c-ws ${open ? "open" : ""}`}>
-      {/* The workspace file's own path, not a generic sentence — it is the only
-        * thing that tells apart two open .code-workspace files that happen to
-        * share a label. */}
-      <button type="button" className="ws" onClick={() => setOpen((o) => !o)} title={filePath}>
-        <span className="wsi">{open ? "▾" : "▸"}</span>
-        <span className="n">{label}</span>
-        <span className="ct">{repos.length} repos</span>
-      </button>
-      <div className="ws-fold">
-        {repos.map((g) => <RepoChip key={g.name} g={g} />)}
-      </div>
-    </div>
-  );
-}
-
-const AGENT_STATE: Record<AgentActivity["state"], { text: string; tone: Tone }> = {
-  working: { text: "working", tone: "working" },
-  "needs-you": { text: "ended turn", tone: "attn" },
-  idle: { text: "idle", tone: "idle" },
-  unknown: { text: "open", tone: "parked" },
-};
-
-/** Every agent open in this card's directories. Collapsed it is one line — the
- * name when there is one agent, a count when there are more; expanded it is a
- * row each, because two sessions in one worktree are two different states and a
- * single aggregate dot cannot say both. */
-function AgentsRow({ agents }: { agents: CardAgent[] }): JSX.Element | null {
-  const [open, setOpen] = React.useState(false);
-  if (agents.length === 0) return null;
-  // A single agent's label IS its name — an identifier, so it earns the mono
-  // treatment (.id). Falling back to "1 agent", or counting several ("N agents"),
-  // is prose, not an identifier, and must not go mono.
-  const soloName = agents.length === 1 ? agents[0].session.name : null;
-  const label = soloName ?? (agents.length === 1 ? "1 agent" : `${agents.length} agents`);
-  return (
-    <div className="c-agents">
-      <button type="button" className="ag-toggle" onClick={() => setOpen((o) => !o)}
-        title="Claude Code sessions open in this directory">
-        <span className="ag-caret">{open ? "▾" : "▸"}</span>
-        <span className={`ag-label ${soloName ? "id" : ""}`}>{label}</span>
-      </button>
-      {open && agents.map((a) => {
-        const st = AGENT_STATE[a.activity.state];
-        return (
-          <div className="ag-row" key={a.session.sessionId}>
-            <span className={`sdot tone-${st.tone} ${st.tone === "working" ? "pulse" : ""}`} />
-            <span className="ag-name" title={a.activity.slug ?? undefined}>{a.session.name ?? a.session.sessionId.slice(0, 8)}</span>
-            <span className={`ag-state tone-${st.tone}`}>{st.text}</span>
-            <span className="ag-age">{timeAgo(a.activity.lastActivityMs)}</span>
-            {/* readOpenSessions defaults a missing startedAt to 0 — timeAgo(0) is ""
-                (falsy ms short-circuits it), which would otherwise render a bare
-                "open" with nothing after it. */}
-            {a.session.startedAt > 0 && <span className="ag-open">open {timeAgo(a.session.startedAt)}</span>}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/** The run's `.code-workspace` file's name, extension stripped — e.g.
- * "ASM-1+2.code-workspace" → "ASM-1+2". `undefined` for a single-repo
- * (per-window) run, which has no workspace file at all. */
-function workspaceLabel(run: Run): string | undefined {
-  return run.workspaceFile?.split(/[\\/]/).pop()?.replace(/\.code-workspace$/, "");
-}
-
-function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel }: {
-  r: RunStatus; prReviewStatus: string; onForget: (key: string) => void;
+function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
+  r: RunStatus;
   /** Non-null on the Agents board: this card is that one session, and its state
    * line and action target come from the agent rather than the run. */
   agent: CardAgent | null;
-  /** Every agent this card lists via `AgentsRow` when `agent` is null — the
-   * whole run's agents on the Workspaces board, or a same-column group on the
-   * Agents board. Unused (and irrelevant) when `agent` is set. */
-  agents: CardAgent[];
   column: DeckColumn;
   sourceLabel: string;
+  selected: boolean;
+  onSelect: () => void;
 }): JSX.Element {
   const col = COLUMNS.find((c) => c.id === column)!;
   const accent = `var(${col.varName})`;
@@ -274,26 +170,18 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel 
   // A ticketless run has no tracked issue behind it: the key is a local slug, and
   // openExternal("") is a button that does nothing.
   const tracked = isTicketRun(r.run);
-  // The short label is only honest for a real Explore session. isTicketRun keys off
-  // an empty url and never inspects the key, so anything else untracked keeps its
-  // key on the chip rather than being relabelled as something it is not. A Track'd
-  // ticketless place is the one exception with an "explore-"-less key: its record
-  // is kind: "explore" but Track it never renames it off its local- place-hash, so
-  // that prefix reads as "explore" here too — it is exactly what the record now is.
-  const explore = r.run.key.startsWith("explore-") || r.run.key.startsWith("local-");
-  // Exact, not prefix-matched: unlike `explore` above (whose key prefix is the only
-  // signal a Track'd place leaves behind), a notepad run always carries its kind.
-  const notepad = runKind(r.run) === "notepad";
   // A place with an agent open in it that Agent Flow Deck never launched. It has no
   // record on disk, so there is nothing to Forget — closing its agents is what
   // removes it.
   const local = runKind(r.run) === "local";
-  // Offer Address PR once the ticket reaches the configured PR-review status. Never on
-  // a local card: its key is read off the branch name (see inferredKey just below), so
-  // the status on it may belong to a ticket that is not ours — not something to seed an
-  // agent against on one click. A run with no ticket status needs no separate guard;
-  // isPrReviewStatus is false whenever either side is empty.
-  const canAddressPr = !local && isPrReviewStatus(r.ticketStatus ?? "", prReviewStatus);
+  // Every reason to address a PR now has its own row and its own verb, so the
+  // old single gated button could only ever duplicate one of them. The lane gate
+  // goes with it: it put Address PR on cards with nothing to address, and
+  // withheld it from cards with a failing check. The local guard is preserved:
+  // a local card's ticket is inferred from a branch name that may belong to
+  // somebody else's ticket, and seeding an agent against that inference on one
+  // click is what this must never do. The host re-checks it anyway.
+  const acts = local ? [] : cardActions(r);
   // The key came from the branch, not from a launch. Say so: the branch could
   // name a ticket somebody else owns, and the ticket status on this card would
   // then be theirs. Computed host-side (the webview has no connector to parse
@@ -305,136 +193,131 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel 
   // repo's git or PR it means.
   const dragRepo = agent?.repo ?? (r.repos.length === 1 ? r.repos[0].name : undefined);
   const cardDragKey = dragRepo ? `${r.run.key}${DRAG_SEP}${dragRepo}` : null;
-  const [menuOpen, setMenuOpen] = React.useState(false);
-  React.useEffect(() => {
-    if (!menuOpen) return;
-    const close = () => setMenuOpen(false);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMenuOpen(false);
-    window.addEventListener("click", close);
-    window.addEventListener("keydown", onKey);
-    return () => { window.removeEventListener("click", close); window.removeEventListener("keydown", onKey); };
-  }, [menuOpen]);
+  // What this card IS, as its own mark. The run's kind, never the agent's: on the
+  // Agents board the state comes from the session, but the object the card belongs
+  // to is still the run.
+  const kind = runKind(r.run);
+  const sigBits = cardSignal(r, agent);
+  // sigBits[0] is the lead PR's number whenever this card has a PR; cardActions
+  // reads the same lead PR, so the two cannot disagree.
+  const firstBit = sigBits[0];
+  const leadPrNumber = firstBit?.kind === "text" && firstBit.text.startsWith("#") ? firstBit.text.slice(1) : null;
 
   return (
     <div
-      className={`card ${column === "needs" ? "attn" : ""}`}
+      className={`card ${column === "needs" ? "attn" : ""} ${selected ? "sel" : ""}`}
       style={{ ["--accent" as any]: accent }}
       draggable={cardDragKey !== null}
+      onClick={onSelect}
       onDragStart={(e) => {
         if (cardDragKey) e.dataTransfer.setData("text/plain", cardDragKey);
       }}
     >
-      {/* State leads, identity trails: the dot sits at the same x on every card, so a column
-          scans top-to-bottom as one strip of "who needs me". */}
-      <div className="c-top">
-        <span className={`status tone-${sv.tone}`}>
-          <span className={`sdot tone-${sv.tone} ${sv.tone === "working" ? "pulse" : ""}`} />
-          {sv.text}
-        </span>
-        {inferredKey ? (
-          <span className="key-wrap">
-            <span className="chip" title="Read from the branch name — Agent Flow Deck did not launch this">~inferred</span>
-            <button
-              className="key"
-              title={`Open ${inferredKey} in ${sourceLabel}`}
-              onClick={() => send({ type: "openExternal", url: r.run.url })}
-            >
-              {inferredKey}
-            </button>
-          </span>
-        ) : tracked ? (
-          <button className="key" title={`Open ${r.run.key} in ${sourceLabel}`} onClick={() => send({ type: "openExternal", url: r.run.url })}>
-            {r.run.key}
-          </button>
-        ) : (
-          <span className="key untracked" title={r.run.key}>{local ? "local" : explore ? "explore" : notepad ? "notepad" : r.run.key}</span>
-        )}
-      </div>
-      <div className="c-title" title={r.run.summary}>
-        {local && inferredKey && <span className="chip">local</span>}
-        {r.run.summary}
-      </div>
-
-      {/* Where the work lives and when it started, on one line: this used to be a
-          half-empty branch row followed by "launched …" trailing the repo chips, where
-          it read as one more chip that had lost its border. */}
-      <div className="c-branch">
-        {/* The agent's own repo, not repos[0]: on a multi-root card the first repo
-            may be one this session never touched. */}
-        {(() => {
-          const own = agent?.repo ? r.run.repos.find((x) => x.name === agent.repo) : undefined;
-          const branch = (own ?? r.run.repos[0])?.branch;
-          return branch && <span className="bn" title={branch}>⎇ {branch}</span>;
-        })()}
-        <span className="elapsed">launched {timeAgo(r.run.createdAt)}</span>
-      </div>
-
-      {(() => {
-        const ws = workspaceLabel(r.run);
-        if (ws && r.repos.length > 1) return <WorkspaceChip label={ws} repos={r.repos} filePath={r.run.workspaceFile ?? ws} />;
-        return r.repos.length > 0 && (
-          <div className="c-repos">
-            {r.repos.map((g) => <RepoChip key={g.name} g={g} />)}
+      {/* The avatar leads, on the x the tone dot used to hold, so a column still
+          scans from one left edge. The title is the anchor; the key trails it on the
+          same line, flex: none, because a truncated ticket key is the one identifier
+          on this card nobody can reconstruct.
+          No stopPropagation on the header itself: clicking the summary has always
+          selected the card, and the title now lives in here. Only the key slot
+          swallows the click, because the key is the interactive part. */}
+      <div className="c-hd">
+        <CardKindIcon kind={kind} />
+        <div className="hd-t">
+          <div className="c-title" title={r.run.summary}>
+            {local && inferredKey && <span className="chip">local</span>}
+            {r.run.summary}
           </div>
-        );
-      })()}
-
-      {(() => {
-        const withPr = Object.entries(r.prs).filter(([, e]) => e.facts !== null) as [string, { facts: PrFacts }][];
-        return withPr.map(([name, e]) => (
-          <PrBlock key={name} repo={name} f={e.facts} showRepo={withPr.length > 1} />
-        ));
-      })()}
-
-      {/* An agent card IS one of those rows — nesting the whole list inside every
-          sibling card would say the same thing four times. */}
-      {agent === null && <AgentsRow agents={agents} />}
-
-      <div className="c-foot">
-        {r.ticketStatus && <span className="pill" title={`${sourceLabel} status: ${r.ticketStatus}`}>{r.ticketStatus}</span>}
-        <div className="actions">
-          {canAddressPr && (
-            <button
-              className="act primary"
-              title={`Address the PR for ${r.run.key} — open its workspace and work through the review feedback`}
-              onClick={() => send({ type: "deck:addressPr", key: r.run.key })}
-            >
-              Address PR
-            </button>
-          )}
-          {/* An already-open window used to say so in a line of its own on every such
-              card. The button that behaves differently is the right place to explain
-              it: a 5px marker carries "there is something to focus", the tooltip
-              carries what Open will actually do. Only Open's own primary once Address
-              PR isn't sitting beside it to claim that weight — a card can't spend two
-              buttons' worth of "the one thing to do here" on itself. */}
-          <button
-            className={`act ${canAddressPr ? "" : "primary"} ${r.windowOpen ? "live" : ""}`}
-            title={r.windowOpen ? "Open now — Open focuses the window already running this task" : "Open this task's workspace"}
-            onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open", ...(agent?.repo ? { repo: agent.repo } : {}) })}
-          >
-            Open
-          </button>
-          {/* main's multi-file diff editor, still scoped to this agent's own repo:
-              dropping the spread would silently send an agent card's Diff to the
-              run's first repo. */}
-          <button className="act" title="Show everything this task changed, file by file" onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff", ...(agent?.repo ? { repo: agent.repo } : {}) })}>Diff</button>
-          <span className="more-wrap">
-            <button className="more" title="More actions" onClick={(e) => { e.stopPropagation(); setMenuOpen((o) => !o); }}>⋯</button>
-            {menuOpen && (
-              <div className="menu" onClick={(e) => e.stopPropagation()}>
-                {tracked && (
-                  <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "openExternal", url: r.run.url }); }}>{`Open in ${sourceLabel}`}</button>
-                )}
-                {local ? (
-                  <button className="mi" onClick={() => { setMenuOpen(false); send({ type: "deck:track", key: r.run.key }); }}>Track it</button>
-                ) : (
-                  <button className="mi danger" onClick={() => { setMenuOpen(false); onForget(r.run.key); }}>Forget</button>
-                )}
-              </div>
-            )}
-          </span>
         </div>
+        <span className="hd-k" onClick={(e) => e.stopPropagation()}>
+          {inferredKey ? (
+            <span className="key-wrap">
+              <span className="chip" title="Read from the branch name — Agent Flow Deck did not launch this">~inferred</span>
+              <button
+                className="key"
+                title={`Open ${inferredKey} in ${sourceLabel}`}
+                onClick={() => send({ type: "openExternal", url: r.run.url })}
+              >
+                {inferredKey}
+              </button>
+            </span>
+          ) : tracked ? (
+            <button className="key" title={`Open ${r.run.key} in ${sourceLabel}`} onClick={() => send({ type: "openExternal", url: r.run.url })}>
+              {r.run.key}
+            </button>
+          ) : (
+            <span className="key untracked" title={r.run.key}>{keyLabel(r.run)}</span>
+          )}
+        </span>
+      </div>
+
+      {acts.length > 0 ? (
+        /* The failure rows REPLACE the signal line rather than joining it: the
+           bits it would show (#pr, ✗ check, conflicts) name the very facts these
+           rows name, and restating them above the actions is noise. A failing
+           card therefore stops showing its branch and diff totals — the correct
+           trade, since "how big" already loses to "what is wrong" in
+           cardSignal's own cap, and both remain in the detail drawer. */
+        <div className="c-rows" onClick={(e) => e.stopPropagation()}>
+          {acts.map((a, i) => (
+            <div className="c-row" key={a.reason}>
+              {i === 0 && leadPrNumber !== null && <span className="m">#{leadPrNumber}</span>}
+              <span className={`lbl ${a.tone}`}>{a.text}</span>
+              <button
+                className="act"
+                title={`${a.label} — open this task's workspace and work through it`}
+                onClick={() => send({ type: "deck:seedPrWork", key: r.run.key, reason: a.reason, ...(a.detail ? { detail: a.detail } : {}) })}
+              >
+                {a.label}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : sigBits.length > 0 ? (
+        <div className="c-sig">
+          {sigBits.map((b, i) => (
+            <React.Fragment key={i}>
+              {i > 0 && <span className="sep">·</span>}
+              {b.kind === "diff"
+                ? <span className="c-diff"><span className="add">+{b.added}</span><span className="del">−{b.removed}</span></span>
+                // A bit's own title wins — that is the repo names behind "4 repos".
+                // The mono fallback is the truncated branch's: .c-sig .m ellipsizes by
+                // design, so a long one is otherwise unrecoverable without opening the
+                // drawer — the old .c-branch .bn carried the same title.
+                : <span className={`${b.mono ? "m" : ""} ${b.tone ?? ""}`.trim()} title={b.title ?? (b.mono ? b.text : undefined)}>{b.text}</span>}
+            </React.Fragment>
+          ))}
+        </div>
+      ) : null}
+
+      {/* One hairline, so it means one thing: identity and facts above it, live
+          state below. */}
+      <hr className="c-hr" />
+      <div className="c-st">
+        <span className={`sdot tone-${sv.tone} ${sv.tone === "working" ? "pulse" : ""}`} />
+        <span className={`status tone-${sv.tone}`}>{sv.text}</span>
+        {/* The age, and deliberately nothing else. Spend does NOT come back here:
+            a66c543 took the card's figure away because a per-card number the reader
+            cannot act on competed with the state line and the failure rows, which
+            they can, and two tests in the suite pin that. The drawer owns spend.
+            Its own title, in words, because the state text to the left also ends in
+            a duration (the last activity) and these are different clocks. */}
+        <span className="c-meta">
+          <span className="age" title={`launched ${timeAgo(r.run.createdAt)}`}>{timeAgo(r.run.createdAt)}</span>
+        </span>
+      </div>
+
+      <div className="c-foot2" onClick={(e) => e.stopPropagation()}>
+        <button
+          className={`act primary ${r.windowOpen ? "live" : ""}`}
+          title={r.windowOpen ? "Open now — Open focuses the window already running this task" : "Open this task's workspace"}
+          onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "open", ...(agent?.repo ? { repo: agent.repo } : {}) })}
+        >
+          Open
+        </button>
+        <button className="act" title="Show everything this task changed, file by file"
+          onClick={() => send({ type: "deck:inspect", key: r.run.key, action: "diff", ...(agent?.repo ? { repo: agent.repo } : {}) })}>
+          Diff
+        </button>
       </div>
     </div>
   );
@@ -443,7 +326,6 @@ function Card({ r, prReviewStatus, onForget, agent, agents, column, sourceLabel 
 export function DeckApp(): JSX.Element {
   const [runs, setRuns] = React.useState<RunStatus[]>([]);
   const [ghNote, setGhNote] = React.useState<string | null>(null);
-  const [prReviewStatus, setPrReviewStatus] = React.useState("");
   const [syncedAt, setSyncedAt] = React.useState<number | null>(null);
   const [, forceTick] = React.useState(0);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string; action?: { label: string; url: string } }[]>([]);
@@ -457,6 +339,15 @@ export function DeckApp(): JSX.Element {
   const [staleCount, setStaleCount] = React.useState(0);
   // See DEFAULT_SOURCE_LABEL's own comment for why "Jira" rather than "".
   const [sourceLabel, setSourceLabel] = React.useState(DEFAULT_SOURCE_LABEL);
+  /** Mirrors `agentFlow.deck.showTokenTotal`. Starts false so the header tile is
+   * absent on the very first paint, before any deck:runs has arrived — the
+   * setting is off by default, and flashing a total that then vanishes would be
+   * worse than never showing it. */
+  const [showTokenTotal, setShowTokenTotal] = React.useState(false);
+  /** run key → usage read on demand for its drawer, or null when unreadable.
+   * A key absent from this map means "not asked yet or still waiting", which the
+   * drawer renders differently from both a zero total and a failed read. */
+  const [lazyUsage, setLazyUsage] = React.useState<Record<string, UsageTotals | null>>({});
   const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean; reviewWrites: boolean; loading: boolean }>(
     { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false, loading: false },
   );
@@ -498,6 +389,10 @@ export function DeckApp(): JSX.Element {
   const [branchCi, setBranchCi] = React.useState<Record<string, BranchCiStatus>>({});
   const [orchEnabled, setOrchEnabled] = React.useState(false);
   const [openFlowId, setOpenFlowId] = React.useState<string | null>(null);
+  /** The selected card's `DeckCard.id`, not a run key: the Agents lens renders
+   * one card per session, so two cards can share a run and a key could not tell
+   * them apart. */
+  const [selId, setSelId] = React.useState<string | null>(null);
   /** The flow list the last `deck:flows` post carried. The message handler below is
    * registered once (`[]` deps, because re-running it would re-post `deck:ready`), so
    * the `flows` state variable it closes over never advances past `[]` — and telling
@@ -516,10 +411,15 @@ export function DeckApp(): JSX.Element {
         setRuns(m.runs);
         setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
-        setPrReviewStatus(m.prReviewStatus);
         setSourceLabel(m.sourceLabel);
+        setShowTokenTotal(m.showTokenTotal);
         setSyncedAt(Date.now());
         setHasLoaded(true);
+      } else if (m.type === "deck:usage") {
+        // Keyed rather than a single "current drawer" slot: a reply can land after
+        // the user has moved to another card, and dropping it would leave the new
+        // drawer showing a figure that belongs to the old one.
+        setLazyUsage((u) => ({ ...u, [m.key]: m.usage }));
       } else if (m.type === "deck:grouping") {
         setGrouping(m.grouping);
       } else if (m.type === "toast") {
@@ -603,9 +503,18 @@ export function DeckApp(): JSX.Element {
         flowsRef.current = posted;
         seenFlowsRef.current = true;
         setFlows(posted);
+        // A pure read of `posted`/`old`/`seenBefore` — computed here, outside the
+        // updater below, rather than inside it. React's contract is that an
+        // updater is pure and may be replayed; a fresh flow auto-opening the
+        // Orchestrator is a one-time side effect (clearing `selId`) that must
+        // happen exactly once per post, not once per replay.
+        const fresh = seenBefore ? posted.find((f) => !old.some((o) => o.id === f.id)) : undefined;
+        // The two drawers share the same fixed slot at z-index 40 (see .dd and
+        // .orch in deckStyles.ts) — a fresh flow auto-opening the Orchestrator
+        // must close any open card detail, or both mount at once.
+        if (fresh) setSelId(null);
         setOpenFlowId((cur) => {
           if (cur && posted.some((f) => f.id === cur)) return cur;
-          const fresh = seenBefore ? posted.find((f) => !old.some((o) => o.id === f.id)) : undefined;
           return fresh ? fresh.id : null;
         });
         setOrchEnabled(m.enabled);
@@ -630,6 +539,13 @@ export function DeckApp(): JSX.Element {
     };
   }, []);
 
+  React.useEffect(() => {
+    if (selId === null) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setSelId(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selId]);
+
   // One list either way, so the columns, counts, stat tiles and sort all read
   // from the same shape. Workspaces mode is today's board exactly: one card per
   // run, agent nested, bucketed by the run's own column.
@@ -640,7 +556,10 @@ export function DeckApp(): JSX.Element {
   const closed = runs.filter((r) => r.shelf === "closed");
   const cards: DeckCard[] = grouping === "agents"
     ? projectCards(live)
-    : live.map((r) => ({ id: `w:${r.run.key}`, status: r, agent: null, agents: r.agents, column: r.column }));
+    : live.map((r) => ({
+        id: `w:${r.run.key}`, status: r, agent: null, agents: r.agents,
+        column: r.column, lane: laneOf(r, r.column),
+      }));
   // The label mirrors the card's own key chip, so the strip and the board name
   // the same run the same way.
   const closedRows: ClosedRow[] = closed.map((r) => ({
@@ -649,11 +568,36 @@ export function DeckApp(): JSX.Element {
     label: isTicketRun(r.run) ? r.run.key : runKind(r.run) === "notepad" ? "notepad" : "explore",
     closedAt: r.run.closedAt ?? null,
   }));
+  // Resolved from the freshly projected list, so a selection whose run was
+  // forgotten, closed, or re-bucketed into a different card id clears itself
+  // rather than leaving the drawer rendering against a card that is no longer
+  // on the board.
+  const selected = selId === null ? null : cards.find((c) => c.id === selId) ?? null;
+  React.useEffect(() => {
+    if (selId !== null && selected === null) setSelId(null);
+  }, [selId, selected]);
+
+  // Ask for the selected run's usage once per drawer opening. This is the only
+  // thing that triggers a transcript read on a default install, which is the whole
+  // point of it being here rather than on a timer: a session that never opens a
+  // drawer parses nothing. Re-asking on each open is deliberate — the host's
+  // reader is incremental, so a second open costs a stat per file, and a stale
+  // figure on a task that has since burned more tokens would be worse.
+  const selRunKey = selected?.status.run.key ?? null;
+  React.useEffect(() => {
+    if (selRunKey === null) return;
+    send({ type: "deck:usageFor", key: selRunKey });
+  }, [selRunKey]);
+
   const needs = cards.filter((c) => c.column === "needs").length;
+  const mergeable = cards.filter((c) => c.column === "merge").length;
   // With arming real, the count that matters on the chip is how many flows are
   // armed — that is the thing quietly spending your attention while the drawer
   // is closed, not how many flows merely exist.
   const armedCount = flows.filter((f) => f.armed).length;
+  // The board's own total, not "today": a day figure would need per-line
+  // timestamps and would print a number that disagrees with the cards under it.
+  const boardEq = live.reduce((s, x) => s + (x.usage ? weightedEq(x.usage) : 0), 0);
 
   const forget = React.useCallback((key: string) => {
     // Optimistic: the card leaves now rather than after a full refresh (a connector
@@ -663,17 +607,38 @@ export function DeckApp(): JSX.Element {
     send({ type: "deck:forget", key });
   }, []);
 
+  // One card, wherever it lands — a lane renders exactly what an unlaned column
+  // does, so a lane can never quietly grow its own kind of card.
+  const card = (c: DeckCard): JSX.Element => (
+    <Card key={c.id} r={c.status} agent={c.agent} column={c.column} sourceLabel={sourceLabel}
+      selected={c.id === selId}
+      onSelect={() => { setOpenFlowId(null); setSelId((cur) => (cur === c.id ? null : c.id)); }} />
+  );
+
   return (
     <>
       <div className="hd">
         <div className="title">In-flight<span className="sub">everything you've launched</span></div>
-        {/* The three board columns and nothing else. "To review" lived here too,
-            six pixels above the review strip that renders its own count; "Total"
-            was the sum of these three, over a board showing every card it counted. */}
+        {/* The board columns and nothing else. "To review" lived here too, six
+            pixels above the review strip that renders its own count; "Total" was
+            the sum of the rest, over a board showing every card it counted.
+            Merge earns a tile for the same reason it earned a column: between
+            the press and the wrap-up, it is the number here you can drive to
+            zero today. */}
         <div className="stats">
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "progress").length}</span><span className="l">In progress</span></div>
           <div className={`stat ${needs > 0 ? "attn" : ""}`}><span className="n">{needs}</span><span className="l">Action required</span></div>
           <div className="stat"><span className="n">{cards.filter((c) => c.column === "review").length}</span><span className="l">In review</span></div>
+          <div className={`stat ${mergeable > 0 ? "up" : ""}`}><span className="n">{mergeable}</span><span className="l">Merge</span></div>
+          {showTokenTotal && boardEq > 0 && (
+            <div
+              className="stat"
+              title="Effort-weighted tokens across every session on the board (input×1, cache-write×1.25, cache-read×0.1, output×5)"
+            >
+              <span className="n">{formatEq(boardEq)}<span className="u">eq</span></span>
+              <span className="l">Tokens on board</span>
+            </div>
+          )}
         </div>
         <div className="sp" />
         {orchEnabled && (
@@ -681,6 +646,7 @@ export function DeckApp(): JSX.Element {
             type="button"
             className={`ctl orch-chip${armedCount > 0 ? " armed" : ""}`}
             onClick={() => {
+              setSelId(null);
               if (flows.length === 0) send({ type: "flow:create" });
               else setOpenFlowId((cur) => (cur ? null : flows[0].id));
             }}
@@ -720,7 +686,10 @@ export function DeckApp(): JSX.Element {
           </button>
         )}
         <button type="button" className="ctl" title={`Re-read git, ${sourceLabel} and PR state now`} onClick={() => send({ type: "deck:refresh" })}>
-          <span className={`spin ${busy ? "on" : ""}`}>⟳</span>
+          {/* At rest this stays the ⟳: a static logo sitting on a button reads as
+              branding rather than as something you can press. In flight the mark
+              takes over, and its motion is the same motion every other wait uses. */}
+          {busy ? <LoadingMark size={12} /> : <span className="spin">⟳</span>}
           <span className="synced">{busy ? "syncing…" : syncedAt ? `synced ${timeAgo(syncedAt)}` : "refresh"}</span>
         </button>
       </div>
@@ -765,7 +734,7 @@ export function DeckApp(): JSX.Element {
 
       {!hasLoaded ? (
         <div className="empty">
-          <span className="spin on" aria-hidden="true">⟳</span>
+          <LoadingMark size={28} />
           <div className="big">Loading…</div>
         </div>
       ) : live.length === 0 && closed.length === 0 ? (
@@ -774,7 +743,7 @@ export function DeckApp(): JSX.Element {
           <div>Take a task from the Agent Flow Deck Tasks pool and it shows up here.</div>
         </div>
       ) : (
-        <div className="board">
+        <div className={`board${selected ? " dd-open" : ""}`}>
           {COLUMNS.map((col) => {
             // Sorting reads the agent's own activity on an agent card and the run's
             // reduction on a parked one, so a column still orders by "most
@@ -786,18 +755,31 @@ export function DeckApp(): JSX.Element {
                 ((a.agent?.activity ?? a.status.agent).lastActivityMs ?? 0) ||
                 b.status.run.createdAt - a.status.run.createdAt);
             return (
-              <section className="col" key={col.id}>
+              // One custom property carries the zone's hue to every rule under it
+              // — the dot, its halo, the header rule and the body's tint — so a
+              // column's colour is set once here and never restated in the sheet.
+              <section className="col" key={col.id} style={{ ["--zone" as string]: `var(${col.varName})` }}>
                 <div className="col-hd">
-                  <span className="dot" style={{ background: `var(${col.varName})` }} />
+                  <span className={`dot${col.glow ? " glow" : ""}`} />
                   <span className="nm">{col.label}</span>
-                  <span className="ct">{list.length}</span>
                   <span className="rule" />
+                  <span className="ct">{list.length}</span>
                 </div>
                 <div className="col-body">
-                  {list.map((c) => (
-                    <Card key={c.id} r={c.status} prReviewStatus={prReviewStatus}
-                      onForget={forget} agent={c.agent} agents={c.agents} column={c.column} sourceLabel={sourceLabel} />
-                  ))}
+                  {LANES[col.id]
+                    ? LANES[col.id]!.flatMap((lane) => {
+                        const inLane = list.filter((c) => c.lane === lane.id);
+                        if (inLane.length === 0) return [];
+                        return [
+                          <div className="lane-hd" key={`h:${lane.id}`}>
+                            <span className="nm">{lane.label}</span>
+                            <span className="ct">{inLane.length}</span>
+                            <span className="rule" />
+                          </div>,
+                          ...inLane.map(card),
+                        ];
+                      })
+                    : list.map(card)}
                 </div>
               </section>
             );
@@ -860,6 +842,19 @@ export function DeckApp(): JSX.Element {
           onResumeApprove={(id) => send({ type: "flow:resumeApprove", id })}
           onResumeDisarm={(id) => send({ type: "flow:resumeDisarm", id })}
           onResetEdge={(id, edgeId) => send({ type: "flow:resetEdge", id, edgeId })}
+        />
+      )}
+
+      {selected && (
+        <DeckDetail
+          card={selected}
+          sourceLabel={sourceLabel}
+          /* Eager total first when the header sweep is on, else the on-demand read.
+             `undefined` means still waiting; `null` means the host tried and
+             failed. The drawer renders three distinct states from that. */
+          usage={selected.status.usage ?? lazyUsage[selected.status.run.key]}
+          onClose={() => setSelId(null)}
+          onForget={forget}
         />
       )}
     </>

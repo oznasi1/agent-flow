@@ -40,10 +40,6 @@ describe("deriveActivity", () => {
     expect(deriveActivity([userMsg, asstTool], NOW - 10_000, NOW).state).toBe("working");
   });
 
-  it("reads a stale tool_use as idle", () => {
-    expect(deriveActivity([userMsg, asstTool], NOW - 10 * 60_000, NOW).state).toBe("idle");
-  });
-
   it("reads a fresh user reply as working", () => {
     expect(deriveActivity([asstTool, userMsg], NOW - 5_000, NOW).state).toBe("working");
   });
@@ -56,6 +52,38 @@ describe("deriveActivity", () => {
     const a = deriveActivity([userMsg, asstTool], NOW - 10_000, NOW);
     expect(a.slug).toBe("export-streaming");
     expect(a.lastActivityMs).toBe(NOW - 10_000);
+  });
+
+  // A tool call that has not returned in 45s: the agent is at a permission
+  // prompt, or a long command is still running. The transcript cannot tell the
+  // two apart, so the label is true under either reading. Before this, the one
+  // genuinely stuck card on the board rendered in the calmest tone there is.
+  it("reads a stale tool_use as stalled", () => {
+    expect(deriveActivity([userMsg, asstTool], NOW - 10 * 60_000, NOW).state).toBe("stalled");
+  });
+
+  it("still reads a fresh tool_use as working — a tool that just started is not stalled", () => {
+    expect(deriveActivity([userMsg, asstTool], NOW - 10_000, NOW).state).toBe("working");
+  });
+
+  it("reads a stale trailing user line as idle, not stalled — no tool is outstanding", () => {
+    expect(deriveActivity([asstTool, userMsg], NOW - 10 * 60_000, NOW).state).toBe("idle");
+  });
+
+  it("marks an unanswered tool_use as midWork", () => {
+    expect(deriveActivity([userMsg, asstTool], NOW - 10 * 60_000, NOW).midWork).toBe(true);
+  });
+
+  it("marks an unanswered user line as midWork — the agent owes a reply", () => {
+    expect(deriveActivity([asstTool, userMsg], NOW - 10 * 60_000, NOW).midWork).toBe(true);
+  });
+
+  it("does not mark a finished turn as midWork", () => {
+    expect(deriveActivity([userMsg, asstEnd], NOW - 10 * 60_000, NOW).midWork).toBe(false);
+  });
+
+  it("does not mark an empty transcript as midWork", () => {
+    expect(deriveActivity([], NOW, NOW).midWork).toBeFalsy();
   });
 });
 

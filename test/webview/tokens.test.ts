@@ -4,6 +4,7 @@ import { CSS } from "../../src/webview/styles";
 import { DECK_CSS } from "../../src/webview/deckStyles";
 import { MARKETPLACE_CSS } from "../../src/webview/marketplaceStyles";
 import { ORCH_CSS } from "../../src/webview/orchestratorStyles";
+import { CYCLE_MS } from "../../src/webview/markGeometry";
 
 /** The tokens tokens.ts owns. A surface may USE these; none may DECLARE them. */
 const OWNED = [
@@ -48,15 +49,37 @@ const ruleBlocks = (sheet: string): { selector: string; body: string }[] =>
     body: m[2],
   }));
 
-// Set per-card as an inline style in DeckApp.tsx (a computed value, not a shared
-// token), so it never appears as a declaration in any stylesheet's own text —
-// excluded from the orphan check the same way --vscode-* variables are.
-const RUNTIME_ONLY = ["--accent"];
+// Set as inline styles in DeckApp.tsx (computed values, not shared tokens), so
+// they never appear as a declaration in any stylesheet's own text — excluded from
+// the orphan check the same way --vscode-* variables are. `--accent` is per-card;
+// `--zone` is per-board-column, and carries that zone's hue to every rule under it.
+const RUNTIME_ONLY = ["--accent", "--zone"];
 
 describe("tokens.ts", () => {
   it("declares every token it owns", () => {
     const declared = new Set(declarationsIn(TOKENS_CSS));
     expect(OWNED.filter((t) => !declared.has(t))).toEqual([]);
+  });
+
+  // BASE_CSS turns every animation off under prefers-reduced-motion, which freezes
+  // the loader on whatever its unanimated rule says. The comet's dim phase is nearly
+  // invisible, so the rule has to rest LIT and let the keyframes dim from there —
+  // otherwise reduced-motion users get a blank hole where the mark should be.
+  it("rests the loading mark lit, so reduced motion leaves a visible mark", () => {
+    const rule = ruleBlocks(BASE_CSS).find((r) => r.selector === ".lmark .ldot");
+    expect(rule).toBeDefined();
+    // The dots move because of this one declaration — the per-dot delays only decide
+    // WHICH dot is lit when. Drop it and every loader in the product silently becomes
+    // a static logo, with nothing else in the suite noticing. The duration is matched
+    // against markGeometry's constant because that is the pairing the stagger assumes.
+    expect(rule!.body).toMatch(new RegExp(`animation:\\s*mark-comet\\s+${CYCLE_MS}ms`));
+    const opacity = Number(/opacity:\s*([\d.]+)/.exec(rule!.body)?.[1]);
+    const frames = /@keyframes mark-comet[^\n]*/.exec(BASE_CSS)![0];
+    const dimmest = Math.min(
+      ...[...frames.matchAll(/opacity:\s*([\d.]+)/g)].map((m) => Number(m[1])),
+    );
+    expect(opacity).toBeGreaterThan(dimmest);
+    expect(opacity).toBeGreaterThanOrEqual(0.8);
   });
 
   it("carries the shared reset, not the tokens", () => {
@@ -124,6 +147,26 @@ describe.each(SURFACES)("%s sheet", (_name, sheet) => {
   it("carries no reset of its own", () => {
     expect(sheet).not.toContain("box-sizing");
     expect(sheet).not.toContain("prefers-reduced-motion");
+  });
+});
+
+describe("attention hue", () => {
+  // Regression guard, and the reason --c-attn is the one status hue not wired to
+  // the host's chart palette. VS Code registers charts.orange as inheriting from
+  // minimap.findMatchHighlight instead of a literal, and stock Cursor Dark sets
+  // that to #88C0D044 — 27%-alpha pale blue, grey once composited. The var()
+  // fallback cannot save it: the variable is defined there, just wrong. Anyone
+  // reaching for var(--vscode-charts-orange) again reintroduces a grey Action
+  // required column in Cursor.
+  it("fixes the hue instead of deriving it from charts.orange", () => {
+    expect(TOKENS_CSS).toContain("--c-attn:     #e0913a");
+    expect(stripComments(TOKENS_CSS)).not.toContain("--vscode-charts-orange");
+  });
+
+  // #e0913a is 2.54:1 on white. The sibling hues stay theme-derived, so they get
+  // their light values from the host; this one has to carry its own.
+  it("declares a light override that passes contrast", () => {
+    expect(TOKENS_CSS).toMatch(/body\.vscode-light\s*{[^}]*--c-attn:\s*#a85c00/);
   });
 });
 
@@ -201,6 +244,16 @@ describe("brand accent", () => {
   // does, and compare it exactly, so `--brand-ink` cannot stand in for `--brand`.
   const spendsBrandFill = (body: string): boolean =>
     [...body.matchAll(/var\(\s*(--[a-z0-9-]+)/g)].some((m) => m[1] === "--brand");
+
+  // SURFACES covers the five surface sheets, and BASE_CSS is none of them — but it
+  // is injected into all three webviews, so a --brand spend added here reaches every
+  // surface while the per-sheet allowlists above stay green. The loading mark is the
+  // one rule that may spend it; this keeps BASE_CSS from becoming the blind spot the
+  // allowlists exist to prevent.
+  it("spends --brand in BASE_CSS on exactly the loading mark", () => {
+    const spenders = ruleBlocks(BASE_CSS).filter((r) => spendsBrandFill(r.body)).map((r) => r.selector);
+    expect(spenders).toEqual([".lmark .ldot"]);
+  });
 
   it.each(SURFACES)("%s spends --brand on exactly its agreed selectors", (name, sheet) => {
     const actual = new Set(

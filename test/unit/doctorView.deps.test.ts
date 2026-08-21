@@ -8,13 +8,19 @@ import * as path from "path";
 // and what defaultDeps actually calls on the connector and on getConfig().
 vi.mock("../../src/config", () => ({ getConfig: vi.fn() }));
 vi.mock("../../src/engine/repos", () => ({ discoverRepos: vi.fn(() => []) }));
-vi.mock("../../src/engine/pr/provider", () => ({ probeGh: vi.fn(async () => null) }));
+vi.mock("../../src/engine/forge/registry", () => ({
+  resolveForge: vi.fn(() => ({
+    label: "GitHub",
+    cli: { name: "gh", installUrl: "https://cli.github.com" },
+    probe: vi.fn(async () => null),
+  })),
+}));
 vi.mock("../../src/engine/pr/which", () => ({ resolveBin: vi.fn(() => null) }));
 vi.mock("../../src/engine/runs", () => ({ defaultRunsDir: vi.fn(() => "/runs"), readRuns: vi.fn(() => []) }));
 
 import { getConfig } from "../../src/config";
 import { discoverRepos } from "../../src/engine/repos";
-import { probeGh } from "../../src/engine/pr/provider";
+import { resolveForge } from "../../src/engine/forge/registry";
 import { resolveBin } from "../../src/engine/pr/which";
 import { readRuns } from "../../src/engine/runs";
 import { defaultDeps } from "../../src/doctorView";
@@ -73,6 +79,12 @@ describe("defaultDeps — the config slice", () => {
       ...CFG,
     });
   });
+
+  it("passes agentProvider through unresolved — collectInputs' hostProviders is what lets Doctor show every host agent under ask, not a guess made here", () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" } as never);
+    const connector = fakeConnector();
+    expect(defaultDeps(connector, () => undefined).config().agentProvider).toBe("ask");
+  });
 });
 
 describe("defaultDeps — delegation", () => {
@@ -97,9 +109,33 @@ describe("defaultDeps — delegation", () => {
     expect(resolveBin).toHaveBeenCalledWith("gh");
   });
 
-  it("reuses probeGh rather than re-implementing the gh check", async () => {
-    vi.mocked(probeGh).mockResolvedValue({ kind: "signed-out", detail: "exit 1" });
-    await expect(deps().gh()).resolves.toEqual({ kind: "signed-out", detail: "exit 1" });
+  it("describes the forge through resolveForge rather than re-implementing it", () => {
+    expect(deps().forge()).toEqual({ label: "GitHub", cli: "gh", installUrl: "https://cli.github.com" });
+    expect(resolveForge).toHaveBeenCalled();
+  });
+
+  // Doctor is the surface built to report exactly this class of misconfiguration,
+  // and it runs independently of the Deck panel — so `resolveForge`'s
+  // fallback-to-github line must reach Doctor's OWN logger. With a swallowing
+  // `() => {}` here, `agentFlow.forge: "gitla"` produced a report reading
+  // "GitHub / gh: signed in" with nothing, anywhere, saying the setting was ignored.
+  it.each(["forge", "forgeProbe"] as const)("passes Doctor's own logger to resolveForge from %s", (member) => {
+    const log = vi.fn();
+    const d = defaultDeps(fakeConnector(), log);
+    if (member === "forge") d.forge();
+    else void d.forgeProbe();
+    expect(vi.mocked(resolveForge).mock.calls.at(-1)?.[1]).toBe(log);
+  });
+
+  it("reuses the forge's own probe rather than re-implementing the gh check", async () => {
+    const probe = vi.fn(async () => ({ kind: "signed-out" as const, detail: "exit 1" }));
+    vi.mocked(resolveForge).mockReturnValue({
+      label: "GitHub",
+      cli: { name: "gh", installUrl: "https://cli.github.com" },
+      probe,
+    } as never);
+    await expect(deps().forgeProbe()).resolves.toEqual({ kind: "signed-out", detail: "exit 1" });
+    expect(probe).toHaveBeenCalled();
   });
 
   it("counts repos and git checkouts from discoverRepos, honouring the blocklist", () => {

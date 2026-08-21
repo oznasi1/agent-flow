@@ -1,5 +1,6 @@
 import * as React from "react";
 import type { TicketKind } from "./helpers";
+import { runKind } from "../types";
 
 // Shared glyphs used across the sidebar's controls. One file so PlayIcon (used by
 // both the Tasks tab's Take button and the Notepad's Start button) has a single
@@ -82,5 +83,72 @@ const TYPE_GLYPHS: Record<TicketKind, JSX.Element> = {
 export const TypeIcon = ({ kind, label }: { kind: TicketKind; label: string }): JSX.Element => (
   <span className={`ty ty-${kind}`} role="img" aria-label={`Type: ${label}`} title={`Type: ${label}`}>
     <svg width="12" height="12" viewBox="0 0 12 12">{TYPE_GLYPHS[kind]}</svg>
+  </span>
+);
+
+/** What a Deck card is, as `runKind` reports it. Derived from the function rather
+ * than restated, so a sixth kind cannot be added to `types.ts` without the
+ * compiler demanding a glyph for it here. */
+export type CardKind = ReturnType<typeof runKind>;
+
+/** The kind in words. It is the accessible name and the tooltip: the glyph is the
+ * only thing on the card that says which kind it is, so this is not decoration. */
+export const CARD_KIND_LABEL: Record<CardKind, string> = {
+  task: "Ticket",
+  notepad: "Notepad note",
+  explore: "Explore place",
+  review: "PR review",
+  local: "Untracked local place",
+};
+
+// Card-kind glyphs. 14×14 in a 16-unit box, currentColor, hue supplied by the
+// .av.k-<kind> rule in deckStyles.ts. Same reasoning as TYPE_GLYPHS above: inline
+// SVG rather than image assets, so there is no asWebviewUri plumbing and no
+// widened CSP for what amounts to five shapes.
+const CARD_KIND_GLYPHS: Record<CardKind, JSX.Element> = {
+  // A tag: the tracked thing on the other end of the card.
+  task: (
+    <path
+      fill="currentColor"
+      d="M7.6 2H13a1 1 0 0 1 1 1v5.4a1 1 0 0 1-.29.71l-5 5a1 1 0 0 1-1.42 0L2.29 9.11a1 1 0 0 1 0-1.42l5-5A1 1 0 0 1 7.6 2zm3.15 1.9a1.15 1.15 0 1 0 0 2.3 1.15 1.15 0 0 0 0-2.3z"
+    />
+  ),
+  // A written-on page. One path, evenodd: the ruled lines are real holes, so the
+  // glyph needs no second colour to knock them out.
+  notepad: (
+    <path fill="currentColor" fillRule="evenodd" d="M3.4 1.8h9.2v12.4H3.4zm1.6 2.4v1.3h6V4.2zm0 3v1.3h6V7.2zm0 3v1.3h3.6v-1.3z" />
+  ),
+  // A magnifier: an Explore run is a question, not a change.
+  explore: (
+    <g fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+      <circle cx="6.9" cy="6.9" r="4.1" />
+      <path d="M10.1 10.1l3.3 3.3" />
+    </g>
+  ),
+  // Two nodes joining a third — the same fork git hosts use for a pull request.
+  review: (
+    <g fill="none" stroke="currentColor" strokeWidth="1.5">
+      <circle cx="4.3" cy="4" r="1.9" />
+      <circle cx="4.3" cy="12" r="1.9" />
+      <circle cx="11.7" cy="8" r="1.9" />
+      <path d="M4.3 5.9v4.2M6.2 4h2.1a1.5 1.5 0 0 1 1.5 1.5v1" strokeLinecap="round" />
+    </g>
+  ),
+  // A pin: a place on this machine, discovered rather than launched.
+  local: (
+    <path
+      fill="currentColor"
+      fillRule="evenodd"
+      d="M8 1.6a4.5 4.5 0 0 1 4.5 4.5c0 3.1-4.5 8.3-4.5 8.3S3.5 9.2 3.5 6.1A4.5 4.5 0 0 1 8 1.6zm0 2.7a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6z"
+    />
+  ),
+};
+
+/** What this card is, as a hued glyph in a neutral tile. Leads the Deck card and
+ * the detail drawer's header, so a selected card and its detail open with the
+ * same mark. */
+export const CardKindIcon = ({ kind }: { kind: CardKind }): JSX.Element => (
+  <span className={`av k-${kind}`} role="img" aria-label={CARD_KIND_LABEL[kind]} title={CARD_KIND_LABEL[kind]}>
+    <svg width="14" height="14" viewBox="0 0 16 16">{CARD_KIND_GLYPHS[kind]}</svg>
   </span>
 );

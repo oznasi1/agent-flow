@@ -7,6 +7,429 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.7] — 2026-08-21
+
+### Fixed
+
+- **A note's screenshot could be replaced by the next note's, under the agent already
+  reading it.** Attachments were staged at `.pick-task/images/<filename>`, and every image
+  pasted into the notepad is called `image.png` — so two notes taken into the same checkout
+  landed on the same file, the second launch silently overwriting the first. An agent opens
+  that file when it gets to it rather than when it starts, so the one that had been running
+  longest was the one most likely to be handed someone else's screenshot and to go and
+  work on it. Images are now staged per run — `.pick-task/images/<run key>/<filename>` —
+  which separates the two without deleting anything, since the other agent may still be
+  working. Nothing prunes the directory, as before; `.pick-task/` stays git-excluded whole.
+
+## [0.33.6] — 2026-08-21
+
+### Changed
+
+- **A multi-repo card names its repos in a tooltip, and the drawer no longer folds
+  them away.** The card's `4 repos` bit said how many repos a task spanned but never
+  which, and a card has no room to list them — so the count now carries the names in
+  its own tooltip, one per line, read off the same array the count comes from, which
+  is what stops the tooltip ever listing a different number than the label claims.
+  The drawer had the opposite problem: it has the room, but its repo chips sat behind
+  a hover-or-click fold, so a reader who opened the drawer to find out which repos a
+  task spans had to reach for a second gesture to get the answer. The fold is gone —
+  the workspace is a plain label, still tooltipped with its `.code-workspace` path
+  since that is the only thing telling two same-named workspaces apart, and every
+  repo chip below it is visible at rest with its own git signal.
+
+## [0.33.5] — 2026-08-21
+
+### Fixed
+
+- **The Action required column was grey in Cursor, not amber.** `--c-attn` resolved
+  through `--vscode-charts-orange`, and VS Code registers `charts.orange` as inheriting
+  from `minimap.findMatchHighlight` rather than carrying a literal default. The stock
+  Cursor Dark theme overrides that to `#88C0D044` — pale blue at 27% alpha, which
+  composites over the card ground to `#3e4d51`, a flat grey. The `var()` fallback never
+  fired because the variable is defined there, just wrong, so every surface drawing the
+  column accent, its glow, the Action required stat and the Highest priority chip lost
+  its hue. The amber is now fixed rather than derived, with a light-theme variant, since
+  a card's one loud colour cannot be left to the host to define.
+
+## [0.33.4] — 2026-08-21
+
+### Added
+
+- **A `CLAUDE.md`, so the repo's rules travel with a checkout.** There wasn't one, and
+  `.claude/` is git-ignored, which left every contributor and coding agent to rediscover
+  the gates that actually bite here: `npm run build` is the only check that fully sees a
+  webview module reaching a Node builtin, `test/unit/compat.test.ts` freezes the released
+  settings, storage and telemetry surface, and the connector, forge and agent-seed seams
+  each carry a rule about what may import what. It states those alongside the commands,
+  the bundle layout and where cross-window state lives, and — like `CONTRIBUTING.md` — is
+  excluded from the packaged `.vsix`. Nothing about the extension itself changed: what
+  this release ships is identical to 0.33.3.
+
+## [0.33.3] — 2026-08-21
+
+### Fixed
+
+- **The README's VS Marketplace badge rendered as a broken image.** It was served by
+  vsmarketplacebadges.dev, which now answers HTTP 405, and shields.io has retired its
+  `visual-studio-marketplace` badge family outright. The badge now reads the version
+  from `package.json` on `main` (`img.shields.io/github/package-json/v`) — the same
+  value, since every merge to main is a release — keeping its label and its link to
+  the Marketplace listing.
+
+## [0.33.2] — 2026-08-20
+
+### Fixed
+
+- **The logo was invisible in VS Code's extension page.** 0.33.1 fixed a white wordmark on
+  the Marketplace's white listing by making the dark-background lockup the `<img>`
+  fallback — which broke the mirror-image case, because VS Code's own extension page
+  ignores `<picture>` too *and* follows your editor theme. On a dark theme it took that
+  fallback and drew a near-black wordmark on near-black.
+
+  No single themed asset can serve both: `#F0F2F4` is 1.12:1 on white and `#16191C` is
+  1.07:1 on dark. So the fallback is now a third, theme-neutral lockup
+  (`media/logo-neutral.png`, graphite `#808A94`) that clears 3:1 on every ground we
+  actually render against — 3.51 on white, 4.69 on VS Code dark, 5.39 on GitHub dark —
+  while GitHub keeps both optimised per-theme lockups through its `<source>` elements.
+
+## [0.33.1] — 2026-08-20
+
+### Added
+
+- **One-click install, and a header that acts.** The README's badge row was three static
+  badges and no way to actually install anything — a reader who wanted the extension had to
+  find "Quick start" and build a `.vsix`. It now carries **Install in VS Code** (a
+  `vscode.dev/redirect` deep link) and **Install in Cursor** (Open VSX), a live version and
+  download-count badge, and a one-line nav to the guide, settings, privacy and changelog.
+  Static `VS Code ^1.90.0` is gone — the engine requirement is still under Requirements.
+  Badge sources are limited to vsce's trusted-SVG allowlist so packaging stays clean.
+
+- **Community health files.** `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1),
+  `SECURITY.md`, GitHub issue forms for bugs and feature requests, and a pull request
+  template. The security policy states scope explicitly, including what is deliberately
+  *out* of scope — notably that `{note}` substitution in Orchestrator commands is unquoted
+  by design and documented as such, so it is not a vulnerability report. Reporting for both
+  conduct and security goes through GitHub's private advisory form; no email address is
+  published.
+
+### Fixed
+
+- **The packaged `.vsix` could ship a task brief.** `.vscodeignore` excluded
+  `.claude/` but never `.pick-task/`, the directory Agent Flow writes task briefs into.
+  Any release packaged while a brief happened to be on disk carried it into the published
+  extension — the note or ticket title, the repos in scope, and the brief's prose — which
+  contradicts the promise that briefs stay local. Published versions to date are unaffected
+  (no brief existed on disk when they were built), but the next one would have been.
+
+- **The logo was invisible on the Marketplace.** The header's `<picture>` kept the
+  light-background wordmark in a `<source>` and the white one as the `<img>` fallback. The
+  Marketplace strips `<picture>` and `<source>` outright and its listing page is always
+  light, so every visitor got a white wordmark on white. (GitHub only survived it because
+  its `<themed-picture>` element does the swap in JS — native `<picture>` was already dead
+  there too, since GitHub wraps the `<img>` in a lightbox `<a>`, which stops it being the
+  direct child `<picture>` requires.) The fallback is now the light-background asset and
+  the dark one moved into the `<source>`, so all three surfaces resolve correctly.
+
+- **The docs said a red PR lands in Action required.** It has not since 0.31.0, which made
+  that column agent-signals-only and moved a blocked PR to In review's `fixes needed`
+  lane; the README was never updated to match. Corrected in the README and the new guide.
+
+### Changed
+
+- **A README you can finish.** It had grown to 625 lines and answered every question at
+  once — a feature tour, a 30-row settings reference and an edge-case manual, each
+  paragraph carrying caveats that only matter once you are already a user. It is now a
+  landing page: the pitch, the four panels, quick start, requirements, six settings and a
+  privacy summary. Nothing was dropped — the full behaviour of every panel moved to
+  [docs/GUIDE.md](docs/GUIDE.md), every setting to [docs/SETTINGS.md](docs/SETTINGS.md),
+  the data disclosure to [docs/PRIVACY.md](docs/PRIVACY.md), and the `src/` architecture
+  to [CONTRIBUTING.md](CONTRIBUTING.md) beside the conventions it explains.
+
+## [0.33.0] — 2026-08-19
+
+### Added
+
+- **`agentFlow.agentProvider` accepts `cursor`.** Seed a task straight into
+  Cursor's chat, or run `cursor-agent` in a terminal. Cursor only — a stored
+  `cursor` value falls back to Claude Code in every other editor, the same way
+  `copilot` already falls back outside VS Code. **Doctor** gains a Cursor group
+  alongside Copilot's.
+- **`agentFlow.agentProvider` accepts `ask`.** Pick the agent per launch instead
+  of fixing one setting. A batch asks once and uses that answer for every task
+  in it; Orchestrator rules and the Deck's unattended seed run with no picker to
+  show, so they always use Claude Code. Under `ask`, **Doctor** shows every
+  agent this host can run rather than guessing at one.
+## [0.32.0] — 2026-08-19
+
+### Added
+
+- **GitLab, wherever the Deck used to mean GitHub.** Set `agentFlow.forge` to
+  `gitlab` and the Deck reads merge requests through the `glab` CLI instead:
+  MR state, pipeline status and mergeability on the cards, the review-requests
+  strip filled from `reviews_for_me`, branch-CI verdicts for an Orchestrator
+  `branch-ci-passed` rule, and — with `agentFlow.reviewWrites` on — approve,
+  comment and request-changes from the expanded row. **Address PR** and **Review
+  with agent** seed a GitLab-flavoured prompt (`glab mr checkout`, "merge
+  request") unless you have written your own, which is always kept. Doctor
+  reports on whichever forge is configured, and names its CLI in every message.
+  Two GitLab facts the Deck cannot invent: there is no "changes requested"
+  state to read back, so arming a flow says that rule can't fire, and
+  `request-changes` posts your message and withdraws any approval you had —
+  disclosed in the confirmation dialog before anything is sent. See
+  [docs/FORGES.md](docs/FORGES.md) for the full list of what differs.
+
+  `agentFlow.forge` ships as `github`, and an existing install is unaffected
+  until you change it.
+
+## [0.31.0] — 2026-08-19
+
+### Changed
+
+- **Action required now means an agent is asking you.** A pull request with red
+  CI, requested changes or a conflict used to be filed under Action required
+  alongside agents that had ended their turn, so one column mixed "Claude wants
+  you" with "GitHub wants you". Those PRs move to **In review**, which is split
+  into `fixes needed` and `waiting on review`. Action required keeps only the
+  agent signals: ended turn, stalled, exited. Nothing about precedence changed —
+  a blocked PR still outranks the merge you have yet to press and the live agent
+  read, so the same card leads the same board, one column to the right.
+- **In progress is split into `working` and `parked`.** The column always held
+  both a live agent and the in-flight catch-all — a run whose agent went quiet,
+  or one with no agent at all. It now says which is which instead of stacking
+  them together.
+- A card sitting in `fixes needed` with nobody home reads **pr blocked** in the
+  attention tone rather than the parked grey, the way it did in Action required.
+- **A parked card with nothing behind it leaves the board.** An open ticket on
+  its own no longer holds a run in flight: with no session open, no PR, and
+  nothing uncommitted or unpushed, the card moves to Recently closed, which
+  offers reopen and forget. Work still holds a card — a live session, an open PR,
+  a merge to wrap up, or anything on disk you could lose, all unchanged. A run
+  launched in the last ten minutes also stays put, so a task you just took cannot
+  flash into Recently closed while its window is still opening.
+
+## [0.30.1] — 2026-08-18
+
+No functional change. Re-released so the packaged build can be installed over an
+older local install.
+
+## [0.30.0] — 2026-08-18
+
+### Changed
+
+- **A ticket with children offers to work them, without a setting to turn on
+  first.** `agentFlow.childWorktrees` now defaults to on, so taking a story that
+  has subtasks asks how you want to work them — a worktree and session per child,
+  one orchestrator session dispatching a subagent per child, or just the parent on
+  its own — instead of silently taking the parent. Taking a ticket with no children
+  is unchanged, and setting `agentFlow.childWorktrees` to `false` restores the old
+  behaviour for every ticket.
+
+## [0.29.0] — 2026-08-18
+
+### Changed
+
+- **The Deck card leads with what it is.** A 22px tile at the card's leading edge
+  carries a glyph per kind — ticket, Notepad note, Explore place, PR review, or an
+  untracked local place — so the kind no longer has to be inferred from the shape
+  of the key. A ticket's glyph stays neutral because it appears in every column and
+  an accent hue there reads as a status the card does not have; the four exception
+  kinds each take the hue of the column they naturally live in. The detail drawer's
+  header opens with the same mark, so a selected card and its detail read as one
+  object.
+- **The card's top row no longer holds three competing labels.** The title is the
+  anchor (clamped to two lines instead of three) with the ticket key beside it, at
+  full width — it can no longer be truncated to `DEMO…`. The signal line drops to a
+  mono caption beneath the title, carrying exactly the bits it carried before, and
+  the live state moves below a single hairline onto its own row with the tone dot,
+  the state text, and how long ago the run was launched. Failure rows, footer
+  actions, drag, selection and every signal bit are unchanged.
+
+## [0.28.0] — 2026-08-18
+
+### Fixed
+
+- **A merged run leaves Action required.** A card whose PRs have all landed
+  now sits in **Merge**, in the `merged · wrap up` lane, whatever its agent
+  last said. Before, an agent that ended its turn before the merge pinned the
+  card in Action required indefinitely: the merge is a fact read from GitHub,
+  but the agent state is a reading of a transcript that nothing invalidates
+  once the work lands, so the question sat there unanswered for the life of
+  the card. The merge is the answer. A merge you have yet to press still
+  ranks below Action required — approved and green is not landed, so an agent
+  waiting on you is the more urgent of the two.
+
+## [0.27.0] — 2026-08-18
+
+### Changed
+
+- **The In-flight board is four zones, ending at the merge.** The fourth
+  column is **Merge**, and it spans both sides of the press: a `ready to
+  merge` lane for a PR one click from landing, and a `merged · wrap up` lane
+  for one that already has. A merge is where the wrap-up starts — move the
+  ticket, delete the branch, watch the deploy — not where the work ends, so
+  it stays somewhere you can see it until the retire sweep's finished window
+  elapses. The merge outranks a still-working agent, the same way a blocked
+  PR already did.
+- **In review means one thing:** a pull request somebody still has to look
+  at. Its `ready to merge` band moved out to the Merge column.
+- **The Done column is gone.** A ticket somebody marked done that never had a
+  PR merge produced no wrap-up, and goes straight to **Recently closed**,
+  which already offers the only two things left to do with it — reopen and
+  forget.
+- **Column chrome.** Each zone carries its own hue through the header dot, its
+  rule and a faint tint down the top of the column. The dot is haloed on the
+  zones where something is genuinely alive — In review is a queue, so it is
+  not. Zone names set in mono uppercase and counts align down the board's
+  right edge. The header gains a Merge tile, lit in green when there is
+  anything in it.
+
+## [0.26.0] — 2026-08-17
+
+### Added
+
+- **Child worktrees for a ticket that has them.** Off by default — turn on
+  `agentFlow.childWorktrees` and taking a ticket with subtasks asks how you
+  want to work them: a worktree and session per child, one orchestrator
+  session on the parent that dispatches a subagent into a worktree per child,
+  or just the parent, today's behaviour. Every child branches off the
+  parent's own branch rather than main, so nothing needs merging anywhere
+  but there. Leave the setting off and a Take is exactly what it was before
+  this feature existed — no extra ticket read, no children query, no picker.
+
+## [0.25.0] — 2026-08-17
+
+### Changed
+
+- **A worktree's workspace folder now leads with its service.** A root pointing at
+  a per-task worktree is named `<repo>-<KEY>` — `account-service-ASM-6031` — so the
+  explorer says which checkout a row came from instead of showing a bare key beside
+  the repos it belongs to. A folder pointing at a main checkout is still just the
+  repo name. Batch launches carried the same qualifier the other way round
+  (`ASM-6031-account-service`) and now group by service too. File mentions follow
+  the folder name, so they keep resolving to the worktree they name; workspaces
+  already on disk are untouched.
+
+## [0.24.0] — 2026-08-17
+
+### Added
+
+- **Each task's token spend, in its detail drawer.** Selecting a card now shows
+  what the task has cost: input, output, cache-write and cache-read counts, under
+  a single effort-weighted total. The weighting matters — cache reads are the
+  overwhelming majority of raw tokens at roughly a tenth the rate, so a plain sum
+  ranks tasks by how long the conversation got rather than by what the work cost.
+  The total is labelled `eq` for that reason, and is deliberately not the sum of
+  the four rows above it. Read on demand when the drawer opens, so a session that
+  never opens one reads no transcripts at all.
+- **An optional "Tokens on board" total in the Deck header**, behind the new
+  `agentFlow.deck.showTokenTotal` setting, off by default. It is the only thing
+  that needs a board-wide transcript sweep, so leaving it off costs nothing.
+- **An action per pull-request problem, beside the problem itself.** A card with a
+  failing check, a conflict and requested changes now offers *Fix CI*, *Resolve
+  conflict* and *Address review* as three separate rows, each seeding an agent
+  with a prompt that names the specific failure. This replaces the single
+  *Address PR* button, which was gated on the review column's waiting lane — so
+  it appeared on cards with nothing to address and was missing from cards with a
+  failing check. An unapproved but otherwise clean PR now correctly offers
+  nothing: it is not a PR with a problem.
+
+### Changed
+
+- **A stuck agent no longer reads as an idle one.** Two new states join the card's
+  status line: `stalled`, when a tool call has been outstanding for more than 45
+  seconds (a permission prompt, or a genuinely long command — the transcript
+  cannot tell, so the label does not claim to), and `exited`, when a transcript
+  stops mid-work and no live session is left behind. Both used to render as
+  `idle`, the calmest tone on the board, on exactly the cards most in need of
+  attention. Both now route to Action required, so expect one or two cards to move
+  there on upgrade.
+
+### Fixed
+
+- **"Agent idle over N minutes" flows fire again on stuck agents.** The condition
+  tested for `idle` exactly, so the two new states above would have silently
+  stopped it firing on precisely the runs it was written to catch.
+- **Token counts include subagent sessions.** Claude Code writes those transcripts
+  one directory below the session's own; reading only the top level reported
+  roughly half of a task's real spend.
+
+## [0.23.1] — 2026-08-17
+
+### Fixed
+
+- **The card drawer no longer scrolls sideways.** Selecting a notepad card put
+  its full ~64-character key in the drawer header, which was wider than the
+  drawer itself: the summary collapsed to nothing, the status pill squashed and
+  the close button left the panel. The header now names an untracked run the way
+  the card's own key chip always has — `notepad`, `local`, `explore`, with the
+  full key on the tooltip and Copy ticket key unchanged — a long ticket key
+  ellipsizes at half the header, and the drawer scrolls on the vertical axis only.
+
+## [0.23.0] — 2026-08-16
+
+### Changed
+
+- **The Deck card is now two tiers.** At rest a card is four rows — state and
+  key, title, one signal line, and a footer with Open and Diff. Everything it
+  used to carry (the branch row, repo chips, every PR block, the agent list,
+  the ticket-status pill and the overflow menu) moves into a detail drawer
+  that opens when you select a card. Nothing was removed; a column now reads
+  as a list of same-shaped cards instead of a stack of unrelated blocks.
+- **The signal line says at most three things**, worst fact first. A card with
+  a PR leads with its number, then how its checks stand, then whatever stands
+  between it and a merge — conflicts before requested changes. A card without
+  one falls back to branch, diff totals and how wide the work spreads. Diff
+  size never outranks PR news.
+- **Address PR now follows the board, not the ticket status.** It appears on a
+  card that has an open non-draft PR, sits in the review column's
+  waiting-on-review lane, and is not a local place. Previously it keyed off
+  `agentFlow.prReviewStatus` matching exactly. That setting still governs the
+  sidebar's Tasks card and is unchanged there.
+- The card drawer and the Orchestrator drawer share a slot, so opening either
+  closes the other.
+
+## [0.22.0] — 2026-08-16
+
+### Added
+
+- **Ready to merge is its own lane.** A PR that is approved, green and
+  conflict-free is the most actionable thing on the board, and it used to sit in
+  **In review** looking exactly like a PR nobody had opened yet. That column now
+  splits into **ready to merge** above **waiting on review**, and **Done** splits
+  into **merged** above **done · not merged** — a run that actually landed no
+  longer reads the same as a ticket someone marked done. Lanes, not new columns:
+  the sidebar has no room for a fifth, and both splits are the same stage of the
+  same work read differently. Every fact behind them was already on the card, so
+  nothing new is fetched.
+
+## [0.21.4] — 2026-08-15
+
+### Changed
+
+- **Waiting looks like Agent Flow.** Every loading indicator is now the product's
+  own mark with one dot lit and chasing round its ring — the Deck's full-screen
+  wait and its refresh button, the review strip, the sidebar's task list and
+  ticket detail, the Marketplace scan, and the file preview. The `⟳` glyphs and
+  the bare **Loading…** lines they replace never said which product was thinking.
+  The mark keeps the lockup's exact geometry, drops its inner texture dots at
+  small sizes where they smear, and rests fully lit, so readers who ask for
+  reduced motion get a still mark rather than a blank space. The review strip's
+  skeleton rows are unchanged — they show the shape of what is coming, which a
+  mark cannot.
+
+## [0.21.3] — 2026-08-15
+
+### Fixed
+
+- **A repo the ticket merely mentions is no longer treated as scope.** The task brief
+  embeds the Jira description verbatim above its **Repos in scope** list, and
+  descriptions routinely name repos nobody checked out for the task. Nothing said
+  which list wins, so an agent could go hunting for — or clone — a repo that was only
+  ever a suggestion. The brief now states outright that the listed repos are the only
+  ones checked out, and asks the agent to say so if the task genuinely cannot be done
+  within them. Repo selection itself was already correct; only the wording changed,
+  in the one function every seeding path shares.
+
 ## [0.21.2] — 2026-08-15
 
 ### Changed

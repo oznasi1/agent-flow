@@ -87,7 +87,7 @@ export function retireVerdict(i: RetireInput): RetireVerdict {
   // window restarts from scratch next time rather than resuming mid-count.
   if (stamped !== null) return { action: "unstamp" };
 
-  // Rule 2b — closed. No agent of its own, no PR, no active ticket, nothing to
+  // Rule 2b — closed. No agent of its own, no PR, nothing to
   // lose. The dirty/ahead veto below rule 2 already guarantees `hasWorkToLose`
   // is false whenever the board shelved this run as closed, but the test is
   // repeated here rather than assumed: the two rules must not be coupled by an

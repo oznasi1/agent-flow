@@ -5,7 +5,7 @@ import {
   TaskApiError, TaskAuthError, TaskWriteError,
   isTaskNetworkError, markTaskNetworkFailure, serializeCaps,
 } from "../../../src/tasks/provider";
-import type { TaskConnector } from "../../../src/tasks/provider";
+import type { Capabilities, TaskConnector } from "../../../src/tasks/provider";
 import type { AuthProbe, ProjectProbe } from "../../../src/engine/doctor";
 
 describe("task errors", () => {
@@ -111,5 +111,40 @@ describe("TaskConnector.probe() contract", () => {
     expect(await bothOk()).toEqual({ auth: authOk, scope: scopeOk });
     expect(await bothFail()).toEqual({ auth: authFail, scope: scopeFail });
     expect(await neitherRun()).toEqual({});
+  });
+});
+
+describe("children capability", () => {
+  it("is absent on a source with no parent/child concept", () => {
+    const caps: Capabilities = { supportedFilters: ["all"], sizes: false };
+    expect(caps.children).toBeUndefined();
+  });
+
+  it("is callable when present, and answers with child refs", async () => {
+    const caps: Capabilities = {
+      supportedFilters: ["all"],
+      sizes: false,
+      children: {
+        of: async (key) => [{ key: `${key}-1`, summary: "child", type: "Sub-task", statusCategory: "new" }],
+      },
+    };
+    expect(await caps.children!.of("ASM-1")).toEqual([
+      { key: "ASM-1-1", summary: "child", type: "Sub-task", statusCategory: "new" },
+    ]);
+  });
+
+  it("stays out of the webview's serialized caps", () => {
+    // Deliberate: nothing in the webview picks children, and the wire shape is
+    // asserted with toEqual both here and in tasksView's JIRA_CAPS. A source's tree
+    // ability is a host-side fact only.
+    const serialized = serializeCaps({
+      supportedFilters: ["all"],
+      sizes: false,
+      children: { of: async () => [] },
+    });
+    expect(serialized).toEqual({
+      supportedFilters: ["all"], sizes: false, labels: false, sprints: false, components: false,
+    });
+    expect("children" in serialized).toBe(false);
   });
 });
