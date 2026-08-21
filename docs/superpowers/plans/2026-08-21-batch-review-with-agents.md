@@ -10,6 +10,8 @@
 
 **Spec:** [docs/superpowers/specs/2026-08-21-batch-review-with-agents-design.md](../specs/2026-08-21-batch-review-with-agents-design.md) — read it before Task 1. It argues every decision this plan executes.
 
+**Base:** written against `75c8208` (0.33.8). `fd46dbc` landed a per-row play button in the review strip while this plan was being written and restructured the row — Task 8 accounts for it. Re-check `main`'s HEAD at the start of each task; if the strip has moved again, stop and say so rather than guessing.
+
 ## Global Constraints
 
 These apply to **every** task. They are the project's rules, not this feature's.
@@ -1153,17 +1155,31 @@ Variant B from the mockup: a `select` toggle in the strip header swaps the caret
 
 **Files:**
 - Modify: `src/webview/ReviewStrip.tsx`
-- Modify: `src/webview/deckStyles.ts` (the `rv-` block, ~lines 401–500)
+- Modify: `src/webview/deckStyles.ts` (the `rv-` block — find it by the `.rv-strip` selector; `fd46dbc` added `.rv-go` styles there, so line numbers have moved)
 - Test: `test/webview/ReviewStrip.test.tsx`
 
 **Interfaces:**
 - Consumes: nothing (pure React over props).
 - Produces: optional props `selecting?: boolean`, `selected?: string[]`, `onSelectMode?: (next: boolean) => void`, `onToggle?: (id: string, shift: boolean) => void`, `onSelectAll?: () => void`, `onLaunchBatch?: () => void`. Task 9 supplies all six.
 
-**Two traps, both real:**
+**The row's current shape** (as of `fd46dbc`, "start an agent review from a collapsed review row" — read it before you start):
+
+```
+.rv-row
+  .rv-head            ← flex line
+    button.rv-line    ← the whole row, onClick = onExpand
+    button.rv-go      ← the per-row play button, onClick = onLaunch (a SIBLING, because
+                          .rv-line is itself a button and a nested click would bubble)
+  .rv-detail          ← only when expanded
+```
+
+**Three traps, all real:**
 
 1. **`.rv-line` is a `<button>`.** A button cannot nest inside a button, so the checkbox must be a **`<span className="rv-chk">`** inside the existing row button — not an `<input>` and not a nested `<button>`. In select mode the row button's own `onClick` toggles instead of expanding.
-2. **jsdom is blind to drag and to real pointer semantics.** Shift-click *is* testable (`fireEvent.click(el, { shiftKey: true })`), but confirm the feel in a real editor window in Task 9.
+2. **Hide `.rv-go` while selecting.** It launches a single review for its own row. Left visible mid-selection it invites a click that launches one PR while the user is still building a batch — two competing actions in one gesture. While `selecting`, render the head with `.rv-line` only; the batch bar's button is the sole launch.
+3. **jsdom is blind to drag and to real pointer semantics.** Shift-click *is* testable (`fireEvent.click(el, { shiftKey: true })`), but confirm the feel in a real editor window in Task 10.
+
+**Accessible-name collision.** `.rv-go` already carries `aria-label="Review with agent"`. A batch button named "Review 2 with agents" would also match `getByRole("button", { name: /Review . with agent/i })`, so **give the batch button an unambiguous accessible name** — `aria-label={`Review the ${n} selected PRs with agents`}` — and query it by that in tests. Its visible text stays the short `▶ Review 2 with agents`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1206,13 +1222,20 @@ Append to `test/webview/ReviewStrip.test.tsx`, using its existing `mk` and `prop
       onToggle: vi.fn(), onSelectMode: vi.fn(), onSelectAll: vi.fn(), onLaunchBatch,
     })} />);
     expect(screen.getByText(/1 selected/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Review 1 with agents?/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with agents/i }));
     expect(onLaunchBatch).toHaveBeenCalled();
+  });
+
+  it("hides the per-row play button while selecting", () => {
+    // Two competing launches in one gesture: .rv-go starts ONE review, the bar starts
+    // the batch. While picking rows, only the bar may launch.
+    render(<ReviewStrip {...props({ selecting: true, selected: [], onToggle: vi.fn(), onSelectMode: vi.fn(), onLaunchBatch: vi.fn() })} />);
+    expect(screen.queryByRole("button", { name: "Review with agent" })).not.toBeInTheDocument();
   });
 
   it("cannot launch an empty selection", () => {
     render(<ReviewStrip {...props({ selecting: true, selected: [], onToggle: vi.fn(), onSelectMode: vi.fn(), onLaunchBatch: vi.fn() })} />);
-    expect(screen.getByRole("button", { name: /Review 0|Review with agents/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Review the 0 selected PRs with agents/i })).toBeDisabled();
   });
 ```
 
@@ -1223,7 +1246,7 @@ Expected: the first PASSES (nothing new rendered yet — it is the inert-by-defa
 
 - [ ] **Step 3: Implement the strip**
 
-Add the six optional props to `ReviewStripProps` with doc comments explaining the optionality (absent = the strip the Deck shipped before batches). In `Row`, take `selecting`, `picked` and `onToggle`; render `<span className={`rv-chk${picked ? " on" : ""}`}>{picked ? "✓" : ""}</span>` in place of `.rv-caret` while selecting, put `picked` on the row's class list, and branch the row button's `onClick`:
+Add the six optional props to `ReviewStripProps` with doc comments explaining the optionality (absent = the strip the Deck shipped before batches). In `Row`, take `selecting`, `picked` and `onToggle`; render `<span className={`rv-chk${picked ? " on" : ""}`}>{picked ? "✓" : ""}</span>` in place of `.rv-caret` while selecting, put `picked` on the row's class list, omit the `.rv-go` branch entirely while `selecting` (trap 2), and branch the row button's `onClick`:
 
 ```tsx
         onClick={(e) => (selecting && onToggle ? onToggle(r.id, e.shiftKey) : onExpand(r.id))}
@@ -1237,7 +1260,15 @@ While `selecting`, do not render `.rv-detail` at all — a row cannot be both op
           <span className="batch-count">{n} selected · shift-click for a range</span>
           <button type="button" className="batch-link" onClick={p.onSelectAll}>Select all {p.requests.length}</button>
           <button type="button" className="batch-link" onClick={() => p.onSelectMode?.(false)}>Done</button>
-          <button type="button" className="batch-launch" disabled={n === 0} onClick={p.onLaunchBatch}>
+          <button
+            type="button"
+            className="batch-launch"
+            disabled={n === 0}
+            // Unambiguous against .rv-go's own "Review with agent" — see the
+            // accessible-name note above.
+            aria-label={`Review the ${n} selected PR${n === 1 ? "" : "s"} with agents`}
+            onClick={p.onLaunchBatch}
+          >
             ▶ Review {n} with agent{n === 1 ? "" : "s"}
           </button>
         </div>
@@ -1293,7 +1324,7 @@ Append to the existing `describe("DeckApp review strip", …)` block in `test/we
     fireEvent.click(screen.getByText("select"));
     fireEvent.click(screen.getByText("a small fix"));
     fireEvent.click(screen.getByText("second fix"));
-    fireEvent.click(screen.getByRole("button", { name: /Review 2 with agents/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 2 selected PRs with agents/i }));
     // One message for the batch, not one per row — the host asks its questions once.
     expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1", "o/r#2"] });
   });
@@ -1304,7 +1335,7 @@ Append to the existing `describe("DeckApp review strip", …)` block in `test/we
     fireEvent.click(screen.getByText("select"));
     fireEvent.click(screen.getByText("a small fix"));
     fireEvent.click(screen.getByText("third fix"), { shiftKey: true });
-    fireEvent.click(screen.getByRole("button", { name: /Review 3 with agents/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 3 selected PRs with agents/i }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1", "o/r#2", "o/r#3"] });
   });
 
@@ -1313,7 +1344,7 @@ Append to the existing `describe("DeckApp review strip", …)` block in `test/we
     host(reviewsMsg([mkReview()], 1));
     fireEvent.click(screen.getByText("select"));
     fireEvent.click(screen.getByText("a small fix"));
-    fireEvent.click(screen.getByRole("button", { name: /Review 1 with agent/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with agents/i }));
     // The bar is gone and the rows expand again — the gesture is over.
     expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
   });
@@ -1327,7 +1358,7 @@ Append to the existing `describe("DeckApp review strip", …)` block in `test/we
     fireEvent.click(screen.getByText("a small fix"));
     fireEvent.click(screen.getByText("second fix"));
     host(reviewsMsg([mkReview()], 1)); // #2 merged
-    fireEvent.click(screen.getByRole("button", { name: /Review 1 with agent/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with agents/i }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1"] });
   });
 ```
