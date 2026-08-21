@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as os from "os";
 import * as path from "path";
-import { FilterVisibility, FlowCommand, PromptMode } from "./types";
+import { AgentProvider, FilterVisibility, FlowCommand, PromptMode } from "./types";
 
 /** The stock "how should the agent start" modes, in picker order. `detail` is the
  * line shown under the label — written for the user reading the picker, never
@@ -146,8 +146,11 @@ export function readAgentSurface(
   return c.get<string>("agentSurface") === "terminal" ? "terminal" : "extension";
 }
 
-/** Which agent Agent Flow starts a session with. */
-export type AgentProvider = "claude-code" | "copilot" | "cursor";
+/** Which agent Agent Flow starts a session with. Declared in ./types so the webview
+ * can name a provider without importing this module (which imports `vscode`); re-exported
+ * here because every caller in the host addresses it at this path, and this file's own
+ * signatures below still use it directly. */
+export type { AgentProvider };
 
 /** The VS Code family, by uri scheme: `vscode`, `vscode-insiders`, and any other
  * `vscode*` build. Cursor is `cursor`, Windsurf is `windsurf`. Preferred over
