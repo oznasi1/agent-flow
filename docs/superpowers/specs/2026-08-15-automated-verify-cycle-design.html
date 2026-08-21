@@ -132,7 +132,7 @@
 
 <section id="tldr">
 <h2>1 · TL;DR</h2>
-<p class="lead">Drive a <b>real VS Code Electron host</b> with <b>Playwright</b>, running the actual extension against a <b>local fake Jira</b> and <b>temp git repos</b>. For each critical feature the run: takes the action, lets a real window open and the Claude panel seed, captures <b>labelled screenshots</b> at each step, asserts on real DOM + filesystem + the fake Jira's received calls, and emits a <b>verify-feature report</b>. A fast <b>Playwright Component Test</b> layer covers webview interaction (incl. the drag-and-drop jsdom can't reach). Both run in CI and <b>block the release</b> — no human in the loop.</p>
+<p class="lead">Drive a <b>real VS Code Electron host</b> with <b>Playwright</b>, running the actual extension against a <b>fixture task connector</b> (a JSON-backed <code>TaskConnector</code>, env-gated in the registry — no HTTP server, no network) and <b>temp git repos</b>. For each critical feature the run: takes the action, lets a real window open and the Claude panel seed, captures <b>labelled screenshots</b> at each step, asserts on real DOM + filesystem + the fixture's recorded writes, and emits a <b>verify-feature report</b>. A fast <b>Playwright Component Test</b> layer covers webview interaction (incl. the drag-and-drop jsdom can't reach). Both run in CI and <b>block the release</b> — no human in the loop.</p>
 </section>
 
 <section id="goal">
@@ -163,13 +163,13 @@
 <div class="flow">
   <div class="step"><div class="n">01</div><div class="h">Build</div><div class="s">bundle extension + webview (esbuild)</div></div>
   <div class="arrow">→</div>
-  <div class="step"><div class="n">02</div><div class="h">Stand up fakes</div><div class="s">local fake Jira, temp git repos, seeded settings + secret</div></div>
+  <div class="step"><div class="n">02</div><div class="h">Stand up fixtures</div><div class="s">fixture tasks JSON, temp git repos, seeded settings</div></div>
   <div class="arrow">→</div>
   <div class="step"><div class="n">03</div><div class="h">Launch host</div><div class="s">real VS Code Electron, extension dev path, Playwright attached</div></div>
   <div class="arrow">→</div>
   <div class="step"><div class="n">04</div><div class="h">Drive feature</div><div class="s">take task → window opens → panel seeds</div></div>
   <div class="arrow">→</div>
-  <div class="step"><div class="n">05</div><div class="h">Assert + shoot</div><div class="s">DOM / fs / fake-Jira assertions + labelled screenshots</div></div>
+  <div class="step"><div class="n">05</div><div class="h">Assert + shoot</div><div class="s">DOM / fs / recorded-write assertions + labelled screenshots</div></div>
   <div class="arrow">→</div>
   <div class="step"><div class="n">06</div><div class="h">Report</div><div class="s">verify-feature HTML + trace/video → Slack / At-Bay / artifact</div></div>
   <div class="arrow">→</div>
@@ -216,9 +216,9 @@
 <tbody>
 <tr><td><span class="pri">1</span></td><td><b>Take a task</b> — pick from pool → confirm → open</td><td>a folder/workspace window opens; <code>.pick-task/TASK.md</code> written with the right brief; <code>.code-workspace</code> generated; correct repos resolved</td></tr>
 <tr><td><span class="pri">2</span></td><td><b>Claude panel seeds</b> in the opened window</td><td>the plan-handshake file is written; the Claude Code command fires; the panel shows the seeded prompt (DOM/text assertion + screenshot) — <em>seeded, not run</em></td></tr>
-<tr><td><span class="pri">3</span></td><td><b>Status write-back</b> from a card</td><td>the fake Jira receives the transition POST <em>and</em> the <code>claude-code</code> provenance label</td></tr>
+<tr><td><span class="pri">3</span></td><td><b>Status write-back</b> from a card</td><td>the fixture connector records the transition <em>and</em> the <code>claude-code</code> provenance label (writes land in a JSONL the test reads)</td></tr>
 <tr><td><span class="pri">4</span></td><td><b>Worktree mode</b></td><td>a real git worktree + branch is created off the temp repo</td></tr>
-<tr><td><span class="pri">5</span></td><td><b>Sign-in / sign-out</b></td><td>token round-trips through SecretStorage; the pool renders the fake Jira's tasks</td></tr>
+<tr><td><span class="pri">5</span></td><td><b>Sign-in / sign-out</b></td><td>token round-trips through SecretStorage (the one journey that keeps a Jira-specific seam); the pool renders the fixture's tasks</td></tr>
 </tbody>
 </table>
 <div class="callout warn">
@@ -231,7 +231,7 @@
 <ul>
   <li><span class="badge b-ok">baseline</span> Playwright's built-in HTML report + trace viewer (zero extra code) as the CI artifact.</li>
   <li><span class="badge b-accent">the "verify feature" analog</span> a thin generator that lays the labelled screenshots into a single self-contained HTML report per feature — matching the At-Bay flow.</li>
-  <li><span class="badge b-stop">out of scope</span> <b>No pixel-diff visual regression.</b> No <code>toHaveScreenshot()</code>, no committed baselines, no baseline-maintenance tax. Screenshots are <b>evidence attached to the PR</b>, read by a human when they want to look — they never fail a build on their own. Correctness is proven by the DOM / filesystem / fake-Jira assertions.</li>
+  <li><span class="badge b-stop">out of scope</span> <b>No pixel-diff visual regression.</b> No <code>toHaveScreenshot()</code>, no committed baselines, no baseline-maintenance tax. Screenshots are <b>evidence attached to the PR</b>, read by a human when they want to look — they never fail a build on their own. Correctness is proven by the DOM / filesystem / recorded-write assertions.</li>
   <li><span class="badge b-accent">delivery</span> <b>the PR itself</b> — see §5d. Slack / At-Bay endpoint remain optional extras.</li>
 </ul>
 
@@ -257,13 +257,18 @@
 
 <section id="seams">
 <h2>6 · Testability seams (the honest cost)</h2>
-<p>A real, fresh host has empty settings and empty SecretStorage, so the extension needs a few small, test-only seams. These are minor and reusable:</p>
+<div class="callout">
+  <div class="t">Decision (2026-08-21): fixture connector, not a fake Jira</div>
+  A fake Jira asserts <em>our model of Jira</em>, not Jira — it can never catch Jira changing, so its marginal value over a fixture is small while its cost (a server process, ports, lifecycle, all inside the flakiest tier) is real. And it aims at the wrong layer: what E2E must prove is the <b>host boundary</b>, and the Jira HTTP client has zero VS Code API surface — it stays covered by unit/contract tests. <code>TaskConnector</code> is already the seam the pluggable-connectors work bought us.
+</div>
+<p>A real, fresh host has empty settings and empty SecretStorage. With the fixture connector, the seam list shrinks to:</p>
 <ul>
-  <li><b>Jira base URL override</b> — already config-driven (<code>agentFlow.jira.baseUrl</code>); the test writes user settings pointing at the local fake server. No code change.</li>
-  <li><b>Test sign-in</b> — a guarded path to put a token into SecretStorage without the interactive prompt (env-gated hidden command, e.g. <code>agentFlow.__test.signIn</code>, active only when a test flag is set).</li>
-  <li><b>Deterministic "opened-by-take" handshake</b> — the seed handshake already uses a plan file with a 15-min TTL (<code>workspace.ts</code>, <code>PLAN_TTL_MS</code>); the test controls timing, no product change needed.</li>
-  <li><b>Optional capture hook</b> — for a lighter, window-less variant, a flag to record the open/seed <em>intent</em> instead of executing it. Not required for the full-fat E2E, but handy for a fast tier.</li>
+  <li><b>Fixture task connector</b> — a JSON-backed <code>TaskConnector</code> (<code>src/tasks/fixture/</code>), registered in the connector registry <em>only</em> when an env flag names its fixture directory. Unset (every real user) → the registry is byte-identical to today: ships inert. It reads tasks from <code>tasks.json</code> and records every write (<code>moveTo</code>, labels) to <code>writes.jsonl</code>, which is what journey 3 asserts on — a request-recorder without a server.</li>
+  <li><b>Settings, not seams</b> — every mid-take prompt is already answerable from settings: <code>taskMode</code> (a configured mode id skips the prompt-mode pick), <code>openIn: "new-window"</code>, <code>worktree: "never"|"always"</code>, <code>remoteControl: "off"</code>. The repo-confirm QuickPick stays and is <em>driven</em> — it is real take UX, and the workbench quick-input is ordinary DOM.</li>
+  <li><b>Deterministic "opened-by-take" handshake</b> — the seed handshake already uses a plan file with a 15-min TTL (<code>workspace.ts</code>, <code>PLAN_TTL_MS</code>); the test controls timing, no product change needed. The launcher overrides <code>HOME</code> for the child host so <code>~/.agentflow/plans</code> lands in the sandbox, never in the developer's real home.</li>
+  <li><b>Test sign-in (journey 5 only)</b> — sign-in/out genuinely exercises SecretStorage against the Jira connector, so that one journey keeps an env-gated seam (<code>agentFlow.__test.signIn</code>). Not needed for journeys 1–4.</li>
 </ul>
+<p>What this deliberately gives up: nothing end-to-end exercises real Jira request/response shaping. That belongs to a contract test in the unit suite against a recorded real response — not to an editor-host lane.</p>
 <p>Everything else the extension already does through real VS Code APIs, so the E2E exercises production code paths, not test shims.</p>
 </section>
 
@@ -321,7 +326,7 @@
 <thead><tr><th>Work</th><th>Rough effort</th></tr></thead>
 <tbody>
 <tr><td>Layer A — CT harness + priority webview tests</td><td>~1–2 days</td></tr>
-<tr><td>Layer B — host launcher, fake Jira, temp-repo fixtures, seams, first 3 journeys</td><td>~3–5 days</td></tr>
+<tr><td>Layer B — host launcher, fixture connector, temp-repo fixtures, first 3 journeys</td><td>~2–4 days (fixture connector replaces the fake-Jira server)</td></tr>
 <tr><td>Layer B — remaining journeys (worktree, sign-in, fallback)</td><td>~2 days</td></tr>
 <tr><td>Layer C — verify-feature report generator + delivery</td><td>~1–2 days</td></tr>
 <tr><td>CI wiring (xvfb, caching, artifacts, gate)</td><td>~1 day</td></tr>
@@ -355,7 +360,7 @@
 <section id="dod">
 <h2>11 · Definition of done</h2>
 <ul>
-  <li><span class="yes">✓</span> A real VS Code host launches in CI and drives the extension against a local fake Jira + temp repos — no real network.</li>
+  <li><span class="yes">✓</span> A real VS Code host launches in CI and drives the extension against the fixture connector + temp repos — no real network.</li>
   <li><span class="yes">✓</span> The core journeys (take task → window opens → panel seeds; status write-back + label) pass with assertions <em>and</em> screenshots.</li>
   <li><span class="yes">✓</span> A verify-feature report is generated every run and posted <b>on the GitHub PR</b> — sticky comment + job summary, with screenshots attached via the Pages-hosted report.</li>
   <li><span class="yes">✓</span> Drag-and-drop reorder is covered in real Chromium (Layer A).</li>
