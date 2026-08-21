@@ -7,7 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.36.0] — 2026-08-21
+## [0.37.0] — 2026-08-21
+
+### Added
+
+- **An automated verify cycle now stands behind every change.** Nothing in this release
+  changes what the extension does — it changes what is *proven* before it ships. Three new
+  test layers run the real thing instead of a mock's approximation:
+  - **Component tests in real Chromium** (`npm run test:ct`) cover the measured-layout
+    behavior jsdom physically cannot execute — both drag-reorder surfaces' "before" drop
+    and the orchestrator canvas's origin correction — and gate every PR.
+  - **Real-host end-to-end** (`npm run test:e2e`) boots a pinned VS Code in a sandbox and
+    drives the extension through its core journeys: take a task (a real window opens; the
+    brief and plan handshake land on disk), status write-back (the transition and the
+    provenance label reach the task source), worktree mode (a git-registered worktree on
+    the per-task branch), and terminal-surface seeding (the prompt typed, unsubmitted).
+    Journeys run against a new JSON-backed **fixture connector** — resolvable only when
+    `AGENT_FLOW_FIXTURE_DIR` is set in the environment, so shipped installs can never
+    reach it.
+  - **A verify-feature report** (`npm run e2e:report`) turns each run into a labelled
+    screenshot strip with a verdict per journey; the merge-to-main CI lane publishes it
+    on every run.
 
 ### Added
 
