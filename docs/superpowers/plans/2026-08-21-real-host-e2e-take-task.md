@@ -760,8 +760,9 @@ git commit -m "docs: document the real-host E2E lane and the fixture connector"
 ## Out of Scope (next increments)
 
 1. **Journey 2 — panel seeding**: needs a pinned Claude Code build installed into the sandbox's `extensionsDir`, plus the seed-DOM assertion. The plan-file assertion in journey 1 already proves the handshake's producer side.
-2. **Journey 3 — status write-back**: the fixture's `writes.jsonl` recorder is already built and unit-tested (Task 1); the journey drives a card's status action and asserts the JSONL.
-3. **Journeys 4–5** — worktree mode (`worktree: "always"` sandbox variant) and sign-in/out (keeps its own SecretStorage seam, per the amended spec §6).
+2. ~~**Journey 3 — status write-back**~~ — **done** in `test-e2e/status-writeback.e2e.ts`: transition + claude-code provenance stamp asserted from `writes.jsonl`, card removal asserted from the DOM; sabotage-checked against a no-opped `stampProvenance`.
+3. ~~**Journey 4 — worktree mode**~~ — **done** in `test-e2e/worktree-take.e2e.ts`: git-registered worktree, per-task branch, brief in the worktree and not the checkout. **Journey 5** (sign-in/out; needs its own SecretStorage seam) remains.
+   *Harness note:* the sandboxed HOME makes macOS throw "Keychain Not Found" at the developer — `--use-inmemory-secretstorage` (VS Code's own test seam, present in 1.96.2) is required; `--password-store=basic` alone is not enough.
 4. **CI wiring** — xvfb job, VS Code download cache, report artifact, the merge-to-main gate, and the `e2e` label trigger from spec §5d. After the lane is proven locally.
 5. **Layer C** — the verify-feature report generator and PR delivery.
 
