@@ -764,7 +764,7 @@ git commit -m "docs: document the real-host E2E lane and the fixture connector"
 3. ~~**Journey 4 — worktree mode**~~ — **done** in `test-e2e/worktree-take.e2e.ts`: git-registered worktree, per-task branch, brief in the worktree and not the checkout. **Journey 5** (sign-in/out; needs its own SecretStorage seam) remains.
    *Harness note:* the sandboxed HOME makes macOS throw "Keychain Not Found" at the developer — `--use-inmemory-secretstorage` (VS Code's own test seam, present in 1.96.2) is required; `--password-store=basic` alone is not enough.
 4. **CI wiring** — xvfb job, VS Code download cache, report artifact, the merge-to-main gate, and the `e2e` label trigger from spec §5d. After the lane is proven locally.
-5. **Layer C** — the verify-feature report generator and PR delivery.
+5. ~~**Layer C — the verify-feature report generator**~~ — **done**: journeys attach labelled step screenshots via `testInfo.attach`, `scripts/verify-report.mjs` builds the screenshot-strip HTML + markdown summary (`npm run e2e:report`), and the CI lane generates it on every run, appends the summary to the run page, and uploads the `verify-report` artifact. Still open from §5d: the **sticky PR comment + `e2e` label trigger** (the lane does not run on PRs yet, so there is no PR to comment on).
 
 ## Self-Review
 
