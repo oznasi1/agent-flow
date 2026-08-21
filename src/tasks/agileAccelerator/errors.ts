@@ -54,7 +54,8 @@ export function classifySfFailure(raw: string, fallback: string): Error {
       if (typeof env.message === "string") message = env.message.trim();
     }
   } catch {
-    /* not JSON — `fallback` is the whole message */
+    /* Not JSON. `fallback` also carries the message when the envelope parses
+       but names no message of its own — see the `message || fallback` below. */
   }
 
   const text = message || fallback;

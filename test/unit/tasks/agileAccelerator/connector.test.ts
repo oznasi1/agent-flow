@@ -558,3 +558,58 @@ describe("statusOf() degradation and cache bounds", () => {
     expect(queryCalls).toBe(afterFill + 1);
   });
 });
+
+describe("schema() cache ownership", () => {
+  it("a stale describe failure does not evict the schema a later call installed", async () => {
+    // signIn()/signOut() null the schema slot directly, so an in-flight describe
+    // can lose ownership of it mid-flight. Without the identity check in
+    // schema()'s failure handler, that describe's eventual rejection evicts the
+    // healthy promise a second caller installed, costing a redundant describe on
+    // every subsequent call. Counting describes is the only way to see it: both
+    // implementations return the same schema to every caller.
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    type Described = { name: string; fields: { name: string }[] };
+    const pending: Array<{ resolve: (v: Described) => void; reject: (e: unknown) => void }> = [];
+    let describeCalls = 0;
+    const cli = fakeCli({
+      describeImpl: () =>
+        new Promise<Described>((resolve, reject) => {
+          describeCalls++;
+          pending.push({ resolve, reject });
+        }),
+    });
+    const c = makeAgileAcceleratorConnector(ctx, () => cli);
+
+    // Attempt A starts on the first candidate and is left in flight.
+    const a = c.provider().list("all", "any");
+    const aSettled = a.catch(() => "rejected");
+    await tick();
+    expect(describeCalls).toBe(1);
+
+    // The user signs in. This nulls the slot while A is still in flight, so A no
+    // longer owns it.
+    await c.signIn();
+
+    // Attempt B installs a fresh promise of its own.
+    const b = c.provider().list("all", "any");
+    await tick();
+    expect(describeCalls).toBe(2);
+
+    // Now let A fail both candidates. Its rejection must not touch B's slot.
+    pending[0].reject(new Error("describe unavailable"));
+    await tick();
+    pending[2]?.reject(new Error("describe unavailable"));
+    await tick();
+    expect(await aSettled).toBe("rejected");
+
+    // B succeeds and its schema is what stays cached.
+    pending[1].resolve({ name: "ADM_Work__c", fields: [{ name: "Name" }, { name: "Id" }] });
+    await expect(b).resolves.toEqual([]);
+    const afterB = describeCalls;
+
+    // The payoff: a third call reuses B's schema rather than re-describing,
+    // which it would have to do if A's rejection had cleared the slot.
+    await expect(c.provider().list("all", "any")).resolves.toEqual([]);
+    expect(describeCalls).toBe(afterB);
+  });
+});

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Agile Accelerator (GUS) as a second task source.** The Deck and the Tasks tab can now read
+  work items from Salesforce's Agile Accelerator — the package behind GUS — instead of Jira.
+  Point `agentFlow.taskSource` at `agileAccelerator`, fill in your Lightning URL and scrum
+  team, and the same lenses, cards and deep links work against `W-` keys.
+
+  It reaches your org through the Salesforce CLI you have already signed in (`sf`), so the
+  extension stores no credential of its own and inherits exactly the org access `sf` has.
+  The connector discovers its own schema rather than assuming a field layout — it asks the
+  org which fields exist, so it works against both a packaged (`agf__`) org and the
+  unmanaged one GUS itself runs on.
+
+  This release is **read-only**. Status changes, assignment and sprint moves stay
+  Jira-only for now; where a write would go, the Deck shows an info toast rather than
+  failing. Jira is untouched and remains the default — nothing changes for an existing
+  setup unless you switch `agentFlow.taskSource` yourself.
+
 ## [0.50.0] — 2026-08-27
 
 ### Changed

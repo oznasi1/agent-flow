@@ -255,20 +255,28 @@ class AgileAcceleratorConnector implements TaskConnector {
   /** One describe per session. Tries the packaged object, then the bare one GUS
    *  uses. A failure clears the cache so a later call can retry. */
   private schema(cli: SfCli): Promise<Schema> {
-    this.schemaCache ??= (async () => {
-      let last: unknown;
-      for (const object of WORK_OBJECT_CANDIDATES) {
-        try {
-          return buildSchema(object, await cli.describe(object));
-        } catch (e) {
-          last = e;
+    if (!this.schemaCache) {
+      // Named, so the failure handler can check it is still the current attempt
+      // before clearing. `signIn`/`signOut` null this slot directly, so an
+      // in-flight describe CAN lose ownership of it mid-flight; without the
+      // identity check, that describe's later rejection would evict a healthy
+      // newer promise and cost a redundant round trip.
+      const p: Promise<Schema> = (async () => {
+        let last: unknown;
+        for (const object of WORK_OBJECT_CANDIDATES) {
+          try {
+            return buildSchema(object, await cli.describe(object));
+          } catch (e) {
+            last = e;
+          }
         }
-      }
-      throw last instanceof Error ? last : new Error("Could not describe the work item object.");
-    })().catch((e: unknown) => {
-      this.schemaCache = null;
-      throw e;
-    });
+        throw last instanceof Error ? last : new Error("Could not describe the work item object.");
+      })().catch((e: unknown) => {
+        if (this.schemaCache === p) this.schemaCache = null;
+        throw e;
+      });
+      this.schemaCache = p;
+    }
     return this.schemaCache;
   }
 

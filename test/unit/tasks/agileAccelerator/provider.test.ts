@@ -100,10 +100,12 @@ describe("the read-only surface", () => {
 
   it("refuses moveTo with an empty retryWith, so no retry is offered", async () => {
     const { deps: d } = deps();
-    await expect(new AgileAcceleratorProvider(d).moveTo("W-1", "x", {})).rejects.toBeInstanceOf(TaskWriteError);
-    await new AgileAcceleratorProvider(d).moveTo("W-1", "x", {}).catch((e: TaskWriteError) => {
-      expect(e.retryWith).toEqual([]);
-    });
+    // Both assertions go through `rejects`. An assertion inside a bare
+    // `.catch()` would silently pass if moveTo ever started resolving, which is
+    // the exact regression this test exists to catch.
+    const attempt = () => new AgileAcceleratorProvider(d).moveTo("W-1", "x", {});
+    await expect(attempt()).rejects.toBeInstanceOf(TaskWriteError);
+    await expect(attempt()).rejects.toHaveProperty("retryWith", []);
   });
 
   it("accepts assignToMe and does nothing, as the seam requires", async () => {

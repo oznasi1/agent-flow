@@ -41,7 +41,13 @@ export interface Schema {
   selectable(logical: readonly string[]): string[];
 }
 
-/** Everything before the object's own name is the namespace. */
+/** The namespace prefix of a custom object, or "" for an unmanaged one.
+ *
+ *  Load-bearing detail, easy to "fix" into a bug: a custom object always ends in
+ *  the `__c` suffix, so the LAST `__` is that suffix's separator and never part
+ *  of the namespace. We cut it off first, then look for the FIRST `__` in what
+ *  remains — that one, if present, closes the namespace. Hence
+ *  `agf__ADM_Work__c` -> `agf__`, while the unmanaged `ADM_Work__c` -> "". */
 export function prefixOf(object: string): string {
   const i = object.lastIndexOf("__");
   const head = object.slice(0, Math.max(i, 0));
@@ -60,7 +66,10 @@ export function buildSchema(object: string, d: SfDescribeResult): Schema {
     prefix,
     has,
     field,
-    teamField: TEAM_FIELD_CANDIDATES.map(field).find((f) => present.has(f)) ?? null,
+    teamField: (() => {
+      const logical = TEAM_FIELD_CANDIDATES.find(has);
+      return logical ? field(logical) : null;
+    })(),
     selectable: (logical) => logical.filter(has).map(field),
   };
 }
