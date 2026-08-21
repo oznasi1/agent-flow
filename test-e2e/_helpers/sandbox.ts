@@ -84,6 +84,14 @@ export function makeSandbox(settingsOverride: Record<string, unknown> = {}): San
   fs.mkdirSync(bin);
   fs.writeFileSync(path.join(bin, "open"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
 
+  // Shadow `claude` too: terminal-surface seeding runs the provider CLI in a real
+  // integrated terminal, and the developer's actual Claude Code CLI must never
+  // start an agent session from a test. The shim prints a marker and then holds
+  // stdin open (cat), so the seeded prompt lands in a "running" TUI the way the
+  // real one would. The HOME override keeps the shell from reading the real rc
+  // files, so no user PATH entry can outrank this shim.
+  fs.writeFileSync(path.join(bin, "claude"), "#!/bin/sh\necho CLAUDE-SHIM-READY\nexec cat\n", { mode: 0o755 });
+
   return {
     root, home, userDataDir, extensionsDir, fixtureDir, reposRoot, repoPath,
     dispose: () => fs.rmSync(root, { recursive: true, force: true }),
