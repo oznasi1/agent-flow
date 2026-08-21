@@ -20,4 +20,12 @@ describe("modelLabel", () => {
   it("does not mistake a version segment for a date", () => {
     expect(modelLabel("claude-haiku-4-5")).toBe("haiku-4-5");
   });
+
+  it("tolerates a nullish model rather than throwing", () => {
+    // Defence in depth: AgentsRow's own render guard is what keeps an absent
+    // model from showing at all — this just means a weakened guard degrades to
+    // an empty label instead of crashing every row in the drawer.
+    expect(modelLabel(null)).toBe("");
+    expect(modelLabel(undefined)).toBe("");
+  });
 });
