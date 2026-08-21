@@ -2005,6 +2005,21 @@ describe("openWorkspace — ask", () => {
     expect(planOf().provider).toBe("cursor");
   });
 
+  it("stamps the run record with the picked agent, not the setting's resolution", async () => {
+    // `resolvedProvider("ask")` is pinned at "claude-code" regardless of what the
+    // picker returns, so this is the one arrangement where the picked agent and the
+    // setting's own resolution genuinely disagree. A stamp that reached for
+    // `resolvedProvider(setting)` instead of the picked `provider` would still read
+    // "claude-code" here and this is the only test that would catch it.
+    setConfig({ agentProvider: "ask" });
+    env.uriScheme = "cursor";
+    window.showQuickPick.mockResolvedValueOnce({ label: "Cursor", provider: "cursor" });
+    await openWorkspace(baseReq({ seedAgent: true }));
+    const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
+    expect(runWrite).toBeTruthy();
+    expect(JSON.parse(String(runWrite![1])).provider).toBe("cursor");
+  });
+
   it("offers only the agents this host can run, under their product names", async () => {
     setConfig({ agentProvider: "ask" });
     env.uriScheme = "cursor";
