@@ -19,3 +19,4 @@ vitest.config.ts
 *.vsix
 .gitignore
 CONTRIBUTING.md
+CLAUDE.md
