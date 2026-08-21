@@ -641,6 +641,12 @@
           "minimum": 0,
           "markdownDescription": "How long a closed run stays in the In-flight board's **Recently closed** strip — no agent of its own open, no pull request, no active ticket, and nothing uncommitted or unpushed. When the window elapses the run record is deleted (never the worktree, branch, or commits). `0` retires it as soon as it closes."
         },
+        "agentFlow.retireInPlaceAfterHours": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "How long a finished **Explore** or **Notepad** session stays on the In-flight board once you close its agent. These run in your checkout rather than in a worktree, so there is no branch or worktree to come back to and nothing to lose \u2014 `0` (the default) removes the card as soon as the session closes. Raise it to keep such a card around for that many hours instead. The run record is deleted when the window elapses; briefs on disk are left untouched."
+        },
         "agentFlow.inflightShowAll": {
           "type": "boolean",
           "default": false,

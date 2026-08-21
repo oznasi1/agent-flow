@@ -427,6 +427,10 @@ export interface AgentFlowConfig {
   // How long a closed run stays in the Recently closed strip before its record
   // is deleted. 0 retires on sight.
   retireClosedAfterHours: number;
+  // How long a finished in-place run — an Explore or Notepad session, which runs
+  // in the checkout rather than a worktree — stays on the board once its own agent
+  // closes. 0 (the default) retires it on sight.
+  retireInPlaceAfterHours: number;
   // Show every run record on the board, pre-strip behaviour. The escape hatch.
   inflightShowAll: boolean;
   // Show the Deck's review-requests strip: open PRs that ask for your review.
@@ -685,6 +689,7 @@ export function getConfig(): AgentFlowConfig {
     retireFinishedAfterHours: Math.max(0, c.get<number>("retireFinishedAfterHours") ?? 24),
     retireAbandonedAfterDays: Math.max(0, c.get<number>("retireAbandonedAfterDays") ?? 7),
     retireClosedAfterHours: Math.max(0, c.get<number>("retireClosedAfterHours") ?? 24),
+    retireInPlaceAfterHours: Math.max(0, c.get<number>("retireInPlaceAfterHours") ?? 0),
     inflightShowAll: c.get<boolean>("inflightShowAll") ?? false,
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),

@@ -2563,6 +2563,7 @@ export class DeckPanel {
       finishedAfterMs: overrideGates ? 0 : cfg.retireFinishedAfterHours * 3_600_000,
       abandonedAfterMs: overrideGates ? 1 : cfg.retireAbandonedAfterDays * 86_400_000,
       closedAfterMs: overrideGates ? 0 : cfg.retireClosedAfterHours * 3_600_000,
+      inPlaceAfterMs: overrideGates ? 0 : cfg.retireInPlaceAfterHours * 3_600_000,
       nowMs,
       exists: (p) => fs.existsSync(p),
     });
@@ -2611,6 +2612,10 @@ export class DeckPanel {
       // rule 2b inert and leaves rules 1, 2 and 3 to sweep it as they always have.
       shelf: "board",
       closedAfterMs: 0,
+      // Rule 0 is shelf-gated like 2b, so "board" already keeps it inert. Zero
+      // rather than the setting, for the same reason `closedAfterMs` is: a window
+      // that can never be consulted should not read as though it might be.
+      inPlaceAfterMs: 0,
       finishedAfterMs: overrideGates ? 0 : cfg.retireFinishedAfterHours * 3_600_000,
       abandonedAfterMs: overrideGates ? 1 : cfg.retireAbandonedAfterDays * 86_400_000,
       nowMs,

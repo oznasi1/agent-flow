@@ -185,6 +185,7 @@ const CFG = {
   retireFinishedAfterHours: 24,
   retireAbandonedAfterDays: 7,
   retireClosedAfterHours: 24,
+  retireInPlaceAfterHours: 0,
   inflightShowAll: false,
   reviewRequests: true,
   reviewRequestsTtlSeconds: 300,

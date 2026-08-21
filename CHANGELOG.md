@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A finished Explore or Notepad session now leaves the In-flight board.** These
+  sessions run in your checkout rather than in a worktree, so the retire sweep read
+  two signals that belonged to the directory rather than to the run: any agent open
+  anywhere in that repo, and the checkout's own uncommitted work. Either one pinned
+  the record forever — a session you closed days ago kept its card, and a repo you
+  work in daily accumulated one per Explore and per note. The sweep now uses the
+  same ownership-scoped answer the board itself uses, so such a run retires once its
+  own agent closes. New `agentFlow.retireInPlaceAfterHours` (default `0`, retire on
+  sight) keeps the old behaviour available as a window in hours. Worktrees, branches,
+  commits and briefs on disk are untouched, and a run with a ticket, an open pull
+  request, or anything uncommitted it owns is unaffected.
+
 ## [0.33.6] — 2026-08-21
 
 ### Changed

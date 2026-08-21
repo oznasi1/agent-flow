@@ -1,8 +1,8 @@
-import { PrEntryMap, RepoGit, Run, Shelf, isTicketRun } from "../types";
+import { PrEntryMap, RepoGit, Run, Shelf, isTicketRun, runKind } from "../types";
 import { landed } from "./visibility";
 
 /** Why a run was retired. Reaches the log, never the user. */
-export type RetireReason = "unreachable" | "finished" | "abandoned" | "closed";
+export type RetireReason = "unreachable" | "finished" | "abandoned" | "closed" | "in-place";
 
 /** What the sweep should do with one run this pass. The four stamp actions are
  * writes to the record, not deletions: they only move `finishedAt` / `closedAt`,
@@ -38,6 +38,10 @@ export interface RetireInput {
   shelf: Shelf;
   /** `agentFlow.retireClosedAfterHours` in ms. 0 retires on sight. */
   closedAfterMs: number;
+  /** `agentFlow.retireInPlaceAfterHours` in ms. 0 retires on sight, which is the
+   * shipped default: an Explore or Notepad session you have finished with and
+   * closed leaves nothing behind to come back to. */
+  inPlaceAfterMs: number;
   nowMs: number;
   /** Injected rather than imported, so every rule is testable without a temp
    * directory — and so this module stays free of `fs`. */
@@ -57,6 +61,33 @@ export interface RetireInput {
 export function retireVerdict(i: RetireInput): RetireVerdict {
   const stamped = typeof i.run.finishedAt === "number" ? i.run.finishedAt : null;
   const closedStamp = typeof i.run.closedAt === "number" ? i.run.closedAt : null;
+
+  // Rule 0 — an in-place run that closed. Explore and Notepad sessions launch in
+  // the main checkout rather than a worktree, so two of the inputs below describe a
+  // directory this run does not own: `hasLiveSession` is any agent anywhere in that
+  // repo, and `repos` carries its permanent dirty/ahead state. Both used to pin every
+  // such record forever — the live-session branch below returned `keep` before rule 2b
+  // was ever reached, and the dirty veto would have blocked it anyway.
+  //
+  // `shelf` is the ownership-scoped answer to the same question, and it already folds
+  // in every signal this rule needs: no agent of the run's OWN, no open PR, nothing
+  // merged to wrap up, nothing owned that is dirty or unpushed, and past the launch
+  // grace. So the test is `shelf === "closed"` and nothing else — one definition of
+  // closed, computed in one place.
+  //
+  // Deliberately ahead of the live-session branch, and deliberately narrow. A task run
+  // launched in place (`agentFlow.worktree: "never"`) has the same unscoped inputs, but
+  // it has a ticket, and retiring one on sight would delete the record of work merely
+  // paused. `isTicketRun` is belt and braces on top of the kind test: Explore and
+  // Notepad runs are ticketless by construction, so a record claiming otherwise is
+  // hand-edited or from a source we do not know, and it keeps the ordinary rules.
+  const inPlaceKind = runKind(i.run) === "explore" || runKind(i.run) === "notepad";
+  if (inPlaceKind && !isTicketRun(i.run) && i.shelf === "closed") {
+    if (i.inPlaceAfterMs <= 0) return { action: "retire", reason: "in-place" };
+    if (closedStamp === null) return { action: "stampClosed", closedAt: i.nowMs };
+    if (i.nowMs - closedStamp >= i.inPlaceAfterMs) return { action: "retire", reason: "in-place" };
+    return { action: "keep" };
+  }
 
   // Somebody is working in here. Clear any stamp: a window that started while
   // the run sat idle should not keep running once you reopen an agent in it.

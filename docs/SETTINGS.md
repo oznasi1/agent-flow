@@ -25,6 +25,7 @@
 | `agentFlow.deckGrouping` | `agents` | One card per agent, or per launched task (`workspaces`). |
 | `agentFlow.retireFinishedAfterHours` | `24` | How long landed work stays on the board after its last agent closes. `0` retires on sight. |
 | `agentFlow.retireClosedAfterHours` | `24` | How long a closed run stays in the board's **Recently closed** strip before its record is deleted. `0` retires on sight. |
+| `agentFlow.retireInPlaceAfterHours` | `0` | How long a finished **Explore** or **Notepad** session stays on the board once you close its agent. These run in your checkout, not a worktree, so `0` removes the card as soon as the session closes. |
 | `agentFlow.inflightShowAll` | `false` | Show every run record on the board, the way it worked before the Recently closed strip. |
 | `agentFlow.retireAbandonedAfterDays` | `7` | How long a ticketless, PR-less, clean run may sit before its record is deleted. `0` disables it. |
 | `agentFlow.prReviewStatus` | `PR initiated` | Task status (case-insensitive) that shows the **Address PR** button on the sidebar's Tasks card. The Deck gates its own Address PR button on the review column's waiting lane instead — this setting does not affect it. |

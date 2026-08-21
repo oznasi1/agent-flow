@@ -460,6 +460,7 @@ vi.mock("../../src/config", async (importActual) => {
       retireFinishedAfterHours: actual.getConfig().retireFinishedAfterHours,
       retireAbandonedAfterDays: actual.getConfig().retireAbandonedAfterDays,
       retireClosedAfterHours: actual.getConfig().retireClosedAfterHours,
+      retireInPlaceAfterHours: actual.getConfig().retireInPlaceAfterHours,
       // Steered per test the way openAgents is: the shelf rule's escape hatch has
       // to be flippable without going through the real config store.
       inflightShowAll: h.inflightShowAll,
@@ -1412,6 +1413,11 @@ describe("shelf", () => {
   });
 
   it("closes a notepad run with no agent, no PR and a clean tree", async () => {
+    // The window is what keeps the record alive long enough to HAVE a shelf: on the
+    // shipped `retireInPlaceAfterHours: 0` the sweep retires this run on sight, so
+    // there would be no posted card to read a shelf off. `shelfFor` is the subject
+    // here, and rule 0 reads its answer rather than the other way round.
+    setConfig({ retireInPlaceAfterHours: 24 });
     h.runs = [notepad("notepad-a", NOW - 90 * MIN)];
     h.openSessions = [];
     show();
@@ -1430,6 +1436,7 @@ describe("shelf", () => {
   it("counts a shared checkout's dirty state only for the run that owns it", async () => {
     // Without path ownership this one dirty tree reads as work to lose on BOTH
     // runs and neither ever leaves the board — the defect this exists for.
+    setConfig({ retireInPlaceAfterHours: 24 }); // see the note above: keeps a closed run observable
     h.runs = [notepad("notepad-old", NOW - 90 * MIN), notepad("notepad-new", NOW - 10 * MIN)];
     h.openSessions = [];
     h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
@@ -1577,14 +1584,37 @@ describe("retire sweep", () => {
   });
 
   it("stamps closedAt on a run the board shelved as closed, and keeps rendering it", async () => {
-    h.runs = [mkRun({ key: "notepad-x", kind: "notepad", url: "", createdAt: Date.now() - 3_600_000 })];
+    // An aged TASK run, not a notepad one: rule 0 now retires an in-place run on
+    // sight, so rule 2b — the rule under test — is only reachable for a run that
+    // owns a worktree. The neighbouring shelf test proves an aged task run with no
+    // agent and no PR shelves as closed, which is the state this needs.
+    h.runs = [mkRun({ key: "ASM-CLOSED", createdAt: Date.now() - 3_600_000 })];
     await sweep();
     expect(h.writeRun).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ key: "notepad-x", closedAt: expect.any(Number) }),
+      expect.objectContaining({ key: "ASM-CLOSED", closedAt: expect.any(Number) }),
     );
     expect(h.removeRun).not.toHaveBeenCalled();
-    expect(lastRuns().map((r) => r.run.key)).toContain("notepad-x");
+    expect(lastRuns().map((r) => r.run.key)).toContain("ASM-CLOSED");
+  });
+
+  it("retires a finished Explore session on sight, the shipped default", async () => {
+    // The defect this exists for: an Explore run launches in the checkout, so the
+    // sweep's `hasLiveSession` was any agent anywhere in that repo and its `repos`
+    // carried the checkout's permanent dirty state. Either one pinned the record
+    // forever. Both are supplied here, and the run must still go.
+    h.runs = [mkRun({
+      key: "explore-retries", kind: "explore", url: "", createdAt: Date.now() - 90 * 60_000,
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }],
+    })];
+    h.openSessions = [sess({ sessionId: "s1", cwd: "/r/other", startedAt: Date.now() - 60_000 })];
+    h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "main", dirty: true, ahead: 2, added: 1, removed: 0, files: 1 }],
+    }));
+    await sweep();
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "explore-retries");
+    expect(lastRuns().map((r) => r.run.key)).not.toContain("explore-retries");
   });
 
   it("retires a closed run once its stamp is older than the window", async () => {
