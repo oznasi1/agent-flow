@@ -225,9 +225,9 @@ export const DECK_CSS = `
      black-on-white marks and take the theme's own ink instead. The hue is safe here in a
      way it would not be on the card's ground: the badge never changes with state, so it
      cannot be read as the status that colour otherwise always means on a card. */
-  .pv.p-claude-code { color: #D97757;
-    border-color: color-mix(in srgb, #D97757 34%, var(--hair));
-    background: color-mix(in srgb, #D97757 10%, var(--vscode-editor-background)); }
+  .pv.p-claude-code { color: var(--p-claude);
+    border-color: color-mix(in srgb, var(--p-claude) 34%, var(--hair));
+    background: color-mix(in srgb, var(--p-claude) 10%, var(--vscode-editor-background)); }
   .status { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex: 0 1 auto;
     font-size: var(--t-body); color: var(--dim); font-variant-numeric: tabular-nums;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -14,7 +14,7 @@ const OWNED = [
   "--k-skill", "--k-command", "--k-agent", "--k-hook", "--k-plugin",
   "--k-story", "--k-epic", "--k-task", "--k-subtask", "--k-bug", "--k-other",
   "--hair", "--edge", "--mono", "--dim",
-  "--brand", "--brand-ink",
+  "--brand", "--brand-ink", "--p-claude",
 ];
 
 const SURFACES: [string, string][] = [

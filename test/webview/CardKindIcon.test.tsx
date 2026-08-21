@@ -98,7 +98,7 @@ describe("CardKindIcon provider badge", () => {
     // color-mix() from a real stylesheet, so this checks the CSS text directly.
     const claudeRule = DECK_CSS.match(/\.pv\.p-claude-code\s*\{[^}]*\}/);
     expect(claudeRule).not.toBeNull();
-    expect(claudeRule![0]).toContain("#D97757");
+    expect(claudeRule![0]).toContain("var(--p-claude)");
     expect(DECK_CSS).not.toMatch(/\.pv\.p-copilot\s*\{[^}]*color\s*:/);
     expect(DECK_CSS).not.toMatch(/\.pv\.p-cursor\s*\{[^}]*color\s*:/);
   });
