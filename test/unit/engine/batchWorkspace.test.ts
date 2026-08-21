@@ -319,6 +319,32 @@ describe("openSharedWorkspace", () => {
       expect(String(plan.matches[0].prompt)).toContain("@api/.claude/worktrees/ASM-1/src/export.py");
     });
   });
+
+  // ── review batches: the kind passthrough ──────────────────────────────────
+  it("writes each task's kind onto its run record", async () => {
+    // decorateReviews finds a row's run with runKind(r) === "review". A batched
+    // review whose run says "task" is invisible to the strip AND gets polled as
+    // if `review-aws-ops-8491` were a Jira key.
+    await openSharedWorkspace(
+      baseReq({
+        tasks: [
+          { ...baseReq().tasks[0], kind: "review" },
+          { ...baseReq().tasks[1], kind: "review" },
+        ],
+      }),
+    );
+    const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
+    expect(runs.map((r) => r.kind)).toEqual(["review", "review"]);
+  });
+
+  it("leaves kind absent — not null — when a task does not set one", async () => {
+    // Absent is how "task" is spelled on every record written before review runs
+    // existed. A literal `kind: undefined` would serialize away too, but only by
+    // accident of JSON.stringify; this asserts the key is genuinely not there.
+    await openSharedWorkspace(baseReq());
+    const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
+    expect(runs.every((r) => !("kind" in r))).toBe(true);
+  });
 });
 
 describe("openSharedWorkspace — existing workspace", () => {

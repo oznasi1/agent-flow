@@ -31,6 +31,11 @@ export interface BatchTask {
   /** The parent ticket this task was fanned out from, when it was. Reaches the run
    *  record unchanged; see `Run.parentKey`. */
   parentKey?: string;
+  /** What launched this run, written straight onto the Run record. Reviews pass
+   *  "review" — `decorateReviews` matches a row to its run with
+   *  `runKind(r) === "review"`, and `Run.kind` is also what keeps a run carrying a
+   *  PR url out of Jira polling. Absent means "task", exactly as before. */
+  kind?: Run["kind"];
 }
 
 export type SharedTarget =
@@ -203,6 +208,9 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
       url: t.ticket.url,
       createdAt,
       ...(provider ? { provider } : {}),
+      // Spread-conditional, not `kind: t.kind`: absent is how "task" is spelled on
+      // every record a task batch has ever written, and this keeps those bytes identical.
+      ...(t.kind ? { kind: t.kind } : {}),
       mode: here ? (here.kind === "workspace" ? "multiroot" : "per-window") : workspaceFile ? "multiroot" : "per-window",
       workspaceFile,
       repos: t.services.map((s) => ({
