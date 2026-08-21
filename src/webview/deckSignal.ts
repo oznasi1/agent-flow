@@ -2,9 +2,13 @@ import { CardAgent, PrFacts, PrWorkReason, RunStatus } from "../types";
 
 /** One element of a card's signal line. `diff` is its own kind rather than a
  * formatted string because the two halves take different colors, and a card
- * must never set a count in anything but mono. */
+ * must never set a count in anything but mono.
+ *
+ * `title` is a bit's own tooltip, for the counts that name several things at
+ * once: "4 repos" says how many but not which, and the card has no room to say
+ * both. Newline-separated — a native `title` honors them, one line per thing. */
 export type SignalBit =
-  | { kind: "text"; text: string; tone?: "bad" | "warn" | "ok"; mono?: boolean }
+  | { kind: "text"; text: string; tone?: "bad" | "warn" | "ok"; mono?: boolean; title?: string }
   | { kind: "diff"; added: number; removed: number };
 
 const REVIEW_TEXT: Record<PrFacts["review"], string> = {
@@ -77,7 +81,15 @@ export function cardSignal(r: RunStatus, agent: CardAgent | null): SignalBit[] {
   const tot = r.repos.reduce((s, g) => ({ a: s.a + g.added, d: s.d + g.removed }), { a: 0, d: 0 });
   if (tot.a > 0 || tot.d > 0) bits.push({ kind: "diff", added: tot.a, removed: tot.d });
 
-  if (r.repos.length > 1) bits.push({ kind: "text", text: `${r.repos.length} repos` });
+  // Names off `r.repos`, the same array the count comes from, so the tooltip can
+  // never list a different number of repos than the label claims.
+  if (r.repos.length > 1) {
+    bits.push({
+      kind: "text",
+      text: `${r.repos.length} repos`,
+      title: r.repos.map((g) => g.name).join("\n"),
+    });
+  }
   // r.agents.length is the RUN's agent count, not this card's — on the Agents
   // lens `agent` is one session and the card is that one agent, so this branch
   // only ever fires on the Workspaces lens, where a card is a run.

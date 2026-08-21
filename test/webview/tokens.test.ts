@@ -150,6 +150,26 @@ describe.each(SURFACES)("%s sheet", (_name, sheet) => {
   });
 });
 
+describe("attention hue", () => {
+  // Regression guard, and the reason --c-attn is the one status hue not wired to
+  // the host's chart palette. VS Code registers charts.orange as inheriting from
+  // minimap.findMatchHighlight instead of a literal, and stock Cursor Dark sets
+  // that to #88C0D044 — 27%-alpha pale blue, grey once composited. The var()
+  // fallback cannot save it: the variable is defined there, just wrong. Anyone
+  // reaching for var(--vscode-charts-orange) again reintroduces a grey Action
+  // required column in Cursor.
+  it("fixes the hue instead of deriving it from charts.orange", () => {
+    expect(TOKENS_CSS).toContain("--c-attn:     #e0913a");
+    expect(stripComments(TOKENS_CSS)).not.toContain("--vscode-charts-orange");
+  });
+
+  // #e0913a is 2.54:1 on white. The sibling hues stay theme-derived, so they get
+  // their light values from the host; this one has to carry its own.
+  it("declares a light override that passes contrast", () => {
+    expect(TOKENS_CSS).toMatch(/body\.vscode-light\s*{[^}]*--c-attn:\s*#a85c00/);
+  });
+});
+
 describe("brand accent", () => {
   it("declares the dark default and the light override", () => {
     expect(TOKENS_CSS).toContain("--brand: #2AA79B");
@@ -195,7 +215,18 @@ describe("brand accent", () => {
     // no longer appears in deckStyles.ts at all. (It had already lost its
     // `::after` sibling here, which the tightened detector showed spends only
     // `var(--brand-ink)`, never `var(--brand)`.)
-    deck: [".act.primary", ".act.primary:hover"],
+    deck: [
+      ".act.primary", ".act.primary:hover",
+      // The review row's play button — the agent action reachable without opening
+      // the row. A deliberate addition, and the same action `.act.primary` already
+      // spends the hue on inside the open row, so it is one action in one colour
+      // rather than a second claim on attention. Like `.orch-chip` it is a tint,
+      // not a fill: the glyph takes the hue and only :hover washes the cell, so a
+      // queue of six rows does not put six filled primaries on the board. The
+      // not-checked-out variant is `--dim`, deliberately NOT a faded brand, and so
+      // does not appear here.
+      ".rv-go", ".rv-go:not(.busy):hover",
+    ],
     marketplace: [".btn.pri", ".btn.pri:hover"],
     controls: [],
     orchestrator: [

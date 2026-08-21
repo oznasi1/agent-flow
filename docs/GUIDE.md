@@ -33,9 +33,10 @@
   for your fixes — then, by default, starts implementing the requested changes (toggle with
   `agentFlow.prReviewAutoFix`).
 - **Review queue** — a strip on the Deck lists every open PR that asks for *your* review,
-  sortable by oldest or smallest, with per-row size, CI and age. **Review with agent** checks
-  one out into a worktree and seeds an agent to review it; submitting the review itself from
-  the Deck is opt-in and ships **off** (`agentFlow.reviewWrites`).
+  sortable by oldest or smallest, with per-row size, CI and age. **Review with agent** — a
+  play button on every row, or the labelled button once you open one — checks it out into a
+  worktree and seeds an agent to review it; submitting the review itself from the Deck is
+  opt-in and ships **off** (`agentFlow.reviewWrites`).
 - **Launch in parallel** — filter the repo lens to one repo **or several** and a checkbox
   appears on each task. Tick a few, then **Launch in parallel**: each task gets its own git
   worktree (its own branch) in whichever of the filtered repos it's inferred to touch — or
@@ -74,8 +75,10 @@ plain list of things you want to do: a title, optional detail, a checkbox.
   field says so — drop an image file onto a note, or pick one with **Attach image**,
   which sits beside **Add note** and in a note's edit form. Thumbnails sit under the
   note's text and open full size in an editor tab. **Start** copies them into
-  `.pick-task/images/` beside the brief and names them in both the brief and the seeded
-  prompt, so the agent reads what you saw instead of your description of it. PNG, JPEG,
+  `.pick-task/images/<run key>/` beside the brief and names them in both the brief and the
+  seeded prompt, so the agent reads what you saw instead of your description of it. The run
+  key in that path is what keeps a note you start now from overwriting the screenshot an
+  agent started earlier is still working from. PNG, JPEG,
   GIF and WebP, up to 10 MB each; the files live beside your notes in the editor's global
   storage and go when the note or the image does.
 - **Order is yours.** Each note has a grip — drag it to put the list in whatever order you
@@ -228,6 +231,11 @@ are still open, alongside the review decision and mergeability. **Review with ag
 checks the PR out into a worktree and seeds
 your agent to review the diff and write its findings to
 `.pick-task/REVIEW-<number>.md`, which the row can then load into the review box.
+That action is also on the line itself, as a play glyph at the end of every row, so
+clearing a queue does not mean expanding each row to reach it. A row already being
+reviewed shows the loading mark there instead and cannot be launched twice; a row
+whose repo isn't checked out locally is greyed but still live, and says why when you
+hover it.
 Turn the strip off with `agentFlow.reviewRequests`; it also goes dark whenever
 `agentFlow.prFacts` is off, since both lean on the same forge CLI — `gh`, or
 `glab` when `agentFlow.forge` is `gitlab`.

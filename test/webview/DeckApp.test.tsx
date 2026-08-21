@@ -1993,9 +1993,9 @@ const wsStatus = () => mkStatus({
   ],
 });
 
-// The workspace chip (and the plain repo-chip row it replaces) moved off the
-// card into the drawer's Work section — every case here selects the card first.
-describe("workspace chip", () => {
+// The workspace label and its repo chips live in the drawer's Work section —
+// every case here selects the card first.
+describe("the drawer's workspace block", () => {
   it("names the workspace and counts its repos", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
@@ -2006,7 +2006,7 @@ describe("workspace chip", () => {
     expect(chip.textContent).not.toContain(".code-workspace");
   });
 
-  it("tooltips the chip with the workspace file's own path, not a generic sentence", () => {
+  it("tooltips the label with the workspace file's own path, not a generic sentence", () => {
     // The path is the only thing that tells apart two open .code-workspace files
     // sharing a label — a generic sentence can't disambiguate them.
     const { container } = render(<DeckApp />);
@@ -2016,30 +2016,26 @@ describe("workspace chip", () => {
     expect(chip.getAttribute("title")).toBe("/ws/centaur+e2e.code-workspace");
   });
 
-  it("keeps both repo chips in the fold, with their git signal", () => {
+  it("shows every repo chip under the label, with its git signal", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
     fireEvent.click(container.querySelector(".card") as HTMLElement);
-    const fold = container.querySelector(".c-ws .ws-fold")!;
-    expect(Array.from(fold.querySelectorAll(".repo")).map((r) => r.textContent))
+    const row = container.querySelector(".c-ws .c-repos")!;
+    expect(Array.from(row.querySelectorAll(".repo")).map((r) => r.textContent))
       .toEqual(["centaur●", "automation_e2e+12−2↑1"]);
   });
 
-  it("replaces the flat chip row, so the drawer says the workspace once", () => {
+  it("has nothing to expand — no fold, and a label rather than a toggle", () => {
+    // The drawer is the surface with room to spare, so a reader who opened it to
+    // find out which repos a task spans must not have to hover or click. Both
+    // halves matter: a leftover .ws-fold rule would hide the chips with
+    // display:none even though the markup renders them.
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
     fireEvent.click(container.querySelector(".card") as HTMLElement);
-    expect(container.querySelector(".c-repos")).toBeNull();
-  });
-
-  it("toggles the fold open for keyboard and touch", () => {
-    const { container } = render(<DeckApp />);
-    host(runsMsg([wsStatus()]));
-    fireEvent.click(container.querySelector(".card") as HTMLElement);
-    const wrap = container.querySelector(".c-ws")!;
-    expect(wrap.className).not.toContain("open");
-    fireEvent.click(container.querySelector(".ws")!);
-    expect(container.querySelector(".c-ws")!.className).toContain("open");
+    expect(container.querySelector(".c-ws .ws-fold")).toBeNull();
+    expect(container.querySelector(".c-ws button")).toBeNull();
+    expect(DECK_CSS).not.toContain("ws-fold");
   });
 
   it("leaves a single-repo run on the plain chip row", () => {
@@ -2427,6 +2423,16 @@ describe("the card at rest", () => {
     expect(card.querySelector(".c-branch")).toBeNull();
     expect(card.querySelector(".c-agents")).toBeNull();
     expect(card.querySelector(".pill")).toBeNull();
+  });
+
+  it("names the repos behind the \"N repos\" bit in its tooltip, one per line", () => {
+    // The card has no room to list them and must not grow to: the count says how
+    // many, the tooltip says which. Newline-separated, which a native title honors.
+    render(<DeckApp />);
+    host(runsMsg([wsStatus()]));
+    const bits = Array.from(document.querySelectorAll(".card .c-sig span"));
+    const count = bits.find((b) => b.textContent === "2 repos")!;
+    expect(count.getAttribute("title")).toBe("centaur\nautomation_e2e");
   });
 
   it("shows Open and Diff in the footer, and no overflow menu", () => {

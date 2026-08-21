@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.8] — 2026-08-21
+
+### Added
+
+- **Hand a PR to an agent without opening its row.** The review queue's agent action lived
+  only inside an expanded row, so clearing a queue meant expanding each row, clicking, and
+  collapsing it again — three gestures for the one thing the queue exists to start. Every
+  row now carries the action on the line itself, as a play glyph in the product's own accent
+  at the end of the row, tooltipped **Review with agent**. It is the same accent the
+  expanded row's own button already uses, so the two read as one action reachable two ways
+  rather than as two different ones. A row whose review is already running shows the loading
+  mark instead and stops being clickable at all — the row says `reviewing` beside it, and a
+  second launch would be a second worktree for a PR mid-review. A row whose repo isn't
+  checked out locally keeps a live button, greyed rather than accented, and says why in its
+  tooltip; clicking it still explains what to do, exactly as the expanded button did.
+
+## [0.33.7] — 2026-08-21
+
+### Fixed
+
+- **A note's screenshot could be replaced by the next note's, under the agent already
+  reading it.** Attachments were staged at `.pick-task/images/<filename>`, and every image
+  pasted into the notepad is called `image.png` — so two notes taken into the same checkout
+  landed on the same file, the second launch silently overwriting the first. An agent opens
+  that file when it gets to it rather than when it starts, so the one that had been running
+  longest was the one most likely to be handed someone else's screenshot and to go and
+  work on it. Images are now staged per run — `.pick-task/images/<run key>/<filename>` —
+  which separates the two without deleting anything, since the other agent may still be
+  working. Nothing prunes the directory, as before; `.pick-task/` stays git-excluded whole.
+
+## [0.33.6] — 2026-08-21
+
+### Changed
+
+- **A multi-repo card names its repos in a tooltip, and the drawer no longer folds
+  them away.** The card's `4 repos` bit said how many repos a task spanned but never
+  which, and a card has no room to list them — so the count now carries the names in
+  its own tooltip, one per line, read off the same array the count comes from, which
+  is what stops the tooltip ever listing a different number than the label claims.
+  The drawer had the opposite problem: it has the room, but its repo chips sat behind
+  a hover-or-click fold, so a reader who opened the drawer to find out which repos a
+  task spans had to reach for a second gesture to get the answer. The fold is gone —
+  the workspace is a plain label, still tooltipped with its `.code-workspace` path
+  since that is the only thing telling two same-named workspaces apart, and every
+  repo chip below it is visible at rest with its own git signal.
+
+## [0.33.5] — 2026-08-21
+
+### Fixed
+
+- **The Action required column was grey in Cursor, not amber.** `--c-attn` resolved
+  through `--vscode-charts-orange`, and VS Code registers `charts.orange` as inheriting
+  from `minimap.findMatchHighlight` rather than carrying a literal default. The stock
+  Cursor Dark theme overrides that to `#88C0D044` — pale blue at 27% alpha, which
+  composites over the card ground to `#3e4d51`, a flat grey. The `var()` fallback never
+  fired because the variable is defined there, just wrong, so every surface drawing the
+  column accent, its glow, the Action required stat and the Highest priority chip lost
+  its hue. The amber is now fixed rather than derived, with a light-theme variant, since
+  a card's one loud colour cannot be left to the host to define.
+
 ## [0.33.4] — 2026-08-21
 
 ### Added

@@ -279,10 +279,11 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
               {i > 0 && <span className="sep">·</span>}
               {b.kind === "diff"
                 ? <span className="c-diff"><span className="add">+{b.added}</span><span className="del">−{b.removed}</span></span>
-                // The truncated branch's own title: .c-sig .m ellipsizes by design,
-                // so a long one is otherwise unrecoverable without opening the
+                // A bit's own title wins — that is the repo names behind "4 repos".
+                // The mono fallback is the truncated branch's: .c-sig .m ellipsizes by
+                // design, so a long one is otherwise unrecoverable without opening the
                 // drawer — the old .c-branch .bn carried the same title.
-                : <span className={`${b.mono ? "m" : ""} ${b.tone ?? ""}`.trim()} title={b.mono ? b.text : undefined}>{b.text}</span>}
+                : <span className={`${b.mono ? "m" : ""} ${b.tone ?? ""}`.trim()} title={b.title ?? (b.mono ? b.text : undefined)}>{b.text}</span>}
             </React.Fragment>
           ))}
         </div>

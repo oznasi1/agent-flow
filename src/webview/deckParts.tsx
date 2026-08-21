@@ -80,27 +80,25 @@ export function RepoChip({ g }: { g: RepoGit }): JSX.Element {
   );
 }
 
-/** The repos of a multi-root run, behind the workspace that holds them. A card
- * for a two-repo task used to spend a line on chips whose names the workspace
- * already implies; at rest this says the one thing that identifies the task, and
- * hovering it gives back every chip with its own git signal.
+/** The repos of a multi-root run, under the workspace that holds them: the
+ * workspace names the task, and every repo chip below it carries its own git
+ * signal.
  *
- * Hover and focus reveal the fold in CSS, with no state to keep in sync. The
- * click toggle exists for touch and for a keyboard user who tabs past: `.open`
- * survives the pointer leaving, which a :hover rule cannot. */
+ * Nothing folds. This renders in the drawer, the one surface with room to spare,
+ * and a reader who opened the drawer to find out which repos a task spans should
+ * not then have to hover or click for the answer. On the card, where there is no
+ * room, the `N repos` signal bit carries the names in its tooltip instead. */
 export function WorkspaceChip({ label, repos, filePath }: { label: string; repos: RepoGit[]; filePath: string }): JSX.Element {
-  const [open, setOpen] = React.useState(false);
   return (
-    <div className={`c-ws ${open ? "open" : ""}`}>
+    <div className="c-ws">
       {/* The workspace file's own path, not a generic sentence — it is the only
         * thing that tells apart two open .code-workspace files that happen to
         * share a label. */}
-      <button type="button" className="ws" onClick={() => setOpen((o) => !o)} title={filePath}>
-        <span className="wsi">{open ? "▾" : "▸"}</span>
+      <span className="ws" title={filePath}>
         <span className="n">{label}</span>
         <span className="ct">{repos.length} repos</span>
-      </button>
-      <div className="ws-fold">
+      </span>
+      <div className="c-repos">
         {repos.map((g) => <RepoChip key={g.name} g={g} />)}
       </div>
     </div>

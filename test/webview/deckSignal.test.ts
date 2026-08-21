@@ -103,7 +103,9 @@ describe("cardSignal", () => {
     expect(bits).toEqual([
       { kind: "text", text: "⎇ feat/x", mono: true },
       { kind: "diff", added: 11, removed: 3 },
-      { kind: "text", text: "2 repos" },
+      // The count's tooltip is where the names go: the card says how many, and
+      // hovering says which, one repo per line.
+      { kind: "text", text: "2 repos", title: "svc\nb" },
     ]);
   });
 

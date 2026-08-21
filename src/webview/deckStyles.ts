@@ -279,19 +279,15 @@ export const DECK_CSS = `
   .repo .add { color: var(--c-done); } .repo .del { color: var(--c-danger); }
   .repo .dirty { color: var(--c-idle); }
 
-  /* The workspace chip and its fold. The name is an identifier, so it is mono;
-     "2 repos" is prose, so it is not. The fold is in the DOM at rest and hidden
-     with display:none — a card that has to grow anyway on hover should not also
-     pay for a mount. */
+  /* The workspace label and the repo chips under it. The name is an identifier,
+     so it is mono; "2 repos" is prose, so it is not. Nothing folds, so the label
+     is a label — no pointer, no hover affordance, nothing to click. The chips
+     below it are the .c-repos row above, margin and all. */
   .c-ws { margin-top: 7px; }
   .ws { display: inline-flex; align-items: baseline; gap: 5px; font-size: var(--t-data);
     color: var(--dim); background: none; border: 1px solid var(--hair); border-radius: var(--r-chip);
-    padding: 1px 6px; cursor: pointer; }
-  .ws:hover { border-color: color-mix(in srgb, var(--vscode-foreground) 25%, transparent); }
-  .ws .wsi { font-size: 9px; color: color-mix(in srgb, var(--vscode-foreground) 40%, transparent); }
+    padding: 1px 6px; }
   .ws .n { font-family: var(--mono); color: color-mix(in srgb, var(--vscode-foreground) 82%, transparent); }
-  .ws-fold { display: none; margin-top: 6px; flex-wrap: wrap; gap: 5px 7px; }
-  .c-ws:hover .ws-fold, .c-ws:focus-within .ws-fold, .c-ws.open .ws-fold { display: flex; }
 
   /* Agents open in this card's directories. Names are identifiers, so mono; the
      row is a control, so it takes the same focus treatment as .act. */
@@ -448,13 +444,46 @@ export const DECK_CSS = `
   .rv-rows { border-top: 1px solid var(--hair); max-height: calc(var(--rv-row-h) * 6.5);
     overflow-y: auto; overscroll-behavior: contain; }
   .rv-row + .rv-row { border-top: 1px solid var(--hair); }
+  /* The head holds the row's two controls side by side — the line that opens the
+     row, and the play button that launches an agent without opening it. It exists
+     because .rv-detail is a sibling of them both and has to sit UNDER both: one
+     flex container cannot do that, so the head is the flex line and .rv-row stays
+     a block. .rv-line then takes whatever .rv-go leaves. */
+  .rv-head { display: flex; align-items: stretch; }
+  /* On the head, not on .rv-line: hovering either control has to light the whole
+     line, or the play cell stays a 26px unlit notch at the end of a hovered row.
+     Scoped away from the skeletons via the aria-hidden their row already carries —
+     they are not rows you can open, so they take no hover at all (which is why
+     .rv-line.rv-skel needs no hover rule of its own any more). Scoped to the head
+     rather than the row so an open row's detail block still takes none either. */
+  .rv-row:not([aria-hidden]) .rv-head:hover {
+    background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)); }
   /* A button, so reset the button chrome and let it fill the row. outline-offset is
      negative because .rv-strip clips overflow — a ring drawn outside would vanish. */
   .rv-line { display: flex; align-items: baseline; gap: 8px; padding: 6px 12px; cursor: pointer;
     font-size: var(--t-body); font-variant-numeric: tabular-nums;
-    width: 100%; text-align: left; background: none; border: 0; color: inherit; font-family: inherit;
+    flex: 1; min-width: 0; text-align: left; background: none; border: 0; color: inherit;
+    font-family: inherit; outline-offset: -2px; }
+
+  /* The row's agent action. --brand, the same hue .act.primary uses for the
+     expanded row's own "Review with agent" — one action, one colour, whichever
+     way you reach it. A fixed width so it stacks into a column like every other
+     field on the row, and full height so the whole cell is the hit target.
+
+     .cold is the repo-not-checked-out case: --dim, not a faded brand, because a
+     washed-out brand glyph reads as the primary action gone wrong rather than
+     one that isn't available here. It stays clickable — the host explains.
+
+     .busy is a span, not a button (see ReviewStrip), so it gets the layout rules
+     and none of the affordance. */
+  .rv-go { flex: none; width: 26px; display: inline-flex; align-items: center;
+    justify-content: center; background: none; border: 0; padding: 0;
+    font-size: var(--t-body); line-height: 1; color: var(--brand);
     outline-offset: -2px; }
-  .rv-line:hover { background: var(--vscode-list-hoverBackground, var(--vscode-toolbar-hoverBackground)); }
+  .rv-go:not(.busy) { cursor: pointer; }
+  .rv-go:not(.busy):hover { background: color-mix(in srgb, var(--brand) 16%, transparent); }
+  .rv-go.cold { color: var(--dim); }
+  .rv-go.cold:hover { background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
   .rv-caret { flex: none; width: 9px; color: var(--dim); }
   /* Identifiers and counts — the only mono on the row. The title and the handle
      beside them are English, and stay in the UI font. */
@@ -508,7 +537,6 @@ export const DECK_CSS = `
   /* align-items: center, not the row's usual baseline — these bars have no text,
      so there is no baseline to sit on and they would hang off the top of the line. */
   .rv-line.rv-skel { cursor: default; align-items: center; }
-  .rv-line.rv-skel:hover { background: none; }
   .sk { display: inline-block; height: 9px; border-radius: 3px;
     background: linear-gradient(90deg,
       color-mix(in srgb, var(--vscode-foreground) 7%, transparent) 25%,

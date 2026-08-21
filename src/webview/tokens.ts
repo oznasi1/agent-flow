@@ -11,7 +11,15 @@ export const TOKENS_CSS = `
   :root {
     /* Column accents / status hues. */
     --c-progress: var(--vscode-charts-blue, #4aa3df);
-    --c-attn:     var(--vscode-charts-orange, #e0913a);
+    /* The one status hue that does NOT track the host's chart palette, because it
+       cannot. VS Code registers charts.orange as inheriting from
+       minimap.findMatchHighlight rather than carrying a literal default, and the
+       stock Cursor Dark theme overrides that to #88C0D044 — pale blue at 27%
+       alpha, which composites over the card ground to #3e4d51, a flat grey. A
+       var() fallback is no defence: the variable IS defined there, just wrong.
+       Amber on a card means one thing, so it is fixed. Measured 6.50:1 on the
+       dark editor ground and 7.00:1 on Cursor's. */
+    --c-attn:     #e0913a;
     --c-review:   var(--vscode-charts-purple, #b083f0);
     --c-done:     var(--vscode-charts-green, #4ac26b);
     --c-idle:     var(--vscode-charts-yellow, #d7a531);
@@ -75,6 +83,9 @@ export const TOKENS_CSS = `
 
   /* VS Code stamps the theme kind onto <body>, so the swap needs no JavaScript. */
   body.vscode-light { --brand: #157F76; --brand-ink: #ffffff; }
+  /* #e0913a on white is 2.54:1, which fails; this reads 5.00:1. Same reason the
+     brand hue above needs a light variant, and the same one-line swap. */
+  body.vscode-light { --c-attn: #a85c00; }
   /* No high-contrast override: currentColor, used outside the color property
      itself, would resolve a filled button's background to its own label color.
      The hue already measures 7.10:1 on #000000 and 4.85:1 on #ffffff, so it

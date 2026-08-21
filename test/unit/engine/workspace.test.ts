@@ -203,10 +203,52 @@ describe("openWorkspace — attachments", () => {
 
   beforeEach(() => copyFileSync.mockReset());
 
-  it("copies each attachment into .pick-task/images/ in every repo", async () => {
+  it("copies each attachment into .pick-task/images/<run key>/ in every repo", async () => {
     await openWorkspace(baseReq({ attachments: [{ path: "/store/i1.png", name: "shot.png" }] }));
-    expect(targets()).toContain("/repos/account-service/.pick-task/images/shot.png");
-    expect(targets()).toContain("/repos/centaur/.pick-task/images/shot.png");
+    expect(targets()).toContain("/repos/account-service/.pick-task/images/ASM-1/shot.png");
+    expect(targets()).toContain("/repos/centaur/.pick-task/images/ASM-1/shot.png");
+  });
+
+  // The reason the run key is in that path at all: two launches into one checkout each
+  // de-duplicate against their own attachment list only, so a shared filename — and every
+  // pasted screenshot is called `image.png` — used to mean the second launch replaced the
+  // first agent's image under it.
+  it("keeps two tasks' same-named attachments apart in one checkout", async () => {
+    await openWorkspace(baseReq({
+      services: mkRepos(["account-service"]),
+      attachments: [{ path: "/store/i1.png", name: "image.png" }],
+    }));
+    await openWorkspace(baseReq({
+      ticket: { key: "ASM-2", summary: "Another", url: "https://jira/ASM-2" },
+      services: mkRepos(["account-service"]),
+      attachments: [{ path: "/store/i2.png", name: "image.png" }],
+    }));
+    expect(targets()).toContain("/repos/account-service/.pick-task/images/ASM-1/image.png");
+    expect(targets()).toContain("/repos/account-service/.pick-task/images/ASM-2/image.png");
+  });
+
+  // Keys are built from free text (a notepad title) or handed over by a task source, and
+  // this is the one place a key becomes a directory rather than a filename fragment.
+  it("folds a key that would escape or split the images directory into one segment", async () => {
+    await openWorkspace(baseReq({
+      ticket: { key: "../../etc/pwned", summary: "Nope", url: "" },
+      services: mkRepos(["account-service"]),
+      attachments: [{ path: "/store/i1.png", name: "shot.png" }],
+    }));
+    expect(targets()).toEqual(["/repos/account-service/.pick-task/images/etc-pwned/shot.png"]);
+  });
+
+  // Defensive rather than reachable — every key a caller builds carries a literal prefix
+  // (`notepad-`, `explore-`) or comes from a task source. Named anyway because the failure
+  // it prevents is silent: an empty segment collapses in `path.join`, putting the file back
+  // in the shared `images/` slot this change exists to get out of.
+  it("still gives a key with nothing sluggable in it a directory of its own", async () => {
+    await openWorkspace(baseReq({
+      ticket: { key: "///", summary: "Nope", url: "" },
+      services: mkRepos(["account-service"]),
+      attachments: [{ path: "/store/i1.png", name: "shot.png" }],
+    }));
+    expect(targets()).toEqual(["/repos/account-service/.pick-task/images/task/shot.png"]);
   });
 
   it("disambiguates two attachments that share a filename", async () => {

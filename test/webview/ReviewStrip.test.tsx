@@ -155,6 +155,46 @@ describe("ReviewStrip", () => {
     expect(onCollapse).toHaveBeenCalledWith(false);
   });
 
+  // ── The row's own play button: the agent action without opening the row ────
+  // .rv-line is itself a button, so this one is a SIBLING of it rather than a
+  // child. That is what makes "launch without expanding" possible at all — a
+  // nested button's click would bubble into the row's own onExpand.
+  it("starts an agent review from a collapsed row, without expanding it", () => {
+    const onLaunch = vi.fn();
+    const onExpand = vi.fn();
+    render(<ReviewStrip {...props({ onLaunch, onExpand })} />);
+    fireEvent.click(screen.getByLabelText("Review with agent"));
+    expect(onLaunch).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
+    expect(onExpand).not.toHaveBeenCalled();
+  });
+
+  it("stands the play button down for a loading mark while a review is already running", () => {
+    // The row already says "reviewing". A live play button beside it invites a
+    // second worktree for a PR that is mid-review, so the cell stops being a
+    // button at all rather than merely looking busy.
+    const { container } = render(<ReviewStrip {...props({
+      requests: [mk({ runKey: "review-aws-ops-8491" })],
+    })} />);
+    expect(screen.queryByLabelText("Review with agent")).not.toBeInTheDocument();
+    expect(container.querySelector(".rv-go svg.lmark")).toBeInTheDocument();
+  });
+
+  it("keeps the play button live but marks it apart when the repo is not checked out", () => {
+    // Same call as the expanded button makes: the host explains what to do rather
+    // than the row refusing the click. The bare label is no explanation on its
+    // own, so this is the one state whose tooltip carries the reason — and it is
+    // marked .cold, not brand, because a washed-out brand glyph reads as the
+    // primary action gone wrong rather than one that isn't available here.
+    const onLaunch = vi.fn();
+    render(<ReviewStrip {...props({ onLaunch, requests: [mk({ localPath: null })] })} />);
+    const go = screen.getByLabelText("Review with agent") as HTMLButtonElement;
+    expect(go.disabled).toBe(false);
+    expect(go.title).toMatch(/isn't checked out/i);
+    expect(go.className).toMatch(/\bcold\b/);
+    fireEvent.click(go);
+    expect(onLaunch).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
+  });
+
   it("offers Review with agent when the repo is checked out", () => {
     const onLaunch = vi.fn();
     render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", onLaunch })} />);
