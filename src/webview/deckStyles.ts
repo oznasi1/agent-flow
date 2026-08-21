@@ -312,6 +312,11 @@ export const DECK_CSS = `
   .ag-state.tone-attn { color: var(--c-attn); }
   .ag-age { margin-left: auto; flex: none; }
   .ag-open { flex: none; opacity: .7; }
+  /* An identifier, so mono — the same rule .ag-name and .key follow. Quieter than the
+     name: which session this is matters more than what is driving it. */
+  .ag-model { flex: none; font-family: var(--mono); font-size: var(--t-data);
+    color: color-mix(in srgb, var(--vscode-foreground) 62%, transparent); }
+  .ag-model .plus { margin-left: 3px; opacity: .6; }
 
   /* Still live: it moved off the card's old .c-foot into the drawer header,
      where it carries the run's tracker status (DeckDetail.tsx's .dd-hd .pill). */

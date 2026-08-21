@@ -2,6 +2,7 @@ import * as React from "react";
 import { send } from "./vscodeApi";
 import { AgentActivity, CardAgent, PrFacts, RepoGit, Run } from "../types";
 import { timeAgo } from "./helpers";
+import { modelLabel } from "./modelLabel";
 
 export type Tone = "working" | "idle" | "attn" | "parked" | "merged";
 
@@ -144,6 +145,17 @@ export function AgentsRow({ agents, defaultOpen = false }: { agents: CardAgent[]
             <span className={`sdot tone-${st.tone} ${st.tone === "working" ? "pulse" : ""}`} />
             <span className="ag-name" title={a.activity.slug ?? undefined}>{a.session.name ?? a.session.sessionId.slice(0, 8)}</span>
             <span className={`ag-state tone-${st.tone}`}>{st.text}</span>
+            {a.activity.model && (
+              <span
+                className="ag-model"
+                title={(a.activity.modelCount ?? 1) > 1
+                  ? `Answering with ${a.activity.model} — this session has used ${a.activity.modelCount} models`
+                  : `Answering with ${a.activity.model}`}
+              >
+                {modelLabel(a.activity.model)}
+                {(a.activity.modelCount ?? 1) > 1 && <span className="plus">+{a.activity.modelCount! - 1}</span>}
+              </span>
+            )}
             <span className="ag-age">{timeAgo(a.activity.lastActivityMs)}</span>
             {/* readOpenSessions defaults a missing startedAt to 0 — timeAgo(0) is ""
                 (falsy ms short-circuits it), which would otherwise render a bare
