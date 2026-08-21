@@ -723,6 +723,7 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:ct": "playwright test -c playwright-ct.config.ts",
+    "test:e2e": "npm run build && playwright test -c playwright-e2e.config.ts",
     "typecheck": "tsc --noEmit",
     "vscode:prepublish": "npm run build -- --production",
     "package": "rm -f *.vsix && vsce package --no-dependencies"
@@ -739,6 +740,7 @@
     "@types/react-dom": "^18.2.0",
     "@types/vscode": "^1.90.0",
     "@vitest/coverage-v8": "^2.1.9",
+    "@vscode/test-electron": "2.4.1",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.20.0",
     "jsdom": "^24.1.3",

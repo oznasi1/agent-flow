@@ -15,3 +15,6 @@ docs/mockups/
 playwright-report/
 test-results/
 playwright/.cache/
+# E2E host downloads and reports.
+.vscode-test/
+playwright-e2e-report/
