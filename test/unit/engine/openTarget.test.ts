@@ -90,6 +90,25 @@ describe("chooseOpenTarget", () => {
       expect(items[1].detail).toBe("Start a session here — keeps this window's folders");
     });
 
+    // "Open the task in a separate window" is wrong on a review's picker, and it is the
+    // detail line the user actually reads. Take's wording is the default so its rows
+    // stay exactly as they shipped.
+    it("says what is being opened, defaulting to Take's own wording", async () => {
+      const d = deps();
+      await chooseOpenTarget({ openIn: "ask", trackOpenWindows: false, ...COPY }, d);
+      const details = (d.pick.mock.calls[0][0] as { detail: string }[]).map((i) => i.detail);
+      expect(details[0]).toBe("Open the task in a separate window");
+      expect(details[2]).toBe("Open the task into a .code-workspace you already have");
+    });
+
+    it("takes the caller's noun when it has one", async () => {
+      const d = deps();
+      await chooseOpenTarget({ openIn: "ask", trackOpenWindows: false, ...COPY, noun: "the review" }, d);
+      const details = (d.pick.mock.calls[0][0] as { detail: string }[]).map((i) => i.detail);
+      expect(details[0]).toBe("Open the review in a separate window");
+      expect(details[2]).toBe("Open the review into a .code-workspace you already have");
+    });
+
     it("forwards the caller's title and placeholder", async () => {
       const d = deps();
       await chooseOpenTarget({ openIn: "ask", trackOpenWindows: false, title: "Review aws-ops#8491 — open where?", placeHolder: "somewhere" }, d);

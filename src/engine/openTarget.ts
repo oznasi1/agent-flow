@@ -61,9 +61,19 @@ export function liveWindowItems(records: readonly PresenceRecord[]): TargetItem[
 /** Where to open this launch. Live windows appear only in the interactive `ask` flow —
  * a specific open window is inherently a per-launch choice, not a setting. */
 export async function chooseOpenTarget(
-  cfg: { openIn: OpenInSetting; trackOpenWindows: boolean; title: string; placeHolder: string },
+  cfg: {
+    openIn: OpenInSetting;
+    trackOpenWindows: boolean;
+    title: string;
+    placeHolder: string;
+    /** What is being opened, as it reads mid-sentence in the item details: "the task"
+     *  for Take, "the review" for Review with agent. Take's own wording is the default,
+     *  so its rows stay byte-identical to what shipped. */
+    noun?: string;
+  },
   deps: ChooseOpenTargetDeps,
 ): Promise<OpenTarget | undefined> {
+  const noun = cfg.noun ?? "the task";
   // A window with no identity can't be named by a plan match, so it can't hold a
   // seeded session — "this window" is not offered, and the setting can't force it.
   const here = deps.currentWindow();
@@ -79,9 +89,9 @@ export async function chooseOpenTarget(
     ? [{ label: "$(window) This window", detail: "Start a session here — keeps this window's folders", target: { kind: "current" } }]
     : [];
   const base: TargetItem[] = [
-    { label: "$(empty-window) New window", detail: "Open the task in a separate window", target: { kind: "new" } },
+    { label: "$(empty-window) New window", detail: `Open ${noun} in a separate window`, target: { kind: "new" } },
     ...thisWindow,
-    { label: "$(folder-library) Existing workspace…", detail: "Open the task into a .code-workspace you already have", target: { kind: "existing-pick" } },
+    { label: "$(folder-library) Existing workspace…", detail: `Open ${noun} into a .code-workspace you already have`, target: { kind: "existing-pick" } },
   ];
   const live = cfg.trackOpenWindows ? liveWindowItems(deps.liveWindows()) : [];
   const p = await deps.pick([...base, ...live], { title: cfg.title, placeHolder: cfg.placeHolder });

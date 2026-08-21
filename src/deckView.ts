@@ -19,7 +19,11 @@ import { COMMAND_KILLED_EXIT_CODE, CommandRunner, chainSourcePlace, resolveComma
 import { buildRunStatus } from "./engine/status";
 import { UsageReader } from "./engine/usageFs";
 import type { UsageTotals } from "./engine/usage";
-import { readLiveWindows, defaultWindowsDir } from "./engine/presence";
+import { readLiveWindows, defaultWindowsDir, currentWindow } from "./engine/presence";
+// The destination question, shared with Take in the sidebar so **Review with agent**
+// asks it in the same words with the same pickers.
+import { chooseOpenTarget, targetToOpenArgs } from "./engine/openTarget";
+import { openTargetDeps } from "./openTargetHost";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
 import { currentBranch, gitState, prEligible, repoRoot, taskDiff } from "./engine/git";
@@ -2065,8 +2069,29 @@ export class DeckPanel {
         { title: `Review ${req.repoName}#${req.number}`, ignoreFocusOut: true },
       ))?.mode;
     if (!mode) return; // picker cancelled — no worktree, no window, no toast
+    // Where it opens, settled before launchReview for exactly the reason above: this is
+    // the second question that can be Escaped, and createWorktrees is still ahead of
+    // both. The count is 1 — a review is one repo — so `targetToOpenArgs` never reaches
+    // the multiroot-vs-per-window question, which is why it can be answered here with a
+    // constant instead of a picker.
+    const target = await chooseOpenTarget(
+      {
+        openIn: cfg.reviewOpenIn,
+        trackOpenWindows: cfg.trackOpenWindows,
+        title: `Review ${req.repoName}#${req.number} — open where?`,
+        placeHolder: "New window, this window, a saved workspace, or a window you have open",
+        noun: "the review",
+      },
+      openTargetDeps(cfg.workspaceDir, (m) => this.toast("info", m)),
+    );
+    if (!target) return; // dismissed — same silence as the mode picker
+    const openTarget = await targetToOpenArgs(target, 1, {
+      currentWindow,
+      chooseWorkspaceMode: async () => "per-window",
+    });
+    if (!openTarget) return; // this window lost its identity between the pick and here
     const res = await launchReview(
-      { req, template: mode.prompt, workspaceDir: cfg.workspaceDir, seedAgent: cfg.seedAgent },
+      { req, template: mode.prompt, workspaceDir: cfg.workspaceDir, seedAgent: cfg.seedAgent, openTarget },
       { createWorktrees, openWorkspace, log: this.log },
     );
     if (!res.ok) {
@@ -2079,9 +2104,12 @@ export class DeckPanel {
     }
     // `res.provider`, not the setting: under `ask` the setting names nobody, and the
     // launch is the only thing that knows which agent the user picked for it.
+    //
+    // `seededInPlace` earns its clause: nothing opens on that path, so a toast that
+    // only says "in a worktree" reads as though the click did nothing at all.
     this.toast(
       "success",
-      `Reviewing ${req.repoName}#${req.number} in a worktree.${cfg.seedAgent ? ` ${providerLabel(res.provider)} pre-seeded — press Enter to start.` : ""}`,
+      `Reviewing ${req.repoName}#${req.number} in a worktree${res.seededInPlace ? ", in this window" : ""}.${cfg.seedAgent ? ` ${providerLabel(res.provider)} pre-seeded — press Enter to start.` : ""}`,
     );
     await this.refreshBusy(); // picks up the new run so the row shows "reviewing"
   }

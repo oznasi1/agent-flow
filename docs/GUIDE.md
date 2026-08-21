@@ -235,7 +235,11 @@ That action is also on the line itself, as a play glyph at the end of every row,
 clearing a queue does not mean expanding each row to reach it. A row already being
 reviewed shows the loading mark there instead and cannot be launched twice; a row
 whose repo isn't checked out locally is greyed but still live, and says why when you
-hover it.
+hover it. Either way it opens a new window on that worktree; set
+`agentFlow.reviewOpenIn` to `ask` (or straight to `this-window`) to send the session
+somewhere you already have open instead — the review still runs in its own worktree
+whichever you pick, and the seeded prompt names that worktree by absolute path so
+nothing is checked out in your main checkout.
 Turn the strip off with `agentFlow.reviewRequests`; it also goes dark whenever
 `agentFlow.prFacts` is off, since both lean on the same forge CLI — `gh`, or
 `glab` when `agentFlow.forge` is `gitlab`.

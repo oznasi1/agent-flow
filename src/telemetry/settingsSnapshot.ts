@@ -99,6 +99,7 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
   return {
     workspace_mode: enumOrInvalid(cfg.workspaceMode, WORKSPACE_MODES),
     open_in: enumOrInvalid(cfg.openIn, OPEN_IN_MODES),
+    review_open_in: enumOrInvalid(cfg.reviewOpenIn, OPEN_IN_MODES),
     agent_provider: enumOrInvalid(cfg.agentProvider, AGENT_PROVIDERS),
     agent_surface: enumOrInvalid(cfg.agentSurface, AGENT_SURFACES),
     explore_mode: enumOrInvalid(cfg.exploreMode, EXPLORE_MODES),

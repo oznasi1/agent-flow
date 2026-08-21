@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Review with agent can ask where to open.** It has always opened a new window on
+  the review worktree, which is one window per review whether or not you wanted one.
+  `agentFlow.reviewOpenIn` now answers that question the same way `agentFlow.openIn`
+  answers it for a task you take — new window, this window, a `.code-workspace` you
+  already have, or a window you have open — from the same picker, in the same words.
+  It ships set to `new-window`, so a stock install keeps today's one-click launch and
+  nothing changes until you set it; `ask` raises the picker, right after the review-mode
+  question and still before the worktree is created, so an Escape leaves nothing behind.
+  The review runs in its own git worktree whichever destination you pick — that part was
+  never optional, since the seeded prompt checks the PR out — so a session landing
+  anywhere but a new window is handed the worktree's absolute path and told to work
+  there, and the launch toast says when it seeded this window rather than opening one.
+
+### Fixed
+
+- **Seeding into a window you already have open no longer clobbers its brief.** Any
+  launch aimed at an already-open folder window wrote a `.pick-task/TASK.md` into that
+  folder so the seeded prompt's relative `{brief}` would resolve — including over the
+  brief the agent working there was already reading from. A review now names its own
+  brief absolutely instead and writes nothing into the destination, which also leaves
+  that repo's `.git/info/exclude` alone.
+
 ## [0.33.8] — 2026-08-21
 
 ### Added
