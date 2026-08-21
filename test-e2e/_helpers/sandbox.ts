@@ -26,7 +26,7 @@ export const FIXTURE_TASK = {
   estimateSeconds: null, descriptionText: "The rocket panel shows stale numbers.",
 };
 
-export function makeSandbox(): Sandbox {
+export function makeSandbox(settingsOverride: Record<string, unknown> = {}): Sandbox {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "af-e2e-"));
   const home = path.join(root, "home");
   const userDataDir = path.join(root, "user-data");
@@ -68,6 +68,9 @@ export function makeSandbox(): Sandbox {
     "security.workspace.trust.enabled": false,
     "update.mode": "none",
     "extensions.autoUpdate": false,
+    // Per-journey overrides last, so a journey can flip exactly one answer
+    // (worktree mode) without restating the whole contract.
+    ...settingsOverride,
   };
   fs.mkdirSync(path.join(userDataDir, "User"), { recursive: true });
   fs.writeFileSync(path.join(userDataDir, "User", "settings.json"), JSON.stringify(settings, null, 2));

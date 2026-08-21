@@ -28,6 +28,13 @@ export async function launchHost(sb: Sandbox): Promise<{ app: ElectronApplicatio
       // openInEditor's `open -a "Visual Studio Code"` then launches the REAL
       // installed editor in a separate process Playwright cannot see.
       "--force-disable-user-env",
+      // With HOME pointed at the sandbox, macOS finds no login keychain and
+      // throws a system-modal "Keychain Not Found" dialog at the developer on
+      // every launch. --password-store=basic is not enough on macOS — safe
+      // storage still initializes against the Keychain — so use VS Code's own
+      // test seam and keep secrets in memory for the session.
+      "--password-store=basic",
+      "--use-inmemory-secretstorage",
     ],
     env: (() => {
       const env: Record<string, string> = {};
