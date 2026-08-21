@@ -21,8 +21,17 @@ npm install
 | `npm run test:watch` | Vitest in watch mode. |
 | `npm run test:cov` | Run tests with V8 coverage (thresholds enforced). |
 | `npm run test:ct` | Run the Playwright component tests (real Chromium; covers measured-layout behavior jsdom cannot). |
+| `npm run test:e2e` | Real-host E2E: downloads a pinned VS Code, launches it sandboxed (own HOME, user-data, extensions), and drives take-a-task against the fixture connector. First run downloads ~150MB. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run package` | Build a `.vsix` with `vsce`. |
+
+## The E2E fixture connector
+
+`agentFlow.taskSource: "fixture"` resolves a JSON-backed task source, but only
+while `AGENT_FLOW_FIXTURE_DIR` is set in the environment — both are required, so
+shipped installs can never reach it. Tasks come from `<dir>/tasks.json`; every
+write the extension performs is appended to `<dir>/writes.jsonl` for tests to
+assert on. See `src/tasks/fixture/connector.ts` and `test-e2e/_helpers/sandbox.ts`.
 
 ## Running the extension
 
