@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.8] — 2026-08-21
+
 ### Added
 
 - **Hand a PR to an agent without opening its row.** The review queue's agent action lived
