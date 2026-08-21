@@ -1,4 +1,6 @@
-import type { PromptMode } from "../../types";
+import type { PromptMode, ReviewRequest, ServiceRef } from "../../types";
+import type { BatchTask } from "../batchWorkspace";
+import { renderReviewTemplate, reviewRunKey } from "./launch";
 
 /** The batch-only read-only mode's id. Deliberately NOT in
  *  `DEFAULT_REVIEW_REQUEST_MODES`: a second shipped mode would make
@@ -65,4 +67,68 @@ export function batchReviewModes(modes: PromptMode[], forge: string): PromptMode
  *  from landing in the user's own tree. */
 export function needsWorktrees(mode: PromptMode): boolean {
   return mode.id !== READ_ONLY_REVIEW_MODE_ID;
+}
+
+/** One planned review, one step short of a `BatchTask`. Everything here is decided
+ *  before the destination is known; only `services` is still missing, because under a
+ *  checkout mode that is a worktree nothing has made yet. */
+export interface ReviewBatchItem {
+  /** The run key — `reviewRunKey(repoName, number)`, the same key a single launch uses,
+   *  so a batched review and a single one are the same run. */
+  key: string;
+  ticket: { key: string; summary: string; url: string };
+  planMd: string;
+  /** The chosen mode's prompt with the review-only placeholders already filled. */
+  promptTemplate: string;
+  /** `REVIEW-<n>` — so two PRs sharing one checkout cannot overwrite each other's brief. */
+  briefSubdir: string;
+  /** The checkout a worktree would be cut from, and the service itself under read-only. */
+  base: ServiceRef;
+  /** The row this came from, for the caller's toasts. */
+  request: ReviewRequest;
+}
+
+/** Plan a batch: one item per reviewable PR, and the repo names that could not be
+ *  reviewed at all. A PR with no `localPath` is in a repo this machine has not
+ *  checked out — its own row's launch already refuses, and a batch says so once per
+ *  repo rather than once per PR. Pure: no git, no fs, no vscode. */
+export function planReviewBatch(
+  requests: ReviewRequest[],
+  mode: PromptMode,
+): { items: ReviewBatchItem[]; skipped: string[] } {
+  const items: ReviewBatchItem[] = [];
+  const skipped: string[] = [];
+  for (const r of requests) {
+    if (!r.localPath) {
+      if (!skipped.includes(r.repoName)) skipped.push(r.repoName);
+      continue;
+    }
+    const key = reviewRunKey(r.repoName, r.number);
+    items.push({
+      key,
+      // Summary and planMd mirror `launchReview`'s wording exactly, so a batched
+      // review's card and run record are indistinguishable from a single one's.
+      ticket: { key, summary: `Review ${r.repoName}#${r.number}: ${r.title}`, url: r.url },
+      planMd: `## Review: ${r.repo}#${r.number}\n\n${r.title}\n\nOpened by @${r.author}. ${r.url}`,
+      promptTemplate: renderReviewTemplate(mode.prompt, { repo: r.repo, number: r.number, author: r.author }),
+      briefSubdir: `REVIEW-${r.number}`,
+      base: { name: r.repoName, path: r.localPath, isGit: true },
+      request: r,
+    });
+  }
+  return { items, skipped };
+}
+
+/** Finish a planned item once its services are known — the worktree under a checkout
+ *  mode, the checkout itself under read-only. */
+export function toBatchTask(item: ReviewBatchItem, services: ServiceRef[]): BatchTask {
+  return {
+    ticket: item.ticket,
+    planMd: item.planMd,
+    descriptionText: "", // a review has no ticket description to mine file hints from
+    services,
+    kind: "review",
+    promptTemplate: item.promptTemplate,
+    briefSubdir: item.briefSubdir,
+  };
 }
