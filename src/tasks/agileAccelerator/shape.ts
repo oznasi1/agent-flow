@@ -53,7 +53,11 @@ function relatedName(rec: SfRecord, lookupField: string): string {
   return str((rel as SfRecord).Name);
 }
 
-function readStatus(rec: SfRecord, schema: Schema): string {
+/** Exported so `connector.ts`'s status poll uses the same coercion `toTask`/
+ *  `toDetail` do — a `Status__c` that isn't a string must read as `""`
+ *  everywhere, not `String(x)`'d into something truthy on the card's poll
+ *  path and empty on its render path. */
+export function readStatus(rec: SfRecord, schema: Schema): string {
   return schema.has("Status__c") ? str(rec[schema.field("Status__c")]) : "";
 }
 

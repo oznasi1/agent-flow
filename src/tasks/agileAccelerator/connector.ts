@@ -1,12 +1,12 @@
 import * as vscode from "vscode";
 import { getConfig } from "../../config";
 import type { AuthProbe, ProjectProbe } from "../../engine/doctor";
-import { SourceInfo, TaskConnector, TaskProvider } from "../provider";
-import { SfCli } from "./cli";
+import { isTaskNetworkError, SourceInfo, TaskConnector, TaskProvider } from "../provider";
+import { SfCli, SfMissingError } from "./cli";
 import { buildSchema, WORK_OBJECT_CANDIDATES, type Schema } from "./describe";
 import { AgileAcceleratorProvider } from "./provider";
 import { buildStatusQuery } from "./soql";
-import { keyOf, statusCategoryOf, type SfRecord } from "./shape";
+import { keyOf, readStatus, recordUrl, statusCategoryOf, type SfRecord } from "./shape";
 
 /** Frozen on release. Renaming either strands every configured install. */
 const ENDPOINT_SETTING = "agentFlow.agileAccelerator.instanceUrl";
@@ -17,11 +17,27 @@ const TARGET_ORG_SETTING = "agentFlow.agileAccelerator.targetOrg";
  *  card; without this each card would cost its own process spawn. */
 const STATUS_TTL_MS = 30_000;
 
+/** `buildStatusQuery` emits `LIMIT keys.length`, so an unbounded key list is an
+ *  unbounded query. A session that has ever shown this many tickets is not
+ *  realistic, so chunking past this is a safety valve, not a normal path. */
+const STATUS_BATCH_CAP = 200;
+
+/** Nothing evicted `statuses` before this existed, so every key ever polled in
+ *  the session would rejoin every later TTL refresh forever. Map preserves
+ *  insertion order, so a delete+set moves an entry to the end; whatever
+ *  iterates first is the oldest. */
+const STATUS_CACHE_CAP = 500;
+
 const SF_INSTALL_URL = "https://developer.salesforce.com/tools/salesforcecli";
 
 class AgileAcceleratorConnector implements TaskConnector {
   readonly id = "agileAccelerator";
   readonly setupSteps = 3;
+
+  /** `makeCli` defaults to the real constructor; tests inject a fake so
+   *  `probe()`, `statusOf`'s coalescing, and `schema()`'s retry can be exercised
+   *  without a real `sf` process. */
+  constructor(private readonly makeCli: (targetOrg: string) => SfCli = (targetOrg) => new SfCli(targetOrg)) {}
 
   /** Session-lived caches. They live here, not on a provider: `provider()` is
    *  rebuilt per operation by contract. */
@@ -30,8 +46,18 @@ class AgileAcceleratorConnector implements TaskConnector {
   private readonly ids = new Map<string, string>();
   private readonly statuses = new Map<string, { at: number; status: string | null; category: string | null }>();
 
+  /** Misses that arrive in the same microtask tick — which, per deckView's
+   *  `Promise.all` refresh, is the whole Deck's cards at once — are coalesced
+   *  into one query by `flushStatuses`. Keyed by ticket key so every waiter for
+   *  that key gets the same result. */
+  private pendingWaiters = new Map<string, Array<(r: { status: string | null; category: string | null }) => void>>();
+  private statusFlushScheduled = false;
+  /** Whichever `SfCli` last registered a miss. Every `SfCli` built this session
+   *  shares one `targetOrg`, so "last one wins" is equivalent to "any one". */
+  private pendingCli: SfCli | null = null;
+
   private cli(): SfCli {
-    return new SfCli(getConfig().agileAcceleratorTargetOrg.trim());
+    return this.makeCli(getConfig().agileAcceleratorTargetOrg.trim());
   }
 
   info(): SourceInfo {
@@ -39,7 +65,7 @@ class AgileAcceleratorConnector implements TaskConnector {
     return {
       label: "Agile Accelerator",
       scopeNoun: "team",
-      scopeValue: cfg.agileAcceleratorTeam,
+      scopeValue: cfg.agileAcceleratorTeam.trim(),
       endpoint: cfg.agileAcceleratorInstanceUrl,
       exampleKey: "W-1234567",
       endpointSetting: ENDPOINT_SETTING,
@@ -107,6 +133,11 @@ class AgileAcceleratorConnector implements TaskConnector {
     void vscode.window.showInformationMessage(
       "Sign in with the Salesforce CLI: run `sf org login web` in a terminal, then refresh the Deck.",
     );
+    // A cached negative — from a prior timeout, not necessarily a real "signed
+    // out" — would otherwise survive this call, so "refresh the Deck" re-reads
+    // the same stale failure the CLI sign-in was meant to fix.
+    this.identityCache = null;
+    this.schemaCache = null;
     return false;
   }
 
@@ -131,7 +162,7 @@ class AgileAcceleratorConnector implements TaskConnector {
       rememberIds: (pairs) => {
         for (const [key, id] of pairs) if (key && id) this.ids.set(key, id);
       },
-      team: cfg.agileAcceleratorTeam,
+      team: cfg.agileAcceleratorTeam.trim(),
       instanceUrl: cfg.agileAcceleratorInstanceUrl,
     });
   }
@@ -144,14 +175,30 @@ class AgileAcceleratorConnector implements TaskConnector {
       };
     }
 
+    // Deliberately bypasses `identity()`: that cache swallows every failure to
+    // null for callers who only want "signed in or not", which is exactly what
+    // made this branch dead before — a CLI timeout came back as `null`, never
+    // as a rejection, so it was misreported as `reason: "auth"`. Doctor's
+    // auth|network split exists to prevent precisely that, so this needs the
+    // raw thrown error.
     let auth: AuthProbe;
     try {
-      const me = await this.identity();
-      auth = me
-        ? { ok: true, displayName: me.displayName }
+      const me = await cli.userInfo();
+      auth = me.username
+        ? { ok: true, displayName: me.username }
         : { ok: false, reason: "auth", message: "Run `sf org login web` to sign in." };
     } catch (e) {
-      auth = { ok: false, reason: "network", message: e instanceof Error ? e.message : String(e) };
+      if (e instanceof SfMissingError) {
+        auth = {
+          ok: false,
+          reason: "auth",
+          message: `The Salesforce CLI (sf) was not found. Install it: ${SF_INSTALL_URL}`,
+        };
+      } else if (isTaskNetworkError(e)) {
+        auth = { ok: false, reason: "network", message: e instanceof Error ? e.message : String(e) };
+      } else {
+        auth = { ok: false, reason: "auth", message: e instanceof Error ? e.message : "Run `sf org login web` to sign in." };
+      }
     }
     if (!auth.ok) return { auth };
 
@@ -159,7 +206,7 @@ class AgileAcceleratorConnector implements TaskConnector {
     try {
       const schema = await this.schema(cli);
       scope = schema.teamField
-        ? { ok: true, name: getConfig().agileAcceleratorTeam }
+        ? { ok: true, name: getConfig().agileAcceleratorTeam.trim() }
         : { ok: false, reason: "not-found", message: `No team field found on ${schema.object}.` };
     } catch (e) {
       scope = { ok: false, reason: "error", message: e instanceof Error ? e.message : String(e) };
@@ -171,9 +218,9 @@ class AgileAcceleratorConnector implements TaskConnector {
    *  instance root — see the spec: a guessed deep-link shape that 404s is worse
    *  than an honest landing page. */
   taskUrl(key: string): string {
-    const base = getConfig().agileAcceleratorInstanceUrl.replace(/\/+$/, "");
+    const instanceUrl = getConfig().agileAcceleratorInstanceUrl;
     const id = this.ids.get(key);
-    return id ? `${base}/lightning/r/ADM_Work__c/${id}/view` : base;
+    return id ? recordUrl(instanceUrl, id) : instanceUrl.replace(/\/+$/, "");
   }
 
   /** Our own persisted urls carry an Id, not a key, so this returns null far more
@@ -191,7 +238,17 @@ class AgileAcceleratorConnector implements TaskConnector {
     this.identityCache ??= this.cli()
       .userInfo()
       .then((u) => (u.username ? { id: u.id, displayName: u.username } : null))
-      .catch(() => null);
+      .catch(() => {
+        // A thrown error is not a confident "signed out" — it may be a
+        // transient timeout. Don't poison the cache with it: clear the slot so
+        // the next call retries, exactly as `schema()` already does below.
+        // This call itself still resolves to null — the swallow-to-null
+        // contract non-probe callers rely on is unchanged; `probe()` needs the
+        // raw throw instead, so it calls `cli.userInfo()` directly rather than
+        // through here.
+        this.identityCache = null;
+        return null;
+      });
     return this.identityCache;
   }
 
@@ -215,47 +272,100 @@ class AgileAcceleratorConnector implements TaskConnector {
     return this.schemaCache;
   }
 
-  /** Batched, TTL'd status readback. A miss fetches the missing key together
-   *  with every other key already known, so a Deck full of cards costs one
-   *  query rather than one per card. Never throws. */
-  private async statusOf(
-    cli: SfCli,
-    key: string,
-  ): Promise<{ status: string | null; category: string | null }> {
+  /** Registers a miss and schedules (at most once) a same-tick flush that
+   *  coalesces every key requested before the flush runs into one query.
+   *  deckView's refresh fans out `Promise.all` over every card in a single
+   *  tick, so this is the difference between one query per refresh and one
+   *  query per card. Never throws — every path resolves via `flushStatuses`. */
+  private statusOf(cli: SfCli, key: string): Promise<{ status: string | null; category: string | null }> {
     const now = Date.now();
     const hit = this.statuses.get(key);
-    if (hit && now - hit.at < STATUS_TTL_MS) return { status: hit.status, category: hit.category };
+    if (hit && now - hit.at < STATUS_TTL_MS) return Promise.resolve({ status: hit.status, category: hit.category });
 
-    const stale = [...this.statuses.entries()].filter(([, v]) => now - v.at >= STATUS_TTL_MS).map(([k]) => k);
-    const keys = [...new Set([key, ...stale])];
+    this.pendingCli = cli;
+    return new Promise((resolve) => {
+      const waiters = this.pendingWaiters.get(key);
+      if (waiters) waiters.push(resolve);
+      else this.pendingWaiters.set(key, [resolve]);
 
-    try {
-      const schema = await this.schema(cli);
-      const records = await cli.query<SfRecord>(buildStatusQuery(schema, keys));
-      const seen = new Set<string>();
-      for (const rec of records) {
-        const k = keyOf(rec);
-        if (!k) continue;
-        const status = schema.has("Status__c") ? String(rec[schema.field("Status__c")] ?? "") : "";
-        this.statuses.set(k, { at: now, status: status || null, category: status ? statusCategoryOf(status) : null });
-        seen.add(k);
+      if (!this.statusFlushScheduled) {
+        this.statusFlushScheduled = true;
+        queueMicrotask(() => void this.flushStatuses());
       }
-      // Keys the org did not return are cached as unknown, so a deleted record
-      // does not re-query on every poll.
-      for (const k of keys) if (!seen.has(k)) this.statuses.set(k, { at: now, status: null, category: null });
-    } catch {
-      // A background poll behind an already-rendered card: unknown is a better
-      // answer than a thrown error.
-      return { status: null, category: null };
+    });
+  }
+
+  /** Runs once per scheduled tick, however many keys arrived in it. */
+  private async flushStatuses(): Promise<void> {
+    this.statusFlushScheduled = false;
+    const waiters = this.pendingWaiters;
+    this.pendingWaiters = new Map();
+    const cli = this.pendingCli;
+    const keys = [...waiters.keys()];
+    const now = Date.now();
+
+    const settle = (ks: readonly string[], result: { status: string | null; category: string | null }) => {
+      for (const k of ks) for (const w of waiters.get(k) ?? []) w(result);
+    };
+
+    if (!cli || keys.length === 0) {
+      settle(keys, { status: null, category: null });
+      return;
     }
 
-    const out = this.statuses.get(key);
-    return { status: out?.status ?? null, category: out?.category ?? null };
+    let schema: Schema;
+    try {
+      schema = await this.schema(cli);
+    } catch {
+      // A background poll behind an already-rendered card: unknown is a
+      // better answer than a thrown error. Not cached, so the next flush
+      // (`schema()` having cleared its own cache on failure) retries.
+      settle(keys, { status: null, category: null });
+      return;
+    }
+
+    for (let i = 0; i < keys.length; i += STATUS_BATCH_CAP) {
+      const chunk = keys.slice(i, i + STATUS_BATCH_CAP);
+      try {
+        const records = await cli.query<SfRecord>(buildStatusQuery(schema, chunk));
+        const returned = new Set<string>();
+        for (const rec of records) {
+          const k = keyOf(rec);
+          if (!k) continue;
+          const status = readStatus(rec, schema);
+          const entry = { at: now, status: status || null, category: status ? statusCategoryOf(status) : null };
+          this.rememberStatus(k, entry);
+          returned.add(k);
+          settle([k], { status: entry.status, category: entry.category });
+        }
+        // Keys the org did not return are cached as unknown, so a deleted
+        // record does not re-query on every poll.
+        const missing = chunk.filter((k) => !returned.has(k));
+        for (const k of missing) this.rememberStatus(k, { at: now, status: null, category: null });
+        settle(missing, { status: null, category: null });
+      } catch {
+        // Not cached, on purpose — see the comment on the outer catch above.
+        settle(chunk, { status: null, category: null });
+      }
+    }
+  }
+
+  private rememberStatus(key: string, entry: { at: number; status: string | null; category: string | null }): void {
+    this.statuses.delete(key);
+    this.statuses.set(key, entry);
+    if (this.statuses.size > STATUS_CACHE_CAP) {
+      const oldest = this.statuses.keys().next().value;
+      if (oldest !== undefined) this.statuses.delete(oldest);
+    }
   }
 }
 
-export function makeAgileAcceleratorConnector(_ctx: vscode.ExtensionContext): TaskConnector {
+export function makeAgileAcceleratorConnector(
+  _ctx: vscode.ExtensionContext,
+  makeCli?: (targetOrg: string) => SfCli,
+): TaskConnector {
   // `_ctx` is unused — this connector stores no secrets. The parameter exists to
-  // match the registry's factory signature.
-  return new AgileAcceleratorConnector();
+  // match the registry's factory signature. `makeCli` is test-only DI mirroring
+  // `cli.ts`'s own `run?`/`locate?` seam; production callers never pass it.
+  return new AgileAcceleratorConnector(makeCli);
 }
