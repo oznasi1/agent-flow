@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.0] — 2026-08-21
+
 ### Added
 
 - **Review with agent can ask where to open.** It has always opened a new window on
