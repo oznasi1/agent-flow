@@ -1382,6 +1382,11 @@ describe("shelf", () => {
   const notepad = (key: string, createdAt: number): Run =>
     mkRun({ key, kind: "notepad", url: "", createdAt, summary: key,
       repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }] });
+  // A ticket run sharing that same checkout — what `agentFlow.worktree: "never"`
+  // produces, and the only kind for which the dirty tree is still its own.
+  const dirtyShare = (key: string, createdAt: number): Run =>
+    mkRun({ key, createdAt, summary: key,
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }] });
 
   it("keeps a just-launched run on the board with no agent and no PR", async () => {
     // mkRun's createdAt is now, and the launch grace is what holds this one: the
@@ -1436,8 +1441,10 @@ describe("shelf", () => {
   it("counts a shared checkout's dirty state only for the run that owns it", async () => {
     // Without path ownership this one dirty tree reads as work to lose on BOTH
     // runs and neither ever leaves the board — the defect this exists for.
-    setConfig({ retireInPlaceAfterHours: 24 }); // see the note above: keeps a closed run observable
-    h.runs = [notepad("notepad-old", NOW - 90 * MIN), notepad("notepad-new", NOW - 10 * MIN)];
+    // Task runs rather than notepad ones: an in-place run ignores the checkout's
+    // dirty state outright (the test below), so ownership only decides this for a
+    // run that owns its branch — which is what `agentFlow.worktree: "never"` makes.
+    h.runs = [dirtyShare("ASM-old", NOW - 90 * MIN), dirtyShare("ASM-new", NOW - 10 * MIN)];
     h.openSessions = [];
     h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
       ...statusFor(i.run, i.ticket?.category ?? null),
@@ -1445,8 +1452,61 @@ describe("shelf", () => {
     }));
     show();
     await settled();
-    expect(shelfOf("notepad-new")).toBe("board");   // newest holder owns the path
-    expect(shelfOf("notepad-old")).toBe("closed");
+    expect(shelfOf("ASM-new")).toBe("board");   // newest holder owns the path
+    expect(shelfOf("ASM-old")).toBe("closed");
+  });
+
+  it("closes an in-place run whose only claim is the checkout's dirty state", async () => {
+    // The other half of the same defect. This run OWNS /r/svc — it is the only
+    // record holding it — so ownership scoping cannot help: counting the dirty tree
+    // pinned the card for as long as the checkout stayed dirty, which for a repo
+    // you work in is forever. An Explore session did not make that mess.
+    setConfig({ retireInPlaceAfterHours: 24 }); // keeps the record observable; see above
+    h.runs = [notepad("explore-a", NOW - 90 * MIN)];
+    h.openSessions = [];
+    h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "main", dirty: true, ahead: 4, added: 9, removed: 1, files: 3 }],
+    }));
+    show();
+    await settled();
+    expect(shelfOf("explore-a")).toBe("closed");
+  });
+
+  it("keeps a ticket-bearing run in place, whose dirty tree is its own", async () => {
+    // The guard on the rule above. A record claiming kind "explore" but carrying a
+    // ticket is not something Explore can produce — it is hand-edited or from a
+    // source we do not know — so it keeps the ordinary veto and holds the board.
+    h.runs = [mkRun({
+      key: "explore-ticketed", kind: "explore", createdAt: NOW - 90 * MIN, summary: "s",
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }],
+    })];
+    h.openSessions = [];
+    h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "main", dirty: true, ahead: 0, added: 1, removed: 0, files: 1 }],
+    }));
+    show();
+    await settled();
+    expect(shelfOf("explore-ticketed")).toBe("board");
+  });
+
+  it("keeps a ticketless task run in place — the kind test is the discriminator", async () => {
+    // The other guard. A legacy record with no url reads as ticketless, but a task
+    // run owns its branch whether or not a url survived, so its dirty tree still
+    // counts. Only the kind test separates this from an Explore session.
+    h.runs = [mkRun({
+      key: "ASM-nourl", url: "", createdAt: NOW - 90 * MIN, summary: "s",
+      repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }],
+    })];
+    h.openSessions = [];
+    h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "main", dirty: true, ahead: 0, added: 1, removed: 0, files: 1 }],
+    }));
+    show();
+    await settled();
+    expect(shelfOf("ASM-nourl")).toBe("board");
   });
 
   it("does not close a run merely because openAgents hides its agents", async () => {

@@ -15,8 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   anywhere in that repo, and the checkout's own uncommitted work. Either one pinned
   the record forever — a session you closed days ago kept its card, and a repo you
   work in daily accumulated one per Explore and per note. The sweep now uses the
-  same ownership-scoped answer the board itself uses, so such a run retires once its
-  own agent closes. New `agentFlow.retireInPlaceAfterHours` (default `0`, retire on
+  same ownership-scoped answer the board itself uses, and the board no longer counts
+  that checkout's dirty state as work such a run owns — it has no branch of its own,
+  and attributing your work in progress to whichever record happens to be newest was
+  arbitrary. Together those two mean such a run leaves the board once its own agent
+  closes. New `agentFlow.retireInPlaceAfterHours` (default `0`, retire on
   sight) keeps the old behaviour available as a window in hours. Worktrees, branches,
   commits and briefs on disk are untouched, and a run with a ticket, an open pull
   request, or anything uncommitted it owns is unaffected.

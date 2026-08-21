@@ -2461,12 +2461,21 @@ export class DeckPanel {
       // Computed before the sweep, not after: rule 2b reads the shelf off the
       // status it is handed, so the verdict has to see the shelved one.
       const ownsPath = (p: string) => ownership.pathOwner.get(canon(p)) === run.key;
+      // An in-place run — Explore or Notepad — opened your checkout rather than
+      // creating a worktree, so its dirty/ahead state is not evidence about this
+      // run. It is your own work in progress far more often than the session's,
+      // and ownership hands it to whichever record happens to be newest, which is
+      // arbitrary. Counting it pinned a sole-holder Explore card to the board for
+      // as long as the checkout stayed dirty — which, for a repo you work in, is
+      // forever. Ticketless on purpose: a task run launched in place
+      // (`agentFlow.worktree: "never"`) does own its branch, and keeps the veto.
+      const inPlace = (runKind(run) === "explore" || runKind(run) === "notepad") && !isTicketRun(run);
       const shelf = getConfig().inflightShowAll ? "board" : shelfFor({
         hasLiveSession: ownership.runsWithSession.has(run.key),
         prOpen: Object.values(status.prs).some((e) => e.facts?.state === "OPEN"),
         merged: prSignals(status.prs).merged,
         justLaunched: now - run.createdAt < JUST_LAUNCHED_MS,
-        hasWorkToLose: status.repos.some((r) => ownsPath(r.path) && (r.dirty || r.ahead > 0)),
+        hasWorkToLose: !inPlace && status.repos.some((r) => ownsPath(r.path) && (r.dirty || r.ahead > 0)),
       });
       const shelved = { ...status, shelf, usage: this.usageByRun.get(run.key) };
       if (this.applyVerdict(run, this.verdictFor(shelved, livePlaces, now))) continue;
