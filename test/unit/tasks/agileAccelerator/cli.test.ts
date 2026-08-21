@@ -70,6 +70,16 @@ describe("SfCli.query", () => {
     expect(err).not.toBeInstanceOf(TaskAuthError);
     expect(isTaskNetworkError(err)).toBe(true);
   });
+
+  it("treats a zero-exit envelope with no result as a failure", async () => {
+    const { run } = fakeRunner([{ stdout: JSON.stringify({ status: 0 }), code: 0 }]);
+    await expect(new SfCli("", run, () => "sf").query("SELECT Id FROM x")).rejects.toBeInstanceOf(SfApiError);
+  });
+
+  it("treats unparsable stdout on a zero exit as a failure", async () => {
+    const { run } = fakeRunner([{ stdout: "not json at all", code: 0 }]);
+    await expect(new SfCli("", run, () => "sf").query("SELECT Id FROM x")).rejects.toBeInstanceOf(SfApiError);
+  });
 });
 
 describe("SfCli.describe / userInfo", () => {
