@@ -150,6 +150,26 @@ describe.each(SURFACES)("%s sheet", (_name, sheet) => {
   });
 });
 
+describe("attention hue", () => {
+  // Regression guard, and the reason --c-attn is the one status hue not wired to
+  // the host's chart palette. VS Code registers charts.orange as inheriting from
+  // minimap.findMatchHighlight instead of a literal, and stock Cursor Dark sets
+  // that to #88C0D044 — 27%-alpha pale blue, grey once composited. The var()
+  // fallback cannot save it: the variable is defined there, just wrong. Anyone
+  // reaching for var(--vscode-charts-orange) again reintroduces a grey Action
+  // required column in Cursor.
+  it("fixes the hue instead of deriving it from charts.orange", () => {
+    expect(TOKENS_CSS).toContain("--c-attn:     #e0913a");
+    expect(stripComments(TOKENS_CSS)).not.toContain("--vscode-charts-orange");
+  });
+
+  // #e0913a is 2.54:1 on white. The sibling hues stay theme-derived, so they get
+  // their light values from the host; this one has to carry its own.
+  it("declares a light override that passes contrast", () => {
+    expect(TOKENS_CSS).toMatch(/body\.vscode-light\s*{[^}]*--c-attn:\s*#a85c00/);
+  });
+});
+
 describe("brand accent", () => {
   it("declares the dark default and the light override", () => {
     expect(TOKENS_CSS).toContain("--brand: #2AA79B");

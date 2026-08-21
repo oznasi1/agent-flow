@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Action required column was grey in Cursor, not amber.** `--c-attn` resolved
+  through `--vscode-charts-orange`, and VS Code registers `charts.orange` as inheriting
+  from `minimap.findMatchHighlight` rather than carrying a literal default. The stock
+  Cursor Dark theme overrides that to `#88C0D044` — pale blue at 27% alpha, which
+  composites over the card ground to `#3e4d51`, a flat grey. The `var()` fallback never
+  fired because the variable is defined there, just wrong, so every surface drawing the
+  column accent, its glow, the Action required stat and the Highest priority chip lost
+  its hue. The amber is now fixed rather than derived, with a light-theme variant, since
+  a card's one loud colour cannot be left to the host to define.
+
 ## [0.33.4] — 2026-08-21
 
 ### Added
