@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.5] — 2026-08-21
+
 ### Fixed
 
 - **The Action required column was grey in Cursor, not amber.** `--c-attn` resolved
