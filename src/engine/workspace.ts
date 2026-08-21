@@ -303,6 +303,38 @@ export function attachmentFileName(all: readonly { path: string; name: string }[
   return `${path.basename(att.name, ext)}-${stem}${ext}`;
 }
 
+/** Where one attachment sits under the brief's `images/` directory: `<run key>/<name>`.
+ *
+ * The run key is load-bearing, not decoration. `attachmentFileName` de-duplicates within
+ * ONE launch's list, which is all a single launch needs and nothing a second launch can
+ * use — and several tasks share a checkout routinely (a repo taken twice, a note taken
+ * beside a running one). Every pasted screenshot is called `image.png`, because that is
+ * what `saveImage` names a note's clipboard paste, so two notes taken into one repo used
+ * to land on the same `images/image.png`: the later take silently replaced the earlier
+ * agent's screenshot, and an agent reads that file when it gets to it, not when it is
+ * launched. Keying the directory by run separates them without deleting anything, which
+ * matters precisely because the other agent may still be working.
+ *
+ * Re-taking the SAME note reuses its key and so overwrites its own directory — the same
+ * "a re-run replaces that note's own record" rule the run store follows.
+ *
+ * Always "/"-joined: the return value goes into brief and prompt text, where the path is
+ * repo-relative markdown and git-style POSIX, never `path.sep`. Callers writing files
+ * split it back into segments. */
+export function attachmentRelPath(runKey: string, all: readonly { path: string; name: string }[], index: number): string {
+  return `${attachmentDirName(runKey)}/${attachmentFileName(all, index)}`;
+}
+
+/** The run key as ONE path segment. Keys reaching a filesystem path is not new — worktree
+ * folders are `<repo>-<KEY>` — but a key becoming a directory here is, and the keys are
+ * built from free text (a notepad title) or handed over by a task source, so anything that
+ * could climb out of `images/` or split into a second segment is folded to a dash rather
+ * than trusted. The slug shape matches `slugify`/`branchName`, minus their length cap: the
+ * key is already bounded by the callers that build it. */
+function attachmentDirName(runKey: string): string {
+  return runKey.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[.-]+|[.-]+$/g, "") || "task";
+}
+
 export function agentPrompt(t: TicketRef, mentions: string[], template: string, briefPath?: string): string {
   return renderPrompt(
     template,
@@ -414,9 +446,12 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     const attachments = req.attachments ?? [];
     if (attachments.length > 0) {
       const imagesDir = path.join(dir, "images");
-      fs.mkdirSync(imagesDir, { recursive: true });
       for (const [i, att] of attachments.entries()) {
-        fs.copyFileSync(att.path, path.join(imagesDir, attachmentFileName(attachments, i)));
+        // `attachmentRelPath` is "/"-joined for the brief text; split it back out so the
+        // directory it names is created and written with this platform's separator.
+        const target = path.join(imagesDir, ...attachmentRelPath(ticket.key, attachments, i).split("/"));
+        fs.mkdirSync(path.dirname(target), { recursive: true });
+        fs.copyFileSync(att.path, target);
       }
     }
     return { repo: s.name, path: briefPath, gitExcluded: ensureGitExcluded(s.path, `${BRIEF_DIR}/`), files: files.length };

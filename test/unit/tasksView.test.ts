@@ -5529,11 +5529,13 @@ describe("notepad", () => {
       { path: path.join(imageDir, "i1.png"), name: "before.png" },
     ]);
     expect(call.planMd).toContain("## Attached images");
-    expect(call.planMd).toContain(".pick-task/images/before.png");
+    // Under this note's own run key, which is what keeps a note taken beside another
+    // note's running agent from naming whichever screenshot landed in the checkout last.
+    expect(call.planMd).toContain(".pick-task/images/notepad-rail-colour-n1/before.png");
     // Both halves of the suffix: the note's own words AND the images, since an
     // image the agent never opens is one the user typed nothing to replace.
     expect(call.promptSuffix).toContain("Details from the note:");
-    expect(call.promptSuffix).toContain(".pick-task/images/before.png");
+    expect(call.promptSuffix).toContain(".pick-task/images/notepad-rail-colour-n1/before.png");
   });
 
   it("leaves the brief and the prompt untouched for a note with no images", async () => {

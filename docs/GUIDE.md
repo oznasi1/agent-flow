@@ -74,8 +74,10 @@ plain list of things you want to do: a title, optional detail, a checkbox.
   field says so — drop an image file onto a note, or pick one with **Attach image**,
   which sits beside **Add note** and in a note's edit form. Thumbnails sit under the
   note's text and open full size in an editor tab. **Start** copies them into
-  `.pick-task/images/` beside the brief and names them in both the brief and the seeded
-  prompt, so the agent reads what you saw instead of your description of it. PNG, JPEG,
+  `.pick-task/images/<run key>/` beside the brief and names them in both the brief and the
+  seeded prompt, so the agent reads what you saw instead of your description of it. The run
+  key in that path is what keeps a note you start now from overwriting the screenshot an
+  agent started earlier is still working from. PNG, JPEG,
   GIF and WebP, up to 10 MB each; the files live beside your notes in the editor's global
   storage and go when the note or the image does.
 - **Order is yours.** Each note has a grip — drag it to put the list in whatever order you

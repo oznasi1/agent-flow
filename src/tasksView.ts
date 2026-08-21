@@ -22,7 +22,7 @@ import { discoverRepos } from "./engine/repos";
 import { inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prompt";
-import { openWorkspace, writeBriefInto, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, attachmentFileName, BRIEF_DIR, type MergeCandidate } from "./engine/workspace";
+import { openWorkspace, writeBriefInto, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, attachmentFileName, attachmentRelPath, BRIEF_DIR, type MergeCandidate } from "./engine/workspace";
 import { briefMarkdown } from "./engine/brief";
 import { readLiveWindows, windowIdentity, defaultWindowsDir, currentWindow, PresenceRecord, type CurrentWindow } from "./engine/presence";
 import { readRuns, defaultRunsDir, describeActiveTasks } from "./engine/runs";
@@ -1377,8 +1377,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     }));
     // Repo-relative, not relative to the brief: the agent's cwd is the repo root, so a
     // bare `images/foo.png` names no file from there — the trap batchWorkspace.ts
-    // already records for brief-relative references.
-    const imageLines = attachments.map((a) => `- \`${BRIEF_DIR}/images/${a.name}\``).join("\n");
+    // already records for brief-relative references. Run-keyed via `attachmentRelPath`,
+    // the same helper the copy uses, so a note taken beside another note's running agent
+    // names its OWN screenshot rather than whichever landed in the checkout last.
+    const imageLines = attachments
+      .map((_, i) => `- \`${BRIEF_DIR}/images/${attachmentRelPath(key, attachments, i)}\``)
+      .join("\n");
     const planMd =
       `## Notepad: ${topic}\n\n_No ticket — an item you wrote in the Agent Flow notepad. ` +
       `If it turns into tracked work, open a ticket afterwards._` +
