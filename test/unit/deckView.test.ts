@@ -1473,6 +1473,36 @@ describe("shelf", () => {
     expect(shelfOf("explore-a")).toBe("closed");
   });
 
+  it("closes every in-place run sharing one dirty checkout, not just the losers", async () => {
+    // The reported symptom, and the coverage the ownership test above gave up when it
+    // moved to task runs: a repo you work in every day collects one record per Explore
+    // and per note. Ownership hands the dirty path to exactly one of them — the newest —
+    // so scoping alone still left that one pinned, and the pile shrank by all-but-one
+    // rather than emptying. None of these sessions made that mess; all of them go.
+    setConfig({ retireInPlaceAfterHours: 24 }); // keeps the records observable; see above
+    h.runs = [
+      notepad("notepad-old", NOW - 90 * MIN),
+      notepad("notepad-mid", NOW - 40 * MIN),
+      mkRun({
+        key: "explore-new", kind: "explore", url: "", createdAt: NOW - 20 * MIN,
+        summary: "explore-new",
+        repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }],
+      }),
+    ];
+    h.openSessions = [];
+    h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
+      ...statusFor(i.run, i.ticket?.category ?? null),
+      repos: [{ name: "svc", path: "/r/svc", branch: "main", dirty: true, ahead: 2, added: 5, removed: 0, files: 2 }],
+    }));
+    show();
+    await settled();
+    expect(shelfOf("notepad-old")).toBe("closed");
+    expect(shelfOf("notepad-mid")).toBe("closed");
+    // The path's owner, and closed all the same — the assertion that fails if the
+    // in-place guard on `hasWorkToLose` is reverted.
+    expect(shelfOf("explore-new")).toBe("closed");
+  });
+
   it("keeps a ticket-bearing run in place, whose dirty tree is its own", async () => {
     // The guard on the rule above. A record claiming kind "explore" but carrying a
     // ticket is not something Explore can produce — it is hand-edited or from a
