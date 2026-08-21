@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.6] — 2026-08-21
+
+### Changed
+
+- **A multi-repo card names its repos in a tooltip, and the drawer no longer folds
+  them away.** The card's `4 repos` bit said how many repos a task spanned but never
+  which, and a card has no room to list them — so the count now carries the names in
+  its own tooltip, one per line, read off the same array the count comes from, which
+  is what stops the tooltip ever listing a different number than the label claims.
+  The drawer had the opposite problem: it has the room, but its repo chips sat behind
+  a hover-or-click fold, so a reader who opened the drawer to find out which repos a
+  task spans had to reach for a second gesture to get the answer. The fold is gone —
+  the workspace is a plain label, still tooltipped with its `.code-workspace` path
+  since that is the only thing telling two same-named workspaces apart, and every
+  repo chip below it is visible at rest with its own git signal.
+
 ## [0.33.5] — 2026-08-21
 
 ### Fixed
