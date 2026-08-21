@@ -40,7 +40,7 @@ The webview needs this type to render a per-provider mark. It currently lives in
 - Consumes: nothing.
 - Produces: `export type AgentProvider = "claude-code" | "copilot" | "cursor"` from `src/types.ts`, and the same name still importable from `src/config.ts`.
 
-- [ ] **Step 1: Add the type to `src/types.ts`**
+- [x] **Step 1: Add the type to `src/types.ts`**
 
 Insert immediately above the `OpenSession` interface (around `src/types.ts:181`), which is declared there for this exact reason:
 
@@ -52,7 +52,7 @@ Insert immediately above the `OpenSession` interface (around `src/types.ts:181`)
 export type AgentProvider = "claude-code" | "copilot" | "cursor";
 ```
 
-- [ ] **Step 2: Replace the declaration in `src/config.ts`**
+- [x] **Step 2: Replace the declaration in `src/config.ts`**
 
 Find this at `src/config.ts:149-150`:
 
@@ -70,22 +70,22 @@ Replace it with a re-export. `config.ts` already imports from `./types` at line 
 export type { AgentProvider } from "./types";
 ```
 
-- [ ] **Step 3: Typecheck**
+- [x] **Step 3: Typecheck**
 
 Run: `npm run typecheck`
 Expected: PASS with no errors. If a file complains about importing `AgentProvider`, the re-export is missing or misspelled — fix the re-export, do not change the importer.
 
-- [ ] **Step 4: Confirm the webview graph is still clean**
+- [x] **Step 4: Confirm the webview graph is still clean**
 
 Run: `npx vitest run test/webview/webviewGraph.test.ts`
 Expected: PASS, unedited. This is the test that proves the move did not drag `vscode` into a webview bundle.
 
-- [ ] **Step 5: Build**
+- [x] **Step 5: Build**
 
 Run: `npm run build`
 Expected: succeeds, `dist/` written.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/types.ts src/config.ts
@@ -107,7 +107,7 @@ The model is in lines `parseLines` already parses (it tails 200 lines per sessio
 - Consumes: `AgentProvider` is not needed here.
 - Produces: `AgentActivity.model?: string | null` and `AgentActivity.modelCount?: number`, populated by `deriveActivity(lines, mtimeMs, nowMs)` on every return path.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `test/unit/engine/transcript.test.ts`, inside the existing `describe("deriveActivity")` block so its `NOW` and `line` helpers are in scope:
 
@@ -153,12 +153,12 @@ Add to `test/unit/engine/transcript.test.ts`, inside the existing `describe("der
   });
 ```
 
-- [ ] **Step 2: Run them to verify they fail**
+- [x] **Step 2: Run them to verify they fail**
 
 Run: `npx vitest run test/unit/engine/transcript.test.ts -t "model"`
 Expected: FAIL — `expect(received).toBe(expected)` with `received: undefined`, because `deriveActivity` does not set the field yet. (`TranscriptLine` will also reject `isSidechain` and `message.model` at typecheck time; that is the same failure.)
 
-- [ ] **Step 3: Widen `TranscriptLine`**
+- [x] **Step 3: Widen `TranscriptLine`**
 
 In `src/engine/transcript.ts`, the interface at line 10 becomes:
 
@@ -177,7 +177,7 @@ export interface TranscriptLine {
 }
 ```
 
-- [ ] **Step 4: Add the two fields to `AgentActivity`**
+- [x] **Step 4: Add the two fields to `AgentActivity`**
 
 In `src/types.ts`, inside `interface AgentActivity` (line 229), after `slug`:
 
@@ -192,7 +192,7 @@ In `src/types.ts`, inside `interface AgentActivity` (line 229), after `slug`:
   modelCount?: number;
 ```
 
-- [ ] **Step 5: Derive it in `deriveActivity`**
+- [x] **Step 5: Derive it in `deriveActivity`**
 
 In `src/engine/transcript.ts`, add this helper above `deriveActivity`:
 
@@ -233,16 +233,16 @@ export function deriveActivity(lines: TranscriptLine[], mtimeMs: number, nowMs: 
 
 Keep every existing comment inside the function exactly where it is — only the return literals change.
 
-- [ ] **Step 6: Run the new tests**
+- [x] **Step 6: Run the new tests**
 
 Run: `npx vitest run test/unit/engine/transcript.test.ts`
 Expected: PASS — the new cases and every pre-existing case in the file.
 
-- [ ] **Step 7: Mutation-check**
+- [x] **Step 7: Mutation-check**
 
 Delete `&& !l.isSidechain` from the filter in `modelOf`, re-run `npx vitest run test/unit/engine/transcript.test.ts`, and confirm "ignores a subagent's model even when it is the last line" FAILS. Restore the code and confirm PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/types.ts src/engine/transcript.ts test/unit/engine/transcript.test.ts
@@ -263,7 +263,7 @@ git commit -m "feat(deck): read the answering model off the transcript tail"
 - Consumes: `AgentProvider` from `../types` (Task 1).
 - Produces: `Run.provider?: AgentProvider` on records written from this version forward.
 
-- [ ] **Step 1: Add the field to `Run`**
+- [x] **Step 1: Add the field to `Run`**
 
 In `src/types.ts`, inside `interface Run` (line 128), after the `kind` field's block:
 
@@ -276,7 +276,7 @@ In `src/types.ts`, inside `interface Run` (line 128), after the `kind` field's b
   provider?: AgentProvider;
 ```
 
-- [ ] **Step 2: Write the failing test for `openWorkspace`**
+- [x] **Step 2: Write the failing test for `openWorkspace`**
 
 `test/unit/engine/workspace.test.ts` mocks `fs` and observes writes through its own
 `writeArg(predicate)` helper (defined at line 57) — there is no runs directory on disk to
@@ -303,12 +303,12 @@ read. Add these to the same `describe` block that holds the existing `recordRun`
   });
 ```
 
-- [ ] **Step 3: Run to verify it fails**
+- [x] **Step 3: Run to verify it fails**
 
 Run: `npx vitest run test/unit/engine/workspace.test.ts -t "provider"`
 Expected: FAIL — `expected undefined to be "claude-code"` on the first test.
 
-- [ ] **Step 4: Stamp it in `openWorkspace`**
+- [x] **Step 4: Stamp it in `openWorkspace`**
 
 `openWorkspace` already holds the resolved value at line 382 (`const provider: AgentProvider = pinned ?? resolvedProvider(setting);`) and `seedAgent` is destructured at line 340, both well before the record is written. In the `Run` literal at `src/engine/workspace.ts:542`, add one line after `kind: req.kind,`:
 
@@ -318,12 +318,12 @@ Expected: FAIL — `expected undefined to be "claude-code"` on the first test.
 
 Spread rather than `provider: seedAgent ? provider : undefined`, matching how `parentKey` and `children` are already written two lines below — an absent key is how "not known" is spelled in this record, and an explicit `undefined` would serialize away only by accident of `JSON.stringify`.
 
-- [ ] **Step 5: Run to verify it passes**
+- [x] **Step 5: Run to verify it passes**
 
 Run: `npx vitest run test/unit/engine/workspace.test.ts`
 Expected: PASS, including every pre-existing test in the file.
 
-- [ ] **Step 6: Write the failing test for `batchWorkspace`**
+- [x] **Step 6: Write the failing test for `batchWorkspace`**
 
 `test/unit/engine/batchWorkspace.test.ts` uses a `writes(predicate)` helper (line 53) that
 returns *all* matching write calls — the batch writes one record per task. Its existing
@@ -349,12 +349,12 @@ follow:
 `/runs/` and `/plans/` are distinct path segments, so this predicate cannot pick up the plan
 files the same launch writes.
 
-- [ ] **Step 7: Run to verify it fails**
+- [x] **Step 7: Run to verify it fails**
 
 Run: `npx vitest run test/unit/engine/batchWorkspace.test.ts -t "provider"`
 Expected: FAIL — `expected undefined to be "cursor"`.
 
-- [ ] **Step 8: Stamp it in `batchWorkspace`**
+- [x] **Step 8: Stamp it in `batchWorkspace`**
 
 `batchWorkspace` has only `req.provider`, which is a pin set under `ask` and absent under a fixed setting. Resolve the same way the seeding path does. Add to the existing import from `../config` (or create one — `batchWorkspace.ts` already imports from `./workspace`, which imports `../config`, so there is no new dependency edge):
 
@@ -377,16 +377,16 @@ and in the `Run` literal, after `createdAt,`:
       ...(provider ? { provider } : {}),
 ```
 
-- [ ] **Step 9: Run to verify it passes**
+- [x] **Step 9: Run to verify it passes**
 
 Run: `npx vitest run test/unit/engine/batchWorkspace.test.ts`
 Expected: PASS, all tests.
 
-- [ ] **Step 10: Mutation-check**
+- [x] **Step 10: Mutation-check**
 
 Change `seedAgent ? { provider } : {}` in `workspace.ts` to `{ provider }` and confirm "stamps no provider when the launch seeded no agent" FAILS. Restore.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add src/types.ts src/engine/workspace.ts src/engine/batchWorkspace.ts \
@@ -407,7 +407,7 @@ git commit -m "feat(deck): record the agent a run was launched with"
 - Consumes: `Run.provider` (Task 3), `CardAgent[]` as `buildRunStatus` already receives it.
 - Produces: `RunStatus.provider?: AgentProvider` — what the webview reads in Tasks 5 and 6.
 
-- [ ] **Step 1: Add the field to `RunStatus`**
+- [x] **Step 1: Add the field to `RunStatus`**
 
 In `src/types.ts`, inside `interface RunStatus`, after `agents`:
 
@@ -421,7 +421,7 @@ In `src/types.ts`, inside `interface RunStatus`, after `agents`:
   provider?: AgentProvider;
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 In `test/unit/engine/status.test.ts`, inside the existing `describe("buildRunStatus")` block so its `run`/`agent` helpers are in scope (read the file's helpers first — `agent(state, lastActivityMs)` is defined at the top of the file):
 
@@ -450,12 +450,12 @@ In `test/unit/engine/status.test.ts`, inside the existing `describe("buildRunSta
 
 `baseRun` and `projectsRoot` must be the names the existing describe block already uses for its `Run` fixture and temp projects dir — read them off the file rather than inventing new ones.
 
-- [ ] **Step 3: Run to verify they fail**
+- [x] **Step 3: Run to verify they fail**
 
 Run: `npx vitest run test/unit/engine/status.test.ts -t "provider"`
 Expected: FAIL — `expected undefined to be "cursor"`.
 
-- [ ] **Step 4: Derive it**
+- [x] **Step 4: Derive it**
 
 In `src/engine/status.ts`, above the `return {` at line 102:
 
@@ -473,16 +473,16 @@ and add to the returned object, after `agents,`:
     ...(provider ? { provider } : {}),
 ```
 
-- [ ] **Step 5: Run to verify it passes**
+- [x] **Step 5: Run to verify it passes**
 
 Run: `npx vitest run test/unit/engine/status.test.ts`
 Expected: PASS, all tests including every pre-existing one.
 
-- [ ] **Step 6: Mutation-check**
+- [x] **Step 6: Mutation-check**
 
 Swap the derivation to `agents.length > 0 ? "claude-code" : run.provider` and confirm "prefers the provider the run record was stamped with" FAILS. Restore.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/types.ts src/engine/status.ts test/unit/engine/status.test.ts
@@ -502,7 +502,7 @@ git commit -m "feat(deck): derive a run's provider from its record, or from a li
 - Consumes: `AgentProvider` from `../types` (Task 1).
 - Produces: `CardKindIcon({ kind, provider }: { kind: CardKind; provider?: AgentProvider | null })`, and the exported `PROVIDER_LABEL: Record<AgentProvider, string>`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add to `test/webview/CardKindIcon.test.tsx`:
 
@@ -547,12 +547,12 @@ describe("CardKindIcon provider badge", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify they fail**
+- [x] **Step 2: Run to verify they fail**
 
 Run: `npx vitest run test/webview/CardKindIcon.test.tsx`
 Expected: FAIL — the pre-existing tests pass; the four new ones fail on a missing `.pv` element (and on the `provider` prop not existing).
 
-- [ ] **Step 3: Add the marks and the labels to `icons.tsx`**
+- [x] **Step 3: Add the marks and the labels to `icons.tsx`**
 
 Below `CARD_KIND_GLYPHS`, add:
 
@@ -596,7 +596,7 @@ done
 
 Add `AgentProvider` to the file's import from `../types`.
 
-- [ ] **Step 4: Render the badge**
+- [x] **Step 4: Render the badge**
 
 Replace `CardKindIcon` (`src/webview/icons.tsx:150`) with:
 
@@ -625,7 +625,7 @@ export const CardKindIcon = ({ kind, provider }: {
 
 Note the existing test `expect(av.className).toBe("av k-task")` — the tile's own class list must stay exactly that, which is why the badge is a child with its own class rather than a modifier on `.av`.
 
-- [ ] **Step 5: Add the CSS**
+- [x] **Step 5: Add the CSS**
 
 In `src/webview/deckStyles.ts`, immediately after the `.av.k-local` rule (line 213):
 
@@ -651,16 +651,16 @@ In `src/webview/deckStyles.ts`, immediately after the `.av.k-local` rule (line 2
 
 If `.av` already declares `overflow` elsewhere in the file, edit that declaration instead of adding a second one.
 
-- [ ] **Step 6: Run the tests**
+- [x] **Step 6: Run the tests**
 
 Run: `npx vitest run test/webview/CardKindIcon.test.tsx`
 Expected: PASS — the four new tests and all pre-existing ones.
 
-- [ ] **Step 7: Mutation-check**
+- [x] **Step 7: Mutation-check**
 
 Change the `aria-label` to `PROVIDER_LABEL[provider]` alone (dropping the kind) and confirm "names both facts in the tile's accessible name" FAILS. Restore.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/webview/icons.tsx src/webview/deckStyles.ts test/webview/CardKindIcon.test.tsx
@@ -680,7 +680,7 @@ git commit -m "feat(deck): put the tool driving a card on its kind tile"
 - Consumes: `RunStatus.provider` (Task 4), `CardKindIcon`'s `provider` prop (Task 5).
 - Produces: nothing new.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 `test/webview/DeckApp.test.tsx` already has `mkStatus(over)`, `runsMsg(runs)` and `host(msg)`
 helpers at the top of the file — use them rather than building a new harness:
@@ -715,13 +715,13 @@ Read `DeckDetail.test.tsx`'s top before writing that one — use its existing re
 and status fixture names, whatever they are called, instead of introducing `renderDetail`
 if it does not already exist.
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `npx vitest run test/webview/DeckApp.test.tsx test/webview/DeckDetail.test.tsx`
 Expected: FAIL — no `.pv.p-cursor` in the tree. ("leaves the tile bare when no provider is
 known" passes trivially at this point; it is there to stay passing forever after.)
 
-- [ ] **Step 3: Pass it from the card**
+- [x] **Step 3: Pass it from the card**
 
 `src/webview/DeckApp.tsx:224`:
 
@@ -729,7 +729,7 @@ known" passes trivially at this point; it is there to stay passing forever after
         <CardKindIcon kind={kind} provider={r.provider} />
 ```
 
-- [ ] **Step 4: Pass it from the drawer**
+- [x] **Step 4: Pass it from the drawer**
 
 `src/webview/DeckDetail.tsx:127`:
 
@@ -739,12 +739,12 @@ known" passes trivially at this point; it is there to stay passing forever after
 
 The comment above that line already says a card and its drawer are one object — this is what keeps that true.
 
-- [ ] **Step 5: Run to verify it passes**
+- [x] **Step 5: Run to verify it passes**
 
 Run: `npx vitest run test/webview`
 Expected: PASS, the whole webview suite.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/webview/DeckApp.tsx src/webview/DeckDetail.tsx \
@@ -768,7 +768,7 @@ git commit -m "feat(deck): show the provider mark on the card and in the drawer"
 
 `modelLabel` gets its own module rather than living inside `deckParts.tsx`: it is a pure string rule with its own test file, and `deckParts.tsx` is already the webview's shared-parts grab bag.
 
-- [ ] **Step 1: Write the failing test for `modelLabel`**
+- [x] **Step 1: Write the failing test for `modelLabel`**
 
 Create `test/webview/modelLabel.test.ts`:
 
@@ -798,12 +798,12 @@ describe("modelLabel", () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `npx vitest run test/webview/modelLabel.test.ts`
 Expected: FAIL — cannot resolve `src/webview/modelLabel`.
 
-- [ ] **Step 3: Write `modelLabel`**
+- [x] **Step 3: Write `modelLabel`**
 
 Create `src/webview/modelLabel.ts`:
 
@@ -818,12 +818,12 @@ export function modelLabel(model: string): string {
 }
 ```
 
-- [ ] **Step 4: Run to verify it passes**
+- [x] **Step 4: Run to verify it passes**
 
 Run: `npx vitest run test/webview/modelLabel.test.ts`
 Expected: PASS, all four.
 
-- [ ] **Step 5: Write the failing test for `AgentsRow`**
+- [x] **Step 5: Write the failing test for `AgentsRow`**
 
 Add to `test/webview/deckParts.test.tsx`. Note its existing `mkAgent` helper builds `activity` without a model, so extend rather than replace it:
 
@@ -860,12 +860,12 @@ describe("AgentsRow model", () => {
 });
 ```
 
-- [ ] **Step 6: Run to verify it fails**
+- [x] **Step 6: Run to verify it fails**
 
 Run: `npx vitest run test/webview/deckParts.test.tsx`
 Expected: FAIL on the three positive cases (no `opus-5` text, no `.ag-model`); the pre-existing tests and "shows nothing where there is no model" pass trivially.
 
-- [ ] **Step 7: Render it**
+- [x] **Step 7: Render it**
 
 In `src/webview/deckParts.tsx`, import the helper:
 
@@ -891,7 +891,7 @@ and inside the `agents.map` in `AgentsRow`, between the `.ag-state` span and the
 
 The `title` carries the untrimmed id, because that is the string a user would paste into a config or a bug report.
 
-- [ ] **Step 8: Add the CSS**
+- [x] **Step 8: Add the CSS**
 
 In `src/webview/deckStyles.ts`, after the `.ag-open` rule (line 293):
 
@@ -903,16 +903,16 @@ In `src/webview/deckStyles.ts`, after the `.ag-open` rule (line 293):
   .ag-model .plus { margin-left: 3px; opacity: .6; }
 ```
 
-- [ ] **Step 9: Run to verify it passes**
+- [x] **Step 9: Run to verify it passes**
 
 Run: `npx vitest run test/webview/deckParts.test.tsx`
 Expected: PASS, all tests.
 
-- [ ] **Step 10: Mutation-check**
+- [x] **Step 10: Mutation-check**
 
 Change the `+N` guard to `>= 1` and confirm "does not mark a session that used exactly one" FAILS. Restore.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add src/webview/modelLabel.ts src/webview/deckParts.tsx src/webview/deckStyles.ts \

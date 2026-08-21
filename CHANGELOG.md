@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A card now says which tool is driving it, and the drawer says which model is
+  answering.** The board could tell you a run was working but not what was doing the work
+  — with three agent providers selectable, two of them launched into surfaces the Deck
+  cannot observe, a row of identical tiles hid the one fact that explains why two cards
+  behave differently. Each card's kind tile now carries a small brand mark on its corner —
+  Claude Code, GitHub Copilot or Cursor — repeated in the detail drawer's header, and the
+  tile's tooltip names both (`Task · Claude Code`). The provider is recorded on the run at
+  launch, from the value the launch already resolved, so it is the tool that actually
+  opened rather than whatever the setting says today; a live Claude Code session in a run
+  that predates the stamp is inferred, and that is the only inference anywhere in the
+  path. In the drawer, each row in **Agents** names the model that session is answering
+  with, read from the transcript the activity sweep already parses and trimmed to how a
+  card reads it (`claude-opus-5` → `opus-5`) — a mid-run model switch moves the label,
+  because the tail is what it reports.
+
+  Both facts are absent-tolerant by construction: a run with no recorded provider and no
+  live session shows no mark at all, and a session whose model cannot be read shows no
+  model line — the tile and the row look exactly as they did before. Nothing is
+  backfilled, so runs already on your board gain the mark as they relaunch.
+
 ## [0.33.8] — 2026-08-21
 
 ### Added
