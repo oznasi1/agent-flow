@@ -71,9 +71,11 @@ export function retireVerdict(i: RetireInput): RetireVerdict {
   //
   // `shelf` is the ownership-scoped answer to the same question, and it already folds
   // in every signal this rule needs: no agent of the run's OWN, no open PR, nothing
-  // merged to wrap up, nothing owned that is dirty or unpushed, and past the launch
-  // grace. So the test is `shelf === "closed"` and nothing else — one definition of
-  // closed, computed in one place.
+  // merged to wrap up, and past the launch grace. (For an in-place run the board does
+  // not count the checkout's dirty state at all — it owns no branch that could hold
+  // work — which is what lets a sole holder of a dirty repo reach "closed" here.) So
+  // the test is `shelf === "closed"` and nothing else: one definition of closed,
+  // computed in one place.
   //
   // Deliberately ahead of the live-session branch, and deliberately narrow. A task run
   // launched in place (`agentFlow.worktree: "never"`) has the same unscoped inputs, but
