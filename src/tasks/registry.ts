@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { getConfig } from "../config";
+import { makeFixtureConnector } from "./fixture/connector";
 import { makeJiraConnector } from "./jira/connector";
 import { TaskConnector } from "./provider";
 
@@ -19,6 +20,16 @@ export function resolveConnector(
   log: (m: string) => void,
 ): TaskConnector {
   const id = getConfig().taskSource;
+  // Test-only: the fixture connector exists only while BOTH the setting names it
+  // and the environment names its data dir. It is deliberately absent from
+  // CONNECTORS/CONNECTOR_IDS — it is not a product connector, must never appear
+  // in the telemetry allowlist, and an exported env var alone must not be able
+  // to change what a real user's taskSource resolves to.
+  const fixtureDir = process.env.AGENT_FLOW_FIXTURE_DIR;
+  if (id === "fixture" && fixtureDir) {
+    log(`taskSource "fixture" resolved from AGENT_FLOW_FIXTURE_DIR=${fixtureDir}`);
+    return makeFixtureConnector(fixtureDir);
+  }
   // `Object.hasOwn`, not `CONNECTORS[id]`: `taskSource` comes from settings.json
   // and can be any string, including a prototype key like "constructor" — which a
   // bare index resolves to a truthy non-factory that would then be called.
