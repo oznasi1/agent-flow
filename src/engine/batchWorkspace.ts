@@ -36,6 +36,14 @@ export interface BatchTask {
    *  `runKind(r) === "review"`, and `Run.kind` is also what keeps a run carrying a
    *  PR url out of Jira polling. Absent means "task", exactly as before. */
   kind?: Run["kind"];
+  /** Overrides the shared `promptTemplate` for this task only. A review batch
+   *  pre-renders {repo}/{number}/{author} per PR — placeholders one shared
+   *  template cannot carry. Absent uses the shared template, as always. */
+  promptTemplate?: string;
+  /** Sub-directory under `.pick-task/` for this task's brief. Reviews pass
+   *  `REVIEW-<n>` so two PRs sharing one checkout cannot overwrite each other's
+   *  brief. Absent keeps `.pick-task/TASK.md`. */
+  briefSubdir?: string;
 }
 
 export type SharedTarget =
@@ -98,7 +106,9 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
     for (const s of t.services) {
       const files = resolveFilesInRepo(s.path, hints);
       filesByPair.set(`${t.ticket.key}:${s.name}`, files);
-      const dir = path.join(s.path, BRIEF_DIR);
+      // The subdir is part of BRIEF_DIR's tree, so `ensureGitExcluded(s.path, ".pick-task/")`
+      // below still covers it — no new exclude rule is needed.
+      const dir = t.briefSubdir ? path.join(s.path, BRIEF_DIR, t.briefSubdir) : path.join(s.path, BRIEF_DIR);
       fs.mkdirSync(dir, { recursive: true });
       const briefPath = path.join(dir, BRIEF_FILE);
       fs.writeFileSync(briefPath, briefMarkdown(t.ticket, t.planMd, t.services, s.name, files));
@@ -183,7 +193,7 @@ export async function openSharedWorkspace(req: SharedOpenRequest): Promise<Share
       );
       // Absolute, not the usual relative path: N worktree roots each hold
       // `.pick-task/TASK.md`, so a relative reference names no file in particular.
-      const prompt = agentPrompt(t.ticket, mentions, promptTemplate, briefPathFor.get(t.ticket.key));
+      const prompt = agentPrompt(t.ticket, mentions, t.promptTemplate ?? promptTemplate, briefPathFor.get(t.ticket.key));
       // Remote Control is never offered here — one clipboard can't serve N sessions.
       // The pin is spread rather than written as `provider: req.provider`, so a batch
       // under a fixed setting produces the plan file it always produced: absent is how

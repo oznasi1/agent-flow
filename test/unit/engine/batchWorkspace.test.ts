@@ -345,6 +345,64 @@ describe("openSharedWorkspace", () => {
     const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
     expect(runs.every((r) => !("kind" in r))).toBe(true);
   });
+
+  // ── review batches: per-task prompt and brief path ────────────────────────
+  it("prefers a task's own promptTemplate over the shared one", async () => {
+    // A review's {repo}/{number}/{author} are rendered per PR before the batch is
+    // assembled, so no single shared template can carry them.
+    await openSharedWorkspace(
+      baseReq({
+        tasks: [
+          { ...baseReq().tasks[0], promptTemplate: "Review aws-ops#8491 — {key}" },
+          baseReq().tasks[1],
+        ],
+      }),
+    );
+    const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
+    expect(plans[0].matches[0].prompt).toContain("Review aws-ops#8491 — ASM-1");
+    // The task that set nothing still gets the shared template, rendered as always.
+    expect(plans[1].matches[0].prompt).toContain("Start ASM-2");
+  });
+
+  it("puts a task's brief in its own sub-directory when it asks for one", async () => {
+    // Two PRs of the SAME repo reviewed without worktrees share one checkout, so
+    // `.pick-task/TASK.md` would collide and the second would win silently.
+    const result = await openSharedWorkspace(
+      baseReq({
+        tasks: [
+          {
+            ticket: { key: "review-api-7", summary: "seven", url: "https://gh/7" },
+            planMd: "p", descriptionText: "",
+            services: [{ name: "api", path: "/repos/api", isGit: true }],
+            briefSubdir: "REVIEW-7",
+          },
+          {
+            ticket: { key: "review-api-9", summary: "nine", url: "https://gh/9" },
+            planMd: "p", descriptionText: "",
+            services: [{ name: "api", path: "/repos/api", isGit: true }],
+            briefSubdir: "REVIEW-9",
+          },
+        ],
+      }),
+    );
+    expect(writes((p) => p.endsWith("TASK.md")).map((c) => String(c[0]))).toEqual([
+      "/repos/api/.pick-task/REVIEW-7/TASK.md",
+      "/repos/api/.pick-task/REVIEW-9/TASK.md",
+    ]);
+    // The result's briefs must name the same paths the plans point the agents at.
+    expect(result.briefs.map((b) => b.path)).toEqual([
+      "/repos/api/.pick-task/REVIEW-7/TASK.md",
+      "/repos/api/.pick-task/REVIEW-9/TASK.md",
+    ]);
+  });
+
+  it("leaves a task batch's brief path exactly where it was", async () => {
+    await openSharedWorkspace(baseReq());
+    expect(writes((p) => p.endsWith("TASK.md")).map((c) => String(c[0]))).toEqual([
+      "/repos/api/.claude/worktrees/ASM-1/.pick-task/TASK.md",
+      "/repos/api/.claude/worktrees/ASM-2/.pick-task/TASK.md",
+    ]);
+  });
 });
 
 describe("openSharedWorkspace — existing workspace", () => {
