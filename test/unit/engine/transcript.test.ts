@@ -95,14 +95,21 @@ describe("deriveActivity", () => {
     expect(a.modelCount).toBe(1);
   });
 
-  it("counts distinct main-chain models when a session switched mid-run", () => {
+  it("reports the LAST model, not the first, when a session switched mid-run", () => {
     // Real case: fast mode switches the model inside one session, so a tail holds
-    // both. The drawer marks that with a "+N" and needs the count to do it.
+    // both. The session is currently answering with whichever it switched to.
+    const a = deriveActivity([asstModel("claude-fable-5"), asstModel("claude-opus-5")], NOW - 1000, NOW);
+    expect(a.model).toBe("claude-opus-5");
+    expect(a.modelCount).toBe(2);
+  });
+
+  it("counts distinct main-chain models across more than one switch", () => {
+    // The drawer marks a multi-model tail with a "+N" and needs the count to do it.
     const a = deriveActivity(
-      [asstModel("claude-opus-5"), asstModel("claude-fable-5"), asstModel("claude-opus-5")],
+      [asstModel("claude-fable-5"), asstModel("claude-opus-5"), asstModel("claude-fable-5")],
       NOW - 1000, NOW,
     );
-    expect(a.model).toBe("claude-opus-5");
+    expect(a.model).toBe("claude-fable-5");
     expect(a.modelCount).toBe(2);
   });
 
