@@ -60,10 +60,15 @@ type moves.
 // src/types.ts, in Run
 /** The agent that was actually seeded when this run was launched — `OpenResult.provider`,
  * not the setting, so it names the real agent even under `ask`. Absent on every record
- * written before this field existed, and on a `local` run, which was never launched by
- * Agent Flow at all. */
+ * written before this field existed, on a `local` run (never launched by Agent Flow at
+ * all), and on a launch that seeded no agent — nothing is driving that run yet, and the
+ * card must not claim otherwise. */
 provider?: AgentProvider;
 ```
+
+Stamped only when the launch actually seeded an agent (`seedAgent`). A launch that opened a
+workspace without starting anything has no tool driving it, and a mark there would be a
+claim no fact supports.
 
 Written in the two places that build a `Run` record:
 
