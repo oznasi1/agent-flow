@@ -60,6 +60,8 @@ const ROOT = path.join(__dirname, "../..");
 const LEGITIMATE: { location: string; text: string; why: string }[] = [
   { location: "src/webview/deckParts.tsx", text: "c-agents",
     why: "CSS class name, an identifier in the stylesheet — renaming it is a style change, not a copy change" },
+  { location: "src/webview/DeckApp.tsx", text: "agents",
+    why: "the value persisted to agentFlow.deckGrouping and read back by every existing install — the UI label beside it says Sessions" },
 ];
 
 /** Locations not yet converted. Shrinks to empty over Tasks 2-9; the final task
@@ -105,11 +107,7 @@ const PENDING_LOCATIONS: string[] = [
   "src/modesNotice.ts",
   "src/tasksView.ts",
   "src/telemetry/notice.ts",
-  "src/webview/App.tsx",
-  "src/webview/DeckApp.tsx",
-  "src/webview/DeckDetail.tsx",
   "src/webview/MarketplaceApp.tsx",
-  "src/webview/Notepad.tsx",
   "src/webview/OrchestratorDrawer.tsx",
   "src/webview/orchestratorRule.ts",
 ];

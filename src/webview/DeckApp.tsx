@@ -161,7 +161,7 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
 
 function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
   r: RunStatus;
-  /** Non-null on the Agents board: this card is that one session, and its state
+  /** Non-null on the Sessions lens: this card is that one session, and its state
    * line and action target come from the agent rather than the run. */
   agent: CardAgent | null;
   column: DeckColumn;
@@ -173,7 +173,7 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
   const accent = `var(${col.varName})`;
   // The agent's own activity when this card is an agent; the run's reduction
   // otherwise. `column` is threaded in rather than read off `r` for the same
-  // reason: on the Agents board both are per-session.
+  // reason: on the Sessions lens both are per-session.
   const sv = stateView({ ...r, agent: agent ? agent.activity : r.agent, column }, sourceLabel);
   // A ticketless run has no tracked issue behind it: the key is a local slug, and
   // openExternal("") is a button that does nothing.
@@ -202,7 +202,7 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
   const dragRepo = agent?.repo ?? (r.repos.length === 1 ? r.repos[0].name : undefined);
   const cardDragKey = dragRepo ? `${r.run.key}${DRAG_SEP}${dragRepo}` : null;
   // What this card IS, as its own mark. The run's kind, never the agent's: on the
-  // Agents board the state comes from the session, but the object the card belongs
+  // Sessions lens the state comes from the session, but the object the card belongs
   // to is still the run.
   const kind = runKind(r.run);
   const sigBits = cardSignal(r, agent);
@@ -408,7 +408,7 @@ export function DeckApp(): JSX.Element {
   const [branchCi, setBranchCi] = React.useState<Record<string, BranchCiStatus>>({});
   const [orchEnabled, setOrchEnabled] = React.useState(false);
   const [openFlowId, setOpenFlowId] = React.useState<string | null>(null);
-  /** The selected card's `DeckCard.id`, not a run key: the Agents lens renders
+  /** The selected card's `DeckCard.id`, not a run key: the Sessions lens renders
    * one card per session, so two cards can share a run and a key could not tell
    * them apart. */
   const [selId, setSelId] = React.useState<string | null>(null);
@@ -688,7 +688,7 @@ export function DeckApp(): JSX.Element {
           </button>
         )}
         {/* A lens, not a trust toggle: both sides show everything, one card per
-            agent or one per launched task. Persisted, so it survives a reload. */}
+            session or one per launched task. Persisted, so it survives a reload. */}
         <div className="ctls seg">
           {(["agents", "workspaces"] as const).map((g) => (
             <button
@@ -696,11 +696,11 @@ export function DeckApp(): JSX.Element {
               type="button"
               className={`ctl ${grouping === g ? "on" : ""}`}
               title={g === "agents"
-                ? "One card per Claude Code agent, with the repo, ticket and PR it belongs to"
-                : "One card per launched task, with its agents nested underneath"}
+                ? `One card per ${agentLabel} session, with the repo, ticket and PR it belongs to`
+                : "One card per launched task, with its sessions nested underneath"}
               onClick={() => { setGrouping(g); send({ type: "deck:setGrouping", grouping: g }); }}
             >
-              {g === "agents" ? "Agents" : "Workspaces"}
+              {g === "agents" ? "Sessions" : "Workspaces"}
             </button>
           ))}
         </div>

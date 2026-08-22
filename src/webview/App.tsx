@@ -532,7 +532,7 @@ export function App(): JSX.Element {
           <button
             className="explore"
             onClick={() => send({ type: "explore" })}
-            title={`Explore repos with a ${agentLabel} agent — pick repos, no ticket needed`}
+            title={`Explore repos in a ${agentLabel} session — pick repos, no ticket needed`}
           >
             <CompassIcon /> Explore
           </button>
