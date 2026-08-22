@@ -21,21 +21,21 @@
   local repo checkouts (backend *and* frontend).
 - **Open + seed** — writes `.pick-task/TASK.md` into each repo (git-excluded), generates a
   `<KEY>.code-workspace` (or one window per repo, or a per-task git worktree), and pre-fills
-  your agent — the Claude Code panel, Copilot Chat, or either one's CLI in a terminal —
+  your tool — the Claude Code panel, Copilot Chat, or either one's CLI in a terminal —
   with your chosen prompt mode (you press Enter to start).
 - **Address PR** — an **Address PR** button appears once a task has an open PR waiting on you.
   On the sidebar's Tasks card that means reaching your PR-review status (default `PR initiated`);
   on a Deck card it means the review column's waiting lane, with an actual open PR behind it —
   the two surfaces gate on different things. From the sidebar's task card the button kicks off
-  an agent **in a fresh worktree**; from a Deck card it re-seeds the workspace that run already
-  has instead, asking nothing, since the run was launched with one. Either way the agent finds
+  a session **in a fresh worktree**; from a Deck card it re-seeds the workspace that run already
+  has instead, asking nothing, since the run was launched with one. Either way the session finds
   the task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
   for your fixes — then, by default, starts implementing the requested changes (toggle with
   `agentFlow.prReviewAutoFix`).
 - **Review queue** — a strip on the Deck lists every open PR that asks for *your* review,
-  sortable by oldest or smallest, with per-row size, CI and age. **Review with agent** — a
+  sortable by oldest or smallest, with per-row size, CI and age. **Review with your agent tool** — a
   play button on every row, or the labelled button once you open one — checks it out into a
-  worktree and seeds an agent to review it; submitting the review itself from the Deck is
+  worktree and seeds a session to review it; submitting the review itself from the Deck is
   opt-in and ships **off** (`agentFlow.reviewWrites`).
 - **Launch in parallel** — filter the repo lens to one repo **or several** and a checkbox
   appears on each task. Tick a few, then **Launch in parallel**: each task gets its own git
@@ -53,7 +53,7 @@
 
 ## The Notepad — work that isn't a ticket
 
-Not everything worth an agent has a Jira key. The panel's second tab, **Notepad**, is a
+Not everything worth a session has a Jira key. The panel's second tab, **Notepad**, is a
 plain list of things you want to do: a title, optional detail, a checkbox.
 
 <p align="center">
@@ -63,12 +63,12 @@ plain list of things you want to do: a title, optional detail, a checkbox.
 - **Notes are yours, not the workspace's.** They're stored in the editor's global state,
   not per-workspace, so the same list is there whichever repo or workspace the panel
   happens to be open against.
-- **Start** kicks off an agent from a note the same way **Explore** does: it asks where to
+- **Start** kicks off a session from a note the same way **Explore** does: it asks where to
   open and which repos to use, writes a `## Notepad:` brief from the note's title and
-  detail (with Explore's topic-agnostic prompt), and seeds your agent. The note stays in
+  detail (with Explore's topic-agnostic prompt), and seeds the session. The note stays in
   the list afterwards — running it isn't the same as finishing it.
 - **The run lands on the Deck** like any other, and the note grows a badge tracking it:
-  **Running** while an agent is attached, **Stale** once nothing is, **Finished** when the
+  **Running** while a session is attached, **Stale** once nothing is, **Finished** when the
   Deck records it as landed. Re-running a note replaces that note's previous run rather
   than piling up a second record.
 - **A screenshot is a detail too.** Paste an image straight into the detail field — the
@@ -76,9 +76,9 @@ plain list of things you want to do: a title, optional detail, a checkbox.
   which sits beside **Add note** and in a note's edit form. Thumbnails sit under the
   note's text and open full size in an editor tab. **Start** copies them into
   `.pick-task/images/<run key>/` beside the brief and names them in both the brief and the
-  seeded prompt, so the agent reads what you saw instead of your description of it. The run
-  key in that path is what keeps a note you start now from overwriting the screenshot an
-  agent started earlier is still working from. PNG, JPEG,
+  seeded prompt, so the session reads what you saw instead of your description of it. The run
+  key in that path is what keeps a note you start now from overwriting the screenshot a
+  session started earlier is still working from. PNG, JPEG,
   GIF and WebP, up to 10 MB each; the files live beside your notes in the editor's global
   storage and go when the note or the image does.
 - **Order is yours.** Each note has a grip — drag it to put the list in whatever order you
@@ -103,7 +103,7 @@ click from landing, `merged · wrap up` for one that already has and still owes 
 transition or a branch to delete. A ticket closed with nothing merged left no wrap-up, and
 drops into **Recently closed** underneath.
 
-<img src="../media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Merge). Its header carries the title, four tiles counting In progress, Action required, In review and Merge, an Agents / Workspaces lens and a refresh reading 'synced 4s ago'. Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a live agent status (working, idle, ended turn, parked, ready to merge, or merged), the PR and CI state, the Jira status, and Open / Diff actions. A note started from the Notepad tab sits among the tickets marked 'notepad'. Each column carries its own hue in its dot, header rule and a faint tint down the top of the column; the Merge column is split into 'ready to merge' and 'merged · wrap up' lanes, and a collapsed 'Recently closed' strip sits under the board. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button." />
+<img src="../media/deck.png" alt="The Agent Flow Deck: a four-column in-flight board (In progress, Action required, In review, Merge). Its header carries the title, four tiles counting In progress, Action required, In review and Merge, a Sessions / Workspaces lens and a refresh reading 'synced 4s ago'. Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, a live session status (working, idle, ended turn, parked, ready to merge, or merged), the PR and CI state, the Jira status, and Open / Diff actions. A note started from the Notepad tab sits among the tickets marked 'notepad'. Each column carries its own hue in its dot, header rule and a faint tint down the top of the column; the Merge column is split into 'ready to merge' and 'merged · wrap up' lanes, and a collapsed 'Recently closed' strip sits under the board. Cards are monochrome except in Action required, whose one card carries an orange rail, status and Open button." />
 
 The columns are a neutral git + Jira backbone; each **card** carries the true live state.
 A best-effort **Live signal** (read from your local Claude Code transcripts) tells `working ·
@@ -112,20 +112,20 @@ its transcript can't be read, or doesn't exist yet, which is the one route back 
 Jira backbone. The live signal is **Claude Code only** — it reads Claude Code's own
 transcripts, and Copilot writes nothing equivalent, so a task launched under
 `agentFlow.agentProvider: copilot` still gets a card, with the git + Jira + PR
-backbone but no agent on it. **Open** focuses the window if it's already open (never a duplicate) and
+backbone but no session on it. **Open** focuses the window if it's already open (never a duplicate) and
 opens it fresh otherwise; **Diff** shows the working diff; **⋯** offers *Open in Jira* and
 *Forget*.
 
-The board opens with **one card per Claude Code agent** — its live state and
+The board opens with **one card per session** — its live state and
 session name lead, and the repo, branch, Jira key and pull request it belongs to
-sit underneath, so two agents in one worktree read as two different pieces of
+sit underneath, so two sessions in one worktree read as two different pieces of
 work, in whichever columns their own states put them. **Open** and **Diff** on
-such a card act on that agent's own directory. Switch the header control to
-**Workspaces** for one card per launched task with its agents nested instead;
+such a card act on that session's own directory. Switch the header control to
+**Workspaces** for one card per launched task with its sessions nested instead;
 whichever you pick sticks.
 
 Run records retire themselves once a task is provably over: its directories are
-gone, it landed a day ago with no agent left in it, or it is an old session with
+gone, it landed a day ago with no session left in it, or it is an old session with
 no ticket, no PR and nothing uncommitted. Uncommitted or unpushed work always
 stops a record being retired, and retirement only ever deletes Agent Flow's own
 pointer — never a worktree, a branch, or a commit. **Clear stale** appears in the
@@ -134,13 +134,13 @@ header when records are only waiting out their window, and takes them on the spo
 The Deck also shows **every Claude Code session open on this machine**, not only
 the ones it launched — read from `~/.claude/sessions`, the registry Claude Code
 keeps of its running sessions. Sessions attach to the card that owns their
-directory, so a worktree with two agents in it lists both, in the order you
+directory, so a worktree with two sessions in it lists both, in the order you
 opened them; a place with no tracked run of its own gets a card of its own,
 marked `local`. A local card reads its branch for a ticket key
 (`ASM-5641-team-table` → `ASM-5641`, marked `~inferred` since a branch can name
 a ticket somebody else owns) and for its pull request, so a worktree Claude Code
 made on its own lands on the board as complete as one you took. It disappears
-the moment you close its last agent — **⋯** → **Track it** pins it to the runs
+the moment you close its last session — **⋯** → **Track it** pins it to the runs
 store first, and from there it behaves exactly like a task you took, **Forget**
 included. Turn it off with `agentFlow.openAgents`, which the board picks up
 immediately — no need to close and reopen the panel.
@@ -151,8 +151,8 @@ with its CLI — `gh`, or `glab` when `agentFlow.forge` is `gitlab`: the PR numb
 passing count), the review decision with any unresolved-thread count, and
 mergeability. A PR that needs a human decision — failing required checks,
 requested changes, or a conflict — pulls its card into **In review**'s `fixes needed`
-lane, even while the agent is still working, because an agent can't know CI broke until
-you tell it. **Action required** is agent signals only — a session that ended its turn,
+lane, even while the session is still working, because a session can't know CI broke until
+you tell it. **Action required** is session signals only — a session that ended its turn,
 stalled, or exited — so "Claude is asking you something" and "GitHub is asking you
 something" stay under separate headers. A PR that is approved, mergeable and green moves
 the card to **Merge**'s `ready to merge` lane, and a merged PR to `merged · wrap up`,
@@ -160,8 +160,8 @@ which is the only thing that makes a card say *merged*. Turn it off with `agentF
 the setting, and cards fall back to the git + Jira backbone.
 
 An **Orchestrator** drawer (off by default, `agentFlow.orchestrator`) lets you wire the
-agents already on the board into a *flow*: drag a card in, connect two nodes, and put a
-condition on the connection — a merged PR, failing CI, an agent that ended its turn, a
+sessions already on the board into a *flow*: drag a card in, connect two nodes, and put a
+condition on the connection — a merged PR, failing CI, a session that ended its turn, a
 clean tree, a Jira status, **the command succeeded**, or CI passing on a named branch of a
 named repo. That last one has no picker yet: you get it only by hand-editing the flow file,
 not through the drawer or the list. The drawer resizes by dragging its edge or pressing
@@ -170,8 +170,8 @@ edit and arm it without a pointer.
 
 What a connection *does* comes from the node it points at, not from a choice you make on the
 rule — there is no action picker anywhere in the drawer or the list. Point a rule at
-unstarted work and it **launches** that agent in a fresh worktree; point it at a place that
-already exists and it **seeds** a second agent there; point it at a **notify** node and it
+unstarted work and it **launches** that session in a fresh worktree; point it at a place that
+already exists and it **seeds** a second session there; point it at a **notify** node and it
 does exactly what that node says: **"Notify me in VS Code"** — a notification popped in your
 own window, nothing more. It messages nobody; if you were hoping for a Slack DM or an email,
 that's not what this does. Point it at
@@ -209,7 +209,7 @@ Reopening the Deck, including after a restart, shows you what is already ready a
 back. Before it ever launches or seeds for the first time, a flow asks once — naming the
 ticket, the repos, and the prompt mode it would use — and only then runs unattended. Running
 its first command asks again, separately: approving a flow's launches only approves opening
-agent sessions, never running a shell command on your machine, so a flow you already
+sessions, never running a shell command on your machine, so a flow you already
 confirmed for a launch still asks the first time one of its rules would run a command — and
 then, like a launch, runs unattended after that. At most three of these — launches, seeds and
 commands together — happen in a single pass, with the rest picked up on the next one. A
@@ -227,9 +227,9 @@ queue is still a scroll, not a count. Each row carries the repo, PR number, titl
 author, age, and its size both as `+409 −50 · 8 files` and as an S/M/L bucket;
 sort by **oldest** (what you owe most) or **smallest** (what you can clear before
 standup). Expanding a row fetches which checks failed and how many review threads
-are still open, alongside the review decision and mergeability. **Review with agent**
+are still open, alongside the review decision and mergeability. **Review with your agent tool**
 checks the PR out into a worktree and seeds
-your agent to review the diff and write its findings to
+a session to review the diff and write its findings to
 `.pick-task/REVIEW-<number>.md`, which the row can then load into the review box.
 That action is also on the line itself, as a play glyph at the end of every row, so
 clearing a queue does not mean expanding each row to reach it. A row already being
@@ -246,7 +246,7 @@ checkboxes, clicking a row picks it instead of expanding it, shift-click takes a
 and the bar underneath launches the lot — one reviewer per PR. The batch asks two
 questions, once each, rather than once per row:
 
-- **How should the agent read each PR?** A **read-only review** fetches the PR's own
+- **How should the session read each PR?** A **read-only review** fetches the PR's own
   commit and reads the diff without checking anything out, so several reviews can share
   one window and none of them can move your working tree — but it cannot run tests. Any
   other mode checks the branch out, so every PR gets its own worktree, exactly as a
@@ -271,7 +271,7 @@ With `agentFlow.reviewWrites` on (**off by default**), the expanded row also
 submits: **Approve**, **Comment**, or **Request changes** — each disabled while a
 submit for that row is already in flight, and each behind a confirmation dialog
 that names the verb, the repo and the PR number before anything is sent. A body
-loaded from the agent's draft is marked as agent-drafted when it goes out, unless
+loaded from the session's draft is marked as session-drafted when it goes out, unless
 you turn `agentFlow.stampLabelOnWrite` off.
 
 ## The Marketplace — browse your skills, commands & agents

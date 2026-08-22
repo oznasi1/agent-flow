@@ -61,13 +61,13 @@ src/
 │   ├── repos.ts        # discover local repo checkouts
 │   ├── infer.ts        # component/label/text → service matching
 │   ├── worktree.ts     # per-task git worktrees + branch naming
-│   ├── workspace.ts    # briefs, .code-workspace, plan.json, open windows, agent seed
+│   ├── workspace.ts    # briefs, .code-workspace, plan.json, open windows, session seed
 │   ├── runs.ts         # what you've launched, for the Deck
-│   ├── transcript.ts   # best-effort live agent state from ~/.claude/projects
+│   ├── transcript.ts   # best-effort live session state from ~/.claude/projects
 │   ├── sessions.ts     # Claude Code's own registry of running sessions
 │   ├── forge/          # which forge is active, behind one interface (docs/FORGES.md)
 │   ├── pr/             # PR/MR facts per repo, over `gh` — and `pr/glab/` over `glab`
-│   ├── review/         # the review queue + "Review with agent": search, sort, launch, store
+│   ├── review/         # the review queue + "Review with your agent tool": search, sort, launch, store
 │   ├── claudeAssets.ts # scan ~/.claude: marketplaces, plugins, skills, commands, hooks
 │   ├── sections.ts     # the Marketplace's category order (Yours → size → Uncategorized)
 │   ├── fuzzy.ts        # the ranked fuzzy match behind the Marketplace's search
@@ -90,14 +90,22 @@ directories knows whether a pull request came from `gh` or `glab`. A forge that 
 answer something degrades in a stated way rather than faking an answer;
 [docs/FORGES.md](docs/FORGES.md) lists what those are.
 
-The agent seed is one chokepoint in `engine/workspace.ts` that every launch path — take,
-batch, Explore, Notepad, Deck relaunch, Address PR, Review with agent — goes through. It
+The session seed is one chokepoint in `engine/workspace.ts` that every launch path — take,
+batch, Explore, Notepad, Deck relaunch, Address PR, Review with your agent tool — goes through. It
 resolves `agentFlow.agentProvider` × `agentFlow.agentSurface` **at seed time in the target
 window**, never from the plan file, so flipping either setting also changes plans already
 on disk.
 
 ## Conventions
 
+- **Vocabulary.** A **session** is one run of a coding tool — one Deck card, one
+  row in `run.agents[]`. An **agent** is a worker a session delegates to (the
+  Marketplace's Agents tab, `.claude/agents/`). The tool itself is named
+  — "Review with Claude Code" — never called "the agent". Identifiers, setting
+  ids, stored values and orchestrator condition keys keep their released
+  spelling, so the code says `agents` where the UI says sessions.
+  `test/unit/vocabulary.test.ts` enforces this; its allowlist records every
+  place "agent" is still correct.
 - **No hardcoded organization values.** Anything organization-specific (Jira site, project
   key, repo layout, blocklist, provenance label) belongs in a `agentFlow.*` setting and is
   read through `getConfig()` in `src/config.ts` — never inlined. New behavior that varies per

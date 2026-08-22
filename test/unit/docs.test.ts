@@ -55,3 +55,26 @@ describe("connector docs", () => {
     expect(read("README.md")).toContain("docs/FORGES.md");
   });
 });
+
+describe("vocabulary note", () => {
+  // The session/agent split (test/unit/vocabulary.test.ts) is only durable if the
+  // next contributor inherits the convention instead of rediscovering it — the note
+  // is meant to be the same words in both files, not just "a mention". A byte-exact
+  // check catches one file's copy quietly drifting or being dropped on an edit,
+  // the same failure mode this whole suite guards against for settings and forges.
+  const NOTE = [
+    '- **Vocabulary.** A **session** is one run of a coding tool — one Deck card, one',
+    '  row in `run.agents[]`. An **agent** is a worker a session delegates to (the',
+    "  Marketplace's Agents tab, `.claude/agents/`). The tool itself is named",
+    '  — "Review with Claude Code" — never called "the agent". Identifiers, setting',
+    '  ids, stored values and orchestrator condition keys keep their released',
+    '  spelling, so the code says `agents` where the UI says sessions.',
+    '  `test/unit/vocabulary.test.ts` enforces this; its allowlist records every',
+    '  place "agent" is still correct.',
+  ].join("\n");
+
+  it("is present, word for word, in both CONTRIBUTING.md and CLAUDE.md", () => {
+    expect(read("CONTRIBUTING.md")).toContain(NOTE);
+    expect(read("CLAUDE.md")).toContain(NOTE);
+  });
+});

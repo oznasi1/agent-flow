@@ -27,10 +27,10 @@ the Deck's review strip can submit a review — approve, comment, or request
 changes — on a PR that asked for yours. Every submit shows a modal confirmation
 naming the verb, the repo and the PR number before anything reaches GitHub, and
 every submit attempt — success or failure — is logged to the **Agent Flow Deck**
-output channel. A review body loaded from the agent's draft is marked as
-agent-drafted when it goes out (a fixed line, not the configurable
+output channel. A review body loaded from the session's draft is marked as
+session-drafted when it goes out (a fixed line, not the configurable
 `agentFlow.provenanceLabel`), unless `agentFlow.stampLabelOnWrite` is off.
-Nothing else about the feature writes anywhere: the review agent itself is told,
+Nothing else about the feature writes anywhere: the review session itself is told,
 in its seeded prompt, not to post anything to GitHub — the human submits the
 review.
 
