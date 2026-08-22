@@ -39,6 +39,37 @@ function stubFetch(broken: string[] = []): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
+/** Wraps `stubFetch`'s default behavior but serves the stargazers endpoint as
+ *  two pages, linked via a GitHub-style `Link: <...>; rel="next"` header on
+ *  the first page only — the second page has no `Link` header, ending
+ *  pagination. Regression coverage for F1: past 100 stars, a single-page
+ *  fetch silently freezes `stars.json` forever. */
+function stubFetchTwoStarPages(): typeof fetch {
+  const base = stubFetch();
+  let call = 0;
+  return (async (url: string | URL, init?: RequestInit) => {
+    const u = String(url);
+    if (!u.includes("stargazers")) return base(url, init);
+    call += 1;
+    if (call === 1) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => [{ starred_at: "2026-07-01T00:00:00Z" }],
+        headers: { get: (name: string) => (name.toLowerCase() === "link"
+          ? '<https://api.github.com/repos/oznasi1/agent-flow/stargazers?per_page=100&page=2>; rel="next"'
+          : null) },
+      } as unknown as Response;
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => [{ starred_at: "2026-07-23T08:46:16Z" }],
+      headers: { get: () => null },
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+}
+
 describe("collect", () => {
   it("writes every source on a fully successful run", async () => {
     const res = await collect({ dir, token: "t", fetchImpl: stubFetch(), now: "2026-08-22T06:17:00Z" });
@@ -90,5 +121,24 @@ describe("collect", () => {
     await collect({ dir, token: "t", fetchImpl: stubFetch(), now: "2026-08-23T06:17:00Z" });
     const lines = fs.readFileSync(path.join(dir, "marketplace.jsonl"), "utf8").trim().split("\n");
     expect(lines).toHaveLength(2);
+  });
+
+  it("follows the Link header to collect stars past a single page (F1)", async () => {
+    const res = await collect({ dir, token: "t", fetchImpl: stubFetchTwoStarPages(), now: "2026-08-22T06:17:00Z" });
+    expect(res.failed.map((f) => f.source)).not.toContain("stars");
+    const stars = JSON.parse(fs.readFileSync(path.join(dir, "stars.json"), "utf8"));
+    expect(stars).toEqual(["2026-07-01T00:00:00Z", "2026-07-23T08:46:16Z"]);
+  });
+
+  it("marketplace: does not append when Open VSX fails (F2)", async () => {
+    const res = await collect({ dir, token: "t", fetchImpl: stubFetch(["open-vsx"]), now: "2026-08-22T06:17:00Z" });
+    expect(fs.existsSync(path.join(dir, "marketplace.jsonl"))).toBe(false);
+    expect(res.failed.map((f) => f.source)).toContain("marketplace");
+  });
+
+  it("marketplace: does not append when VS Marketplace fails (F2)", async () => {
+    const res = await collect({ dir, token: "t", fetchImpl: stubFetch(["extensionquery"]), now: "2026-08-22T06:17:00Z" });
+    expect(fs.existsSync(path.join(dir, "marketplace.jsonl"))).toBe(false);
+    expect(res.failed.map((f) => f.source)).toContain("marketplace");
   });
 });

@@ -23,6 +23,36 @@ async function getJson(fetchImpl, url, init) {
   return res.json();
 }
 
+/** Extract the `rel="next"` URL from a GitHub `Link` response header, or null
+ * when there isn't one (last page). */
+function nextPageUrl(linkHeader) {
+  if (!linkHeader) return null;
+  for (const part of linkHeader.split(",")) {
+    const match = part.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+/** Follow `Link: rel="next"` until exhausted, concatenating every page's
+ * array. GitHub's stargazers endpoint returns ascending by `starred_at` and
+ * caps each page at 100 — past 100 stars a single page is a silent freeze,
+ * so full history requires walking every page. */
+async function getAllPages(fetchImpl, url, init) {
+  const items = [];
+  let next = url;
+  while (next) {
+    const res = await fetchImpl(next, init);
+    if (!res.ok) throw new Error(`${next} → HTTP ${res.status}`);
+    const page = await res.json();
+    if (!Array.isArray(page)) throw new Error(`${next} → paginated response was not an array`);
+    items.push(...page);
+    const linkHeader = typeof res.headers?.get === "function" ? res.headers.get("link") : null;
+    next = nextPageUrl(linkHeader);
+  }
+  return items;
+}
+
 const ghInit = (token, accept = "application/vnd.github+json") => ({
   headers: { Accept: accept, Authorization: `Bearer ${token}`, "User-Agent": "agent-flow-reach" },
 });
@@ -69,7 +99,7 @@ export async function collect({ dir, token, fetchImpl, now }) {
   });
 
   await source("stars", async () => {
-    const payload = await getJson(
+    const payload = await getAllPages(
       fetchImpl, `${GH}/stargazers?per_page=100`,
       ghInit(token, "application/vnd.github.star+json"),
     );

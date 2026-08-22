@@ -13,10 +13,12 @@ describe("readJson", () => {
     expect(readJson(dir, "traffic/views.json", { seed: true })).toEqual({ seed: true });
   });
 
-  it("returns the fallback when the file is corrupt rather than throwing", () => {
+  it("throws when the file exists but does not parse — never masks damage as empty", () => {
     fs.mkdirSync(path.join(dir, "traffic"), { recursive: true });
     fs.writeFileSync(path.join(dir, "traffic/views.json"), "{not json");
-    expect(readJson(dir, "traffic/views.json", { seed: true })).toEqual({ seed: true });
+    expect(() => readJson(dir, "traffic/views.json", { seed: true })).toThrow();
+    // The damaged file itself is left untouched for manual repair.
+    expect(fs.readFileSync(path.join(dir, "traffic/views.json"), "utf8")).toBe("{not json");
   });
 
   it("round-trips through writeJson", () => {
@@ -34,6 +36,13 @@ describe("writeJson", () => {
   it("writes a trailing newline so git diffs stay clean", () => {
     writeJson(dir, "meta.json", { lastRun: "2026-08-22" });
     expect(fs.readFileSync(path.join(dir, "meta.json"), "utf8").endsWith("\n")).toBe(true);
+  });
+
+  it("writes atomically — no stray temp file survives, and an existing file is fully replaced", () => {
+    writeJson(dir, "meta.json", { lastRun: "2026-08-22" });
+    writeJson(dir, "meta.json", { lastRun: "2026-08-23" });
+    expect(fs.readdirSync(dir)).toEqual(["meta.json"]);
+    expect(JSON.parse(fs.readFileSync(path.join(dir, "meta.json"), "utf8"))).toEqual({ lastRun: "2026-08-23" });
   });
 });
 
