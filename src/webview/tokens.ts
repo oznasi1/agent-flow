@@ -9,8 +9,22 @@ import { CYCLE_MS } from "./markGeometry";
 // deckStyles.ts because only the review strip has rows.
 export const TOKENS_CSS = `
   :root {
-    /* Column accents / status hues. */
+    /* Column accents / status hues.
+
+       The resting four are derived from the host's chart palette, then dropped to
+       ~78% of their chroma. The board's rule is that one card at a time gets to be
+       loud and the loud one is amber — which only bites if everything at rest
+       recedes; at full chroma a blue column, a green agent dot and a purple review
+       rail all shout as loudly as the card that actually needs you.
+
+       Two declarations per hue, on purpose. The plain derived value comes first so
+       an engine that cannot parse relative colour keeps a working hue rather than an
+       unset variable; the oklch form then scales chroma without touching lightness,
+       which is what keeps each hue correct on a light theme as well as a dark one.
+       Mixing toward the foreground instead would lighten on dark and darken on
+       light, and neither of those is "quieter". */
     --c-progress: var(--vscode-charts-blue, #4aa3df);
+    --c-progress: oklch(from var(--vscode-charts-blue, #4aa3df) l calc(c * .78) h);
     /* The one status hue that does NOT track the host's chart palette, because it
        cannot. VS Code registers charts.orange as inheriting from
        minimap.findMatchHighlight rather than carrying a literal default, and the
@@ -21,8 +35,11 @@ export const TOKENS_CSS = `
        dark editor ground and 7.00:1 on Cursor's. */
     --c-attn:     #e0913a;
     --c-review:   var(--vscode-charts-purple, #b083f0);
+    --c-review:   oklch(from var(--vscode-charts-purple, #b083f0) l calc(c * .78) h);
     --c-done:     var(--vscode-charts-green, #4ac26b);
+    --c-done:     oklch(from var(--vscode-charts-green, #4ac26b) l calc(c * .78) h);
     --c-idle:     var(--vscode-charts-yellow, #d7a531);
+    --c-idle:     oklch(from var(--vscode-charts-yellow, #d7a531) l calc(c * .78) h);
     --c-danger:   var(--vscode-charts-red, #e5534b);
 
     /* Marketplace taxonomy. A different axis from status: what KIND of thing this
@@ -46,24 +63,41 @@ export const TOKENS_CSS = `
     --k-bug:     color-mix(in srgb, var(--c-danger) 72%, var(--vscode-foreground));
     --k-other:   var(--vscode-descriptionForeground);
 
-    --hair: var(--vscode-panel-border);
-    /* Controls need an edge that survives sitting on a card, which is already 4%
-       lighter than the editor background — panelBorder disappears against it. */
-    --edge: color-mix(in srgb, var(--vscode-foreground) 16%, transparent);
+    /* A hairline the theme cannot lose. This was var(--vscode-panel-border), which
+       several stock themes set close enough to their editor background that it
+       vanished against a card ground — and the card ground is lifted off that
+       background by design. Derived from the foreground instead, so it holds its
+       weight on light and dark alike. */
+    --hair: color-mix(in srgb, var(--vscode-foreground) 12%, transparent);
+    /* Controls need an edge that survives sitting on a card, which is already
+       lighter than the editor background. Slightly quieter than the 16% it replaced,
+       because --hair is no longer the fainter of the two. */
+    --edge: color-mix(in srgb, var(--vscode-foreground) 14%, transparent);
     --mono: var(--vscode-editor-font-family, ui-monospace, monospace);
     --dim: var(--vscode-descriptionForeground);
 
     /* Four steps. Every font-size on every surface is one of these, so a new
-       element can't quietly invent a fifth. */
-    --t-micro: 10px;
-    --t-data: 10.5px;
-    --t-body: 11px;
-    --t-title: 13px;
+       element can't quietly invent a fifth.
 
-    /* One radius per role. */
-    --r-card: 10px;
-    --r-ctl: 6px;
-    --r-chip: 5px;
+       --t-data and --t-micro sit half a pixel apart, and that is deliberate rather
+       than a rounding accident: nine of the fourteen --t-data rules in deckStyles.ts
+       pair it with var(--mono), so it is the MONOSPACE step, and mono at the same
+       nominal size reads wider and heavier than the proportional face. The lead
+       sizes above body live on the one surface that has a lead (.hd .title and
+       .stat .n in deckStyles.ts) rather than becoming a fifth token nothing else
+       would use. */
+    --t-micro: 10.5px;
+    --t-data: 11px;
+    --t-body: 11.5px;
+    --t-title: 13.5px;
+
+    /* One radius per role, and one family. Squarer than the set this replaced: with
+       the Deck's tinted lane field gone there is no longer a container whose radius
+       has to exceed the cards standing inside it, and the board reads as an
+       instrument rather than as an app. */
+    --r-card: 6px;
+    --r-ctl: 5px;
+    --r-chip: 4px;
 
     /* The one fixed hue in the product. Measured 5.57:1 on the dark editor ground
        and 6.00:1 on the dark sidebar; the light variant exists because #2AA79B on

@@ -553,3 +553,21 @@ describe("notepad actions cluster", () => {
     expect(shared!.body).toMatch(/width:\s*24px/);
   });
 });
+
+describe("resting status hues", () => {
+  // The four column hues that are NOT --c-attn. Each must stay DERIVED from the
+  // host's chart palette — hard-coding one is how a dark-tuned hex ends up sitting
+  // on a light theme — and each must ship the chroma scale as a SECOND declaration,
+  // so an engine that cannot parse relative colour keeps the plain derived hue
+  // instead of an unset variable.
+  const RESTING = ["--c-progress", "--c-review", "--c-done", "--c-idle"];
+
+  it.each(RESTING)("%s derives from the host palette and scales its chroma", (token) => {
+    const decls = [...stripComments(TOKENS_CSS).matchAll(new RegExp(`${token}:\\s*([^;]+);`, "g"))]
+      .map((m) => m[1].trim());
+    expect(decls).toHaveLength(2);
+    expect(decls[0]).toMatch(/^var\(--vscode-charts-[a-z]+/);
+    expect(decls[1]).toMatch(/^oklch\(from var\(--vscode-charts-[a-z]+/);
+    expect(decls[1]).toContain("calc(c *");
+  });
+});
