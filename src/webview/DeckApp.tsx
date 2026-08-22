@@ -14,6 +14,7 @@ import { CardKindIcon } from "./icons";
 import { keyLabel, timeAgo } from "./helpers";
 import { type Tone } from "./deckParts";
 import { DeckDetail } from "./DeckDetail";
+import { useDrawerExit } from "./Drawer";
 import { cardActions, cardSignal } from "./deckSignal";
 // src/engine/usage.ts imports NOTHING — this is what makes it legal in a
 // browser bundle. npm run build is the only gate that would catch a violation
@@ -602,6 +603,14 @@ export function DeckApp(): JSX.Element {
   React.useEffect(() => {
     if (selId !== null && selected === null) setSelId(null);
   }, [selId, selected]);
+  /** The card the detail drawer draws, and whether it is sliding out — the same
+   * seam the Orchestrator drawer leaves the board through. It lives up here
+   * rather than inside DeckDetail because the two signals it needs are this
+   * component's: `selId` is what the user pointed at, `selected` is what that
+   * still resolves to on the board. Dismissing drops the first and animates;
+   * a card leaving the board drops the second, and unmounts at once (the
+   * effect above then clears the stale id). */
+  const { shown: shownCard, closing: ddClosing } = useDrawerExit(selId, selected);
 
   // Ask for the selected run's usage once per drawer opening. This is the only
   // thing that triggers a transcript read on a default install, which is the whole
@@ -914,14 +923,15 @@ export function DeckApp(): JSX.Element {
         />
       )}
 
-      {selected && (
+      {shownCard && (
         <DeckDetail
-          card={selected}
+          card={shownCard}
           sourceLabel={sourceLabel}
+          closing={ddClosing}
           /* Eager total first when the header sweep is on, else the on-demand read.
              `undefined` means still waiting; `null` means the host tried and
              failed. The drawer renders three distinct states from that. */
-          usage={selected.status.usage ?? lazyUsage[selected.status.run.key]}
+          usage={shownCard.status.usage ?? lazyUsage[shownCard.status.run.key]}
           onClose={() => setSelId(null)}
           onForget={forget}
         />
