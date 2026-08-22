@@ -408,7 +408,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     } else {
       const choice = await vscode.window.showQuickPick(
         choices.map((p) => ({ label: providerLabel(p), provider: p })),
-        { title: "Which agent?", placeHolder: "Pick the agent to start this session with", ignoreFocusOut: true },
+        { title: "Which tool?", placeHolder: "Pick the tool to start this session with", ignoreFocusOut: true },
       );
       // Dismissed: the user cancelled the launch itself. Nothing has been created yet,
       // so returning here leaves no window, no worktree, no brief and no plan behind.
