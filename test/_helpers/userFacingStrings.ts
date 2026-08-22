@@ -121,6 +121,24 @@ export function scanManifest(root: string): Hit[] {
     (v.enumDescriptions ?? []).forEach((d: unknown, i: number) => add(`${key}.enumDescriptions[${i}]`, d));
     (v.markdownEnumDescriptions ?? []).forEach((d: unknown, i: number) =>
       add(`${key}.markdownEnumDescriptions[${i}]`, d));
+    // Some settings' `default` carries user-facing prompt prose, not just a
+    // stored wire value (e.g. agentFlow.explorePrompts.*, agentFlow.prReviewPrompt).
+    // A plain string default is scanned directly; an array-of-object default
+    // (e.g. agentFlow.reviewRequestModes) is scanned field-by-field, since its
+    // `label`/`prompt`/`detail` strings are copy but its `id`/`hidden` are wire
+    // values indistinguishable from copy without reading each field's role.
+    const def = v.default;
+    if (typeof def === "string") {
+      add(`${key}.default`, def);
+    } else if (Array.isArray(def)) {
+      def.forEach((item: unknown, i: number) => {
+        if (item && typeof item === "object") {
+          for (const [field, val] of Object.entries(item as Record<string, unknown>)) {
+            add(`${key}.default[${i}].${field}`, val);
+          }
+        }
+      });
+    }
   }
   for (const cmd of c.commands ?? []) {
     add(`command:${cmd.command}.title`, cmd.title);
