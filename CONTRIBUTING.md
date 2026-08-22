@@ -34,6 +34,16 @@ that MUST make it fail. A journey that survives its mutation asserts nothing.
 Add the patch in the same commit as the journey; generate it by breaking `src/`
 by hand, `git diff > test-e2e/sabotage/<journey>.patch`, then `git checkout src/`.
 
+Each patch also needs a companion `test-e2e/sabotage/<journey>.expect`: one
+line holding a distinctive substring of the `test("…")` title the mutation
+must break. The runner does not trust the spec file's overall exit code —
+`describeWithHost` runs serially and skips every test after the first genuine
+failure, so an unrelated earlier failure could otherwise mask a target test
+that never ran at all. `npm run sabotage` reads the JSON report and requires
+the NAMED test to have actually failed; a missing `.expect`, a stale one (no
+test title contains it anymore), or a target test that passed or was skipped
+are all reported as distinct gate failures, not silently ignored.
+
 ## The E2E fixture connector
 
 `agentFlow.taskSource: "fixture"` resolves a JSON-backed task source, but only
