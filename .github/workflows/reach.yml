@@ -1,0 +1,57 @@
+name: reach
+
+on:
+  schedule:
+    # 06:17 UTC daily. An odd minute avoids the top-of-hour scheduling crush.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+# Never part of the CI gate — this workflow must not be able to block a PR.
+permissions:
+  contents: write
+
+concurrency:
+  group: reach
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main (for the collector scripts)
+        uses: actions/checkout@v4
+
+      - name: Check out the data branch
+        uses: actions/checkout@v4
+        with:
+          ref: reach-data
+          path: .reach-data
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # No `npm ci` — the collector has zero dependencies by design.
+      - name: Collect
+        env:
+          # Falls back to the built-in token. The traffic API requires push
+          # access; if the built-in token is rejected, set the REACH_TOKEN
+          # secret to a PAT with `repo` scope. See docs/REACH.md.
+          GH_TOKEN: ${{ secrets.REACH_TOKEN || github.token }}
+        run: node scripts/reach/collect.mjs --out .reach-data
+
+      - name: Render the dashboard
+        # Runs even if a source failed: the sources that succeeded were written.
+        if: always()
+        run: node scripts/reach/render.mjs --data .reach-data --out .reach-data/index.html
+
+      - name: Commit the day's data
+        if: always()
+        working-directory: .reach-data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet && echo "reach: nothing changed" && exit 0
+          git commit -m "chore(reach): $(date -u +%Y-%m-%d)"
+          git push origin reach-data
