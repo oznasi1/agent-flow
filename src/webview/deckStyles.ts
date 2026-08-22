@@ -11,6 +11,14 @@
 //    is monochrome until you point at it; the one asking for you carries the orange.
 //    That is why the primary button is a quiet surface everywhere except in Action
 //    required — six identical bright slabs signal nothing.
+/** How long a drawer's slide takes, in ms. Declared HERE, beside the keyframes
+ * it drives, and imported by `Drawer.tsx` rather than duplicated there: that
+ * module holds a closing drawer mounted for exactly this long, so a number that
+ * drifted from the CSS would either cut the slide off mid-flight or park an
+ * invisible drawer in the DOM. This module imports nothing, so the dependency
+ * only ever points one way. */
+export const DRAWER_ANIM_MS = 180;
+
 export const DECK_CSS = `
   html, body { height: 100%; }
   body { margin: 0;
@@ -682,18 +690,72 @@ export const DECK_CSS = `
   .rc-row:hover .rc-act, .rc-act:focus { opacity: 1; }
   .rc-act:hover { color: var(--vscode-foreground); background: var(--vscode-toolbar-hoverBackground); }
 
-  /* The selected card's detail. Same geometry as the Orchestrator drawer — below
-     the header, anchored right, no scrim — because it is the same kind of object
-     and the two are mutually exclusive. 460px is the narrowest width at which a
-     .pr-block's label column and value column both fit without wrapping. */
-  /* \`hidden auto\`, not \`auto\`: the drawer is a fixed-width panel of rows that all
+  /* The drawer shell — everything the card detail (.dd) and the Orchestrator
+     (.orch, orchestratorStyles.ts) share, which is everything except width and
+     how each one scrolls. They are the same kind of object: a panel below the
+     header, anchored right, no scrim, in one fixed slot at z-index 40 that only
+     one of them may occupy (DeckApp.tsx enforces the exclusion). The header
+     carries the chip you just pressed and the toggles the board reads from, so
+     the panel starts below it rather than at the top of the webview; and a modal
+     veil would block the drag the Orchestrator exists to receive, so there is no
+     scrim on either.
+
+     They used to be two rules, and they drifted — two shadow depths, and only
+     one of them animated at all. \`Drawer.tsx\` is the component half of this
+     seam; a drawer's own class carries its differences and nothing else. */
+  .drawer { position: fixed; top: 53px; right: 0; bottom: 0; z-index: 40;
+    display: flex; flex-direction: column;
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    border-left: 1px solid var(--hair); box-shadow: -14px 0 34px -12px rgba(0,0,0,.45);
+    animation: drawer-in ${DRAWER_ANIM_MS}ms cubic-bezier(.22,.61,.36,1) both; }
+
+  /* A drawer is anchored to the right edge, so it arrives and leaves along that
+     edge — a panel that slid up, faded, or scaled would be inventing a second
+     story about where this surface lives. The distance is the drawer's own
+     width, so the slide starts fully off-screen no matter how wide the user has
+     dragged it, and the opacity ramp is short and front-loaded: it exists to
+     soften the shadow's arrival, not to make the panel read as translucent on
+     the way in.
+
+     \`both\` matters. Without it the first painted frame is the drawer at its
+     final position, and the animation then jumps it back off-screen — one frame
+     of flash on every open. */
+  @keyframes drawer-in {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  /* Closing. \`Drawer.tsx\`'s \`useDrawerExit\` keeps the aside mounted for exactly
+     DRAWER_ANIM_MS after its open key drops, drawing the item it last held, and
+     that span is what this animates. Inert throughout — \`pointer-events\` off,
+     and the element carries \`aria-hidden\` — because a drawer already on its way
+     out must not take a click that was meant for the board behind it.
+
+     The declared \`opacity: 0\` is the reduced-motion fallback, and it is load
+     bearing. tokens.ts's reset carries a global
+     \`* { animation: none !important }\` for users who have asked the system for
+     less motion, which suppresses \`drawer-out\` outright — and the unmount is a
+     JS timer, so without this the drawer would sit fully visible in place for
+     DRAWER_ANIM_MS after the user dismissed it. A running animation outranks a
+     declared value, so while \`drawer-out\` plays this is inert and the keyframes
+     own the fade; it only takes effect when they are gone. (The query itself is
+     deliberately not written here — tokens.test.ts asserts no surface sheet
+     carries a motion reset of its own, and the shared one in tokens.ts is the
+     only place that should.) */
+  .drawer.closing { animation-name: drawer-out; pointer-events: none; opacity: 0; }
+  @keyframes drawer-out {
+    from { transform: translateX(0); opacity: 1; }
+    to { transform: translateX(100%); opacity: 0; }
+  }
+
+  /* The selected card's detail. 460px is the narrowest width at which a
+     .pr-block's label column and value column both fit without wrapping.
+
+     \`hidden auto\`, not \`auto\`: the drawer is a fixed-width panel of rows that all
      ellipsize, so sideways scroll here is never a feature — it is always a row that
      failed to shrink (a long mono key did exactly that), and it takes the close
      button off-screen with it. Vertical scroll is the only axis it needs. */
-  .dd { position: fixed; top: 53px; right: 0; bottom: 0; width: 460px; z-index: 40;
-    display: flex; flex-direction: column; overflow: hidden auto;
-    background: var(--vscode-editorWidget-background);
-    border-left: 1px solid var(--hair); box-shadow: -10px 0 26px rgba(0,0,0,.28); }
+  .dd { width: 460px; overflow: hidden auto; }
   .dd-hd { display: flex; align-items: center; gap: 8px; padding: 9px 12px;
     border-bottom: 1px solid var(--hair); }
   /* \`max-width\` is load-bearing: a nowrap flex item's automatic minimum size is its

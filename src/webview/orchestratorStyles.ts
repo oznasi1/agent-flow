@@ -1,13 +1,14 @@
+import { DRAWER_ANIM_MS } from "./deckStyles";
+
 // The Orchestrator drawer. Read alongside the approved mockup at
 // docs/mockups/2026-08-05-deck-orchestrator-drawer.html (?v=canvas) — that file is
 // the visual contract and is git-ignored, so it lives only in the primary checkout.
 //
-// Two things here are deliberate and easy to "fix" wrongly:
-//  1. The drawer starts BELOW the Deck header, not at the top of the panel. The
-//     header carries the chip you just pressed and the Live-signal / PR-facts
-//     toggles the conditions read from; covering them hides the state.
-//  2. There is NO scrim. A modal veil would block the drag the drawer exists to
-//     receive — the board stays fully live while the drawer is open.
+// Two things about this drawer are deliberate and easy to "fix" wrongly — and
+// neither lives here any more, because they are true of the card detail too:
+// it starts BELOW the Deck header rather than at the top of the panel, and there
+// is NO scrim. Both are stated once, on `.drawer` in deckStyles.ts, which this
+// sheet's `.orch` composes onto. Only what differs is written below.
 // Width is user-resizable: a grip on the drawer's left border (this task), and
 // on top of that plumbing, an expand toggle (Task 4). --orch-w carries the live
 // value. It is declared right here, locally, with the phase-1 pixel figure as
@@ -16,17 +17,17 @@
 // OrchestratorDrawer.tsx then overrides it with an inline style carrying the
 // current (dragged, arrow-keyed, or persisted) width — the override direction
 // only works because the default already exists here to be overridden.
-/** How long the drawer's slide takes, in ms. Declared HERE, beside the
- * keyframes it drives, and imported by `OrchestratorDrawer.tsx` rather than
- * duplicated there: that file holds the closing drawer mounted for exactly
- * this long, so a number that drifted from the CSS would either cut the
- * slide off mid-flight or park an invisible drawer in the DOM. This module
- * imports nothing, so the dependency only ever points one way. */
-export const ORCH_ANIM_MS = 180;
+/** How long this drawer's slide takes, in ms — the Deck's one drawer figure,
+ * under the name this sheet has always called it. The number and the keyframes
+ * it drives moved to deckStyles.ts when the card detail and this drawer became
+ * one shell (`.drawer` there, `Drawer.tsx` beside it): two slides of different
+ * lengths on one surface was exactly the drift that seam exists to prevent. */
+export const ORCH_ANIM_MS = DRAWER_ANIM_MS;
 
 /** How far an edge chip's own centre is painted from the point it is positioned
- * at, in px — negative because it sits ABOVE that point. Declared HERE for the
- * same reason `ORCH_ANIM_MS` is: `.orch-edge` below carries
+ * at, in px — negative because it sits ABOVE that point. Declared HERE, beside
+ * the rule it has to agree with, and imported by `OrchestratorDrawer.tsx` rather
+ * than duplicated there: `.orch-edge` below carries
  * `transform: translate(-50%, -150%)`, so the box is lifted by 1.5 of its own
  * height and its CENTRE lands exactly one height above the point.
  *
@@ -87,51 +88,9 @@ export const ORCH_CSS = `
      a different kind of object. */
   .orch-chip.armed .ct { color: var(--brand); font-weight: 600; }
 
-  .orch { position: fixed; top: 53px; right: 0; bottom: 0; --orch-w: 560px; width: var(--orch-w); z-index: 40;
-    display: flex; flex-direction: column;
-    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
-    border-left: 1px solid var(--hair); box-shadow: -14px 0 34px -12px rgba(0,0,0,.45);
-    animation: orch-in ${ORCH_ANIM_MS}ms cubic-bezier(.22,.61,.36,1) both; }
-
-  /* The drawer is anchored to the right edge, so it arrives and leaves along
-     that edge — a panel that slid up, faded, or scaled would be inventing a
-     second story about where this surface lives. The distance is the drawer's
-     own width, so the slide starts fully off-screen no matter how wide the
-     user has dragged it, and the opacity ramp is short and front-loaded: it
-     exists to soften the shadow's arrival, not to make the panel read as
-     translucent on the way in.
-
-     \`both\` matters. Without it the first painted frame is the drawer at its
-     final position, and the animation then jumps it back off-screen — one
-     frame of flash on every open. */
-  @keyframes orch-in {
-    from { transform: translateX(100%); opacity: 0; }
-    to { transform: translateX(0); opacity: 1; }
-  }
-
-  /* Closing. \`OrchestratorDrawer.tsx\` keeps the aside mounted for exactly
-     ORCH_ANIM_MS after \`openId\` drops, drawing the flow it last held, and
-     that span is what this animates. Inert throughout — \`pointer-events\`
-     off, and the element carries \`aria-hidden\` — because a drawer already
-     on its way out must not take a click that was meant for the board
-     behind it.
-
-     The declared \`opacity: 0\` is the reduced-motion fallback, and it is load
-     bearing. tokens.ts's reset carries a global
-     \`* { animation: none !important }\` for users who have asked the system
-     for less motion, which suppresses \`orch-out\` outright — and the unmount
-     is a JS timer, so without this the drawer would sit fully visible in
-     place for ORCH_ANIM_MS after the user dismissed it. A running animation
-     outranks a declared value, so while \`orch-out\` plays this is inert and
-     the keyframes own the fade; it only takes effect when they are gone.
-     (The query itself is deliberately not written here — tokens.test.ts
-     asserts no surface sheet carries a motion reset of its own, and the
-     shared one in tokens.ts is the only place that should.) */
-  .orch.closing { animation-name: orch-out; pointer-events: none; opacity: 0; }
-  @keyframes orch-out {
-    from { transform: translateX(0); opacity: 1; }
-    to { transform: translateX(100%); opacity: 0; }
-  }
+  /* Width, and nothing else — the shell is \`.drawer\` in deckStyles.ts, including
+     the slide this drawer used to own outright. */
+  .orch { --orch-w: 560px; width: var(--orch-w); }
 
   /* The resize grip, centred ON the left border rather than beside it — half
      outside the drawer's box, half inside — so it never nudges the header,

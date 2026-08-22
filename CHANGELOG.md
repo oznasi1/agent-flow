@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-08-23
+
+### Changed
+
+- A card's detail drawer now slides in and out along the Deck's right edge, the
+  same way the Orchestrator drawer does — same shell, same shadow, same 180ms
+  slide. The two panels share one fixed slot, and they now arrive and leave as
+  one kind of object instead of one sliding while the other appeared and vanished
+  in a frame. A card that leaves the board while its drawer is open still closes
+  it at once: there is no dismissal to animate.
+
 ## [0.40.0] — 2026-08-23
 
 ### Changed

@@ -7,6 +7,7 @@ import type { DeckCard } from "./deckCards";
 // is kept free of fs-touching imports, which bucket.test.ts enforces.
 import { prSignals } from "../engine/bucket";
 import { AgentsRow, PrBlock, RepoChip, WorkspaceChip, workspaceLabel } from "./deckParts";
+import { Drawer } from "./Drawer";
 import { CardKindIcon } from "./icons";
 import { keyLabel, timeAgo } from "./helpers";
 
@@ -19,6 +20,12 @@ export interface DeckDetailProps {
    * a total — including a genuine all-zero, which is NOT the same as either above.
    * Printing 0 for an unread run would assert it cost nothing. */
   usage?: UsageTotals | null;
+  /** Sliding out. The card this drawer draws is the one it last held, not one
+   * still selected on the board — `DeckApp.tsx` owns that bookkeeping through
+   * `useDrawerExit`, because the selection state this drawer would need to read
+   * it from lives there. Absent means open, which is what every caller that
+   * only ever renders an open drawer gets for free. */
+  closing?: boolean;
   onClose: () => void;
   onForget: (key: string) => void;
 }
@@ -47,7 +54,7 @@ function copy(text: string): void {
   void navigator.clipboard?.writeText(text);
 }
 
-export function DeckDetail({ card, sourceLabel, usage, onClose, onForget }: DeckDetailProps): JSX.Element {
+export function DeckDetail({ card, sourceLabel, usage, closing = false, onClose, onForget }: DeckDetailProps): JSX.Element {
   const r = card.status;
   const key = r.run.key;
   const tracked = isTicketRun(r.run);
@@ -120,7 +127,7 @@ export function DeckDetail({ card, sourceLabel, usage, onClose, onForget }: Deck
   const ws = workspaceLabel(r.run);
 
   return (
-    <aside className="dd" aria-label={`Detail for ${key}`}>
+    <Drawer surface="dd" label={`Detail for ${key}`} closing={closing}>
       <div className="dd-hd">
         {/* The card's own mark, at the card's own size: a selected card and its
           * drawer are one object, and a smaller mark here would read as two. */}
@@ -249,6 +256,6 @@ export function DeckDetail({ card, sourceLabel, usage, onClose, onForget }: Deck
           ))}
         </div>
       ))}
-    </aside>
+    </Drawer>
   );
 }
