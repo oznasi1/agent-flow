@@ -57,7 +57,20 @@ const ghInit = (token, accept = "application/vnd.github+json") => ({
   headers: { Accept: accept, Authorization: `Bearer ${token}`, "User-Agent": "agent-flow-reach" },
 });
 
-export async function collect({ dir, token, fetchImpl, now }) {
+export async function collect({ dir, token, publicToken, fetchImpl, now }) {
+  // Two tokens, because the endpoints need different grants and we want the
+  // stronger one to be as narrow as possible.
+  //
+  // The traffic endpoints require push access — a fine-grained PAT needs
+  // `Administration: read`, and Actions' built-in GITHUB_TOKEN is NOT enough
+  // (verified: it 403s on all four). Everything else here is ordinary public
+  // read, which the built-in token already satisfies.
+  //
+  // So `token` (the PAT) is spent only on traffic, and `publicToken` — the
+  // built-in token — carries the rest. That way the PAT never needs a
+  // permission beyond Administration, and a PAT scoped to exactly that keeps
+  // working even though it cannot read /stargazers.
+  const readToken = publicToken ?? token;
   const ok = [];
   const failed = [];
 
@@ -101,7 +114,7 @@ export async function collect({ dir, token, fetchImpl, now }) {
   await source("stars", async () => {
     const payload = await getAllPages(
       fetchImpl, `${GH}/stargazers?per_page=100`,
-      ghInit(token, "application/vnd.github.star+json"),
+      ghInit(readToken, "application/vnd.github.star+json"),
     );
     writeJson(dir, "stars.json", parseStars(payload));
   });
@@ -156,8 +169,11 @@ if (process.argv[1] && process.argv[1].endsWith("collect.mjs")) {
     console.error("reach: GH_TOKEN or GITHUB_TOKEN is required");
     process.exit(1);
   }
+  // Optional. When absent every request uses `token`, which is what a local
+  // run with a single PAT does.
+  const publicToken = process.env.GH_PUBLIC_TOKEN ?? undefined;
   const { ok, failed } = await collect({
-    dir, token, fetchImpl: fetch, now: new Date().toISOString(),
+    dir, token, publicToken, fetchImpl: fetch, now: new Date().toISOString(),
   });
   console.log(`reach: ok=[${ok.join(", ")}]`);
   for (const f of failed) console.error(`reach: FAILED ${f.source} — ${f.error}`);
