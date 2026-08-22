@@ -4,7 +4,7 @@ import { execFileSync } from "child_process";
 import * as fs from "fs";
 import { makeSandbox, FIXTURE_TASK, type Sandbox } from "./_helpers/sandbox";
 import { launchHost, openTasksView, tasksFrame } from "./_helpers/host";
-import { installForgeShims, ghPrListAnswer } from "./_helpers/forgeShim";
+import { installForgeShims, ghPrListAnswer, expectNoUnknownForgeCalls } from "./_helpers/forgeShim";
 import { shot } from "./_helpers/shot";
 
 let sb: Sandbox;
@@ -49,6 +49,7 @@ test.afterEach(async () => {
   const calls = unknownLog.replace("unknown.jsonl", "calls.jsonl");
   if (fs.existsSync(calls)) console.log("FORGE CALLS:\n" + fs.readFileSync(calls, "utf8"));
   else console.log("FORGE CALLS: none");
+  expectNoUnknownForgeCalls(sb);
   sb.dispose();
 });
 

@@ -54,3 +54,58 @@ export function ghPrListAnswer(branch: string): string {
     statusCheckRollup: [{ __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS", name: "ci" }],
   }]);
 }
+
+export interface ReviewReq {
+  number: number;
+  repo: string;   // "owner/name"
+  title: string;
+  author: string;
+  branch: string;
+}
+
+/** The `gh api graphql` answer the review rail parses.
+ *
+ *  Shape matters more than content: `parseReviewSearch` (src/engine/review/search.ts)
+ *  returns NULL for anything that is not `data.search.{issueCount,nodes}`, and a
+ *  null parse is indistinguishable from "no review requests" — which would make
+ *  the journey pass against a broken product. Both members are mandatory here.
+ *
+ *  The shim keys on the first two argv words, so this registers under the
+ *  signature "api graphql" (tr-mangled to `api_graphql`). */
+export function ghReviewRequestsAnswer(reqs: ReviewReq[]): string {
+  return JSON.stringify({
+    data: {
+      search: {
+        issueCount: reqs.length,
+        nodes: reqs.map((r) => ({
+          __typename: "PullRequest",
+          number: r.number,
+          title: r.title,
+          url: `https://github.invalid/${r.repo}/pull/${r.number}`,
+          isDraft: false,
+          createdAt: "2026-08-20T00:00:00Z",
+          updatedAt: "2026-08-21T00:00:00Z",
+          author: { login: r.author },
+          headRefName: r.branch,
+          baseRefName: "main",
+          repository: { nameWithOwner: r.repo },
+        })),
+      },
+    },
+  });
+}
+
+/** Fail when the product shelled a subcommand nobody faked.
+ *
+ *  Call this in the teardown of every forge journey. Without it the shim's
+ *  empty-answer fallback silently absorbs a real behaviour change: the journey
+ *  stays green while the product asks a question the test never answered. */
+export function expectNoUnknownForgeCalls(sb: Sandbox): void {
+  const log = path.join(sb.root, "forge-answers", "unknown.jsonl");
+  if (!fs.existsSync(log)) return;
+  const lines = fs.readFileSync(log, "utf8").trim();
+  if (lines === "") return;
+  throw new Error(
+    `the product shelled forge subcommands with no canned answer — add them to the shim:\n${lines}`,
+  );
+}

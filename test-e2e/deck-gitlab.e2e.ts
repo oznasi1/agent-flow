@@ -4,7 +4,7 @@ import { execFileSync } from "child_process";
 import * as fs from "fs";
 import { makeSandbox, FIXTURE_TASK, type Sandbox } from "./_helpers/sandbox";
 import { launchHost, openTasksView, tasksFrame } from "./_helpers/host";
-import { installForgeShims } from "./_helpers/forgeShim";
+import { installForgeShims, expectNoUnknownForgeCalls } from "./_helpers/forgeShim";
 import { shot } from "./_helpers/shot";
 
 let sb: Sandbox;
@@ -58,6 +58,7 @@ test.afterEach(async () => {
   await app?.close();
   app = undefined;
   if (fs.existsSync(unknownLog)) console.log("FORGE UNKNOWN ARGV:\n" + fs.readFileSync(unknownLog, "utf8"));
+  expectNoUnknownForgeCalls(sb);
   sb.dispose();
 });
 
