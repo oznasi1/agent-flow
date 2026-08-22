@@ -588,3 +588,15 @@ describe("per-card accent", () => {
     expect(app).not.toContain("--accent");
   });
 });
+
+describe("empty board column", () => {
+  // The zone rail is drawn on .col-body, which is a childless div when a column has
+  // no cards — so without this rule an empty column shows a floating ~16px tick in
+  // its own hue. Found by looking at the Merge column with nothing in it; nothing in
+  // this suite would have caught it, so it gets a guard rather than a comment.
+  it("draws no rail when the column has no cards", () => {
+    const rule = ruleBlocks(DECK_CSS).find((r) => r.selector === ".col-body:empty");
+    expect(rule).toBeDefined();
+    expect(rule!.body).toMatch(/border-left:\s*0/);
+  });
+});

@@ -156,6 +156,12 @@ export const DECK_CSS = `
      instead of scrolling out from behind it. */
   .col-body { display: flex; flex-direction: column; gap: 8px; padding: 6px 0 10px 12px;
     border-left: 1px solid color-mix(in srgb, var(--zone) 40%, transparent); }
+  /* An empty column draws nothing below its head. The body is a childless div then, so
+     the rail would be a floating ~16px tick in the zone's hue — a rail with nothing to
+     rail, which reads as a stray mark rather than as structure. (The tint this rail
+     replaced had the same shape and got away with it: a 16px rounded field read as an
+     empty place, where a 16px line reads as debris.) The head still says "Merge 0". */
+  .col-body:empty { border-left: 0; padding: 0; }
   /* A band inside a column. Deliberately quieter than .col-hd — no dot, no sticky,
      lowercase from the markup — so the column header still reads as the heading and
      this reads as a divider under it. The first lane sits tight to the column
