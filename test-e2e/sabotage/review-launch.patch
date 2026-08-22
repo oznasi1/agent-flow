@@ -1,0 +1,12 @@
+diff --git a/src/engine/review/launch.ts b/src/engine/review/launch.ts
+index ba74d61..452bea7 100644
+--- a/src/engine/review/launch.ts
++++ b/src/engine/review/launch.ts
+@@ -19,7 +19,6 @@ export function renderReviewTemplate(
+ ): string {
+   return template
+     .replace(/\{repo\}/g, () => v.repo)
+-    .replace(/\{number\}/g, () => String(v.number))
+     .replace(/\{author\}/g, () => v.author);
+ }
+ 
