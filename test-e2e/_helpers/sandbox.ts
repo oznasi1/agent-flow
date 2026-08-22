@@ -18,10 +18,18 @@ export interface Sandbox {
  *  purpose: `inferServices` matches repo names against the task text, so the
  *  repo-confirm QuickPick opens with this repo pre-checked and a single Enter
  *  confirms it. */
+// `inOpenSprint: true` — so the fixture's "mysprint" lens (now supported by
+// the fixture connector; see src/tasks/fixture/connector.ts) has two cards to
+// drive the reorder/reset-order/remove-from-sprint journeys against. This does
+// NOT hide either task from the "mine" lens the other journeys use: the
+// fixture connector's `list()` ignores the lens argument entirely and returns
+// everything regardless, and `showAddToSprint` (App.tsx:782) keys off
+// `unassigned`, not `inOpenSprint`, so "Add to my sprint" still renders for
+// these still-unassigned tasks.
 export const FIXTURE_TASK = {
   key: "E2E-1", summary: "Fix the rocket telemetry panel", status: "To Do",
   statusCategory: "new", priority: "P2", assignee: "Unassigned",
-  labels: [], components: [], sprint: null, inOpenSprint: false,
+  labels: [], components: [], sprint: null, inOpenSprint: true,
   updated: "2026-08-21T00:00:00.000Z", url: "https://fixture.invalid/browse/E2E-1",
   estimateSeconds: null, descriptionText: "The rocket panel shows stale numbers.",
 };
@@ -79,6 +87,13 @@ export function makeSandbox(settingsOverride: Record<string, unknown> = {}): San
   //  - childWorktrees false → no tree pick, even though the fixture now
   //    claims `children`; the child-tree journey flips this one to true
   //  - 1 repo → chooseWorkspaceMode returns "per-window" with no pick
+  //  - defaultFilter "mine" → LOAD-BEARING now that the fixture connector's
+  //    supportedFilters includes "mysprint": getConfig().defaultFilter
+  //    defaults to "mysprint" (src/config.ts), and effectiveFilter used to
+  //    fall back to "mine" only because "mysprint" was unsupported. Now that
+  //    it's supported, every journey would otherwise open on the My-sprint
+  //    lens — which filters to `inOpenSprint` tasks — pinning this keeps the
+  //    11 pre-existing journeys' card counts byte-identical.
   const settings = {
     "agentFlow.taskSource": "fixture",
     "agentFlow.reposRoot": reposRoot,
@@ -89,6 +104,7 @@ export function makeSandbox(settingsOverride: Record<string, unknown> = {}): San
     "agentFlow.remoteControl": "off",
     "agentFlow.childWorktrees": false,
     "agentFlow.seedAgent": true,
+    "agentFlow.defaultFilter": "mine",
     "security.workspace.trust.enabled": false,
     "update.mode": "none",
     "extensions.autoUpdate": false,

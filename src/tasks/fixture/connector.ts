@@ -35,7 +35,7 @@ export function makeFixtureConnector(dir: string): TaskConnector {
   };
 
   const caps: Capabilities = {
-    supportedFilters: ["mine", "all"],
+    supportedFilters: ["mine", "all", "mysprint"],
     sizes: false,
     labels: {
       add: async (key, label) => { find(key); record({ op: "addLabel", key, label }); },

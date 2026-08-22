@@ -15,10 +15,27 @@ export class Pool {
     this.frame = tasksFrame(page);
   }
 
-  /** Click the activity-bar item and wait for the pool to render `n` cards. */
+  /** Open the sidebar and wait for the pool to render `n` cards. Idempotent, so a
+   *  shared-host journey (`describeWithHost`) can call this once per test without
+   *  each call fighting the last: VS Code's activity bar TOGGLES a view
+   *  container's visibility when its own already-active icon is clicked again,
+   *  so unconditionally re-clicking it (as `openTasksView` does) would collapse
+   *  an already-open Agent Flow sidebar instead of confirming it's open, and
+   *  `pool.cards()` would then time out at 0. Checking first avoids ever sending
+   *  that second click. */
   static async open(page: Page, n: number): Promise<Pool> {
-    await openTasksView(page);
     const pool = new Pool(page);
+    // Before the sidebar has ever been opened, the outer `iframe.webview` doesn't
+    // exist yet — resolving through it to count `.card` throws rather than
+    // answering 0, so treat that failure the same as "not open yet".
+    const alreadyOpen = await pool
+      .cards()
+      .count()
+      .then((n) => n > 0)
+      .catch(() => false);
+    if (!alreadyOpen) {
+      await openTasksView(page);
+    }
     await expect(pool.cards()).toHaveCount(n, { timeout: 30_000 });
     return pool;
   }

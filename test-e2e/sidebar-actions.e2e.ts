@@ -4,7 +4,7 @@ import * as path from "path";
 import { expect, test } from "@playwright/test";
 import { describeWithHost } from "./_helpers/sharedHost";
 import { Pool } from "./_helpers/po/pool";
-import { FIXTURE_TASK } from "./_helpers/sandbox";
+import { FIXTURE_TASK, FIXTURE_TASK_2 } from "./_helpers/sandbox";
 import { shot } from "./_helpers/shot";
 
 /** Read every write the extension has recorded so far. Append-only, so a test
@@ -54,69 +54,34 @@ describeWithHost("sidebar actions", { "agentFlow.exploreMode": "general" }, (ctx
     await shot(ctx.page(), testInfo, "1 · detail panel");
   });
 
-  // BLOCKER (not implemented) — "adding a label" per the brief's script assumes a
-  // direct affordance (a "label" button, then typed free text) that does not exist
-  // anywhere in src/webview/App.tsx: there is no `send({ type: "addLabel", ... })`
-  // call, no `case "addLabel"` in tasksView.ts's message switch, and the only
-  // caller of `caps.labels.add` is the PRIVATE `stampProvenance` helper
-  // (tasksView.ts ~line 287), fired automatically as a side effect of every OTHER
-  // write (addToMySprint / removeFromSprint / setComponent / moveTo), gated on
+  // This is the product's ONLY label surface, not a missing test: there is no
+  // `send({ type: "addLabel", ... })` call anywhere in src/webview/App.tsx, no
+  // `case "addLabel"` in tasksView.ts's message switch, and the only caller of
+  // `caps.labels.add` is the PRIVATE `stampProvenance` helper (tasksView.ts
+  // ~line 287), fired automatically as a side effect of every OTHER write
+  // (addToMySprint / removeFromSprint / setComponent / moveTo), gated on
   // `agentFlow.stampLabelOnWrite` (default true) and always stamping the FIXED
   // `agentFlow.provenanceLabel` (default "claude-code") — never arbitrary user
-  // text. A user cannot type "needs-e2e" through this UI because no control
-  // accepts free-form label text. This is a capability gap in the product (or in
-  // an earlier task's fixture wiring), not a locator to repair — see the report.
-  //
-  // The one honest way to exercise `addLabel` for real is as the side effect of a
-  // genuine write, which the next test does (it asserts BOTH `addToSprint` and the
-  // `addLabel` provenance stamp that follows it).
+  // text. A user cannot type a custom label like "needs-e2e" through this UI;
+  // the next test exercises `addLabel` the only honest way there is — as the
+  // side effect of a genuine write.
 
   test("adding to sprint records addToSprint and stamps the provenance label", async ({}, testInfo) => {
-    // Not `Pool.open`: `openTasksView` clicks the activity-bar icon unconditionally,
-    // and VS Code TOGGLES a view container's visibility on a second click of its
-    // own icon — since test 1 already left Agent Flow focused, re-clicking here
-    // collapses the sidebar instead of opening it, and `pool.cards()` then times
-    // out at 0. Every test after the first constructs `Pool` directly against the
-    // still-open webview instead. See the report.
-    const pool = new Pool(ctx.page());
-    await expect(pool.cards()).toHaveCount(2, { timeout: 30_000 });
+    const pool = await Pool.open(ctx.page(), 2);
     await pool.card(FIXTURE_TASK.key).getByRole("button", { name: /add to my sprint/i }).click();
     await expect
       .poll(() => writes(ctx.sb().fixtureDir).filter((w) => w.op === "addToSprint" && w.key === FIXTURE_TASK.key))
       .toHaveLength(1);
     // The provenance stamp — real `addLabel` coverage, via the only path that ever
-    // produces one. See the blocker note above the previous test.
+    // produces one. See the note above the previous test.
     await expect
       .poll(() => writes(ctx.sb().fixtureDir).filter((w) => w.op === "addLabel" && w.key === FIXTURE_TASK.key))
       .toHaveLength(1);
     await shot(ctx.page(), testInfo, "2 · added to sprint");
   });
 
-  // BLOCKER (not implemented) — the brief's second half ("click sprint again to
-  // remove") and the whole reorder/reset-order journey both require the
-  // "mysprint" filter tab to be selectable. It never is for this fixture:
-  // src/tasks/fixture/connector.ts's `caps.supportedFilters` is `["mine", "all"]`
-  // (verbatim from Task 3's brief, reviewed and committed as e23930a), and
-  // `visibleFilters`/`effectiveFilter` (src/webview/helpers.ts) only ever render a
-  // "My sprint" tab when "mysprint" is in that list — it isn't, so the tab never
-  // renders. Two features are gated behind exactly that tab:
-  //   - The "Remove from sprint" icon button: App.tsx's `onRemoveFromSprint` prop
-  //     is only ever passed `filter === "mysprint" && caps.sprints ? … : undefined`
-  //     (App.tsx ~line 684) — with no "mysprint" tab reachable, it is always
-  //     `undefined` and the button never renders on any card, in any lens.
-  //   - The whole reorder feature: `canReorder = filter === "mysprint" && …`
-  //     (App.tsx ~line 460), and the `.reorder-bar` / "Reset order" button render
-  //     only inside `{filter === "mysprint" && caps.sprints && …}` (App.tsx ~line
-  //     627). No drag handle (`.grip`) and no "Reset order" button exist outside
-  //     that lens.
-  // This is a genuine "capability still hidden" case per the task's own policy —
-  // see the report for the recommended fix (add "mysprint" to the fixture's
-  // `supportedFilters`).
-
   test("setting a component records the delta the picker produced", async () => {
-    // Not `Pool.open` — see the comment on the sprint test above.
-    const pool = new Pool(ctx.page());
-    await expect(pool.cards()).toHaveCount(2, { timeout: 30_000 });
+    const pool = await Pool.open(ctx.page(), 2);
     const card = pool.card(FIXTURE_TASK.key);
     // The card may already be expanded (test 1 opened it in this shared session);
     // only click to expand if the detail panel isn't showing yet.
@@ -141,9 +106,7 @@ describeWithHost("sidebar actions", { "agentFlow.exploreMode": "general" }, (ctx
   });
 
   test("Explore launches and lands a plan file", async ({}, testInfo) => {
-    // Not `Pool.open` — see the comment on the previous test.
-    const pool = new Pool(ctx.page());
-    await expect(pool.cards()).toHaveCount(2, { timeout: 30_000 });
+    const pool = await Pool.open(ctx.page(), 2);
     await pool.frame.getByRole("button", { name: /explore/i }).click();
 
     // `agentFlow.exploreMode: "general"` (this describe's own settings override)
@@ -173,5 +136,87 @@ describeWithHost("sidebar actions", { "agentFlow.exploreMode": "general" }, (ctx
       { timeout: 60_000 },
     ).not.toHaveLength(0);
     await shot(ctx.page(), testInfo, "3 · explore launched");
+  });
+
+  // The three tests below need the "My sprint" lens, which the fixture connector
+  // now supports (`supportedFilters` gained "mysprint" — see
+  // src/tasks/fixture/connector.ts and the report's Ruling A). Both fixture
+  // tasks carry `inOpenSprint: true` (sandbox.ts) so this lens has two cards to
+  // work with: one to reorder against the other, then remove. Run last, in this
+  // order, because removing a card drops the lens to one — a card count no
+  // subsequent test needs.
+
+  test("reordering the pool survives a refresh, and reset restores source order", async ({}, testInfo) => {
+    const pool = await Pool.open(ctx.page(), 2);
+    await pool.frame.getByRole("group", { name: "Task filter" }).getByRole("button", { name: "My sprint" }).click();
+    await expect(pool.cards()).toHaveCount(2, { timeout: 15_000 });
+    const first = await pool.cards().nth(0).innerText();
+
+    // Not `dragTo` — a sibling task in this plan (Task 5) documents that it does
+    // not reliably fire dragstart/dragover/drop in Chromium. A manual mouse
+    // sequence on the row's own `.grip` handle (App.tsx:844-849) does instead —
+    // confirmed live — but needed two adjustments beyond the ruling's base
+    // recipe: a small in-place wiggle plus a short pause right after mousedown
+    // (Chromium's own drag-arming needs to see the pointer move a few pixels
+    // before treating the gesture as a drag, not just jump straight to the
+    // target — a single big step, even split into many `steps`, arrived too
+    // fast for it to notice), and landing in the LOWER half of the target card:
+    // `dropPos` (App.tsx) resolves "before"/"after" from which half of the
+    // hovered card the pointer is in, and dropping "before" the very next card
+    // is a no-op — it's already there.
+    const from = await pool.cards().nth(0).locator(".grip").boundingBox();
+    const to = await pool.cards().nth(1).boundingBox();
+    if (!from || !to) throw new Error("drag source .grip or drop-target card did not render a bounding box");
+    await pool.page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await pool.page.mouse.down();
+    await pool.page.mouse.move(from.x + from.width / 2 + 3, from.y + from.height / 2 + 3, { steps: 3 });
+    await pool.page.waitForTimeout(100);
+    await pool.page.mouse.move(to.x + to.width / 2, to.y + to.height * 0.75, { steps: 12 });
+    await pool.page.mouse.up();
+
+    await expect.poll(async () => (await pool.cards().nth(0).innerText()) !== first, { timeout: 10_000 }).toBe(true);
+    await shot(ctx.page(), testInfo, "4 · reordered");
+
+    // Persistence is the point: the manual order lives in workspaceState, outside
+    // the webview, so it must survive the panel being refetched. `ControlOrMeta`,
+    // not `Control` — the palette is Cmd+Shift+P on macOS (the dev platform) and
+    // Ctrl+Shift+P on Linux (CI); the literal `Control` modifier opens nothing on
+    // macOS.
+    await ctx.page().keyboard.press("ControlOrMeta+Shift+P");
+    await ctx.page().keyboard.type("Agent Flow: Refresh Tasks");
+    await ctx.page().keyboard.press("Enter");
+
+    // Refresh re-fetches with `agentFlow.defaultFilter` ("mine", pinned in
+    // sandbox.ts — see the report's Ruling A), which lands the panel back on the
+    // "Mine" tab regardless of which lens was active before the refresh
+    // (App.tsx's `case "tasks"` calls `setFilter(m.filter)` unconditionally). The
+    // manual order is a "mysprint"-only concern (tasksView.ts's `fetch` handler
+    // only applies `sortBySavedOrder` for that lens), so re-selecting "My sprint"
+    // is what actually proves it survived — not just that the sidebar still shows
+    // two cards. `Pool.open` (not `new Pool`): the webview wasn't torn down by
+    // the refresh, but it costs nothing to go through the one idempotent entry
+    // point uniformly.
+    const reopened = await Pool.open(ctx.page(), 2);
+    await reopened.frame.getByRole("group", { name: "Task filter" }).getByRole("button", { name: "My sprint" }).click();
+    await expect(reopened.cards()).toHaveCount(2, { timeout: 15_000 });
+    await expect.poll(async () => (await reopened.cards().nth(0).innerText()) !== first).toBe(true);
+
+    await reopened.frame.getByRole("button", { name: /reset order/i }).click();
+    await expect.poll(() => reopened.cards().nth(0).innerText()).toContain(first.split("\n")[0]);
+  });
+
+  test("removing from sprint records removeFromSprint", async () => {
+    // Still on the "My sprint" tab from the previous test — no re-selection needed.
+    const pool = await Pool.open(ctx.page(), 2);
+    // The icon-only "Remove from sprint" button (App.tsx:880-888), addressed by
+    // its aria-label — it carries no visible text, only the icon.
+    await pool
+      .card(FIXTURE_TASK_2.key)
+      .getByRole("button", { name: new RegExp(`Remove ${FIXTURE_TASK_2.key} from your active sprint`) })
+      .click();
+    await expect
+      .poll(() => writes(ctx.sb().fixtureDir).filter((w) => w.op === "removeFromSprint" && w.key === FIXTURE_TASK_2.key))
+      .toHaveLength(1);
+    await expect(pool.cards()).toHaveCount(1, { timeout: 15_000 });
   });
 });
