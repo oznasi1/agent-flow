@@ -1,0 +1,12 @@
+diff --git a/src/deckView.ts b/src/deckView.ts
+index 366ce95..948a60b 100644
+--- a/src/deckView.ts
++++ b/src/deckView.ts
+@@ -2720,7 +2720,6 @@ export class DeckPanel {
+     const dir = defaultRunsDir();
+     switch (v.action) {
+       case "retire":
+-        removeRun(dir, run.key);
+         removePrEntries(defaultPrFactsDir(), run.key);
+         // Any fetch already in flight belongs to the incarnation just deleted.
+         this.prEpoch.set(run.key, (this.prEpoch.get(run.key) ?? 0) + 1);
