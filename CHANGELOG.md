@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The loading mark now runs as a **wave** rather than a single travelling dot: the
+  brand-coloured dots light one by one clockwise from twelve o'clock and empty the
+  same way, with five of the eight lit at any moment. The old comet lit one dot at a
+  time, which disappeared at the 12px size the mark ships at beside text — a loader
+  that read as a static logo. The cycle slowed from 1400ms to 1900ms to suit the
+  longer lit span. Reduced motion is unchanged: the mark still rests fully lit.
+
 ## [0.39.0] — 2026-08-22
 
 ### Changed

@@ -66,7 +66,7 @@ describe("tokens.ts", () => {
   });
 
   // BASE_CSS turns every animation off under prefers-reduced-motion, which freezes
-  // the loader on whatever its unanimated rule says. The comet's dim phase is nearly
+  // the loader on whatever its unanimated rule says. The wave's dim phase is nearly
   // invisible, so the rule has to rest LIT and let the keyframes dim from there —
   // otherwise reduced-motion users get a blank hole where the mark should be.
   it("rests the loading mark lit, so reduced motion leaves a visible mark", () => {
@@ -76,14 +76,33 @@ describe("tokens.ts", () => {
     // WHICH dot is lit when. Drop it and every loader in the product silently becomes
     // a static logo, with nothing else in the suite noticing. The duration is matched
     // against markGeometry's constant because that is the pairing the stagger assumes.
-    expect(rule!.body).toMatch(new RegExp(`animation:\\s*mark-comet\\s+${CYCLE_MS}ms`));
+    expect(rule!.body).toMatch(new RegExp(`animation:\\s*mark-wave\\s+${CYCLE_MS}ms`));
     const opacity = Number(/opacity:\s*([\d.]+)/.exec(rule!.body)?.[1]);
-    const frames = /@keyframes mark-comet[^\n]*/.exec(BASE_CSS)![0];
+    const frames = /@keyframes mark-wave[^\n]*/.exec(BASE_CSS)![0];
     const dimmest = Math.min(
       ...[...frames.matchAll(/opacity:\s*([\d.]+)/g)].map((m) => Number(m[1])),
     );
     expect(opacity).toBeGreaterThan(dimmest);
     expect(opacity).toBeGreaterThanOrEqual(0.8);
+  });
+
+  // The test above passes for a comet as readily as for a wave: both rest lit and
+  // both dim. What separates them is how many dots are lit at once, and that lives
+  // entirely in how long the keyframes HOLD full opacity — a single 100% stop is a
+  // travelling dot, a held span is a wave. Nothing else in the suite can tell the
+  // two apart, so without this the wave could collapse back to a comet in silence.
+  it("holds the dots lit across a span, which is what makes it a wave", () => {
+    const frames = /@keyframes mark-wave[^\n]*/.exec(BASE_CSS)?.[0];
+    expect(frames).toBeDefined();
+    // `76%, 100% { … }` hangs two stops off one block, so collect every percentage
+    // in front of each brace rather than assuming there is one apiece.
+    const lit = [...frames!.matchAll(/([\d.%,\s]+)\{\s*opacity:\s*([\d.]+)/g)]
+      .filter((m) => Number(m[2]) >= 0.95)
+      .flatMap((m) => [...m[1].matchAll(/([\d.]+)%/g)].map((p) => Number(p[1])));
+    expect(lit.length).toBeGreaterThanOrEqual(2);
+    // A third of the cycle. Enough that several dots overlap at 12px, which is the
+    // whole reason the wave replaced the comet — one lit dot vanished at that size.
+    expect(Math.max(...lit) - Math.min(...lit)).toBeGreaterThanOrEqual(30);
   });
 
   it("carries the shared reset, not the tokens", () => {
