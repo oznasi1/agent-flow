@@ -1,3 +1,10 @@
+/** The vocabulary gate. A Deck card is a "session"; an "agent" is a worker a
+ * session delegates to; the tool is named, never called "the agent". Every
+ * user-facing string in src/ and package.json is scanned, and every surviving
+ * agent-word must be in LEGITIMATE with a stated reason. Set equality both
+ * ways: an unexpected string fails, and so does a dead allowlist entry — which
+ * is what stops this list rotting into a blanket suppression list.
+ * See docs/superpowers/specs/2026-08-22-deck-session-semantics-design.md. */
 import * as path from "path";
 import { describe, expect, it } from "vitest";
 import { hasAgentWord, scanManifest, scanSources, userFacingStrings, type Hit } from "../_helpers/userFacingStrings";
@@ -123,11 +130,6 @@ const LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "the repository URL (github.com/oznasi1/agent-flow) contains the hyphen-bounded word \"agent\" — same class of hit as the repository-URL entries above" },
 ];
 
-/** Locations not yet converted. Shrinks to empty over Tasks 2-9; the final task
- * deletes this list and its assertion. A location listed here tolerates ANY
- * agent-word text inside it. */
-const PENDING_LOCATIONS: string[] = [];
-
 // Delimited with a NUL byte, which cannot occur in source text or manifest
 // JSON strings, so location+text can never collide with a different pair.
 const key = (h: { location: string; text: string }) => `${h.location}\u0000${h.text}`;
@@ -136,12 +138,11 @@ const allHits = (): Hit[] => [...scanSources(ROOT), ...scanManifest(ROOT)];
 describe("the vocabulary gate", () => {
   it("has no agent-word outside the allowlist", () => {
     const allowed = new Set(LEGITIMATE.map(key));
-    const pending = new Set(PENDING_LOCATIONS);
     const unexpected = allHits()
-      .filter((h) => !allowed.has(key(h)) && !pending.has(h.location))
+      .filter((h) => !allowed.has(key(h)))
       .map((h) => `${h.location}: ${JSON.stringify(h.text)}`);
     // A card is a session. If one of these is genuinely correct, add it to
-    // LEGITIMATE with a reason; do not add it to PENDING_LOCATIONS.
+    // LEGITIMATE with a reason.
     expect(unexpected).toEqual([]);
   });
 
@@ -151,13 +152,6 @@ describe("the vocabulary gate", () => {
     // into a blanket suppression list.
     const live = new Set(allHits().map(key));
     expect(LEGITIMATE.filter((e) => !live.has(key(e))).map((e) => e.location)).toEqual([]);
-  });
-
-  it("has no dead pending entry", () => {
-    // Forces PENDING_LOCATIONS to shrink as strings are converted, instead of
-    // silently covering a file that no longer needs covering.
-    const locations = new Set(allHits().map((h) => h.location));
-    expect(PENDING_LOCATIONS.filter((l) => !locations.has(l))).toEqual([]);
   });
 
   it("states a reason for every allowlist entry", () => {
