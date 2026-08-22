@@ -62,6 +62,61 @@ describe("renderDashboard", () => {
     expect(renderDashboard(hostile)).not.toContain("<script>x</script>");
   });
 
+  describe("chart legibility", () => {
+    const withTraffic = {
+      ...DATA,
+      views: {
+        "2026-08-19": { count: 18, uniques: 4 },
+        "2026-08-20": { count: 0, uniques: 0 },
+        "2026-08-21": { count: 12, uniques: 3 },
+      },
+    };
+
+    it("prints the value above every bar while they are wide enough", () => {
+      const html = renderDashboard(withTraffic);
+      expect(html).toMatch(/<text class="val"[^>]*>18<\/text>/);
+      expect(html).toMatch(/<text class="val"[^>]*>12<\/text>/);
+    });
+
+    it("labels the date axis", () => {
+      const html = renderDashboard(withTraffic);
+      expect(html).toMatch(/<text class="tick"[^>]*>08-19<\/text>/);
+      expect(html).toMatch(/<text class="tick"[^>]*>08-21<\/text>/);
+    });
+
+    it("draws a recorded zero as a visible bar labelled 0, not as a gap", () => {
+      // A zero day and an unrecorded day are different facts. GitHub really
+      // reports count: 0 on quiet days, so the chart must show one.
+      const html = renderDashboard(withTraffic);
+      expect(html).toMatch(/class="bar zero"/);
+      expect(html).toMatch(/<text class="val"[^>]*>0<\/text>/);
+    });
+
+    it("states the total, the peak and the recorded span", () => {
+      const html = renderDashboard(withTraffic);
+      expect(html).toContain("30 total");
+      expect(html).toContain("peak 18/day");
+      expect(html).toContain("3 days");
+      expect(html).toContain("2026-08-19");
+    });
+
+    it("never sums daily uniques — they double-count and the sum is false", () => {
+      // Regression guard. Daily uniques cannot be added: a visitor who comes on
+      // three days counts once per day. On the live data the daily figures sum
+      // to 21 where GitHub reports 9 unique viewers, and to 136 where it
+      // reports 105 unique cloners. Printing the sum states a false number.
+      const html = renderDashboard(withTraffic);
+      expect(html).not.toMatch(/\bunique\b/i);
+    });
+
+    it("keeps chart text in ink tokens rather than the series colour", () => {
+      const html = renderDashboard(withTraffic);
+      expect(html).toMatch(/\.chart \.val \{[^}]*fill:var\(--fg\)/);
+      expect(html).toMatch(/\.chart \.tick \{[^}]*fill:var\(--muted\)/);
+      expect(html).not.toMatch(/\.chart \.val \{[^}]*fill:var\(--bar\)/);
+    });
+  });
+
   it("renders an empty store without throwing", () => {
     const empty = { meta: {}, views: {}, clones: {}, stars: [], marketplace: [] };
     expect(() => renderDashboard(empty)).not.toThrow();
