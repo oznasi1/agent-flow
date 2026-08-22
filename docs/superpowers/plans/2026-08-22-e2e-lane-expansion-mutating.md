@@ -121,9 +121,27 @@ node test-e2e/_helpers/cursorHost.spike.mjs; echo "EXIT=$?"
 
 Read the **real** exit code from that `echo`, not from a wrapper — a process can be SIGTERMed and still look green.
 
-- [ ] **Step 3: Record the outcome in this file**
+- [x] **Step 3: Outcome — measured 2026-08-23**
 
-Replace this step's text with the measured result — the date, the exit code, the page titles CDP reported, and the verdict. On a **no-go**, add "Task 11 is cancelled" and delete the spike file. On a **go**, keep the file until Task 11 lands `launchCursorHost`, then delete it.
+Ran `node test-e2e/_helpers/cursorHost.spike.mjs; echo "EXIT=$?"`. Real exit code: `EXIT=1`.
+
+This time CDP *did* accept a connection (unlike the earlier `_electron.launch` attempt, which
+never completed its handshake at all): `chromium.connectOverCDP` connected within the 120s
+window and the process logged `DevTools listening on ws://127.0.0.1:9222/devtools/browser/…`.
+But only one CDP page was ever exposed, with an empty title:
+
+```
+CDP pages: 1 [ '' ]
+NO-GO: no CDP target exposed .activitybar
+```
+
+`.activitybar` never appeared on that page within the 15s wait — no other target showed up to
+try. So the workbench is not reachable through the one page CDP hands back.
+
+**Verdict: NO-GO.** CDP connects, but no target exposes the workbench. **Task 11 is
+cancelled.** The spike file `test-e2e/_helpers/cursorHost.spike.mjs` has been deleted per the
+no-go instruction. The real-host E2E lane (Task 8's Cursor *provider* journey) stays on the
+VS Code host; driving Cursor itself as an E2E host remains a manual-only path.
 
 - [ ] **Step 4: Commit**
 
