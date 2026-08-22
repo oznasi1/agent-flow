@@ -232,12 +232,12 @@ export function describeCond(cond: Condition, c: CondContext): string {
     }
     case "agent-ended-turn": {
       const a = placeActivity(c);
-      if (a.state === "unknown") return "agent state unknown";
+      if (a.state === "unknown") return "session state unknown";
       return a.state === "needs-you" ? "ended turn" : a.state;
     }
     case "agent-idle-over": {
       const a = placeActivity(c);
-      if (a.state === "unknown") return "agent state unknown";
+      if (a.state === "unknown") return "session state unknown";
       if (a.lastActivityMs === null) return "last activity unknown";
       // Same `isIdleLike` test as `evalCond`'s arm above, and for the same
       // reason: `stalled` and `exited` are readings this rule fires on, so the
@@ -248,7 +248,7 @@ export function describeCond(cond: Condition, c: CondContext): string {
     }
     case "no-agent-left": {
       const n = agentsHere(c).length;
-      return n === 0 ? "no agent" : n === 1 ? "1 agent open" : `${n} agents open`;
+      return n === 0 ? "no sessions" : n === 1 ? "1 session open" : `${n} sessions open`;
     }
     case "tree-clean":
     case "has-uncommitted": {

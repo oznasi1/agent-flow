@@ -1316,7 +1316,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           <>
         <div className="orch-sect">
           <div className="orch-sect-hd">
-            <span className="t">Agents</span>
+            <span className="t">Sessions</span>
             <span className="rule" />
           </div>
           <div
@@ -1331,7 +1331,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             }}
           >
             {flow.nodes.filter(isAgentNode).length === 0 ? (
-              <span className="hint">Drag a card from the board to attach an agent.</span>
+              <span className="hint">Drag a card from the board to attach a session.</span>
             ) : (
               flow.nodes.filter(isAgentNode).map((n) => (
                 <span className="orch-tchip" key={n.id}>

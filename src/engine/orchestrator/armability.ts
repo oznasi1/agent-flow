@@ -22,7 +22,7 @@ export interface UnfirableRule {
   label: string;
 }
 
-/** Conditions that read transcript-derived agent activity. With the Live signal
+/** Conditions that read transcript-derived session activity. With the Live signal
  * off, every activity is `unknown`, which neither of these can ever satisfy.
  * `no-agent-left` is deliberately absent: it counts sessions in the registry,
  * which is populated whether or not any transcript is read. */
@@ -60,9 +60,9 @@ const LABEL: Record<Condition["kind"], string> = {
   "changes-requested": "changes requested",
   "threads-resolved": "0 unresolved threads",
   "pr-conflicting": "branch conflicts",
-  "agent-ended-turn": "agent ended its turn",
-  "agent-idle-over": "agent idle over…",
-  "no-agent-left": "no agent left",
+  "agent-ended-turn": "session ended its turn",
+  "agent-idle-over": "session idle over…",
+  "no-agent-left": "no sessions left",
   "tree-clean": "tree is clean",
   "has-uncommitted": "has uncommitted work",
   "nothing-to-push": "nothing to push",

@@ -40,9 +40,9 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
   "changes-requested": "changes requested",
   "threads-resolved": "0 unresolved threads",
   "pr-conflicting": "branch conflicts",
-  "agent-ended-turn": "agent ended its turn",
-  "agent-idle-over": "agent idle over…",
-  "no-agent-left": "no agent left",
+  "agent-ended-turn": "session ended its turn",
+  "agent-idle-over": "session idle over…",
+  "no-agent-left": "no sessions left",
   "tree-clean": "tree is clean",
   "has-uncommitted": "has uncommitted work",
   "nothing-to-push": "nothing to push",
@@ -153,7 +153,7 @@ export function condOffered(flow: Flow, e: FlowEdge): boolean {
  * that ellipsis in for a rule that actually has one. */
 export function condOptionLabel(cond: Condition): string {
   switch (cond.kind) {
-    case "agent-idle-over": return `agent idle over ${cond.minutes}m`;
+    case "agent-idle-over": return `session idle over ${cond.minutes}m`;
     case "ticket-status-is": return `ticket status is ${cond.status}`;
     case "branch-ci-passed": return `CI passed on ${cond.repo}#${cond.branch}`;
     default: return COND_LABEL[cond.kind];

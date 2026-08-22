@@ -62,6 +62,20 @@ const LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "CSS class name, an identifier in the stylesheet — renaming it is a style change, not a copy change" },
   { location: "src/webview/DeckApp.tsx", text: "agents",
     why: "the value persisted to agentFlow.deckGrouping and read back by every existing install — the UI label beside it says Sessions" },
+  // Task 6: orchestrator condition keys. Serialized into flow files under
+  // ~/.agentflow/flows and shared across windows — renaming any of them
+  // silently breaks every saved flow. Only the labels beside them changed.
+  { location: "src/engine/orchestrator/armability.ts", text: "agent-ended-turn",
+    why: "condition key serialized into ~/.agentflow/flows — renaming it breaks every saved flow" },
+  { location: "src/engine/orchestrator/armability.ts", text: "agent-idle-over", why: "condition key, as above" },
+  { location: "src/engine/orchestrator/conditions.ts", text: "agent-ended-turn", why: "condition key, as above" },
+  { location: "src/engine/orchestrator/conditions.ts", text: "agent-idle-over", why: "condition key, as above" },
+  { location: "src/engine/orchestrator/conditions.ts", text: "no-agent-left", why: "condition key, as above" },
+  { location: "src/engine/orchestrator/evaluate.ts", text: "agent-ended-turn", why: "condition key, as above" },
+  { location: "src/engine/orchestrator/evaluate.ts", text: "agent-idle-over", why: "condition key, as above" },
+  { location: "src/engine/orchestrator/evaluate.ts", text: "agent-state-unknown",
+    why: "a blocked-reason code recorded for diagnostics, not rendered to the user — result.blocked has no reader in deckView.ts or any webview" },
+  { location: "src/webview/orchestratorRule.ts", text: "agent-idle-over", why: "condition key, as above" },
 ];
 
 /** Locations not yet converted. Shrinks to empty over Tasks 2-9; the final task
@@ -99,17 +113,12 @@ const PENDING_LOCATIONS: string[] = [
   "src/deckView.ts",
   "src/engine/claudeAssets.ts",
   "src/engine/diffView.ts",
-  "src/engine/orchestrator/armability.ts",
-  "src/engine/orchestrator/conditions.ts",
-  "src/engine/orchestrator/evaluate.ts",
   "src/engine/runs.ts",
   "src/engine/workspace.ts",
   "src/modesNotice.ts",
   "src/tasksView.ts",
   "src/telemetry/notice.ts",
   "src/webview/MarketplaceApp.tsx",
-  "src/webview/OrchestratorDrawer.tsx",
-  "src/webview/orchestratorRule.ts",
 ];
 
 // Delimited with a NUL byte, which cannot occur in source text or manifest
