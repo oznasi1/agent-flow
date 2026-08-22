@@ -56,6 +56,14 @@ let toastSeq = 0;
 // moment later. Same reasoning, same default, as App.tsx's DEFAULT_SOURCE_LABEL.
 const DEFAULT_SOURCE_LABEL = "Jira";
 
+// The webview renders before the extension's first deck:runs post on some paths,
+// so this must be a real name and not "" — a tooltip that reads "undefined" is
+// worse than one that briefly names the default agent. Same reasoning as
+// DEFAULT_SOURCE_LABEL above. Also the fallback for a deck:runs message that
+// omits `agentLabel` altogether — an in-flight message posted before this
+// build's host reloads has no such field.
+const DEFAULT_AGENT_LABEL = "Claude Code";
+
 // `needs` stays the column id — it is the engine's vocabulary (DeckColumn,
 // deriveBucket) and never reaches a user. "Action required" is what the board
 // says, in the summary tile, the column header and the legend alike: one name for
@@ -339,6 +347,8 @@ export function DeckApp(): JSX.Element {
   const [staleCount, setStaleCount] = React.useState(0);
   // See DEFAULT_SOURCE_LABEL's own comment for why "Jira" rather than "".
   const [sourceLabel, setSourceLabel] = React.useState(DEFAULT_SOURCE_LABEL);
+  // See DEFAULT_AGENT_LABEL's own comment for why "Claude Code" rather than "".
+  const [agentLabel, setAgentLabel] = React.useState(DEFAULT_AGENT_LABEL);
   /** Mirrors `agentFlow.deck.showTokenTotal`. Starts false so the header tile is
    * absent on the very first paint, before any deck:runs has arrived — the
    * setting is off by default, and flashing a total that then vanishes would be
@@ -421,6 +431,9 @@ export function DeckApp(): JSX.Element {
         setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
         setSourceLabel(m.sourceLabel);
+        // The `?? DEFAULT_AGENT_LABEL` is required, not defensive: an in-flight
+        // message posted before this build's host reloads has no such field.
+        setAgentLabel(m.agentLabel ?? DEFAULT_AGENT_LABEL);
         setShowTokenTotal(m.showTokenTotal);
         setSyncedAt(Date.now());
         setHasLoaded(true);

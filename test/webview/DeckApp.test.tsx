@@ -46,8 +46,9 @@ const runsMsg = (
   prReviewStatus = "PR initiated",
   sourceLabel = "Jira",
   showTokenTotal = false,
+  agentLabel = "Claude Code",
 ): OutboundMessage =>
-  ({ type: "deck:runs", runs, ghNote: null, prReviewStatus, showTokenTotal, staleCount: 0, sourceLabel });
+  ({ type: "deck:runs", runs, ghNote: null, prReviewStatus, showTokenTotal, staleCount: 0, sourceLabel, agentLabel });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
@@ -714,7 +715,7 @@ describe("DeckApp PR-facts chrome", () => {
 
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", showTokenTotal: false, staleCount: 0, sourceLabel: "Jira" });
+    host({ type: "deck:runs", runs: [mkStatus()], ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", showTokenTotal: false, staleCount: 0, sourceLabel: "Jira", agentLabel: "Claude Code" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 

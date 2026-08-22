@@ -2878,6 +2878,10 @@ export class DeckPanel {
         showTokenTotal: getConfig().showTokenTotal,
         staleCount: this.staleCount,
         sourceLabel: this.connector.info().label,
+        // Read fresh on every post, like sourceLabel and showTokenTotal above:
+        // agentProvider is a setting the user can flip mid-session, and the
+        // board re-posts often enough that this is the whole of keeping it live.
+        agentLabel: providerLabel(resolvedProvider(getConfig().agentProvider)),
       });
       // The disabled branch posts its own "cleared" state directly — enqueueReviews
       // only ever posts once a search settles or is already fresh, neither of

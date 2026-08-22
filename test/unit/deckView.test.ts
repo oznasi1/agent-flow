@@ -802,6 +802,13 @@ describe("DeckPanel", () => {
     expect(lastRunsPost().sourceLabel).toBe("Acme");
   });
 
+  it("sends the resolved provider label on deck:runs so Deck copy can name the tool", async () => {
+    h.agentProvider = "cursor";
+    show();
+    await settled();
+    expect(lastRunsPost().agentLabel).toBe("Cursor");
+  });
+
   it("keeps review runs off the board — only the ticket run reaches it", async () => {
     h.runs = [
       mkRun(),

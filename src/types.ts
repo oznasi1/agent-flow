@@ -766,7 +766,12 @@ export type OutboundMessage =
        * board reads this rather than hardcoding a tracker. Same field, same intent
        * as `state`'s `sourceLabel` above; the Deck is a separate panel with its
        * own outbound message, so it carries its own copy. */
-      sourceLabel: string }
+      sourceLabel: string;
+      /** The configured tool's user-facing name — "Claude Code", "Cursor",
+       * "Copilot" — so no Deck string has to hardcode which tool is driving.
+       * Same field, same intent as `sourceLabel` above: the Deck is a separate
+       * panel with its own outbound message, so it carries its own copy. */
+      agentLabel: string }
   | { type: "deck:loading"; loading: boolean }
   | {
       type: "deck:reviews";
