@@ -5,6 +5,7 @@ import { expect, test } from "@playwright/test";
 import { describeWithHost } from "./_helpers/sharedHost";
 import { Pool } from "./_helpers/po/pool";
 import { FIXTURE_TASK, FIXTURE_TASK_2 } from "./_helpers/sandbox";
+import { runCommand } from "./_helpers/palette";
 import { shot } from "./_helpers/shot";
 
 /** Read every write the extension has recorded so far. Append-only, so a test
@@ -201,9 +202,7 @@ describeWithHost("sidebar actions", { "agentFlow.exploreMode": "general" }, (ctx
     // "Agent Flow Deck: Focus on Tasks View") above "Refresh Tasks" for that
     // query — which the assertion right below this actually verifies now,
     // where it silently didn't before this fix.
-    await ctx.page().keyboard.press("ControlOrMeta+Shift+P");
-    await ctx.page().keyboard.type("Refresh Tasks");
-    await ctx.page().keyboard.press("Enter");
+    await runCommand(ctx.page(), "Refresh Tasks");
 
     // Refresh re-fetches with `agentFlow.defaultFilter` ("mine", pinned in
     // sandbox.ts — see the report's Ruling A), which lands the panel back on the
