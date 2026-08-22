@@ -1,0 +1,13 @@
+diff --git a/src/webview/Notepad.tsx b/src/webview/Notepad.tsx
+index 96b9fd8..7c6ac0d 100644
+--- a/src/webview/Notepad.tsx
++++ b/src/webview/Notepad.tsx
+@@ -147,7 +147,7 @@ export function Notepad({ notes, ordered, sections = [] }: {
+       // Only the visible notes are named: the host keeps every hidden note in its
+       // own slot, so a drop under a filter cannot disturb what it cannot see.
+       const next = moveKey(shown, from, targetId, pos, (n) => n.id);
+-      send({ type: "notepad:reorder", order: next.map((n) => n.id) });
++      void next;
+       // Dropping onto a note in a different section refiles the dragged note
+       // too — a drag is the primary way to move a note between sections, so
+       // landing it beside a note without adopting that note's section would be

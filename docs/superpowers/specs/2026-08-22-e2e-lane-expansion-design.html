@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Flow — E2E Lane Expansion</title>
+<style>
+  :root{
+    --bg:#f7f8fa; --panel:#ffffff; --ink:#1c2024; --muted:#5b6570; --faint:#8a95a1;
+    --line:#e5e8ec; --line2:#eef1f4; --accent:#3b6ef5; --accent-soft:#eaf0ff;
+    --ok:#1a7f52; --ok-soft:#e6f4ec; --warn:#8a6d1f; --warn-soft:#fbf3dc;
+    --stop:#b0341d; --stop-soft:#fbe9e5; --code-bg:#f3f4f6; --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0f1216; --panel:#161a20; --ink:#e8ebee; --muted:#9aa4af; --faint:#6b7681;
+      --line:#242a31; --line2:#1d2228; --accent:#6d9bff; --accent-soft:#1a2233;
+      --ok:#5cc48d; --ok-soft:#132419; --warn:#d8b45a; --warn-soft:#2a2413;
+      --stop:#e88872; --stop-soft:#2a1713; --code-bg:#1b2027;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0f1216; --panel:#161a20; --ink:#e8ebee; --muted:#9aa4af; --faint:#6b7681;
+    --line:#242a31; --line2:#1d2228; --accent:#6d9bff; --accent-soft:#1a2233;
+    --ok:#5cc48d; --ok-soft:#132419; --warn:#d8b45a; --warn-soft:#2a2413;
+    --stop:#e88872; --stop-soft:#2a1713; --code-bg:#1b2027;
+  }
+  :root[data-theme="light"]{
+    --bg:#f7f8fa; --panel:#ffffff; --ink:#1c2024; --muted:#5b6570; --faint:#8a95a1;
+    --line:#e5e8ec; --line2:#eef1f4; --accent:#3b6ef5; --accent-soft:#eaf0ff;
+    --ok:#1a7f52; --ok-soft:#e6f4ec; --warn:#8a6d1f; --warn-soft:#fbf3dc;
+    --stop:#b0341d; --stop-soft:#fbe9e5; --code-bg:#f3f4f6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;}
+  .wrap{max-width:940px;margin:0 auto;padding:48px 24px 96px}
+  header.hero{margin-bottom:36px}
+  .eyebrow{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+  h1{font-size:30px;line-height:1.2;margin:10px 0 8px;letter-spacing:-.02em}
+  .sub{color:var(--muted);font-size:16px;margin:0}
+  .meta{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px}
+  .chip{font-size:12px;padding:4px 10px;border-radius:999px;background:var(--panel);border:1px solid var(--line);color:var(--muted)}
+  .chip b{color:var(--ink);font-weight:600}
+  h2{font-size:20px;margin:44px 0 12px;letter-spacing:-.01em;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  h3{font-size:16px;margin:24px 0 8px}
+  p{margin:10px 0}
+  section{margin-top:8px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin:16px 0}
+  .num-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .stat .v{font-size:24px;font-weight:700;letter-spacing:-.02em}
+  .stat .k{font-size:12px;color:var(--muted);margin-top:2px}
+  .stat .d{font-size:11px;color:var(--ok);margin-top:4px;font-weight:600}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px;display:block;overflow-x:auto}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line2);vertical-align:top}
+  thead th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);border-bottom:1px solid var(--line)}
+  tbody tr:last-child td{border-bottom:none}
+  code{font-family:var(--mono);font-size:.86em;background:var(--code-bg);padding:1px 5px;border-radius:5px}
+  pre{background:var(--code-bg);border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.55}
+  pre code{background:none;padding:0}
+  .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:6px;letter-spacing:.02em}
+  .b-ok{background:var(--ok-soft);color:var(--ok)}
+  .b-warn{background:var(--warn-soft);color:var(--warn)}
+  .b-stop{background:var(--stop-soft);color:var(--stop)}
+  .b-accent{background:var(--accent-soft);color:var(--accent)}
+  .callout{border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 10px 10px 0;padding:14px 18px;margin:16px 0}
+  .callout.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+  .callout.stop{border-left-color:var(--stop);background:var(--stop-soft)}
+  .callout .t{font-weight:700;font-size:13px;margin-bottom:4px}
+  ul,ol{margin:10px 0;padding-left:22px}
+  li{margin:6px 0}
+  .lead{font-size:16px;color:var(--ink)}
+  .pri{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:6px;font-size:12px;font-weight:700;background:var(--accent-soft);color:var(--accent);margin-right:6px}
+  .foot{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);color:var(--faint);font-size:13px}
+  .yes{color:var(--ok);font-weight:600}
+  .no{color:var(--stop);font-weight:600}
+  .toc{font-size:14px;columns:2;column-gap:32px}
+  .toc a{color:var(--muted);text-decoration:none}
+  .toc a:hover{color:var(--accent)}
+  /* pipeline */
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:18px 0}
+  .step{flex:1 1 140px;min-width:140px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;position:relative}
+  .step .n{font-size:11px;font-weight:700;color:var(--accent)}
+  .step .h{font-weight:600;font-size:13.5px;margin:3px 0}
+  .step .s{font-size:12px;color:var(--muted)}
+  .arrow{align-self:center;color:var(--faint);font-size:18px}
+  @media(max-width:760px){.arrow{display:none}.flow{flex-direction:column}.step{min-width:0}}
+  @media(max-width:640px){.num-grid{grid-template-columns:repeat(2,1fr)}.toc{columns:1}h1{font-size:24px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">Design · Testing</div>
+  <h1>E2E Lane Expansion — Deck lifecycle, sidebar, Marketplace &amp; Notepad, PR review, and the parked hosts</h1>
+  <p class="sub">Take the real-host lane from eleven journeys over the take/seed core to the app's remaining
+  user-facing surfaces — and make a green run mean something by turning one-time sabotage discipline into a
+  repeatable gate.</p>
+  <div class="meta">
+    <span class="chip">Date <b>2026-08-22</b></span>
+    <span class="chip">Status <b>Approved — ready for writing-plans</b></span>
+    <span class="chip">Base <b>main @ 6d9eb77</b></span>
+    <span class="chip">Predecessor <b>2026-08-15-automated-verify-cycle-design.html §5b</b></span>
+  </div>
+</header>
+
+<section>
+<h2 id="goals">1 · What this buys</h2>
+<p class="lead">Three goals, chosen deliberately over a fourth.</p>
+<div class="num-grid">
+  <div class="stat"><div class="v">+9</div><div class="k">journeys over uncovered surfaces</div><div class="d">Deck lifecycle · sidebar · Marketplace · Notepad · PR review</div></div>
+  <div class="stat"><div class="v">3</div><div class="k">parked gaps attempted</div><div class="d">Copilot panel · Cursor provider · Cursor host</div></div>
+  <div class="stat"><div class="v">1</div><div class="k">new standing gate</div><div class="d">repeatable sabotage</div></div>
+  <div class="stat"><div class="v">~21</div><div class="k">Electron boots after</div><div class="d">vs ~25 if purely additive</div></div>
+</div>
+<p><b>Speed was explicitly not a goal</b>, and is therefore treated as a constraint to respect rather than an
+objective to chase: the design spends boots where they buy coverage and saves them where grouping is free, but it
+does not restructure the lane for latency. §8 names the escape hatch if the required check ever gets painful.</p>
+</section>
+
+<section>
+<h2 id="today">2 · The lane today</h2>
+<p>Eleven journeys in <code>test-e2e/</code>, <code>workers: 1</code>, <code>fullyParallel: false</code>, one
+Electron VS Code <b>1.96.2</b> per <code>test()</code>, <code>retries: 1</code> in CI. The lane is a
+<b>required check on every PR</b> (<code>.github/workflows/e2e.yml</code>) and generates the Layer&nbsp;C
+verify-feature report on every run, pass or fail.</p>
+
+<table>
+<thead><tr><th>Journey</th><th>Proves</th></tr></thead>
+<tbody>
+<tr><td><code>smoke.e2e.ts</code></td><td>A real host boots the extension; the pool renders the fixture task</td></tr>
+<tr><td><code>take-task.e2e.ts</code></td><td>Take opens a real window; brief + plan handshake land on disk</td></tr>
+<tr><td><code>seed-terminal.e2e.ts</code></td><td>Prompt typed unsubmitted into a real xterm, asserted from its DOM</td></tr>
+<tr><td><code>seed-panel.e2e.ts</code></td><td>The pinned real Claude Code <b>2.1.238</b> panel opens via <code>claude-vscode.primaryEditor.open</code></td></tr>
+<tr><td><code>worktree-take.e2e.ts</code></td><td>git-registered worktree, per-task branch, brief in the worktree not the checkout</td></tr>
+<tr><td><code>batch-take.e2e.ts</code></td><td>Two tasks → two windows → two worktrees, two briefs, two plan files</td></tr>
+<tr><td><code>deck-github.e2e.ts</code> / <code>deck-gitlab.e2e.ts</code></td><td>The Deck's PR/MR block on both forges, incl. GitLab's <code>head_pipeline</code>-only-on-GET shape</td></tr>
+<tr><td><code>status-writeback.e2e.ts</code></td><td>Transition + <code>claude-code</code> provenance stamp, asserted from <code>writes.jsonl</code></td></tr>
+<tr><td><code>sign-in.e2e.ts</code></td><td>SecretStorage round-trip; sign-out re-gates the pool after a refresh</td></tr>
+<tr><td><code>copilot-fallback.e2e.ts</code></td><td>Copilot seed with no Copilot lands on the documented clipboard-fallback toast</td></tr>
+</tbody>
+</table>
+
+<h3>The five seams that make it deterministic</h3>
+<p>Everything below reuses these; nothing new is invented where one already fits.</p>
+<ul>
+<li><b>The fixture connector</b> — <code>agentFlow.taskSource: "fixture"</code> <em>and</em>
+<code>AGENT_FLOW_FIXTURE_DIR</code>, both required, so a shipped install can never resolve it. Tasks read from
+<code>tasks.json</code>; every write appends to <code>writes.jsonl</code>.</li>
+<li><b>A sandboxed HOME</b> — <code>~/.agentflow</code>, run records and flows all land in a temp root that is
+disposed per test.</li>
+<li><b>PATH shims</b> — the sandbox owns the child's PATH and puts its own <code>bin/</code> first.
+<code>open</code> exits 1 (forcing the in-process <code>vscode.openFolder</code> fallback rather than launching the
+developer's real editor); <code>claude</code> prints a marker and holds stdin.</li>
+<li><b>Forge shims</b> — <code>gh</code>/<code>glab</code> match the <b>first two argv words</b>
+(<code>tr</code>-mangled per character) against canned JSON, log every call to <code>calls.jsonl</code>, and log
+unmatched argv to <code>unknown.jsonl</code> while returning <code>[]</code>.</li>
+<li><b>Host flags that stop escapes</b> — <code>--force-disable-user-env</code> (or macOS re-resolves PATH from the
+login shell and drops the shims), <code>--use-inmemory-secretstorage</code> (or a sandboxed HOME throws a modal
+"Keychain Not Found"), and deleting <code>ELECTRON_RUN_AS_NODE</code> from the child env.</li>
+</ul>
+</section>
+
+<section>
+<h2 id="scope">3 · Scope</h2>
+<table>
+<thead><tr><th>In</th><th>Out, and why</th></tr></thead>
+<tbody>
+<tr><td>Deck lifecycle — retire, forget, track, clear-stale, Address PR</td>
+    <td><b>Orchestrator</b> — the largest uncovered subsystem, but it needs two windows driven at once against a
+    cross-window lock and a 6&nbsp;s evaluation pass. It deserves its own spec, not a corner of this one.</td></tr>
+<tr><td>Sidebar actions — detail, Explore, labels, reorder, sprint, component; child trees at Take time</td>
+    <td><b>Setup wizard &amp; Doctor</b> — not selected. Doctor's fixture probe deliberately returns
+    <code>{}</code> so it renders "skip"; a journey would assert almost nothing without product change.</td></tr>
+<tr><td>Marketplace and Notepad — two webview bundles with zero real-host coverage</td>
+    <td><b>Real Jira connector</b> — rejected. It needs secrets in CI and breaks the lane's offline property,
+    which is the thing that makes it trustworthy.</td></tr>
+<tr><td>PR review — the review rail, single launch and batch</td>
+    <td><b>Parallel workers</b> — rejected. The runner is 2–4 cores, Electron is heavy, and a flaky
+    <em>required</em> check is worse than a slow one.</td></tr>
+<tr><td>Copilot Chat panel, Cursor provider, Cursor-as-host (spike)</td>
+    <td><b><code>@core</code>/<code>@extended</code> lane split</b> — held as an escape hatch (§8), not built.</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2 id="harness">4 · Harness changes</h2>
+<p>Four additions under <code>test-e2e/_helpers/</code>. Existing journeys are not rewritten — they keep calling
+<code>launchHost</code> per test.</p>
+
+<h3>4.1 <code>sharedHost.ts</code> — one boot per file, for read-only groups</h3>
+<p>A <code>describeWithHost(title, settings, fn)</code> wrapper that boots one Electron in <code>beforeAll</code>,
+disposes in <code>afterAll</code>, and forces <code>test.describe.configure({ mode: "serial" })</code> so a failure
+skips the rest of the group instead of running the remainder against a half-mutated host.</p>
+<div class="callout warn">
+<div class="t">The cost, stated plainly</div>
+Tests inside a group share state and are order-dependent. That is acceptable <em>only</em> for surfaces whose
+actions are local (Notepad's <code>globalState</code>, the Marketplace's reads) or additive
+(<code>writes.jsonl</code> is append-only, so each test asserts <em>its own</em> appended line by op and key rather
+than the file's whole contents). Any journey that opens a window, creates a worktree, or writes a run record stays
+one-boot-one-test.
+</div>
+
+<h3>4.2 <code>po/</code> — page objects</h3>
+<p><code>po/pool.ts</code>, <code>po/deck.ts</code>, <code>po/marketplace.ts</code>: intent-named methods
+(<code>selectRepo("rocket")</code>, <code>openCardMenu("E2E-1")</code>, <code>retire(key)</code>) wrapping the frame
+locators. Today nine files select on raw CSS classes — <code>.card</code>, <code>.batch-bar</code>,
+<code>.repo-select-trigger</code> — so one class rename is a nine-file repair. <b>No <code>data-testid</code>
+attributes are added to <code>src/</code>:</b> the page objects centralise the existing selectors, they do not
+change the product to suit the test.</p>
+
+<h3>4.3 Shim extensions</h3>
+<ul>
+<li><b><code>ghReviewRequestsAnswer()</code></b> in <code>forgeShim.ts</code> — the review rail shells
+<code>gh api graphql</code> with a <code>search(type:ISSUE)</code> query
+(<code>src/engine/review/search.ts</code>). The signature <code>api graphql</code> mangles to
+<code>api_graphql</code>, so it slots into the existing first-two-words scheme with no shim rewrite. The builder
+emits <code>data.search.issueCount</code> <em>and</em> <code>nodes</code>, because <code>parse</code> returns null
+for anything that is not that shape.</li>
+<li><b>A <code>cursor-agent</code> shim</b> — modelled exactly on the <code>claude</code> one (print a marker,
+<code>exec cat</code> to hold stdin) so the Cursor provider's terminal seed lands in a "running" TUI and the
+developer's real CLI can never start a session from a test.</li>
+<li><b><code>expectNoUnknownForgeCalls(sb)</code></b> — see §6.2.</li>
+</ul>
+
+<h3>4.4 <code>copilotChat.ts</code></h3>
+<p>Pins <code>GitHub.copilot-chat</code> into the sandbox's <code>extensionsDir</code> using the pattern
+<code>claudeCode.ts</code> already proves: gallery <code>vspackage</code> download, gunzip when the magic bytes say
+so, install through VS Code's own CLI into a staging dir, cache under <code>.vscode-test/</code> keyed on
+version + platform. The CI cache key in <code>e2e.yml</code> gains this file so the pin and the cache stay in
+step.</p>
+<div class="callout">
+<div class="t">Named risk</div>
+Copilot Chat may refuse to register <code>workbench.action.chat.open</code> until signed in. If so, the journey
+inverts into a <em>pin</em>: assert that the command is absent and the clipboard fallback fires — which is what
+<code>copilot-fallback.e2e.ts</code> already proves, so the honest outcome is to delete the new journey and record
+the finding rather than ship a test that asserts nothing. This is a go/no-go inside the task, like §7.
+</div>
+</section>
+
+<section>
+<h2 id="fixture">5 · The fixture connector gains three capabilities</h2>
+<p>This is the design's <b>only <code>src/</code> change</b>, and it is deliberate.</p>
+<p>Today the fixture advertises <code>supportedFilters: ["mine","all"]</code>, <code>sizes: false</code> and
+<code>labels.add</code> — nothing else. The capability record is doing its job: with no <code>sprints</code>,
+<code>components</code> or <code>children</code> member, the sidebar correctly <em>hides</em> those lenses, so
+<code>addToMySprint</code>, <code>removeFromSprint</code>, <code>setComponent</code> and child expansion are not
+merely untested — they are unreachable from any E2E host.</p>
+<p>The fix is to have the fixture claim all three, each recording to <code>writes.jsonl</code> the way
+<code>labels.add</code> and <code>moveTo</code> already do:</p>
+<pre><code>sprints:    { activeId, add(sprintId, key), remove(key) }
+components: { list, update(key, { add, remove }) }
+children:   { of(key) }   // one level down; the caller recurses (engine/taskTree.ts)</code></pre>
+<p>Two fixture tasks gain a parent/child relation and an <code>inOpenSprint</code> variation so the lens has
+something to show.</p>
+<div class="callout">
+<div class="t">Why this does not violate "never break existing users"</div>
+<code>makeFixtureConnector</code> is reachable only when <code>agentFlow.taskSource: "fixture"</code>
+<em>and</em> <code>AGENT_FLOW_FIXTURE_DIR</code> are both set; <code>CONNECTOR_IDS</code> is untouched and a
+dedicated unit test already pins that gate. Nothing in the released surface frozen by
+<code>test/unit/compat.test.ts</code> moves. The capabilities added are ones a real Jira source genuinely has, so
+the fixture becomes <em>more</em> faithful, not a fabrication shaped to suit a test.
+</div>
+</section>
+
+<section>
+<h2 id="journeys">6 · The journeys</h2>
+
+<h3>6.1 Shared-host groups — three boots, ~14 assertions</h3>
+
+<table>
+<thead><tr><th>File</th><th>Tests</th><th>Asserted from</th></tr></thead>
+<tbody>
+<tr>
+  <td><code>sidebar-actions.e2e.ts</code></td>
+  <td>Detail panel renders <code>descriptionText</code> · label add · add-to-sprint and remove · set component ·
+      card reorder persists across a refresh · reset order restores source order ·
+      Explore launches and lands its plan file</td>
+  <td><code>writes.jsonl</code> ops (<code>addLabel</code>, sprint add/remove, component update), the pool DOM, and
+      <code>~/.agentflow/plans/</code> for Explore</td>
+</tr>
+<tr>
+  <td><code>notepad.e2e.ts</code></td>
+  <td>Add · edit · toggle done · clear completed · delete · section add/rename/delete/collapse · move note between
+      sections · <b>real drag-reorder</b> · <code>notepad:run</code> seeds a session</td>
+  <td>The webview DOM after a reload (proving <code>globalState</code> persistence), and the plan file for
+      <code>notepad:run</code></td>
+</tr>
+<tr>
+  <td><code>marketplace.e2e.ts</code></td>
+  <td>Agents and commands listed from a seeded <code>.claude/</code> · read a file's body · copy · reveal</td>
+  <td>The Marketplace webview DOM, and the workbench notification DOM for the copy toast</td>
+</tr>
+</tbody>
+</table>
+
+<div class="callout">
+<div class="t">Why the drag test is the single highest-value item in this group</div>
+An element with <code>draggable</code> cannot be text-selected in Blink, and <code>preventDefault</code> on
+<code>dragstart</code> does not give the gesture back. <b>jsdom cannot see either fact</b> — which is exactly how
+the known Tasks-tab selection bug survives a full green unit suite. Playwright driving a real Electron is the only
+harness in this repo that can observe it. The Notepad journey asserts both the reorder <em>and</em> that a note's
+text remains selectable.
+</div>
+
+<p><b>Clipboard note.</b> <code>mkt:copy</code> calls <code>vscode.env.clipboard.writeText</code>, which reaches
+the <em>real</em> system clipboard — the sandbox does not contain it, and <code>copilot-fallback.e2e.ts</code>
+already has this property today. The journey therefore asserts the <code>"Copied to clipboard."</code> toast in the
+workbench notification DOM rather than reading the clipboard back: reading it is unreliable headlessly and would
+make the assertion depend on state the test cannot own.</p>
+
+<h3>6.2 Per-test journeys — seven boots</h3>
+
+<p><b><code>review-launch.e2e.ts</code></b> — the flow the user named. <code>gh api graphql</code> is shimmed to
+return one review request on <code>rocket#41</code>; the Deck's review rail renders it; "Review with Claude Code"
+launches. Assertions: a real git worktree named <code>review-rocket-41</code> exists and is git-registered (the key
+comes from <code>reviewRunKey</code>, <code>review-&lt;repo-slug&gt;-&lt;number&gt;</code>), the brief is inside it,
+the plan handshake carries the review-rendered template with <code>{repo}</code>, <code>{number}</code> and
+<code>{author}</code> substituted, and the run record exists under <code>~/.agentflow/runs/</code>. A second
+<code>test()</code> in the same file drives <code>deck:reviewBatch</code> across two PRs and asserts two worktrees
+and two run records.</p>
+
+<p><b><code>deck-lifecycle.e2e.ts</code></b> — retire a run and watch the card leave the board; forget an untracked
+run; track one back; clear stale. Assertions come from <code>~/.agentflow/runs/</code> on disk plus the Deck DOM,
+so a UI-only change that never touches the record fails.</p>
+
+<p><b><code>address-pr.e2e.ts</code></b> — Address PR from the sidebar (<code>addressPr</code>) and from the Deck
+(<code>deck:addressPr</code>), both against the shimmed <code>gh</code>. Asserts the seeded prompt names the PR and
+that the session opens against the PR's branch.</p>
+
+<p><b><code>cursor-provider.e2e.ts</code></b> — <code>agentFlow.agentProvider: "cursor"</code> with the terminal
+surface. Asserts the prompt reaches the <code>cursor-agent</code> shim's xterm DOM unsubmitted. This path shipped
+in 0.33.0 <b>without ever running in an editor</b>; the journey is the first execution of it in CI.</p>
+
+<p><b><code>copilot-panel.e2e.ts</code></b> — real pinned Copilot Chat, subject to §4.4's go/no-go.
+<code>copilot-fallback.e2e.ts</code> stays as the no-extension case; the two together pin both sides of the
+branch.</p>
+
+<p><b><code>child-tree-take.e2e.ts</code></b> — <code>agentFlow.childWorktrees</code> is on and the fixture now
+claims <code>children</code>, so taking <code>E2E-1</code> finds <code>E2E-1-a</code> one level down and offers the
+tree. Asserts a git-registered worktree per child. <b>Corrected during planning:</b> children surface at
+<em>Take</em> time behind <code>probeTree</code> (<code>tasksView.ts</code>), not as a sidebar tree expansion — it
+opens windows and creates worktrees, so it cannot share a host and belongs here rather than in §6.1.</p>
+
+<p><b><code>cursor-host.e2e.ts</code></b> — created only if §8's spike says go.</p>
+</section>
+
+<section>
+<h2 id="hardening">7 · Hardening — making green mean something</h2>
+
+<h3>7.1 Sabotage becomes a repeatable gate</h3>
+<p>Every journey shipped so far carried a sabotage check: break the product, watch the journey fail, revert. But it
+was performed <b>once, by hand, during development</b> — which is precisely how a journey that has since gone
+vacuous stays green forever. This design makes it standing infrastructure:</p>
+<div class="flow">
+  <div class="step"><div class="n">1</div><div class="h">Apply</div><div class="s"><code>test-e2e/sabotage/&lt;journey&gt;.patch</code>, one per journey</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="n">2</div><div class="h">Rebuild</div><div class="s">E2E asserts the bundle, so a bare re-run would test stale <code>dist/</code></div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="n">3</div><div class="h">Run that one journey</div><div class="s">and <b>require</b> a failure</div></div>
+  <div class="arrow">→</div>
+  <div class="step"><div class="n">4</div><div class="h">Revert</div><div class="s"><code>git diff --exit-code</code> as proof the tree is clean</div></div>
+</div>
+<p><code>scripts/sabotage.mjs [journey]</code> drives it; a <b>weekly</b> CI job runs the full set. It is
+deliberately <em>not</em> a per-PR gate: it rebuilds and re-runs per patch, which is far too slow for the required
+check, and its failure mode ("a test stopped being able to fail") is a standing-health question, not a
+merge-blocking one.</p>
+<div class="callout stop">
+<div class="t">The scar this addresses</div>
+On a prior plan, six plan-authored tests turned out to be vacuous or impossible while the implementers' code was
+correct — the tests were the defect source. A green suite that cannot fail is worse than no suite, because it is
+believed. Note also that a sabotage check only means anything against <b>committed</b> work: the
+<code>git checkout</code> that restores the mutant also reverts any uncommitted fix.
+</div>
+
+<h3>7.2 Unfaked shell calls fail loudly</h3>
+<p>The forge shim's unknown-argv handling is self-discovering by design: log to <code>unknown.jsonl</code>, return
+<code>[]</code>, exit 0 — so the first run against real code <em>reports</em> what else must be faked instead of
+crashing cryptically. That is right during development and wrong forever after: once a journey is green, a product
+change that starts shelling a new subcommand silently receives an empty answer and the journey keeps passing.
+<code>expectNoUnknownForgeCalls(sb)</code> in each forge journey's teardown asserts <code>unknown.jsonl</code> is
+empty or absent.</p>
+
+<h3>7.3 Flake stops hiding</h3>
+<p>CI keeps <code>retries: 1</code> — dropping it would make a required check hostile — but
+<code>scripts/verify-report.mjs</code> learns to read each result's retry count and mark
+<b>"passed on retry"</b> in the markdown summary and the sticky PR comment. Today a journey that only passes the
+second time is indistinguishable in the report from one that passes cleanly, which is how an intermittently broken
+journey becomes permanent background noise.</p>
+</section>
+
+<section>
+<h2 id="spike">8 · The Cursor-as-host spike — timeboxed, gates its own tasks</h2>
+<p>Measured on 2026-08-22: Playwright's <code>_electron.launch</code> against Cursor with
+<code>--extensionDevelopmentPath</code> and a fresh user-data <b>never completes the launch handshake</b> — the
+driver's inspector pipe does not answer, and it times out at five minutes. CDP was never tried.</p>
+<p><b>The probe:</b> launch Cursor with <code>--remote-debugging-port=&lt;n&gt;</code> as a plain child process,
+attach with <code>chromium.connectOverCDP</code>, locate the workbench target among the CDP pages, and assert
+<code>.activitybar</code>. Timebox: one session.</p>
+<table>
+<thead><tr><th>Outcome</th><th>Consequence</th></tr></thead>
+<tbody>
+<tr><td><span class="yes">Go</span></td><td><code>launchCursorHost()</code> joins <code>host.ts</code> beside
+<code>launchHost</code>, and <b>one</b> journey (smoke + take) runs on Cursor. Not the whole suite — the point is to
+prove the host boots and the extension activates, not to double the lane.</td></tr>
+<tr><td><span class="no">No-go</span></td><td>A documented negative result in the plan's ledger, naming what was
+tried and how it failed. The Cursor lane stays manual. <b>No other task depends on this either way</b> — the
+Cursor <em>provider</em> journey (§6.2) runs on the VS Code host and is unaffected.</td></tr>
+</tbody>
+</table>
+<p>The spike runs <b>first</b>, before any plan task is written against it, so a no-go costs one session rather
+than a restructured plan.</p>
+</section>
+
+<section>
+<h2 id="runtime">9 · Runtime and CI</h2>
+<p>Boot count is the honest cost metric: each boot downloads nothing (the VS Code build is cached on the key that
+hashes <code>host.ts</code> and <code>claudeCode.ts</code>) but each pays full Electron start-up.</p>
+<table>
+<thead><tr><th></th><th>Boots</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>Today</td><td>11</td><td>Measured at ~1–2 min in CI</td></tr>
+<tr><td>Purely additive</td><td>~25</td><td>The approach this design rejected</td></tr>
+<tr><td><b>This design</b></td><td><b>~21</b></td><td>11 existing + 3 grouped + 7 per-test (+1 if the spike says go)</td></tr>
+</tbody>
+</table>
+<p><b>CI changes:</b> the cache key in <code>e2e.yml</code> gains <code>copilotChat.ts</code>; a new weekly
+<code>sabotage.yml</code> job runs §7.1. The required check keeps its current shape — same job, same sticky
+comment, same artifacts.</p>
+<div class="callout">
+<div class="t">Escape hatch, not built now</div>
+If the required check crosses roughly eight minutes, tag journeys <code>@core</code> / <code>@extended</code> and
+run only <code>@core</code> on PRs with the full set on merge-to-main. It is named here so the option is designed
+rather than improvised, and deliberately deferred because it lets a break reach <code>main</code>.
+</div>
+</section>
+
+<section>
+<h2 id="dod">10 · Definition of done</h2>
+<ul>
+<li><code>npm run typecheck</code> clean · <code>npm test</code> passes <b>unmodified</b> · <code>npm run build</code>
+succeeds · <code>npm run test:cov</code> thresholds hold · <code>npm run test:ct</code> passes ·
+<code>npm run test:e2e</code> passes (11 existing + new).</li>
+<li>The one <code>src/</code> change is the fixture connector's three capabilities (§5), covered by unit tests
+that also re-pin the double gate.</li>
+<li>Every new journey ships with its sabotage patch in <code>test-e2e/sabotage/</code>, and
+<code>scripts/sabotage.mjs</code> passes over the full set at least once.</li>
+<li>No new dependencies. Pins move only deliberately: VS Code 1.96.2, Claude Code 2.1.238, plus the new Copilot
+Chat pin.</li>
+<li>Lockfile hygiene: <code>grep -c codeartifact package-lock.json</code> → 0.</li>
+<li>Both required checks green on the PR; merged via the REST path.</li>
+<li>A <code>CHANGELOG.md</code> entry only if user-facing behaviour changes — expected to be <b>none</b>, since the
+fixture connector is unreachable in shipped installs.</li>
+</ul>
+</section>
+
+<section>
+<h2 id="risks">11 · Risks</h2>
+<table>
+<thead><tr><th>Risk</th><th>Mitigation</th></tr></thead>
+<tbody>
+<tr><td>A shared-host group cascades: one failure hides the rest</td><td><code>mode: "serial"</code> makes the skip
+explicit rather than reporting phantom failures; groups are capped at the read-only surfaces where a cascade is
+cheap to read</td></tr>
+<tr><td>Copilot Chat demands sign-in and never exposes its command</td><td>Go/no-go inside the task (§4.4); delete
+the journey and record the finding rather than ship a vacuous test</td></tr>
+<tr><td>The Cursor CDP spike fails like the inspector pipe did</td><td>Timeboxed, runs first, nothing depends
+on it (§8)</td></tr>
+<tr><td>Doubling the journey count doubles the flake surface on a required check</td><td>§7.3 makes retries
+visible, so flake is measured rather than absorbed; <code>workers: 1</code> stays</td></tr>
+<tr><td>The review rail's GraphQL shape drifts upstream in <code>gh</code></td><td>§7.2 turns an unfaked call into
+a failure instead of an empty answer</td></tr>
+<tr><td>Page objects drift from the real classes</td><td>They are thin and centralised; a wrong selector fails
+every test in the surface at once, which is the loud failure mode</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2 id="findings">12 · Findings from implementation</h2>
+<p>Two real product defects surfaced while building the Notepad journey (Task 5). Both are recorded here — not
+just in the throwaway execution ledger under <code>.superpowers/sdd/...</code>, which is deleted once this work
+lands — so a maintainer diffing the spec against the code later can still find them.</p>
+
+<div class="callout warn">
+<div class="t">Finding A — post-drag text selection is broken (pinned by a test)</div>
+<p>After a Notepad row is dragged to a new position, its body text can no longer be selected with the mouse.
+Deterministic — reproduced three times in a row, not a flake. In Blink, an element carrying the
+<code>draggable</code> attribute cannot be text-selected by mouse, and calling <code>preventDefault()</code> on
+<code>dragstart</code> does not hand the gesture back to selection — Blink forks "drag" from "select" at
+<code>mousedown</code>, before <code>dragstart</code> even fires, and does not revisit that fork afterward.</p>
+<p><code>src/webview/Notepad.tsx:504-511</code> shows the author already anticipated exactly this trap and built an
+<code>armed</code> / <code>draggable={armed}</code> state machine meant to un-arm a row once its drag completes —
+but the reset on <code>onDragEnd</code> at <code>Notepad.tsx:626</code> (<code>() =&gt; { setArmed(false);
+dnd.onEnd(); }</code>) does not fully hand the gesture back to selection for the row that was just dragged.</p>
+<p>Pinned by <code>test.fail()</code> in <code>test-e2e/notepad.e2e.ts</code> ("dragging a note leaves its body
+unselectable afterwards (pinned defect)"). <b>When this is fixed:</b> delete the <code>test.fail()</code> line —
+not the test itself — which is what turns the test from "expected to fail" back into an ordinary passing
+regression check.</p>
+</div>
+
+<div class="callout stop">
+<div class="t">Finding B — Notepad <code>globalState</code> data-loss race (previously unknown, NOT fixed)</div>
+<p>Two Notepad writes issued roughly 100–300ms apart can race: the second write's own read of
+<code>agentFlow.notepad</code> / <code>agentFlow.notepadSections</code> comes back as if the first write had never
+happened, and the second write clobbers it. Concretely observed as <code>renameSection</code> DELETING the section
+it was asked to rename — <code>notepad:addSection</code> persists and reads back correctly, but the very next
+message, <code>notepad:renameSection</code>, sent moments later, reads <code>this.sections()</code> back as
+<code>[]</code> with nothing else logged in between, so its own <code>.map()</code> over nothing writes
+<code>[]</code> right back and deletes the section.</p>
+<p>Isolated by bisection with temporary instrumentation (a <code>this.log()</code> added to <code>tasksView.ts</code>,
+since reverted). A ~500ms pause between writes reproduces ordinary human pacing and eliminated the race 100% of the
+time in testing.</p>
+<p>The E2E journey (<code>test-e2e/notepad.e2e.ts</code>) paces its own writes around this with a documented
+<code>settle()</code> helper — a workaround for the journey, not a fix for the product. <b>This defect is not
+fixed.</b> It is user-facing data loss in a persistence path: any two Notepad actions issued close enough together
+(add-then-add, add-then-rename, and likely others on the same write path) can silently discard state the user just
+entered.</p>
+</div>
+</section>
+
+<div class="foot">
+Agent Flow Deck · design spec · 2026-08-22 · successor to
+<code>2026-08-15-automated-verify-cycle-design.html</code> §5b · next step: <code>superpowers:writing-plans</code>
+</div>
+
+</div>
+</body>
+</html>
