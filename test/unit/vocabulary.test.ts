@@ -111,7 +111,6 @@ const PENDING_LOCATIONS: string[] = [
   "src/webview/MarketplaceApp.tsx",
   "src/webview/Notepad.tsx",
   "src/webview/OrchestratorDrawer.tsx",
-  "src/webview/ReviewStrip.tsx",
   "src/webview/orchestratorRule.ts",
 ];
 

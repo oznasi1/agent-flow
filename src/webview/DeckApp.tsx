@@ -801,6 +801,7 @@ export function DeckApp(): JSX.Element {
           setSelectedReviews([]);
           selectAnchor.current = null;
         }}
+        agentLabel={agentLabel}
       />
 
       {!hasLoaded ? (
