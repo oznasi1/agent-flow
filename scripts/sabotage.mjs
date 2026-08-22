@@ -56,7 +56,22 @@ function checkTarget(journey, expectSubstring) {
   if (!existsSync(REPORT)) {
     return { ok: false, message: `${journey}: no ${REPORT} was written — cannot verify which test failed` };
   }
-  const report = JSON.parse(readFileSync(REPORT, "utf8"));
+  let report;
+  try {
+    report = JSON.parse(readFileSync(REPORT, "utf8"));
+  } catch (err) {
+    // A malformed or truncated report (e.g. the run crashed mid-write) must not
+    // throw out of this function — an uncaught throw here would escape the
+    // per-patch loop below entirely (the `git apply -R` revert in that loop's
+    // `finally` would still run, but the loop's own iteration, and the final
+    // `npm run build` after it that restores dist/ to match the clean tree,
+    // never would) — leaving a sabotaged dist/ behind a clean-looking git
+    // tree. Fail just this one journey instead.
+    return {
+      ok: false,
+      message: `${journey}: ${REPORT} could not be parsed as JSON (${err.message}) — cannot verify which test failed`,
+    };
+  }
   const specs = (report.suites ?? []).flatMap((top) => flattenSpecs(top));
   const matches = specs.filter((s) => s.title.includes(expectSubstring));
   if (matches.length === 0) {

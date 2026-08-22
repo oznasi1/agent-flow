@@ -151,6 +151,16 @@ describeWithHost("sidebar actions", { "agentFlow.exploreMode": "general" }, (ctx
     await pool.frame.getByRole("group", { name: "Task filter" }).getByRole("button", { name: "My sprint" }).click();
     await expect(pool.cards()).toHaveCount(2, { timeout: 15_000 });
     const first = await pool.cards().nth(0).innerText();
+    // The card's ticket key, captured separately from `first` above: `.card-top`
+    // is `display:flex` (styles.ts), so Chromium blockifies its flex children for
+    // `innerText` purposes and the FIRST LINE of every card's `innerText` is
+    // always the drag-grip glyph "⠿" (App.tsx's `.grip` span) — identical on
+    // every card regardless of which one is actually first. Asserting against
+    // `first.split("\n")[0]` after reset would therefore pass no matter which
+    // card ended up on top. The `.key` locator (the ticket's own anchor text,
+    // e.g. "E2E-1") genuinely distinguishes the cards, so that's what "restores
+    // source order" has to check.
+    const firstKey = await pool.cards().nth(0).locator(".key").innerText();
 
     // Not `dragTo` — a sibling task in this plan (Task 5) documents that it does
     // not reliably fire dragstart/dragover/drop in Chromium. A manual mouse
@@ -182,8 +192,17 @@ describeWithHost("sidebar actions", { "agentFlow.exploreMode": "general" }, (ctx
     // not `Control` — the palette is Cmd+Shift+P on macOS (the dev platform) and
     // Ctrl+Shift+P on Linux (CI); the literal `Control` modifier opens nothing on
     // macOS.
+    //
+    // Palette QUERY: the bare command title ("Refresh Tasks"), not "Agent Flow:
+    // Refresh Tasks" — the same trap documented on `marketplace.e2e.ts`'s
+    // `openMarketplace()`. Confirmed live: the category-qualified string does
+    // not land this command first, because no `"category"` is set on it in
+    // package.json, so VS Code's palette fuzzy-ranks an unrelated command (e.g.
+    // "Agent Flow Deck: Focus on Tasks View") above "Refresh Tasks" for that
+    // query — which the assertion right below this actually verifies now,
+    // where it silently didn't before this fix.
     await ctx.page().keyboard.press("ControlOrMeta+Shift+P");
-    await ctx.page().keyboard.type("Agent Flow: Refresh Tasks");
+    await ctx.page().keyboard.type("Refresh Tasks");
     await ctx.page().keyboard.press("Enter");
 
     // Refresh re-fetches with `agentFlow.defaultFilter` ("mine", pinned in
@@ -197,12 +216,23 @@ describeWithHost("sidebar actions", { "agentFlow.exploreMode": "general" }, (ctx
     // the refresh, but it costs nothing to go through the one idempotent entry
     // point uniformly.
     const reopened = await Pool.open(ctx.page(), 2);
+    // The palette command itself leaves exactly one observable mark before the
+    // next click hides it: the unconditional `setFilter(m.filter)` above snaps
+    // the "Mine" button's `aria-pressed` to true, even though "My sprint" was
+    // the active tab when the command was invoked. Asserting that here — before
+    // clicking "My sprint" ourselves — is what proves "Refresh Tasks" actually
+    // ran, rather than the persistence check below merely surviving because the
+    // click that follows performs its own refetch regardless of whether the
+    // palette command did anything at all.
+    await expect(
+      reopened.frame.getByRole("group", { name: "Task filter" }).getByRole("button", { name: "Mine" }),
+    ).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 });
     await reopened.frame.getByRole("group", { name: "Task filter" }).getByRole("button", { name: "My sprint" }).click();
     await expect(reopened.cards()).toHaveCount(2, { timeout: 15_000 });
     await expect.poll(async () => (await reopened.cards().nth(0).innerText()) !== first).toBe(true);
 
     await reopened.frame.getByRole("button", { name: /reset order/i }).click();
-    await expect.poll(() => reopened.cards().nth(0).innerText()).toContain(first.split("\n")[0]);
+    await expect.poll(() => reopened.cards().nth(0).locator(".key").innerText()).toBe(firstKey);
   });
 
   test("removing from sprint records removeFromSprint", async () => {

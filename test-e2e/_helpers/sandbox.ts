@@ -18,14 +18,15 @@ export interface Sandbox {
  *  purpose: `inferServices` matches repo names against the task text, so the
  *  repo-confirm QuickPick opens with this repo pre-checked and a single Enter
  *  confirms it. */
-// `inOpenSprint: true` — so the fixture's "mysprint" lens (now supported by
-// the fixture connector; see src/tasks/fixture/connector.ts) has two cards to
-// drive the reorder/reset-order/remove-from-sprint journeys against. This does
-// NOT hide either task from the "mine" lens the other journeys use: the
-// fixture connector's `list()` ignores the lens argument entirely and returns
-// everything regardless, and `showAddToSprint` (App.tsx:782) keys off
-// `unassigned`, not `inOpenSprint`, so "Add to my sprint" still renders for
-// these still-unassigned tasks.
+// `inOpenSprint: true` is actually inert — recorded here so nobody "fixes" it
+// away expecting a behavior change. The fixture connector's `list()` ignores
+// the lens argument entirely and returns both tasks regardless of which lens
+// is selected; `showAddToSprint` (App.tsx:782) keys off `unassigned`, not
+// `inOpenSprint`; and `onRemoveFromSprint` (App.tsx:684) keys off the ACTIVE
+// LENS, not this field. So the "My sprint" lens shows both fixture cards no
+// matter what this flag is set to, and the reorder/reset-order/remove-from-
+// sprint journeys below never actually prove sprint membership — only that
+// card ordering persists within a lens, and that the remove affordance fires.
 export const FIXTURE_TASK = {
   key: "E2E-1", summary: "Fix the rocket telemetry panel", status: "To Do",
   statusCategory: "new", priority: "P2", assignee: "Unassigned",

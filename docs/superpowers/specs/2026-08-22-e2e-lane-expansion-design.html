@@ -480,6 +480,49 @@ every test in the surface at once, which is the loud failure mode</td></tr>
 </table>
 </section>
 
+<section>
+<h2 id="findings">12 · Findings from implementation</h2>
+<p>Two real product defects surfaced while building the Notepad journey (Task 5). Both are recorded here — not
+just in the throwaway execution ledger under <code>.superpowers/sdd/...</code>, which is deleted once this work
+lands — so a maintainer diffing the spec against the code later can still find them.</p>
+
+<div class="callout warn">
+<div class="t">Finding A — post-drag text selection is broken (pinned by a test)</div>
+<p>After a Notepad row is dragged to a new position, its body text can no longer be selected with the mouse.
+Deterministic — reproduced three times in a row, not a flake. In Blink, an element carrying the
+<code>draggable</code> attribute cannot be text-selected by mouse, and calling <code>preventDefault()</code> on
+<code>dragstart</code> does not hand the gesture back to selection — Blink forks "drag" from "select" at
+<code>mousedown</code>, before <code>dragstart</code> even fires, and does not revisit that fork afterward.</p>
+<p><code>src/webview/Notepad.tsx:504-511</code> shows the author already anticipated exactly this trap and built an
+<code>armed</code> / <code>draggable={armed}</code> state machine meant to un-arm a row once its drag completes —
+but the reset on <code>onDragEnd</code> at <code>Notepad.tsx:626</code> (<code>() =&gt; { setArmed(false);
+dnd.onEnd(); }</code>) does not fully hand the gesture back to selection for the row that was just dragged.</p>
+<p>Pinned by <code>test.fail()</code> in <code>test-e2e/notepad.e2e.ts</code> ("dragging a note leaves its body
+unselectable afterwards (pinned defect)"). <b>When this is fixed:</b> delete the <code>test.fail()</code> line —
+not the test itself — which is what turns the test from "expected to fail" back into an ordinary passing
+regression check.</p>
+</div>
+
+<div class="callout stop">
+<div class="t">Finding B — Notepad <code>globalState</code> data-loss race (previously unknown, NOT fixed)</div>
+<p>Two Notepad writes issued roughly 100–300ms apart can race: the second write's own read of
+<code>agentFlow.notepad</code> / <code>agentFlow.notepadSections</code> comes back as if the first write had never
+happened, and the second write clobbers it. Concretely observed as <code>renameSection</code> DELETING the section
+it was asked to rename — <code>notepad:addSection</code> persists and reads back correctly, but the very next
+message, <code>notepad:renameSection</code>, sent moments later, reads <code>this.sections()</code> back as
+<code>[]</code> with nothing else logged in between, so its own <code>.map()</code> over nothing writes
+<code>[]</code> right back and deletes the section.</p>
+<p>Isolated by bisection with temporary instrumentation (a <code>this.log()</code> added to <code>tasksView.ts</code>,
+since reverted). A ~500ms pause between writes reproduces ordinary human pacing and eliminated the race 100% of the
+time in testing.</p>
+<p>The E2E journey (<code>test-e2e/notepad.e2e.ts</code>) paces its own writes around this with a documented
+<code>settle()</code> helper — a workaround for the journey, not a fix for the product. <b>This defect is not
+fixed.</b> It is user-facing data loss in a persistence path: any two Notepad actions issued close enough together
+(add-then-add, add-then-rename, and likely others on the same write path) can silently discard state the user just
+entered.</p>
+</div>
+</section>
+
 <div class="foot">
 Agent Flow Deck · design spec · 2026-08-22 · successor to
 <code>2026-08-15-automated-verify-cycle-design.html</code> §5b · next step: <code>superpowers:writing-plans</code>
