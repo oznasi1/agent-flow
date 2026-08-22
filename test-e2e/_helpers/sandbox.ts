@@ -26,6 +26,14 @@ export const FIXTURE_TASK = {
   estimateSeconds: null, descriptionText: "The rocket panel shows stale numbers.",
 };
 
+/** A second task for the batch journey — same repo hint so inference checks it. */
+export const FIXTURE_TASK_2 = {
+  ...FIXTURE_TASK,
+  key: "E2E-2", summary: "Refit the rocket landing gear",
+  url: "https://fixture.invalid/browse/E2E-2",
+  descriptionText: "Landing gear misses the pad.",
+};
+
 export function makeSandbox(settingsOverride: Record<string, unknown> = {}): Sandbox {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "af-e2e-"));
   const home = path.join(root, "home");
@@ -48,7 +56,7 @@ export function makeSandbox(settingsOverride: Record<string, unknown> = {}): San
     { cwd: repoPath },
   );
 
-  fs.writeFileSync(path.join(fixtureDir, "tasks.json"), JSON.stringify([FIXTURE_TASK], null, 2));
+  fs.writeFileSync(path.join(fixtureDir, "tasks.json"), JSON.stringify([FIXTURE_TASK, FIXTURE_TASK_2], null, 2));
 
   // Pre-answer every mid-take prompt except the repo-confirm QuickPick:
   //  - taskMode "implementation" is a built-in prompt-mode id → no mode pick
