@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-08-23
+
 ### Changed
 
 - A card's detail drawer now slides in and out along the Deck's right edge, the
