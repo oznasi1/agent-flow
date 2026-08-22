@@ -13,7 +13,7 @@ surface, and the reader has to infer which one is meant from context:
 | --- | --- |
 | one run of a coding tool — one Deck card | Deck cards and counts, the `Agents / Workspaces` grouping toggle, `agentFlow.openAgents`, the orchestrator's rule labels |
 | the tool being driven | `agentFlow.agentProvider`, `agentFlow.agentSurface`, "Review with agent", "Start this note as an agent run" |
-| a Claude Code subagent | the Marketplace's Agents tab, `.claude/agents/`, `AssetType: "agent"` |
+| a worker a session delegates to | the Marketplace's Agents tab, `.claude/agents/`, `AssetType: "agent"` |
 
 The first and third collide hardest: a Deck card is *not* an agent, because one
 card routinely dispatches many subagents. Calling the card a **session** makes
@@ -47,11 +47,50 @@ change below is derived from it.
 | word | means | example |
 | --- | --- | --- |
 | **session** | one run of a coding tool — one Deck card, one row in `run.agents[]` | "3 sessions", `Sessions / Workspaces`, "session ended its turn" |
-| **agent** | a Claude Code subagent | the Marketplace's Agents tab, `.claude/agents/`, `AssetType: "agent"` |
+| **agent** | a worker a session delegates to, and reports back to it | the Marketplace's Agents tab, `.claude/agents/`, `AssetType: "agent"` |
 | *the tool's name* | Claude Code / Cursor / Copilot — never "the agent" | "Review with Claude Code", "Which tool starts your sessions" |
 
 A useful test for any new string: if it could be preceded by "one of the many
-things this card spawned", the word is *agent*. Otherwise it is *session*.
+things this session spawned", the word is *agent*. Otherwise it is *session*.
+
+**"Agent" is defined without naming a vendor, deliberately.** Delegating to
+several workers is not a Claude Code idea, and the vocabulary must not be
+hostage to which tools currently support it. Today the only place Agent Flow
+*enumerates* agents is the Marketplace, whose scan reads `~/.claude` or
+`$CLAUDE_CONFIG_DIR` and nothing else (`claudeAssetsFs.ts:10`) — that is a
+property of one feature's implementation, not of the word. If a Cursor or
+Copilot asset browser is ever added, its Agents tab needs no rename.
+
+### When may a string still say "Claude Code"?
+
+Only when the tool name is *load-bearing* — when the sentence is describing a
+real limitation and would become false without it. Where "Claude Code" is
+merely standing in for "whichever tool you configured", it is a bug, and this
+change fixes it rather than carrying it forward.
+
+| string | verdict |
+| --- | --- |
+| `agentFlow.openAgents` — "every Claude Code session open on this machine" | **Keep.** `types.ts:288` states it outright: a live Claude Code session is the only thing the Deck can detect, because `~/.claude/sessions` is the only session registry it can read. Dropping the name would over-promise. |
+| the Marketplace's Agents tab | **Keep the tab.** Claude-scoped because the asset scan is, not because Claude owns the word. |
+| the grouping toggle's tooltip — "One card per Claude Code agent" | **Wrong today, independent of this rename.** Agent Flow launches Cursor and Copilot sessions (`engine/workspace.ts`, `engine/orchestrator/launch.ts`), so a card is frequently not Claude Code and a Cursor user is told something false. Becomes `One card per ${agentLabel} session`. |
+
+Every "Claude Code" in a user-facing string was checked against this test. The
+full result — 31 mentions in `src/`, 4 in the manifest:
+
+- **Load-bearing, unchanged:** everything about Remote Control needing Claude
+  Code (`tasksView.ts:105,1725,1801`, `workspace.ts:1115,1117`), every
+  `doctor.ts` install/version probe, the `providerLabel` constants
+  (`config.ts:210,220`), `deckParts.tsx:135`'s tooltip, `agentFlow.openAgents`,
+  `agentFlow.remoteControl`, and `agentProvider`'s note that the other
+  providers fall back to Claude Code.
+- **Stand-ins, fixed:** exactly two, and they are the same sentence twice —
+  `DeckApp.tsx:686` takes `agentLabel`; its manifest twin
+  (`deckGrouping.enumDescriptions[0]`) cannot interpolate, so it drops the
+  vendor instead: "One card per session, with the repo, ticket and PR it
+  belongs to on the card".
+
+`deckView.ts:769` names Claude Code in a code comment about flow spend, not in
+a string. Out of scope.
 
 ## Scope
 
@@ -82,12 +121,18 @@ shape changes.
 ### 2. Deck webview
 
 - **Grouping toggle** (`DeckApp.tsx:680-692`) — `Agents` → `Sessions`;
-  `Workspaces` unchanged. Tooltips become "One card per Claude Code session,
-  with the repo, ticket and PR it belongs to" and "One card per launched task,
-  with its sessions nested underneath". **The stored value stays `"agents"`.**
+  `Workspaces` unchanged. Tooltips become ``One card per ${agentLabel} session,
+  with the repo, ticket and PR it belongs to`` and "One card per launched task,
+  with its sessions nested underneath". The first drops a hardcoded "Claude
+  Code" that is false for every Cursor and Copilot user — see *When may a
+  string still say "Claude Code"?* above. **The stored value stays `"agents"`.**
 - **Counts** — `deckSignal.ts:96` `${r.agents.length} agents` → `sessions`;
-  the singular at `:94` likewise. `deckStyles.ts:301`'s comment example
-  ("3 agents") follows.
+  the singular at `:94` likewise. `deckParts.tsx:135` — the nested row count
+  under a workspace card, `"1 agent"` / `` `${agents.length} agents` `` →
+  session/sessions. Its tooltip at `:135`, "Claude Code sessions open in this
+  directory", **keeps the vendor name**: that list is read from
+  `~/.claude/sessions`, so the name is load-bearing.
+  `deckStyles.ts:301`'s comment example ("3 agents") follows.
 - **Review actions** (`ReviewStrip.tsx:167,169,368`) — "Review with agent" →
   `Review with ${agentLabel}`; the batch action's accessible name →
   `` Review the ${n} selected PR${…} with ${agentLabel} ``. The two accessible
@@ -132,8 +177,10 @@ flow files under `~/.agentflow/flows` and shared across windows.
   in a `${agentLabel}` session".
 - `Notepad.tsx:649` — "Start this note as an agent run" → "Start this note as a
   session".
-- `MarketplaceApp.tsx:18` — **unchanged.** Its Agents tab lists subagents,
-  which is the one correct use of the word.
+- `MarketplaceApp.tsx:18` — **unchanged.** Its Agents tab lists agents in the
+  vocabulary's own sense: workers a session delegates to. The tab is
+  Claude-scoped because the asset scan is, not because the label needs
+  qualifying.
 
 ### 5. Settings and enum descriptions (~35 strings in `package.json`)
 
@@ -145,9 +192,9 @@ allowlist.
 | --- | --- |
 | `agentProvider` | "Which agent Agent Flow starts a session with" → "Which tool…"; the `ask` enum's "pick from the agents this editor can run" → "…the tools…" |
 | `agentSurface` | "the agent's chat panel" → "the tool's chat panel" |
-| `openAgents` | "…as agents on the card that owns their directory" → "…as sessions…" |
+| `openAgents` | "…as agents on the card that owns their directory" → "…as sessions…". Its opening "every **Claude Code** session open on this machine" **stays** — load-bearing, per the test above |
 | `seedAgent` | "pre-fill the agent's panel (or terminal)" → "pre-fill the session's panel…" |
-| `deckGrouping` | both `enumDescriptions` per §2; the description's "**Agents / Workspaces** control" → "**Sessions / Workspaces**" |
+| `deckGrouping` | the description's "**Agents / Workspaces** control" → "**Sessions / Workspaces**"; `enumDescriptions[0]` → "One card per session, with the repo, ticket and PR it belongs to on the card" (vendor dropped, not interpolated — manifest prose has no `agentLabel`); `[1]` → "…with every session open in its directories nested underneath" |
 | `retireFinishedAfterHours`, `retireClosedAfterHours`, `retireInPlaceAfterHours` | "after its last agent closes" / "no agent of its own open" / "once you close its agent" → session |
 | `orchestrator` | "wire the agents already on your board" → "…sessions…" |
 | `reviewRequestModes`, `reviewRequestMode`, `reviewOpenIn`, `reviewRequestPrompt` | "**Review with agent**" → "**Review with your agent tool**" (settings prose cannot interpolate `agentLabel`) |
