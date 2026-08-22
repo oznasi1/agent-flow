@@ -34,25 +34,34 @@ export const DECK_CSS = `
      gap's shorthand form sets row-gap and column-gap in one value, so it is
      also the safe way to give them different sizes — a separate row-gap
      declaration ahead of a shorthand gap would be silently overwritten. */
-  .hd { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
-    padding: 13px 20px; border-bottom: 1px solid var(--hair); }
+  .hd { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+    padding: 14px 20px 13px; border-bottom: 1px solid var(--hair); }
   /* The gloss sits under the label, not beside it: stacked, the two lines read as one
      title block instead of a sentence that happens to change weight mid-way. Free
      vertically — the stat tiles next to it already set the header's height. */
-  .hd .title { font-size: 15px; font-weight: 600; letter-spacing: -.012em; white-space: nowrap;
+  /* 16px, not 15: the panel's lead and the stat figures beside it are what give the
+     scale its range, so that --t-title can read as a title at 13.5px rather than as
+     slightly-larger body. Tracking tightens as size grows. */
+  .hd .title { font-size: 16px; font-weight: 620; letter-spacing: -.02em; white-space: nowrap;
     line-height: 1.3; }
-  .hd .title .sub { display: block; color: var(--dim); font-weight: 400; font-size: 12px;
-    letter-spacing: 0; line-height: 1.3; }
+  .hd .title .sub { display: block; color: color-mix(in srgb, var(--vscode-foreground) 45%, transparent);
+    font-weight: 400; font-size: 11.5px; letter-spacing: 0; line-height: 1.3; }
   /* Wraps under the title rather than clipping: the tiles are an unshrinkable
      block on their own, and a header that only folded around them (via .hd's
      own flex-wrap) would still lose its right edge below ~400px. */
-  .stats { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
+  .stats { display: flex; flex-wrap: wrap; align-items: stretch; gap: 2px; }
   /* Sentence case, matching the column headers: one tile per board column, named
-     exactly as the column names itself. The two used to differ in case. */
-  .stat { display: flex; flex-direction: column; gap: 2px; padding: 4px 11px 5px; border-radius: 8px;
-    border: 1px solid var(--edge); background: var(--vscode-editorWidget-background, transparent); }
-  .stat .n { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.05;
-    letter-spacing: -.02em; }
+     exactly as the column names itself. The two used to differ in case.
+
+     No border and no ground: four outlines around four numbers rank nothing against
+     anything, and the numbers are the tiles. The transparent border stays declared so
+     the lit states below can colour it without shifting the tile by a pixel. It also
+     wraps better under ~520px, where four bordered boxes folding read worse than four
+     numbers folding. */
+  .stat { display: flex; flex-direction: column; gap: 2px; padding: 4px 13px 5px; border-radius: var(--r-ctl);
+    border: 1px solid transparent; background: transparent; }
+  .stat .n { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.05;
+    letter-spacing: -.03em; }
   /* Same muted-suffix treatment as the card's own \`.spend .u\` — the unit reads
      as a footnote on the number, not a second figure. */
   .stat .n .u { font-family: var(--vscode-font-family); font-size: var(--t-micro); font-weight: 400;
@@ -61,11 +70,13 @@ export const DECK_CSS = `
   .stat.attn { border-color: color-mix(in srgb, var(--c-attn) 55%, var(--hair)); }
   .stat.attn .n { color: var(--c-attn); }
   .stat.attn .l { color: color-mix(in srgb, var(--c-attn) 70%, var(--dim)); }
-  /* The good-news tile, lit on exactly the same terms as .attn and in the merge
-     column's own green. Two lit tiles in a row is the point: one says something
-     is wrong, the other says something is at the merge, and they are the only two
-     numbers on this header you can act on without opening anything. */
-  .stat.up { border-color: color-mix(in srgb, var(--c-done) 55%, var(--hair)); }
+  /* The good-news tile, in the merge column's own green. Two lit tiles is still the
+     point — one says something is wrong, the other says something is at the merge,
+     and they are the only two numbers on this header you can act on without opening
+     anything — but they are no longer lit on identical terms: ink lights both, and
+     the outline is now reserved for attention debt alone. Something ready to merge is
+     good news, not a debt, and a second outlined tile is a second claim on the same
+     glance. */
   .stat.up .n { color: var(--c-done); }
   .stat.up .l { color: color-mix(in srgb, var(--c-done) 70%, var(--dim)); }
   .hd .sp { flex: 1; }
@@ -108,8 +119,8 @@ export const DECK_CSS = `
   /* Sticky so the column you're reading stays labelled once the board scrolls; opaque because
      cards pass underneath it. */
   .col-hd { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 8px;
-    padding: 16px 2px 10px; flex: none; background: var(--vscode-editor-background); }
-  .col-hd .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--zone); }
+    padding: 15px 0 8px; flex: none; background: var(--vscode-editor-background); }
+  .col-hd .dot { order: -3; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--zone); }
   /* The halo, on the zones where the dot means something is alive right now. A
      spread-only shadow rather than a blur ring: it reads as light coming off the
      dot at 8px, where a blurred ring reads as a smudge. Static, not animated —
@@ -117,18 +128,23 @@ export const DECK_CSS = `
      headers would drown it. */
   .col-hd .dot.glow { box-shadow: 0 0 0 3px color-mix(in srgb, var(--zone) 26%, transparent),
     0 0 9px 1px color-mix(in srgb, var(--zone) 55%, transparent); }
-  /* Mono uppercase micro, not a 12px semibold sentence: a zone label is a
-     coordinate on the board, in the same voice as every other identifier here,
-     and it must not compete with the card titles underneath it. Tracking opens up
-     because uppercase at 10px sets too tight to read otherwise. */
-  .col-hd .nm { font-family: var(--mono); font-size: var(--t-micro); font-weight: 600;
-    text-transform: uppercase; letter-spacing: .08em; white-space: nowrap; color: var(--zone); }
-  /* Right-aligned, past the rule: the count is the answer to "how many", which you
-     ask after reading the label, and a column of counts down the board's right edge
-     is comparable at a glance in a way four counts at four label widths is not. */
-  .col-hd .ct { font-size: var(--t-micro); font-variant-numeric: tabular-nums; color: var(--dim);
-    border: 1px solid var(--hair); border-radius: 20px; padding: 1px 7px; line-height: 1.3; }
-  .col-hd .rule { flex: 1; height: 1px; background: color-mix(in srgb, var(--zone) 22%, var(--hair)); }
+  /* A heading, voiced as one: sentence case in the UI font at full-strength ink.
+     This was mono uppercase micro in the zone's own hue, on the argument that a zone
+     label is a coordinate rather than a heading — but it spent mono on English, which
+     is rule #1 at the top of this file, and it left the board's largest structural
+     labels quieter than the metadata inside the cards. The hue has not gone
+     anywhere: the dot beside it carries it, and the footer legend names it. */
+  .col-hd .nm { order: -2; font-family: inherit; font-size: 11.5px; font-weight: 600;
+    text-transform: none; letter-spacing: -.008em; white-space: nowrap; color: var(--vscode-foreground); }
+  /* Beside the label, not past the rule. Right-aligned it sat one board gap from the
+     NEXT column's dot, so "7 ● Action required" read as one phrase — and the
+     comparable column of counts that position bought is already paid for by the
+     header's stat tiles, which are exactly that row of counts. The order values are
+     what reseat it, because the count comes last in the markup. */
+  .col-hd .ct { order: -1; font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums;
+    border: 0; padding: 0; line-height: 1.3;
+    color: color-mix(in srgb, var(--vscode-foreground) 45%, transparent); }
+  .col-hd .rule { order: 0; flex: 1; height: 1px; background: var(--hair); }
   /* The zone tint: a flat field of the column's own hue behind its cards. Faint on
      purpose — it says "this is a place" without fighting the cards, which carry
      their own accent rail and their own state colour.
