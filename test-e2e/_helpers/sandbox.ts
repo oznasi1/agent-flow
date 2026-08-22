@@ -52,6 +52,35 @@ export const FIXTURE_CHILD = {
   parent: "E2E-1",
 };
 
+/** The Marketplace lists agents and commands out of `.claude/`. The real one is
+ *  gitignored, so the sandbox writes its own — two files whose names the
+ *  journey asserts on. `dir` is the directory `.claude/` is created under —
+ *  pass `home` (see the call site in `makeSandbox`), not `repoPath`: no
+ *  journey opens a workspace folder for this sandbox, so `scanClaudeAssets`
+ *  never reads a repo-scoped `.claude/`, only `claudeConfigDir()`.
+ *
+ *  Also creates an EMPTY `.claude/plugins/` dir: `scanClaudeAssets` derives
+ *  `notSetUp` from `isDir(${claudeDir}/plugins)` alone (claudeAssets.ts) and
+ *  the webview's `.notSetUp` branch renders an empty-state message INSTEAD of
+ *  `.results` — with no `plugins/` dir the seeded agent and command would be
+ *  scanned and counted in the filter pills but never rendered as rows. */
+export function seedClaudeAssets(dir: string): void {
+  const agents = path.join(dir, ".claude", "agents");
+  const commands = path.join(dir, ".claude", "commands");
+  const plugins = path.join(dir, ".claude", "plugins");
+  fs.mkdirSync(agents, { recursive: true });
+  fs.mkdirSync(commands, { recursive: true });
+  fs.mkdirSync(plugins, { recursive: true });
+  fs.writeFileSync(
+    path.join(agents, "telemetry-auditor.md"),
+    "---\nname: telemetry-auditor\ndescription: Audits the rocket telemetry panel.\n---\n\nCheck the feed endpoint.\n",
+  );
+  fs.writeFileSync(
+    path.join(commands, "refit.md"),
+    "---\ndescription: Refit the landing gear.\n---\n\nRun the refit checklist.\n",
+  );
+}
+
 export function makeSandbox(settingsOverride: Record<string, unknown> = {}): Sandbox {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "af-e2e-"));
   const home = path.join(root, "home");
@@ -78,6 +107,14 @@ export function makeSandbox(settingsOverride: Record<string, unknown> = {}): San
     path.join(fixtureDir, "tasks.json"),
     JSON.stringify([FIXTURE_TASK, FIXTURE_TASK_2, FIXTURE_CHILD], null, 2),
   );
+
+  // `home`, not `repoPath`: `launchHost` never passes a folder to open, so
+  // `vscode.workspace.workspaceFolders` is empty for the whole session and
+  // `scanClaudeAssets` (claudeAssets.ts) only ever reads `claudeConfigDir()` —
+  // `$CLAUDE_CONFIG_DIR` or `~/.claude`, which resolves to `home` here since
+  // `launchHost` points HOME at the sandbox. A repo-scoped `.claude/` would
+  // never be scanned and the Marketplace journey would see an empty list.
+  seedClaudeAssets(home);
 
   // Pre-answer every mid-take prompt except the repo-confirm QuickPick:
   //  - taskMode "implementation" is a built-in prompt-mode id → no mode pick
