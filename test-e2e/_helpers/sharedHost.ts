@@ -41,11 +41,17 @@ export function describeWithHost(
     });
 
     test.afterAll(async () => {
-      await app?.close();
-      app = undefined;
-      page = undefined;
-      sb?.dispose();
-      sb = undefined;
+      // A crashed or already-dead Electron process can reject the close; if it
+      // does, disposal must still run to avoid leaking the sandbox (a real git repo
+      // and fixture files in a temp directory that only disposal removes).
+      try {
+        await app?.close();
+      } finally {
+        app = undefined;
+        page = undefined;
+        sb?.dispose();
+        sb = undefined;
+      }
     });
 
     fn({
