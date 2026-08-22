@@ -57,7 +57,10 @@ const ROOT = path.join(__dirname, "../..");
 /** Every place the agent-word is CORRECT, with the reason. This list is the
  * durable answer to "why does this still say agent here?" — a design artifact,
  * not test scaffolding. Grows as Tasks 2-9 classify each string. */
-const LEGITIMATE: { location: string; text: string; why: string }[] = [];
+const LEGITIMATE: { location: string; text: string; why: string }[] = [
+  { location: "src/webview/deckParts.tsx", text: "c-agents",
+    why: "CSS class name, an identifier in the stylesheet — renaming it is a style change, not a copy change" },
+];
 
 /** Locations not yet converted. Shrinks to empty over Tasks 2-9; the final task
  * deletes this list and its assertion. A location listed here tolerates ANY
@@ -103,15 +106,12 @@ const PENDING_LOCATIONS: string[] = [
   "src/tasksView.ts",
   "src/telemetry/notice.ts",
   "src/webview/App.tsx",
-  "src/webview/ClosedStrip.tsx",
   "src/webview/DeckApp.tsx",
   "src/webview/DeckDetail.tsx",
   "src/webview/MarketplaceApp.tsx",
   "src/webview/Notepad.tsx",
   "src/webview/OrchestratorDrawer.tsx",
   "src/webview/ReviewStrip.tsx",
-  "src/webview/deckParts.tsx",
-  "src/webview/deckSignal.ts",
   "src/webview/orchestratorRule.ts",
 ];
 

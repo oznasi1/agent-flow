@@ -743,7 +743,7 @@ describe("DeckApp PR-facts chrome", () => {
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
-    expect(screen.getByRole("button", { name: /2 agents/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /2 sessions/ })).toBeTruthy();
     expect(screen.getByText("svc-fa")).toBeTruthy();
     // Each row carries its OWN state — the whole point of listing them. Scoped to
     // .ag-state because "working" is also the name of an In-progress lane header
@@ -1543,7 +1543,7 @@ describe("Agents view", () => {
     const inProgress = Array.from(document.querySelectorAll(".col")).find((c) => c.querySelector(".nm")!.textContent === "In progress")!;
     expect(inProgress.querySelectorAll(".card")).toHaveLength(1);
     // The merged card lists both sessions in its collapsed agents row.
-    expect(screen.getByText("2 agents")).toBeInTheDocument();
+    expect(screen.getByText("2 sessions")).toBeInTheDocument();
   });
 
   it("counts cards, not runs, in the stat tiles", () => {

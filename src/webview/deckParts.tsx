@@ -124,11 +124,11 @@ const AGENT_STATE: Record<AgentActivity["state"], { text: string; tone: Tone }> 
 export function AgentsRow({ agents, defaultOpen = false }: { agents: CardAgent[]; defaultOpen?: boolean }): JSX.Element | null {
   const [open, setOpen] = React.useState(defaultOpen);
   if (agents.length === 0) return null;
-  // A single agent's label IS its name — an identifier, so it earns the mono
-  // treatment (.id). Falling back to "1 agent", or counting several ("N agents"),
+  // A single session's label IS its name — an identifier, so it earns the mono
+  // treatment (.id). Falling back to "1 session", or counting several ("N sessions"),
   // is prose, not an identifier, and must not go mono.
   const soloName = agents.length === 1 ? agents[0].session.name : null;
-  const label = soloName ?? (agents.length === 1 ? "1 agent" : `${agents.length} agents`);
+  const label = soloName ?? (agents.length === 1 ? "1 session" : `${agents.length} sessions`);
   return (
     <div className="c-agents">
       <button type="button" className="ag-toggle" onClick={() => setOpen((o) => !o)}
