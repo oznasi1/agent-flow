@@ -150,11 +150,13 @@ describe("useDrawerExit", () => {
     try {
       const { rerender, unmount } = render(<Host openKey="a" item="A" />);
       rerender(<Host openKey={null} item={null} />);
+      expect(vi.getTimerCount()).toBe(1);
       unmount();
-      // A `setExiting` firing into an unmounted tree is React's "update on an
-      // unmounted component" warning, which the suite does not fail on — so the
-      // pending timer itself is what gets asserted.
-      act(() => { vi.advanceTimersByTime(DRAWER_ANIM_MS * 2); });
+      // Asserted BEFORE advancing, and that ordering is the whole test: a timer
+      // that is merely allowed to fire into an unmounted tree also leaves a
+      // count of zero afterwards, so checking it later would pass with no
+      // cleanup at all. React swallows the resulting `setExiting` warning, so
+      // the pending timer is the only observable.
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
