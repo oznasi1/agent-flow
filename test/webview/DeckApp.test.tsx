@@ -2628,8 +2628,22 @@ describe("the card at rest", () => {
     expect(add).not.toBe(del);
     expect(add.textContent).toBe("+12");
     expect(del.textContent).toBe("−2");
-    expect(DECK_CSS).toMatch(/\.c-diff\s+\.add\s*\{\s*color:\s*var\(--c-done\)/);
-    expect(DECK_CSS).toMatch(/\.c-diff\s+\.del\s*\{\s*color:\s*var\(--c-danger\)/);
+    // The counts are no longer hued — green on this board means a live agent or a
+    // mergeable branch, not "lines added" — so the assertion moved off the specific
+    // hue tokens and onto what the gray-on-gray bug actually was. Each rule must
+    // exist, and each must resolve somewhere near the foreground rather than to the
+    // dim gray .c-sig passes down. This is strictly stronger than pinning the old
+    // hues: it still catches a missing rule, and it now also catches a rule that is
+    // present but faint, which a hue-pinned regex would have let through.
+    const addRule = /\.c-diff\s+\.add\s*\{\s*color:\s*([^;]+);/.exec(DECK_CSS);
+    const delRule = /\.c-diff\s+\.del\s*\{\s*color:\s*([^;]+);/.exec(DECK_CSS);
+    expect(addRule).not.toBeNull();
+    expect(delRule).not.toBeNull();
+    for (const rule of [addRule![1], delRule![1]]) {
+      expect(rule).not.toBe("var(--dim)");
+      expect(rule).not.toBe("var(--vscode-descriptionForeground)");
+      expect(rule).toContain("var(--vscode-foreground)");
+    }
   });
 });
 

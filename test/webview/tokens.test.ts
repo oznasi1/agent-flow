@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { TOKENS_CSS, BASE_CSS, CONTROLS_CSS } from "../../src/webview/tokens";
 import { CSS } from "../../src/webview/styles";
@@ -49,11 +51,13 @@ const ruleBlocks = (sheet: string): { selector: string; body: string }[] =>
     body: m[2],
   }));
 
-// Set as inline styles in DeckApp.tsx (computed values, not shared tokens), so
-// they never appear as a declaration in any stylesheet's own text — excluded from
-// the orphan check the same way --vscode-* variables are. `--accent` is per-card;
-// `--zone` is per-board-column, and carries that zone's hue to every rule under it.
-const RUNTIME_ONLY = ["--accent", "--zone"];
+// Set as an inline style in DeckApp.tsx (a computed value, not a shared token), so
+// it never appears as a declaration in any stylesheet's own text — excluded from the
+// orphan check the same way --vscode-* variables are. `--zone` is per-board-column,
+// and carries that zone's hue to every rule under it. (`--accent` was here too, per
+// card, until the card's accent rail retired and the column body's own rail took
+// over stating the zone — see the "per-card accent" guard at the end of this file.)
+const RUNTIME_ONLY = ["--zone"];
 
 describe("tokens.ts", () => {
   it("declares every token it owns", () => {
@@ -569,5 +573,18 @@ describe("resting status hues", () => {
     expect(decls[0]).toMatch(/^var\(--vscode-charts-[a-z]+/);
     expect(decls[1]).toMatch(/^oklch\(from var\(--vscode-charts-[a-z]+/);
     expect(decls[1]).toContain("calc(c *");
+  });
+});
+
+describe("per-card accent", () => {
+  // The card's accent rail is gone: the column body's rail states the zone once, and
+  // the one card that needs you says so with an amber border and wash. This asserts
+  // the producer went with the consumer. A custom property still set on every card
+  // that no rule reads is dead weight nothing else can see — tsc does not flag the
+  // now-unused local (noUnusedLocals is off), and no rendering test would notice.
+  it("is set by nobody now that no rule reads it", () => {
+    expect(DECK_CSS).not.toContain("--accent");
+    const app = readFileSync(join(__dirname, "../../src/webview/DeckApp.tsx"), "utf8");
+    expect(app).not.toContain("--accent");
   });
 });
