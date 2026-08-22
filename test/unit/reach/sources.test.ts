@@ -84,4 +84,11 @@ describe("parseStars", () => {
   it("throws when the payload is not an array", () => {
     expect(() => parseStars({ message: "Bad credentials" })).toThrow(/malformed/i);
   });
+
+  it("throws when every element lacks starred_at rather than returning an empty history", () => {
+    // Non-empty but unparseable — e.g. the star+json Accept header was dropped
+    // and the response is a plain user-list shape instead. Must not read as
+    // "no stars", which would overwrite real history with [].
+    expect(() => parseStars([{ login: "octocat" }, { login: "hubot" }])).toThrow(/malformed|starred_at/i);
+  });
 });

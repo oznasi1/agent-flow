@@ -9,3 +9,8 @@ export interface DashboardData {
   marketplace: { ts: string; openvsx: OpenVsxReach; vsmarketplace: VsMarketplaceReach }[];
 }
 export declare function renderDashboard(data: DashboardData): string;
+export interface MarketplaceJsonlResult {
+  records: unknown[];
+  skipped: number;
+}
+export declare function parseMarketplaceJsonl(text: string): MarketplaceJsonlResult;

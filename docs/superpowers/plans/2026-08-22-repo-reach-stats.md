@@ -537,6 +537,17 @@ describe("readJson", () => {
     fs.writeFileSync(path.join(dir, "traffic/views.json"), "{not json");
     expect(readJson(dir, "traffic/views.json", { seed: true })).toEqual({ seed: true });
   });
+  // **SUPERSEDED — see commit c55366c.** This test and the semantics it
+  // asserted were deliberately reversed after this plan was written. A
+  // corrupt-but-existing file composed into exactly the permanent data loss
+  // this project exists to prevent: a run killed mid-write leaves invalid
+  // JSON, the next run reads it as the fallback, merges only the trailing
+  // fourteen days, and overwrites everything older. The shipped behaviour is
+  // the opposite of what's written above: a MISSING file returns the
+  // fallback; an existing-but-unparseable file THROWS, so the per-source
+  // try/catch in collect.mjs skips the write and preserves the damaged file
+  // for manual repair instead of silently reinitializing it. Do not
+  // reintroduce the fallback-on-corrupt behaviour shown here.
 
   it("round-trips through writeJson", () => {
     writeJson(dir, "traffic/views.json", { "2026-08-21": { count: 18, uniques: 3 } });
@@ -579,6 +590,20 @@ Expected: FAIL — cannot resolve the module.
 - [ ] **Step 3: Write the implementation**
 
 Create `scripts/reach/store.mjs`:
+
+> **SUPERSEDED — see commit c55366c.** The comment and `readJson` body below
+> describe the semantics as originally planned, and they are not what
+> shipped. The corrupt-file-falls-back design was reversed because it let a
+> torn write (a run killed mid-write, e.g. by CI cancellation) silently
+> masquerade as a fresh empty store, causing the next merge to overwrite
+> everything older than the trailing fourteen days — an unrecoverable loss in
+> an append-only store. The actual, shipped semantics: a **missing** file
+> returns the fallback (the legitimate first-run case); a file that **exists
+> but does not parse** **throws**, so the collector's per-source try/catch
+> skips the write and leaves the damaged file in place for manual repair. See
+> the real implementation in [scripts/reach/store.mjs](../../../scripts/reach/store.mjs)
+> for the code that actually ships. Do not use the snippet below as a
+> reference for current behaviour.
 
 ```js
 // Filesystem layer for the reach store. Deliberately dumb: all judgment lives
@@ -633,6 +658,13 @@ Expected: PASS (6 tests), clean typecheck.
 git add scripts/reach/store.mjs scripts/reach/store.d.mts test/unit/reach/store.test.ts
 git commit -m "feat(reach): json and jsonl store with corrupt-file fallback"
 ```
+
+> **SUPERSEDED — see commit c55366c.** This is the commit message as
+> originally planned, naming the fallback-on-corrupt behaviour that later
+> shipped in reverse (see the two notes above). The message that actually
+> landed for the reversal is `fix(reach): paginate stars, pin marketplace
+> atomicity, fail loud on a corrupt store` — "fail loud" is the opposite of
+> "fallback." Read `git log` for the true history, not this snippet.
 
 ---
 

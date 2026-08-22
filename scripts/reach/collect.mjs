@@ -130,9 +130,16 @@ export async function collect({ dir, token, fetchImpl, now }) {
     appendJsonl(dir, "marketplace.jsonl", { ts: now, openvsx: vsx, vsmarketplace: vsm });
   });
 
+  // firstCollected is the dashboard's headline honesty claim ("recording
+  // since <date>"). Stamping it on a run where every source failed would
+  // assert coverage that doesn't exist yet — so it's only set once at least
+  // one source has actually landed. lastRun still updates unconditionally:
+  // knowing the collector ran (and achieved nothing) is useful on its own.
   const meta = readJson(dir, "meta.json", {});
   writeJson(dir, "meta.json", {
-    firstCollected: meta.firstCollected ?? now,
+    ...(meta.firstCollected || ok.length > 0
+      ? { firstCollected: meta.firstCollected ?? now }
+      : {}),
     lastRun: now,
     schemaVersion: 1,
   });

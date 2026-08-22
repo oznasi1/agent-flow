@@ -12,6 +12,25 @@ const esc = (v) =>
 
 const fmt = (n) => (typeof n === "number" ? n.toLocaleString("en-US") : "—");
 
+/** Parses `marketplace.jsonl`, one JSON value per line. `appendJsonl` is the
+ * store's one non-atomic writer — a process killed mid-append can leave a
+ * torn final line. A single unparseable line must not make the whole
+ * dashboard un-renderable forever, so it's skipped rather than thrown; the
+ * skip count is returned so the caller can surface it. */
+export function parseMarketplaceJsonl(text) {
+  let skipped = 0;
+  const records = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    try {
+      records.push(JSON.parse(line));
+    } catch {
+      skipped += 1;
+    }
+  }
+  return { records, skipped };
+}
+
 /** A bar chart as inline SVG. `series` is [[label, value], …]. */
 function barChart(series, { width = 720, height = 160 } = {}) {
   if (series.length === 0) return '<p class="empty">No data yet.</p>';
@@ -95,10 +114,16 @@ if (process.argv[1] && process.argv[1].endsWith("render.mjs")) {
   };
   const dir = arg("--data", ".");
   const out = arg("--out", path.join(dir, "index.html"));
-  const marketplace = fs.existsSync(path.join(dir, "marketplace.jsonl"))
-    ? fs.readFileSync(path.join(dir, "marketplace.jsonl"), "utf8")
-        .split("\n").filter(Boolean).map((l) => JSON.parse(l))
-    : [];
+  let marketplace = [];
+  if (fs.existsSync(path.join(dir, "marketplace.jsonl"))) {
+    const { records, skipped } = parseMarketplaceJsonl(
+      fs.readFileSync(path.join(dir, "marketplace.jsonl"), "utf8"),
+    );
+    marketplace = records;
+    if (skipped > 0) {
+      console.warn(`reach: skipped ${skipped} unparseable line(s) in marketplace.jsonl`);
+    }
+  }
   const html = renderDashboard({
     meta: readJson(dir, "meta.json", {}),
     views: readJson(dir, "traffic/views.json", {}),

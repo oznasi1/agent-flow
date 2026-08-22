@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderDashboard } from "../../../scripts/reach/render.mjs";
+import { renderDashboard, parseMarketplaceJsonl } from "../../../scripts/reach/render.mjs";
 
 const DATA = {
   meta: { firstCollected: "2026-08-22T06:17:00Z", lastRun: "2026-08-22T06:17:00Z", schemaVersion: 1 },
@@ -65,5 +65,26 @@ describe("renderDashboard", () => {
   it("renders an empty store without throwing", () => {
     const empty = { meta: {}, views: {}, clones: {}, stars: [], marketplace: [] };
     expect(() => renderDashboard(empty)).not.toThrow();
+  });
+});
+
+describe("parseMarketplaceJsonl", () => {
+  it("parses every well-formed line", () => {
+    const text = '{"ts":"2026-08-22T06:17:00Z","n":1}\n{"ts":"2026-08-23T06:17:00Z","n":2}\n';
+    const { records, skipped } = parseMarketplaceJsonl(text);
+    expect(records).toEqual([{ ts: "2026-08-22T06:17:00Z", n: 1 }, { ts: "2026-08-23T06:17:00Z", n: 2 }]);
+    expect(skipped).toBe(0);
+  });
+
+  it("skips a torn final line rather than throwing, and reports the count", () => {
+    // Simulates appendJsonl's one non-atomic write getting cut mid-record.
+    const text = '{"ts":"2026-08-22T06:17:00Z","n":1}\n{"ts":"2026-08-23T06:17:00Z","n":2';
+    const { records, skipped } = parseMarketplaceJsonl(text);
+    expect(records).toEqual([{ ts: "2026-08-22T06:17:00Z", n: 1 }]);
+    expect(skipped).toBe(1);
+  });
+
+  it("returns no records and no skips for an empty file", () => {
+    expect(parseMarketplaceJsonl("")).toEqual({ records: [], skipped: 0 });
   });
 });

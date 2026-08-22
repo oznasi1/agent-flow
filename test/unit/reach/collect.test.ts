@@ -141,4 +141,21 @@ describe("collect", () => {
     expect(fs.existsSync(path.join(dir, "marketplace.jsonl"))).toBe(false);
     expect(res.failed.map((f) => f.source)).toContain("marketplace");
   });
+
+  it("does not stamp firstCollected on a run where every source fails", async () => {
+    const allBroken = ["traffic/views", "traffic/clones", "traffic/popular/referrers", "traffic/popular/paths", "stargazers", "open-vsx", "extensionquery"];
+    const res = await collect({ dir, token: "t", fetchImpl: stubFetch(allBroken), now: "2026-08-22T06:17:00Z" });
+    expect(res.ok).toEqual([]);
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, "meta.json"), "utf8"));
+    expect(meta.firstCollected).toBeUndefined();
+    expect(meta.lastRun).toBe("2026-08-22T06:17:00Z");
+  });
+
+  it("stamps firstCollected once a later run succeeds, after an all-failed first run", async () => {
+    const allBroken = ["traffic/views", "traffic/clones", "traffic/popular/referrers", "traffic/popular/paths", "stargazers", "open-vsx", "extensionquery"];
+    await collect({ dir, token: "t", fetchImpl: stubFetch(allBroken), now: "2026-08-22T06:17:00Z" });
+    await collect({ dir, token: "t", fetchImpl: stubFetch(), now: "2026-08-23T06:17:00Z" });
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, "meta.json"), "utf8"));
+    expect(meta.firstCollected).toBe("2026-08-23T06:17:00Z");
+  });
 });

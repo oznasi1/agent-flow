@@ -1,7 +1,7 @@
 # All-time reach: preserving install and traffic history
 
 **Date:** 2026-08-22 · **Surface:** maintainer tooling (`scripts/reach/`, a scheduled workflow, a
-generated dashboard) · **Status:** design approved, not implemented
+generated dashboard) · **Status:** implemented
 
 GitHub's Insights → Traffic tab shows fourteen days and no more. This design does not widen that
 window — nothing can. It starts a durable record beside it, so that fourteen days from now the
@@ -71,7 +71,7 @@ Four pieces, each doing one thing.
 ### 1. Collector — `scripts/reach/collect.mjs`
 
 Node's native `fetch`, no dependencies, matching the existing `.mjs` precedent in
-[scripts/verify-report.mjs](../../../scripts/verify-report.mjs). Eight endpoints across three
+[scripts/verify-report.mjs](../../../scripts/verify-report.mjs). Seven endpoints across three
 services, once per run:
 
 | Source | Endpoint | Shape |
@@ -81,7 +81,6 @@ services, once per run:
 | Referrers | `/traffic/popular/referrers` | top-10 snapshot |
 | Paths | `/traffic/popular/paths` | top-10 snapshot |
 | Stars | `/stargazers` + `Accept: application/vnd.github.star+json` | full history, paginated |
-| Repo meta | `/repos/{o}/{r}` | stars, forks, watchers |
 | Open VSX | `https://open-vsx.org/api/oznasi1/oznasi1-agent-flow` | `downloadCount`, `reviewCount`, `version` |
 | VS Marketplace | `POST /_apis/public/gallery/extensionquery`, `flags: 914` | `install`, `downloadCount`, `updateCount`, `weightedRating` |
 
@@ -112,13 +111,20 @@ the value is a cumulative counter whose interest is entirely in how it moves.
 ### 3. Dashboard — `scripts/reach/render.mjs` → `index.html`
 
 A single self-contained HTML file with inline SVG charts and no CDN, generated from the store and
-committed beside it. Four sections: the cumulative install curve (Open VSX and VS Marketplace on
-separate axes — they differ by more than an order of magnitude), daily views and clones, the
-referrer series, and the star timeline. Theme-aware light and dark.
+committed beside it. What ships: latest-snapshot tiles for Open VSX downloads, VS Marketplace
+downloads and installs, and total stars; and bar charts of daily views and daily clones. Theme-aware
+light and dark.
+
+The referrer series and the star timeline described in earlier drafts of this design did not ship
+in the dashboard — see Follow-ups. The underlying data for both **is** being collected (`stars.json`
+in full, and a dated snapshot per run under `snapshots/referrers/`), so nothing is lost by deferring
+the chart; it can be added later from history already banked. A cumulative install curve across
+Open VSX and VS Marketplace on dual axes was also considered and deferred for the same reason —
+`marketplace.jsonl` already banks one line per run.
 
 It must print **`recording since <firstCollected>`** prominently. For the first weeks the
-install curve is one or two points; drawing a confident line through them would assert a trend
-that has not been observed.
+history is one or two points; drawing a confident line through them would assert a trend that has
+not been observed.
 
 ### 4. Workflow — `.github/workflows/reach.yml`
 
@@ -149,8 +155,10 @@ days **backfills completely** with no special-case code.
 
 ## Failure posture: never write a zero
 
-A source that fails must leave its file untouched and exit non-zero for that source alone. It must
-never record `0`.
+A source that fails must leave its file untouched. It must never record `0`. The collector exits
+non-zero for the whole process when any source fails — not just for that source — since the
+workflow only has one process-level exit code to observe; the per-source detail is in the
+`failed: [{ source, error }]` array returned by `collect()` and logged to stderr.
 
 This is the one rule whose violation is silent and expensive: a 403 from an expired token, written
 as a zero, draws a cliff on the chart indistinguishable from a real collapse in traffic — and
@@ -167,7 +175,8 @@ run picks up the rest.
 - Idempotency — merging the same payload twice equals merging it once.
 - Overwrite-on-overlap — a revised count for an existing date wins.
 - Old dates survive a payload that no longer mentions them.
-- A fourteen-day gap backfills without loss.
+- A gap spanning twenty days (an existing date plus a fresh fourteen-day payload with no overlap)
+  backfills without loss.
 
 And, with `fetch` stubbed, the collector-level failure posture: a source that returns 403 or times
 out leaves its file byte-identical and never writes a zero, while its sibling sources still land.
@@ -178,8 +187,9 @@ both. The 90% lines / 85% branches gate cannot be moved by this work in either d
 
 ## Repo invariants respected
 
-- **No new dependencies.** Native `fetch` covers all five sources, so [.npmrc](../../../.npmrc)
-  and `package-lock.json` are untouched and the `E401` private-registry failure mode is not in play.
+- **No new dependencies.** Native `fetch` covers all six sources (views, clones, referrers, paths,
+  stars, marketplace), so [.npmrc](../../../.npmrc) and `package-lock.json` are untouched and the
+  `E401` private-registry failure mode is not in play.
 - **The webview graph is unaffected** — nothing under `src/` changes, so the browser bundles and
   `npm run build` are untouched.
 - **No hardcoded organization values in the extension.** The collector is maintainer tooling for
@@ -204,3 +214,10 @@ both. The 90% lines / 85% branches gate cannot be moved by this work in either d
 - Publish the dashboard via GitHub Pages from the `reach-data` branch once the shape settles.
 - Add GitHub Releases download counts if the project ever publishes `.vsix` assets there.
 - Consider a `reach` summary line in the company cycle report once several weeks of data exist.
+- **Add a referrer series chart to the dashboard.** `snapshots/referrers/<date>.json` is already
+  banked, one dated top-10 snapshot per run — the chart can be built from history that already
+  exists once there's enough of it to be worth showing.
+- **Add a star timeline chart to the dashboard.** `stars.json` already holds the full sorted
+  `starred_at` history; this is a rendering gap only, not a data gap.
+- **Add a cumulative install curve on dual axes.** `marketplace.jsonl` already banks one line per
+  run for both Open VSX and VS Marketplace; the chart is deferred, the data is not.

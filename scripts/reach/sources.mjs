@@ -54,8 +54,17 @@ export function parseStars(payload) {
   if (!Array.isArray(payload)) {
     throw new Error("reach: malformed stargazers payload — not an array");
   }
-  return payload
+  const stars = payload
     .map((s) => s?.starred_at)
     .filter((t) => typeof t === "string")
     .sort();
+  // A genuinely starless repo returns []. But a non-empty array where NOT ONE
+  // element has a usable starred_at means the Accept header was wrong or
+  // dropped and the payload isn't what we think it is — returning [] here
+  // would overwrite real history with nothing. Only trust an empty result
+  // when the input itself was empty.
+  if (payload.length > 0 && stars.length === 0) {
+    throw new Error("reach: malformed stargazers payload — no element has a starred_at");
+  }
+  return stars;
 }

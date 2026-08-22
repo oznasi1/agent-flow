@@ -17,6 +17,9 @@ concurrency:
 jobs:
   collect:
     runs-on: ubuntu-latest
+    # A hung network call would otherwise bottom out at GitHub's 360-minute
+    # default, holding the `reach` concurrency group against the next run.
+    timeout-minutes: 10
     steps:
       - name: Check out main (for the collector scripts)
         uses: actions/checkout@v4
