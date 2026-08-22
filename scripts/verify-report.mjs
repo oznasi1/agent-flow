@@ -26,11 +26,27 @@ function collect(suite, file, acc) {
     for (const t of spec.tests ?? []) {
       // The last result is the one that counted (earlier ones are retries).
       const r = (t.results ?? []).at(-1) ?? {};
+      // `t.status` is Playwright's OUTCOME — "expected" | "unexpected" | "flaky"
+      // | "skipped" — and it is the only field that answers "did this run go the
+      // way it was supposed to". `r.status` is the raw result, which for a
+      // `test.fail()`-pinned test reads "failed" even though that failure IS the
+      // expected outcome. Reading the raw status here once made a fully green
+      // run (`27 passed`, exit 0) render as "❌ 26/27", which is worse than no
+      // report: it trains people to ignore the one artifact meant to be read.
+      const outcome = t.status ?? "unknown";
       acc.push({
         file: spec.file ?? file,
         title: spec.title,
-        ok: r.status === "passed",
-        status: r.status ?? "unknown",
+        ok: outcome === "expected",
+        // A pinned defect: the test ran, it failed, and failing is what we
+        // asserted. Worth its own label rather than a silent "pass" — the point
+        // of pinning is that the defect stays visible until someone fixes it.
+        pinned: t.expectedStatus === "failed" && outcome === "expected",
+        // Passed only on retry. Named rather than absorbed, because a journey
+        // that needs a second attempt is a flake, and an invisible flake becomes
+        // permanent background noise.
+        flaky: outcome === "flaky",
+        status: outcome === "unexpected" ? (r.status ?? "failed") : outcome,
         ms: r.duration ?? 0,
         // Buffer attachments (testInfo.attach with body) arrive base64 in
         // `body`; file attachments arrive as `path`. Take either.
@@ -53,7 +69,13 @@ const sections = rows
         return `<figure><img alt="${esc(a.name)}" src="data:image/png;base64,${b64}"><figcaption>${esc(a.name)}</figcaption></figure>`;
       })
       .join("\n");
-    const badge = row.ok ? `<span class="badge ok">PASS</span>` : `<span class="badge fail">${esc(row.status.toUpperCase())}</span>`;
+    const badge = row.pinned
+      ? `<span class="badge pinned">PINNED</span>`
+      : row.flaky
+        ? `<span class="badge flaky">FLAKY</span>`
+        : row.ok
+          ? `<span class="badge ok">PASS</span>`
+          : `<span class="badge fail">${esc(row.status.toUpperCase())}</span>`;
     return `<section>
 <h2>${badge} ${esc(row.title)} <span class="meta">${esc(path.basename(row.file))} · ${secs(row.ms)}</span></h2>
 ${strip || "<p class='meta'>no step screenshots attached</p>"}
@@ -62,8 +84,17 @@ ${strip || "<p class='meta'>no step screenshots attached</p>"}
   .join("\n");
 
 const passed = rows.filter((r) => r.ok).length;
+const pinned = rows.filter((r) => r.pinned).length;
+const flaky = rows.filter((r) => r.flaky).length;
 const stamp = data.stats?.startTime ?? new Date().toISOString();
-const allOk = passed === rows.length;
+// Green when nothing came out UNEXPECTED. A pinned defect failing on purpose is
+// not a broken run, and must not paint the whole report red.
+const allOk = rows.every((r) => r.ok || r.flaky);
+// Rendered after the count so the headline never hides either caveat.
+const caveats = [
+  pinned ? `${pinned} pinned defect${pinned === 1 ? "" : "s"} failing as designed` : null,
+  flaky ? `${flaky} passed only on retry` : null,
+].filter(Boolean).join(" · ");
 
 const html = `<!DOCTYPE html>
 <html lang="en">
@@ -72,8 +103,8 @@ const html = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Verify report — Agent Flow real-host E2E</title>
 <style>
-  :root{--bg:#f7f8fa;--panel:#fff;--ink:#1c2024;--muted:#5b6570;--line:#e5e8ec;--ok:#1a7f52;--ok-soft:#e6f4ec;--stop:#b0341d;--stop-soft:#fbe9e5}
-  @media (prefers-color-scheme:dark){:root{--bg:#0f1216;--panel:#161a20;--ink:#e8ebee;--muted:#9aa4af;--line:#242a31;--ok:#5cc48d;--ok-soft:#132419;--stop:#e88872;--stop-soft:#2a1713}}
+  :root{--bg:#f7f8fa;--panel:#fff;--ink:#1c2024;--muted:#5b6570;--line:#e5e8ec;--ok:#1a7f52;--ok-soft:#e6f4ec;--stop:#b0341d;--stop-soft:#fbe9e5;--warn:#8a6d1f;--warn-soft:#fbf3dc}
+  @media (prefers-color-scheme:dark){:root{--bg:#0f1216;--panel:#161a20;--ink:#e8ebee;--muted:#9aa4af;--line:#242a31;--ok:#5cc48d;--ok-soft:#132419;--stop:#e88872;--stop-soft:#2a1713;--warn:#d8b45a;--warn-soft:#2a2413}}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
   .wrap{max-width:1100px;margin:0 auto;padding:40px 24px 80px}
@@ -85,6 +116,8 @@ const html = `<!DOCTYPE html>
   .badge{font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;letter-spacing:.03em}
   .badge.ok{background:var(--ok-soft);color:var(--ok)}
   .badge.fail{background:var(--stop-soft);color:var(--stop)}
+  .badge.pinned{background:var(--warn-soft);color:var(--warn)}
+  .badge.flaky{background:var(--warn-soft);color:var(--warn)}
   figure{display:inline-block;vertical-align:top;margin:0 12px 8px 0;max-width:340px}
   figure img{max-width:100%;border:1px solid var(--line);border-radius:8px;display:block}
   figcaption{font-size:12px;color:var(--muted);margin-top:5px}
@@ -92,7 +125,7 @@ const html = `<!DOCTYPE html>
 </head>
 <body><div class="wrap">
 <h1>Verify report — real-host E2E</h1>
-<p class="sub">${passed}/${rows.length} journeys passed · a real VS Code host, driven end to end · ${esc(stamp)}</p>
+<p class="sub">${passed}/${rows.length} journeys passed${caveats ? ` · ${esc(caveats)}` : ""} · a real VS Code host, driven end to end · ${esc(stamp)}</p>
 ${sections}
 </div></body>
 </html>
@@ -102,14 +135,18 @@ const md = [
   `## Real-host E2E — verify report`,
   ``,
   `${allOk ? "✅" : "❌"} **${passed}/${rows.length} journeys passed** (${esc(stamp)})`,
+  ...(caveats ? [``, `_${caveats}._`] : []),
   ``,
   `| Journey | Verdict | Time | Steps shot |`,
   `|---|---|---|---|`,
-  ...rows.map((r) => `| ${r.title} | ${r.ok ? "✅ pass" : `❌ ${r.status}`} | ${secs(r.ms)} | ${r.shots.length} |`),
+  ...rows.map((r) => {
+    const verdict = r.pinned ? "📌 pinned (failing by design)" : r.flaky ? "⚠️ flaky (passed on retry)" : r.ok ? "✅ pass" : `❌ ${r.status}`;
+    return `| ${r.title} | ${verdict} | ${secs(r.ms)} | ${r.shots.length} |`;
+  }),
   ``,
   `The screenshot-strip report is in the run's \`verify-report\` artifact.`,
 ].join("\n");
 
 fs.writeFileSync(OUT_HTML, html);
 fs.writeFileSync(OUT_MD, md);
-console.log(`verify-report: ${passed}/${rows.length} passed → ${OUT_HTML} (${(html.length / 1024 / 1024).toFixed(1)}MB), ${OUT_MD}`);
+console.log(`verify-report: ${passed}/${rows.length} passed${caveats ? ` (${caveats})` : ""} → ${OUT_HTML} (${(html.length / 1024 / 1024).toFixed(1)}MB), ${OUT_MD}`);
