@@ -20,7 +20,8 @@ test("a real host boots the extension and the pool renders the fixture task", as
 
   // The card is real DOM inside the real webview: the fixture's summary can be
   // there only if extension → connector → registry gate → webview all worked.
-  await expect(frame.locator(".card", { hasText: FIXTURE_TASK.key })).toBeVisible({ timeout: 30_000 });
-  await expect(frame.locator(".card")).toContainText(FIXTURE_TASK.summary);
+  const card = frame.locator(".card", { hasText: FIXTURE_TASK.key });
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  await expect(card).toContainText(FIXTURE_TASK.summary);
   await shot(page, testInfo, "1 · pool loaded");
 });

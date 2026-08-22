@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `agentFlow.deckGrouping`'s stored value and every orchestrator condition key
   keep their existing spelling.
 
+## [0.37.1] — 2026-08-22
+
+### Fixed
+
+- **A Copilot take without Copilot installed no longer silently seeds nothing.** Modern
+  VS Code registers the chat-open command even when no chat extension is installed, so the
+  seed "succeeded" while opening nothing — no panel, no prompt, no hint. The seed now checks
+  that GitHub Copilot Chat is actually present, and when it isn't, takes the documented
+  fallback: the task prompt lands on your clipboard and a notification says so. Found by the
+  real-host E2E lane; its journey now guards the fallback.
+
 ## [0.37.0] — 2026-08-21
 
 ### Added

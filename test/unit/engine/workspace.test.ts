@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
 import { attachmentFileName, briefMarkdown, openWorkspace, writeBriefInto, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
-import { commands, env, setConfig, window, workspace } from "../../_mocks/vscode";
+import { commands, env, extensions, setConfig, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
 vi.mock("fs");
@@ -1114,11 +1114,43 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       env.uriScheme = "vscode";
       setConfig({ agentProvider: "copilot", agentSurface: undefined });
       commands.getCommands.mockResolvedValue([CHAT_OPEN_CMD]);
+      // These tests describe a host where Copilot Chat IS installed. The mock
+      // resets getExtension to undefined per test, which — before the gate in
+      // seedChatPanel existed — silently meant "not installed" and the tests
+      // passed only because core VS Code registers the command anyway.
+      extensions.getExtension.mockReturnValue({ packageJSON: {} });
     });
 
     afterEach(() => {
       env.uriScheme = "cursor";
       setConfig({ agentProvider: undefined });
+    });
+
+    it("falls back to the clipboard when Copilot Chat is not installed, even though core registers the command", async () => {
+      // The bug this pins: VS Code >=1.9x registers workbench.action.chat.open
+      // with no chat extension installed, so command presence proves nothing.
+      // Without the extension the seed must take the documented clipboard
+      // fallback instead of executing a command that visibly does nothing.
+      extensions.getExtension.mockReturnValue(undefined);
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(commands.executeCommand).not.toHaveBeenCalledWith(CHAT_OPEN_CMD, expect.anything());
+      expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
+    });
+
+    it("asks for the extension by the chat panel's own id", async () => {
+      // GitHub.copilot alone has no chat panel; GitHub.copilot-chat is what
+      // registers the UI the seed opens. Pin the id so a refactor cannot
+      // quietly gate on the wrong extension.
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(extensions.getExtension).toHaveBeenCalledWith("GitHub.copilot-chat");
     });
 
     it("opens chat with the prompt prefilled and unsubmitted", async () => {
@@ -1283,6 +1315,11 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       env.uriScheme = "vscode";
       setConfig({ agentProvider: "copilot", agentSurface: undefined });
       commands.getCommands.mockResolvedValue([CHAT_OPEN_CMD]);
+      // These tests describe a host where Copilot Chat IS installed. The mock
+      // resets getExtension to undefined per test, which — before the gate in
+      // seedChatPanel existed — silently meant "not installed" and the tests
+      // passed only because core VS Code registers the command anyway.
+      extensions.getExtension.mockReturnValue({ packageJSON: {} });
     });
 
     afterEach(() => {
@@ -1542,6 +1579,7 @@ describe("seedClaudeCode — remote control", () => {
       // load-bearing, or every Copilot seed would be refused.
       seedPlan({ remoteControl: false });
       commands.getCommands.mockResolvedValue(["workbench.action.chat.open"]);
+      extensions.getExtension.mockReturnValue({ packageJSON: {} }); // Copilot Chat installed here
       const { context } = fakeContext();
 
       await maybeSeedAgent(context, () => {});
