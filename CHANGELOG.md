@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-08-22
+
 ### Changed
 
 - **The Deck reads as an instrument again.** No behaviour changes — this is type, colour,
