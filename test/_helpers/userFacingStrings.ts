@@ -64,9 +64,13 @@ export function userFacingStrings(fileName: string, source: string): string[] {
   );
   const out: string[] = [];
   const take = (text: string) => {
-    // Collapse whitespace RUNS but do not trim the ends: a template chunk
-    // adjacent to an interpolation (e.g. `${n} agents open`) carries a
-    // leading/trailing space that is part of the rendered copy.
+    // Collapse whitespace RUNS but deliberately do NOT trim the ends: a
+    // template chunk adjacent to an interpolation (e.g. `${n} agents open`)
+    // carries a leading/trailing space that is part of the rendered copy.
+    // Trimming would make that chunk's allowlist key collide with a bare
+    // string literal like "agents" in the same file — allowlisting the wire
+    // value would then silently allowlist the display string too. Do not
+    // "fix" this by adding .trim() back.
     if (hasAgentWord(text)) out.push(text.replace(/\s+/g, " "));
   };
   const visit = (n: ts.Node): void => {
@@ -109,7 +113,7 @@ export function scanManifest(root: string): Hit[] {
   const hits: Hit[] = [];
   const add = (jsonPath: string, text: unknown) => {
     if (typeof text === "string" && hasAgentWord(text)) {
-      hits.push({ location: `package.json#${jsonPath}`, text: text.replace(/\s+/g, " ").trim() });
+      hits.push({ location: `package.json#${jsonPath}`, text: text.replace(/\s+/g, " ") });
     }
   };
   for (const [key, v] of Object.entries<any>(c.configuration?.properties ?? {})) {

@@ -25,7 +25,7 @@ describe("the user-facing string extractor", () => {
   });
 
   it("ignores module specifiers", () => {
-    expect(userFacingStrings("f.ts", `import { p } from "./agentPick";`)).toEqual([]);
+    expect(userFacingStrings("f.ts", `import { p } from "./agent-flow-base";`)).toEqual([]);
   });
 
   it("ignores string-literal types — those are wire values, not copy", () => {
