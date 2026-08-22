@@ -28,9 +28,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .vscode-test
-          # The pin lives in test-e2e/_helpers/host.ts (VSCODE_VERSION);
-          # hashing the file re-downloads exactly when the pin moves.
-          key: vscode-test-${{ runner.os }}-${{ hashFiles('test-e2e/_helpers/host.ts') }}
+          # The pins live in test-e2e/_helpers/host.ts (VSCODE_VERSION) and
+          # claudeCode.ts (CLAUDE_CODE_VERSION); hashing both re-downloads
+          # exactly when either pin moves.
+          key: vscode-test-${{ runner.os }}-${{ hashFiles('test-e2e/_helpers/host.ts', 'test-e2e/_helpers/claudeCode.ts') }}
       # A real Electron workbench needs a display; xvfb provides one headlessly.
       - run: xvfb-run -a npm run test:e2e
       # Layer C: the verify-feature report is generated on every run — pass or
