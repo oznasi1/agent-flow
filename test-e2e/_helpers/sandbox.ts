@@ -34,6 +34,16 @@ export const FIXTURE_TASK_2 = {
   descriptionText: "Landing gear misses the pad.",
 };
 
+/** A child of E2E-1. Parented records are excluded from `list()`, so the pool
+ *  stays at TWO cards and every existing journey's count assertion holds. */
+export const FIXTURE_CHILD = {
+  ...FIXTURE_TASK,
+  key: "E2E-1-a", summary: "Repoint the telemetry feed",
+  url: "https://fixture.invalid/browse/E2E-1-a",
+  descriptionText: "The feed points at the retired endpoint.",
+  parent: "E2E-1",
+};
+
 export function makeSandbox(settingsOverride: Record<string, unknown> = {}): Sandbox {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "af-e2e-"));
   const home = path.join(root, "home");
@@ -56,13 +66,18 @@ export function makeSandbox(settingsOverride: Record<string, unknown> = {}): San
     { cwd: repoPath },
   );
 
-  fs.writeFileSync(path.join(fixtureDir, "tasks.json"), JSON.stringify([FIXTURE_TASK, FIXTURE_TASK_2], null, 2));
+  fs.writeFileSync(
+    path.join(fixtureDir, "tasks.json"),
+    JSON.stringify([FIXTURE_TASK, FIXTURE_TASK_2, FIXTURE_CHILD], null, 2),
+  );
 
   // Pre-answer every mid-take prompt except the repo-confirm QuickPick:
   //  - taskMode "implementation" is a built-in prompt-mode id → no mode pick
   //  - openIn "new-window" → no destination pick
   //  - worktree "never"    → no worktree pick (journey 4 will flip this)
   //  - remoteControl "off" → no Remote Control pick
+  //  - childWorktrees false → no tree pick, even though the fixture now
+  //    claims `children`; the child-tree journey flips this one to true
   //  - 1 repo → chooseWorkspaceMode returns "per-window" with no pick
   const settings = {
     "agentFlow.taskSource": "fixture",
@@ -72,6 +87,7 @@ export function makeSandbox(settingsOverride: Record<string, unknown> = {}): San
     "agentFlow.openIn": "new-window",
     "agentFlow.worktree": "never",
     "agentFlow.remoteControl": "off",
+    "agentFlow.childWorktrees": false,
     "agentFlow.seedAgent": true,
     "security.workspace.trust.enabled": false,
     "update.mode": "none",
