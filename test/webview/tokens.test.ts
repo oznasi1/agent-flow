@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 import { TOKENS_CSS, BASE_CSS, CONTROLS_CSS } from "../../src/webview/tokens";
 import { CSS } from "../../src/webview/styles";
@@ -49,11 +51,13 @@ const ruleBlocks = (sheet: string): { selector: string; body: string }[] =>
     body: m[2],
   }));
 
-// Set as inline styles in DeckApp.tsx (computed values, not shared tokens), so
-// they never appear as a declaration in any stylesheet's own text — excluded from
-// the orphan check the same way --vscode-* variables are. `--accent` is per-card;
-// `--zone` is per-board-column, and carries that zone's hue to every rule under it.
-const RUNTIME_ONLY = ["--accent", "--zone"];
+// Set as an inline style in DeckApp.tsx (a computed value, not a shared token), so
+// it never appears as a declaration in any stylesheet's own text — excluded from the
+// orphan check the same way --vscode-* variables are. `--zone` is per-board-column,
+// and carries that zone's hue to every rule under it. (`--accent` was here too, per
+// card, until the card's accent rail retired and the column body's own rail took
+// over stating the zone — see the "per-card accent" guard at the end of this file.)
+const RUNTIME_ONLY = ["--zone"];
 
 describe("tokens.ts", () => {
   it("declares every token it owns", () => {
@@ -551,5 +555,48 @@ describe("notepad actions cluster", () => {
     expect(iconOnly!.body).toMatch(/width:\s*auto/);
     const shared = ruleBlocks(CSS).find((r) => r.selector === ".sprint-remove.icon-only, .quiet.icon-only");
     expect(shared!.body).toMatch(/width:\s*24px/);
+  });
+});
+
+describe("resting status hues", () => {
+  // The four column hues that are NOT --c-attn. Each must stay DERIVED from the
+  // host's chart palette — hard-coding one is how a dark-tuned hex ends up sitting
+  // on a light theme — and each must ship the chroma scale as a SECOND declaration,
+  // so an engine that cannot parse relative colour keeps the plain derived hue
+  // instead of an unset variable.
+  const RESTING = ["--c-progress", "--c-review", "--c-done", "--c-idle"];
+
+  it.each(RESTING)("%s derives from the host palette and scales its chroma", (token) => {
+    const decls = [...stripComments(TOKENS_CSS).matchAll(new RegExp(`${token}:\\s*([^;]+);`, "g"))]
+      .map((m) => m[1].trim());
+    expect(decls).toHaveLength(2);
+    expect(decls[0]).toMatch(/^var\(--vscode-charts-[a-z]+/);
+    expect(decls[1]).toMatch(/^oklch\(from var\(--vscode-charts-[a-z]+/);
+    expect(decls[1]).toContain("calc(c *");
+  });
+});
+
+describe("per-card accent", () => {
+  // The card's accent rail is gone: the column body's rail states the zone once, and
+  // the one card that needs you says so with an amber border and wash. This asserts
+  // the producer went with the consumer. A custom property still set on every card
+  // that no rule reads is dead weight nothing else can see — tsc does not flag the
+  // now-unused local (noUnusedLocals is off), and no rendering test would notice.
+  it("is set by nobody now that no rule reads it", () => {
+    expect(DECK_CSS).not.toContain("--accent");
+    const app = readFileSync(join(__dirname, "../../src/webview/DeckApp.tsx"), "utf8");
+    expect(app).not.toContain("--accent");
+  });
+});
+
+describe("empty board column", () => {
+  // The zone rail is drawn on .col-body, which is a childless div when a column has
+  // no cards — so without this rule an empty column shows a floating ~16px tick in
+  // its own hue. Found by looking at the Merge column with nothing in it; nothing in
+  // this suite would have caught it, so it gets a guard rather than a comment.
+  it("draws no rail when the column has no cards", () => {
+    const rule = ruleBlocks(DECK_CSS).find((r) => r.selector === ".col-body:empty");
+    expect(rule).toBeDefined();
+    expect(rule!.body).toMatch(/border-left:\s*0/);
   });
 });
