@@ -1040,6 +1040,16 @@ async function seedChatPanel(
     log(`seed ${key}: per-task Copilot chat tabs are not wired up yet — batch falls back to the briefs`);
     return false;
   }
+  // Command presence proves nothing on a modern host: core VS Code registers
+  // workbench.action.chat.open (its built-in chat framework) even with no chat
+  // extension installed, and executing it then "succeeds" while opening nothing
+  // the user can see — a silently unseeded take. Only the extension that
+  // actually provides the panel makes the command mean what this function
+  // promises. Cursor is exempt: its chat is the host's own, not an extension.
+  if (provider === "copilot" && !vscode.extensions.getExtension("GitHub.copilot-chat")) {
+    log(`seed ${key}: GitHub Copilot Chat is not installed — falling back to the clipboard`);
+    return false;
+  }
   // Copilot's product name for the chat panel itself is "Copilot Chat", distinct
   // from providerLabel's generic "Copilot" used everywhere else (toasts, session
   // names) — this line predates providerLabel and keeps its original wording so the
