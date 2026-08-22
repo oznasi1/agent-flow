@@ -14,13 +14,17 @@ export class Marketplace {
     this.frame = page.frameLocator("iframe.webview").last().frameLocator("#active-frame");
   }
 
+  /** Every result row. `.row` is the row itself (MarketplaceApp.tsx:454); do NOT
+   *  use `.n`, which is a count badge on the filter pills and group headers. */
   results(): Locator {
-    return this.frame.locator(".results .n");
+    return this.frame.locator(".results .row");
   }
 
-  /** One result row, addressed by its displayed name. */
+  /** One result row, addressed by the display name in its `.nm` span
+   *  (MarketplaceApp.tsx:458). Matching the row by its name element rather than
+   *  by row text keeps a description or marketplace label from matching too. */
   result(name: string): Locator {
-    return this.frame.locator(".results").getByText(name, { exact: true });
+    return this.frame.locator(`.results .row:has(.nm:text-is("${name}"))`);
   }
 
   detail(): Locator {
