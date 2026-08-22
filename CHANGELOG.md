@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The Deck reads as an instrument again.** No behaviour changes — this is type, colour,
+  spacing and radii only. The type scale widens and gains a real lead (a 16px panel title and
+  19px header figures), so a card title reads as a title rather than as slightly-larger body.
+  Column heads are voiced as headings — sentence case in the UI font, with the count beside
+  the label instead of at the column's far edge, where it sat one gap from the next column's
+  dot. Each column states its hue once, as a rail you can trace down its left edge, replacing
+  a faint tint plus a per-card rail that said the same thing three times. Resting status hues
+  drop to ~78% chroma so the one card that actually needs you is the only saturated thing on
+  the board. Diff counts leave green and red for neutral ink with the direction carried by the
+  glyph, so green now means a live agent or a mergeable branch and nothing else. The header's
+  four bordered stat tiles lose their outlines; only Action required keeps one.
+
 ## [0.37.0] — 2026-08-21
 
 ### Added
