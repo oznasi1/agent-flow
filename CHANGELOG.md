@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.38.0] — 2026-08-22
+## [0.39.0] — 2026-08-22
 
 ### Changed
 
@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "agent". No setting, saved flow or run record changes: `agentFlow.openAgents`,
   `agentFlow.deckGrouping`'s stored value and every orchestrator condition key
   keep their existing spelling.
+
+## [0.38.0] — 2026-08-22
+
+### Changed
+
 - **The Deck reads as an instrument again.** No behaviour changes — this is type, colour,
   spacing and radii only. The type scale widens and gains a real lead (a 16px panel title and
   19px header figures), so a card title reads as a title rather than as slightly-larger body.
@@ -27,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a faint tint plus a per-card rail that said the same thing three times. Resting status hues
   drop to ~78% chroma so the one card that actually needs you is the only saturated thing on
   the board. Diff counts leave green and red for neutral ink with the direction carried by the
-  glyph, so green now means a live session or a mergeable branch and nothing else. The header's
+  glyph, so green now means a live agent or a mergeable branch and nothing else. The header's
   four bordered stat tiles lose their outlines; only Action required keeps one.
 
 ## [0.37.1] — 2026-08-22
