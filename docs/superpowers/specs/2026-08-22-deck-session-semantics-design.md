@@ -155,10 +155,17 @@ flow files under `~/.agentflow/flows` and shared across windows.
   its turn"; "agent idle over…" → "session idle over…"; "no agent left" → "no
   sessions left". Keys `agent-ended-turn`, `agent-idle-over`, `no-agent-left`
   are untouched, as is `status.agent`.
-- `OrchestratorDrawer.tsx` — the `Agents` section header (`:1362`) →
-  `Sessions`; "over every agent in every repo of the run" (`:250`) → "…every
-  session…"; "agent state unknown" (`:254`) → "session state unknown"; "not an
-  agent node" (`:509`) → "not a session node".
+- `OrchestratorDrawer.tsx` — the `Agents` section header (`:1319`) →
+  `Sessions`; "Drag a card from the board to attach an agent." (`:1334`) →
+  "…attach a session." These are the drawer's only two agent-word *strings*:
+  its other mentions (`:250`, `:254`, `:509`) are comments, which the gate's
+  AST scan never visits.
+- `conditions.ts` — the condition readouts, which are host-side, not in the
+  drawer: "agent state unknown" (`:235`, `:240`) → "session state unknown";
+  and `:251`'s "no agent" / "1 agent open" / "N agents open" → sessions.
+- `armability.ts:63-65` holds a **second copy** of the condition→label map that
+  `orchestratorRule.ts:43-45` also holds — one host-side, one in the webview.
+  Both must change identically.
 - `docs/ORCHESTRATOR_COMMANDS.md` carries no condition keys — only prose. Its
   display-label references become session ("Opens a new agent session" at
   `:28` → "Opens a new session"; "launching and seeding agent sessions" at
@@ -267,6 +274,12 @@ not test scaffolding.
 The repo's CI gate, in order: `npm run typecheck`, `npm test`,
 `npm run build`. All four steps of `.github/workflows/ci.yml` must pass.
 `npm test` needs `timeout: 600000` when run through a tool.
+
+**Inventory.** The gate's AST scan — the authority, since it never visits
+comments — finds **84 user-facing strings in `src/` across 24 files, plus 26 in
+`package.json`**: 110 in total. The grep-based estimates elsewhere in this
+document ran lower because quoting-based greps miss JSX text and template
+chunks. See the implementation plan for the per-file breakdown.
 
 **Existing tests.** 22 assertions across 8 files match on rendered copy and
 must change:
