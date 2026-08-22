@@ -151,6 +151,48 @@ describe("collect", () => {
     expect(meta.lastRun).toBe("2026-08-22T06:17:00Z");
   });
 
+  // The traffic endpoints require push access (a fine-grained PAT with
+  // `Administration: read`); the built-in Actions GITHUB_TOKEN 403s on them.
+  // /stargazers is the mirror image — ordinary public read, which a PAT scoped
+  // to Administration alone cannot do. Both failures were observed live, which
+  // is why the two tokens are routed separately.
+  describe("token routing", () => {
+    /** Records the Authorization header seen by each endpoint. */
+    function recordingFetch(seen: Record<string, string>) {
+      return (async (url: string | URL, init?: RequestInit) => {
+        const u = String(url);
+        const auth = String((init?.headers as Record<string, string>)?.Authorization ?? "");
+        if (u.includes("stargazers")) seen.stars = auth;
+        if (u.includes("traffic/views")) seen.views = auth;
+        return {
+          ok: true, status: 200,
+          headers: { get: () => null },
+          json: async () => (u.includes("stargazers") ? [] : { views: [] }),
+        } as unknown as Response;
+      }) as unknown as typeof fetch;
+    }
+
+    it("spends the privileged token on traffic and the public token on stargazers", async () => {
+      const seen: Record<string, string> = {};
+      await collect({
+        dir, token: "PAT", publicToken: "BUILTIN",
+        fetchImpl: recordingFetch(seen), now: "2026-08-22T06:17:00Z",
+      });
+      expect(seen.views).toBe("Bearer PAT");
+      expect(seen.stars).toBe("Bearer BUILTIN");
+    });
+
+    it("falls back to the single token when no public token is given", async () => {
+      const seen: Record<string, string> = {};
+      await collect({
+        dir, token: "PAT",
+        fetchImpl: recordingFetch(seen), now: "2026-08-22T06:17:00Z",
+      });
+      expect(seen.views).toBe("Bearer PAT");
+      expect(seen.stars).toBe("Bearer PAT");
+    });
+  });
+
   it("stamps firstCollected once a later run succeeds, after an all-failed first run", async () => {
     const allBroken = ["traffic/views", "traffic/clones", "traffic/popular/referrers", "traffic/popular/paths", "stargazers", "open-vsx", "extensionquery"];
     await collect({ dir, token: "t", fetchImpl: stubFetch(allBroken), now: "2026-08-22T06:17:00Z" });

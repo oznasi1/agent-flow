@@ -37,10 +37,19 @@ jobs:
       # No `npm ci` — the collector has zero dependencies by design.
       - name: Collect
         env:
-          # Falls back to the built-in token. The traffic API requires push
-          # access; if the built-in token is rejected, set the REACH_TOKEN
-          # secret to a PAT with `repo` scope. See docs/REACH.md.
+          # The privileged token, spent ONLY on the traffic endpoints.
+          # RESOLVED 2026-08-22 by a live run: the built-in GITHUB_TOKEN is NOT
+          # sufficient — it 403s on all four traffic endpoints. REACH_TOKEN must
+          # be a fine-grained PAT on this repo with `Administration: read`.
+          # The fallback remains so a fork without the secret still collects
+          # what it can rather than failing outright. See docs/REACH.md.
           GH_TOKEN: ${{ secrets.REACH_TOKEN || github.token }}
+          # The public-read endpoints (/stargazers) use the built-in token, not
+          # the PAT. The traffic endpoints need `Administration: read`, which
+          # the built-in token lacks; a PAT scoped to exactly that cannot read
+          # /stargazers. Routing them separately means the PAT never needs a
+          # permission beyond Administration. Both 403s were observed live.
+          GH_PUBLIC_TOKEN: ${{ github.token }}
         run: node scripts/reach/collect.mjs --out .reach-data
 
       - name: Render the dashboard

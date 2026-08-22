@@ -106,30 +106,49 @@ real numbers. No design in this collector closes that gap; the honest move is
 to say so here and in the dashboard rather than imply the history is
 complete.
 
-## The `GITHUB_TOKEN` question — open, not settled
+## Tokens — resolved, and why there are two
 
-The traffic endpoints (`/traffic/views`, `/traffic/clones`,
-`/traffic/popular/*`) require **push access** to the repository. Whether the
-Actions-provided `GITHUB_TOKEN` (exposed to the workflow as `github.token`)
-actually carries push access for a personal-account repo is **unverified as
-of this writing** — it has not been tested against a real scheduled or
-dispatched run. Do not read the workflow's fallback as evidence either way;
-it exists so that discovering the built-in token doesn't work costs one
-secret, not a redesign:
+Settled by live runs on 2026-08-22. Two tokens are in play because the
+endpoints need opposite things:
 
-```yaml
-env:
-  GH_TOKEN: ${{ secrets.REACH_TOKEN || github.token }}
+| Endpoints | Needs | Token used |
+| --- | --- | --- |
+| `/traffic/views`, `/traffic/clones`, `/traffic/popular/*` | **push access** — a fine-grained PAT with `Administration: read` | `GH_TOKEN` (the `REACH_TOKEN` secret) |
+| `/stargazers`, Open VSX, VS Marketplace | ordinary public read | `GH_PUBLIC_TOKEN` (Actions' built-in `github.token`) |
+
+**The built-in `GITHUB_TOKEN` is not sufficient for traffic.** A dispatched run
+returned `HTTP 403` on all four traffic endpoints while collecting stars and
+marketplace data fine:
+
+```
+reach: ok=[stars, marketplace]
+reach: FAILED views  — .../traffic/views  → HTTP 403
+reach: FAILED clones — .../traffic/clones → HTTP 403
 ```
 
-The first live run resolves this. If the collector log shows something like
-`reach: FAILED views — … HTTP 403`, the built-in token was insufficient:
+**And a fine-grained PAT scoped to `Administration: read` cannot read
+`/stargazers`** — the mirror-image failure, observed on the very next run:
 
-1. Create a personal access token on the `oznasi1` account with `repo` scope.
-2. `gh secret set REACH_TOKEN --repo oznasi1/agent-flow` and paste it in.
-3. Re-run the workflow (`gh workflow run reach.yml --repo oznasi1/agent-flow`
-   or the Actions "Run workflow" button). The workflow already prefers
-   `REACH_TOKEN` over `github.token` whenever the secret is set.
+```
+reach: ok=[views, clones, referrers, paths, marketplace]
+reach: FAILED stars — .../stargazers → HTTP 403
+```
+
+Hence the split. Routing the public reads through the built-in token means the
+PAT never needs a permission beyond `Administration: read` — the narrowest
+grant that does the job, rather than widening the PAT until everything passes.
+
+### Creating `REACH_TOKEN`
+
+1. https://github.com/settings/personal-access-tokens/new
+2. **Resource owner** `oznasi1`; **Repository access** → *Only select
+   repositories* → `oznasi1/agent-flow`.
+3. **Repository permissions → Administration: Read-only.** Nothing else is
+   needed. (`Metadata: Read-only` is added automatically and is harmless.)
+4. `gh secret set REACH_TOKEN --repo oznasi1/agent-flow`
+
+A classic (non-fine-grained) PAT with `repo` scope also works, but grants far
+more than this needs.
 
 ### Rotating `REACH_TOKEN`
 
