@@ -216,7 +216,7 @@ export declare function mergeDaily(existing: DailyMap, incoming: DailyMap): Dail
 npx vitest run test/unit/reach/merge.test.ts
 ```
 
-Expected: PASS, 11 tests.
+Expected: PASS, 10 tests.
 
 - [ ] **Step 5: Verify the typecheck gate specifically**
 
@@ -475,7 +475,7 @@ npx vitest run test/unit/reach/sources.test.ts
 npm run typecheck
 ```
 
-Expected: PASS (12 tests), clean typecheck.
+Expected: PASS (11 tests), clean typecheck.
 
 - [ ] **Step 5: Commit**
 
@@ -625,7 +625,7 @@ npx vitest run test/unit/reach/store.test.ts
 npm run typecheck
 ```
 
-Expected: PASS (7 tests), clean typecheck.
+Expected: PASS (6 tests), clean typecheck.
 
 - [ ] **Step 5: Commit**
 
@@ -681,9 +681,12 @@ const OK_BODIES: Record<string, unknown> = {
   },
 };
 
-/** A fetch stub. `broken` names the substrings whose requests should 403. */
-function stubFetch(broken: string[] = []) {
-  return async (url: string | URL) => {
+/** A fetch stub. `broken` names the substrings whose requests should 403.
+ *  Cast to `typeof fetch`: collect() only ever calls it as fetchImpl(url, init),
+ *  but the real signature's first parameter is `RequestInfo | URL`, which a
+ *  narrower stub cannot satisfy contravariantly under `strict: true`. */
+function stubFetch(broken: string[] = []): typeof fetch {
+  return (async (url: string | URL) => {
     const u = String(url);
     if (broken.some((b) => u.includes(b))) {
       return { ok: false, status: 403, json: async () => ({ message: "Forbidden" }) } as unknown as Response;
@@ -691,7 +694,7 @@ function stubFetch(broken: string[] = []) {
     const key = Object.keys(OK_BODIES).find((k) => u.includes(k.split("/").pop()!))
       ?? (u.includes("open-vsx") ? "openvsx" : "vsmarketplace");
     return { ok: true, status: 200, json: async () => OK_BODIES[key] } as unknown as Response;
-  };
+  }) as unknown as typeof fetch;
 }
 
 describe("collect", () => {
@@ -769,7 +772,7 @@ Create `scripts/reach/collect.mjs`:
 // NOTHING and is reported in `failed`; its siblings still land. That isolation
 // is the whole enforcement of the never-write-a-zero rule — see the spec.
 
-import { mergeDaily, toDailyMap } from "./merge.mjs";
+import { mergeDaily } from "./merge.mjs";
 import { parseTraffic, parseOpenVsx, parseVsMarketplace, parseStars } from "./sources.mjs";
 import { readJson, writeJson, appendJsonl } from "./store.mjs";
 
