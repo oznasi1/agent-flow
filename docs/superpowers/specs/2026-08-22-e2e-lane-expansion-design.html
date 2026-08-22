@@ -114,7 +114,7 @@
   <div class="stat"><div class="v">+9</div><div class="k">journeys over uncovered surfaces</div><div class="d">Deck lifecycle · sidebar · Marketplace · Notepad · PR review</div></div>
   <div class="stat"><div class="v">3</div><div class="k">parked gaps attempted</div><div class="d">Copilot panel · Cursor provider · Cursor host</div></div>
   <div class="stat"><div class="v">1</div><div class="k">new standing gate</div><div class="d">repeatable sabotage</div></div>
-  <div class="stat"><div class="v">~20</div><div class="k">Electron boots after</div><div class="d">vs ~25 if purely additive</div></div>
+  <div class="stat"><div class="v">~21</div><div class="k">Electron boots after</div><div class="d">vs ~25 if purely additive</div></div>
 </div>
 <p><b>Speed was explicitly not a goal</b>, and is therefore treated as a constraint to respect rather than an
 objective to chase: the design spends boots where they buy coverage and saves them where grouping is free, but it
@@ -172,7 +172,7 @@ login shell and drops the shims), <code>--use-inmemory-secretstorage</code> (or 
 <tr><td>Deck lifecycle — retire, forget, track, clear-stale, Address PR</td>
     <td><b>Orchestrator</b> — the largest uncovered subsystem, but it needs two windows driven at once against a
     cross-window lock and a 6&nbsp;s evaluation pass. It deserves its own spec, not a corner of this one.</td></tr>
-<tr><td>Sidebar actions — detail, Explore, labels, reorder, sprint, component, child expansion</td>
+<tr><td>Sidebar actions — detail, Explore, labels, reorder, sprint, component; child trees at Take time</td>
     <td><b>Setup wizard &amp; Doctor</b> — not selected. Doctor's fixture probe deliberately returns
     <code>{}</code> so it renders "skip"; a journey would assert almost nothing without product change.</td></tr>
 <tr><td>Marketplace and Notepad — two webview bundles with zero real-host coverage</td>
@@ -278,7 +278,7 @@ the fixture becomes <em>more</em> faithful, not a fabrication shaped to suit a t
 <tr>
   <td><code>sidebar-actions.e2e.ts</code></td>
   <td>Detail panel renders <code>descriptionText</code> · label add · add-to-sprint and remove · set component ·
-      child expansion one level · card reorder persists across a refresh · reset order restores source order ·
+      card reorder persists across a refresh · reset order restores source order ·
       Explore launches and lands its plan file</td>
   <td><code>writes.jsonl</code> ops (<code>addLabel</code>, sprint add/remove, component update), the pool DOM, and
       <code>~/.agentflow/plans/</code> for Explore</td>
@@ -313,7 +313,7 @@ already has this property today. The journey therefore asserts the <code>"Copied
 workbench notification DOM rather than reading the clipboard back: reading it is unreliable headlessly and would
 make the assertion depend on state the test cannot own.</p>
 
-<h3>6.2 Per-test journeys — six boots</h3>
+<h3>6.2 Per-test journeys — seven boots</h3>
 
 <p><b><code>review-launch.e2e.ts</code></b> — the flow the user named. <code>gh api graphql</code> is shimmed to
 return one review request on <code>rocket#41</code>; the Deck's review rail renders it; "Review with Claude Code"
@@ -340,7 +340,13 @@ in 0.33.0 <b>without ever running in an editor</b>; the journey is the first exe
 <code>copilot-fallback.e2e.ts</code> stays as the no-extension case; the two together pin both sides of the
 branch.</p>
 
-<p><b><code>cursor-host.e2e.ts</code></b> — created only if §7's spike says go.</p>
+<p><b><code>child-tree-take.e2e.ts</code></b> — <code>agentFlow.childWorktrees</code> is on and the fixture now
+claims <code>children</code>, so taking <code>E2E-1</code> finds <code>E2E-1-a</code> one level down and offers the
+tree. Asserts a git-registered worktree per child. <b>Corrected during planning:</b> children surface at
+<em>Take</em> time behind <code>probeTree</code> (<code>tasksView.ts</code>), not as a sidebar tree expansion — it
+opens windows and creates worktrees, so it cannot share a host and belongs here rather than in §6.1.</p>
+
+<p><b><code>cursor-host.e2e.ts</code></b> — created only if §8's spike says go.</p>
 </section>
 
 <section>
@@ -419,7 +425,7 @@ hashes <code>host.ts</code> and <code>claudeCode.ts</code>) but each pays full E
 <tbody>
 <tr><td>Today</td><td>11</td><td>Measured at ~1–2 min in CI</td></tr>
 <tr><td>Purely additive</td><td>~25</td><td>The approach this design rejected</td></tr>
-<tr><td><b>This design</b></td><td><b>~20</b></td><td>11 existing + 3 grouped + 6 per-test (+1 if the spike says go)</td></tr>
+<tr><td><b>This design</b></td><td><b>~21</b></td><td>11 existing + 3 grouped + 7 per-test (+1 if the spike says go)</td></tr>
 </tbody>
 </table>
 <p><b>CI changes:</b> the cache key in <code>e2e.yml</code> gains <code>copilotChat.ts</code>; a new weekly
