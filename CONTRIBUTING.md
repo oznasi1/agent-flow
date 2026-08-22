@@ -67,7 +67,7 @@ src/
 │   ├── sessions.ts     # Claude Code's own registry of running sessions
 │   ├── forge/          # which forge is active, behind one interface (docs/FORGES.md)
 │   ├── pr/             # PR/MR facts per repo, over `gh` — and `pr/glab/` over `glab`
-│   ├── review/         # the review queue + "Review with your agent tool": search, sort, launch, store
+│   ├── review/         # the review queue + "Review with …" (names your tool — Claude Code, Cursor, or Copilot): search, sort, launch, store
 │   ├── claudeAssets.ts # scan ~/.claude: marketplaces, plugins, skills, commands, hooks
 │   ├── sections.ts     # the Marketplace's category order (Yours → size → Uncategorized)
 │   ├── fuzzy.ts        # the ranked fuzzy match behind the Marketplace's search
@@ -91,7 +91,7 @@ answer something degrades in a stated way rather than faking an answer;
 [docs/FORGES.md](docs/FORGES.md) lists what those are.
 
 The session seed is one chokepoint in `engine/workspace.ts` that every launch path — take,
-batch, Explore, Notepad, Deck relaunch, Address PR, Review with your agent tool — goes through. It
+batch, Explore, Notepad, Deck relaunch, Address PR, Review with … — goes through. It
 resolves `agentFlow.agentProvider` × `agentFlow.agentSurface` **at seed time in the target
 window**, never from the plan file, so flipping either setting also changes plans already
 on disk.

@@ -63,7 +63,8 @@ Four seams carry most of the design:
   [docs/FORGES.md](docs/FORGES.md).
 - **The session seed** — one chokepoint in [src/engine/workspace.ts](src/engine/workspace.ts)
   that every launch path goes through (take, batch, Explore, Notepad, Deck relaunch, Address
-  PR, Review with your agent tool). It resolves `agentFlow.agentProvider` × `agentFlow.agentSurface`
+  PR, Review with … — the button names your tool: Claude Code, Cursor, or Copilot). It
+  resolves `agentFlow.agentProvider` × `agentFlow.agentSurface`
   **at seed time in the target window**, never from the plan file, so flipping a setting also
   changes plans already on disk.
 - **Pure vs. `*Fs`** — where logic needs the filesystem, the arithmetic and rules live in a

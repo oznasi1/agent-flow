@@ -33,10 +33,11 @@
   for your fixes — then, by default, starts implementing the requested changes (toggle with
   `agentFlow.prReviewAutoFix`).
 - **Review queue** — a strip on the Deck lists every open PR that asks for *your* review,
-  sortable by oldest or smallest, with per-row size, CI and age. **Review with your agent tool** — a
-  play button on every row, or the labelled button once you open one — checks it out into a
-  worktree and seeds a session to review it; submitting the review itself from the Deck is
-  opt-in and ships **off** (`agentFlow.reviewWrites`).
+  sortable by oldest or smallest, with per-row size, CI and age. **Review with …** (the
+  button names your configured tool — `Review with Claude Code`, `Review with Cursor`, or
+  `Review with Copilot`) — a play button on every row, or the labelled button once you open
+  one — checks it out into a worktree and seeds a session to review it; submitting the
+  review itself from the Deck is opt-in and ships **off** (`agentFlow.reviewWrites`).
 - **Launch in parallel** — filter the repo lens to one repo **or several** and a checkbox
   appears on each task. Tick a few, then **Launch in parallel**: each task gets its own git
   worktree (its own branch) in whichever of the filtered repos it's inferred to touch — or
@@ -227,7 +228,7 @@ queue is still a scroll, not a count. Each row carries the repo, PR number, titl
 author, age, and its size both as `+409 −50 · 8 files` and as an S/M/L bucket;
 sort by **oldest** (what you owe most) or **smallest** (what you can clear before
 standup). Expanding a row fetches which checks failed and how many review threads
-are still open, alongside the review decision and mergeability. **Review with your agent tool**
+are still open, alongside the review decision and mergeability. **Review with …**
 checks the PR out into a worktree and seeds
 a session to review the diff and write its findings to
 `.pick-task/REVIEW-<number>.md`, which the row can then load into the review box.

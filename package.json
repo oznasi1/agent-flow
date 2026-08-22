@@ -252,7 +252,7 @@
             "Ask every launch — pick from the tools this editor can run"
           ],
           "default": "claude-code",
-          "markdownDescription": "Which tool Agent Flow starts a session with. `copilot` works only in VS Code and `cursor` only in Cursor — each falls back to Claude Code in the other editor. Note that neither Copilot nor Cursor sessions appear as live sessions on the Deck, which reads Claude Code's session files.\n\nSet to `ask` to choose per launch. Batch launches ask once for the whole batch, and Orchestrator rules — which run unattended — always use Claude Code, because there is nobody there to answer a picker."
+          "markdownDescription": "Which tool Agent Flow starts a session with. `copilot` works only in VS Code and `cursor` only in Cursor — each falls back to Claude Code in the other editor. Note that neither Copilot nor Cursor sessions appear as live cards on the Deck, which reads Claude Code's session files.\n\nSet to `ask` to choose per launch. Batch launches ask once for the whole batch, and Orchestrator rules — which run unattended — always use Claude Code, because there is nobody there to answer a picker."
         },
         "agentFlow.agentSurface": {
           "type": "string",
@@ -645,7 +645,7 @@
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "markdownDescription": "How long a finished **Explore** or **Notepad** session stays on the In-flight board once you close its session. These run in your checkout rather than in a worktree, so there is no branch or worktree to come back to and nothing to lose — `0` (the default) removes the card as soon as the session closes. Raise it to keep such a card around for that many hours instead. The run record is deleted when the window elapses; briefs on disk are left untouched."
+          "markdownDescription": "How long a finished **Explore** or **Notepad** session stays on the In-flight board once you close it. These run in your checkout rather than in a worktree, so there is no branch or worktree to come back to and nothing to lose — `0` (the default) removes the card as soon as the session closes. Raise it to keep such a card around for that many hours instead. The run record is deleted when the window elapses; briefs on disk are left untouched."
         },
         "agentFlow.inflightShowAll": {
           "type": "boolean",
@@ -681,7 +681,7 @@
         },
         "agentFlow.reviewRequestModes": {
           "type": "array",
-          "markdownDescription": "Seed modes offered by **Review with your agent tool** on the Deck's review strip. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`. Add your own — e.g. separate backend and frontend review modes — and clicking **Review with your agent tool** asks which to use, since your entry joins the built-in **Full review** rather than replacing it. Pin one with `#agentFlow.reviewRequestMode#` to skip the question. Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"full\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you. Under `#agentFlow.forge#: gitlab` the built-in **Full review** mode carries an equivalent GitLab-flavoured prompt, unless you have overridden that mode's `prompt` yourself.",
+          "markdownDescription": "Seed modes offered by **Review with …** on the Deck's review strip — the button names your configured tool, so it reads `Review with Claude Code`, `Review with Cursor`, or `Review with Copilot`. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`. Add your own — e.g. separate backend and frontend review modes — and clicking **Review with …** asks which to use, since your entry joins the built-in **Full review** rather than replacing it. Pin one with `#agentFlow.reviewRequestMode#` to skip the question. Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"full\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you. Under `#agentFlow.forge#: gitlab` the built-in **Full review** mode carries an equivalent GitLab-flavoured prompt, unless you have overridden that mode's `prompt` yourself.",
           "items": {
             "type": "object",
             "required": [
@@ -722,7 +722,7 @@
         "agentFlow.reviewRequestMode": {
           "type": "string",
           "default": "ask",
-          "markdownDescription": "Which review mode to seed when you click **Review with your agent tool**: `ask` to choose each time, or the `id` of one of `#agentFlow.reviewRequestModes#`. A stock install has one mode and shows no picker; add or hide modes so only one is left and the picker stays away."
+          "markdownDescription": "Which review mode to seed when you click **Review with …**: `ask` to choose each time, or the `id` of one of `#agentFlow.reviewRequestModes#`. A stock install has one mode and shows no picker; add or hide modes so only one is left and the picker stays away."
         },
         "agentFlow.reviewOpenIn": {
           "type": "string",
@@ -734,19 +734,19 @@
           ],
           "enumDescriptions": [
             "Always open the review in a new window on its worktree",
-            "Ask each time you click Review with your agent tool",
+            "Ask each time you click Review with …",
             "Always start the review here, keeping this window's folders as they are",
             "Always pick an existing .code-workspace to focus and seed"
           ],
           "default": "new-window",
-          "markdownDescription": "Where **Review with your agent tool** opens: a new window on the review worktree (the default, and what every release so far did), this window, a `.code-workspace` you already have, or `ask` to choose each time — the same question `#agentFlow.openIn#` asks for a task you take, kept separate because a review is a shorter errand. The review always runs in its own git worktree whichever you pick; a destination other than a new window seeds a session that is told to work in that worktree by absolute path."
+          "markdownDescription": "Where **Review with …** opens: a new window on the review worktree (the default, and what every release so far did), this window, a `.code-workspace` you already have, or `ask` to choose each time — the same question `#agentFlow.openIn#` asks for a task you take, kept separate because a review is a shorter errand. The review always runs in its own git worktree whichever you pick; a destination other than a new window seeds a session that is told to work in that worktree by absolute path."
         },
         "agentFlow.reviewRequestPrompt": {
           "type": "string",
           "editPresentation": "multilineText",
           "default": "",
           "markdownDeprecationMessage": "Deprecated — use `agentFlow.reviewRequestModes`. If you customized this, its value is migrated into the **Full review** mode automatically.",
-          "markdownDescription": "Prompt seeded when you launch **Review with your agent tool** on a review request. Empty uses the built-in default. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`."
+          "markdownDescription": "Prompt seeded when you launch **Review with …** on a review request. Empty uses the built-in default. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`."
         },
         "agentFlow.stampLabelOnWrite": {
           "type": "boolean",

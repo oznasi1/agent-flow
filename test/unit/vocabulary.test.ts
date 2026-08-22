@@ -108,22 +108,14 @@ const LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "the Marketplace tab listing subagents — the one correct use of the word" },
   { location: "src/webview/MarketplaceApp.tsx", text: "Search skills, commands, agents, hooks…",
     why: "searches subagents among the other asset types" },
-  // Task 8: the manifest has no way to interpolate the configured tool's name
-  // into generic prose, so these four review settings name the category of
-  // tool instead of a specific one. "agent tool" means "the AI coding tool
-  // configured via agentFlow.agentProvider" — a category, not a running
-  // session and not a subagent. The Deck's actual button renders the real
-  // tool name ("Review with Claude Code"); only this manifest prose is generic.
-  { location: "package.json#agentFlow.reviewRequestModes.markdownDescription", text: "Seed modes offered by **Review with your agent tool** on the Deck's review strip. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`. Add your own — e.g. separate backend and frontend review modes — and clicking **Review with your agent tool** asks which to use, since your entry joins the built-in **Full review** rather than replacing it. Pin one with `#agentFlow.reviewRequestMode#` to skip the question. Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"full\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you. Under `#agentFlow.forge#: gitlab` the built-in **Full review** mode carries an equivalent GitLab-flavoured prompt, unless you have overridden that mode's `prompt` yourself.",
-    why: "\"agent tool\" names the category of tool configured via agentFlow.agentProvider, not a running session or a subagent — see the block comment above" },
-  { location: "package.json#agentFlow.reviewRequestMode.markdownDescription", text: "Which review mode to seed when you click **Review with your agent tool**: `ask` to choose each time, or the `id` of one of `#agentFlow.reviewRequestModes#`. A stock install has one mode and shows no picker; add or hide modes so only one is left and the picker stays away.",
-    why: "\"agent tool\" names the category of tool configured via agentFlow.agentProvider, not a running session or a subagent — see the block comment above" },
-  { location: "package.json#agentFlow.reviewOpenIn.markdownDescription", text: "Where **Review with your agent tool** opens: a new window on the review worktree (the default, and what every release so far did), this window, a `.code-workspace` you already have, or `ask` to choose each time — the same question `#agentFlow.openIn#` asks for a task you take, kept separate because a review is a shorter errand. The review always runs in its own git worktree whichever you pick; a destination other than a new window seeds a session that is told to work in that worktree by absolute path.",
-    why: "\"agent tool\" names the category of tool configured via agentFlow.agentProvider, not a running session or a subagent — see the block comment above" },
-  { location: "package.json#agentFlow.reviewOpenIn.enumDescriptions[1]", text: "Ask each time you click Review with your agent tool",
-    why: "\"agent tool\" names the category of tool configured via agentFlow.agentProvider, not a running session or a subagent — see the block comment above" },
-  { location: "package.json#agentFlow.reviewRequestPrompt.markdownDescription", text: "Prompt seeded when you launch **Review with your agent tool** on a review request. Empty uses the built-in default. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`.",
-    why: "\"agent tool\" names the category of tool configured via agentFlow.agentProvider, not a running session or a subagent — see the block comment above" },
+  // Fix round 1: the five "Review with your agent tool" review-setting entries
+  // that used to live here are gone. That phrase described a button that does
+  // not exist — the real button always names a concrete tool via
+  // `providerLabel()` (src/config.ts) and is never a generic phrase. Manifest
+  // prose now uses the "Review with …" ellipsis caption instead, which no
+  // longer contains the agent-word at all, so those five settings need no
+  // allowlist entry any more (confirmed via scanManifest: only
+  // deckGrouping.default and telemetry.enabled.markdownDescription remain).
   // Task 8: same repository-URL pattern as the two LEGITIMATE entries above
   // for src/modesNotice.ts and src/telemetry/notice.ts — the hyphen in
   // "agent-flow" bounds "agent" as a standalone word to the regex.

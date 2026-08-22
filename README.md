@@ -75,8 +75,10 @@ requested changes or a conflict lands in **In review**'s `fixes needed` lane. **
 focuses that window if it's already open; **Diff** shows the working tree.
 
 Above the columns sits your **review queue**: every open PR waiting on your review, sorted
-by oldest or smallest, with **Review with your agent tool** — a play button on every row, no need to
-open it — to check one out and have the diff read for you.
+by oldest or smallest, with **Review with …** (the button names your configured tool, so it
+reads **Review with Claude Code**, **Review with Cursor**, or **Review with Copilot**) — a
+play button on every row, no need to open it — to check one out and have the diff read
+for you.
 
 ### Marketplace — everything Claude Code can do here
 
