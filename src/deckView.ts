@@ -1098,7 +1098,7 @@ export class DeckPanel {
     // question it will never be asked. Both halves read off `confirmedAt`, so the
     // sentence and the gate cannot drift apart.
     const alsoAsks = target.action === "run"
-      ? (flow.launchConfirmedAt === undefined ? " It will still ask before it starts an agent session." : "")
+      ? (flow.launchConfirmedAt === undefined ? " It will still ask before it starts a session." : "")
       : (flow.commandConfirmedAt === undefined ? " It will still ask before it runs a shell command." : "");
     const message = target.action === "launch"
       ? (() => {
@@ -1120,7 +1120,7 @@ export class DeckPanel {
           `It will keep running commands on its own from now on.${alsoAsks}`
       : (() => {
           const mode = cfg.promptModes.find((m) => m.id === target.mode);
-          return `${flow.name} is ready to seed another agent into ${target.node.repo} with the "${
+          return `${flow.name} is ready to start another session in ${target.node.repo} with the "${
             mode?.label ?? target.mode ?? "default"
           }" prompt${noteClause}, unattended. It will keep seeding and launching on its own from now on.${alsoAsks}`;
         })();
@@ -1375,11 +1375,11 @@ export class DeckPanel {
     }
     return {
       kind: "done",
-      outcome: { ok: true, note: `seeded another agent in ${node.repo}` },
+      outcome: { ok: true, note: `started another session in ${node.repo}` },
       // A seed never promotes anything: the place it targets already exists.
       receipt: {
         level: "success",
-        message: `${flow.name}: seeded another agent in ${node.repo}.${
+        message: `${flow.name}: started another session in ${node.repo}.${
           cfg.seedAgent ? ` ${unattendedAgentLabel(cfg)} pre-seeded — press Enter to start.` : ""
         }`,
       },
@@ -2133,7 +2133,7 @@ export class DeckPanel {
     //     rather than worktrees (mode-dependent).
     if (requests.length > cfg.batchLaunchConfirmThreshold) {
       const go = await vscode.window.showWarningMessage(
-        `Review ${requests.length} PRs with agents? That's ${requests.length} agent sessions.`,
+        `Review ${requests.length} PRs with sessions? That's ${requests.length} sessions.`,
         { modal: true },
         "Review",
       );
@@ -2149,7 +2149,7 @@ export class DeckPanel {
       (await vscode.window.showQuickPick(
         modes.map((m) => ({ label: m.label, detail: m.detail, mode: m })),
         {
-          title: `Review ${requests.length} ${requests.length === 1 ? "PR" : "PRs"} with agents`,
+          title: `Review ${requests.length} ${requests.length === 1 ? "PR" : "PRs"} with sessions`,
           ignoreFocusOut: true,
         },
       ))?.mode;
@@ -2321,7 +2321,7 @@ export class DeckPanel {
       this.post({ type: "deck:reviewDraft", id, body: fs.readFileSync(req.draftPath, "utf8").trim() });
     } catch (e) {
       this.log(`deck: review draft ${id} unreadable: ${e}`);
-      this.toast("error", `Couldn't read the agent's review for ${req.repoName}#${req.number}.`);
+      this.toast("error", `Couldn't read the session's review for ${req.repoName}#${req.number}.`);
     }
   }
 
@@ -2878,6 +2878,10 @@ export class DeckPanel {
         showTokenTotal: getConfig().showTokenTotal,
         staleCount: this.staleCount,
         sourceLabel: this.connector.info().label,
+        // Read fresh on every post, like sourceLabel and showTokenTotal above:
+        // agentProvider is a setting the user can flip mid-session, and the
+        // board re-posts often enough that this is the whole of keeping it live.
+        agentLabel: providerLabel(resolvedProvider(getConfig().agentProvider)),
       });
       // The disabled branch posts its own "cleared" state directly — enqueueReviews
       // only ever posts once a search settles or is already fresh, neither of

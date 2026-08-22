@@ -2109,8 +2109,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // without this it looked identical to the user walking away. operation_failed is
     // no substitute — it carries no flow_id, so the Take can't be reconstructed.
     try {
-      // How should the agent start — pick a prompt mode (or use the configured default) FIRST.
-      const promptMode = await this.choosePromptMode(cfg, `${key} — how should the agent start?`);
+      // How should the session start — pick a prompt mode (or use the configured default) FIRST.
+      const promptMode = await this.choosePromptMode(cfg, `${key} — how should the session start?`);
       if (!promptMode) {
         track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", prompt_mode: promptModeProp, repo_count: 0, duration_ms: flow.elapsedMs(), task_fp: taskFp });
         return;
@@ -2206,7 +2206,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       if (go !== "Launch") return;
     }
 
-    const promptMode = await this.choosePromptMode(cfg, `Launch ${keys.length} selected task(s) — how should the agents start?`);
+    const promptMode = await this.choosePromptMode(cfg, `Launch ${keys.length} selected task(s) — how should the sessions start?`);
     if (!promptMode) return;
 
     const target = await this.chooseOpenTarget(cfg);

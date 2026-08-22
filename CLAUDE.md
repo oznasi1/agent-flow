@@ -61,9 +61,10 @@ Four seams carry most of the design:
   [src/engine/forge/types.ts](src/engine/forge/types.ts), selected by `agentFlow.forge`
   (`gh` or `glab`). Degradation is stated, never faked. See
   [docs/FORGES.md](docs/FORGES.md).
-- **The agent seed** — one chokepoint in [src/engine/workspace.ts](src/engine/workspace.ts)
+- **The session seed** — one chokepoint in [src/engine/workspace.ts](src/engine/workspace.ts)
   that every launch path goes through (take, batch, Explore, Notepad, Deck relaunch, Address
-  PR, Review with agent). It resolves `agentFlow.agentProvider` × `agentFlow.agentSurface`
+  PR, Review with … — the button names your tool: Claude Code, Cursor, or Copilot). It
+  resolves `agentFlow.agentProvider` × `agentFlow.agentSurface`
   **at seed time in the target window**, never from the plan file, so flipping a setting also
   changes plans already on disk.
 - **Pure vs. `*Fs`** — where logic needs the filesystem, the arithmetic and rules live in a
@@ -83,13 +84,21 @@ State lives outside the workspace on purpose, and in three different places for 
 different reasons: the Notepad in `globalState` (per editor, so it follows you between
 repos), Jira credentials in `SecretStorage`, and everything cross-window under
 `~/.agentflow/` — `runs/` is the Deck's durable one-file-per-task record
-([runs.ts](src/engine/runs.ts)), `plans/` is the transient handshake the agent seed
-consumes, `flows/` is the orchestrator's. Live agent signal is read best-effort from Claude
+([runs.ts](src/engine/runs.ts)), `plans/` is the transient handshake the session seed
+consumes, `flows/` is the orchestrator's. Live session signal is read best-effort from Claude
 Code's own `~/.claude/projects` transcripts ([transcript.ts](src/engine/transcript.ts),
 [sessions.ts](src/engine/sessions.ts)) — never assume it is present.
 
 ## Invariants
 
+- **Vocabulary.** A **session** is one run of a coding tool — one Deck card, one
+  row in `run.agents[]`. An **agent** is a worker a session delegates to (the
+  Marketplace's Agents tab, `.claude/agents/`). The tool itself is named
+  — "Review with Claude Code" — never called "the agent". Identifiers, setting
+  ids, stored values and orchestrator condition keys keep their released
+  spelling, so the code says `agents` where the UI says sessions.
+  `test/unit/vocabulary.test.ts` enforces this; its allowlist records every
+  place "agent" is still correct.
 - **Webviews cannot reach Node.** Any module reachable from a browser entry point that
   imports `fs`, `os`, `path`, `child_process` (etc.) breaks `npm run build` even if the code
   never runs — esbuild resolves statically. `tsc` and most of the suite pass regardless;

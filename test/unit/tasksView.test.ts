@@ -1611,7 +1611,7 @@ describe("explore", () => {
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
         planMd: expect.stringContaining(
-          "- **ASM-9** (task) — Fix retry bug — `/repos/svc` (branch: fix/retry) — idle, no agent attached",
+          "- **ASM-9** (task) — Fix retry bug — `/repos/svc` (branch: fix/retry) — idle, no session attached",
         ),
       }),
     );
@@ -3094,13 +3094,13 @@ describe("takeBatch", () => {
   const pickCursorAgent = () =>
     vi.mocked(window.showQuickPick).mockImplementation(
       async (_items: unknown, opts?: unknown) =>
-        ((opts as { title?: string } | undefined)?.title === "Which agent?"
+        ((opts as { title?: string } | undefined)?.title === "Which tool?"
           ? { label: "Cursor", provider: "cursor" }
           : { shared: false }) as never,
     );
   const agentPicks = () =>
     vi.mocked(window.showQuickPick).mock.calls.filter(
-      (c) => (c[1] as { title?: string } | undefined)?.title === "Which agent?",
+      (c) => (c[1] as { title?: string } | undefined)?.title === "Which tool?",
     );
 
   it("asks which agent once for the whole batch, and pins the answer onto every task", async () => {
@@ -3141,8 +3141,8 @@ describe("takeBatch", () => {
     await provider.takeBatch(["ASM-1"], ["api"]);
     expect(agentPicks()).toHaveLength(1);
     expect(agentPicks()[0][1]).toEqual({
-      title: "Which agent?",
-      placeHolder: "Pick the agent to start this session with",
+      title: "Which tool?",
+      placeHolder: "Pick the tool to start this session with",
       ignoreFocusOut: true,
     });
   });
@@ -3154,8 +3154,8 @@ describe("takeBatch", () => {
     const { provider } = setup();
     await provider.takeBatch(twoKeys, ["api"]);
     expect(agentPicks()[0][1]).toEqual({
-      title: "Which agent?",
-      placeHolder: "Pick the agent for every task in this batch",
+      title: "Which tool?",
+      placeHolder: "Pick the tool for every session in this batch",
       ignoreFocusOut: true,
     });
   });
@@ -3197,7 +3197,7 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(window.showQuickPick).mockImplementation(
       async (_items: unknown, opts?: unknown) =>
-        ((opts as { title?: string } | undefined)?.title === "Which agent?" ? undefined : { shared: false }) as never,
+        ((opts as { title?: string } | undefined)?.title === "Which tool?" ? undefined : { shared: false }) as never,
     );
     const { provider, posted } = setup();
     await provider.takeBatch(twoKeys, ["api"]);
@@ -3228,7 +3228,7 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(window.showQuickPick).mockImplementation(
       async (_items: unknown, opts?: unknown) =>
-        ((opts as { title?: string } | undefined)?.title === "Which agent?"
+        ((opts as { title?: string } | undefined)?.title === "Which tool?"
           ? { label: "Cursor", provider: "cursor" }
           : { shared: true }) as never,
     );
@@ -4830,7 +4830,7 @@ describe("agent-naming copy under the `ask` provider", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(window.showQuickPick).mockImplementation(
       async (_items: unknown, opts?: unknown) =>
-        ((opts as { title?: string } | undefined)?.title === "Which agent?"
+        ((opts as { title?: string } | undefined)?.title === "Which tool?"
           ? { label: "Cursor", provider: "cursor" }
           : { shared: false }) as never,
     );
@@ -4855,7 +4855,7 @@ describe("agent-naming copy under the `ask` provider", () => {
     const order: string[] = [];
     vi.mocked(window.showQuickPick).mockImplementation(async (_items: unknown, opts?: unknown) => {
       const title = (opts as { title?: string } | undefined)?.title;
-      if (title === "Which agent?") {
+      if (title === "Which tool?") {
         order.push("agent");
         return { label: "Cursor", provider: "cursor" } as never;
       }

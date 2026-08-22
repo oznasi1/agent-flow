@@ -117,7 +117,7 @@ describe("cardSignal", () => {
         activity: { state: "idle", lastActivityMs: 1, slug: null } },
     ] as CardAgent[];
     const bits = cardSignal(status({ repos: [repo({ added: 1, removed: 1 })], agents }), null);
-    expect(bits[2]).toEqual({ kind: "text", text: "2 agents" });
+    expect(bits[2]).toEqual({ kind: "text", text: "2 sessions" });
   });
 
   it("omits the diff bit when nothing changed", () => {

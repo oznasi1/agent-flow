@@ -45,8 +45,8 @@ describe("resolveBatchProvider", () => {
     window.showQuickPick.mockImplementationOnce(async (items: any) => items[1]);
     expect(await resolveBatchProvider(cfg(), true)).toBe("cursor");
     const opts = window.showQuickPick.mock.calls[0][1] as { title: string; placeHolder: string };
-    expect(opts.title).toBe("Which agent?");
-    expect(opts.placeHolder).toContain("every task in this batch");
+    expect(opts.title).toBe("Which tool?");
+    expect(opts.placeHolder).toContain("every session in this batch");
   });
 
   it("says 'this session' when the launch is not really a batch", async () => {

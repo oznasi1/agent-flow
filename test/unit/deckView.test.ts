@@ -802,6 +802,13 @@ describe("DeckPanel", () => {
     expect(lastRunsPost().sourceLabel).toBe("Acme");
   });
 
+  it("sends the resolved provider label on deck:runs so Deck copy can name the tool", async () => {
+    h.agentProvider = "cursor";
+    show();
+    await settled();
+    expect(lastRunsPost().agentLabel).toBe("Cursor");
+  });
+
   it("keeps review runs off the board — only the ticket run reaches it", async () => {
     h.runs = [
       mkRun(),
@@ -6658,7 +6665,7 @@ describe("a met seed rule acts", () => {
     await send({ type: "deck:refresh" });
     const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
     expect(call[0]).toBe(
-      'Ship the migration is ready to seed another agent into bite-me with the "Implementation" prompt, unattended. It will keep seeding and launching on its own from now on. It will still ask before it runs a shell command.',
+      'Ship the migration is ready to start another session in bite-me with the "Implementation" prompt, unattended. It will keep seeding and launching on its own from now on. It will still ask before it runs a shell command.',
     );
   });
 
@@ -6670,7 +6677,7 @@ describe("a met seed rule acts", () => {
     await send({ type: "deck:refresh" });
     const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
     expect(call[0]).toBe(
-      'Ship the migration is ready to seed another agent into bite-me with the "Implementation" prompt, unattended. It will keep seeding and launching on its own from now on. It will still ask before it runs a shell command.',
+      'Ship the migration is ready to start another session in bite-me with the "Implementation" prompt, unattended. It will keep seeding and launching on its own from now on. It will still ask before it runs a shell command.',
     );
   });
 
@@ -7323,7 +7330,7 @@ describe("a met run rule acts", () => {
     const { send } = await warmed([cmdFlow({ launchConfirmedAt: undefined, commandConfirmedAt: undefined })]);
     await send({ type: "deck:refresh" });
     const message = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
-    expect(message).toContain("still ask before it starts an agent session");
+    expect(message).toContain("still ask before it starts a session");
   });
 
   it("does NOT gate on a command edge it cannot resolve — nothing would be spent", async () => {

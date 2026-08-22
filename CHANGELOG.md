@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.0] — 2026-08-22
+
+### Changed
+
+- The Deck calls a card a **session**, not an agent — a session is one run of your
+  coding tool, and it can dispatch many agents (subagents) of its own. The
+  `Agents / Workspaces` lens is now `Sessions / Workspaces`, and the review
+  actions name your configured tool ("Review with Cursor") instead of saying
+  "agent". No setting, saved flow or run record changes: `agentFlow.openAgents`,
+  `agentFlow.deckGrouping`'s stored value and every orchestrator condition key
+  keep their existing spelling.
+
 ## [0.38.0] — 2026-08-22
 
 ### Changed

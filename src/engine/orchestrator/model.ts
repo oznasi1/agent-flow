@@ -83,7 +83,13 @@ export type CondKind =
    * documented arm for it, so it stays a total function over every kind. */
   | "command-succeeded";
 
-/** Parameterised where it has to be, a bare kind everywhere else. */
+/** The `kind` strings below are serialized into flow files under
+ * ~/.agentflow/flows and shared across windows, so they keep their released
+ * spelling — `agent-idle-over`, not `session-idle-over` — while the labels
+ * rendered beside them read "session". That mismatch is deliberate: a card is a
+ * session in the UI, and renaming a key would break every saved flow.
+ *
+ * Parameterised where it has to be, a bare kind everywhere else. */
 export type Condition =
   | { kind: CondKind }
   | { kind: "agent-idle-over"; minutes: number }

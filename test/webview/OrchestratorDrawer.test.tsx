@@ -371,8 +371,8 @@ describe("the tray", () => {
       nodes: [{ id: "n1", kind: "command", x: 0, y: 0, join: "any", commandId: "deploy" }],
     });
     render(<OrchestratorDrawer {...props({ flows: [existing] })} />);
-    expect(screen.getByText(/Drag a card from the board to attach an agent/i)).toBeTruthy();
-    // Not in THIS tray — the Agents tray is what a condition can be about. It has
+    expect(screen.getByText(/Drag a card from the board to attach a session/i)).toBeTruthy();
+    // Not in THIS tray — the Sessions tray is what a condition can be about. It has
     // its own Remove in the Actions section below (see that describe block); the
     // scope here is what makes this about the tray's membership rather than about
     // whether the node can be deleted at all.
@@ -380,7 +380,7 @@ describe("the tray", () => {
   });
 
   it("removes a command node, which nothing could delete before", () => {
-    // `removeNode` was reachable from the Agents tray alone, and that tray is
+    // `removeNode` was reachable from the Sessions tray alone, and that tray is
     // `isAgentNode` — so a command node could not be deleted from either surface,
     // and it is created by a `<select>` that fires on change: one accidental pick
     // was permanent short of hand-editing the flow file.
@@ -409,7 +409,7 @@ describe("the tray", () => {
   });
 
   it("drops every edge touching a command node it removes", () => {
-    // Same rule the Agents tray's own delete follows: an edge whose end is gone can
+    // Same rule the Sessions tray's own delete follows: an edge whose end is gone can
     // never be evaluated. It matters more here — a chained command's rules point at
     // AND out of the node being deleted.
     const onSave = vi.fn();
@@ -432,7 +432,7 @@ describe("the tray", () => {
   });
 
   it("shows no Actions section at all when a flow has no notify or command node", () => {
-    // No empty box for a flow that has none — the Agents tray earns its empty
+    // No empty box for a flow that has none — the Sessions tray earns its empty
     // state because it is a drop target; this list is not.
     const placeOnly = flow({
       nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" }],

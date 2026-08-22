@@ -25,10 +25,15 @@ message. One fact, one place.
 
 | Target node | Verb    | What it costs                                  |
 |-------------|---------|-------------------------------------------------|
-| `planned`   | launch  | Opens a new agent session — real money           |
+| `planned`   | launch  | Opens a new session — real money                 |
 | `place`     | seed    | Sends a prompt into a live session — real money  |
 | `command`   | run     | Executes shell on your machine                   |
 | `notify`    | notify  | Nothing — a toast on the Deck, and a receipt on the rule |
+
+Condition **keys** keep their released spelling — `agent-ended-turn`,
+`agent-idle-over`, `no-agent-left` — because they are serialized into flow
+files under `~/.agentflow/flows`. The labels shown beside them read
+"session". That mismatch is deliberate; renaming a key breaks every saved flow.
 
 ## One pass
 
@@ -43,14 +48,14 @@ first four steps can end the pass without a command ever running.
    the same unfired rule and both act on it.
 2. **Evaluate each armed flow's rules.** Conditions are read off the
    statuses this same pass already built — PR state, CI, review threads, git
-   cleanliness, agent activity, ticket status. A rule whose condition is not
+   cleanliness, session activity, ticket status. A rule whose condition is not
    met, or cannot yet be answered, is simply left alone.
 3. **Hold, if this is the first look.** The first evaluation after arming —
    or after a restart — that finds rules *already* met does not act. It
    reports them and waits for **Go**. A flow armed last week must not spend
    anything the moment you reopen the Deck.
 4. **Ask for consent, once per kind of spend.** Two separate gates: one
-   covers launching and seeding agent sessions, the other covers running
+   covers launching and seeding sessions, the other covers running
    shell. Consent to open a session is **not** consent to execute a command,
    so a flow you approved before commands existed is asked again. The modal
    names the actual command text. The pass that asks performs nothing —
@@ -189,14 +194,14 @@ to batch about a command you have not typed yet.
 - **Recover a failed rule** — Reset clears the latch and keeps the note and
   mode.
 - **Refuse the whole thing** — the command gate is separate from the session
-  gate, so approving agent launches never silently approved shell.
+  gate, so approving session launches never silently approved shell.
 
 ### You cannot
 
 - **Wait on another branch's CI from the UI.** `branch CI passed` takes a
   repo *and* a branch, and no picker asks for them — so "wait for the build
   to pass on master, then deploy" has to be hand-written in the flow file
-  today. Same for `agent idle over…` and `ticket status is…`. Hand-authored
+  today. Same for `session idle over…` and `ticket status is…`. Hand-authored
   rules do render and do run.
 - **Choose the directory from the UI.** `cwdRepo` is respected by the engine
   but has no control; without it the directory is inherited from the rule's
@@ -228,7 +233,7 @@ to batch about a command you have not typed yet.
 | Flows lock TTL                 | 300 s          | Held across a whole pass; a stale lock is reaped, never stolen.             |
 | Max output                     | 1 MiB          | Beyond it the process is torn down and the rule latches errored.            |
 | Kill signal                    | SIGKILL        | A script that traps TERM would otherwise run past its own deadline.        |
-| Consent prompts                | 2 per flow     | One for agent sessions, one for shell — asked once each, then remembered.  |
+| Consent prompts                | 2 per flow     | One for sessions, one for shell — asked once each, then remembered.  |
 | Telemetry about commands       | count only     | Never an id, a label, or the command text: a `run` string carries hostnames and sometimes tokens. |
 
 ## Not yet proven

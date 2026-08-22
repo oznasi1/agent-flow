@@ -56,6 +56,14 @@ let toastSeq = 0;
 // moment later. Same reasoning, same default, as App.tsx's DEFAULT_SOURCE_LABEL.
 const DEFAULT_SOURCE_LABEL = "Jira";
 
+// The webview renders before the extension's first deck:runs post on some paths,
+// so this must be a real name and not "" — a tooltip that reads "undefined" is
+// worse than one that briefly names the default agent. Same reasoning as
+// DEFAULT_SOURCE_LABEL above. Also the fallback for a deck:runs message that
+// omits `agentLabel` altogether — an in-flight message posted before this
+// build's host reloads has no such field.
+const DEFAULT_AGENT_LABEL = "Claude Code";
+
 // `needs` stays the column id — it is the engine's vocabulary (DeckColumn,
 // deriveBucket) and never reaches a user. "Action required" is what the board
 // says, in the summary tile, the column header and the legend alike: one name for
@@ -153,7 +161,7 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
 
 function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
   r: RunStatus;
-  /** Non-null on the Agents board: this card is that one session, and its state
+  /** Non-null on the Sessions lens: this card is that one session, and its state
    * line and action target come from the agent rather than the run. */
   agent: CardAgent | null;
   column: DeckColumn;
@@ -163,7 +171,7 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
 }): JSX.Element {
   // The agent's own activity when this card is an agent; the run's reduction
   // otherwise. `column` is threaded in rather than read off `r` for the same
-  // reason: on the Agents board both are per-session.
+  // reason: on the Sessions lens both are per-session.
   const sv = stateView({ ...r, agent: agent ? agent.activity : r.agent, column }, sourceLabel);
   // A ticketless run has no tracked issue behind it: the key is a local slug, and
   // openExternal("") is a button that does nothing.
@@ -192,7 +200,7 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
   const dragRepo = agent?.repo ?? (r.repos.length === 1 ? r.repos[0].name : undefined);
   const cardDragKey = dragRepo ? `${r.run.key}${DRAG_SEP}${dragRepo}` : null;
   // What this card IS, as its own mark. The run's kind, never the agent's: on the
-  // Agents board the state comes from the session, but the object the card belongs
+  // Sessions lens the state comes from the session, but the object the card belongs
   // to is still the run.
   const kind = runKind(r.run);
   const sigBits = cardSignal(r, agent);
@@ -336,6 +344,8 @@ export function DeckApp(): JSX.Element {
   const [staleCount, setStaleCount] = React.useState(0);
   // See DEFAULT_SOURCE_LABEL's own comment for why "Jira" rather than "".
   const [sourceLabel, setSourceLabel] = React.useState(DEFAULT_SOURCE_LABEL);
+  // See DEFAULT_AGENT_LABEL's own comment for why "Claude Code" rather than "".
+  const [agentLabel, setAgentLabel] = React.useState(DEFAULT_AGENT_LABEL);
   /** Mirrors `agentFlow.deck.showTokenTotal`. Starts false so the header tile is
    * absent on the very first paint, before any deck:runs has arrived — the
    * setting is off by default, and flashing a total that then vanishes would be
@@ -395,7 +405,7 @@ export function DeckApp(): JSX.Element {
   const [branchCi, setBranchCi] = React.useState<Record<string, BranchCiStatus>>({});
   const [orchEnabled, setOrchEnabled] = React.useState(false);
   const [openFlowId, setOpenFlowId] = React.useState<string | null>(null);
-  /** The selected card's `DeckCard.id`, not a run key: the Agents lens renders
+  /** The selected card's `DeckCard.id`, not a run key: the Sessions lens renders
    * one card per session, so two cards can share a run and a key could not tell
    * them apart. */
   const [selId, setSelId] = React.useState<string | null>(null);
@@ -418,6 +428,9 @@ export function DeckApp(): JSX.Element {
         setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
         setSourceLabel(m.sourceLabel);
+        // The `?? DEFAULT_AGENT_LABEL` is required, not defensive: an in-flight
+        // message posted before this build's host reloads has no such field.
+        setAgentLabel(m.agentLabel ?? DEFAULT_AGENT_LABEL);
         setShowTokenTotal(m.showTokenTotal);
         setSyncedAt(Date.now());
         setHasLoaded(true);
@@ -672,7 +685,7 @@ export function DeckApp(): JSX.Element {
           </button>
         )}
         {/* A lens, not a trust toggle: both sides show everything, one card per
-            agent or one per launched task. Persisted, so it survives a reload. */}
+            session or one per launched task. Persisted, so it survives a reload. */}
         <div className="ctls seg">
           {(["agents", "workspaces"] as const).map((g) => (
             <button
@@ -680,11 +693,11 @@ export function DeckApp(): JSX.Element {
               type="button"
               className={`ctl ${grouping === g ? "on" : ""}`}
               title={g === "agents"
-                ? "One card per Claude Code agent, with the repo, ticket and PR it belongs to"
-                : "One card per launched task, with its agents nested underneath"}
+                ? `One card per ${agentLabel} session, with the repo, ticket and PR it belongs to`
+                : "One card per launched task, with its sessions nested underneath"}
               onClick={() => { setGrouping(g); send({ type: "deck:setGrouping", grouping: g }); }}
             >
-              {g === "agents" ? "Agents" : "Workspaces"}
+              {g === "agents" ? "Sessions" : "Workspaces"}
             </button>
           ))}
         </div>
@@ -785,6 +798,7 @@ export function DeckApp(): JSX.Element {
           setSelectedReviews([]);
           selectAnchor.current = null;
         }}
+        agentLabel={agentLabel}
       />
 
       {!hasLoaded ? (

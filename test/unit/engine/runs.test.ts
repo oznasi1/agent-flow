@@ -102,13 +102,13 @@ describe("describeActiveTasks", () => {
   it("lists an unfinished run as idle when its repo has no live session", () => {
     const run = mkRun("ASM-1", 100);
     expect(describeActiveTasks([run], new Set())).toBe(
-      "## Active tasks\n- **ASM-1** (task) — ASM-1 summary — `/repos/svc` (branch: asm-1) — idle, no agent attached",
+      "## Active tasks\n- **ASM-1** (task) — ASM-1 summary — `/repos/svc` (branch: asm-1) — idle, no session attached",
     );
   });
 
   it("marks a run as having an agent open when its repo is in livePlaces", () => {
     const run = mkRun("ASM-1", 100);
-    expect(describeActiveTasks([run], new Set(["/repos/svc"]))).toContain("agent open");
+    expect(describeActiveTasks([run], new Set(["/repos/svc"]))).toContain("session open");
     expect(describeActiveTasks([run], new Set(["/repos/svc"]))).not.toContain("idle");
   });
 
@@ -131,7 +131,7 @@ describe("describeActiveTasks", () => {
     const malformed = rest as unknown as Run;
     expect(() => describeActiveTasks([malformed], new Set())).not.toThrow();
     expect(describeActiveTasks([malformed], new Set())).toContain("unknown location");
-    expect(describeActiveTasks([malformed], new Set())).toContain("idle, no agent attached");
+    expect(describeActiveTasks([malformed], new Set())).toContain("idle, no session attached");
   });
 
   it("collapses an embedded newline in a run's summary so the bullet stays a single line", () => {
@@ -139,7 +139,7 @@ describe("describeActiveTasks", () => {
     const md = describeActiveTasks([run], new Set());
     expect(md.split("\n")).toEqual([
       "## Active tasks",
-      "- **ASM-1** (task) — Fix the retry bug and the flaky test — `/repos/svc` (branch: asm-1) — idle, no agent attached",
+      "- **ASM-1** (task) — Fix the retry bug and the flaky test — `/repos/svc` (branch: asm-1) — idle, no session attached",
     ]);
   });
 
@@ -149,8 +149,8 @@ describe("describeActiveTasks", () => {
     const md = describeActiveTasks([b, a], new Set());
     expect(md.split("\n")).toEqual([
       "## Active tasks",
-      "- **ASM-2** (task) — ASM-2 summary — `/repos/svc` (branch: asm-2) — idle, no agent attached",
-      "- **ASM-1** (task) — ASM-1 summary — `/repos/svc` (branch: asm-1) — idle, no agent attached",
+      "- **ASM-2** (task) — ASM-2 summary — `/repos/svc` (branch: asm-2) — idle, no session attached",
+      "- **ASM-1** (task) — ASM-1 summary — `/repos/svc` (branch: asm-1) — idle, no session attached",
     ]);
   });
 });

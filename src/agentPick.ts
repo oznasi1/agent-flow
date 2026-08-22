@@ -32,8 +32,8 @@ export async function resolveBatchProvider(cfg: AgentFlowConfig, isBatch: boolea
       // because a shared window seeds from plan files and cannot ask later; it is a
       // single launch, so it gets the single-launch placeholder, word for word the
       // one `openWorkspace` would have shown it.
-      title: "Which agent?",
-      placeHolder: isBatch ? "Pick the agent for every task in this batch" : "Pick the agent to start this session with",
+      title: "Which tool?",
+      placeHolder: isBatch ? "Pick the tool for every session in this batch" : "Pick the tool to start this session with",
       ignoreFocusOut: true,
     },
   );

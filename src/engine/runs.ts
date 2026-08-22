@@ -72,7 +72,7 @@ export function describeActiveTasks(runs: Run[], livePlaces: ReadonlySet<string>
     // Collapse any embedded newline so one run's summary can't split a single
     // bullet across multiple lines of the `## Active tasks` markdown list.
     const summary = r.summary.replace(/\s*\n\s*/g, " ");
-    return `- **${r.key}** (${runKind(r)}) — ${summary} — ${where} — ${live ? "agent open" : "idle, no agent attached"}`;
+    return `- **${r.key}** (${runKind(r)}) — ${summary} — ${where} — ${live ? "session open" : "idle, no session attached"}`;
   });
   return `## Active tasks\n${lines.join("\n")}`;
 }

@@ -2176,8 +2176,8 @@ describe("openWorkspace — ask", () => {
     window.showQuickPick.mockResolvedValueOnce({ label: "Claude Code", provider: "claude-code" });
     await openWorkspace(baseReq({ seedAgent: true }));
     expect(window.showQuickPick.mock.calls[0][1]).toEqual({
-      title: "Which agent?",
-      placeHolder: "Pick the agent to start this session with",
+      title: "Which tool?",
+      placeHolder: "Pick the tool to start this session with",
       ignoreFocusOut: true,
     });
   });

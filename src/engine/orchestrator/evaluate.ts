@@ -24,7 +24,7 @@ import {
 export const MAX_LAUNCHES_PER_PASS = 3;
 
 /** Conditions that can only ever be true when the Live signal is readable, because
- * they ask what an agent is *doing*. `no-agent-left` is deliberately NOT here: it
+ * they ask what a session is *doing*. `no-agent-left` is deliberately NOT here: it
  * counts sessions in the registry, which is populated whether or not any transcript
  * is read — and it is exactly the condition that should fire when nothing is there,
  * so blocking it on an unknown state would invert it. */

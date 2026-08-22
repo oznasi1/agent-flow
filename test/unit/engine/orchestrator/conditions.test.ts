@@ -415,7 +415,7 @@ describe("describeCond", () => {
     expect(describeCond({ kind: "agent-idle-over", minutes: 10 }, ctx({ agents: [cardAgent("idle", null, REPO)] })))
       .toBe("last activity unknown");
     expect(describeCond({ kind: "agent-ended-turn" }, ctx({ agents: [cardAgent("unknown", null, REPO)] })))
-      .toBe("agent state unknown");
+      .toBe("session state unknown");
   });
 
   it("describes agent-idle-over while the agent is still working, not idle", () => {
@@ -427,14 +427,14 @@ describe("describeCond", () => {
     expect(describeCond({ kind: "agent-idle-over", minutes: 10 }, ctx({ agents: [cardAgent("needs-you", NOW, REPO)] })))
       .toBe("ended turn");
     expect(describeCond({ kind: "agent-idle-over", minutes: 10 }, ctx({ agents: [cardAgent("unknown", null, REPO)] })))
-      .toBe("agent state unknown");
+      .toBe("session state unknown");
   });
 
   it("describes how many agents are in the place", () => {
-    expect(describeCond({ kind: "no-agent-left" }, ctx({ agents: [] }))).toBe("no agent");
-    expect(describeCond({ kind: "no-agent-left" }, ctx({ agents: [cardAgent("idle", NOW, REPO)] }))).toBe("1 agent open");
+    expect(describeCond({ kind: "no-agent-left" }, ctx({ agents: [] }))).toBe("no sessions");
+    expect(describeCond({ kind: "no-agent-left" }, ctx({ agents: [cardAgent("idle", NOW, REPO)] }))).toBe("1 session open");
     expect(describeCond({ kind: "no-agent-left" }, ctx({ agents: [cardAgent("idle", NOW, REPO), cardAgent("working", NOW, REPO)] })))
-      .toBe("2 agents open");
+      .toBe("2 sessions open");
   });
 
   it("describes git state", () => {

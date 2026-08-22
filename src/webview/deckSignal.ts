@@ -90,10 +90,10 @@ export function cardSignal(r: RunStatus, agent: CardAgent | null): SignalBit[] {
       title: r.repos.map((g) => g.name).join("\n"),
     });
   }
-  // r.agents.length is the RUN's agent count, not this card's — on the Agents
-  // lens `agent` is one session and the card is that one agent, so this branch
-  // only ever fires on the Workspaces lens, where a card is a run.
-  else if (r.agents.length > 1) bits.push({ kind: "text", text: `${r.agents.length} agents` });
+  // r.agents.length is the RUN's session count, not this card's — on the
+  // Sessions lens a card is one session, so this branch only ever fires on
+  // the Workspaces lens, where a card is a run.
+  else if (r.agents.length > 1) bits.push({ kind: "text", text: `${r.agents.length} sessions` });
 
   // Same structural guard as above: slice caps at three bits.
   return bits.slice(0, 3);

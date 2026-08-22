@@ -646,7 +646,7 @@ function NoteRow({ note, sections, editing, onEdit, onDone, dnd }: {
       {note.body && <div className="np-body">{note.body}</div>}
       <ImageStrip note={note} />
       <div className="np-acts">
-        <button className="take" onClick={() => send({ type: "notepad:run", id: note.id })} title="Start this note as an agent run">
+        <button className="take" onClick={() => send({ type: "notepad:run", id: note.id })} title="Start this note as a session">
           <PlayIcon /> Start
         </button>
         <button className="quiet icon-only dim" aria-label="Edit note" title="Edit note" onClick={onEdit}>

@@ -28,8 +28,8 @@ export interface DeckDetailProps {
 interface Action {
   label: string;
   /** Extra context beside the label — an identifier (a branch, a key, a PR
-   * number, a path) when `id` is set, prose ("already running", "seed an
-   * agent against the review") otherwise. Only an identifier earns the mono
+   * number, a path) when `id` is set, prose ("already running", "start a
+   * session against the review") otherwise. Only an identifier earns the mono
    * treatment: the spec's rule is mono for identifiers, UI font for anything
    * that reads as English. */
   hint?: string;
@@ -66,7 +66,7 @@ export function DeckDetail({ card, sourceLabel, usage, onClose, onForget }: Deck
   // look at — so the old `lane === "waiting"` half of this test is what the column
   // itself says. The `local` guard stays: a local card's key is read off its
   // branch, so its status may belong to a ticket somebody else owns, not something
-  // to seed an agent against. prSignals(r.prs).open guards the remaining hole: a
+  // to start a session against. prSignals(r.prs).open guards the remaining hole: a
   // card can reach review off its Jira status alone, with `prs: {}` and no actual
   // PR to address.
   const canAddressPr = !local && card.column === "review" && prSignals(r.prs).open;
@@ -82,7 +82,7 @@ export function DeckDetail({ card, sourceLabel, usage, onClose, onForget }: Deck
             run: () => send({ type: "deck:inspect", key, action: "diff", repo: g.name }) }))
         : []),
       ...(canAddressPr
-        ? [{ label: "Address PR", hint: "seed an agent against the review",
+        ? [{ label: "Address PR", hint: "start a session against the review",
             run: () => send({ type: "deck:addressPr", key }) }]
         : []),
       ...(tracked
@@ -189,12 +189,12 @@ export function DeckDetail({ card, sourceLabel, usage, onClose, onForget }: Deck
       </div>
 
       <div className="dd-sec">
-        <div className="dd-lbl">Agents</div>
+        <div className="dd-lbl">Sessions</div>
         {/* Expanded by default here — there is room in the drawer, unlike the
           * card, where the fold existed because the card had none. */}
         {card.agents.length > 0
           ? <AgentsRow agents={card.agents} defaultOpen />
-          : <div className="dd-none">No agent open — git + {sourceLabel} only</div>}
+          : <div className="dd-none">No session open — git + {sourceLabel} only</div>}
       </div>
 
       {/* Spend lives only here, never on the card: the four classes are what make

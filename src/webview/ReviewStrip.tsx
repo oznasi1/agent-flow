@@ -10,7 +10,7 @@ function age(ms: number): string {
   return `${h}h`;
 }
 
-/** Why the agent action might not do what you expect. Both of the row's launch
+/** Why launching a review might not do what you expect. Both of the row's launch
  * controls — the play button on the line and the labelled one inside the open
  * row — carry it, so it lives here rather than being written out twice and left
  * to drift. Neither control is disabled by it: the host explains on click. */
@@ -76,9 +76,10 @@ export interface ReviewStripProps {
   onToggle?: (id: string, shift: boolean) => void;
   onSelectAll?: () => void;
   onLaunchBatch?: () => void;
+  agentLabel: string;
 }
 
-function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed, selecting, picked, onToggle, onExpand, onOpen, onLaunch, onLoadDraft, onBody, onSubmit }: {
+function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed, selecting, picked, onToggle, onExpand, onOpen, onLaunch, onLoadDraft, onBody, onSubmit, agentLabel }: {
   r: ReviewRequest;
   expanded: boolean;
   selecting: boolean;
@@ -95,6 +96,7 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
   onLoadDraft: (id: string) => void;
   onBody: (id: string, body: string) => void;
   onSubmit: (id: string, verb: ReviewVerb) => void;
+  agentLabel: string;
 }): JSX.Element {
   const ci = CI_GLYPH[r.ci];
   return (
@@ -124,7 +126,7 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
           <span className="rv-title" title={r.title}>{r.title}</span>
           {r.runKey && <span className="rv-running">reviewing</span>}
           {r.isDraft && <span className="rv-draft">draft</span>}
-          {/* The agent's findings, waiting to be read — NOT r.isDraft above, which is
+          {/* The session's findings, waiting to be read — NOT r.isDraft above, which is
               the PR's own draft state on the forge. Open the row to load it. */}
           {r.draftPath && <span className="rv-ready">review ready</span>}
           <span className={`rv-size s-${sizeBucket(linesChanged(r))}`}>{sizeBucket(linesChanged(r))}</span>
@@ -141,7 +143,7 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
           <span className="rv-author" title={r.author}>@{r.author}</span>
           <span className="rv-age">{age(r.createdAt)}</span>
         </button>
-        {/* The agent action, without opening the row. A SIBLING of .rv-line rather
+        {/* The review action, without opening the row. A SIBLING of .rv-line rather
             than a child, because .rv-line is itself a button: nested, its click
             would bubble straight into the row's own onExpand, so starting a review
             would always also expand the row.
@@ -164,9 +166,9 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
             // The accessible name stays the bare action either way — the caveat is
             // a caveat, not a different action. The title is where it goes, which
             // is also where the expanded button already puts it.
-            aria-label="Review with agent"
+            aria-label={`Review with ${agentLabel}`}
             title={r.localPath
-              ? "Review with agent"
+              ? `Review with ${agentLabel}`
               : notCheckedOut(r.repoName)}
             onClick={() => onLaunch(r.id)}
           >
@@ -227,10 +229,10 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
               title={r.localPath ? `Review in a worktree of ${r.repoName}` : notCheckedOut(r.repoName)}
               onClick={() => onLaunch(r.id)}
             >
-              ▶ Review with agent
+              ▶ Review with {agentLabel}
             </button>
             {r.draftPath && (
-              <button type="button" className="act" onClick={() => onLoadDraft(r.id)}>Load agent's review</button>
+              <button type="button" className="act" onClick={() => onLoadDraft(r.id)}>Load the session's review</button>
             )}
             <button type="button" className="act" onClick={() => onOpen(r.url)}>Open PR</button>
             {reviewWrites && (() => {
@@ -318,7 +320,7 @@ export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
         {p.loading && <LoadingMark size={12} />}
         {p.issueCount > shown && <span className="rv-note">showing {shown} of {p.issueCount}</span>}
         {p.stale && shown > 0 && <span className="rv-note warn">couldn't refresh — showing the last result</span>}
-        {ready > 1 && <span className="rv-note">{ready} agent reviews ready</span>}
+        {ready > 1 && <span className="rv-note">{ready} session reviews ready</span>}
         <span className="sp" />
         {/* No sort control while loading: there is nothing to sort, and a live
             control over skeleton rows invites a click that changes nothing. */}
@@ -350,7 +352,7 @@ export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
                  selecting={selecting} picked={picked.has(r.id)}
                  onToggle={(id, shift) => p.onToggle?.(id, shift)}
                  onExpand={p.onExpand} onOpen={p.onOpen} onLaunch={p.onLaunch} onLoadDraft={p.onLoadDraft}
-                 onBody={p.onBody} onSubmit={p.onSubmit} />
+                 onBody={p.onBody} onSubmit={p.onSubmit} agentLabel={p.agentLabel} />
           ))}
         </div>
       )}
@@ -365,13 +367,15 @@ export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
             type="button"
             className="batch-launch"
             disabled={n === 0}
-            // Unambiguous against .rv-go's own "Review with agent": both are on screen
-            // in the same strip, and one accessible name for two different actions is
-            // how a click lands on the wrong one.
-            aria-label={`Review the ${n} selected PR${n === 1 ? "" : "s"} with agents`}
+            // Unambiguous against .rv-go's own "Review with {agentLabel}": both are on
+            // screen in the same strip, and one accessible name for two different
+            // actions is how a click lands on the wrong one. Substituting the same
+            // agentLabel into both preserves the distinction because this one keeps
+            // its "Review the N selected PRs" prefix.
+            aria-label={`Review the ${n} selected PR${n === 1 ? "" : "s"} with ${p.agentLabel}`}
             onClick={() => p.onLaunchBatch?.()}
           >
-            ▶ Review {n} with agent{n === 1 ? "" : "s"}
+            ▶ Review {n} with {p.agentLabel}
           </button>
         </div>
       )}

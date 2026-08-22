@@ -20,7 +20,7 @@ const props = (over: Partial<React.ComponentProps<typeof ReviewStrip>> = {}) => 
   expanded: null, details: {}, onExpand: vi.fn(), onSort: vi.fn(), onOpen: vi.fn(),
   collapsed: false, onCollapse: vi.fn(), onLaunch: vi.fn(), onLoadDraft: vi.fn(),
   reviewWrites: false, bodies: {}, onBody: vi.fn(), onSubmit: vi.fn(),
-  submitting: {}, submitFailed: {},
+  submitting: {}, submitFailed: {}, agentLabel: "Claude Code",
   ...over,
 });
 
@@ -163,7 +163,7 @@ describe("ReviewStrip", () => {
     const onLaunch = vi.fn();
     const onExpand = vi.fn();
     render(<ReviewStrip {...props({ onLaunch, onExpand })} />);
-    fireEvent.click(screen.getByLabelText("Review with agent"));
+    fireEvent.click(screen.getByLabelText("Review with Claude Code"));
     expect(onLaunch).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
     expect(onExpand).not.toHaveBeenCalled();
   });
@@ -175,7 +175,7 @@ describe("ReviewStrip", () => {
     const { container } = render(<ReviewStrip {...props({
       requests: [mk({ runKey: "review-aws-ops-8491" })],
     })} />);
-    expect(screen.queryByLabelText("Review with agent")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Review with Claude Code")).not.toBeInTheDocument();
     expect(container.querySelector(".rv-go svg.lmark")).toBeInTheDocument();
   });
 
@@ -187,7 +187,7 @@ describe("ReviewStrip", () => {
     // primary action gone wrong rather than one that isn't available here.
     const onLaunch = vi.fn();
     render(<ReviewStrip {...props({ onLaunch, requests: [mk({ localPath: null })] })} />);
-    const go = screen.getByLabelText("Review with agent") as HTMLButtonElement;
+    const go = screen.getByLabelText("Review with Claude Code") as HTMLButtonElement;
     expect(go.disabled).toBe(false);
     expect(go.title).toMatch(/isn't checked out/i);
     expect(go.className).toMatch(/\bcold\b/);
@@ -195,10 +195,10 @@ describe("ReviewStrip", () => {
     expect(onLaunch).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
   });
 
-  it("offers Review with agent when the repo is checked out", () => {
+  it("offers Review with Claude Code when the repo is checked out", () => {
     const onLaunch = vi.fn();
     render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", onLaunch })} />);
-    fireEvent.click(screen.getByText(/Review with agent/i));
+    fireEvent.click(screen.getByText(/Review with Claude Code/i));
     expect(onLaunch).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
   });
 
@@ -213,7 +213,7 @@ describe("ReviewStrip", () => {
       onLaunch,
       requests: [mk({ localPath: null })],
     })} />);
-    const btn = screen.getByText(/Review with agent/i) as HTMLButtonElement;
+    const btn = screen.getByText(/Review with Claude Code/i) as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
     expect(btn.title).toMatch(/isn't checked out/i);
     fireEvent.click(btn);
@@ -233,12 +233,12 @@ describe("ReviewStrip", () => {
   it("offers to load the agent's draft only once the file exists", () => {
     const onLoadDraft = vi.fn();
     const { rerender } = render(<ReviewStrip {...props({ expanded: "CyberJackGit/aws-ops#8491", onLoadDraft })} />);
-    expect(screen.queryByText(/Load agent's review/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Load the session's review/i)).not.toBeInTheDocument();
     rerender(<ReviewStrip {...props({
       expanded: "CyberJackGit/aws-ops#8491", onLoadDraft,
       requests: [mk({ draftPath: "/wt/.pick-task/REVIEW-8491.md" })],
     })} />);
-    fireEvent.click(screen.getByText(/Load agent's review/i));
+    fireEvent.click(screen.getByText(/Load the session's review/i));
     expect(onLoadDraft).toHaveBeenCalledWith("CyberJackGit/aws-ops#8491");
   });
 
@@ -513,7 +513,7 @@ describe("ReviewStrip", () => {
       onToggle: vi.fn(), onSelectMode: vi.fn(), onSelectAll: vi.fn(), onLaunchBatch,
     })} />);
     expect(screen.getByText(/1 selected/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with agents/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with Claude Code/i }));
     expect(onLaunchBatch).toHaveBeenCalled();
   });
 
@@ -542,7 +542,7 @@ describe("ReviewStrip", () => {
     // Two competing launches in one gesture: .rv-go starts ONE review, the bar starts
     // the batch. While picking rows, only the bar may launch.
     render(<ReviewStrip {...props({ selecting: true, selected: [], onToggle: vi.fn(), onSelectMode: vi.fn(), onLaunchBatch: vi.fn() })} />);
-    expect(screen.queryByRole("button", { name: "Review with agent" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review with Claude Code" })).not.toBeInTheDocument();
   });
 
   it("keeps a row shut while selecting, even the one that was open", () => {
@@ -555,7 +555,7 @@ describe("ReviewStrip", () => {
 
   it("cannot launch an empty selection", () => {
     render(<ReviewStrip {...props({ selecting: true, selected: [], onToggle: vi.fn(), onSelectMode: vi.fn(), onLaunchBatch: vi.fn() })} />);
-    expect(screen.getByRole("button", { name: /Review the 0 selected PRs with agents/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Review the 0 selected PRs with Claude Code/i })).toBeDisabled();
   });
 
   it("leaves selection mode from the bar", () => {
@@ -593,7 +593,7 @@ describe("ReviewStrip", () => {
     render(<ReviewStrip {...props({
       requests: [mk({ draftPath: "/a" }), mk({ id: "b#2", number: 2, draftPath: "/b" })], issueCount: 2,
     })} />);
-    expect(screen.getByText(/2 agent reviews ready/i)).toBeInTheDocument();
+    expect(screen.getByText(/2 session reviews ready/i)).toBeInTheDocument();
   });
 
   it("says nothing in the header about a single ready review", () => {

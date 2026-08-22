@@ -23,9 +23,9 @@ describe("AgentsRow", () => {
   // change just because the drawer now wants it expanded.
   it("stays collapsed by default when defaultOpen is omitted", () => {
     render(<AgentsRow agents={[mkAgent("svc-7e", "working"), mkAgent("svc-fa", "idle")]} />);
-    expect(screen.getByRole("button", { name: /2 agents/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /2 sessions/ })).toBeTruthy();
     expect(screen.queryByText("svc-fa")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /2 agents/ }));
+    fireEvent.click(screen.getByRole("button", { name: /2 sessions/ }));
     expect(screen.getByText("svc-fa")).toBeTruthy();
   });
 

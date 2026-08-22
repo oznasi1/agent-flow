@@ -98,7 +98,7 @@ export const DEFAULT_EXPLORE_GENERAL_PROMPT =
  * priority), {brief} (includes the active-tasks list), {files}. */
 export const DEFAULT_EXPLORE_SUPERVISE_PROMPT =
   "Supervision session — checking on your other active Agent Flow tasks. A brief listing them, and whether each " +
-  "still has an agent attached, is at {brief}. Read it, judge which ones are stalled, blocked, or waiting on you, " +
+  "still has a session attached, is at {brief}. Read it, judge which ones are stalled, blocked, or waiting on you, " +
   "and tell me what needs attention. Where it's safe and unambiguous, help unblock or integrate one yourself; " +
   "flag anything you're unsure about rather than guessing.{files}";
 

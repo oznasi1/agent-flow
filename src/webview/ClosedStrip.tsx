@@ -37,7 +37,7 @@ export function ClosedStrip({ rows, collapsed, onCollapse, onReopen, onForget, o
     <div className="rc">
       <div className="rc-hd">
         <button type="button" className="rc-toggle" onClick={() => onCollapse(!collapsed)}
-          title="Runs that left the board — no agent, no pull request, nothing uncommitted">
+          title="Runs that left the board — no session, no pull request, nothing uncommitted">
           <span className="rc-caret">{collapsed ? "▸" : "▾"}</span>
           <span className="rc-nm">Recently closed</span>
           <span className="rc-ct">{rows.length}</span>

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as React from "react";
-import { render, screen, fireEvent, act, within } from "@testing-library/react";
+import { render, screen, fireEvent, act, within, waitFor } from "@testing-library/react";
 
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
@@ -46,8 +46,9 @@ const runsMsg = (
   prReviewStatus = "PR initiated",
   sourceLabel = "Jira",
   showTokenTotal = false,
+  agentLabel = "Claude Code",
 ): OutboundMessage =>
-  ({ type: "deck:runs", runs, ghNote: null, prReviewStatus, showTokenTotal, staleCount: 0, sourceLabel });
+  ({ type: "deck:runs", runs, ghNote: null, prReviewStatus, showTokenTotal, staleCount: 0, sourceLabel, agentLabel });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
   session: { pid: 1, sessionId: name, cwd: "/r/svc", startedAt: Date.now() - 3_600_000, name },
@@ -714,7 +715,7 @@ describe("DeckApp PR-facts chrome", () => {
 
   it("shows the gh note when the host sends one", () => {
     render(<DeckApp />);
-    host({ type: "deck:runs", runs: [mkStatus()], ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", showTokenTotal: false, staleCount: 0, sourceLabel: "Jira" });
+    host({ type: "deck:runs", runs: [mkStatus()], ghNote: "gh CLI not found — PR facts off", prReviewStatus: "PR initiated", showTokenTotal: false, staleCount: 0, sourceLabel: "Jira", agentLabel: "Claude Code" });
     expect(screen.getByText(/gh CLI not found/)).toBeTruthy();
   });
 
@@ -742,7 +743,7 @@ describe("DeckApp PR-facts chrome", () => {
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [mkAgent("svc-7e", "working", Date.now()), mkAgent("svc-fa", "idle", Date.now() - 60_000)] })]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
-    expect(screen.getByRole("button", { name: /2 agents/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /2 sessions/ })).toBeTruthy();
     expect(screen.getByText("svc-fa")).toBeTruthy();
     // Each row carries its OWN state — the whole point of listing them. Scoped to
     // .ag-state because "working" is also the name of an In-progress lane header
@@ -792,8 +793,8 @@ describe("DeckApp PR-facts chrome", () => {
   });
 
   it("renders no agents row for a card with none", () => {
-    // Not screen.queryByRole("button", { name: /agent/ }) — the header's own
-    // grouping lens always renders an "Agents" button, whose accessible name
+    // Not screen.queryByRole("button", { name: /session/ }) — the header's own
+    // grouping lens always renders a "Sessions" button, whose accessible name
     // matches that pattern too, so an unscoped query would pass even if
     // AgentsRow leaked an empty control. Scope to the card's own markup instead.
     const { container } = render(<DeckApp />);
@@ -828,6 +829,23 @@ describe("DeckApp review strip", () => {
     render(<DeckApp />);
     host(reviewsMsg([mkReview()]));
     expect(screen.getByText("a small fix")).toBeInTheDocument();
+  });
+
+  // An in-flight deck:runs posted by an older host build has no agentLabel field
+  // at all (see the `?? DEFAULT_AGENT_LABEL` comment in DeckApp.tsx) — this is
+  // the one path that ever observes the fallback, since every other test's
+  // runsMsg() supplies "Claude Code" explicitly.
+  it("falls back to the default agent label when deck:runs omits agentLabel", async () => {
+    render(<DeckApp />);
+    host({
+      type: "deck:runs", runs: [], ghNote: null, prReviewStatus: "PR initiated",
+      showTokenTotal: false, staleCount: 0, sourceLabel: "Jira",
+    } as unknown as OutboundMessage);
+    host(reviewsMsg([mkReview()]));
+    fireEvent.click(screen.getByText("a small fix"));
+    await waitFor(() => {
+      expect(screen.getByText(/Review with Claude Code/i)).toBeInTheDocument();
+    });
   });
 
   it("sends the new sort to the host", () => {
@@ -925,7 +943,7 @@ describe("DeckApp review strip", () => {
     fireEvent.click(screen.getByText("select"));
     fireEvent.click(screen.getByText("a small fix"));
     fireEvent.click(screen.getByText("second fix"));
-    fireEvent.click(screen.getByRole("button", { name: /Review the 2 selected PRs with agents/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 2 selected PRs with Claude Code/i }));
     // One message for the batch, not one per row — the host asks its questions once.
     expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1", "o/r#2"] });
   });
@@ -936,7 +954,7 @@ describe("DeckApp review strip", () => {
     fireEvent.click(screen.getByText("select"));
     fireEvent.click(screen.getByText("a small fix"));
     fireEvent.click(screen.getByText("third fix"), { shiftKey: true });
-    fireEvent.click(screen.getByRole("button", { name: /Review the 3 selected PRs with agents/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 3 selected PRs with Claude Code/i }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1", "o/r#2", "o/r#3"] });
   });
 
@@ -948,7 +966,7 @@ describe("DeckApp review strip", () => {
     fireEvent.click(screen.getByText("select"));
     fireEvent.click(screen.getByText("third fix"));
     fireEvent.click(screen.getByText("a small fix"), { shiftKey: true });
-    fireEvent.click(screen.getByRole("button", { name: /Review the 3 selected PRs with agents/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 3 selected PRs with Claude Code/i }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1", "o/r#2", "o/r#3"] });
   });
 
@@ -957,7 +975,7 @@ describe("DeckApp review strip", () => {
     host(reviewsMsg(three(), 3));
     fireEvent.click(screen.getByText("select"));
     fireEvent.click(screen.getByText("Select all 3"));
-    fireEvent.click(screen.getByRole("button", { name: /Review the 3 selected PRs with agents/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 3 selected PRs with Claude Code/i }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1", "o/r#2", "o/r#3"] });
   });
 
@@ -969,7 +987,7 @@ describe("DeckApp review strip", () => {
     fireEvent.click(screen.getByText("select"));
     fireEvent.click(screen.getByText("third fix"));
     fireEvent.click(screen.getByText("a small fix"));
-    fireEvent.click(screen.getByRole("button", { name: /Review the 2 selected PRs with agents/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 2 selected PRs with Claude Code/i }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1", "o/r#3"] });
   });
 
@@ -980,7 +998,7 @@ describe("DeckApp review strip", () => {
     fireEvent.click(screen.getByText("a small fix"));
     fireEvent.click(screen.getByText("second fix"));
     fireEvent.click(screen.getByText("a small fix"));
-    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with agents/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with Claude Code/i }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#2"] });
   });
 
@@ -989,7 +1007,7 @@ describe("DeckApp review strip", () => {
     host(reviewsMsg([mkReview()], 1));
     fireEvent.click(screen.getByText("select"));
     fireEvent.click(screen.getByText("a small fix"));
-    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with agents/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with Claude Code/i }));
     // The bar is gone and the rows expand again — the gesture is over.
     expect(screen.queryByText(/selected/)).not.toBeInTheDocument();
     // And the selection went with it: coming back to select mode starts from zero,
@@ -1017,7 +1035,7 @@ describe("DeckApp review strip", () => {
     fireEvent.click(screen.getByText("a small fix"));
     fireEvent.click(screen.getByText("second fix"));
     host(reviewsMsg([mkReview()], 1)); // #2 merged
-    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with agents/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Review the 1 selected PR with Claude Code/i }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:reviewBatch", ids: ["o/r#1"] });
   });
 
@@ -1052,7 +1070,7 @@ describe("DeckApp review writes", () => {
     render(<DeckApp />);
     host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
     fireEvent.click(screen.getByText("a small fix"));
-    fireEvent.click(screen.getByText(/Load agent's review/i));
+    fireEvent.click(screen.getByText(/Load the session's review/i));
     host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
     fireEvent.click(screen.getByText("Comment"));
     expect(sent).toHaveBeenCalledWith({
@@ -1075,7 +1093,7 @@ describe("DeckApp review writes", () => {
     render(<DeckApp />);
     host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
     fireEvent.click(screen.getByText("a small fix"));
-    fireEvent.click(screen.getByText(/Load agent's review/i));
+    fireEvent.click(screen.getByText(/Load the session's review/i));
     host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "1. the retry budget is unbounded" } });
     fireEvent.click(screen.getByText("Comment"));
@@ -1089,7 +1107,7 @@ describe("DeckApp review writes", () => {
     render(<DeckApp />);
     host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
     fireEvent.click(screen.getByText("a small fix"));
-    fireEvent.click(screen.getByText(/Load agent's review/i));
+    fireEvent.click(screen.getByText(/Load the session's review/i));
     host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "" } });
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "all mine now" } });
@@ -1186,7 +1204,7 @@ describe("DeckApp review writes", () => {
     render(<DeckApp />);
     host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
     fireEvent.click(screen.getByText("a small fix"));
-    fireEvent.click(screen.getByText(/Load agent's review/i));
+    fireEvent.click(screen.getByText(/Load the session's review/i));
     host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
     fireEvent.click(screen.getByText("Comment"));
     host({ type: "deck:reviewSubmitDone", id: "o/r#1", outcome: "ok" });
@@ -1236,7 +1254,7 @@ describe("DeckApp review writes", () => {
     render(<DeckApp />);
     host({ ...reviewsMsg([mkReview({ draftPath: "/wt/REVIEW-1.md" })]), reviewWrites: true } as OutboundMessage);
     fireEvent.click(screen.getByText("a small fix"));
-    fireEvent.click(screen.getByText(/Load agent's review/i));
+    fireEvent.click(screen.getByText(/Load the session's review/i));
     host({ type: "deck:reviewDraft", id: "o/r#1", body: "1. unbounded retry" });
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "   " } });
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "all mine now" } });
@@ -1542,7 +1560,7 @@ describe("Agents view", () => {
     const inProgress = Array.from(document.querySelectorAll(".col")).find((c) => c.querySelector(".nm")!.textContent === "In progress")!;
     expect(inProgress.querySelectorAll(".card")).toHaveLength(1);
     // The merged card lists both sessions in its collapsed agents row.
-    expect(screen.getByText("2 agents")).toBeInTheDocument();
+    expect(screen.getByText("2 sessions")).toBeInTheDocument();
   });
 
   it("counts cards, not runs, in the stat tiles", () => {
