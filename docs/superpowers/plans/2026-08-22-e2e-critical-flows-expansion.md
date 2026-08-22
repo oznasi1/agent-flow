@@ -369,7 +369,26 @@ Steps mirror Task 2 exactly: settings `{"agentFlow.forge": "gitlab", "agentFlow.
 
 ---
 
-### Task 4: Copilot provider — the deterministic fallback contract
+### Task 4: Copilot provider — STOPPED: the journey found a product bug instead
+
+**Finding (2026-08-22, real host, VS Code 1.96.2, no Copilot installed):** core
+VS Code registers `workbench.action.chat.open` since its built-in chat
+framework landed, so `seedChatPanel`'s presence-poll succeeds on attempt 1 and
+the command resolves without throwing — while opening **nothing** the user can
+see (no chat view, no query). The extension logs
+`seed E2E-1: opened Copilot Chat via workbench.action.chat.open (attempt 1)`
+and returns success; the clipboard fallback this task meant to pin is
+**unreachable dead code on modern hosts**. A user with
+`agentFlow.agentProvider: "copilot"` and no Copilot gets a silently unseeded
+take.
+
+Product fix needed before this journey exists (its own PR, with this E2E as
+its proof): `seedChatPanel` must verify a chat extension is actually present
+(e.g. `vscode.extensions.getExtension("GitHub.copilot-chat")`) — or verify the
+chat view genuinely opened — before treating the command's existence as
+success. Until then, asserting current behavior would bless the bug.
+
+### Task 4 (original scope, for after the fix): the deterministic fallback contract
 
 **Files:**
 - Create: `test-e2e/copilot-fallback.e2e.ts`
