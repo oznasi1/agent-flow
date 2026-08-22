@@ -25,8 +25,9 @@ import { DRAWER_ANIM_MS } from "./deckStyles";
 export const ORCH_ANIM_MS = DRAWER_ANIM_MS;
 
 /** How far an edge chip's own centre is painted from the point it is positioned
- * at, in px — negative because it sits ABOVE that point. Declared HERE for the
- * same reason `ORCH_ANIM_MS` is: `.orch-edge` below carries
+ * at, in px — negative because it sits ABOVE that point. Declared HERE, beside
+ * the rule it has to agree with, and imported by `OrchestratorDrawer.tsx` rather
+ * than duplicated there: `.orch-edge` below carries
  * `transform: translate(-50%, -150%)`, so the box is lifted by 1.5 of its own
  * height and its CENTRE lands exactly one height above the point.
  *
