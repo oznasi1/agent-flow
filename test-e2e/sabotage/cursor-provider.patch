@@ -1,0 +1,13 @@
+diff --git a/src/config.ts b/src/config.ts
+index 05b90c0..4e72326 100644
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -201,7 +201,7 @@ export function readAgentProviderSetting(
+   const raw = c.get<string>("agentProvider");
+   if (raw === "ask") return "ask";
+   if (raw === "copilot" && isVSCodeHost()) return "copilot";
+-  if (raw === "cursor" && isCursorHost()) return "cursor";
++  if (raw === "cursor") return "cursor";
+   return "claude-code";
+ }
+ 
