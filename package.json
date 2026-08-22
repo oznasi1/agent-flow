@@ -776,6 +776,7 @@
     "test:ct": "playwright test -c playwright-ct.config.ts",
     "test:e2e": "npm run build && playwright test -c playwright-e2e.config.ts",
     "e2e:report": "node scripts/verify-report.mjs",
+    "sabotage": "node scripts/sabotage.mjs",
     "typecheck": "tsc --noEmit",
     "vscode:prepublish": "npm run build -- --production",
     "package": "rm -f *.vsix && vsce package --no-dependencies"

@@ -1,0 +1,15 @@
+diff --git a/src/tasks/fixture/connector.ts b/src/tasks/fixture/connector.ts
+index c43b346..50167f1 100644
+--- a/src/tasks/fixture/connector.ts
++++ b/src/tasks/fixture/connector.ts
+@@ -49,9 +49,8 @@ export function makeFixtureConnector(dir: string): TaskConnector {
+     },
+     components: {
+       list: async () => ["landing-gear", "telemetry"],
+-      update: async (key, delta) => {
++      update: async (key) => {
+         find(key);
+-        record({ op: "setComponents", key, add: delta.add ?? [], remove: delta.remove ?? [] });
+       },
+     },
+     children: {
