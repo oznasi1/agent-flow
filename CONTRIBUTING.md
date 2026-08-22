@@ -23,8 +23,26 @@ npm install
 | `npm run test:ct` | Run the Playwright component tests (real Chromium; covers measured-layout behavior jsdom cannot). |
 | `npm run test:e2e` | Real-host E2E: downloads a pinned VS Code, launches it sandboxed (own HOME, user-data, extensions), and drives take-a-task against the fixture connector. First run downloads ~150MB (the pinned VS Code) plus the pinned Claude Code vsix for the panel-seeding journey. |
 | `npm run e2e:report` | Build the verify-feature report from the last `test:e2e` run — one self-contained HTML with a labelled screenshot strip and verdict per journey (`test-results/verify-report.html`). |
+| `npm run sabotage [journey]` | Mutation-check the E2E lane: apply `test-e2e/sabotage/<journey>.patch`, rebuild, run that one journey, require it to fail, revert. Requires a clean tree — the revert would discard uncommitted work. Runs weekly in CI, not per-PR. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run package` | Build a `.vsix` with `vsce`. |
+
+## Sabotage patches
+
+Every E2E journey pairs with `test-e2e/sabotage/<journey>.patch`, a mutation
+that MUST make it fail. A journey that survives its mutation asserts nothing.
+Add the patch in the same commit as the journey; generate it by breaking `src/`
+by hand, `git diff > test-e2e/sabotage/<journey>.patch`, then `git checkout src/`.
+
+Each patch also needs a companion `test-e2e/sabotage/<journey>.expect`: one
+line holding a distinctive substring of the `test("…")` title the mutation
+must break. The runner does not trust the spec file's overall exit code —
+`describeWithHost` runs serially and skips every test after the first genuine
+failure, so an unrelated earlier failure could otherwise mask a target test
+that never ran at all. `npm run sabotage` reads the JSON report and requires
+the NAMED test to have actually failed; a missing `.expect`, a stale one (no
+test title contains it anymore), or a target test that passed or was skipped
+are all reported as distinct gate failures, not silently ignored.
 
 ## The E2E fixture connector
 

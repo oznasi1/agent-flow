@@ -69,6 +69,63 @@ describe("the fixture provider", () => {
   });
 });
 
+const PARENT = {
+  key: "E2E-1", summary: "Fix the rocket telemetry panel", status: "To Do",
+  statusCategory: "new" as const, priority: "P2", assignee: "Unassigned", labels: [],
+  components: [], sprint: null, inOpenSprint: false,
+  updated: "2026-08-21T00:00:00.000Z", url: "https://fixture.invalid/browse/E2E-1",
+  estimateSeconds: null, descriptionText: "The rocket panel shows stale numbers.",
+};
+const CHILD = {
+  ...PARENT, key: "E2E-1-a", summary: "Repoint the telemetry feed",
+  url: "https://fixture.invalid/browse/E2E-1-a", parent: "E2E-1",
+};
+
+const writes = (): Record<string, unknown>[] =>
+  fs.readFileSync(path.join(dir, "writes.jsonl"), "utf8")
+    .trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
+
+describe("fixture connector capabilities", () => {
+  // The outer beforeEach seeds tasks.json with RECORD (a single flat task);
+  // these tests need a parent/child pair instead, so overwrite it here.
+  beforeEach(() => {
+    fs.writeFileSync(path.join(dir, "tasks.json"), JSON.stringify([PARENT, CHILD]));
+  });
+
+  it("keeps parented records out of the pool list", async () => {
+    const p = makeFixtureConnector(dir).provider();
+    expect((await p.list("all", "any")).map((t) => t.key)).toEqual(["E2E-1"]);
+  });
+
+  it("answers children one level down", async () => {
+    const p = makeFixtureConnector(dir).provider();
+    expect(await p.caps.children!.of("E2E-1")).toEqual([
+      { key: "E2E-1-a", summary: "Repoint the telemetry feed", type: "Sub-task", statusCategory: "new" },
+    ]);
+    expect(await p.caps.children!.of("E2E-1-a")).toEqual([]);
+  });
+
+  it("records sprint membership changes", async () => {
+    const p = makeFixtureConnector(dir).provider();
+    expect(await p.caps.sprints!.activeId()).toBe("fixture-sprint-1");
+    await p.caps.sprints!.add("fixture-sprint-1", "E2E-1");
+    await p.caps.sprints!.remove("E2E-1");
+    expect(writes().map((w) => w.op)).toEqual(["addToSprint", "removeFromSprint"]);
+  });
+
+  it("records component updates and lists the fixture's components", async () => {
+    const p = makeFixtureConnector(dir).provider();
+    expect(await p.caps.components!.list()).toEqual(["landing-gear", "telemetry"]);
+    await p.caps.components!.update("E2E-1", { add: ["telemetry"] });
+    expect(writes()[0]).toMatchObject({ op: "setComponents", key: "E2E-1", add: ["telemetry"] });
+  });
+
+  it("throws for an unknown key rather than silently recording", async () => {
+    const p = makeFixtureConnector(dir).provider();
+    await expect(p.caps.sprints!.add("fixture-sprint-1", "NOPE-9")).rejects.toThrow(/no task NOPE-9/);
+  });
+});
+
 describe("the registry gate", () => {
   it("does NOT advertise the fixture in CONNECTOR_IDS — telemetry allowlist stays as shipped", () => {
     expect(CONNECTOR_IDS).toEqual(["jira"]);

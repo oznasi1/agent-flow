@@ -1,0 +1,13 @@
+diff --git a/src/marketplaceView.ts b/src/marketplaceView.ts
+index a714f7b..68df8f6 100644
+--- a/src/marketplaceView.ts
++++ b/src/marketplaceView.ts
+@@ -123,7 +123,7 @@ export class MarketplacePanel {
+       }
+       case "mkt:copy":
+         await vscode.env.clipboard.writeText(m.text);
+-        this.toast("success", "Copied to clipboard.");
++        this.toast("success", "Done.");
+         break;
+       case "openExternal":
+         await vscode.env.openExternal(vscode.Uri.parse(m.url));
