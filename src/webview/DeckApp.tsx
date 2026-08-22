@@ -161,8 +161,6 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
   selected: boolean;
   onSelect: () => void;
 }): JSX.Element {
-  const col = COLUMNS.find((c) => c.id === column)!;
-  const accent = `var(${col.varName})`;
   // The agent's own activity when this card is an agent; the run's reduction
   // otherwise. `column` is threaded in rather than read off `r` for the same
   // reason: on the Agents board both are per-session.
@@ -206,7 +204,6 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
   return (
     <div
       className={`card ${column === "needs" ? "attn" : ""} ${selected ? "sel" : ""}`}
-      style={{ ["--accent" as any]: accent }}
       draggable={cardDragKey !== null}
       onClick={onSelect}
       onDragStart={(e) => {
