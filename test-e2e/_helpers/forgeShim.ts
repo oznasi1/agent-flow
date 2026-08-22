@@ -23,7 +23,9 @@ export function installForgeShims(sb: Sandbox, answers: ForgeAnswers): { unknown
   for (const cli of ["gh", "glab"] as const) {
     const map = answers[cli] ?? {};
     for (const [sig, body] of Object.entries(map)) {
-      fs.writeFileSync(path.join(answersDir, `${cli}.${sig.replace(/[^A-Za-z0-9]+/g, "_")}.json`), body);
+      // Per-CHAR, not per-run: the shim mangles with `tr`, which maps every
+      // non-alphanumeric character to its own underscore.
+      fs.writeFileSync(path.join(answersDir, `${cli}.${sig.replace(/[^A-Za-z0-9]/g, "_")}.json`), body);
     }
     fs.writeFileSync(
       path.join(bin, cli),
