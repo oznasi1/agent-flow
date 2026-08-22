@@ -71,12 +71,29 @@ export class Deck {
     return this.frame.locator(`.rv-row:has(.rv-num:text-is("#${n}"))`);
   }
 
+  /** Expand one review row. `{expanded && !selecting && (…)}` (ReviewStrip.tsx:181)
+   *  gates the ENTIRE detail block — `.rv-facts`, the optional `.rv-box` comment
+   *  box, and `.rv-actions` with the "Review with …" button `reviewLaunch` needs
+   *  — so a collapsed row has no launch button at all, not a disabled one. The
+   *  click target is `.rv-line`, the row's own header button: it wraps the whole
+   *  head (caret, repo, number, title, …) as ONE `<button>` whose handler is
+   *  `onExpand(r.id)` (ReviewStrip.tsx:111-119; the doc comment right above it —
+   *  "the whole line is the checkbox" — confirms the caret span at :119 is
+   *  decorative, not a separate target). Waits for `open` on the row's own class
+   *  (`` `rv-row ${expanded ? "open" : ""}...` ``, ReviewStrip.tsx:103) rather
+   *  than returning immediately, since `.rv-detail` mounts on the re-render that
+   *  follows the click, not synchronously with it. */
+  async expandReview(n: number): Promise<void> {
+    const row = this.review(n);
+    await row.locator(".rv-line").click();
+    await expect(row).toHaveClass(/\bopen\b/, { timeout: 15_000 });
+  }
+
   /** The row's primary launch action — `▶ Review with {agentLabel}`
-   *  (`.rv-actions .act.primary`, ReviewStrip.tsx:225-234). It lives in
-   *  `.rv-detail`, which only renders once the row is expanded (click
-   *  `.rv-line`, i.e. `review(n)` itself, first) and the row isn't in batch
-   *  `selecting` mode — it is not the always-visible `▶` icon button
-   *  (`.rv-go`) on the collapsed line. */
+   *  (`.rv-actions .act.primary`, ReviewStrip.tsx:225-234). It lives inside the
+   *  `{expanded && !selecting && (…)}` block (ReviewStrip.tsx:181), so it does
+   *  not exist on a collapsed row — call `expandReview(n)` first. It is not the
+   *  always-visible `▶` icon button (`.rv-go`) on the collapsed line. */
   reviewLaunch(n: number): Locator {
     return this.review(n).locator(".rv-actions .act.primary");
   }
