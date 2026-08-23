@@ -24,11 +24,16 @@ export const INNER_R = 1.21;
 export const VIEW_BOX = "0 0 24 24";
 
 /**
- * One trip of the lit dot round the ring. Lives here rather than beside either
- * user because both need it: tokens.ts spends it as the animation's duration,
- * LoadingMark divides it into the per-dot head start that makes the dot travel.
+ * One trip of the wave round the ring — a single dot's full light-and-dim cycle,
+ * not the span it stays lit for. Lives here rather than beside either user because
+ * both need it: tokens.ts spends it as the animation's duration, LoadingMark divides
+ * it into the per-dot head start that carries the wave clockwise.
+ *
+ * Slower than the 1400ms the single-dot comet ran at. The wave holds each dot lit
+ * across half its cycle, so at the old speed the ring read as a flicker rather than
+ * as something travelling.
  */
-export const CYCLE_MS = 1400;
+export const CYCLE_MS = 1900;
 
 /** A dot's slice of the cycle — its head start over the dot behind it. */
 export const STEP_MS = CYCLE_MS / OUTER.length;

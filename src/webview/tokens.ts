@@ -143,7 +143,14 @@ export const BASE_CSS = `
   /* The loading mark: the product's own logo, running. Shared by all three surfaces
      because all three wait on something. Geometry lives in markGeometry.ts, and each
      dot's animation-delay is set inline by LoadingMark.tsx — that stagger, not any
-     transform, is what carries the lit dot round the ring.
+     transform, is what carries the wave clockwise round the ring.
+
+     A wave, not a comet: the lit span runs from 5% to 52%, so roughly five of the eight
+     dots are lit at any moment and the ring fills and empties rather than one dot
+     chasing its own tail. That span is the point of the shape — at 12px, the size the
+     mark ships at beside text, a single lit dot was too small to find, and the loader
+     read as a static logo. Shorten the hold and it becomes a comet again, which is
+     what the "holds the dots lit across a span" test in tokens.test.ts guards.
 
      The dots rest LIT and the keyframes dim them, never the other way round: the rule
      above kills the animation outright under reduced motion, and a rule that rested
@@ -156,8 +163,8 @@ export const BASE_CSS = `
   /* Identical to ".gauge .tex" in styles.ts on purpose — same dots, same coordinates,
      so they must look the same. Change one and change the other. */
   .lmark .tex { fill: currentColor; opacity: .85; }
-  .lmark .ldot { fill: var(--brand); opacity: .9; animation: mark-comet ${CYCLE_MS}ms linear infinite; }
-  @keyframes mark-comet { 0% { opacity: 1; } 8% { opacity: .58; } 16% { opacity: .3; } 30%, 100% { opacity: .12; } }
+  .lmark .ldot { fill: var(--brand); opacity: .9; animation: mark-wave ${CYCLE_MS}ms linear infinite; }
+  @keyframes mark-wave { 0% { opacity: .14; } 5% { opacity: 1; } 52% { opacity: 1; } 76%, 100% { opacity: .14; } }
 `;
 
 // One control language, shared by the sidebar and the Marketplace. Derived from

@@ -6,7 +6,7 @@ import { render, screen, fireEvent, act, within, waitFor } from "@testing-librar
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
 import { DeckApp } from "../../src/webview/DeckApp";
-import { DECK_CSS } from "../../src/webview/deckStyles";
+import { DECK_CSS, DRAWER_ANIM_MS } from "../../src/webview/deckStyles";
 import { DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { send } from "../../src/webview/vscodeApi";
 import type { AgentActivity, CardAgent, OutboundMessage, PrFacts, RepoGit, ReviewRequest, RunStatus } from "../../src/types";
@@ -1976,7 +1976,12 @@ describe("the deck:flows handler", () => {
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(document.querySelector(".dd")).not.toBeNull();
     host(flowsMsg([mkFlow("f1", "New flow")])); // a fresh flow, not from this chip
-    expect(document.querySelector(".dd")).toBeNull();
+    // `.dd.closing`, not absence: both drawers now leave the slot through the
+    // same slide-out (Drawer.tsx's useDrawerExit), so the detail stays mounted
+    // and inert for the length of it rather than vanishing in this frame. The
+    // Orchestrator's own half of this pairing has read that way since it grew
+    // an exit — see "closes the Orchestrator drawer when a card is selected".
+    expect(document.querySelector(".dd.closing")).not.toBeNull();
     expect(document.querySelector(".orch")).not.toBeNull();
   });
 });
@@ -2460,7 +2465,11 @@ describe("card selection", () => {
     host(runsMsg([mkStatus()]));
     fireEvent.click(card());
     fireEvent.click(card());
-    expect(document.querySelector(".dd")).toBeNull();
+    // Dismissed, so it is sliding out rather than gone — see the note on
+    // "closes a selected card's detail when a flow it has not seen before
+    // arrives". The unmount at the end of that slide has its own tests in
+    // "the card detail's open and close animation" below.
+    expect(document.querySelector(".dd.closing")).not.toBeNull();
   });
 
   it("re-targets the drawer when a second card is selected", () => {
@@ -2478,7 +2487,7 @@ describe("card selection", () => {
     host(runsMsg([mkStatus()]));
     fireEvent.click(card());
     act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
-    expect(document.querySelector(".dd")).toBeNull();
+    expect(document.querySelector(".dd.closing")).not.toBeNull();
   });
 
   it("drops a selection whose card is gone from the next post", () => {
@@ -2533,7 +2542,7 @@ describe("card selection", () => {
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(document.querySelector(".dd")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /orchestrator/i }));
-    expect(document.querySelector(".dd")).toBeNull();
+    expect(document.querySelector(".dd.closing")).not.toBeNull();
   });
 
   // "does not select when a PR link is clicked" is deleted here, not re-pointed:
@@ -2895,5 +2904,97 @@ describe("DeckApp card anatomy", () => {
         expect(card.querySelector(".c-meta .age")).not.toBeNull();
       }
     });
+  });
+});
+
+// The card detail slides in and out along the right edge it is anchored to, the
+// same way the Orchestrator drawer does and through the same code — see the
+// mirror of this describe in OrchestratorDrawer.test.tsx. The exit is the half
+// that needs more than a stylesheet: dismissing drops `selId`, which would
+// unmount the aside in the same frame and leave nothing to animate, so the
+// drawer holds the card it last had for exactly DRAWER_ANIM_MS.
+describe("the card detail's open and close animation", () => {
+  const dd = () => document.querySelector(".dd") as HTMLElement | null;
+  const openOne = () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+  };
+
+  it("arrives with the shared drawer shell, not the closing state", () => {
+    openOne();
+    // `.drawer` is the assertion that matters: the shell is one rule and one
+    // element for both drawers, so a detail drawer that grew its own geometry
+    // again would fail here rather than merely look slightly different.
+    expect(dd()!.className).toContain("drawer");
+    expect(dd()!.className).not.toContain("closing");
+  });
+
+  it("keeps painting the card while it slides out, then drops it", () => {
+    vi.useFakeTimers();
+    try {
+      openOne();
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      // Still in the DOM, or there would be nothing for the CSS to animate, and
+      // still drawing the card it held — this is the drawer the user just
+      // dismissed, not a blank shell.
+      expect(dd()!.className).toContain("closing");
+      expect(dd()!.querySelector(".dd-hd .k")!.textContent).toBe("ASM-1");
+
+      // Just short of the animation's end it is still there; one tick past it,
+      // gone. Both halves are asserted so a timer that never fires and a timer
+      // that fires instantly are each caught.
+      act(() => { vi.advanceTimersByTime(DRAWER_ANIM_MS - 1); });
+      expect(dd()).not.toBeNull();
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(dd()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("is hidden from the accessibility tree while closing", () => {
+    vi.useFakeTimers();
+    try {
+      openOne();
+      const named = { name: "Detail for ASM-1" };
+      expect(screen.queryByRole("complementary", named)).not.toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
+      // Inert for those milliseconds: a drawer already dismissed must not answer
+      // a role query, a screen reader, or a Tab. `queryByRole` honours
+      // aria-hidden, which is what keeps every "the drawer is closed" assertion
+      // in this file that reads through a role query true across this change.
+      expect(dd()).not.toBeNull();
+      expect(dd()!.getAttribute("aria-hidden")).toBe("true");
+      expect(screen.queryByRole("complementary", named)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // While OPEN the attribute must be absent, not "false": this element is the
+  // drawer's own landmark, and `aria-hidden="false"` is not the same as absent
+  // to every screen reader.
+  it("carries no aria-hidden at all while open", () => {
+    openOne();
+    expect(dd()!.hasAttribute("aria-hidden")).toBe(false);
+  });
+
+  // The counterpart of "drops a selection whose card is gone from the next post"
+  // above, stated as the animation rule it is: a card that disappears from under
+  // an open drawer is not a dismissal, so there is nothing to slide out and no
+  // card left to draw. The drawer must not come back for the length of a slide
+  // it never earned, which is what advancing past one asserts.
+  it("vanishes at once when the open card leaves the board", () => {
+    vi.useFakeTimers();
+    try {
+      openOne();
+      host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "ASM-9" } })]));
+      expect(dd()).toBeNull();
+      act(() => { vi.advanceTimersByTime(DRAWER_ANIM_MS * 2); });
+      expect(dd()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

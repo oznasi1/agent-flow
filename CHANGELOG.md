@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-08-23
+
+### Changed
+
+- A card's detail drawer now slides in and out along the Deck's right edge, the
+  same way the Orchestrator drawer does — same shell, same shadow, same 180ms
+  slide. The two panels share one fixed slot, and they now arrive and leave as
+  one kind of object instead of one sliding while the other appeared and vanished
+  in a frame. A card that leaves the board while its drawer is open still closes
+  it at once: there is no dismissal to animate.
+
+## [0.40.0] — 2026-08-23
+
+### Changed
+
+- The loading mark now runs as a **wave** rather than a single travelling dot: the
+  brand-coloured dots light one by one clockwise from twelve o'clock and empty the
+  same way, with five of the eight lit at any moment. The old comet lit one dot at a
+  time, which disappeared at the 12px size the mark ships at beside text — a loader
+  that read as a static logo. The cycle slowed from 1400ms to 1900ms to suit the
+  longer lit span. Reduced motion is unchanged: the mark still rests fully lit.
+
 ## [0.39.0] — 2026-08-22
 
 ### Changed
