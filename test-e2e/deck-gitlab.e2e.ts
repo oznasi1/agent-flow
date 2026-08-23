@@ -58,8 +58,11 @@ test.afterEach(async () => {
   await app?.close();
   app = undefined;
   if (fs.existsSync(unknownLog)) console.log("FORGE UNKNOWN ARGV:\n" + fs.readFileSync(unknownLog, "utf8"));
-  expectNoUnknownForgeCalls(sb);
-  sb.dispose();
+  try {
+    expectNoUnknownForgeCalls(sb);
+  } finally {
+    sb.dispose();
+  }
 });
 
 /** The same Deck board over the glab forge: one setting flips the seam, and the

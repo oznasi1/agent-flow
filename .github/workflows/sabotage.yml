@@ -11,6 +11,14 @@ on:
 jobs:
   sabotage:
     runs-on: ubuntu-latest
+    # 9 patches today, each rebuilding and running one journey spec with CI
+    # retries:1 (playwright-e2e.config.ts) — a target test that fails via a
+    # multi-minute expect-timeout (test.setTimeout runs up to 360s in some
+    # journeys) is doubled by the retry, and a healthy run still completes in
+    # well under 30 minutes. 90 minutes leaves several times that much
+    # headroom for slow patches while bounding a stuck run far short of the
+    # 360-minute GitHub Actions default.
+    timeout-minutes: 90
     permissions:
       contents: read
     steps:

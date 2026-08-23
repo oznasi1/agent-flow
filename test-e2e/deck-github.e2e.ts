@@ -49,8 +49,11 @@ test.afterEach(async () => {
   const calls = unknownLog.replace("unknown.jsonl", "calls.jsonl");
   if (fs.existsSync(calls)) console.log("FORGE CALLS:\n" + fs.readFileSync(calls, "utf8"));
   else console.log("FORGE CALLS: none");
-  expectNoUnknownForgeCalls(sb);
-  sb.dispose();
+  try {
+    expectNoUnknownForgeCalls(sb);
+  } finally {
+    sb.dispose();
+  }
 });
 
 /** The Deck's PR block, fed by the shimmed gh: after a worktree take, the run's

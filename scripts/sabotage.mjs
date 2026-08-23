@@ -123,12 +123,35 @@ if (existsSync(MARKER)) {
   const journey = readFileSync(MARKER, "utf8").trim();
   const patchPath = join(DIR, `${journey}.patch`);
   if (dirty()) {
-    console.error(
-      `sabotage: a previous run was killed while ${journey}.patch was applied — the working tree ` +
-        `still carries that mutation, not just an unrelated dirty tree.\n` +
-        `Recover with: git apply -R ${patchPath}\n` +
-        `Then re-run \`npm run sabotage\` (the marker is cleared automatically once the tree is clean).`,
-    );
+    // The marker names the patch a previous run left applied, but a killed run
+    // isn't the only way to land here with the marker present and the tree
+    // dirty — someone could have that patch's mutation still applied AND
+    // unrelated changes on top, or the dirty tree could be unrelated entirely.
+    // Confirming the patch reverses cleanly before recommending `git apply -R`
+    // is the difference between advice that works and advice that fails
+    // confusingly on a tree the patch was never really applied to (as-is).
+    let reversible = false;
+    try {
+      execFileSync("git", ["apply", "-R", "--check", patchPath], { stdio: "pipe" });
+      reversible = true;
+    } catch {
+      reversible = false;
+    }
+    if (reversible) {
+      console.error(
+        `sabotage: a previous run was killed while ${journey}.patch was applied — the working tree ` +
+          `still carries that mutation, not just an unrelated dirty tree.\n` +
+          `Recover with: git apply -R ${patchPath}\n` +
+          `Then re-run \`npm run sabotage\` (the marker is cleared automatically once the tree is clean).`,
+      );
+    } else {
+      console.error(
+        `sabotage: the marker says ${journey}.patch was left applied, but it no longer reverses cleanly ` +
+          `against the current working tree — the dirty tree may not be (only) that mutation.\n` +
+          `\`git apply -R ${patchPath}\` would fail confusingly, so resolve this by hand instead. Current status:\n` +
+          execFileSync("git", ["status"], { encoding: "utf8" }),
+      );
+    }
     process.exit(1);
   }
   // The tree is already clean — the patch was reverted by hand (or some other

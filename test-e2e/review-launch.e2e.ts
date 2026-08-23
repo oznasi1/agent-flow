@@ -44,8 +44,11 @@ test.beforeEach(() => {
 test.afterEach(async () => {
   await app?.close();
   app = undefined;
-  expectNoUnknownForgeCalls(sb);
-  sb.dispose();
+  try {
+    expectNoUnknownForgeCalls(sb);
+  } finally {
+    sb.dispose();
+  }
 });
 
 /** Every worktree git itself knows about in the fixture repo. Asserting from
@@ -111,14 +114,24 @@ test("launching a review opens its worktree, brief and plan handshake", async ({
 
   // The plan handshake carries the review-rendered template: {repo}, {number}
   // and {author} are substituted before the shared renderer ever sees it.
+  // launchReview independently sets ticket.key to "review-rocket-41", its
+  // summary to "Review oznasi1/rocket#41: …" and the planMd heading to the
+  // same — all built straight from req.repoName/req.number, with no template
+  // substitution involved. So asserting the plan merely CONTAINS
+  // "oznasi1/rocket" or "41" would pass even if renderReviewTemplate did
+  // nothing at all to the template body. Assert instead on text that exists
+  // ONLY in the template's own wording, combined with the substituted value:
+  // the `gh pr checkout` line proves {repo} and {number} landed together
+  // inside template text, and "by octo" proves {author} did too.
   const plansDir = path.join(sb.home, ".agentflow", "plans");
   await expect.poll(() => (fs.existsSync(plansDir) ? fs.readdirSync(plansDir) : []), { timeout: 60_000 })
     .not.toHaveLength(0);
   const plan = fs.readdirSync(plansDir).map((f) => fs.readFileSync(path.join(plansDir, f), "utf8")).join("\n");
-  expect(plan).toContain("oznasi1/rocket");
-  expect(plan).toContain("41");
+  expect(plan).toContain("gh pr checkout 41 --repo oznasi1/rocket");
+  expect(plan).toContain("by octo");
   expect(plan).not.toContain("{repo}");
   expect(plan).not.toContain("{number}");
+  expect(plan).not.toContain("{author}");
   await shot(launched.page, testInfo, "2 · review launched");
 
   // Let the review's own new window finish booting before the test ends and

@@ -52,7 +52,13 @@ test("a copilot take opens the real chat panel instead of the clipboard fallback
 
   // The contract: with Copilot Chat present, seedChatPanel resolves
   // workbench.action.chat.open and NEVER reaches the clipboard fallback toast.
+  // There used to be a companion `.not.toContainText("prompt copied")` check
+  // on `.notifications-toasts` here, but Playwright's `.not` is satisfied by
+  // the container not being mounted at all — which is exactly what happens
+  // when no toast ever fired — so it passed trivially and proved nothing. The
+  // welcome-copy assertion above is the actual discriminator for this
+  // journey's contract: it can only pass via the real chat panel, never the
+  // clipboard-fallback path.
   await expect(opened.getByText(/welcome to copilot/i).first()).toBeVisible({ timeout: 180_000 });
-  await expect(opened.locator(".notifications-toasts")).not.toContainText("prompt copied");
   await shot(opened, testInfo, "1 · copilot panel");
 });

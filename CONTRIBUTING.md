@@ -67,6 +67,17 @@ once the tree is clean (whether by that command or by any other manual
 recovery). Every other cause of a dirty tree still gets the plain "working
 tree is dirty. Commit first" message.
 
+**One patch proves one test, not a whole file.** The runner pairs exactly one
+`.patch` with one `.expect` per journey *file*, and `.expect` names a single
+target test. When a spec file holds more than one `test(...)`, only the named
+test is mutation-proven — a sibling test in the same file can still be
+vacuous and this gate will not catch it. For example, `deck-lifecycle`'s
+`forget` test goes through a separate `removeRun` call (`src/deckView.ts`)
+that its file's patch does not touch, and `review-launch`'s batch-launch test
+is likewise unproven by that file's patch. Do not read a green `npm run
+sabotage` as "every test in every journey file can fail" — it only means the
+one named test per patched file can.
+
 ## The E2E fixture connector
 
 `agentFlow.taskSource: "fixture"` resolves a JSON-backed task source, but only
