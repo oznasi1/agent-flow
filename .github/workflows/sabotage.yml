@@ -1,0 +1,33 @@
+name: Sabotage (mutation-check the E2E lane)
+
+# Weekly, not per-PR: it rebuilds and re-runs per patch, far too slow for a
+# required check, and "a journey stopped being able to fail" is a
+# standing-health question rather than a merge-blocking one.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  sabotage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Cache the pinned VS Code build
+        uses: actions/cache@v4
+        with:
+          path: .vscode-test
+          # Kept in sync with the same key in e2e.yml — the pins live in
+          # test-e2e/_helpers/host.ts (VSCODE_VERSION), claudeCode.ts
+          # (CLAUDE_CODE_VERSION), and copilotChat.ts (COPILOT_CHAT_VERSION);
+          # hashing all three re-downloads exactly when any pin moves.
+          key: vscode-test-${{ runner.os }}-${{ hashFiles('test-e2e/_helpers/host.ts', 'test-e2e/_helpers/claudeCode.ts', 'test-e2e/_helpers/copilotChat.ts') }}
+      # A real Electron workbench needs a display; xvfb provides one headlessly.
+      - run: xvfb-run -a npm run sabotage
