@@ -32,14 +32,32 @@
   .chart .val { fill:var(--fg); font-size:9px; text-anchor:middle; font-variant-numeric:tabular-nums; }
   .chart .tick { fill:var(--muted); font-size:9px; text-anchor:middle; font-variant-numeric:tabular-nums; }
   .empty { color:var(--muted); }
+  /* A ranking reads as a time series if it looks like one, so the tables are
+     deliberately plain — no bars, no colour, nothing that implies a trend. */
+  .rank { border-collapse:collapse; width:100%; font-size:13px; margin-bottom:4px; }
+  .rank th { text-align:left; font-weight:600; color:var(--muted); font-size:11px;
+             text-transform:uppercase; letter-spacing:.05em; padding:0 8px 6px 0;
+             border-bottom:1px solid var(--line); }
+  .rank td { padding:6px 8px 6px 0; border-bottom:1px solid var(--line); }
+  .rank tr:last-child td { border-bottom:0; }
+  .rank .n { text-align:right; font-variant-numeric:tabular-nums; padding-right:0; width:72px; }
+  /* Hidden until the inline script decides the data is old. The hidden
+     attribute does the work, so a browser with JS off shows nothing rather
+     than a false alarm. */
+  .stale { background:#fdf3d8; color:#5c4813; border:1px solid #e8d08a;
+           border-radius:6px; padding:10px 14px; margin:0 0 20px; font-size:13px; }
+  @media (prefers-color-scheme: dark) {
+    .stale { background:#332b14; color:#f0dca8; border-color:#5c4b1d; }
+  }
 </style></head><body>
 <h1>Agent Flow — reach</h1>
-<p class="since">Recording since 2026-08-22. Last run 2026-08-23.
-Latest published version 0.41.0.</p>
+<div id="stale" class="stale" hidden></div>
+<p class="since" id="freshness" data-last-run="2026-08-23T17:27:44.517Z">Recording since 2026-08-22. Last run 2026-08-23.
+Latest published version 0.41.1.</p>
 
 <div class="tiles">
-  <div class="tile"><b>19,412</b><span>Open VSX downloads</span></div>
-  <div class="tile"><b>1,113</b><span>VS Marketplace downloads</span></div>
+  <div class="tile"><b>19,504</b><span>Open VSX downloads</span></div>
+  <div class="tile"><b>1,117</b><span>VS Marketplace downloads</span></div>
   <div class="tile"><b>11</b><span>VS Marketplace installs</span></div>
   <div class="tile"><b>2</b><span>Stars</span></div>
 </div>
@@ -56,4 +74,35 @@ Latest published version 0.41.0.</p>
 <h2>Daily clones</h2>
 <p class="sub">460 total · peak 170/day · 15 days (2026-08-08 → 2026-08-22)</p>
 <svg viewBox="0 0 720 150" role="img" class="chart" preserveAspectRatio="xMidYMid meet"><line class="axis" x1="0" y1="134" x2="720" y2="134"/><g><title>2026-08-08: 51</title><rect class="bar" x="0.0" y="99.0" width="46.0" height="35" rx="4.0"/></g><text class="val" x="23.0" y="95.0">51</text><text class="tick" x="23.0" y="146.0">08-08</text><g><title>2026-08-09: 9</title><rect class="bar" x="48.0" y="128.0" width="46.0" height="6" rx="4.0"/></g><text class="val" x="71.0" y="124.0">9</text><g><title>2026-08-10: 6</title><rect class="bar" x="96.0" y="130.0" width="46.0" height="4" rx="4.0"/></g><text class="val" x="119.0" y="126.0">6</text><text class="tick" x="119.0" y="146.0">08-10</text><g><title>2026-08-11: 5</title><rect class="bar" x="144.0" y="131.0" width="46.0" height="3" rx="4.0"/></g><text class="val" x="167.0" y="127.0">5</text><g><title>2026-08-12: 33</title><rect class="bar" x="192.0" y="111.0" width="46.0" height="23" rx="4.0"/></g><text class="val" x="215.0" y="107.0">33</text><text class="tick" x="215.0" y="146.0">08-12</text><g><title>2026-08-13: 17</title><rect class="bar" x="240.0" y="122.0" width="46.0" height="12" rx="4.0"/></g><text class="val" x="263.0" y="118.0">17</text><g><title>2026-08-14: 16</title><rect class="bar" x="288.0" y="123.0" width="46.0" height="11" rx="4.0"/></g><text class="val" x="311.0" y="119.0">16</text><text class="tick" x="311.0" y="146.0">08-14</text><g><title>2026-08-15: 27</title><rect class="bar" x="336.0" y="115.0" width="46.0" height="19" rx="4.0"/></g><text class="val" x="359.0" y="111.0">27</text><g><title>2026-08-16: 5</title><rect class="bar" x="384.0" y="131.0" width="46.0" height="3" rx="4.0"/></g><text class="val" x="407.0" y="127.0">5</text><text class="tick" x="407.0" y="146.0">08-16</text><g><title>2026-08-17: 11</title><rect class="bar" x="432.0" y="126.0" width="46.0" height="8" rx="4.0"/></g><text class="val" x="455.0" y="122.0">11</text><g><title>2026-08-18: 7</title><rect class="bar" x="480.0" y="129.0" width="46.0" height="5" rx="4.0"/></g><text class="val" x="503.0" y="125.0">7</text><text class="tick" x="503.0" y="146.0">08-18</text><g><title>2026-08-19: 9</title><rect class="bar" x="528.0" y="128.0" width="46.0" height="6" rx="4.0"/></g><text class="val" x="551.0" y="124.0">9</text><g><title>2026-08-20: 11</title><rect class="bar" x="576.0" y="126.0" width="46.0" height="8" rx="4.0"/></g><text class="val" x="599.0" y="122.0">11</text><text class="tick" x="599.0" y="146.0">08-20</text><g><title>2026-08-21: 83</title><rect class="bar" x="624.0" y="76.0" width="46.0" height="58" rx="4.0"/></g><text class="val" x="647.0" y="72.0">83</text><g><title>2026-08-22: 170</title><rect class="bar" x="672.0" y="16.0" width="46.0" height="118" rx="4.0"/></g><text class="val" x="695.0" y="12.0">170</text><text class="tick" x="695.0" y="146.0">08-22</text></svg>
+
+<h2>Top referrers</h2>
+<p class="sub">Ranking on 2026-08-23 — where GitHub says the views came from. A ranking is not a total: two snapshots do not add up.</p>
+<table class="rank"><thead><tr><th>Top referrers</th><th class="n">Views</th><th class="n">Uniques</th></tr></thead><tbody><tr><td>Google</td><td class="n">22</td><td class="n">4</td></tr><tr><td>github.com</td><td class="n">15</td><td class="n">1</td></tr><tr><td>open-vsx.org</td><td class="n">10</td><td class="n">1</td></tr></tbody></table>
+
+<h2>Top paths</h2>
+<p class="sub">Ranking on 2026-08-23 — the pages those views landed on. A ranking is not a total: two snapshots do not add up.</p>
+<table class="rank"><thead><tr><th>Top paths</th><th class="n">Views</th><th class="n">Uniques</th></tr></thead><tbody><tr><td>/pulls</td><td class="n">44</td><td class="n">2</td></tr><tr><td>Overview</td><td class="n">39</td><td class="n">6</td></tr><tr><td>/compare/reach-data</td><td class="n">10</td><td class="n">1</td></tr><tr><td>/graphs/contributors</td><td class="n">9</td><td class="n">2</td></tr><tr><td>/actions/metrics/usage</td><td class="n">8</td><td class="n">1</td></tr><tr><td>/forks</td><td class="n">7</td><td class="n">2</td></tr><tr><td>/graphs/traffic</td><td class="n">5</td><td class="n">1</td></tr><tr><td>/pull/15</td><td class="n">5</td><td class="n">1</td></tr><tr><td>/actions/workflows/ci.yml</td><td class="n">4</td><td class="n">2</td></tr><tr><td>/community</td><td class="n">4</td><td class="n">2</td></tr></tbody></table>
+
+<script>
+/* The page is regenerated only when the collector runs, so it cannot detect
+   its own staleness at render time — a skipped cron leaves a page that is
+   perfectly consistent and simply old. Reading the age in the *viewer's*
+   browser is the only check that survives the collector not running at all,
+   which is precisely the failure this is here to catch.
+
+   The timestamp is read from a data attribute rather than interpolated into
+   this script, so nothing from the store is ever parsed as code. */
+(function () {
+  var el = document.getElementById("freshness");
+  var box = document.getElementById("stale");
+  if (!el || !box) return;
+  var last = Date.parse(el.getAttribute("data-last-run"));
+  if (isNaN(last)) return;
+  var days = Math.floor((Date.now() - last) / 86400000);
+  if (days < 2) return;
+  box.textContent = "⚠ This data is " + days + " days old. The collector runs daily, "
+    + "so it has probably stopped — check the reach workflow.";
+  box.hidden = false;
+})();
+</script>
 </body></html>
