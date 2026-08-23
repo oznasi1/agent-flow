@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.1] — 2026-08-23
+
 ### Changed
 
 - **The name is "Agent Flow Deck" in the last places that still said "Agent
