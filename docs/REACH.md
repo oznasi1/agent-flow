@@ -20,6 +20,42 @@ totals and star history for this repo are readable by anyone. That is a
 consequence worth knowing rather than a problem to fix — but don't put
 anything in the store you wouldn't publish.
 
+## The range filter, and what it can honestly scope
+
+The dashboard has one control: **All time / 7 / 30 / 90 days**, in a row above
+everything it scopes. Three rules keep it from lying.
+
+**A preset the store cannot answer is disabled, not hidden.** With 15 days
+recorded, a "30 days" button would return exactly the all-time view — the
+reader would believe they had filtered when they had not. It renders greyed
+out with a title saying how many days exist, so a short history reads as short.
+Unsatisfiable presets are not even rendered as chart blocks.
+
+**A range cannot slice a lifetime counter.** Open VSX and VS Marketplace
+downloads are cumulative totals; there is no "downloads during last week" field
+to read. Showing the unsliced 19,504 under a 7-day filter would read as a claim
+that all of them happened that week. So the tile keeps the lifetime number and
+the line beneath it reports the *change* between the first and last sample
+inside the range. Two samples are required — one sample is a level, not a
+change, and a fabricated `0` would look identical to a genuinely flat week.
+
+**A ranking is a single day and does not follow the range at all.** Referrers
+and paths are one dated snapshot; the section says so rather than appearing to
+re-filter.
+
+Mechanically the filter is progressive enhancement, and deliberately dumb:
+`render.mjs` pre-renders one hidden block per satisfiable range and parks each
+block's total on the block, each range's delta on the button that selects it.
+The inline script only toggles visibility and copies those values into place —
+it performs no arithmetic, so a filtered view and the served view cannot
+disagree, and there is no second copy of the data in the page. With JavaScript
+off the page is the all-time view, exactly as it was before the filter existed.
+
+The ranges count back from the **newest recorded day**, not from the clock.
+Anchoring to the clock would empty every range the moment the collector
+stalled; "the last 7 recorded days" is a question the store can always answer,
+and the staleness banner is what says the recording itself has stopped.
+
 ## Before the first run: bootstrap the data branch
 
 `.github/workflows/reach.yml` checks out an orphan `reach-data` branch to
