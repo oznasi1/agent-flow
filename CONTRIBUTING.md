@@ -48,9 +48,12 @@ are all reported as distinct gate failures, not silently ignored.
 `finally`, but a `finally` cannot run if the process itself is killed (e.g. a
 tool or CI step timing out mid-patch) — that leaves a mutation applied to
 `src/` with no automatic revert. Before applying a patch, the runner writes
-`test-results/.sabotage-in-progress` (gitignored, alongside the rest of
-`test-results/`) naming the patch in flight, and removes it once the revert
-is confirmed clean. If a run dies mid-patch, the next invocation of
+`.sabotage-in-progress` at the repo root (gitignored) naming the patch in
+flight, and removes it once the revert is confirmed clean. It lives at the
+root rather than under `test-results/` because Playwright empties that whole
+directory at the start of every run — a marker parked there would vanish
+mid-loop, exactly when it's needed. If a run dies mid-patch, the next
+invocation of
 `npm run sabotage` finds that marker and — instead of the generic "working
 tree is dirty" refusal — fails with the exact patch name and the recovery
 command:

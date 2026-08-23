@@ -14,7 +14,7 @@
 // slow for a required check, and "a test stopped being able to fail" is a
 // standing-health question, not a merge-blocking one.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const DIR = "test-e2e/sabotage";
@@ -22,14 +22,21 @@ const DIR = "test-e2e/sabotage";
 // reporter is configured unconditionally (not gated on CI), and a single-spec
 // run still writes it, confirmed by inspection while building this check.
 const REPORT = "test-results/e2e-results.json";
-// A gitignored marker (lives under test-results/, already ignored) naming the
-// patch currently applied. This runner's `finally` reverts the patch, but a
-// `finally` cannot survive a SIGKILL of its own process — a hard kill mid-patch
-// (e.g. a tool timeout during `npm run build`) has left a mutated src/ on disk
-// with no explanation beyond "tree is dirty". The marker lets the NEXT run say
-// which patch and how to recover, instead of just refusing to proceed.
-const MARKER_DIR = "test-results";
-const MARKER = join(MARKER_DIR, ".sabotage-in-progress");
+// A gitignored marker naming the patch currently applied. This runner's
+// `finally` reverts the patch, but a `finally` cannot survive a SIGKILL of its
+// own process — a hard kill mid-patch (e.g. a tool timeout during the rebuild
+// or the Playwright run) has left a mutated src/ on disk with no explanation
+// beyond "tree is dirty". The marker lets the NEXT run say which patch and how
+// to recover, instead of just refusing to proceed.
+//
+// Deliberately NOT under test-results/: Playwright empties its whole output
+// directory at the start of every run (confirmed by hand — a canary file
+// dropped in test-results/ before `npx playwright test` does not survive it),
+// which would silently erase the marker mid-loop, defeating the guard at
+// exactly the moment it exists to help. The repo root is untouched by both
+// `npm run build` and Playwright, so the marker survives the whole window a
+// patch is on disk.
+const MARKER = ".sabotage-in-progress";
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit", ...opts });
 
 function dirty() {
@@ -165,7 +172,6 @@ for (const patch of patches) {
   // kill anywhere between here and the revert below leaves a trail. Written
   // ahead of `git apply` on purpose: the mutation itself is what dirties the
   // tree, so the marker must exist for the entire window the tree is dirty.
-  mkdirSync(MARKER_DIR, { recursive: true });
   writeFileSync(MARKER, journey);
   run("git", ["apply", join(DIR, patch)]);
   let survived = false;
