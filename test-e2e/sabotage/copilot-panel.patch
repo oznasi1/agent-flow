@@ -1,0 +1,13 @@
+diff --git a/src/engine/workspace.ts b/src/engine/workspace.ts
+index ede1ac1..252cf1f 100644
+--- a/src/engine/workspace.ts
++++ b/src/engine/workspace.ts
+@@ -1046,7 +1046,7 @@ async function seedChatPanel(
+   // the user can see — a silently unseeded take. Only the extension that
+   // actually provides the panel makes the command mean what this function
+   // promises. Cursor is exempt: its chat is the host's own, not an extension.
+-  if (provider === "copilot" && !vscode.extensions.getExtension("GitHub.copilot-chat")) {
++  if (provider === "copilot") {
+     log(`seed ${key}: GitHub Copilot Chat is not installed — falling back to the clipboard`);
+     return false;
+   }
