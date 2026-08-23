@@ -29,3 +29,21 @@ export interface MarketplaceJsonlResult {
   skipped: number;
 }
 export declare function parseMarketplaceJsonl(text: string): MarketplaceJsonlResult;
+
+export declare function sliceDays(buckets: DailyMap, days: number | null): DailyMap;
+export interface Preset {
+  days: number;
+  enabled: boolean;
+}
+export declare function availablePresets(buckets: DailyMap, presets?: number[]): Preset[];
+/** Only the fields the delta reads — a caller does not need a whole record. */
+export interface CumulativeSample {
+  ts: string;
+  openvsx?: { downloads?: number } | null;
+  vsmarketplace?: { downloads?: number } | null;
+}
+export declare function deltaWithin(
+  marketplace: CumulativeSample[],
+  days: number | null,
+  anchorDay: string | null,
+): { vsx: number; vsm: number } | null;
