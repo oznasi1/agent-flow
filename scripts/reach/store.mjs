@@ -53,3 +53,36 @@ export function appendJsonl(dir, rel, record) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.appendFileSync(file, `${JSON.stringify(record)}\n`, "utf8");
 }
+
+/**
+ * The newest dated file under `snapshots/<kind>/`, or null when the directory
+ * is missing or holds nothing dated.
+ *
+ * Referrers and paths are stored one dated file per run rather than merged,
+ * because they are GitHub's top-10 *rankings* — two snapshots do not compose
+ * into a sum. So "latest" is the only honest thing to read, and the date comes
+ * back with the rows so the caller can say which day it describes rather than
+ * implying it is current.
+ *
+ * Filenames are sorted lexically, which is chronological for `YYYY-MM-DD` and
+ * only for that shape — hence the strict filter rather than a bare readdir.
+ */
+export function readLatestSnapshot(dir, kind) {
+  const base = path.join(dir, "snapshots", kind);
+  let names;
+  try {
+    names = fs.readdirSync(base);
+  } catch (e) {
+    if (e && e.code === "ENOENT") return null;
+    throw e;
+  }
+  const dated = names.filter((n) => /^\d{4}-\d{2}-\d{2}\.json$/.test(n)).sort();
+  if (dated.length === 0) return null;
+  const file = dated[dated.length - 1];
+  // readJson throws on a corrupt file rather than masking it as empty; the
+  // dashboard's CLI catches that and renders without this section, the same
+  // way it tolerates a torn line in marketplace.jsonl.
+  const rows = readJson(dir, `snapshots/${kind}/${file}`, null);
+  if (!Array.isArray(rows)) return null;
+  return { date: file.slice(0, 10), rows };
+}

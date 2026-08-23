@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { readJson, writeJson, appendJsonl } from "../../../scripts/reach/store.mjs";
+import { readJson, writeJson, appendJsonl, readLatestSnapshot } from "../../../scripts/reach/store.mjs";
 
 let dir: string;
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "reach-")); });
@@ -54,5 +54,44 @@ describe("appendJsonl", () => {
     expect(lines).toHaveLength(2);
     expect(JSON.parse(lines[0])).toEqual({ ts: "2026-08-22", downloads: 18596 });
     expect(JSON.parse(lines[1])).toEqual({ ts: "2026-08-23", downloads: 18700 });
+  });
+});
+
+describe("readLatestSnapshot", () => {
+  it("returns null when the kind has never been collected", () => {
+    expect(readLatestSnapshot(dir, "referrers")).toBeNull();
+  });
+
+  it("picks the newest date, not the newest mtime — order on disk is not chronology", () => {
+    // Written newest-first on purpose: a readdir/mtime-based implementation
+    // would answer 2026-08-01 here, silently serving month-old rankings.
+    writeJson(dir, "snapshots/referrers/2026-09-02.json", [{ referrer: "new", count: 2, uniques: 1 }]);
+    writeJson(dir, "snapshots/referrers/2026-08-01.json", [{ referrer: "old", count: 9, uniques: 4 }]);
+    const snap = readLatestSnapshot(dir, "referrers");
+    expect(snap).toEqual({ date: "2026-09-02", rows: [{ referrer: "new", count: 2, uniques: 1 }] });
+  });
+
+  it("ignores files that are not a dated snapshot", () => {
+    writeJson(dir, "snapshots/paths/2026-08-01.json", [{ path: "/x", count: 1, uniques: 1 }]);
+    fs.writeFileSync(path.join(dir, "snapshots/paths/README.md"), "notes\n");
+    fs.writeFileSync(path.join(dir, "snapshots/paths/latest.json"), "[]\n");
+    expect(readLatestSnapshot(dir, "paths")?.date).toBe("2026-08-01");
+  });
+
+  it("returns null when the directory holds nothing dated", () => {
+    fs.mkdirSync(path.join(dir, "snapshots/paths"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "snapshots/paths/notes.txt"), "x");
+    expect(readLatestSnapshot(dir, "paths")).toBeNull();
+  });
+
+  it("returns null when the payload is not an array — a shape change must not render as rows", () => {
+    writeJson(dir, "snapshots/referrers/2026-08-01.json", { referrer: "not-a-list" });
+    expect(readLatestSnapshot(dir, "referrers")).toBeNull();
+  });
+
+  it("throws on a corrupt snapshot rather than masking it as absent", () => {
+    fs.mkdirSync(path.join(dir, "snapshots/referrers"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "snapshots/referrers/2026-08-01.json"), "{ not json");
+    expect(() => readLatestSnapshot(dir, "referrers")).toThrow(/corrupt JSON/);
   });
 });

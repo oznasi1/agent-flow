@@ -9,6 +9,9 @@ on:
 # Never part of the CI gate — this workflow must not be able to block a PR.
 permissions:
   contents: write
+  # For the health issue below. The built-in token is enough for this one —
+  # only the traffic endpoints need the PAT.
+  issues: write
 
 concurrency:
   group: reach
@@ -67,3 +70,56 @@ jobs:
           git diff --staged --quiet && echo "reach: nothing changed" && exit 0
           git commit -m "chore(reach): $(date -u +%Y-%m-%d)"
           git push origin reach-data
+
+      # A red run in the Actions tab is only a signal if somebody looks, and
+      # the failure this guards against is exactly the kind nobody looks for.
+      # One tracking issue is durable, lands where the work already is, and is
+      # closed by the next good run so it can never sit there lying.
+      #
+      # This cannot catch the other failure mode — a cron that never fires at
+      # all produces no run and therefore no step. That one is caught in the
+      # viewer's browser by the dashboard's staleness banner. See docs/REACH.md.
+      - name: Open or update the health issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "The \`reach\` workflow failed: $RUN_URL"
+            echo
+            echo "Sources that did succeed were still written and committed — the store is"
+            echo "not corrupt, it is incomplete. But GitHub only retains 14 days of daily"
+            echo "traffic, so every day this stays red is a day of views and clones that"
+            echo "cannot be recovered later."
+            echo
+            echo "First thing to check: REACH_TOKEN. It is a fine-grained PAT needing"
+            echo "Administration: read, and it expires."
+            echo
+            echo "This issue closes itself on the next successful run."
+          } > "$RUNNER_TEMP/reach-issue.md"
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+            --json number,title \
+            --jq '[.[] | select(.title == "reach: the collector is failing")][0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" \
+              --body-file "$RUNNER_TEMP/reach-issue.md"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" \
+              --title "reach: the collector is failing" \
+              --body-file "$RUNNER_TEMP/reach-issue.md"
+          fi
+
+      - name: Close the health issue on recovery
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 \
+            --json number,title \
+            --jq '[.[] | select(.title == "reach: the collector is failing")][0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue close "$number" --repo "$GITHUB_REPOSITORY" \
+              --comment "Recovered: $RUN_URL"
+          fi

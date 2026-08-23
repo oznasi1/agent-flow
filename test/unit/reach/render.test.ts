@@ -143,3 +143,90 @@ describe("parseMarketplaceJsonl", () => {
     expect(parseMarketplaceJsonl("")).toEqual({ records: [], skipped: 0 });
   });
 });
+
+const REFERRERS = {
+  date: "2026-08-23",
+  rows: [
+    { referrer: "Google", count: 22, uniques: 4 },
+    { referrer: "github.com", count: 15, uniques: 1 },
+  ],
+};
+const PATHS = {
+  date: "2026-08-23",
+  rows: [{ path: "/oznasi1/agent-flow/pulls", title: "/pulls", count: 44, uniques: 2 }],
+};
+
+describe("ranking sections", () => {
+  it("renders the referrers and paths recorded in the latest snapshot", () => {
+    const html = renderDashboard({ ...DATA, referrers: REFERRERS, paths: PATHS });
+    expect(html).toContain("Google");
+    expect(html).toContain("github.com");
+    expect(html).toContain("/pulls");
+    expect(html).toContain("22");
+  });
+
+  it("prefers a path's title over its raw path", () => {
+    const html = renderDashboard({ ...DATA, paths: PATHS });
+    expect(html).toContain("<td>/pulls</td>");
+    expect(html).not.toContain("/oznasi1/agent-flow/pulls");
+  });
+
+  it("falls back to the raw path when GitHub sends no title", () => {
+    const paths = { date: "2026-08-23", rows: [{ path: "/raw/only", count: 3, uniques: 1 }] };
+    expect(renderDashboard({ ...DATA, paths })).toContain("<td>/raw/only</td>");
+  });
+
+  it("dates the ranking and says it is not a total — it sits beside two time series", () => {
+    const html = renderDashboard({ ...DATA, referrers: REFERRERS });
+    expect(html).toContain("Ranking on 2026-08-23");
+    expect(html).toMatch(/two snapshots do not add up/i);
+  });
+
+  it("says nothing was recorded rather than rendering an empty table", () => {
+    const html = renderDashboard({ ...DATA, referrers: null, paths: null });
+    expect(html).toContain("No snapshot recorded yet.");
+    expect(html).not.toContain('<table class="rank"');
+  });
+
+  it("treats a snapshot with zero rows as nothing recorded", () => {
+    const html = renderDashboard({ ...DATA, referrers: { date: "2026-08-23", rows: [] } });
+    expect(html).toContain("No snapshot recorded yet.");
+  });
+
+  it("caps the table at ten rows even if the payload grows", () => {
+    const rows = Array.from({ length: 25 }, (_, i) => ({ referrer: `r${i}`, count: 1, uniques: 1 }));
+    const html = renderDashboard({ ...DATA, referrers: { date: "2026-08-23", rows } });
+    expect(html).toContain("<td>r9</td>");
+    expect(html).not.toContain("<td>r10</td>");
+  });
+
+  it("escapes a hostile referrer — the value is attacker-controlled", () => {
+    const rows = [{ referrer: "<img src=x onerror=alert(1)>", count: 1, uniques: 1 }];
+    const html = renderDashboard({ ...DATA, referrers: { date: "2026-08-23", rows } });
+    expect(html).not.toContain("<img src=x");
+    expect(html).toContain("&lt;img src=x");
+  });
+});
+
+describe("staleness stamp", () => {
+  it("carries the last run as a data attribute the viewer can check", () => {
+    expect(renderDashboard(DATA)).toContain('data-last-run="2026-08-22T06:17:00Z"');
+  });
+
+  it("omits the attribute entirely when nothing has ever run", () => {
+    // The script still *references* the attribute, so match the attribute
+    // itself — a bare substring check passes even when the stamp is emitted.
+    const html = renderDashboard({ ...DATA, meta: {} });
+    expect(html).not.toMatch(/data-last-run="/);
+    expect(renderDashboard(DATA)).toMatch(/data-last-run="/);
+  });
+
+  it("ships the warning box hidden — JS off must not mean a false alarm", () => {
+    expect(renderDashboard(DATA)).toContain('<div id="stale" class="stale" hidden></div>');
+  });
+
+  it("keeps the page offline-safe despite the added script", () => {
+    const html = renderDashboard({ ...DATA, referrers: REFERRERS, paths: PATHS });
+    expect(html).not.toMatch(/<script[^>]+src=/i);
+  });
+});

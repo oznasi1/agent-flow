@@ -4,7 +4,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { readJson } from "./store.mjs";
+import { readJson, readLatestSnapshot } from "./store.mjs";
 
 const esc = (v) =>
   String(v ?? "").replace(/[&<>"']/g, (c) =>
@@ -119,8 +119,37 @@ function chartSection(title, buckets) {
     + barChart(entries.map(([d, b]) => [d, b.count ?? 0]));
 }
 
+/**
+ * One ranking table — referrers or paths.
+ *
+ * These are the only figures here that must never be presented as a series.
+ * GitHub returns a top-ten ordered by a rolling window it does not disclose,
+ * so yesterday's table and today's share no denominator: they cannot be summed,
+ * averaged, or charted over time. The subtitle therefore states the snapshot
+ * date and says outright that it is a ranking, because a bare table of numbers
+ * next to two time-series charts will otherwise be read as one.
+ */
+function rankSection(title, snapshot, label, blurb) {
+  if (!snapshot || snapshot.rows.length === 0) {
+    return `<h2>${esc(title)}</h2>\n<p class="empty">No snapshot recorded yet.</p>`;
+  }
+  const rows = snapshot.rows
+    .slice(0, 10)
+    .map((r) => `<tr><td>${esc(label(r))}</td>`
+      + `<td class="n">${fmt(r.count)}</td>`
+      + `<td class="n">${fmt(r.uniques)}</td></tr>`)
+    .join("");
+  return `<h2>${esc(title)}</h2>\n`
+    + `<p class="sub">Ranking on ${esc(snapshot.date)} — ${esc(blurb)}. `
+    + `A ranking is not a total: two snapshots do not add up.</p>\n`
+    + `<table class="rank"><thead><tr><th>${esc(title)}</th>`
+    + `<th class="n">Views</th><th class="n">Uniques</th></tr></thead>`
+    + `<tbody>${rows}</tbody></table>`;
+}
+
 export function renderDashboard(data) {
-  const { meta = {}, views = {}, clones = {}, stars = [], marketplace = [] } = data;
+  const { meta = {}, views = {}, clones = {}, stars = [], marketplace = [],
+    referrers = null, paths = null } = data;
   const latest = marketplace[marketplace.length - 1];
   const thin = marketplace.length < 3;
 
@@ -163,9 +192,27 @@ export function renderDashboard(data) {
   .chart .val { fill:var(--fg); font-size:9px; text-anchor:middle; font-variant-numeric:tabular-nums; }
   .chart .tick { fill:var(--muted); font-size:9px; text-anchor:middle; font-variant-numeric:tabular-nums; }
   .empty { color:var(--muted); }
+  /* A ranking reads as a time series if it looks like one, so the tables are
+     deliberately plain — no bars, no colour, nothing that implies a trend. */
+  .rank { border-collapse:collapse; width:100%; font-size:13px; margin-bottom:4px; }
+  .rank th { text-align:left; font-weight:600; color:var(--muted); font-size:11px;
+             text-transform:uppercase; letter-spacing:.05em; padding:0 8px 6px 0;
+             border-bottom:1px solid var(--line); }
+  .rank td { padding:6px 8px 6px 0; border-bottom:1px solid var(--line); }
+  .rank tr:last-child td { border-bottom:0; }
+  .rank .n { text-align:right; font-variant-numeric:tabular-nums; padding-right:0; width:72px; }
+  /* Hidden until the inline script decides the data is old. The hidden
+     attribute does the work, so a browser with JS off shows nothing rather
+     than a false alarm. */
+  .stale { background:#fdf3d8; color:#5c4813; border:1px solid #e8d08a;
+           border-radius:6px; padding:10px 14px; margin:0 0 20px; font-size:13px; }
+  @media (prefers-color-scheme: dark) {
+    .stale { background:#332b14; color:#f0dca8; border-color:#5c4b1d; }
+  }
 </style></head><body>
 <h1>Agent Flow — reach</h1>
-<p class="since">${since}. Last run ${esc(String(meta.lastRun ?? "—").slice(0, 10))}.
+<div id="stale" class="stale" hidden></div>
+<p class="since" id="freshness"${meta.lastRun ? ` data-last-run="${esc(meta.lastRun)}"` : ""}>${since}. Last run ${esc(String(meta.lastRun ?? "—").slice(0, 10))}.
 Latest published version ${esc(latest?.openvsx?.version ?? "—")}.</p>
 
 <div class="tiles">
@@ -183,6 +230,33 @@ ${thin ? '<p class="note">Not enough history to show a trend yet — this needs 
 ${chartSection("Daily views", views)}
 
 ${chartSection("Daily clones", clones)}
+
+${rankSection("Top referrers", referrers, (r) => r.referrer, "where GitHub says the views came from")}
+
+${rankSection("Top paths", paths, (r) => r.title || r.path, "the pages those views landed on")}
+
+<script>
+/* The page is regenerated only when the collector runs, so it cannot detect
+   its own staleness at render time — a skipped cron leaves a page that is
+   perfectly consistent and simply old. Reading the age in the *viewer's*
+   browser is the only check that survives the collector not running at all,
+   which is precisely the failure this is here to catch.
+
+   The timestamp is read from a data attribute rather than interpolated into
+   this script, so nothing from the store is ever parsed as code. */
+(function () {
+  var el = document.getElementById("freshness");
+  var box = document.getElementById("stale");
+  if (!el || !box) return;
+  var last = Date.parse(el.getAttribute("data-last-run"));
+  if (isNaN(last)) return;
+  var days = Math.floor((Date.now() - last) / 86400000);
+  if (days < 2) return;
+  box.textContent = "\u26a0 This data is " + days + " days old. The collector runs daily, "
+    + "so it has probably stopped \u2014 check the reach workflow.";
+  box.hidden = false;
+})();
+</script>
 </body></html>
 `;
 }
@@ -205,8 +279,21 @@ if (process.argv[1] && process.argv[1].endsWith("render.mjs")) {
       console.warn(`reach: skipped ${skipped} unparseable line(s) in marketplace.jsonl`);
     }
   }
+  // A corrupt snapshot must not cost the whole dashboard — the charts and
+  // tiles are worth more than one day's ranking. Same tolerance the torn-line
+  // case above gets, and the damaged file is left in place for repair.
+  const snapshot = (kind) => {
+    try {
+      return readLatestSnapshot(dir, kind);
+    } catch (e) {
+      console.warn(`reach: skipped the ${kind} snapshot — ${e.message}`);
+      return null;
+    }
+  };
   const html = renderDashboard({
     meta: readJson(dir, "meta.json", {}),
+    referrers: snapshot("referrers"),
+    paths: snapshot("paths"),
     views: readJson(dir, "traffic/views.json", {}),
     clones: readJson(dir, "traffic/clones.json", {}),
     stars: readJson(dir, "stars.json", []),
