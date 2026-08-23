@@ -6,6 +6,20 @@ webview. It exists because GitHub's traffic API only retains 14 days of daily
 views and clones: whatever isn't recorded before that window closes is gone
 forever, no exceptions. This doc is meant to be true, not encouraging.
 
+## Where the dashboard lives
+
+<https://oznasi1.github.io/agent-flow/> — GitHub Pages, served from the
+`reach-data` branch at root. Every collection run regenerates `index.html` and
+pushes it, and Pages rebuilds on that push, so the page is current without
+anyone running anything. There is a `.nojekyll` file on the branch; without it
+Pages would hand the tree to Jekyll, which has its own opinions about
+directories like `snapshots/`.
+
+The page is public, because the branch already was. Traffic counts, download
+totals and star history for this repo are readable by anyone. That is a
+consequence worth knowing rather than a problem to fix — but don't put
+anything in the store you wouldn't publish.
+
 ## Before the first run: bootstrap the data branch
 
 `.github/workflows/reach.yml` checks out an orphan `reach-data` branch to
@@ -50,7 +64,9 @@ branch exists.
 
 Referrers and paths are GitHub's top-10 rankings, not totals — two snapshots
 don't compose into a sum, so each run keeps its own dated file instead of
-merging into one aggregate.
+merging into one aggregate. The dashboard renders the **latest** snapshot of
+each as a plain table, dated and labelled a ranking, deliberately without any
+chart: put a top-ten next to two time-series and it gets read as a third.
 
 All of this lands on an orphan `reach-data` branch (no shared history with
 `main`, never merge it back) via `.github/workflows/reach.yml`, which runs on
@@ -181,6 +197,39 @@ written — a partial failure is not a reason to discard the run. Point `--out`
 at a scratch directory for local experiments; pointing it at a real
 `.reach-data` checkout works the same way the workflow uses it, but be
 careful not to commit scratch data to that branch by accident.
+
+## When the collector stops
+
+Two different failures, and neither one is noisy on its own.
+
+**A run that fails.** `collect.mjs` exits non-zero when any source throws, so
+the job goes red — but a red run in the Actions tab is only a signal if
+somebody looks, and nobody watches a workflow that cannot block anything. So
+`reach.yml` opens a tracking issue titled `reach: the collector is failing`,
+comments on that same issue rather than opening a second one if the next run
+also fails, and closes it automatically on the first successful run. An open
+issue with that title means the store is currently incomplete; no such issue
+means the last run was clean. `REACH_TOKEN` expiring is the likeliest cause —
+check that first.
+
+**A run that never happens.** GitHub skips scheduled runs under load and
+disables the cron outright after 60 quiet days (see below). Nothing fails,
+because nothing ran: no red job, no issue, no notification. The store simply
+stops growing and the dashboard keeps serving its last good render, perfectly
+consistent and increasingly wrong.
+
+Nothing on GitHub's side can catch that, and neither can the renderer — the
+page is only regenerated when the collector runs, so at render time the data
+is always fresh by definition. The check therefore happens in the viewer's
+browser: `render.mjs` stamps `meta.lastRun` onto the page as a data attribute,
+and a short inline script compares it to the clock when you open the page,
+showing a warning banner once the data is two or more days old. It is the only
+part of the dashboard that runs client-side, and this is why. Two days rather
+than one, because a single late cron is normal.
+
+If you see that banner, check whether the workflow is still enabled before
+assuming the data is lost — a disabled cron resumes with one
+`workflow_dispatch`, and anything inside the trailing 14 days backfills itself.
 
 ## Scheduling caveats
 
