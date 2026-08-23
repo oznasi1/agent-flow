@@ -43,7 +43,7 @@ Which tool is your choice — **Claude Code** by default, **GitHub Copilot** in 
 Your Jira project as a filterable pool: **My sprint · Unassigned · Mine · Sprint ·
 Backlog**, with a size lens and a fuzzy title search. Click a card and the repos the
 ticket touches are already selected — read from its components, labels and text, matched
-against your local checkouts. Press **▶ Take** and Agent Flow writes a
+against your local checkouts. Press **▶ Take** and Agent Flow Deck writes a
 `.pick-task/TASK.md` brief into each repo, generates a workspace, and pre-fills your
 session with the prompt; you press Enter.
 
@@ -90,7 +90,7 @@ plus whatever you wrote yourself. Search is fuzzy (`revw` finds `/review`), and 
 row renders its file so you can read what something does without opening it.
 
 **More:** the [full guide](docs/GUIDE.md) covers the Deck's Orchestrator drawer, run
-retirement, tracking Claude Code sessions Agent Flow didn't launch, per-task worktrees,
+retirement, tracking Claude Code sessions Agent Flow Deck didn't launch, per-task worktrees,
 prompt modes, and Remote Control.
 
 ## Quick start

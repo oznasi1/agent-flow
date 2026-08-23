@@ -90,13 +90,13 @@ describe("mount + auth gate", () => {
            prReviewStatus: "PR initiated", filters: ALL_FILTERS, liveCount: 2 });
     const trail = () => document.querySelector(".tabbar .tabbar-trail") as HTMLElement;
     expect(trail()).not.toBeNull();
-    expect(within(trail()).getByRole("img", { name: "2 Agent Flow windows open" })).toBeInTheDocument();
+    expect(within(trail()).getByRole("img", { name: "2 Agent Flow Deck windows open" })).toBeInTheDocument();
     expect(within(trail()).getByRole("button", { name: /Explore/ })).toBeInTheDocument();
 
     // Explore starts a session on repos, not on a ticket, and the gauge counts open
     // windows — neither belongs to one tab, so both survive the switch to Notepad.
     fireEvent.click(screen.getByRole("tab", { name: "Notepad" }));
-    expect(within(trail()).getByRole("img", { name: "2 Agent Flow windows open" })).toBeInTheDocument();
+    expect(within(trail()).getByRole("img", { name: "2 Agent Flow Deck windows open" })).toBeInTheDocument();
     expect(within(trail()).getByRole("button", { name: /Explore/ })).toBeInTheDocument();
   });
 

@@ -1292,7 +1292,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const planMd = env
       ? `## Verify: ${topic} on ${env}\n\n_Verification session — environment: ${env}. Services in scope: ${serviceNames}._`
       : action.id === "supervise"
-        ? `## Supervise: ${topic}\n\n_No Jira ticket yet — a supervision session over your other active Agent Flow tasks._\n\n` +
+        ? `## Supervise: ${topic}\n\n_No Jira ticket yet — a supervision session over your other active Agent Flow Deck tasks._\n\n` +
           describeActiveTasks(readRuns(defaultRunsDir()), new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys()))
         : `## Exploration: ${topic}\n\n_No Jira ticket yet — a knowledge/exploration session. If it turns into work, open a ticket afterwards._`;
     const result = await openWorkspace({
@@ -1382,7 +1382,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       .map((_, i) => `- \`${BRIEF_DIR}/images/${attachmentRelPath(key, attachments, i)}\``)
       .join("\n");
     const planMd =
-      `## Notepad: ${topic}\n\n_No ticket — an item you wrote in the Agent Flow notepad. ` +
+      `## Notepad: ${topic}\n\n_No ticket — an item you wrote in the Agent Flow Deck notepad. ` +
       `If it turns into tracked work, open a ticket afterwards._` +
       (note.body.trim() ? `\n\n${note.body.trim()}` : "") +
       (attachments.length > 0 ? `\n\n## Attached images\n\n${imageLines}` : "");

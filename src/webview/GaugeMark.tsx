@@ -6,7 +6,7 @@ import { OUTER, INNER, OUTER_R, INNER_R, VIEW_BOX } from "./markGeometry";
 const STATIC_LIT = 6;
 
 /**
- * The mark, doubling as a gauge. `live` is the number of Agent Flow windows open,
+ * The mark, doubling as a gauge. `live` is the number of Agent Flow Deck windows open,
  * as of the host's last `state` or `tasks` post — it updates whenever the pool
  * refreshes, not just at mount. Omit it (the host omits it when trackOpenWindows
  * is off) to get the static lockup. It never animates: the sidebar has no turn
@@ -15,7 +15,7 @@ const STATIC_LIT = 6;
 export function GaugeMark({ live, size = 15 }: { live?: number; size?: number }): JSX.Element {
   const known = live !== undefined;
   const count = known ? Math.max(0, Math.min(live, OUTER.length)) : STATIC_LIT;
-  const label = known ? `${live} Agent Flow window${live === 1 ? "" : "s"} open` : undefined;
+  const label = known ? `${live} Agent Flow Deck window${live === 1 ? "" : "s"} open` : undefined;
 
   return (
     <svg

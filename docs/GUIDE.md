@@ -90,7 +90,7 @@ plain list of things you want to do: a title, optional detail, a checkbox.
   when there's something to clear).
 
 The fields are ordinary text inputs, so your operating system's own dictation — double-tap
-Control on macOS, `Win`+`H` on Windows — types straight into them. Agent Flow ships no
+Control on macOS, `Win`+`H` on Windows — types straight into them. Agent Flow Deck ships no
 microphone button of its own: a VS Code webview can't reach the microphone, and Electron
 can't run the Web Speech API.
 
@@ -128,7 +128,7 @@ whichever you pick sticks.
 Run records retire themselves once a task is provably over: its directories are
 gone, it landed a day ago with no session left in it, or it is an old session with
 no ticket, no PR and nothing uncommitted. Uncommitted or unpushed work always
-stops a record being retired, and retirement only ever deletes Agent Flow's own
+stops a record being retired, and retirement only ever deletes Agent Flow Deck's own
 pointer — never a worktree, a branch, or a commit. **Clear stale** appears in the
 header when records are only waiting out their window, and takes them on the spot.
 

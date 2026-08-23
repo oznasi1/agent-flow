@@ -24,9 +24,9 @@ describe("GaugeMark", () => {
 
   it("names the count for screen readers, singular and plural", () => {
     render(<GaugeMark live={1} />);
-    expect(screen.getByRole("img", { name: "1 Agent Flow window open" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "1 Agent Flow Deck window open" })).toBeInTheDocument();
     render(<GaugeMark live={4} />);
-    expect(screen.getByRole("img", { name: "4 Agent Flow windows open" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "4 Agent Flow Deck windows open" })).toBeInTheDocument();
   });
 
   it("falls back to the static six-lit lockup and hides itself when there is no count", () => {
