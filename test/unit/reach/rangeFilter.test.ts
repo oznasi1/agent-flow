@@ -80,8 +80,13 @@ describe("the range filter", () => {
     expect(p.scope()).toBe("Views, all time");
   });
 
-  it("ignores a preset the store cannot satisfy", () => {
+  it("cannot be moved to a preset the store does not cover", () => {
+    // The protection is the `disabled` attribute — a disabled button fires no
+    // click — so that attribute is what this asserts. A JS guard here would be
+    // unreachable code; the mutation that removed one changed no behaviour.
     const p = mount();
+    expect((document.querySelector('[data-range="30"]') as HTMLButtonElement).disabled).toBe(true);
+    expect((document.querySelector('[data-range="7"]') as HTMLButtonElement).disabled).toBe(false);
     p.press("30");
     expect(p.visible()).toEqual(["views:all", "clones:all"]);
     expect(p.pressed()).toBe("all");

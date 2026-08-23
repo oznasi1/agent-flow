@@ -452,9 +452,11 @@ ${chartBlocks("clones", "Daily clones", clones, presets)}
     }
   }
 
+  // No guard for the disabled presets: a disabled button does not fire click,
+  // so the disabled attribute is the protection and a JS check would be dead
+  // code that no test could reach. The tests assert the attribute instead.
   buttons.forEach(function (b) {
     b.addEventListener("click", function () {
-      if (b.disabled) return;
       buttons.forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
       apply(b);
     });
