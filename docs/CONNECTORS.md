@@ -1,6 +1,6 @@
 # Adding a task source
 
-Agent Flow reads and writes tickets through a seam, not a hardwired dependency
+Agent Flow Deck reads and writes tickets through a seam, not a hardwired dependency
 on Jira. This guide is for whoever writes connector #2: what the seam
 requires, what degrades gracefully when a source can't answer something, and
 the handful of places where the seam doesn't reach yet — so you find those on
@@ -128,7 +128,7 @@ downstream can check one flag and reach for a differently-named method.
 | `sprints` | The "add to my sprint" action, the "My sprint" tab's drag-to-reorder, and the "remove from sprint" (with Undo) action on a card. | All three disappear from the UI (`caps.sprints` gates each). Calling any of `TasksViewProvider`'s sprint handlers directly (e.g. from the command palette after a stale webview render) reports `"{label} doesn't have sprints."` rather than throwing — see `sprints()` in `src/tasksView.ts`. |
 | `components` | The component-derived state on each repo chip in a task's detail panel — on-the-ticket (solid) vs. not (dashed, with a `↑` that pushes it) — and the two-way sync behind it. | The repo selection itself still renders, and is still editable: which repos a task touches is what `take` sends as `services`, and it is inferred from summary, description and labels as much as from components. Only the three-state classification goes: every chip renders plain, with no dash, no `↑`, and no title — there is nothing about the ticket to claim (`componentsSupported={caps.components}` in `App.tsx`; the same plain rendering also covers a components-having source whose list couldn't be read). |
 | `refreshCaps?()` | Not a `caps` member but the thing that can change one: a source that must ask its own server what it can do. The Jira connector reads the project's boards and, when there is no Scrum board, drops `mysprint`/`sprint`/`backlog` and `sprints`. The host calls it once per panel init, alongside the first `list()`, and posts a `caps` message with the result. | Nothing is called and nothing is posted; the `caps` in the initial `state` message are final. A connector whose capabilities are static (the fixture connector) should **omit** it rather than implement a no-op. |
-| `labels` | Provenance stamping — writing `agentFlow.provenanceLabel` onto a task after Agent Flow acts on it, when `agentFlow.stampLabelOnWrite` is on. | **A silent no-op**, not an error and not a toast: `stampProvenance()` in `src/tasksView.ts` returns immediately if `caps.labels` is absent. The write that mattered (the status change, the assignment) already succeeded; failing the whole operation over a label a source doesn't have would be the wrong trade. If you don't have labels, you don't need to do anything to make this safe — just don't declare the capability. |
+| `labels` | Provenance stamping — writing `agentFlow.provenanceLabel` onto a task after Agent Flow Deck acts on it, when `agentFlow.stampLabelOnWrite` is on. | **A silent no-op**, not an error and not a toast: `stampProvenance()` in `src/tasksView.ts` returns immediately if `caps.labels` is absent. The write that mattered (the status change, the assignment) already succeeded; failing the whole operation over a label a source doesn't have would be the wrong trade. If you don't have labels, you don't need to do anything to make this safe — just don't declare the capability. |
 
 One more field degrades the same way but isn't a `caps` entry:
 **`Task.inOpenSprint` is a required `boolean`, with no honest "no sprint
@@ -193,7 +193,7 @@ export interface TaskConnector {
   boxes, `showQuickPick`, whatever you need) and **collect, don't write**.
   `from`/`total` are the wizard's shared step counter — title your boxes
   `` `Agent Flow Deck Setup (${from}/${total})` `` so a multi-step connector
-  numbers correctly alongside Agent Flow's own `reposRoot` step, which always
+  numbers correctly alongside Agent Flow Deck's own `reposRoot` step, which always
   comes last. Return `null` if the user cancels partway; `setup.ts` treats that
   as an abort, leaving first-run setup un-marked-complete so it offers itself
   again next launch.
@@ -210,7 +210,7 @@ export interface TaskConnector {
   Jira connector.
 
 - **`setupSteps`** — how many boxes `configure` shows, so `setup.ts` can
-  compute `total = connector.setupSteps + 1` (the `+1` is Agent Flow's own
+  compute `total = connector.setupSteps + 1` (the `+1` is Agent Flow Deck's own
   `reposRoot` step, not yours).
 
 - **`isAuthenticated()` / `signIn()` / `signOut()`** — your own credential
@@ -315,7 +315,7 @@ source-agnostic:
   a branch against a `PROJECT-123`-style pattern and, on a match, builds a
   `${baseUrl}/browse/${key}` url — both details are Jira's, and neither is
   reached through `TaskConnector`/`TaskProvider`. This is what powers the
-  inferred ticket shown on a local Deck card for a workspace Agent Flow never
+  inferred ticket shown on a local Deck card for a workspace Agent Flow Deck never
   launched.
 
   It's left this way deliberately, and it degrades **safely rather than

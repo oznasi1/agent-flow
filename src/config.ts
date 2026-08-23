@@ -93,11 +93,11 @@ export const DEFAULT_EXPLORE_GENERAL_PROMPT =
   "Help me make progress on this — ask what I need if it's unclear before diving in. " +
   "Don't change code unless I ask.{files}";
 
-/** Seed for the "Supervise running tasks" action — check on Agent Flow's other
+/** Seed for the "Supervise running tasks" action — check on Agent Flow Deck's other
  * active runs rather than the current focus. Placeholders: {summary} (optional
  * priority), {brief} (includes the active-tasks list), {files}. */
 export const DEFAULT_EXPLORE_SUPERVISE_PROMPT =
-  "Supervision session — checking on your other active Agent Flow tasks. A brief listing them, and whether each " +
+  "Supervision session — checking on your other active Agent Flow Deck tasks. A brief listing them, and whether each " +
   "still has a session attached, is at {brief}. Read it, judge which ones are stalled, blocked, or waiting on you, " +
   "and tell me what needs attention. Where it's safe and unambiguous, help unblock or integrate one yourself; " +
   "flag anything you're unsure about rather than guessing.{files}";
@@ -135,7 +135,7 @@ export const DEFAULT_COMMANDS: FlowCommand[] = [
   },
 ];
 
-/** Where Agent Flow starts a session. */
+/** Where Agent Flow Deck starts a session. */
 export type AgentSurface = "extension" | "terminal";
 
 /** Read the session surface. Anything unrecognized — including undefined — means
@@ -149,7 +149,7 @@ export function readAgentSurface(
   return c.get<string>("agentSurface") === "terminal" ? "terminal" : "extension";
 }
 
-/** Which agent Agent Flow starts a session with. Declared in ./types so the webview
+/** Which agent Agent Flow Deck starts a session with. Declared in ./types so the webview
  * can name a provider without importing this module (which imports `vscode`); re-exported
  * here because every caller in the host addresses it at this path, and this file's own
  * signatures below still use it directly. */

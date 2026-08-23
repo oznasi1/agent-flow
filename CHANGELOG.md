@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.1] — 2026-08-23
+
+### Changed
+
+- **The name is "Agent Flow Deck" in the last places that still said "Agent
+  Flow."** The 0.1.47 rename covered the chrome; the copy written since did not
+  always follow. Four setting descriptions (task source, forge, which tool starts
+  a session, where it starts), the supervision prompt's default text, the
+  supervision and notepad briefs, and the sidebar mark's screen-reader label now
+  all use the full product name — as do the README and the guide, connector,
+  forge and settings docs. Setting keys, command ids and stored values are
+  untouched.
+
 ## [0.41.0] — 2026-08-23
 
 ### Changed

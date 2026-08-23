@@ -1,6 +1,6 @@
 # Adding a forge
 
-Agent Flow reads pull requests, CI and review requests through a seam, not a
+Agent Flow Deck reads pull requests, CI and review requests through a seam, not a
 hardwired dependency on GitHub. This guide is for whoever writes forge #3: what
 the seam requires, what degrades gracefully when a forge can't answer something,
 and where the seam doesn't reach — so you find those here instead of in a bug
@@ -96,7 +96,7 @@ directory. Treat it as no safer to import from webview code than `github.ts` or
 `head_pipeline`, not a substitute. `head_pipeline` appears only on
 `GET /projects/:id/merge_requests/:iid`. Checked against gitlab.com's live API,
 because the documented list-response shape reads as though it were there — which is
-exactly how Agent Flow first shipped GitLab support reading CI off a list row, with
+exactly how Agent Flow Deck first shipped GitLab support reading CI off a list row, with
 every card silently showing no CI and every test agreeing, since the fixtures were
 written from the docs.
 

@@ -2,7 +2,7 @@
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
   "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a coding agent already briefed — Claude Code, GitHub Copilot, or Cursor.",
-  "version": "0.41.0",
+  "version": "0.41.1",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",
   "license": "MIT",
@@ -145,7 +145,7 @@
             "Atlassian Jira Cloud"
           ],
           "default": "jira",
-          "description": "Where Agent Flow reads tasks from. Each source has its own settings under agentFlow.<source>.*. Requires a window reload."
+          "description": "Where Agent Flow Deck reads tasks from. Each source has its own settings under agentFlow.<source>.*. Requires a window reload."
         },
         "agentFlow.forge": {
           "type": "string",
@@ -158,7 +158,7 @@
             "GitLab, through the `glab` CLI."
           ],
           "default": "github",
-          "description": "Which forge Agent Flow reads pull/merge requests, CI, and review requests from. Each forge needs its own CLI installed and signed in — run Doctor to check. Requires a window reload."
+          "description": "Which forge Agent Flow Deck reads pull/merge requests, CI, and review requests from. Each forge needs its own CLI installed and signed in — run Doctor to check. Requires a window reload."
         },
         "agentFlow.jira.baseUrl": {
           "type": "string",
@@ -252,7 +252,7 @@
             "Ask every launch — pick from the tools this editor can run"
           ],
           "default": "claude-code",
-          "markdownDescription": "Which tool Agent Flow starts a session with. `copilot` works only in VS Code and `cursor` only in Cursor — each falls back to Claude Code in the other editor. Note that neither Copilot nor Cursor sessions appear as live cards on the Deck, which reads Claude Code's session files.\n\nSet to `ask` to choose per launch. Batch launches ask once for the whole batch, and Orchestrator rules — which run unattended — always use Claude Code, because there is nobody there to answer a picker."
+          "markdownDescription": "Which tool Agent Flow Deck starts a session with. `copilot` works only in VS Code and `cursor` only in Cursor — each falls back to Claude Code in the other editor. Note that neither Copilot nor Cursor sessions appear as live cards on the Deck, which reads Claude Code's session files.\n\nSet to `ask` to choose per launch. Batch launches ask once for the whole batch, and Orchestrator rules — which run unattended — always use Claude Code, because there is nobody there to answer a picker."
         },
         "agentFlow.agentSurface": {
           "type": "string",
@@ -265,7 +265,7 @@
             "The tool's CLI in an integrated terminal"
           ],
           "default": "extension",
-          "description": "Where Agent Flow starts a session: the tool's chat panel, or its CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter to start."
+          "description": "Where Agent Flow Deck starts a session: the tool's chat panel, or its CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter to start."
         },
         "agentFlow.workspaceMode": {
           "type": "string",
@@ -471,7 +471,7 @@
           "type": "string",
           "editPresentation": "multilineText",
           "markdownDescription": "Prompt seeded for the **Supervise running tasks** Explore action. Placeholders: `{summary}` (optional priority), `{brief}` (includes a list of your other active tasks), `{files}`.",
-          "default": "Supervision session — checking on your other active Agent Flow tasks. A brief listing them, and whether each still has a session attached, is at {brief}. Read it, judge which ones are stalled, blocked, or waiting on you, and tell me what needs attention. Where it's safe and unambiguous, help unblock or integrate one yourself; flag anything you're unsure about rather than guessing.{files}"
+          "default": "Supervision session — checking on your other active Agent Flow Deck tasks. A brief listing them, and whether each still has a session attached, is at {brief}. Read it, judge which ones are stalled, blocked, or waiting on you, and tell me what needs attention. Where it's safe and unambiguous, help unblock or integrate one yourself; flag anything you're unsure about rather than guessing.{files}"
         },
         "agentFlow.explorePrompts.verify": {
           "type": "string",
