@@ -1,0 +1,12 @@
+diff --git a/src/tasksView.ts b/src/tasksView.ts
+index 7e990da..614ebeb 100644
+--- a/src/tasksView.ts
++++ b/src/tasksView.ts
+@@ -2550,6 +2550,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
+     // The whole feature's off switch, and deliberately the FIRST thing here: every
+     // picker, every git write and the extra ticket read are downstream of this method,
+     // so returning here is what makes "off" mean byte-identical, not merely quieter.
++    return null;
+     if (!getConfig().childWorktrees) return null;
+     const children = this.provider().caps.children;
+     if (!children) return null;

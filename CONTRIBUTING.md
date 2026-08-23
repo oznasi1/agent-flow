@@ -44,6 +44,40 @@ the NAMED test to have actually failed; a missing `.expect`, a stale one (no
 test title contains it anymore), or a target test that passed or was skipped
 are all reported as distinct gate failures, not silently ignored.
 
+**Recovering from a killed run.** The runner reverts each patch in a
+`finally`, but a `finally` cannot run if the process itself is killed (e.g. a
+tool or CI step timing out mid-patch) — that leaves a mutation applied to
+`src/` with no automatic revert. Before applying a patch, the runner writes
+`.sabotage-in-progress` at the repo root (gitignored) naming the patch in
+flight, and removes it once the revert is confirmed clean. It lives at the
+root rather than under `test-results/` because Playwright empties that whole
+directory at the start of every run — a marker parked there would vanish
+mid-loop, exactly when it's needed. If a run dies mid-patch, the next
+invocation of
+`npm run sabotage` finds that marker and — instead of the generic "working
+tree is dirty" refusal — fails with the exact patch name and the recovery
+command:
+
+```
+git apply -R test-e2e/sabotage/<journey>.patch
+```
+
+Run that, then re-run `npm run sabotage`; the marker is cleared automatically
+once the tree is clean (whether by that command or by any other manual
+recovery). Every other cause of a dirty tree still gets the plain "working
+tree is dirty. Commit first" message.
+
+**One patch proves one test, not a whole file.** The runner pairs exactly one
+`.patch` with one `.expect` per journey *file*, and `.expect` names a single
+target test. When a spec file holds more than one `test(...)`, only the named
+test is mutation-proven — a sibling test in the same file can still be
+vacuous and this gate will not catch it. For example, `deck-lifecycle`'s
+`forget` test goes through a separate `removeRun` call (`src/deckView.ts`)
+that its file's patch does not touch, and `review-launch`'s batch-launch test
+is likewise unproven by that file's patch. Do not read a green `npm run
+sabotage` as "every test in every journey file can fail" — it only means the
+one named test per patched file can.
+
 ## The E2E fixture connector
 
 `agentFlow.taskSource: "fixture"` resolves a JSON-backed task source, but only

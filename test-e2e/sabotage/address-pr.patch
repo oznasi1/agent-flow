@@ -1,0 +1,13 @@
+diff --git a/src/config.ts b/src/config.ts
+index 05b90c0..d26f927 100644
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -266,7 +266,7 @@ export const DEFAULT_EXPLORE_ACTIONS: ExploreAction[] = EXPLORE_ACTION_DEFS.map(
+  * see PR_REVIEW_AUTOFIX_CLAUSE and prReviewTemplate in engine/prompt.ts. */
+ export const DEFAULT_PR_REVIEW_PROMPT =
+   'Jira {key} ({url}): "{summary}". This task has an open GitHub PR — all our PRs carry the Jira key in their title and branch. ' +
+-  "Using `gh` (or the GitHub tools available to you): find the PR for {key}, run `gh pr checkout` to bring its branch " +
++  "Using `gh` (or the GitHub tools available to you): find the PR for {key}, run `gh pr view` to bring its branch " +
+   "into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested " +
+   "changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}";
+ 

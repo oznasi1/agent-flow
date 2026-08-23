@@ -22,3 +22,9 @@ playwright-e2e-report/
 # Local scratch output dir suggested by docs/REACH.md for running the reach
 # collector by hand — never meant to be committed to this repo.
 .reach-data/
+
+# scripts/sabotage.mjs's own marker, naming the patch currently applied so a
+# killed run can be diagnosed and recovered. Root-level and gitignored (not
+# under test-results/, which Playwright empties at the start of every run —
+# that would erase the marker mid-loop).
+/.sabotage-in-progress

@@ -14,7 +14,7 @@
 // slow for a required check, and "a test stopped being able to fail" is a
 // standing-health question, not a merge-blocking one.
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const DIR = "test-e2e/sabotage";
@@ -22,6 +22,21 @@ const DIR = "test-e2e/sabotage";
 // reporter is configured unconditionally (not gated on CI), and a single-spec
 // run still writes it, confirmed by inspection while building this check.
 const REPORT = "test-results/e2e-results.json";
+// A gitignored marker naming the patch currently applied. This runner's
+// `finally` reverts the patch, but a `finally` cannot survive a SIGKILL of its
+// own process — a hard kill mid-patch (e.g. a tool timeout during the rebuild
+// or the Playwright run) has left a mutated src/ on disk with no explanation
+// beyond "tree is dirty". The marker lets the NEXT run say which patch and how
+// to recover, instead of just refusing to proceed.
+//
+// Deliberately NOT under test-results/: Playwright empties its whole output
+// directory at the start of every run (confirmed by hand — a canary file
+// dropped in test-results/ before `npx playwright test` does not survive it),
+// which would silently erase the marker mid-loop, defeating the guard at
+// exactly the moment it exists to help. The repo root is untouched by both
+// `npm run build` and Playwright, so the marker survives the whole window a
+// patch is on disk.
+const MARKER = ".sabotage-in-progress";
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { stdio: "inherit", ...opts });
 
 function dirty() {
@@ -104,6 +119,48 @@ function checkTarget(journey, expectSubstring) {
   return { ok: true, message: `${journey}: target test "${matches[0].title}" correctly failed` };
 }
 
+if (existsSync(MARKER)) {
+  const journey = readFileSync(MARKER, "utf8").trim();
+  const patchPath = join(DIR, `${journey}.patch`);
+  if (dirty()) {
+    // The marker names the patch a previous run left applied, but a killed run
+    // isn't the only way to land here with the marker present and the tree
+    // dirty — someone could have that patch's mutation still applied AND
+    // unrelated changes on top, or the dirty tree could be unrelated entirely.
+    // Confirming the patch reverses cleanly before recommending `git apply -R`
+    // is the difference between advice that works and advice that fails
+    // confusingly on a tree the patch was never really applied to (as-is).
+    let reversible = false;
+    try {
+      execFileSync("git", ["apply", "-R", "--check", patchPath], { stdio: "pipe" });
+      reversible = true;
+    } catch {
+      reversible = false;
+    }
+    if (reversible) {
+      console.error(
+        `sabotage: a previous run was killed while ${journey}.patch was applied — the working tree ` +
+          `still carries that mutation, not just an unrelated dirty tree.\n` +
+          `Recover with: git apply -R ${patchPath}\n` +
+          `Then re-run \`npm run sabotage\` (the marker is cleared automatically once the tree is clean).`,
+      );
+    } else {
+      console.error(
+        `sabotage: the marker says ${journey}.patch was left applied, but it no longer reverses cleanly ` +
+          `against the current working tree — the dirty tree may not be (only) that mutation.\n` +
+          `\`git apply -R ${patchPath}\` would fail confusingly, so resolve this by hand instead. Current status:\n` +
+          execFileSync("git", ["status"], { encoding: "utf8" }),
+      );
+    }
+    process.exit(1);
+  }
+  // The tree is already clean — the patch was reverted by hand (or some other
+  // way) and the marker is just stale. Don't let a stale marker block every
+  // future run forever; clean it up and fall through to a normal run.
+  console.error(`sabotage: clearing stale marker for ${journey}.patch (tree is already clean)`);
+  rmSync(MARKER, { force: true });
+}
+
 if (dirty()) {
   console.error("sabotage: working tree is dirty. Commit first — the revert would discard your changes.");
   process.exit(1);
@@ -134,6 +191,11 @@ for (const patch of patches) {
   }
   const expectSubstring = readFileSync(expectFile, "utf8").trim();
   console.log(`\n=== sabotage: ${journey} ===`);
+  // Record which patch is about to go on disk BEFORE applying it, so a hard
+  // kill anywhere between here and the revert below leaves a trail. Written
+  // ahead of `git apply` on purpose: the mutation itself is what dirties the
+  // tree, so the marker must exist for the entire window the tree is dirty.
+  writeFileSync(MARKER, journey);
   run("git", ["apply", join(DIR, patch)]);
   let survived = false;
   let target;
@@ -165,6 +227,8 @@ for (const patch of patches) {
     console.error(`sabotage: tree not clean after reverting ${patch} — fix by hand before continuing`);
     process.exit(1);
   }
+  // Revert confirmed clean — the marker's job is done.
+  rmSync(MARKER, { force: true });
   if (survived) {
     console.error(`sabotage: ${journey} PASSED under its mutation — the journey is vacuous`);
     failures++;
