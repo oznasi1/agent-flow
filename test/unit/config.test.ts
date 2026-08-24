@@ -1168,6 +1168,17 @@ describe("forge", () => {
   });
 });
 
+describe("getConfig — attention notifications", () => {
+  it("defaults notifyOnActionRequired off — a toast interrupts, so it ships inert", () => {
+    expect(getConfig().notifyOnActionRequired).toBe(false);
+  });
+
+  it("reads notifyOnActionRequired when the user turns it on", () => {
+    setConfig({ notifyOnActionRequired: true });
+    expect(getConfig().notifyOnActionRequired).toBe(true);
+  });
+});
+
 describe("forge-flavoured prompts", () => {
   // The placeholders a template actually offers, read off the template itself
   // rather than hand-typed here — a hand-typed list can quietly assert a
