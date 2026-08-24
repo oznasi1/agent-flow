@@ -262,6 +262,17 @@ never notice a run parking. Recorded here so nobody re-proposes it.
 - **A run that parks while no window is focused never toasts.** The badge is its signal. This
   is the direct consequence of the focused-window decision and is the right trade: a toast
   nobody sees is an announcement spent on nobody.
+- **Windows that disagree about what is waiting can re-announce on every focus switch.** The
+  latch is one file, the focused window rewrites all of it, and `nextAnnouncements` prunes
+  every stamp whose key is not in the set *that* window just computed. So two windows whose
+  key sets genuinely differ prune each other's stamps and re-toast each other's runs each
+  time focus lands on them — not the "at most one duplicate toast" a single lost race costs.
+  It takes a per-window config divergence to get there: `agentFlow.inflightShowAll`,
+  `agentFlow.openAgents` and `agentFlow.prFacts` are all `window`-scoped, so one workspace
+  overriding any of them is enough. Accepted rather than fixed, because the prune's
+  destructiveness is exactly what makes park -> answer -> park announce twice, which is
+  specified above; and the obvious alternative — a record per window — would announce every
+  run once per open window, which is the worse failure. Document it; do not fix it.
 
 ## Testing
 

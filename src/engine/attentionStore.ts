@@ -8,10 +8,27 @@ import * as path from "path";
  * over the same runs store, so an in-memory latch would announce the same run
  * once per window, and would forget everything on an extension-host restart.
  *
- * Advisory rather than locked. The worst a lost race can do is raise one
- * duplicate toast, which is not worth the coordination the orchestrator's flows
- * need — and the write is atomic (temp + rename) so a crash mid-write cannot
- * leave a truncated file behind for the next window to read. */
+ * Advisory rather than locked, and the write is atomic (temp + rename) so a
+ * crash mid-write cannot leave a truncated file behind for the next window to
+ * read. Two windows racing one pass costs at most one duplicate toast, which is
+ * not worth the coordination the orchestrator's flows need.
+ *
+ * The honest bound is wider than that, though, and it is a bound on *repetition*
+ * rather than on a single race: the focused window rewrites the whole file, and
+ * `nextAnnouncements` prunes every stamp whose key is not in the set THIS window
+ * just computed. Two windows that genuinely compute different sets therefore
+ * prune each other's stamps, and each re-announces the other's runs the next
+ * time focus lands on it — indefinitely, not once. That needs the two windows to
+ * disagree about which runs are waiting, which needs a per-window setting to
+ * differ: `agentFlow.inflightShowAll`, `agentFlow.openAgents` and
+ * `agentFlow.prFacts` are all `window`-scoped, so a workspace that overrides one
+ * of them is enough.
+ *
+ * Left as it is on purpose. The prune's destructiveness is the mechanism that
+ * makes park -> answer -> park announce twice, which is specified behaviour and
+ * the whole point of a level-triggered latch. Scoping the record per window
+ * would trade a rare repeat for announcing every run once per open window, which
+ * is worse; the trade is recorded in the design doc's Accepted trade-offs. */
 export function defaultAttentionFile(): string {
   return path.join(os.homedir(), ".agentflow", "attention.json");
 }

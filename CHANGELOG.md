@@ -15,7 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it reads Claude Code's transcripts, your open sessions, and PR facts already cached.
 - **Optional notification when a run enters Action required**, off by default
   (`agentFlow.notifyOnActionRequired`). Raised once when a run parks, by whichever window is
-  focused at the time, and not repeated until that run is answered and parks again.
+  focused at the time, and not repeated until that run is answered and parks again. It names
+  the ticket a run is for — or, for an untracked session card, the workspace or folder it is
+  in.
+
+### Fixed
+
+- **Reading a repo's live session state no longer reads every transcript in its Claude Code
+  project directory** — just the one it needs. Claude Code never prunes
+  `~/.claude/projects`, so on a repo worked in for months that directory holds hundreds of
+  megabytes, and each read cost about a second of the extension host's main thread. The Deck
+  refreshes noticeably faster on a long-lived repo, and the new badge's own polling is
+  cheap enough to run with the panel closed.
 
 ## [0.41.1] — 2026-08-23
 
