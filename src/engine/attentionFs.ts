@@ -1,5 +1,5 @@
 // The cheap half of the attention badge: build `AttentionCandidate`s without
-// touching gh/glab, a ticket tracker, or the network.
+// touching a forge, a ticket tracker, or the network.
 //
 // Every reader is injected rather than imported at the call site. The cost ladder
 // below is the reason: "no git call for a run nobody is waiting on" is a promise
@@ -15,7 +15,7 @@ import { readPrEntries, defaultPrFactsDir } from "./pr/store";
 import { readRuns, defaultRunsDir } from "./runs";
 import { PresenceRecord, readLiveWindows, defaultWindowsDir } from "./presence";
 import { readAgentActivity, readSessionActivity } from "./transcript";
-import { gitState as realGitState, repoRoot } from "./git";
+import { defaultBranch as realDefaultBranch, gitState as realGitState, repoRoot } from "./git";
 import { JUST_LAUNCHED_MS } from "./visibility";
 
 /** `deriveBucket`'s needs rung, named once so the cost ladder and its test agree. */
@@ -33,9 +33,19 @@ export interface AttentionDeps {
   /** The expensive one: three git calls per repo. The tests assert it is never
    * called for a run nobody is waiting on. */
   gitState: (name: string, repoPath: string) => RepoGit;
+  /** A repo on its default branch cannot own a pull request of its own — see
+   * `git.ts`'s `prEligible`, which this module cannot call directly: it reaches
+   * the real `defaultBranch`, and the whole point of this deps object is that
+   * nothing here does that except through a spy. */
+  defaultBranch: (repoPath: string) => string;
   repoRootOf: (dir: string) => string;
   nowMs: number;
   showAll: boolean;
+  /** `agentFlow.openAgents` — the Deck's display toggle for session cards. It
+   * must not change whether a run counts as having a live session (`ownership`
+   * is resolved from every place regardless), only whether a session's own
+   * transcript reading joins the state union — exactly `deckView.ts`'s
+   * `places = this.openAgents ? allPlaces : new Map()`. */
   openAgents: boolean;
 }
 
@@ -54,6 +64,7 @@ export function defaultAttentionDeps(nowMs: number, showAll: boolean, openAgents
     sessionActivity: (cwd, sessionId) => readSessionActivity(projectsRoot, cwd, sessionId, nowMs),
     repoActivity: (repoPath, branch) => readAgentActivity(projectsRoot, repoPath, branch, nowMs),
     gitState: (name, repoPath) => realGitState(name, repoPath),
+    defaultBranch: (repoPath) => realDefaultBranch(repoPath),
     repoRootOf: (dir) => {
       const hit = repoRootMemo.get(dir);
       if (hit !== undefined) return hit;
@@ -88,6 +99,11 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
       const sessions = allPlaces.get(place);
       if (!sessions) continue;
       claimed.add(place);
+      // `openAgents` off is a display toggle, not "nobody is here" — ownership
+      // above is resolved from every place regardless — but the Deck itself
+      // never builds a CardAgent (and never reads its transcript) for a hidden
+      // place, so the state union must not see it either.
+      if (!deps.openAgents) continue;
       for (const s of sessions) {
         if (ownership.sessionOwner.get(s.sessionId) !== run.key) continue;
         owned.push(deps.sessionActivity(s.cwd, s.sessionId));
@@ -104,7 +120,23 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
     // machine reaches neither. Do NOT hoist either out of this branch —
     // attentionFs.test.ts asserts both spies stay untouched otherwise.
     const waiting = NEEDS_STATES.has(agentState);
-    const prs = waiting ? deps.prEntries(run.key) : {};
+    // A notepad run owns no pull request — see deckView.ts's `prLess` for why a
+    // stranger's branch cannot be attributed to a note. Reading the cache for it
+    // would be wasted work as well as wrong, so it is skipped entirely, not
+    // fetched-then-discarded.
+    const stored = waiting && runKind(run) !== "notepad" ? deps.prEntries(run.key) : {};
+    // Filtered exactly as deckView.ts filters `readPrEntries`'s result before a
+    // card ever sees it: a repo on its default branch owns no PR of its own
+    // (`prEligible`'s rule, reimplemented against the injected `defaultBranch`
+    // rather than calling the real one), and a repo that has since left the run
+    // — re-taken with a different repo selection — is dropped simply by never
+    // being looked up, rather than carried forward as an orphaned entry that
+    // could still vote `prMerged` or `prOpen` on a run it no longer belongs to.
+    const prs: PrEntryMap = Object.fromEntries(
+      run.repos
+        .filter((r) => stored[r.name] && r.isGit && r.branch && r.branch !== deps.defaultBranch(r.path))
+        .map((r) => [r.name, stored[r.name]]),
+    );
     // `!hasLiveSession`: with a session open the shelf is already `board`, so
     // git could only confirm what is settled. Task 7's parity test is what
     // proves this skip changes no verdict — if it ever could, delete it.
